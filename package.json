@@ -1,0 +1,16 @@
+{
+  "name": "swng",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "build": "pnpm -r build"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vitest": "^4.0.9"
+  }
+}

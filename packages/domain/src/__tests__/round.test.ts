@@ -1,18 +1,18 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { DomainError } from "../round/error";
 import {
+  DomainError,
   createRoundConfig,
   createInitialRoundState,
   isValidHoleNumber,
   makeRoundSnapshot,
-} from "../round/round";
+} from "../index";
 import type {
   RoundConfig,
   RoundState,
   Player,
   Score,
   IsoDateTime,
-} from "../round/types";
+} from "../index";
 
 describe("round module", () => {
   describe("createRoundConfig", () => {

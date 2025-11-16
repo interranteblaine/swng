@@ -42,6 +42,12 @@ importers:
         specifier: ^18.0.0
         version: 18.0.0
 
+  packages/application:
+    dependencies:
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+
   packages/domain: {}
 
 packages:

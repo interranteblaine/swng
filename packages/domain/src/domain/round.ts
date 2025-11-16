@@ -1,13 +1,5 @@
 import { DomainError } from "./error";
-import type {
-  IsoDateTime,
-  Player,
-  RoundConfig,
-  RoundId,
-  RoundSnapshot,
-  RoundState,
-  Score,
-} from "./types";
+import type { IsoDateTime, RoundConfig, RoundId, RoundState } from "./types";
 
 export function createRoundConfig(options: {
   roundId: RoundId;
@@ -56,20 +48,4 @@ export function isValidHoleNumber(
     holeNumber >= 1 &&
     holeNumber <= config.holes
   );
-}
-
-export function makeRoundSnapshot(input: {
-  config: RoundConfig;
-  state: RoundState;
-  players: Player[];
-  scores: Score[];
-}): RoundSnapshot {
-  const { config, state, players, scores } = input;
-
-  return {
-    config,
-    state,
-    players: [...players],
-    scores: [...scores],
-  };
 }

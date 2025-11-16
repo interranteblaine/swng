@@ -4,15 +4,8 @@ import {
   createRoundConfig,
   createInitialRoundState,
   isValidHoleNumber,
-  makeRoundSnapshot,
 } from "../index";
-import type {
-  RoundConfig,
-  RoundState,
-  Player,
-  Score,
-  IsoDateTime,
-} from "../index";
+import type { RoundConfig, IsoDateTime } from "../index";
 
 describe("round module", () => {
   describe("createRoundConfig", () => {
@@ -84,49 +77,6 @@ describe("round module", () => {
       expect(isValidHoleNumber(config, 0)).toBe(false);
       expect(isValidHoleNumber(config, config.holes + 1)).toBe(false);
       expect(isValidHoleNumber(config, 2.5)).toBe(false);
-    });
-  });
-
-  describe("makeRoundSnapshot", () => {
-    it("returns a snapshot identical to input", () => {
-      const config: RoundConfig = {
-        roundId: "r1",
-        accessCode: "code",
-        courseName: "Course",
-        holes: 2,
-        par: [4, 5],
-        createdAt: "2025-11-15T17:00:00Z",
-      };
-      const state: RoundState = {
-        roundId: config.roundId,
-        currentHole: 2,
-        status: "IN_PROGRESS",
-        stateVersion: 1,
-        updatedAt: "2025-11-15T17:10:00Z",
-      };
-      const players: Player[] = [
-        {
-          roundId: config.roundId,
-          playerId: "p1",
-          name: "Alice",
-          color: "red",
-          joinedAt: "2025-11-15T17:00:00Z",
-          updatedAt: "2025-11-15T17:00:00Z",
-        },
-      ];
-      const scores: Score[] = [
-        {
-          roundId: config.roundId,
-          playerId: "p1",
-          holeNumber: 1,
-          strokes: 4,
-          updatedBy: "p1",
-          updatedAt: "2025-11-15T17:10:00Z",
-        },
-      ];
-
-      const snapshot = makeRoundSnapshot({ config, state, players, scores });
-      expect(snapshot).toEqual({ config, state, players, scores });
     });
   });
 });

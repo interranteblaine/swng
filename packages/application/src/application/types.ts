@@ -44,6 +44,19 @@ export interface SessionRepository {
   createSession(session: Session): Promise<void>;
 }
 
+export interface Connection {
+  roundId: RoundId;
+  connectionId: string;
+  playerId: PlayerId;
+  connectedAt: IsoDateTime;
+}
+
+export interface ConnectionRepository {
+  addConnection(connection: Connection, ttlSeconds?: number): Promise<void>;
+  removeConnection(roundId: RoundId, connectionId: string): Promise<void>;
+  listConnections(roundId: RoundId): Promise<Connection[]>;
+}
+
 export interface BroadcastPort {
   broadcastPlayerJoined(roundId: RoundId, player: Player): Promise<void>;
   broadcastPlayerUpdated(roundId: RoundId, player: Player): Promise<void>;

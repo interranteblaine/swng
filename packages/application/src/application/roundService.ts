@@ -164,10 +164,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
 
       const session = await ensureSessionForRound(roundId, sessionId);
 
-      const snapshot = await roundRepo.getRoundSnapshot(roundId);
-      if (!snapshot) {
-        throw new ApplicationError("NOT_FOUND", "Round not found");
-      }
+      const snapshot = await loadRoundSnapshot(roundId);
 
       const { config: roundConfig } = snapshot;
 
@@ -208,10 +205,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
 
       await ensureSessionForRound(roundId, sessionId);
 
-      const snapshot = await roundRepo.getRoundSnapshot(roundId);
-      if (!snapshot) {
-        throw new ApplicationError("NOT_FOUND", "Round not found");
-      }
+      const snapshot = await loadRoundSnapshot(roundId);
 
       const { config: roundConfig, state: stateValue } = snapshot;
 

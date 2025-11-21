@@ -1,4 +1,5 @@
 import { PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
 import type {
   RoundConfig,
   RoundId,
@@ -8,6 +9,7 @@ import type {
   Score,
 } from "@swng/domain";
 import type { RoundRepository } from "@swng/application";
+import { ApplicationError } from "@swng/application";
 import {
   roundPk,
   CONFIG_SK,
@@ -125,15 +127,41 @@ export function createDynamoRoundRepository(
     );
   }
 
-  async function saveState(stateDomain: RoundState): Promise<void> {
+  async function saveState(
+    stateDomain: RoundState,
+    expectedVersion?: number
+  ): Promise<void> {
     const item = toStateItem(stateDomain);
 
-    await docClient.send(
-      new PutCommand({
-        TableName: tableName,
-        Item: item,
-      })
-    );
+    try {
+      if (expectedVersion === undefined) {
+        // Initial write: ensure the state item does not already exist
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: item,
+            ConditionExpression: "attribute_not_exists(PK)",
+          })
+        );
+      } else {
+        // Update write: ensure we're writing over the version we observed
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: item,
+            ConditionExpression: "stateVersion = :prevVersion",
+            ExpressionAttributeValues: {
+              ":prevVersion": expectedVersion,
+            },
+          })
+        );
+      }
+    } catch (err: unknown) {
+      if (err instanceof ConditionalCheckFailedException) {
+        throw new ApplicationError("CONFLICT", "State version mismatch");
+      }
+      throw err;
+    }
   }
 
   return {

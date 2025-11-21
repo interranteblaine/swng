@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createRoundService } from "../application/roundService";
 import { RoundServiceDeps } from "../application/types";
+import { ApplicationError } from "../application/errors";
 import type {
   RoundConfig,
   RoundState,
@@ -59,7 +60,18 @@ function createTestDeps(): {
     saveConfig: async (config: RoundConfig) => {
       configs.push(config);
     },
-    saveState: async (state: RoundState) => {
+    saveState: async (state: RoundState, expectedVersion?: number) => {
+      // Simulate optimistic concurrency: if an expectedVersion is provided,
+      // require it to match the latest persisted state's version.
+      if (expectedVersion !== undefined) {
+        const last = states[states.length - 1];
+        if (!last || last.stateVersion !== expectedVersion) {
+          throw new ApplicationError(
+            "CONFLICT",
+            "State version mismatch (test stub)"
+          );
+        }
+      }
       states.push(state);
     },
   };
@@ -397,6 +409,25 @@ describe("RoundService Behavior", () => {
         status: null,
       });
       expect(res.state.status).toBeNull();
+    });
+
+    it("propagates CONFLICT when repository detects a concurrent update", async () => {
+      // First update succeeds; our stub getRoundSnapshot returns the initial state (states[0])
+      // which simulates a stale read on subsequent calls.
+      await service.patchRoundState({
+        roundId: "rid-1",
+        sessionId: "sid-1",
+        currentHole: 2,
+      });
+
+      // Second update reads the same stale version (states[0]) and thus provides expectedVersion=1,
+      // but the latest persisted state's version is now 2, causing the stub to throw CONFLICT.
+      await expect(
+        service.patchRoundState({
+          roundId: "rid-1",
+          sessionId: "sid-1",
+        })
+      ).rejects.toMatchObject({ code: "CONFLICT" });
     });
   });
 

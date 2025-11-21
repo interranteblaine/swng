@@ -17,7 +17,7 @@ export interface RoundRepository {
   ): Promise<{ roundId: RoundId; snapshot: RoundSnapshot } | null>;
 
   saveConfig(config: RoundConfig): Promise<void>;
-  saveState(state: RoundState): Promise<void>;
+  saveState(state: RoundState, expectedVersion?: number): Promise<void>;
 }
 
 export interface PlayerRepository {

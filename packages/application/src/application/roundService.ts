@@ -234,7 +234,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         updatedAt: now,
       };
 
-      await roundRepo.saveState(updatedState);
+      await roundRepo.saveState(updatedState, stateValue.stateVersion);
 
       return { state: updatedState };
     },

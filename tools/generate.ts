@@ -30,7 +30,7 @@ async function generatePackage(name: string) {
 
   // Recursively render any .ejs in src
   async function renderDir(dir: string) {
-    for (const entry of await fs.readdir(dir)) {
+    for (const entry of await fs.readdir(dir, { encoding: "utf8" })) {
       const full = path.join(dir, entry);
       if ((await fs.stat(full)).isDirectory()) {
         await renderDir(full);

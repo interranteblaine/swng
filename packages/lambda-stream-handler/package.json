@@ -1,0 +1,11 @@
+{
+  "name": "@swng/lambda-stream-handler",
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest",
+    "lint": "eslint ."
+  }
+}

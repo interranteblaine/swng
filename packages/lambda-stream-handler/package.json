@@ -3,9 +3,19 @@
   "version": "0.0.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "dependencies": {
+    "@aws-sdk/util-dynamodb": "^3.936.0",
+    "@swng/adapters-apigw-broadcast": "workspace:*",
+    "@swng/adapters-dynamodb": "workspace:*",
+    "@swng/application": "workspace:*",
+    "@swng/domain": "workspace:*"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest",
     "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.159"
   }
 }

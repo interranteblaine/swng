@@ -84,6 +84,34 @@ importers:
 
   packages/domain: {}
 
+  packages/lambda-http-handler: {}
+
+  packages/lambda-stream-handler:
+    dependencies:
+      '@aws-sdk/util-dynamodb':
+        specifier: ^3.936.0
+        version: 3.936.0(@aws-sdk/client-dynamodb@3.936.0)
+      '@swng/adapters-apigw-broadcast':
+        specifier: workspace:*
+        version: link:../adapters-apigw-broadcast
+      '@swng/adapters-dynamodb':
+        specifier: workspace:*
+        version: link:../adapters-dynamodb
+      '@swng/application':
+        specifier: workspace:*
+        version: link:../application
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@types/aws-lambda':
+        specifier: ^8.10.159
+        version: 8.10.159
+
+  packages/lambda-ws-connect: {}
+
+  packages/lambda-ws-disconnect: {}
+
 packages:
 
   '@aws-crypto/sha256-browser@5.2.0':
@@ -763,6 +791,9 @@ packages:
 
   '@tsconfig/node16@1.0.4':
     resolution: {integrity: sha512-vxhUy4J8lyeyinH7Azl1pdd43GJhZH/tP2weN8TntQblOY+A0XbT8DJk1/oCPuOOyg/Ja757rG0CgHcWC8OfMA==}
+
+  '@types/aws-lambda@8.10.159':
+    resolution: {integrity: sha512-SAP22WSGNN12OQ8PlCzGzRCZ7QDCwI85dQZbmpz7+mAk+L7j+wI7qnvmdKh+o7A5LaOp6QnOZ2NJphAZQTTHQg==}
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
@@ -2515,6 +2546,8 @@ snapshots:
   '@tsconfig/node14@1.0.3': {}
 
   '@tsconfig/node16@1.0.4': {}
+
+  '@types/aws-lambda@8.10.159': {}
 
   '@types/chai@5.2.3':
     dependencies:

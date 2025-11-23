@@ -6,6 +6,7 @@
   "dependencies": {
     "@aws-sdk/util-dynamodb": "^3.936.0",
     "@swng/adapters-apigw-broadcast": "workspace:*",
+    "@swng/adapters-powertools-logger": "workspace:*",
     "@swng/adapters-dynamodb": "workspace:*",
     "@swng/application": "workspace:*",
     "@swng/domain": "workspace:*"
@@ -16,6 +17,7 @@
     "lint": "eslint ."
   },
   "devDependencies": {
-    "@types/aws-lambda": "^8.10.159"
+    "@types/aws-lambda": "^8.10.159",
+    "@types/node": "^24.10.1"
   }
 }

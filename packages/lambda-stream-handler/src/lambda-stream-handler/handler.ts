@@ -3,16 +3,9 @@ import type {
   DynamoDBStreamHandler,
   Context,
 } from "aws-lambda";
-import type { BroadcastPort } from "@swng/application";
+import type { BroadcastPort, Logger } from "@swng/application";
 import { handleDomainEvent } from "@swng/application";
 import { toDomainEventsFromStreamRecord } from "./toDomainEventsFromStreamRecord";
-
-export interface Logger {
-  debug?: (...args: unknown[]) => void;
-  info?: (...args: unknown[]) => void;
-  warn?: (...args: unknown[]) => void;
-  error?: (...args: unknown[]) => void;
-}
 
 export const noopLogger: Logger = {
   debug: () => {},

@@ -2,9 +2,9 @@ import {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
 } from "@aws-sdk/client-apigatewaymanagementapi";
-import type { BroadcastPort } from "@swng/application";
+import type { BroadcastPort, Logger } from "@swng/application";
 import type { Player, Score, RoundState, RoundId } from "@swng/domain";
-import type { ApiGatewayBroadcastConfig, Logger } from "./config";
+import type { ApiGatewayBroadcastConfig } from "./config";
 import { noopLogger } from "./config";
 
 function buildClient(

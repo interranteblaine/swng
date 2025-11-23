@@ -28,3 +28,8 @@ export {
   toSessionItem,
   fromSessionItem,
 } from "./adapters-dynamodb/sessionItems";
+export {
+  createDynamoDocClient,
+  createDynamoConfigFrom,
+} from "./adapters-dynamodb/config";
+export type { DynamoConfig } from "./adapters-dynamodb/config";

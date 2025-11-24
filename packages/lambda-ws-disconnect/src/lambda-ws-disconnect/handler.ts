@@ -9,7 +9,6 @@ import {
 } from "@swng/adapters-dynamodb";
 import { createPowertoolsLogger } from "@swng/adapters-powertools-logger";
 
-// Environment
 const tableName = process.env.DYNAMO_TABLE;
 const region = process.env.AWS_REGION;
 const logLevel =
@@ -20,7 +19,6 @@ if (!tableName) {
   throw new Error("Missing required env: DYNAMO_TABLE");
 }
 
-// Cold start scoped deps
 let coldStart = true;
 const baseLogger = createPowertoolsLogger({
   serviceName: "ws-disconnect",

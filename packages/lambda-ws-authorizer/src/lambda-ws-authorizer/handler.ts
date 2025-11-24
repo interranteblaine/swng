@@ -30,14 +30,38 @@ const docClient = createDynamoDocClient({ region });
 function extractSessionIdFromAuthHeader(
   event: APIGatewayRequestAuthorizerEvent
 ): string | null {
-  const headerVal =
-    event.headers?.Authorization ?? event.headers?.authorization ?? null;
+  const headers = event.headers ?? {};
 
-  if (!headerVal) return null;
+  // 1) Authorization header (for environments that can set headers)
+  const authHeader =
+    (headers as Record<string, string | undefined>).Authorization ??
+    (headers as Record<string, string | undefined>).authorization ??
+    null;
 
   const prefix = "Session ";
-  if (headerVal.startsWith(prefix) && headerVal.length > prefix.length) {
-    return headerVal.substring(prefix.length).trim();
+  if (
+    typeof authHeader === "string" &&
+    authHeader.startsWith(prefix) &&
+    authHeader.length > prefix.length
+  ) {
+    return authHeader.substring(prefix.length).trim();
+  }
+
+  // 2) Browser WebSocket subprotocol: Sec-WebSocket-Protocol may contain comma-separated protocols
+  let secProto: string | undefined;
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() === "sec-websocket-protocol" && typeof v === "string") {
+      secProto = v;
+      break;
+    }
+  }
+  if (secProto) {
+    const tokens = secProto.split(",").map((s) => s.trim());
+    for (const t of tokens) {
+      if (t.startsWith(prefix) && t.length > prefix.length) {
+        return t.substring(prefix.length).trim();
+      }
+    }
   }
 
   return null;

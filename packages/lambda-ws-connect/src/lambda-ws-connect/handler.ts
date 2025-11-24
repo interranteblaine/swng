@@ -9,7 +9,6 @@ import {
 } from "@swng/adapters-dynamodb";
 import { createPowertoolsLogger } from "@swng/adapters-powertools-logger";
 
-// Environment
 const tableName = process.env.DYNAMO_TABLE;
 const region = process.env.AWS_REGION;
 const logLevel =
@@ -20,7 +19,6 @@ if (!tableName) {
   throw new Error("Missing required env: DYNAMO_TABLE");
 }
 
-// Cold start scoped deps
 let coldStart = true;
 const baseLogger = createPowertoolsLogger({
   serviceName: "ws-connect",
@@ -28,7 +26,6 @@ const baseLogger = createPowertoolsLogger({
 });
 const docClient = createDynamoDocClient({ region });
 
-// Types for authorizer context
 interface WsAuthContext {
   roundId: string;
   playerId: string;
@@ -44,7 +41,7 @@ interface WsAuthorizerEnvelope {
 function readAuthorizerContext(
   event: APIGatewayProxyWebsocketEventV2
 ): WsAuthContext | null {
-  // Keep it simple: expect the REQUEST authorizer to place values at requestContext.authorizer
+  // Expect the REQUEST authorizer to place values at requestContext.authorizer
   const ctxWithAuth = event.requestContext as unknown as WsAuthorizerEnvelope;
   const roundId = ctxWithAuth.authorizer?.roundId;
   const playerId = ctxWithAuth.authorizer?.playerId;

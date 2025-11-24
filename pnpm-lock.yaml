@@ -91,6 +91,18 @@ importers:
         specifier: workspace:*
         version: link:../domain
 
+  packages/client:
+    dependencies:
+      '@swng/application':
+        specifier: workspace:*
+        version: link:../application
+      '@swng/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+
   packages/contracts:
     dependencies:
       zod:

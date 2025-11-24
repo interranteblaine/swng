@@ -15,6 +15,7 @@ export const noopLogger: Logger = {
   info: () => {},
   warn: () => {},
   error: () => {},
+  with: () => noopLogger,
 };
 
 export function createApiGatewayManagementClient(args: {

@@ -1,55 +1,60 @@
-import type {
-  DynamoDBStreamEvent,
-  DynamoDBStreamHandler,
-  Context,
-} from "aws-lambda";
-import type { BroadcastPort, Logger } from "@swng/application";
-import { handleDomainEvent } from "@swng/application";
-import { toDomainEventsFromStreamRecord } from "./toDomainEventsFromStreamRecord";
+import { createPowertoolsLogger } from "@swng/adapters-powertools-logger";
+import {
+  createApiGatewayBroadcastPort,
+  createApiGatewayManagementClient,
+} from "@swng/adapters-apigw-broadcast";
+import {
+  createDynamoConnectionRepository,
+  createDynamoConfigFrom,
+} from "@swng/adapters-dynamodb";
+import type { DynamoDBStreamHandler } from "aws-lambda";
+import { processStreamEventBatch } from "./processor";
 
-export const noopLogger: Logger = {
-  debug: () => {},
-  info: () => {},
-  warn: () => {},
-  error: () => {},
+const endpoint = process.env.WS_MANAGEMENT_ENDPOINT;
+const region = process.env.AWS_REGION;
+const tableName = process.env.DYNAMO_TABLE;
+const logLevel =
+  (process.env.LOG_LEVEL as "INFO" | "DEBUG" | "WARN" | "ERROR" | undefined) ||
+  "INFO";
+
+if (!endpoint) throw new Error("Missing required env: WS_MANAGEMENT_ENDPOINT");
+if (!tableName) throw new Error("Missing required env: DYNAMO_TABLE");
+
+const baseLogger = createPowertoolsLogger({
+  serviceName: "stream-handler",
+  logLevel,
+});
+
+const dynamoCfg = createDynamoConfigFrom({
+  tableName,
+  region,
+});
+
+const connectionRepo = createDynamoConnectionRepository(dynamoCfg);
+
+const apigwClient = createApiGatewayManagementClient({
+  endpoint,
+  region,
+});
+
+let coldStart = true;
+
+export const handler: DynamoDBStreamHandler = async (event, context) => {
+  const invocationLogger = baseLogger.with({
+    awsRequestId: context.awsRequestId,
+    functionName: context.functionName,
+    coldStart,
+  });
+
+  const broadcast = createApiGatewayBroadcastPort({
+    endpoint,
+    region,
+    connectionRepo,
+    logger: invocationLogger,
+    client: apigwClient,
+  });
+
+  await processStreamEventBatch(event, { broadcast, logger: invocationLogger });
+
+  coldStart = false;
 };
-
-export async function processStreamEventBatch(
-  event: DynamoDBStreamEvent,
-  deps: { broadcast: BroadcastPort; logger?: Logger }
-): Promise<void> {
-  const logger = deps.logger ?? noopLogger;
-  const { broadcast } = deps;
-
-  for (const record of event.Records) {
-    try {
-      const domainEvents = toDomainEventsFromStreamRecord(record);
-      // Sequentially handle events per record to preserve order
-      for (const evt of domainEvents) {
-        await handleDomainEvent(evt, broadcast);
-      }
-    } catch (err) {
-      logger.warn?.("Failed to process DynamoDB stream record", {
-        err,
-        record,
-      });
-      // Continue with the rest of the batch
-    }
-  }
-}
-
-export function createStreamHandler(deps: {
-  broadcast: BroadcastPort;
-  logger?: Logger;
-}): DynamoDBStreamHandler {
-  const logger = deps.logger ?? noopLogger;
-
-  const handler: DynamoDBStreamHandler = async (
-    event: DynamoDBStreamEvent,
-    _context: Context
-  ): Promise<void> => {
-    await processStreamEventBatch(event, { broadcast: deps.broadcast, logger });
-  };
-
-  return handler;
-}

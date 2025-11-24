@@ -93,7 +93,27 @@ importers:
 
   packages/domain: {}
 
-  packages/lambda-http-handler: {}
+  packages/lambda-http-handler:
+    dependencies:
+      '@swng/adapters-dynamodb':
+        specifier: workspace:*
+        version: link:../adapters-dynamodb
+      '@swng/adapters-powertools-logger':
+        specifier: workspace:*
+        version: link:../adapters-powertools-logger
+      '@swng/application':
+        specifier: workspace:*
+        version: link:../application
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@types/aws-lambda':
+        specifier: ^8.10.159
+        version: 8.10.159
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.10.1
 
   packages/lambda-stream-handler:
     dependencies:
@@ -123,9 +143,43 @@ importers:
         specifier: ^24.10.1
         version: 24.10.1
 
-  packages/lambda-ws-connect: {}
+  packages/lambda-ws-connect:
+    dependencies:
+      '@swng/adapters-dynamodb':
+        specifier: workspace:*
+        version: link:../adapters-dynamodb
+      '@swng/adapters-powertools-logger':
+        specifier: workspace:*
+        version: link:../adapters-powertools-logger
+      '@swng/application':
+        specifier: workspace:*
+        version: link:../application
+    devDependencies:
+      '@types/aws-lambda':
+        specifier: ^8.10.159
+        version: 8.10.159
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.10.1
 
-  packages/lambda-ws-disconnect: {}
+  packages/lambda-ws-disconnect:
+    dependencies:
+      '@swng/adapters-dynamodb':
+        specifier: workspace:*
+        version: link:../adapters-dynamodb
+      '@swng/adapters-powertools-logger':
+        specifier: workspace:*
+        version: link:../adapters-powertools-logger
+      '@swng/application':
+        specifier: workspace:*
+        version: link:../application
+    devDependencies:
+      '@types/aws-lambda':
+        specifier: ^8.10.159
+        version: 8.10.159
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.10.1
 
 packages:
 

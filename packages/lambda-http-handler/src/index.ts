@@ -1,2 +1,1 @@
-export * from "./lambda-http-handler/types";
-export { greet, defaultGreeter } from "./lambda-http-handler/greet";
+export { handler } from "./lambda-http-handler/handler";

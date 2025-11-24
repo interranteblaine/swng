@@ -1,5 +1,5 @@
 {
-  "name": "@swng/lambda",
+  "name": "@swng/lambda-http-handler",
   "version": "0.0.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

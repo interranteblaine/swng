@@ -1,0 +1,20 @@
+{
+  "name": "@swng/lambda-ws-authorizer",
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@swng/adapters-powertools-logger": "workspace:*",
+    "@swng/adapters-dynamodb": "workspace:*",
+    "@swng/application": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.159",
+    "@types/node": "^24.10.1"
+  }
+}

@@ -30,8 +30,6 @@ const dynamoCfg = createDynamoConfigFrom({
   region,
 });
 
-const connectionRepo = createDynamoConnectionRepository(dynamoCfg);
-
 const apigwClient = createApiGatewayManagementClient({
   endpoint,
   region,
@@ -44,6 +42,10 @@ export const handler: DynamoDBStreamHandler = async (event, context) => {
     awsRequestId: context.awsRequestId,
     functionName: context.functionName,
     coldStart,
+  });
+
+  const connectionRepo = createDynamoConnectionRepository(dynamoCfg, {
+    logger: invocationLogger,
   });
 
   const broadcast = createApiGatewayBroadcastPort({

@@ -1,17 +1,26 @@
 import { PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import type { RoundId, Score } from "@swng/domain";
-import type { ScoreRepository } from "@swng/application";
+import type { ScoreRepository, Logger } from "@swng/application";
 import { roundPk, SCORE_SK_PREFIX } from "./keys";
 import type { DynamoConfig } from "./config";
 import { ScoreItem, toScoreItem, fromScoreItem } from "./scoreItems";
 
 export function createDynamoScoreRepository(
-  config: DynamoConfig
+  config: DynamoConfig,
+  opts?: { logger?: Logger }
 ): ScoreRepository {
   const { tableName, docClient } = config;
+  const log = opts?.logger;
 
   async function upsertScore(score: Score): Promise<void> {
     const item: ScoreItem = toScoreItem(score);
+
+    log?.debug("DDB upsertScore", {
+      tableName,
+      roundId: score.roundId,
+      playerId: score.playerId,
+      holeNumber: score.holeNumber,
+    });
 
     await docClient.send(
       new PutCommand({
@@ -34,7 +43,9 @@ export function createDynamoScoreRepository(
     );
 
     const items = (result.Items ?? []) as ScoreItem[];
-    return items.map(fromScoreItem);
+    const scores = items.map(fromScoreItem);
+    log?.debug("DDB listScores", { tableName, roundId, count: scores.length });
+    return scores;
   }
 
   return {

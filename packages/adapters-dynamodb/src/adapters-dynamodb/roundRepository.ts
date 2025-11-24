@@ -8,7 +8,7 @@ import type {
   Player,
   Score,
 } from "@swng/domain";
-import type { RoundRepository } from "@swng/application";
+import type { RoundRepository, Logger } from "@swng/application";
 import { ApplicationError } from "@swng/application";
 import {
   roundPk,
@@ -32,14 +32,17 @@ import { fromScoreItem, ScoreItem } from "./scoreItems";
 import { DynamoConfig } from "./config";
 
 export function createDynamoRoundRepository(
-  config: DynamoConfig
+  config: DynamoConfig,
+  opts?: { logger?: Logger }
 ): RoundRepository {
   const { tableName, docClient } = config;
+  const log = opts?.logger;
 
   async function getRoundSnapshot(
     roundId: RoundId
   ): Promise<RoundSnapshot | null> {
     const pk = roundPk(roundId);
+    log?.debug("DDB getRoundSnapshot", { tableName, roundId });
 
     const result = await docClient.send(
       new QueryCommand({
@@ -52,6 +55,11 @@ export function createDynamoRoundRepository(
     );
 
     const items = result.Items ?? [];
+    log?.debug("DDB getRoundSnapshot fetched", {
+      tableName,
+      roundId,
+      itemCount: items.length,
+    });
     if (items.length === 0) {
       return null;
     }
@@ -82,6 +90,12 @@ export function createDynamoRoundRepository(
     const stateDomain: RoundState = fromStateItem(stateItem);
     const players: Player[] = playerItems.map(fromPlayerItem);
     const scores: Score[] = scoreItems.map(fromScoreItem);
+    log?.debug("DDB getRoundSnapshot mapped", {
+      tableName,
+      roundId,
+      players: players.length,
+      scores: scores.length,
+    });
 
     return {
       config: configDomain,
@@ -94,6 +108,7 @@ export function createDynamoRoundRepository(
   async function getRoundSnapshotByAccessCode(
     accessCode: string
   ): Promise<{ roundId: RoundId; snapshot: RoundSnapshot } | null> {
+    log?.debug("DDB getRoundSnapshotByAccessCode", { tableName, accessCode });
     const result = await docClient.send(
       new QueryCommand({
         TableName: tableName,
@@ -110,6 +125,7 @@ export function createDynamoRoundRepository(
     if (!rawConfig) return null;
 
     const roundId = rawConfig.roundId;
+    log?.debug("DDB getRoundSnapshotByAccessCode hit", { tableName, roundId });
     const snapshot = await getRoundSnapshot(roundId);
     if (!snapshot) return null;
 
@@ -118,6 +134,7 @@ export function createDynamoRoundRepository(
 
   async function saveConfig(configDomain: RoundConfig): Promise<void> {
     const item = toConfigItem(configDomain);
+    log?.debug("DDB saveConfig", { tableName, roundId: configDomain.roundId });
 
     await docClient.send(
       new PutCommand({
@@ -132,6 +149,11 @@ export function createDynamoRoundRepository(
     expectedVersion?: number
   ): Promise<void> {
     const item = toStateItem(stateDomain);
+    log?.debug("DDB saveState", {
+      tableName,
+      roundId: stateDomain.roundId,
+      expectedVersion,
+    });
 
     try {
       if (expectedVersion === undefined) {

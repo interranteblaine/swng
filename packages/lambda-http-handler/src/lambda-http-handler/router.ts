@@ -4,6 +4,13 @@ import type {
 } from "aws-lambda";
 import { ApplicationError, type RoundService } from "@swng/application";
 import { json, parseJson, requireSessionId } from "./httpUtils";
+import {
+  parseCreateRoundRequest,
+  parseJoinRoundRequest,
+  parseUpdateScoreRequest,
+  parsePatchRoundStateRequest,
+  parseUpdatePlayerRequest,
+} from "@swng/contracts";
 
 export type HttpEvent = Parameters<APIGatewayProxyHandlerV2>[0];
 export type HttpResult = APIGatewayProxyStructuredResultV2;
@@ -27,19 +34,16 @@ export async function routeRequest(
 
   // POST /rounds
   if (method === "POST" && path === "/rounds") {
-    type Body = { courseName?: string; par?: unknown };
-    const body = parseJson<Body>(event.body, event.isBase64Encoded);
-
-    if (typeof body.courseName !== "string" || !Array.isArray(body.par)) {
-      throw new ApplicationError(
-        "INVALID_INPUT",
-        "Missing or invalid fields: courseName (string), par (number[])"
-      );
+    const raw = parseJson<unknown>(event.body, event.isBase64Encoded);
+    const parsed = parseCreateRoundRequest(raw);
+    if (!parsed.ok) {
+      throw new ApplicationError("INVALID_INPUT", parsed.error);
     }
+    const body = parsed.data;
 
     const result = await service.createRound({
       courseName: body.courseName,
-      par: body.par as number[],
+      par: body.par,
     });
 
     return json(201, result);
@@ -47,18 +51,12 @@ export async function routeRequest(
 
   // POST /rounds/join
   if (method === "POST" && path === "/rounds/join") {
-    type Body = { accessCode?: string; playerName?: string; color?: string };
-    const body = parseJson<Body>(event.body, event.isBase64Encoded);
-
-    if (
-      typeof body.accessCode !== "string" ||
-      typeof body.playerName !== "string"
-    ) {
-      throw new ApplicationError(
-        "INVALID_INPUT",
-        "Missing or invalid fields: accessCode (string), playerName (string)"
-      );
+    const raw = parseJson<unknown>(event.body, event.isBase64Encoded);
+    const parsed = parseJoinRoundRequest(raw);
+    if (!parsed.ok) {
+      throw new ApplicationError("INVALID_INPUT", parsed.error);
     }
+    const body = parsed.data;
 
     const result = await service.joinRound({
       accessCode: body.accessCode,
@@ -88,19 +86,12 @@ export async function routeRequest(
       const roundId = decodeURIComponent(m[1]);
       const sessionId = requireSessionId(event.headers);
 
-      type Body = { playerId?: string; holeNumber?: number; strokes?: number };
-      const body = parseJson<Body>(event.body, event.isBase64Encoded);
-
-      if (
-        typeof body.playerId !== "string" ||
-        typeof body.holeNumber !== "number" ||
-        typeof body.strokes !== "number"
-      ) {
-        throw new ApplicationError(
-          "INVALID_INPUT",
-          "Missing or invalid fields: playerId (string), holeNumber (number), strokes (number)"
-        );
+      const raw = parseJson<unknown>(event.body, event.isBase64Encoded);
+      const parsed = parseUpdateScoreRequest(raw);
+      if (!parsed.ok) {
+        throw new ApplicationError("INVALID_INPUT", parsed.error);
       }
+      const body = parsed.data;
 
       const result = await service.updateScore({
         roundId,
@@ -121,11 +112,12 @@ export async function routeRequest(
       const roundId = decodeURIComponent(m[1]);
       const sessionId = requireSessionId(event.headers);
 
-      type Body = {
-        currentHole?: number;
-        status?: "IN_PROGRESS" | "COMPLETED" | null;
-      };
-      const body = parseJson<Body>(event.body, event.isBase64Encoded);
+      const raw = parseJson<unknown>(event.body, event.isBase64Encoded);
+      const parsed = parsePatchRoundStateRequest(raw);
+      if (!parsed.ok) {
+        throw new ApplicationError("INVALID_INPUT", parsed.error);
+      }
+      const body = parsed.data;
 
       const result = await service.patchRoundState({
         roundId,
@@ -146,8 +138,12 @@ export async function routeRequest(
       const playerId = decodeURIComponent(m[2]);
       const sessionId = requireSessionId(event.headers);
 
-      type Body = { name?: string; color?: string };
-      const body = parseJson<Body>(event.body, event.isBase64Encoded);
+      const raw = parseJson<unknown>(event.body, event.isBase64Encoded);
+      const parsed = parseUpdatePlayerRequest(raw);
+      if (!parsed.ok) {
+        throw new ApplicationError("INVALID_INPUT", parsed.error);
+      }
+      const body = parsed.data;
 
       const result = await service.updatePlayer({
         roundId,

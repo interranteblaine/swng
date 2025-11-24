@@ -91,6 +91,12 @@ importers:
         specifier: workspace:*
         version: link:../domain
 
+  packages/contracts:
+    dependencies:
+      zod:
+        specifier: ^4.1.13
+        version: 4.1.13
+
   packages/domain: {}
 
   packages/lambda-http-handler:
@@ -104,6 +110,9 @@ importers:
       '@swng/application':
         specifier: workspace:*
         version: link:../application
+      '@swng/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@swng/domain':
         specifier: workspace:*
         version: link:../domain
@@ -1669,6 +1678,9 @@ packages:
   yocto-queue@0.1.0:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
+
+  zod@4.1.13:
+    resolution: {integrity: sha512-AvvthqfqrAhNH9dnfmrfKzX5upOdjUVJYFqNSlkmGf64gRaTzlPwz99IHYnVs28qYAybvAlBV+H7pn0saFY4Ig==}
 
 snapshots:
 
@@ -3446,3 +3458,5 @@ snapshots:
   yn@3.1.1: {}
 
   yocto-queue@0.1.0: {}
+
+  zod@4.1.13: {}

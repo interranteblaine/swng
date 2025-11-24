@@ -12,7 +12,8 @@
     "@swng/adapters-powertools-logger": "workspace:*",
     "@swng/adapters-dynamodb": "workspace:*",
     "@swng/application": "workspace:*",
-    "@swng/domain": "workspace:*"
+    "@swng/domain": "workspace:*",
+    "@swng/contracts": "workspace:*"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.159",

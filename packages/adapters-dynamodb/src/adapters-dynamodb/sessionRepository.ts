@@ -1,18 +1,16 @@
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
-import type { SessionRepository, Session, Logger } from "@swng/application";
+import type { SessionRepository, Session } from "@swng/application";
 import { toSessionItem, fromSessionItem, SessionItem } from "./sessionItems";
 import { SESSION_SK, sessionPk } from "./keys";
 import { DynamoConfig } from "./config";
 
 export function createDynamoSessionRepository(
-  config: DynamoConfig,
-  opts?: { logger?: Logger }
+  config: DynamoConfig
 ): SessionRepository {
-  const { tableName, docClient } = config;
-  const log = opts?.logger;
+  const { tableName, docClient, logger } = config;
 
   async function getSession(sessionId: string): Promise<Session | null> {
-    log?.debug("DDB getSession", { tableName, sessionId });
+    logger?.debug("DDB getSession", { tableName, sessionId });
     const result = await docClient.send(
       new GetCommand({
         TableName: tableName,
@@ -31,7 +29,7 @@ export function createDynamoSessionRepository(
   async function createSession(session: Session): Promise<void> {
     const item = toSessionItem(session);
 
-    log?.debug("DDB createSession", {
+    logger?.debug("DDB createSession", {
       tableName,
       sessionId: session.sessionId,
     });

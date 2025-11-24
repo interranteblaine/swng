@@ -1,10 +1,6 @@
 import { DeleteCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import type { RoundId } from "@swng/domain";
-import type {
-  Connection,
-  ConnectionRepository,
-  Logger,
-} from "@swng/application";
+import type { Connection, ConnectionRepository } from "@swng/application";
 import { roundPk, CONNECTION_SK_PREFIX, connectionSk } from "./keys";
 import type { DynamoConfig } from "./config";
 import {
@@ -14,11 +10,9 @@ import {
 } from "./connectionItems";
 
 export function createDynamoConnectionRepository(
-  config: DynamoConfig,
-  opts?: { logger?: Logger }
+  config: DynamoConfig
 ): ConnectionRepository {
-  const { tableName, docClient } = config;
-  const log = opts?.logger;
+  const { tableName, docClient, logger } = config;
 
   async function addConnection(
     connection: Connection,
@@ -26,7 +20,7 @@ export function createDynamoConnectionRepository(
   ): Promise<void> {
     const item: ConnectionItem = toConnectionItem(connection, ttlSeconds);
 
-    log?.debug("DDB addConnection", {
+    logger?.debug("DDB addConnection", {
       tableName,
       roundId: connection.roundId,
       connectionId: connection.connectionId,
@@ -45,7 +39,7 @@ export function createDynamoConnectionRepository(
     roundId: RoundId,
     connectionId: string
   ): Promise<void> {
-    log?.debug("DDB removeConnection", { tableName, roundId, connectionId });
+    logger?.debug("DDB removeConnection", { tableName, roundId, connectionId });
     await docClient.send(
       new DeleteCommand({
         TableName: tableName,
@@ -71,7 +65,7 @@ export function createDynamoConnectionRepository(
 
     const items = (result.Items ?? []) as ConnectionItem[];
     const connections = items.map(fromConnectionItem);
-    log?.debug("DDB listConnections", {
+    logger?.debug("DDB listConnections", {
       tableName,
       roundId,
       count: connections.length,

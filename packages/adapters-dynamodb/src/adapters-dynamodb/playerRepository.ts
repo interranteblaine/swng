@@ -1,21 +1,19 @@
 import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import type { Player, PlayerId, RoundId } from "@swng/domain";
-import type { PlayerRepository, Logger } from "@swng/application";
+import type { PlayerRepository } from "@swng/application";
 import { roundPk, PLAYER_SK_PREFIX, playerSk } from "./keys";
 import type { DynamoConfig } from "./config";
 import { PlayerItem, toPlayerItem, fromPlayerItem } from "./playerItems";
 
 export function createDynamoPlayerRepository(
-  config: DynamoConfig,
-  opts?: { logger?: Logger }
+  config: DynamoConfig
 ): PlayerRepository {
-  const { tableName, docClient } = config;
-  const log = opts?.logger;
+  const { tableName, docClient, logger } = config;
 
   async function createPlayer(player: Player): Promise<void> {
     const item: PlayerItem = toPlayerItem(player);
 
-    log?.debug("DDB createPlayer", {
+    logger?.debug("DDB createPlayer", {
       tableName,
       roundId: player.roundId,
       playerId: player.playerId,
@@ -34,7 +32,7 @@ export function createDynamoPlayerRepository(
   async function updatePlayer(player: Player): Promise<void> {
     const item: PlayerItem = toPlayerItem(player);
 
-    log?.debug("DDB updatePlayer", {
+    logger?.debug("DDB updatePlayer", {
       tableName,
       roundId: player.roundId,
       playerId: player.playerId,
@@ -52,7 +50,7 @@ export function createDynamoPlayerRepository(
     roundId: RoundId,
     playerId: PlayerId
   ): Promise<Player | null> {
-    log?.debug("DDB getPlayer", { tableName, roundId, playerId });
+    logger?.debug("DDB getPlayer", { tableName, roundId, playerId });
     const result = await docClient.send(
       new GetCommand({
         TableName: tableName,
@@ -83,7 +81,7 @@ export function createDynamoPlayerRepository(
 
     const items = (result.Items ?? []) as PlayerItem[];
     const players = items.map(fromPlayerItem);
-    log?.debug("DDB listPlayers", {
+    logger?.debug("DDB listPlayers", {
       tableName,
       roundId,
       count: players.length,

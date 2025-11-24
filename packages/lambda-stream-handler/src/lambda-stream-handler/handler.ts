@@ -5,7 +5,7 @@ import {
 } from "@swng/adapters-apigw-broadcast";
 import {
   createDynamoConnectionRepository,
-  createDynamoConfigFrom,
+  createDynamoDocClient,
 } from "@swng/adapters-dynamodb";
 import type { DynamoDBStreamHandler } from "aws-lambda";
 import { processStreamEventBatch } from "./processor";
@@ -25,10 +25,7 @@ const baseLogger = createPowertoolsLogger({
   logLevel,
 });
 
-const dynamoCfg = createDynamoConfigFrom({
-  tableName,
-  region,
-});
+const docClient = createDynamoDocClient({ region });
 
 const apigwClient = createApiGatewayManagementClient({
   endpoint,
@@ -44,16 +41,16 @@ export const handler: DynamoDBStreamHandler = async (event, context) => {
     coldStart,
   });
 
-  const connectionRepo = createDynamoConnectionRepository(dynamoCfg, {
+  const connectionRepo = createDynamoConnectionRepository({
+    tableName,
+    docClient,
     logger: invocationLogger,
   });
 
   const broadcast = createApiGatewayBroadcastPort({
-    endpoint,
-    region,
+    client: apigwClient,
     connectionRepo,
     logger: invocationLogger,
-    client: apigwClient,
   });
 
   await processStreamEventBatch(event, { broadcast, logger: invocationLogger });

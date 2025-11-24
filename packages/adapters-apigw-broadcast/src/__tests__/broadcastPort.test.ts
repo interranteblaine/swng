@@ -75,8 +75,6 @@ describe("ApiGatewayBroadcastPort behavior", () => {
 
   it("broadcasts to all active connections for PlayerJoined", async () => {
     const broadcast = createApiGatewayBroadcastPort({
-      endpoint: "https://example.com/dev",
-      region: "us-east-1",
       client,
       connectionRepo,
     });
@@ -109,8 +107,6 @@ describe("ApiGatewayBroadcastPort behavior", () => {
     } as unknown as ConnectionRepository;
 
     const broadcast = createApiGatewayBroadcastPort({
-      endpoint: "https://example.com/dev",
-      region: "us-east-1",
       client,
       connectionRepo,
     });
@@ -125,8 +121,6 @@ describe("ApiGatewayBroadcastPort behavior", () => {
     listConnections.mockResolvedValue([]);
 
     const broadcast = createApiGatewayBroadcastPort({
-      endpoint: "https://example.com/dev",
-      region: "us-east-1",
       client,
       connectionRepo,
     });

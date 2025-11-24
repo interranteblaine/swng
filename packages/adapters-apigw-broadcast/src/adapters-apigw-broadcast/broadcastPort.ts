@@ -1,21 +1,7 @@
-import {
-  ApiGatewayManagementApiClient,
-  PostToConnectionCommand,
-} from "@aws-sdk/client-apigatewaymanagementapi";
-import type { BroadcastPort, Logger } from "@swng/application";
+import { PostToConnectionCommand } from "@aws-sdk/client-apigatewaymanagementapi";
+import type { BroadcastPort } from "@swng/application";
 import type { Player, Score, RoundState, RoundId } from "@swng/domain";
 import type { ApiGatewayBroadcastConfig } from "./config";
-import { noopLogger } from "./config";
-
-function buildClient(
-  cfg: ApiGatewayBroadcastConfig
-): ApiGatewayManagementApiClient {
-  if (cfg.client) return cfg.client;
-  return new ApiGatewayManagementApiClient({
-    region: cfg.region,
-    endpoint: cfg.endpoint,
-  });
-}
 
 function isGone(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
@@ -42,9 +28,7 @@ function encode(message: unknown): Uint8Array {
 export function createApiGatewayBroadcastPort(
   config: ApiGatewayBroadcastConfig
 ): BroadcastPort {
-  const client = buildClient(config);
-  const logger: Logger = config.logger ?? noopLogger;
-  const { connectionRepo } = config;
+  const { connectionRepo, client, logger } = config;
 
   async function sendToRound(
     roundId: RoundId,
@@ -70,14 +54,14 @@ export function createApiGatewayBroadcastPort(
             try {
               await connectionRepo.removeConnection(roundId, conn.connectionId);
             } catch (pruneErr) {
-              logger.warn?.("Failed to prune stale connection", {
+              logger?.warn?.("Failed to prune stale connection", {
                 roundId,
                 connectionId: conn.connectionId,
                 pruneErr,
               });
             }
           } else {
-            logger.warn?.("Failed to broadcast to connection", {
+            logger?.warn?.("Failed to broadcast to connection", {
               roundId,
               connectionId: conn.connectionId,
               err,

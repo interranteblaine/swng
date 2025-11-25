@@ -16,57 +16,38 @@ import type {
 import type { RoundId } from "@swng/domain";
 import type { DomainEvent } from "@swng/domain";
 
-export type HeadersInitLike = Record<string, string> | Array<[string, string]>;
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH";
 
-export interface RequestInitLike {
-  method?: string;
-  headers?: HeadersInitLike;
-  body?: string | Uint8Array | null;
+export interface HttpRequest {
+  url: string;
+  method: HttpMethod;
+  headers?: Record<string, string>;
+  body?: string; // JSON string when present
 }
 
-export interface ResponseLike {
+export interface HttpResponse {
   ok: boolean;
   status: number;
-  text(): Promise<string>;
+  bodyText: string;
 }
 
-export type FetchLike = (
-  url: string,
-  init?: RequestInitLike
-) => Promise<ResponseLike>;
-
-export interface MessageEventLike {
-  data: unknown;
+export interface HttpPort {
+  request(req: HttpRequest): Promise<HttpResponse>;
 }
 
-export type WsEventHandler = (ev?: unknown) => void;
-export type WsMessageHandler = (ev: MessageEventLike) => void;
+export type WsTextHandler = (data: string) => void;
 
-export interface WebSocketLike {
-  readonly readyState: number;
-  send(data: string | Uint8Array): void;
+export interface WsConnection {
   close(code?: number, reason?: string): void;
-
-  onopen?: WsEventHandler | null;
-  onmessage?: WsMessageHandler | null;
-  onclose?: WsEventHandler | null;
-  onerror?: WsEventHandler | null;
-
-  addEventListener(type: "open", listener: WsEventHandler): void;
-  addEventListener(type: "close", listener: WsEventHandler): void;
-  addEventListener(type: "error", listener: WsEventHandler): void;
-  addEventListener(type: "message", listener: WsMessageHandler): void;
-
-  removeEventListener(type: "open", listener: WsEventHandler): void;
-  removeEventListener(type: "close", listener: WsEventHandler): void;
-  removeEventListener(type: "error", listener: WsEventHandler): void;
-  removeEventListener(type: "message", listener: WsMessageHandler): void;
 }
 
-export type WebSocketCtorLike = new (
-  url: string,
-  protocols?: string | string[]
-) => WebSocketLike;
+export interface WebSocketPort {
+  connect(
+    url: string,
+    protocols: string[],
+    onMessage: WsTextHandler
+  ): WsConnection;
+}
 
 export interface Client {
   createRound(input: CreateRoundRequest): Promise<CreateRoundOutput>;
@@ -91,12 +72,12 @@ export interface Client {
   connectWs(
     sessionId: string,
     onEvent: (evt: DomainEvent) => void
-  ): WebSocketLike;
+  ): WsConnection;
 }
 
 export interface CreateClientOptions {
-  fetch: FetchLike;
-  wsCtor: WebSocketCtorLike;
+  http: HttpPort;
+  ws: WebSocketPort;
   baseUrl: string;
   wsUrl: string;
 }

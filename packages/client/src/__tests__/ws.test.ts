@@ -1,81 +1,53 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import type { DomainEvent } from "@swng/domain";
-import { connectWsWithCtor } from "../index";
-import type { WebSocketCtorLike } from "../client/types";
+import { connectWs } from "../index";
+import type { WebSocketPort } from "../client/types";
 
-class FakeWebSocket {
-  static last: FakeWebSocket | undefined;
+describe("connectWs (WebSocketPort)", () => {
+  // Minimal fake WebSocketPort that records the last connection
+  let last:
+    | {
+        url: string;
+        protocols: string[];
+        onMessage?: (data: string) => void;
+        closed: boolean;
+      }
+    | undefined;
 
-  public readonly url: string;
-  public readonly protocols?: string[];
-  private listeners: Record<string, ((ev: { data: unknown }) => void)[]> = {};
-  private closed = false;
+  const port: WebSocketPort = {
+    connect(url, protocols, onMessage) {
+      last = { url, protocols, onMessage, closed: false };
+      return {
+        close(code?: number, reason?: string) {
+          // simulate close semantics
+          if (last) last.closed = true;
+          void code;
+          void reason;
+        },
+      };
+    },
+  };
 
-  constructor(url: string, protocols?: string[]) {
-    this.url = url;
-    this.protocols = protocols;
-    FakeWebSocket.last = this;
+  function emit(payload: unknown) {
+    const text =
+      typeof payload === "string" ? payload : JSON.stringify(payload);
+    last?.onMessage?.(text);
   }
 
-  addEventListener(type: string, listener: (ev: { data: unknown }) => void) {
-    (this.listeners[type] ||= []).push(listener);
-  }
-
-  close(): void {
-    this.closed = true;
-  }
-
-  emitMessage(payload: unknown): void {
-    if (this.closed) return;
-    const ev = {
-      data: typeof payload === "string" ? payload : JSON.stringify(payload),
-    };
-    for (const fn of this.listeners["message"] ?? []) fn(ev);
-  }
-}
-
-describe("connectWs (behavior)", () => {
-  const original = (globalThis as unknown as { WebSocket?: unknown }).WebSocket;
-
-  beforeEach(() => {
-    (globalThis as unknown as { WebSocket: unknown }).WebSocket =
-      FakeWebSocket as unknown;
-    FakeWebSocket.last = undefined;
-  });
-
-  afterEach(() => {
-    if (original === undefined) {
-      delete (globalThis as unknown as { WebSocket?: unknown }).WebSocket;
-    } else {
-      (globalThis as unknown as { WebSocket: unknown }).WebSocket = original;
-    }
-    FakeWebSocket.last = undefined;
-  });
-
-  it("uses subprotocol 'Session <id>' and returns a socket", () => {
-    const ws = connectWsWithCtor(
-      FakeWebSocket as unknown as WebSocketCtorLike,
-      "wss://example/ws",
-      "s1",
-      () => {}
-    );
-    expect(FakeWebSocket.last?.protocols?.[0]).toBe("Session s1");
+  it("uses subprotocol 'Session <id>' and returns a connection", () => {
+    const ws = connectWs(port, "wss://example/ws", "s1", () => {});
+    expect(last?.protocols?.[0]).toBe("Session s1");
     expect(typeof ws.close).toBe("function");
     ws.close();
   });
 
   it("forwards a valid DomainEvent to the callback", () => {
     let received: DomainEvent | undefined;
-    const ws = connectWsWithCtor(
-      FakeWebSocket as unknown as WebSocketCtorLike,
-      "wss://example/ws",
-      "s1",
-      (evt) => {
-        received = evt;
-      }
-    );
+    const ws = connectWs(port, "wss://example/ws", "s1", (evt) => {
+      received = evt;
+    });
 
-    FakeWebSocket.last?.emitMessage({
+    emit({
       type: "ScoreChanged",
       roundId: "r1",
       occurredAt: "2020-01-01T00:00:00Z",

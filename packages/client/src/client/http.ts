@@ -14,7 +14,7 @@ import type {
   UpdatePlayerRequest,
 } from "@swng/contracts";
 import type { RoundId } from "@swng/domain";
-import type { FetchLike } from "./types";
+import type { HttpPort } from "./types";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH";
 
@@ -52,7 +52,7 @@ function parseError(data: unknown): { code?: string; message?: string } {
 }
 
 async function fetchJson<T>(
-  fetchImpl: FetchLike,
+  http: HttpPort,
   baseUrl: string,
   method: HttpMethod,
   path: string,
@@ -65,13 +65,14 @@ async function fetchJson<T>(
   };
   if (sessionId) headers["x-session-id"] = sessionId;
 
-  const res = await fetchImpl(url, {
+  const res = await http.request({
+    url,
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
-  const text = await res.text();
+  const text = res.bodyText;
   const data: unknown = text ? JSON.parse(text) : {};
 
   if (!res.ok) {
@@ -90,11 +91,11 @@ async function fetchJson<T>(
   return data as T;
 }
 
-export function createHttpClient(fetchImpl: FetchLike, baseUrl: string) {
+export function createHttpClient(http: HttpPort, baseUrl: string) {
   return {
     async createRound(input: CreateRoundRequest): Promise<CreateRoundOutput> {
       return fetchJson<CreateRoundOutput>(
-        fetchImpl,
+        http,
         baseUrl,
         "POST",
         "/rounds",
@@ -104,7 +105,7 @@ export function createHttpClient(fetchImpl: FetchLike, baseUrl: string) {
 
     async joinRound(input: JoinRoundRequest): Promise<JoinRoundOutput> {
       return fetchJson<JoinRoundOutput>(
-        fetchImpl,
+        http,
         baseUrl,
         "POST",
         "/rounds/join",
@@ -118,7 +119,7 @@ export function createHttpClient(fetchImpl: FetchLike, baseUrl: string) {
     }): Promise<GetRoundOutput> {
       const { roundId, sessionId } = args;
       return fetchJson<GetRoundOutput>(
-        fetchImpl,
+        http,
         baseUrl,
         "GET",
         `/rounds/${encodeURIComponent(roundId)}`,
@@ -133,7 +134,7 @@ export function createHttpClient(fetchImpl: FetchLike, baseUrl: string) {
       const { roundId, sessionId, playerId, holeNumber, strokes } = args;
       const body: UpdateScoreRequest = { playerId, holeNumber, strokes };
       return fetchJson<UpdateScoreOutput>(
-        fetchImpl,
+        http,
         baseUrl,
         "PUT",
         `/rounds/${encodeURIComponent(roundId)}/scores`,
@@ -148,7 +149,7 @@ export function createHttpClient(fetchImpl: FetchLike, baseUrl: string) {
       const { roundId, sessionId, currentHole, status } = args;
       const body: PatchRoundStateRequest = { currentHole, status };
       return fetchJson<PatchRoundStateOutput>(
-        fetchImpl,
+        http,
         baseUrl,
         "PATCH",
         `/rounds/${encodeURIComponent(roundId)}/state`,
@@ -167,7 +168,7 @@ export function createHttpClient(fetchImpl: FetchLike, baseUrl: string) {
       const { roundId, sessionId, playerId, name, color } = args;
       const body: UpdatePlayerRequest = { name, color };
       return fetchJson<UpdatePlayerOutput>(
-        fetchImpl,
+        http,
         baseUrl,
         "PATCH",
         `/rounds/${encodeURIComponent(roundId)}/players/${encodeURIComponent(

@@ -1,6 +1,6 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { createHttpClient } from "../client/http";
+import type { HttpPort } from "../client/types";
 
 describe("client http (stateless)", () => {
   const calls: {
@@ -10,121 +10,121 @@ describe("client http (stateless)", () => {
 
   beforeEach(() => {
     calls.length = 0;
-
-    // Minimal fetch mock capturing requests
-    globalThis.fetch = vi.fn(async (url: string, init?: RequestInit) => {
-      calls.push({
-        url: String(url),
-        init: {
-          method: (init?.method as string | undefined) ?? "GET",
-          headers: (init?.headers as Record<string, string>) ?? {},
-          body: init?.body as string | undefined,
-        },
-      });
-
-      // Simulate endpoints used by tests
-      if (String(url).endsWith("/rounds/join")) {
-        const out = {
-          roundId: "r1",
-          sessionId: "s1",
-          player: {
-            roundId: "r1",
-            playerId: "p1",
-            name: "Alice",
-            color: "#000000",
-            joinedAt: "2020-01-01T00:00:00Z",
-            updatedAt: "2020-01-01T00:00:00Z",
-          },
-          snapshot: {
-            config: {
-              roundId: "r1",
-              accessCode: "AC",
-              courseName: "Course",
-              holes: 1,
-              par: [3],
-              createdAt: "2020-01-01T00:00:00Z",
-            },
-            state: {
-              roundId: "r1",
-              currentHole: 1,
-              status: "IN_PROGRESS",
-              stateVersion: 1,
-              updatedAt: "2020-01-01T00:00:00Z",
-            },
-            players: [],
-            scores: [],
-          },
-        };
-        return {
-          ok: true,
-          status: 200,
-          text: async () => JSON.stringify(out),
-        } as unknown as Response;
-      }
-
-      if (/\/rounds\/r1$/.test(String(url))) {
-        const out = {
-          snapshot: {
-            config: {
-              roundId: "r1",
-              accessCode: "AC",
-              courseName: "Course",
-              holes: 1,
-              par: [3],
-              createdAt: "2020-01-01T00:00:00Z",
-            },
-            state: {
-              roundId: "r1",
-              currentHole: 1,
-              status: "IN_PROGRESS",
-              stateVersion: 1,
-              updatedAt: "2020-01-01T00:00:00Z",
-            },
-            players: [],
-            scores: [],
-          },
-        };
-        return {
-          ok: true,
-          status: 200,
-          text: async () => JSON.stringify(out),
-        } as unknown as Response;
-      }
-
-      if (/\/rounds\/r1\/scores$/.test(String(url))) {
-        const out = {
-          score: {
-            roundId: "r1",
-            playerId: "p1",
-            holeNumber: 2,
-            strokes: 4,
-            updatedBy: "p1",
-            updatedAt: "2020-01-01T00:00:00Z",
-          },
-        };
-        return {
-          ok: true,
-          status: 200,
-          text: async () => JSON.stringify(out),
-        } as unknown as Response;
-      }
-
-      // Default OK
-      return {
-        ok: true,
-        status: 200,
-        text: async () => "{}",
-      } as unknown as Response;
-    }) as unknown as typeof fetch;
   });
 
-  afterEach(() => {
-    vi.resetAllMocks();
-  });
+  function makeHttpPort(): HttpPort {
+    return {
+      async request(req) {
+        // record call
+        calls.push({
+          url: String(req.url),
+          init: {
+            method: req.method ?? "GET",
+            headers: req.headers ?? {},
+            body: req.body,
+          },
+        });
+
+        // simulate endpoints used by tests
+        if (String(req.url).endsWith("/rounds/join")) {
+          const out = {
+            roundId: "r1",
+            sessionId: "s1",
+            player: {
+              roundId: "r1",
+              playerId: "p1",
+              name: "Alice",
+              color: "#000000",
+              joinedAt: "2020-01-01T00:00:00Z",
+              updatedAt: "2020-01-01T00:00:00Z",
+            },
+            snapshot: {
+              config: {
+                roundId: "r1",
+                accessCode: "AC",
+                courseName: "Course",
+                holes: 1,
+                par: [3],
+                createdAt: "2020-01-01T00:00:00Z",
+              },
+              state: {
+                roundId: "r1",
+                currentHole: 1,
+                status: "IN_PROGRESS",
+                stateVersion: 1,
+                updatedAt: "2020-01-01T00:00:00Z",
+              },
+              players: [],
+              scores: [],
+            },
+          };
+          return {
+            ok: true,
+            status: 200,
+            bodyText: JSON.stringify(out),
+          };
+        }
+
+        if (/\/rounds\/r1$/.test(String(req.url))) {
+          const out = {
+            snapshot: {
+              config: {
+                roundId: "r1",
+                accessCode: "AC",
+                courseName: "Course",
+                holes: 1,
+                par: [3],
+                createdAt: "2020-01-01T00:00:00Z",
+              },
+              state: {
+                roundId: "r1",
+                currentHole: 1,
+                status: "IN_PROGRESS",
+                stateVersion: 1,
+                updatedAt: "2020-01-01T00:00:00Z",
+              },
+              players: [],
+              scores: [],
+            },
+          };
+          return {
+            ok: true,
+            status: 200,
+            bodyText: JSON.stringify(out),
+          };
+        }
+
+        if (/\/rounds\/r1\/scores$/.test(String(req.url))) {
+          const out = {
+            score: {
+              roundId: "r1",
+              playerId: "p1",
+              holeNumber: 2,
+              strokes: 4,
+              updatedBy: "p1",
+              updatedAt: "2020-01-01T00:00:00Z",
+            },
+          };
+          return {
+            ok: true,
+            status: 200,
+            bodyText: JSON.stringify(out),
+          };
+        }
+
+        // default OK
+        return {
+          ok: true,
+          status: 200,
+          bodyText: "{}",
+        };
+      },
+    };
+  }
 
   it("joinRound returns values and getRound sends x-session-id", async () => {
     const base = "https://api.example.com";
-    const http = createHttpClient(globalThis.fetch as any, base);
+    const http = createHttpClient(makeHttpPort(), base);
 
     const join = await http.joinRound({
       accessCode: "ABC123",
@@ -144,8 +144,7 @@ describe("client http (stateless)", () => {
 
   it("updateScore hits correct route/method and attaches x-session-id", async () => {
     const base = "https://api.example.com";
-
-    const http = createHttpClient(globalThis.fetch as any, base);
+    const http = createHttpClient(makeHttpPort(), base);
 
     await http.updateScore({
       roundId: "r1",

@@ -14,6 +14,7 @@ import type {
   UpdatePlayerRequest,
 } from "@swng/contracts";
 import type { RoundId } from "@swng/domain";
+import type { FetchLike } from "./types";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH";
 
@@ -51,23 +52,20 @@ function parseError(data: unknown): { code?: string; message?: string } {
 }
 
 async function fetchJson<T>(
+  fetchImpl: FetchLike,
   baseUrl: string,
   method: HttpMethod,
   path: string,
   body?: unknown,
   sessionId?: string
 ): Promise<T> {
-  if (typeof fetch !== "function") {
-    throw new Error("global fetch not available (browser-only client)");
-  }
-
   const url = toUrl(baseUrl, path);
   const headers: Record<string, string> = {
     "content-type": "application/json",
   };
   if (sessionId) headers["x-session-id"] = sessionId;
 
-  const res = await fetch(url, {
+  const res = await fetchImpl(url, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -92,81 +90,92 @@ async function fetchJson<T>(
   return data as T;
 }
 
-export async function createRound(
-  baseUrl: string,
-  input: CreateRoundRequest
-): Promise<CreateRoundOutput> {
-  return fetchJson<CreateRoundOutput>(baseUrl, "POST", "/rounds", input);
-}
+export function createHttpClient(fetchImpl: FetchLike, baseUrl: string) {
+  return {
+    async createRound(input: CreateRoundRequest): Promise<CreateRoundOutput> {
+      return fetchJson<CreateRoundOutput>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        "/rounds",
+        input
+      );
+    },
 
-export async function joinRound(
-  baseUrl: string,
-  input: JoinRoundRequest
-): Promise<JoinRoundOutput> {
-  return fetchJson<JoinRoundOutput>(baseUrl, "POST", "/rounds/join", input);
-}
+    async joinRound(input: JoinRoundRequest): Promise<JoinRoundOutput> {
+      return fetchJson<JoinRoundOutput>(
+        fetchImpl,
+        baseUrl,
+        "POST",
+        "/rounds/join",
+        input
+      );
+    },
 
-export async function getRound(
-  baseUrl: string,
-  args: { roundId: RoundId; sessionId: string }
-): Promise<GetRoundOutput> {
-  const { roundId, sessionId } = args;
-  return fetchJson<GetRoundOutput>(
-    baseUrl,
-    "GET",
-    `/rounds/${encodeURIComponent(roundId)}`,
-    undefined,
-    sessionId
-  );
-}
+    async getRound(args: {
+      roundId: RoundId;
+      sessionId: string;
+    }): Promise<GetRoundOutput> {
+      const { roundId, sessionId } = args;
+      return fetchJson<GetRoundOutput>(
+        fetchImpl,
+        baseUrl,
+        "GET",
+        `/rounds/${encodeURIComponent(roundId)}`,
+        undefined,
+        sessionId
+      );
+    },
 
-export async function updateScore(
-  baseUrl: string,
-  args: { roundId: RoundId; sessionId: string } & UpdateScoreRequest
-): Promise<UpdateScoreOutput> {
-  const { roundId, sessionId, playerId, holeNumber, strokes } = args;
-  const body: UpdateScoreRequest = { playerId, holeNumber, strokes };
-  return fetchJson<UpdateScoreOutput>(
-    baseUrl,
-    "PUT",
-    `/rounds/${encodeURIComponent(roundId)}/scores`,
-    body,
-    sessionId
-  );
-}
+    async updateScore(
+      args: { roundId: RoundId; sessionId: string } & UpdateScoreRequest
+    ): Promise<UpdateScoreOutput> {
+      const { roundId, sessionId, playerId, holeNumber, strokes } = args;
+      const body: UpdateScoreRequest = { playerId, holeNumber, strokes };
+      return fetchJson<UpdateScoreOutput>(
+        fetchImpl,
+        baseUrl,
+        "PUT",
+        `/rounds/${encodeURIComponent(roundId)}/scores`,
+        body,
+        sessionId
+      );
+    },
 
-export async function patchRoundState(
-  baseUrl: string,
-  args: { roundId: RoundId; sessionId: string } & PatchRoundStateRequest
-): Promise<PatchRoundStateOutput> {
-  const { roundId, sessionId, currentHole, status } = args;
-  const body: PatchRoundStateRequest = { currentHole, status };
-  return fetchJson<PatchRoundStateOutput>(
-    baseUrl,
-    "PATCH",
-    `/rounds/${encodeURIComponent(roundId)}/state`,
-    body,
-    sessionId
-  );
-}
+    async patchRoundState(
+      args: { roundId: RoundId; sessionId: string } & PatchRoundStateRequest
+    ): Promise<PatchRoundStateOutput> {
+      const { roundId, sessionId, currentHole, status } = args;
+      const body: PatchRoundStateRequest = { currentHole, status };
+      return fetchJson<PatchRoundStateOutput>(
+        fetchImpl,
+        baseUrl,
+        "PATCH",
+        `/rounds/${encodeURIComponent(roundId)}/state`,
+        body,
+        sessionId
+      );
+    },
 
-export async function updatePlayer(
-  baseUrl: string,
-  args: {
-    roundId: RoundId;
-    sessionId: string;
-    playerId: string;
-  } & UpdatePlayerRequest
-): Promise<UpdatePlayerOutput> {
-  const { roundId, sessionId, playerId, name, color } = args;
-  const body: UpdatePlayerRequest = { name, color };
-  return fetchJson<UpdatePlayerOutput>(
-    baseUrl,
-    "PATCH",
-    `/rounds/${encodeURIComponent(roundId)}/players/${encodeURIComponent(
-      playerId
-    )}`,
-    body,
-    sessionId
-  );
+    async updatePlayer(
+      args: {
+        roundId: RoundId;
+        sessionId: string;
+        playerId: string;
+      } & UpdatePlayerRequest
+    ): Promise<UpdatePlayerOutput> {
+      const { roundId, sessionId, playerId, name, color } = args;
+      const body: UpdatePlayerRequest = { name, color };
+      return fetchJson<UpdatePlayerOutput>(
+        fetchImpl,
+        baseUrl,
+        "PATCH",
+        `/rounds/${encodeURIComponent(roundId)}/players/${encodeURIComponent(
+          playerId
+        )}`,
+        body,
+        sessionId
+      );
+    },
+  };
 }

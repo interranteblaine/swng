@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { DomainEvent } from "@swng/domain";
-import { connectWs } from "../index";
+import { connectWsWithCtor } from "../index";
+import type { WebSocketCtorLike } from "../client/types";
 
 class FakeWebSocket {
   static last: FakeWebSocket | undefined;
@@ -52,7 +53,12 @@ describe("connectWs (behavior)", () => {
   });
 
   it("uses subprotocol 'Session <id>' and returns a socket", () => {
-    const ws = connectWs("wss://example/ws", "s1", () => {});
+    const ws = connectWsWithCtor(
+      FakeWebSocket as unknown as WebSocketCtorLike,
+      "wss://example/ws",
+      "s1",
+      () => {}
+    );
     expect(FakeWebSocket.last?.protocols?.[0]).toBe("Session s1");
     expect(typeof ws.close).toBe("function");
     ws.close();
@@ -60,9 +66,14 @@ describe("connectWs (behavior)", () => {
 
   it("forwards a valid DomainEvent to the callback", () => {
     let received: DomainEvent | undefined;
-    const ws = connectWs("wss://example/ws", "s1", (evt) => {
-      received = evt;
-    });
+    const ws = connectWsWithCtor(
+      FakeWebSocket as unknown as WebSocketCtorLike,
+      "wss://example/ws",
+      "s1",
+      (evt) => {
+        received = evt;
+      }
+    );
 
     FakeWebSocket.last?.emitMessage({
       type: "ScoreChanged",

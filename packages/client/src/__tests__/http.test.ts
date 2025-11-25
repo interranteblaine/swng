@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { joinRound, getRound, updateScore } from "../index";
+import { createHttpClient } from "../client/http";
 
 describe("client http (stateless)", () => {
   const calls: {
@@ -123,8 +124,9 @@ describe("client http (stateless)", () => {
 
   it("joinRound returns values and getRound sends x-session-id", async () => {
     const base = "https://api.example.com";
+    const http = createHttpClient(globalThis.fetch as any, base);
 
-    const join = await joinRound(base, {
+    const join = await http.joinRound({
       accessCode: "ABC123",
       playerName: "Alice",
     });
@@ -132,7 +134,7 @@ describe("client http (stateless)", () => {
     expect(join.sessionId).toBe("s1");
     expect(join.roundId).toBe("r1");
 
-    await getRound(base, { roundId: join.roundId, sessionId: join.sessionId });
+    await http.getRound({ roundId: join.roundId, sessionId: join.sessionId });
 
     const last = calls[calls.length - 1];
     expect(last.url).toBe("https://api.example.com/rounds/r1");
@@ -143,7 +145,9 @@ describe("client http (stateless)", () => {
   it("updateScore hits correct route/method and attaches x-session-id", async () => {
     const base = "https://api.example.com";
 
-    await updateScore(base, {
+    const http = createHttpClient(globalThis.fetch as any, base);
+
+    await http.updateScore({
       roundId: "r1",
       sessionId: "s1",
       playerId: "p1",

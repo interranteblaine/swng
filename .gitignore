@@ -22,3 +22,9 @@ pnpm-debug.log*
 # IDE-specific files
 .vscode
 .idea
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+*.js
+*.d.ts

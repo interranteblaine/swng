@@ -8,7 +8,14 @@
     "lint": "pnpm -r lint",
     "gen": "ts-node tools/generate.ts",
     "build": "pnpm -r build",
-    "validate": "pnpm lint && pnpm build && pnpm test"
+    "validate": "pnpm lint && pnpm build && pnpm test",
+    "cdk:bootstrap": "pnpm -F @swng/infra-cdk cdk bootstrap",
+    "cdk:synth": "pnpm -F @swng/infra-cdk cdk synth",
+    "cdk:diff": "pnpm -F @swng/infra-cdk cdk diff",
+    "cdk:deploy": "pnpm -F @swng/infra-cdk cdk deploy",
+    "cdk:destroy": "pnpm -F @swng/infra-cdk cdk destroy",
+    "cdk:guard": "node -e \"if(!process.env.AWS_PROFILE){console.error('Set AWS_PROFILE before running CDK');process.exit(1)}\"",
+    "cdk:deploy:safe": "pnpm run cdk:guard && pnpm run cdk:deploy"
   },
   "devDependencies": {
     "@types/ejs": "^3.1.5",
@@ -21,6 +28,7 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",
     "vitest": "^4.0.9",
-    "yargs": "^18.0.0"
+    "yargs": "^18.0.0",
+    "@types/node": "^22.7.9"
   }
 }

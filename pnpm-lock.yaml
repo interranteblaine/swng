@@ -83,8 +83,8 @@ importers:
         version: link:../domain
     devDependencies:
       '@types/node':
-        specifier: ^24.10.1
-        version: 24.10.1
+        specifier: ^22.7.9
+        version: 22.19.1
 
   packages/adapters-dynamodb:
     dependencies:
@@ -164,8 +164,8 @@ importers:
         specifier: ^8.10.159
         version: 8.10.159
       '@types/node':
-        specifier: ^24.10.1
-        version: 24.10.1
+        specifier: ^22.7.9
+        version: 22.19.1
 
   packages/lambda-stream-handler:
     dependencies:
@@ -192,8 +192,8 @@ importers:
         specifier: ^8.10.159
         version: 8.10.159
       '@types/node':
-        specifier: ^24.10.1
-        version: 24.10.1
+        specifier: ^22.7.9
+        version: 22.19.1
 
   packages/lambda-ws-authorizer:
     dependencies:
@@ -211,8 +211,8 @@ importers:
         specifier: ^8.10.159
         version: 8.10.159
       '@types/node':
-        specifier: ^24.10.1
-        version: 24.10.1
+        specifier: ^22.7.9
+        version: 22.19.1
 
   packages/lambda-ws-connect:
     dependencies:
@@ -230,8 +230,8 @@ importers:
         specifier: ^8.10.159
         version: 8.10.159
       '@types/node':
-        specifier: ^24.10.1
-        version: 24.10.1
+        specifier: ^22.7.9
+        version: 22.19.1
 
   packages/lambda-ws-disconnect:
     dependencies:
@@ -249,8 +249,8 @@ importers:
         specifier: ^8.10.159
         version: 8.10.159
       '@types/node':
-        specifier: ^24.10.1
-        version: 24.10.1
+        specifier: ^22.7.9
+        version: 22.19.1
 
   packages/node-client:
     dependencies:
@@ -265,14 +265,14 @@ importers:
         version: 7.16.0
     devDependencies:
       '@types/node':
-        specifier: ^24.10.1
-        version: 24.10.1
+        specifier: ^22.7.9
+        version: 22.19.1
       '@types/yargs':
         specifier: ^17.0.35
         version: 17.0.35
       ts-node:
         specifier: ^10.9.2
-        version: 10.9.2(@types/node@24.10.1)(typescript@5.9.3)
+        version: 10.9.2(@types/node@22.19.1)(typescript@5.9.3)
       yargs:
         specifier: ^18.0.0
         version: 18.0.0
@@ -1011,9 +1011,6 @@ packages:
   '@types/node@22.19.1':
     resolution: {integrity: sha512-LCCV0HdSZZZb34qifBsyWlUmok6W7ouER+oQIGBScS8EsZsQbrtFTUrDX4hOl+CS6p7cnNC4td+qrSVGSCTUfQ==}
 
-  '@types/node@24.10.1':
-    resolution: {integrity: sha512-GNWcUTRBgIRJD5zj+Tq0fKOJ5XZajIiBroOF0yvj2bSU1WvNdYS/dn9UxwsujGW4JX06dnHyjV2y9rRaybH0iQ==}
-
   '@types/yargs-parser@21.0.3':
     resolution: {integrity: sha512-I4q9QU9MQv4oEOz4tAHJtNz1cwuLxn2F3xcc2iV5WdqLPpUnj30aUuxt1mAxYTG+oe8CZMV/+6rU4S4gRDzqtQ==}
 
@@ -1690,9 +1687,6 @@ packages:
 
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
-
-  undici-types@7.16.0:
-    resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
 
   undici@7.16.0:
     resolution: {integrity: sha512-QEg3HPMll0o3t2ourKwOeUAZ159Kn9mx5pnzHRQO8+Wixmh88YdZRiIwat0iNzNNXn0yoEtXJqFpyW7eM8BV7g==}
@@ -2821,15 +2815,11 @@ snapshots:
 
   '@types/jsonfile@6.1.4':
     dependencies:
-      '@types/node': 24.10.1
+      '@types/node': 22.19.1
 
   '@types/node@22.19.1':
     dependencies:
       undici-types: 6.21.0
-
-  '@types/node@24.10.1':
-    dependencies:
-      undici-types: 7.16.0
 
   '@types/yargs-parser@21.0.3': {}
 
@@ -3513,24 +3503,6 @@ snapshots:
       v8-compile-cache-lib: 3.0.1
       yn: 3.1.1
 
-  ts-node@10.9.2(@types/node@24.10.1)(typescript@5.9.3):
-    dependencies:
-      '@cspotcode/source-map-support': 0.8.1
-      '@tsconfig/node10': 1.0.12
-      '@tsconfig/node12': 1.0.11
-      '@tsconfig/node14': 1.0.3
-      '@tsconfig/node16': 1.0.4
-      '@types/node': 24.10.1
-      acorn: 8.15.0
-      acorn-walk: 8.3.4
-      arg: 4.1.3
-      create-require: 1.1.1
-      diff: 4.0.2
-      make-error: 1.3.6
-      typescript: 5.9.3
-      v8-compile-cache-lib: 3.0.1
-      yn: 3.1.1
-
   tslib@2.8.1: {}
 
   type-check@0.4.0:
@@ -3551,8 +3523,6 @@ snapshots:
   typescript@5.9.3: {}
 
   undici-types@6.21.0: {}
-
-  undici-types@7.16.0: {}
 
   undici@7.16.0: {}
 

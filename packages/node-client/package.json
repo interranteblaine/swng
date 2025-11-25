@@ -5,13 +5,18 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "verify": "ts-node src/node-client/runVerifyStaging.ts"
   },
   "dependencies": {
     "@swng/client": "workspace:*",
+    "@swng/domain": "workspace:*",
     "undici": "^7.16.0"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1"
+    "@types/node": "^24.10.1",
+    "@types/yargs": "^17.0.35",
+    "ts-node": "^10.9.2",
+    "yargs": "^18.0.0"
   }
 }

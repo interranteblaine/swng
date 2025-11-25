@@ -232,6 +232,9 @@ importers:
       '@swng/client':
         specifier: workspace:*
         version: link:../client
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
       undici:
         specifier: ^7.16.0
         version: 7.16.0
@@ -239,6 +242,15 @@ importers:
       '@types/node':
         specifier: ^24.10.1
         version: 24.10.1
+      '@types/yargs':
+        specifier: ^17.0.35
+        version: 17.0.35
+      ts-node:
+        specifier: ^10.9.2
+        version: 10.9.2(@types/node@24.10.1)(typescript@5.9.3)
+      yargs:
+        specifier: ^18.0.0
+        version: 18.0.0
 
 packages:
 

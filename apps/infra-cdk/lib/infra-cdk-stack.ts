@@ -4,6 +4,7 @@ import { DataStore } from "./constructs/data-store.js";
 import { HttpApiInfra } from "./constructs/http-api.js";
 import { WebSocketInfra } from "./constructs/websocket.js";
 import { StreamingInfra } from "./constructs/streaming.js";
+import { WebAppInfra } from "./constructs/web-app.js";
 
 interface InfraProps extends StackProps {
   stage: "beta" | "prod";
@@ -39,6 +40,13 @@ export class InfraCdkStack extends Stack {
       table: data.table,
       wsApiId: ws.apiId,
       stageName: stage,
+    });
+
+    // UI (S3 + CloudFront) with DNS
+    new WebAppInfra(this, `WebApp-${stage}`, {
+      stage: stage,
+      zoneDomain: "swng.golf",
+      hostName: stage === "beta" ? "beta" : undefined,
     });
 
     // Outputs

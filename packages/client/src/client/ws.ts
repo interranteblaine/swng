@@ -18,7 +18,7 @@ function toDomainEventHandler(
 
 /**
  * Create a WebSocket connection using the WebSocketPort.
- * Auth is provided via subprotocol "Session <sessionId>".
+ * Auth is provided via subprotocol".
  */
 export function connectWs(
   ws: WebSocketPort,
@@ -30,5 +30,5 @@ export function connectWs(
     throw new Error("sessionId is required to connect WebSocket");
   }
   const handler = toDomainEventHandler(onEvent);
-  return ws.connect(wsUrl, [`Session ${sessionId}`], handler);
+  return ws.connect(wsUrl, [`session.${sessionId}`], handler);
 }

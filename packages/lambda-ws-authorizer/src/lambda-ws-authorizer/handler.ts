@@ -38,13 +38,13 @@ function extractSessionIdFromAuthHeader(
     (headers as Record<string, string | undefined>).authorization ??
     null;
 
-  const prefix = "Session ";
+  const authPrefix = "Session ";
   if (
     typeof authHeader === "string" &&
-    authHeader.startsWith(prefix) &&
-    authHeader.length > prefix.length
+    authHeader.startsWith(authPrefix) &&
+    authHeader.length > authPrefix.length
   ) {
-    return authHeader.substring(prefix.length).trim();
+    return authHeader.substring(authPrefix.length).trim();
   }
 
   // 2) Browser WebSocket subprotocol: Sec-WebSocket-Protocol may contain comma-separated protocols
@@ -57,9 +57,10 @@ function extractSessionIdFromAuthHeader(
   }
   if (secProto) {
     const tokens = secProto.split(",").map((s) => s.trim());
+    const wsPrefix = "session.";
     for (const t of tokens) {
-      if (t.startsWith(prefix) && t.length > prefix.length) {
-        return t.substring(prefix.length).trim();
+      if (t.startsWith(wsPrefix) && t.length > wsPrefix.length) {
+        return t.substring(wsPrefix.length).trim();
       }
     }
   }

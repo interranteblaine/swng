@@ -27,6 +27,10 @@ pnpm-debug.log*
 .cdk.staging
 cdk.out
 
+# CDK deployment outputs and artifacts
+cdk-outputs-*.json
+cdk.context.json
+
 # Environment files
 .env*
 !.env.example

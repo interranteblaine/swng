@@ -8,7 +8,8 @@ import { WebAppInfra } from "./constructs/web-app.js";
 
 interface InfraProps extends StackProps {
   stage: "beta" | "prod";
-  wafRateLimitPer5Min?: number;
+  httpApiRateLimit?: number;
+  httpApiBurstLimit?: number;
 }
 
 export class InfraCdkStack extends Stack {
@@ -28,11 +29,12 @@ export class InfraCdkStack extends Stack {
       stageName: stage,
     });
 
-    // HTTP API + Lambda + WAF
+    // HTTP API + Lambda
     const http = new HttpApiInfra(this, `Http-${stage}`, {
       table: data.table,
       stageName: stage,
-      wafRateLimitPer5Min: props.wafRateLimitPer5Min,
+      rateLimit: props.httpApiRateLimit,
+      burstLimit: props.httpApiBurstLimit,
     });
 
     // Stream processor -> API Gateway Management API

@@ -13,18 +13,30 @@
     "gen": "ts-node tools/generate.ts",
     "build": "pnpm -r build",
     "validate": "pnpm lint && pnpm build && pnpm test",
+
     "dev:web": "pnpm -F @swng/web dev",
     "build:web": "pnpm -F @swng/web build",
     "preview:web": "pnpm -F @swng/web preview",
     "build:web:beta": "pnpm -F @swng/web build:beta",
     "build:web:prod": "pnpm -F @swng/web build:prod",
+
     "cdk:bootstrap": "pnpm -F @swng/infra-cdk cdk bootstrap",
     "cdk:synth": "pnpm -F @swng/infra-cdk cdk synth",
     "cdk:diff": "pnpm -F @swng/infra-cdk cdk diff",
     "cdk:deploy": "pnpm -F @swng/infra-cdk cdk deploy",
     "cdk:destroy": "pnpm -F @swng/infra-cdk cdk destroy",
     "cdk:guard": "node -e \"if(!process.env.AWS_PROFILE){console.error('Set AWS_PROFILE before running CDK');process.exit(1)}\"",
-    "cdk:deploy:safe": "pnpm run cdk:guard && pnpm run cdk:deploy"
+    "cdk:deploy:safe": "pnpm run cdk:guard && pnpm run cdk:deploy",
+    "cdk:bootstrap:beta": "AWS_PROFILE=swng AWS_REGION=us-east-1 pnpm -F @swng/infra-cdk cdk bootstrap",
+    "cdk:deploy:account": "AWS_PROFILE=swng AWS_REGION=us-east-1 pnpm -F @swng/infra-cdk cdk deploy ApiGwAccountStack",
+    "cdk:synth:beta": "AWS_PROFILE=swng AWS_REGION=us-east-1 pnpm -F @swng/infra-cdk cdk synth InfraCdkStack-beta",
+    "cdk:diff:beta": "AWS_PROFILE=swng AWS_REGION=us-east-1 pnpm -F @swng/infra-cdk cdk diff InfraCdkStack-beta",
+    "cdk:deploy:beta": "AWS_PROFILE=swng AWS_REGION=us-east-1 pnpm -F @swng/infra-cdk cdk deploy InfraCdkStack-beta --outputs-file apps/infra-cdk/cdk-outputs-beta.json",
+    "cdk:synth:prod": "AWS_PROFILE=swng AWS_REGION=us-east-1 pnpm -F @swng/infra-cdk cdk synth InfraCdkStack-prod",
+    "cdk:diff:prod": "AWS_PROFILE=swng AWS_REGION=us-east-1 pnpm -F @swng/infra-cdk cdk diff InfraCdkStack-prod",
+    "cdk:deploy:prod": "AWS_PROFILE=swng AWS_REGION=us-east-1 pnpm -F @swng/infra-cdk cdk deploy InfraCdkStack-prod --outputs-file apps/infra-cdk/cdk-outputs-prod.json",
+    "web:publish:beta": "bash tools/web-publish-beta.sh beta",
+    "web:publish:prod": "bash tools/web-publish-beta.sh prod"
   },
   "devDependencies": {
     "@types/ejs": "^3.1.5",

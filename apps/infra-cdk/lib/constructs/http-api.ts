@@ -9,7 +9,6 @@ import {
   HttpMethod,
 } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
-import * as wafv2 from "aws-cdk-lib/aws-wafv2";
 import * as logs from "aws-cdk-lib/aws-logs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -22,7 +21,8 @@ const repoRoot = join(__dirname, "../../../../");
 export interface HttpApiInfraProps {
   table: Table;
   stageName: string;
-  wafRateLimitPer5Min?: number; // requests per 5 minutes per IP, default 300
+  rateLimit?: number;
+  burstLimit?: number;
 }
 
 export class HttpApiInfra extends Construct {
@@ -101,50 +101,11 @@ export class HttpApiInfra extends Construct {
           user: "$context.identity.user",
         }),
       },
-    });
-
-    // WAFv2 Web ACL (rate limiting)
-    const webAcl = new wafv2.CfnWebACL(this, `HttpWebAcl-${props.stageName}`, {
-      name: `http-waf-${props.stageName}`,
-      scope: "REGIONAL",
-      defaultAction: { allow: {} },
-      visibilityConfig: {
-        cloudWatchMetricsEnabled: true,
-        metricName: `http-waf-${props.stageName}`,
-        sampledRequestsEnabled: true,
+      defaultRouteSettings: {
+        throttlingBurstLimit: props.burstLimit ?? 100,
+        throttlingRateLimit: props.rateLimit ?? 50,
       },
-      rules: [
-        {
-          name: "RateLimit",
-          priority: 1,
-          action: { block: {} },
-          statement: {
-            rateBasedStatement: {
-              limit: props.wafRateLimitPer5Min ?? 300,
-              aggregateKeyType: "IP",
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: "RateLimit",
-            sampledRequestsEnabled: true,
-          },
-        },
-      ],
     });
-
-    const stageArn = `arn:aws:apigateway:${Stack.of(this).region}::/apis/${
-      this.api.apiId
-    }/stages/${props.stageName}`;
-
-    new wafv2.CfnWebACLAssociation(
-      this,
-      `HttpWafAssociation-${props.stageName}`,
-      {
-        webAclArn: webAcl.attrArn,
-        resourceArn: stageArn,
-      }
-    );
 
     this.apiId = this.api.apiId;
     this.stageName = props.stageName;

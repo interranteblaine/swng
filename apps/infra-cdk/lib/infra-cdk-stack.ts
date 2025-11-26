@@ -1,16 +1,59 @@
-import { Stack, StackProps } from "aws-cdk-lib";
+import { CfnOutput, Stack, StackProps } from "aws-cdk-lib";
 import { Construct } from "constructs";
-// import * as sqs from 'aws-cdk-lib/aws-sqs';
+import { DataStore } from "./constructs/data-store.js";
+import { HttpApiInfra } from "./constructs/http-api.js";
+import { WebSocketInfra } from "./constructs/websocket.js";
+import { StreamingInfra } from "./constructs/streaming.js";
 
 export class InfraCdkStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // The code that defines your stack goes here
+    const stage = "beta";
 
-    // example resource
-    // const queue = new sqs.Queue(this, 'InfraCdkQueue', {
-    //   visibilityTimeout: cdk.Duration.seconds(300)
-    // });
+    // Data layer
+    const data = new DataStore(this, `DataStore-${stage}`, {
+      stage,
+    });
+
+    // WebSocket API + authorizer + connect/disconnect
+    const ws = new WebSocketInfra(this, `WebSocket-${stage}`, {
+      table: data.table,
+      stageName: stage,
+    });
+
+    // HTTP API + Lambda + WAF
+    const http = new HttpApiInfra(this, `Http-${stage}`, {
+      table: data.table,
+      stageName: stage,
+    });
+
+    // Stream processor -> API Gateway Management API
+    new StreamingInfra(this, `Streaming-${stage}`, {
+      table: data.table,
+      wsApiId: ws.apiId,
+      stageName: stage,
+    });
+
+    // Outputs
+    new CfnOutput(this, `DynamoTableName-${stage}`, {
+      value: data.tableName,
+      exportName: `DynamoTableName-${stage}`,
+    });
+
+    new CfnOutput(this, `HttpApiUrl-${stage}`, {
+      value: http.url,
+      exportName: `HttpApiUrl-${stage}`,
+    });
+
+    new CfnOutput(this, `WsApiId-${stage}`, {
+      value: ws.apiId,
+      exportName: `WsApiId-${stage}`,
+    });
+
+    new CfnOutput(this, `WsWssUrl-${stage}`, {
+      value: ws.wssUrl,
+      exportName: `WsWssUrl-${stage}`,
+    });
   }
 }

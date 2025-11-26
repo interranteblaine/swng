@@ -5,11 +5,16 @@ import { HttpApiInfra } from "./constructs/http-api.js";
 import { WebSocketInfra } from "./constructs/websocket.js";
 import { StreamingInfra } from "./constructs/streaming.js";
 
+interface InfraProps extends StackProps {
+  stage: "beta" | "prod";
+  wafRateLimitPer5Min?: number;
+}
+
 export class InfraCdkStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
+  constructor(scope: Construct, id: string, props: InfraProps) {
     super(scope, id, props);
 
-    const stage = "beta";
+    const stage = props.stage;
 
     // Data layer
     const data = new DataStore(this, `DataStore-${stage}`, {
@@ -26,6 +31,7 @@ export class InfraCdkStack extends Stack {
     const http = new HttpApiInfra(this, `Http-${stage}`, {
       table: data.table,
       stageName: stage,
+      wafRateLimitPer5Min: props.wafRateLimitPer5Min,
     });
 
     // Stream processor -> API Gateway Management API

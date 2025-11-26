@@ -26,5 +26,7 @@ pnpm-debug.log*
 # CDK asset staging directory
 .cdk.staging
 cdk.out
-*.js
-*.d.ts
+
+# Environment files
+.env*
+!.env.example

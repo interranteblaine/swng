@@ -3,12 +3,19 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=8.0.0"
+  },
   "scripts": {
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "gen": "ts-node tools/generate.ts",
     "build": "pnpm -r build",
     "validate": "pnpm lint && pnpm build && pnpm test",
+    "dev:web": "pnpm -F @swng/web dev",
+    "build:web": "pnpm -F @swng/web build",
+    "preview:web": "pnpm -F @swng/web preview",
     "cdk:bootstrap": "pnpm -F @swng/infra-cdk cdk bootstrap",
     "cdk:synth": "pnpm -F @swng/infra-cdk cdk synth",
     "cdk:diff": "pnpm -F @swng/infra-cdk cdk diff",

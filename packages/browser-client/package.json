@@ -1,13 +1,25 @@
 {
   "name": "@swng/browser-client",
   "version": "0.0.0",
+  "type": "module",
   "main": "dist/index.js",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "prebuild": "pnpm -F @swng/client build",
+    "build": "tsup --config tsup.config.ts",
     "lint": "eslint ."
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
   "dependencies": {
     "@swng/client": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1"
   }
 }

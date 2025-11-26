@@ -11,6 +11,10 @@
     "test": "vitest",
     "test:watch": "vitest -w",
     "coverage": "vitest run --coverage",
+    "predev": "pnpm -F @swng/browser-client build",
+    "prebuild": "pnpm -F @swng/browser-client build",
+    "prebuild:beta": "pnpm -F @swng/browser-client build",
+    "prebuild:prod": "pnpm -F @swng/browser-client build",
     "build:beta": "vite build --mode beta",
     "build:prod": "vite build --mode production",
     "preview": "vite preview"

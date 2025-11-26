@@ -11,6 +11,8 @@
     "test": "vitest",
     "test:watch": "vitest -w",
     "coverage": "vitest run --coverage",
+    "build:beta": "vite build --mode beta",
+    "build:prod": "vite build --mode production",
     "preview": "vite preview"
   },
   "dependencies": {

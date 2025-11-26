@@ -16,6 +16,8 @@
     "dev:web": "pnpm -F @swng/web dev",
     "build:web": "pnpm -F @swng/web build",
     "preview:web": "pnpm -F @swng/web preview",
+    "build:web:beta": "pnpm -F @swng/web build:beta",
+    "build:web:prod": "pnpm -F @swng/web build:prod",
     "cdk:bootstrap": "pnpm -F @swng/infra-cdk cdk bootstrap",
     "cdk:synth": "pnpm -F @swng/infra-cdk cdk synth",
     "cdk:diff": "pnpm -F @swng/infra-cdk cdk diff",

@@ -24,6 +24,7 @@ function mkEvent(
     headers?: Record<string, string>;
     body?: unknown;
     isBase64Encoded?: boolean;
+    stage?: string;
   }
 ): HttpEvent {
   const body =
@@ -53,7 +54,7 @@ function mkEvent(
       },
       requestId: "req",
       routeKey: "$default",
-      stage: "$default",
+      stage: opts?.stage ?? "$default",
       time: "",
       timeEpoch: Date.now(),
     },
@@ -255,5 +256,49 @@ describe("router.routeRequest", () => {
       const body = JSON.parse(resp.body!);
       expect(body.error.code).toBe("INVALID_INPUT");
     }
+  });
+
+  it("POST /beta/rounds is normalized and routed to /rounds", async () => {
+    const { config, state } = sampleRound();
+    const service = mockService({
+      createRound: async () => ({ config, state }),
+    });
+
+    const res = await routeRequest(
+      mkEvent("POST", "/beta/rounds", {
+        stage: "beta",
+        body: { courseName: "Course", par: [3, 4, 5] },
+      }),
+      service
+    );
+
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body!);
+    expect(body).toEqual({ config, state });
+  });
+
+  it("POST /prod/rounds/join is normalized and routed to /rounds/join", async () => {
+    const { snapshot, player } = sampleRound();
+    const service = mockService({
+      joinRound: async () => ({
+        roundId: snapshot.config.roundId,
+        player,
+        sessionId: "sess_1",
+        snapshot,
+      }),
+    });
+
+    const res = await routeRequest(
+      mkEvent("POST", "/prod/rounds/join", {
+        stage: "prod",
+        body: { accessCode: "ABC123", playerName: "Alice", color: "#000000" },
+      }),
+      service
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers?.["x-session-id"]).toBe("sess_1");
+    const body = JSON.parse(res.body!);
+    expect(body.roundId).toBe(snapshot.config.roundId);
   });
 });

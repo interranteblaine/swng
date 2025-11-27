@@ -17,8 +17,18 @@ export type HttpResult = APIGatewayProxyStructuredResultV2;
 
 function getMethodAndPath(event: HttpEvent): { method: string; path: string } {
   const method = event.requestContext.http.method;
-  const path = decodeURI(event.rawPath || "/");
-  return { method, path };
+  const raw = decodeURI(event.rawPath || "/");
+  const stage = event.requestContext?.stage;
+
+  // Normalize path: strip stage prefix (e.g., "/beta/..." -> "/...")
+  if (stage && raw === `/${stage}`) {
+    return { method, path: "/" };
+  }
+  if (stage && raw.startsWith(`/${stage}/`)) {
+    return { method, path: raw.slice(stage.length + 1) };
+  }
+
+  return { method, path: raw };
 }
 
 const RE_ROUND = /^\/rounds\/([^/]+)$/;

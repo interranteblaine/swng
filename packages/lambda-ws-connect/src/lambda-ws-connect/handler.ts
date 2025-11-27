@@ -84,12 +84,17 @@ export const handler = async (
       logger: invocationLogger,
     });
 
-    await connectionRepo.addConnection({
-      roundId: auth.roundId,
-      connectionId,
-      playerId: auth.playerId,
-      connectedAt: new Date().toISOString(),
-    });
+    const ttlSeconds = Math.floor(Date.now() / 1000) + 24 * 60 * 60; // 24h
+
+    await connectionRepo.addConnection(
+      {
+        roundId: auth.roundId,
+        connectionId,
+        playerId: auth.playerId,
+        connectedAt: new Date().toISOString(),
+      },
+      ttlSeconds
+    );
 
     invocationLogger.info("WS $connect: connection added", {
       roundId: auth.roundId,

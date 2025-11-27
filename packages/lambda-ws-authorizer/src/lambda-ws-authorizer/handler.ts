@@ -27,44 +27,13 @@ const baseLogger = createPowertoolsLogger({
 });
 const docClient = createDynamoDocClient({ region });
 
-function extractSessionIdFromAuthHeader(
+function extractSessionId(
   event: APIGatewayRequestAuthorizerEvent
 ): string | null {
-  const headers = event.headers ?? {};
-
-  // 1) Authorization header (for environments that can set headers)
-  const authHeader =
-    (headers as Record<string, string | undefined>).Authorization ??
-    (headers as Record<string, string | undefined>).authorization ??
-    null;
-
-  const authPrefix = "Session ";
-  if (
-    typeof authHeader === "string" &&
-    authHeader.startsWith(authPrefix) &&
-    authHeader.length > authPrefix.length
-  ) {
-    return authHeader.substring(authPrefix.length).trim();
+  const qs = event.queryStringParameters?.session;
+  if (typeof qs === "string" && qs.trim().length > 0) {
+    return qs.trim();
   }
-
-  // 2) Browser WebSocket subprotocol: Sec-WebSocket-Protocol may contain comma-separated protocols
-  let secProto: string | undefined;
-  for (const [k, v] of Object.entries(headers)) {
-    if (k.toLowerCase() === "sec-websocket-protocol" && typeof v === "string") {
-      secProto = v;
-      break;
-    }
-  }
-  if (secProto) {
-    const tokens = secProto.split(",").map((s) => s.trim());
-    const wsPrefix = "session.";
-    for (const t of tokens) {
-      if (t.startsWith(wsPrefix) && t.length > wsPrefix.length) {
-        return t.substring(wsPrefix.length).trim();
-      }
-    }
-  }
-
   return null;
 }
 
@@ -116,9 +85,9 @@ export const handler: APIGatewayRequestAuthorizerHandler = async (
   });
 
   try {
-    const sessionId = extractSessionIdFromAuthHeader(event);
+    const sessionId = extractSessionId(event);
     if (!sessionId) {
-      invocationLogger.warn("Missing or invalid Authorization header");
+      invocationLogger.warn("Missing or invalid session querystring");
       return denyPolicy();
     }
 

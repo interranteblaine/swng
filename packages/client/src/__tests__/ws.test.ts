@@ -34,9 +34,10 @@ describe("connectWs (WebSocketPort)", () => {
     last?.onMessage?.(text);
   }
 
-  it('uses subprotocol "session.<id>" and returns a connection', () => {
+  it("appends ?session=<id>", () => {
     const ws = connectWs(port, "wss://example/ws", "s1", () => {});
-    expect(last?.protocols?.[0]).toBe("session.s1");
+    expect(last?.url).toBe("wss://example/ws?session=s1");
+    expect(last?.protocols?.length).toBe(0);
     expect(typeof ws.close).toBe("function");
     ws.close();
   });

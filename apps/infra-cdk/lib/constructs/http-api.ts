@@ -42,7 +42,7 @@ export class HttpApiInfra extends Construct {
       ),
       runtime: Runtime.NODEJS_22_X,
       bundling: {
-        format: OutputFormat.ESM,
+        format: OutputFormat.CJS,
         minify: true,
         sourcesContent: false,
       },

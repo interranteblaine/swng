@@ -41,7 +41,7 @@ export class StreamingInfra extends Construct {
       ),
       runtime: lambda.Runtime.NODEJS_22_X,
       bundling: {
-        format: OutputFormat.ESM,
+        format: OutputFormat.CJS,
         minify: true,
         sourcesContent: false,
       },
@@ -50,6 +50,8 @@ export class StreamingInfra extends Construct {
         WS_MANAGEMENT_ENDPOINT: this.managementEndpoint,
       },
     });
+
+    props.table.grantReadData(this.fn);
 
     // Allow Lambda to call Management API: POST @connections/*
     // arn:aws:execute-api:{region}:{account}:{api-id}/{stage}/POST/@connections/*

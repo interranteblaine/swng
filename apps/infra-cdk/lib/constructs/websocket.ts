@@ -43,7 +43,7 @@ export class WebSocketInfra extends Construct {
         ),
         runtime: Runtime.NODEJS_22_X,
         bundling: {
-          format: OutputFormat.ESM,
+          format: OutputFormat.CJS,
           minify: true,
           sourcesContent: false,
         },
@@ -61,7 +61,7 @@ export class WebSocketInfra extends Construct {
       ),
       runtime: Runtime.NODEJS_22_X,
       bundling: {
-        format: OutputFormat.ESM,
+        format: OutputFormat.CJS,
         minify: true,
         sourcesContent: false,
       },
@@ -81,7 +81,7 @@ export class WebSocketInfra extends Construct {
         ),
         runtime: Runtime.NODEJS_22_X,
         bundling: {
-          format: OutputFormat.ESM,
+          format: OutputFormat.CJS,
           minify: true,
           sourcesContent: false,
         },
@@ -100,11 +100,7 @@ export class WebSocketInfra extends Construct {
       `WsAuthorizer-${props.stageName}`,
       this.authorizerFn,
       {
-        // Provide both Authorization and Sec-WebSocket-Protocol so our authorizer can read either
-        identitySource: [
-          "route.request.header.Authorization",
-          "route.request.header.Sec-WebSocket-Protocol",
-        ],
+        identitySource: ["route.request.querystring.session"],
       }
     );
 

@@ -3,7 +3,16 @@ import {
   createInitialRoundState,
   isValidHoleNumber,
 } from "@swng/domain";
-import type { RoundState, Player, Score, RoundSnapshot } from "@swng/domain";
+import type {
+  RoundState,
+  Player,
+  Score,
+  RoundSnapshot,
+  PlayerJoinedEvent,
+  PlayerUpdatedEvent,
+  ScoreChangedEvent,
+  RoundStateChangedEvent,
+} from "@swng/domain";
 import { ApplicationError } from "./errors";
 import type {
   RoundService,
@@ -32,6 +41,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     idGenerator,
     clock,
     config,
+    broadcast,
   } = deps;
 
   const defaultColor = "#000000";
@@ -134,6 +144,14 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
 
       await sessionRepo.createSession(session);
 
+      const evt: PlayerJoinedEvent = {
+        type: "PlayerJoined",
+        roundId,
+        occurredAt: player.joinedAt,
+        player,
+      };
+      await broadcast.notify(roundId, evt);
+
       const updatedSnapshot: RoundSnapshot = {
         config: roundConfig,
         state,
@@ -195,6 +213,14 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
 
       await scoreRepo.upsertScore(score);
 
+      const evt: ScoreChangedEvent = {
+        type: "ScoreChanged",
+        roundId,
+        occurredAt: score.updatedAt,
+        score,
+      };
+      await broadcast.notify(roundId, evt);
+
       return { score };
     },
 
@@ -236,6 +262,14 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
 
       await roundRepo.saveState(updatedState, stateValue.stateVersion);
 
+      const evt: RoundStateChangedEvent = {
+        type: "RoundStateChanged",
+        roundId,
+        occurredAt: updatedState.updatedAt,
+        state: updatedState,
+      };
+      await broadcast.notify(roundId, evt);
+
       return { state: updatedState };
     },
 
@@ -259,6 +293,14 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       };
 
       await playerRepo.updatePlayer(updated);
+
+      const evt: PlayerUpdatedEvent = {
+        type: "PlayerUpdated",
+        roundId,
+        occurredAt: updated.updatedAt,
+        player: updated,
+      };
+      await broadcast.notify(roundId, evt);
 
       return { player: updated };
     },

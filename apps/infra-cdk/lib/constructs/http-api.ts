@@ -13,6 +13,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { Construct } from "constructs";
+import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -21,6 +22,7 @@ const repoRoot = join(__dirname, "../../../../");
 export interface HttpApiInfraProps {
   table: Table;
   stageName: string;
+  wsApiId: string;
   rateLimit?: number;
   burstLimit?: number;
 }
@@ -35,6 +37,10 @@ export class HttpApiInfra extends Construct {
   constructor(scope: Construct, id: string, props: HttpApiInfraProps) {
     super(scope, id);
 
+    const region = Stack.of(this).region;
+    const account = Stack.of(this).account;
+    const managementEndpoint = `https://${props.wsApiId}.execute-api.${region}.amazonaws.com/${props.stageName}`;
+
     this.handler = new NodejsFunction(this, `HttpHandler-${props.stageName}`, {
       entry: join(
         repoRoot,
@@ -48,8 +54,17 @@ export class HttpApiInfra extends Construct {
       },
       environment: {
         DYNAMO_TABLE: props.table.tableName,
+        WS_MANAGEMENT_ENDPOINT: managementEndpoint,
       },
     });
+
+    const manageConnectionsArn = `arn:aws:execute-api:${region}:${account}:${props.wsApiId}/${props.stageName}/POST/@connections/*`;
+    this.handler.addToRolePolicy(
+      new PolicyStatement({
+        actions: ["execute-api:ManageConnections"],
+        resources: [manageConnectionsArn],
+      })
+    );
 
     props.table.grantReadWriteData(this.handler);
 

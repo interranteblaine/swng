@@ -60,6 +60,7 @@ export function createDynamoConnectionRepository(
           ":pk": roundPk(roundId),
           ":skPrefix": CONNECTION_SK_PREFIX,
         },
+        ConsistentRead: true,
       })
     );
 

@@ -6,14 +6,20 @@ import {
   createDynamoRoundRepository,
   createDynamoScoreRepository,
   createDynamoSessionRepository,
+  createDynamoConnectionRepository,
 } from "@swng/adapters-dynamodb";
 import { createPowertoolsLogger } from "@swng/adapters-powertools-logger";
+import {
+  createApiGatewayBroadcastPort,
+  createApiGatewayManagementClient,
+} from "@swng/adapters-apigw-broadcast";
 import { clock, idGenerator } from "./runtime";
 import { toHttpErrorResponse } from "./httpUtils";
 import { routeRequest } from "./router";
 
 const tableName = process.env.DYNAMO_TABLE;
 const region = process.env.AWS_REGION;
+const wsEndpoint = process.env.WS_MANAGEMENT_ENDPOINT;
 const logLevel =
   (process.env.LOG_LEVEL as "DEBUG" | "INFO" | "WARN" | "ERROR" | undefined) ||
   "INFO";
@@ -25,6 +31,9 @@ const sessionTtlMs =
 if (!tableName) {
   throw new Error("Missing required env: DYNAMO_TABLE");
 }
+if (!wsEndpoint) {
+  throw new Error("Missing required env: WS_MANAGEMENT_ENDPOINT");
+}
 
 let coldStart = true;
 
@@ -34,6 +43,10 @@ const baseLogger = createPowertoolsLogger({
 });
 
 const docClient = createDynamoDocClient({ region });
+const apigwClient = createApiGatewayManagementClient({
+  endpoint: wsEndpoint,
+  region,
+});
 
 export const handler: APIGatewayProxyHandlerV2 = async (event, context) => {
   const invocationLogger = baseLogger.with({
@@ -43,6 +56,13 @@ export const handler: APIGatewayProxyHandlerV2 = async (event, context) => {
   });
 
   const dynamoCfg = { tableName, docClient, logger: invocationLogger };
+
+  const broadcast = createApiGatewayBroadcastPort({
+    client: apigwClient,
+    connectionRepo: createDynamoConnectionRepository(dynamoCfg),
+    logger: invocationLogger,
+  });
+
   const service = createRoundService({
     roundRepo: createDynamoRoundRepository(dynamoCfg),
     playerRepo: createDynamoPlayerRepository(dynamoCfg),
@@ -51,6 +71,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event, context) => {
     idGenerator,
     clock,
     config: { sessionTtlMs },
+    broadcast,
   });
 
   try {

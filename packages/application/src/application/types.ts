@@ -58,13 +58,7 @@ export interface ConnectionRepository {
 }
 
 export interface BroadcastPort {
-  broadcastPlayerJoined(roundId: RoundId, player: Player): Promise<void>;
-  broadcastPlayerUpdated(roundId: RoundId, player: Player): Promise<void>;
-  broadcastScoreChanged(roundId: RoundId, score: Score): Promise<void>;
-  broadcastRoundStateChanged(
-    roundId: RoundId,
-    state: RoundState
-  ): Promise<void>;
+  notify(roundId: RoundId, message: unknown): Promise<void>;
 }
 
 export interface Clock {
@@ -99,6 +93,7 @@ export interface RoundServiceDeps {
   idGenerator: IdGenerator;
   clock: Clock;
   config: RoundServiceConfig;
+  broadcast: BroadcastPort;
 }
 
 export interface CreateRoundInput {

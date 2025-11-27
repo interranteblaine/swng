@@ -215,34 +215,6 @@ importers:
 
   packages/lambda-http-handler:
     dependencies:
-      '@swng/adapters-dynamodb':
-        specifier: workspace:*
-        version: link:../adapters-dynamodb
-      '@swng/adapters-powertools-logger':
-        specifier: workspace:*
-        version: link:../adapters-powertools-logger
-      '@swng/application':
-        specifier: workspace:*
-        version: link:../application
-      '@swng/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@swng/domain':
-        specifier: workspace:*
-        version: link:../domain
-    devDependencies:
-      '@types/aws-lambda':
-        specifier: ^8.10.159
-        version: 8.10.159
-      '@types/node':
-        specifier: ^22.7.9
-        version: 22.19.1
-
-  packages/lambda-stream-handler:
-    dependencies:
-      '@aws-sdk/util-dynamodb':
-        specifier: ^3.936.0
-        version: 3.936.0(@aws-sdk/client-dynamodb@3.936.0)
       '@swng/adapters-apigw-broadcast':
         specifier: workspace:*
         version: link:../adapters-apigw-broadcast
@@ -255,6 +227,9 @@ importers:
       '@swng/application':
         specifier: workspace:*
         version: link:../application
+      '@swng/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@swng/domain':
         specifier: workspace:*
         version: link:../domain

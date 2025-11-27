@@ -1,6 +1,6 @@
 import { PostToConnectionCommand } from "@aws-sdk/client-apigatewaymanagementapi";
 import type { BroadcastPort } from "@swng/application";
-import type { Player, Score, RoundState, RoundId } from "@swng/domain";
+import type { RoundId } from "@swng/domain";
 import type { ApiGatewayBroadcastConfig } from "./config";
 
 function isGone(err: unknown): boolean {
@@ -24,6 +24,9 @@ function isGone(err: unknown): boolean {
 function encode(message: unknown): Uint8Array {
   return Buffer.from(JSON.stringify(message));
 }
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export function createApiGatewayBroadcastPort(
   config: ApiGatewayBroadcastConfig
@@ -34,8 +37,12 @@ export function createApiGatewayBroadcastPort(
     roundId: RoundId,
     payload: unknown
   ): Promise<void> {
-    const connections = await connectionRepo.listConnections(roundId);
-    if (!connections.length) return;
+    let connections = await connectionRepo.listConnections(roundId);
+    if (!connections.length) {
+      await sleep(150);
+      connections = await connectionRepo.listConnections(roundId);
+      if (!connections.length) return;
+    }
 
     const data = encode(payload);
 
@@ -73,29 +80,8 @@ export function createApiGatewayBroadcastPort(
   }
 
   return {
-    async broadcastPlayerJoined(
-      roundId: RoundId,
-      player: Player
-    ): Promise<void> {
-      await sendToRound(roundId, { type: "PlayerJoined", player });
-    },
-
-    async broadcastPlayerUpdated(
-      roundId: RoundId,
-      player: Player
-    ): Promise<void> {
-      await sendToRound(roundId, { type: "PlayerUpdated", player });
-    },
-
-    async broadcastScoreChanged(roundId: RoundId, score: Score): Promise<void> {
-      await sendToRound(roundId, { type: "ScoreChanged", score });
-    },
-
-    async broadcastRoundStateChanged(
-      roundId: RoundId,
-      state: RoundState
-    ): Promise<void> {
-      await sendToRound(roundId, { type: "RoundStateChanged", state });
+    async notify(roundId: RoundId, message: unknown): Promise<void> {
+      await sendToRound(roundId, message);
     },
   };
 }

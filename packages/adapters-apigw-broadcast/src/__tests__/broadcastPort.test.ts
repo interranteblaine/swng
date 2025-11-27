@@ -3,43 +3,74 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApiGatewayBroadcastPort } from "../index";
 import type { ApiGatewayManagementApiClient } from "@aws-sdk/client-apigatewaymanagementapi";
 import type { ConnectionRepository } from "@swng/application";
-import type { Player, Score, RoundState, RoundId } from "@swng/domain";
+import type { DomainEvent, RoundId } from "@swng/domain";
 
 const NOW = "2025-01-01T00:00:00.000Z";
 
-function makePlayer(roundId: RoundId): Player {
+function makePlayerJoined(roundId: RoundId): DomainEvent {
   return {
+    type: "PlayerJoined",
     roundId,
-    playerId: "pid-1",
-    name: "Alice",
-    color: "#000000",
-    joinedAt: NOW,
-    updatedAt: NOW,
+    occurredAt: NOW,
+    player: {
+      roundId,
+      playerId: "pid-1",
+      name: "Alice",
+      color: "#000000",
+      joinedAt: NOW,
+      updatedAt: NOW,
+    },
   };
 }
 
-function makeScore(roundId: RoundId): Score {
+function makePlayerUpdated(roundId: RoundId): DomainEvent {
   return {
+    type: "PlayerUpdated",
     roundId,
-    playerId: "pid-1",
-    holeNumber: 1,
-    strokes: 3,
-    updatedBy: "pid-1",
-    updatedAt: NOW,
+    occurredAt: NOW,
+    player: {
+      roundId,
+      playerId: "pid-1",
+      name: "Alice2",
+      color: "#111111",
+      joinedAt: NOW,
+      updatedAt: NOW,
+    },
   };
 }
 
-function makeState(roundId: RoundId): RoundState {
+function makeScoreChanged(roundId: RoundId): DomainEvent {
   return {
+    type: "ScoreChanged",
     roundId,
-    currentHole: 1,
-    status: "IN_PROGRESS",
-    stateVersion: 1,
-    updatedAt: NOW,
+    occurredAt: NOW,
+    score: {
+      roundId,
+      playerId: "pid-1",
+      holeNumber: 1,
+      strokes: 3,
+      updatedBy: "pid-1",
+      updatedAt: NOW,
+    },
   };
 }
 
-describe("ApiGatewayBroadcastPort behavior", () => {
+function makeRoundStateChanged(roundId: RoundId): DomainEvent {
+  return {
+    type: "RoundStateChanged",
+    roundId,
+    occurredAt: NOW,
+    state: {
+      roundId,
+      currentHole: 1,
+      status: "IN_PROGRESS",
+      stateVersion: 1,
+      updatedAt: NOW,
+    },
+  } as DomainEvent;
+}
+
+describe("ApiGatewayBroadcastPort notify()", () => {
   const roundId: RoundId = "rid-1";
   const conn1 = {
     roundId,
@@ -73,13 +104,13 @@ describe("ApiGatewayBroadcastPort behavior", () => {
     } as unknown as ConnectionRepository;
   });
 
-  it("broadcasts to all active connections for PlayerJoined", async () => {
+  it("broadcasts to all active connections for a DomainEvent", async () => {
     const broadcast = createApiGatewayBroadcastPort({
       client,
       connectionRepo,
     });
 
-    await broadcast.broadcastPlayerJoined(roundId, makePlayer(roundId));
+    await broadcast.notify(roundId, makePlayerJoined(roundId));
 
     expect(listConnections).toHaveBeenCalledWith(roundId);
     expect(sendMock).toHaveBeenCalledTimes(2);
@@ -111,7 +142,7 @@ describe("ApiGatewayBroadcastPort behavior", () => {
       connectionRepo,
     });
 
-    await broadcast.broadcastPlayerUpdated(roundId, makePlayer(roundId));
+    await broadcast.notify(roundId, makePlayerUpdated(roundId));
 
     expect(sendMock).toHaveBeenCalledTimes(2);
     expect(removeConnection).toHaveBeenCalledWith(roundId, "c1");
@@ -125,9 +156,47 @@ describe("ApiGatewayBroadcastPort behavior", () => {
       connectionRepo,
     });
 
-    await broadcast.broadcastScoreChanged(roundId, makeScore(roundId));
-    await broadcast.broadcastRoundStateChanged(roundId, makeState(roundId));
+    await broadcast.notify(roundId, makeScoreChanged(roundId));
+    await broadcast.notify(roundId, makeRoundStateChanged(roundId));
 
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("retries once when initial list is empty, then broadcasts", async () => {
+    // First call: no connections; second call: two connections
+    listConnections.mockResolvedValueOnce([]);
+    listConnections.mockResolvedValueOnce([conn1, conn2]);
+
+    const broadcast = createApiGatewayBroadcastPort({
+      client,
+      connectionRepo,
+    });
+
+    const evt = makePlayerJoined(roundId);
+    const before = Date.now();
+    await broadcast.notify(roundId, evt);
+    const elapsed = Date.now() - before;
+
+    // Should have attempted to send to both after retry
+    expect(sendMock).toHaveBeenCalledTimes(2);
+    const ids = new Set(
+      sendMock.mock.calls.map(([cmd]) => (cmd as any).input?.ConnectionId)
+    );
+    expect(ids).toEqual(new Set(["c1", "c2"]));
+
+    expect(elapsed).toBeGreaterThanOrEqual(0);
+  });
+
+  it("gives up after retry when still empty", async () => {
+    listConnections.mockResolvedValueOnce([]);
+    listConnections.mockResolvedValueOnce([]);
+
+    const broadcast = createApiGatewayBroadcastPort({
+      client,
+      connectionRepo,
+    });
+
+    await broadcast.notify(roundId, makeScoreChanged(roundId));
     expect(sendMock).not.toHaveBeenCalled();
   });
 });

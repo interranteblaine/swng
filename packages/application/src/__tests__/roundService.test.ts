@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createRoundService } from "../application/roundService";
 import { RoundServiceDeps } from "../application/types";
 import { ApplicationError } from "../application/errors";
@@ -129,6 +130,8 @@ function createTestDeps(): {
   };
 
   const config = { sessionTtlMs: 1000 * 60 * 60 };
+  const broadcastNotify = vi.fn(async (_roundId: string, _msg: unknown) => {});
+  const broadcast = { notify: broadcastNotify };
 
   return {
     deps: {
@@ -139,6 +142,7 @@ function createTestDeps(): {
       idGenerator,
       clock,
       config,
+      broadcast,
     },
     stores: { configs, states, players, sessions, scores },
   };
@@ -217,6 +221,18 @@ describe("RoundService Behavior", () => {
         playerName: "NoColorUser",
       });
       expect(player.color).toBe("#000000");
+    });
+
+    it("emits notify with PlayerJoined", async () => {
+      const before = (deps.broadcast as any).notify.mock.calls.length;
+      await service.joinRound({
+        accessCode: "code-1",
+        playerName: "EmitUser",
+      });
+      const calls = (deps.broadcast as any).notify.mock.calls;
+      expect(calls.length).toBeGreaterThan(before);
+      const last = calls[calls.length - 1];
+      expect(last[1]?.type).toBe("PlayerJoined");
     });
   });
 
@@ -325,6 +341,21 @@ describe("RoundService Behavior", () => {
       expect(stores.scores).toHaveLength(1);
       expect(out.score.strokes).toBe(3);
       expect(out.score.updatedBy).toBe("pid-1");
+    });
+
+    it("emits notify with ScoreChanged", async () => {
+      const before = (deps.broadcast as any).notify.mock.calls.length;
+      await service.updateScore({
+        roundId: "rid-1",
+        sessionId: "sid-1",
+        playerId: "pid-1",
+        holeNumber: 1,
+        strokes: 2,
+      });
+      const calls = (deps.broadcast as any).notify.mock.calls;
+      expect(calls.length).toBeGreaterThan(before);
+      const last = calls[calls.length - 1];
+      expect(last[1]?.type).toBe("ScoreChanged");
     });
 
     it("throws NOT_FOUND if snapshot is missing", async () => {

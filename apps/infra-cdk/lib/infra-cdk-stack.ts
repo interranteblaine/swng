@@ -3,7 +3,6 @@ import { Construct } from "constructs";
 import { DataStore } from "./constructs/data-store.js";
 import { HttpApiInfra } from "./constructs/http-api.js";
 import { WebSocketInfra } from "./constructs/websocket.js";
-import { StreamingInfra } from "./constructs/streaming.js";
 import { WebAppInfra } from "./constructs/web-app.js";
 
 interface InfraProps extends StackProps {
@@ -29,19 +28,13 @@ export class InfraCdkStack extends Stack {
       stageName: stage,
     });
 
-    // HTTP API + Lambda
+    // HTTP API + Lambda + API Gateway Management API
     const http = new HttpApiInfra(this, `Http-${stage}`, {
       table: data.table,
       stageName: stage,
+      wsApiId: ws.apiId,
       rateLimit: props.httpApiRateLimit,
       burstLimit: props.httpApiBurstLimit,
-    });
-
-    // Stream processor -> API Gateway Management API
-    new StreamingInfra(this, `Streaming-${stage}`, {
-      table: data.table,
-      wsApiId: ws.apiId,
-      stageName: stage,
     });
 
     // UI (S3 + CloudFront) with DNS

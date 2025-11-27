@@ -74,6 +74,9 @@ export async function verifyStaging(
     }
   });
 
+  // Ensure WS handshake completes before actions that expect broadcasts
+  await sleep(300);
+
   let closed = false;
   try {
     // 3) Join round as B -> expect PlayerJoined

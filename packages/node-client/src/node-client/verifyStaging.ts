@@ -65,7 +65,7 @@ export async function verifyStaging(
 
   const events: DomainEvent[] = [];
   console.log(`[WS] connecting for sessionA... (events will be logged)`);
-  const connA = client.connectWs(sessionA, (evt) => {
+  const connA = client.connectEvents(sessionA, (evt) => {
     events.push(evt);
     try {
       console.log(`[EVENT] ${evt.type}`);

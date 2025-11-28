@@ -1,22 +1,22 @@
 import { describe, it, expect } from "vitest";
 import type { DomainEvent } from "@swng/domain";
-import { connectWs } from "../index";
-import type { WebSocketPort } from "../client/types";
+import { connectEvents } from "../index";
+import type { WebSocketPort, WsHandlers } from "../client/types";
 
-describe("connectWs (WebSocketPort)", () => {
+describe("connectEvents (WebSocketPort)", () => {
   // Minimal fake WebSocketPort that records the last connection
   let last:
     | {
         url: string;
         protocols: string[];
-        onMessage?: (data: string) => void;
+        handlers?: WsHandlers;
         closed: boolean;
       }
     | undefined;
 
   const port: WebSocketPort = {
-    connect(url, protocols, onMessage) {
-      last = { url, protocols, onMessage, closed: false };
+    connect(url, protocols, handlers) {
+      last = { url, protocols, handlers, closed: false };
       return {
         close(code?: number, reason?: string) {
           // simulate close semantics
@@ -31,11 +31,11 @@ describe("connectWs (WebSocketPort)", () => {
   function emit(payload: unknown) {
     const text =
       typeof payload === "string" ? payload : JSON.stringify(payload);
-    last?.onMessage?.(text);
+    last?.handlers?.onMessage?.(text);
   }
 
   it("appends ?session=<id>", () => {
-    const ws = connectWs(port, "wss://example/ws", "s1", () => {});
+    const ws = connectEvents(port, "wss://example/ws", "s1", () => {});
     expect(last?.url).toBe("wss://example/ws?session=s1");
     expect(last?.protocols?.length).toBe(0);
     expect(typeof ws.close).toBe("function");
@@ -44,9 +44,14 @@ describe("connectWs (WebSocketPort)", () => {
 
   it("forwards a valid DomainEvent to the callback", () => {
     let received: DomainEvent | undefined;
-    const ws = connectWs(port, "wss://example/ws", "s1", (evt) => {
-      received = evt;
-    });
+    const ws = connectEvents(
+      port,
+      "wss://example/ws",
+      "s1",
+      (evt: DomainEvent) => {
+        received = evt;
+      }
+    );
 
     emit({
       type: "ScoreChanged",

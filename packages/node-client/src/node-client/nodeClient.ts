@@ -1,10 +1,5 @@
 import { createClient } from "@swng/client";
-import type {
-  Client,
-  HttpPort,
-  WebSocketPort,
-  WsTextHandler,
-} from "@swng/client";
+import type { Client, HttpPort, WebSocketPort, WsHandlers } from "@swng/client";
 import { fetch as undiciFetch, WebSocket as UndiciWebSocket } from "undici";
 
 export function createNodeClient(opts: {
@@ -27,16 +22,55 @@ export function createNodeClient(opts: {
   };
 
   const ws: WebSocketPort = {
-    connect(url, protocols, onMessage: WsTextHandler) {
+    connect(url, protocols, handlers: WsHandlers) {
       const sock = new UndiciWebSocket(url, protocols);
+
+      // open
+      try {
+        sock.addEventListener?.("open", () => {
+          handlers.onOpen?.();
+        });
+      } catch {
+        // ignore
+      }
+
+      // message
       sock.addEventListener?.("message", (ev: unknown) => {
         const d = (ev as { data?: unknown })?.data;
         const text =
           typeof d === "string"
             ? d
             : (d as { toString?: () => string })?.toString?.() ?? "";
-        if (text) onMessage(text);
+        if (text) handlers.onMessage(text);
       });
+
+      // error
+      try {
+        sock.addEventListener?.("error", (ev: unknown) => {
+          handlers.onError?.(ev);
+        });
+      } catch {
+        // ignore
+      }
+
+      // close
+      try {
+        sock.addEventListener?.("close", (ev: unknown) => {
+          const e = ev as {
+            code?: number;
+            reason?: string;
+            wasClean?: boolean;
+          };
+          handlers.onClose?.({
+            code: e.code ?? 0,
+            reason: e.reason ?? "",
+            wasClean: Boolean(e.wasClean),
+          });
+        });
+      } catch {
+        // ignore
+      }
+
       return {
         close(code?: number, reason?: string) {
           sock.close(code, reason);

@@ -35,18 +35,27 @@ export interface HttpPort {
   request(req: HttpRequest): Promise<HttpResponse>;
 }
 
-export type WsTextHandler = (data: string) => void;
+export type WsStatus = "connecting" | "open" | "error" | "closed";
+
+export interface WsHandlers {
+  onOpen?: () => void;
+  onMessage: (data: string) => void;
+  onClose?: (e: { code: number; reason: string; wasClean: boolean }) => void;
+  onError?: (err: unknown) => void;
+}
 
 export interface WsConnection {
   close(code?: number, reason?: string): void;
 }
 
 export interface WebSocketPort {
-  connect(
-    url: string,
-    protocols: string[],
-    onMessage: WsTextHandler
-  ): WsConnection;
+  connect(url: string, protocols: string[], handlers: WsHandlers): WsConnection;
+}
+
+export interface WsSession {
+  close(): void;
+  getStatus(): WsStatus;
+  onStatus(cb: (s: WsStatus) => void): () => void;
 }
 
 export interface Client {
@@ -69,10 +78,14 @@ export interface Client {
       playerId: string;
     } & UpdatePlayerRequest
   ): Promise<UpdatePlayerOutput>;
-  connectWs(
+  connectEvents(
     sessionId: string,
-    onEvent: (evt: DomainEvent) => void
-  ): WsConnection;
+    onEvent: (evt: DomainEvent) => void,
+    opts?: {
+      backoffMs?: (attempt: number) => number;
+      classifyClose?: (code: number) => "retry" | "fatal";
+    }
+  ): WsSession;
 }
 
 export interface CreateClientOptions {

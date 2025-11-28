@@ -1,6 +1,6 @@
 export { createClient } from "./client/client";
 export { createHttpClient } from "./client/http";
-export { connectWs } from "./client/ws";
+export { connectEvents } from "./client/wsReliable";
 export type {
   Client,
   CreateClientOptions,
@@ -9,5 +9,7 @@ export type {
   HttpResponse,
   WebSocketPort,
   WsConnection,
-  WsTextHandler,
+  WsStatus,
+  WsHandlers,
+  WsSession,
 } from "./client/types";

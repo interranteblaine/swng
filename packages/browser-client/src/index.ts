@@ -1,10 +1,5 @@
 import { createClient } from "@swng/client";
-import type {
-  Client,
-  HttpPort,
-  WebSocketPort,
-  WsTextHandler,
-} from "@swng/client";
+import type { Client, HttpPort, WebSocketPort, WsHandlers } from "@swng/client";
 
 export function createBrowserClient(opts: {
   baseUrl: string;
@@ -26,16 +21,46 @@ export function createBrowserClient(opts: {
   };
 
   const ws: WebSocketPort = {
-    connect(url, protocols, onMessage: WsTextHandler) {
+    connect(url, protocols, handlers: WsHandlers) {
       const sock = new WebSocket(url, protocols);
+
+      try {
+        sock.onopen = () => {
+          handlers.onOpen?.();
+        };
+      } catch {
+        // ignore
+      }
+
       sock.onmessage = (ev: MessageEvent) => {
         const d = (ev as MessageEvent & { data: unknown }).data as unknown;
         const text =
           typeof d === "string"
             ? d
             : (d as { toString?: () => string })?.toString?.() ?? "";
-        if (text) onMessage(text);
+        if (text) handlers.onMessage(text);
       };
+
+      try {
+        sock.onerror = (ev: Event) => {
+          handlers.onError?.(ev);
+        };
+      } catch {
+        // ignore
+      }
+
+      try {
+        sock.onclose = (ev: CloseEvent) => {
+          handlers.onClose?.({
+            code: ev.code,
+            reason: ev.reason,
+            wasClean: ev.wasClean,
+          });
+        };
+      } catch {
+        // ignore
+      }
+
       return {
         close(code?: number, reason?: string) {
           sock.close(code, reason);

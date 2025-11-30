@@ -14,6 +14,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { Construct } from "constructs";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
+import { AccessLogFormat } from "aws-cdk-lib/aws-apigateway";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,6 +26,7 @@ export interface HttpApiInfraProps {
   wsApiId: string;
   rateLimit?: number;
   burstLimit?: number;
+  allowedOrigins?: string[];
 }
 
 export class HttpApiInfra extends Construct {
@@ -71,19 +73,26 @@ export class HttpApiInfra extends Construct {
     this.api = new HttpApi(this, `HttpApi-${props.stageName}`, {
       createDefaultStage: false,
       corsPreflight: {
-        allowHeaders: ["*"],
+        allowHeaders: ["content-type", "x-session-id"],
         allowMethods: [
           CorsHttpMethod.GET,
           CorsHttpMethod.POST,
+          CorsHttpMethod.PUT,
+          CorsHttpMethod.PATCH,
           CorsHttpMethod.OPTIONS,
         ],
-        allowOrigins: ["*"],
+        allowOrigins: props.allowedOrigins ?? ["*"],
       },
     });
 
     this.api.addRoutes({
       path: "/{proxy+}",
-      methods: [HttpMethod.ANY],
+      methods: [
+        HttpMethod.GET,
+        HttpMethod.POST,
+        HttpMethod.PUT,
+        HttpMethod.PATCH,
+      ],
       integration: new HttpLambdaIntegration(
         `HttpIntegration-${props.stageName}`,
         this.handler
@@ -99,26 +108,28 @@ export class HttpApiInfra extends Construct {
       }
     );
 
-    new apigwv2.CfnStage(this, `HttpStage-${props.stageName}`, {
-      apiId: this.api.apiId,
+    new apigwv2.HttpStage(this, `HttpStage-${props.stageName}`, {
+      httpApi: this.api,
       stageName: props.stageName,
       autoDeploy: true,
-      accessLogSettings: {
-        destinationArn: accessLogs.logGroupArn,
-        format: JSON.stringify({
-          requestId: "$context.requestId",
-          httpMethod: "$context.httpMethod",
-          path: "$context.path",
-          routeKey: "$context.routeKey",
-          status: "$context.status",
-          ip: "$context.identity.sourceIp",
-          caller: "$context.identity.caller",
-          user: "$context.identity.user",
-        }),
+      throttle: {
+        rateLimit: props.rateLimit ?? 50,
+        burstLimit: props.burstLimit ?? 100,
       },
-      defaultRouteSettings: {
-        throttlingBurstLimit: props.burstLimit ?? 100,
-        throttlingRateLimit: props.rateLimit ?? 50,
+      accessLogSettings: {
+        destination: new apigwv2.LogGroupLogDestination(accessLogs),
+        format: AccessLogFormat.custom(
+          JSON.stringify({
+            requestId: "$context.requestId",
+            httpMethod: "$context.httpMethod",
+            path: "$context.path",
+            routeKey: "$context.routeKey",
+            status: "$context.status",
+            ip: "$context.identity.sourceIp",
+            caller: "$context.identity.caller",
+            user: "$context.identity.user",
+          })
+        ),
       },
     });
 

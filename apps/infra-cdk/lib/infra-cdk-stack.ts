@@ -35,6 +35,10 @@ export class InfraCdkStack extends Stack {
       wsApiId: ws.apiId,
       rateLimit: props.httpApiRateLimit,
       burstLimit: props.httpApiBurstLimit,
+      allowedOrigins:
+        stage === "beta"
+          ? ["https://beta.swng.golf", "http://localhost:5173"]
+          : ["https://swng.golf"],
     });
 
     // UI (S3 + CloudFront) with DNS

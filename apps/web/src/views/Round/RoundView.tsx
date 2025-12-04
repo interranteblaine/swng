@@ -1,14 +1,12 @@
-import { useState } from "react";
 import { useParams } from "react-router-dom";
+import * as Tabs from "@radix-ui/react-tabs";
 import { PlayTab } from "./PlayTab/PlayTab";
-import { RoundTabs, type RoundTabId } from "./RoundTabs";
 import { SettingsTab } from "./SettingsTab/SettingsTab";
 import { TotalsTab } from "./TotalsTab/TotalsTab";
 import { RoundProvider } from "./Context/RoundProvider";
 
 export function RoundView() {
   const { roundId } = useParams<{ roundId: string }>();
-  const [activeTab, setActiveTab] = useState<RoundTabId>("play");
 
   if (!roundId) {
     return (
@@ -26,11 +24,23 @@ export function RoundView() {
           <p>Score and manage the current round.</p>
         </header>
 
-        <RoundTabs activeTab={activeTab} onChange={setActiveTab} />
+        <Tabs.Root defaultValue="play">
+          <Tabs.List aria-label="Round sections">
+            <Tabs.Trigger value="play">Play</Tabs.Trigger>
+            <Tabs.Trigger value="totals">Totals</Tabs.Trigger>
+            <Tabs.Trigger value="settings">Settings</Tabs.Trigger>
+          </Tabs.List>
 
-        {activeTab === "play" && <PlayTab />}
-        {activeTab === "totals" && <TotalsTab />}
-        {activeTab === "settings" && <SettingsTab />}
+          <Tabs.Content value="play">
+            <PlayTab />
+          </Tabs.Content>
+          <Tabs.Content value="totals">
+            <TotalsTab />
+          </Tabs.Content>
+          <Tabs.Content value="settings">
+            <SettingsTab />
+          </Tabs.Content>
+        </Tabs.Root>
       </section>
     </RoundProvider>
   );

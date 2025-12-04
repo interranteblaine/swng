@@ -20,6 +20,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-tabs": "^1.1.13",
     "@swng/browser-client": "workspace:*",
     "@swng/domain": "workspace:*",
     "@tanstack/react-query": "^5.90.11",

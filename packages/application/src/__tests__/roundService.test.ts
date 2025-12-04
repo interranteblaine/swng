@@ -178,7 +178,6 @@ describe("RoundService Behavior", () => {
 
       expect(cfg.courseName).toBe("Test");
       expect(cfg.par).toEqual(par);
-      expect(st.currentHole).toBe(1);
       expect(st.stateVersion).toBe(1);
       expect(result.config).toEqual(cfg);
       expect(result.state).toEqual(st);
@@ -391,24 +390,12 @@ describe("RoundService Behavior", () => {
       });
     });
 
-    it("rejects invalid hole update", async () => {
-      await expect(
-        service.patchRoundState({
-          roundId: "rid-1",
-          sessionId: "sid-1",
-          currentHole: 99,
-        })
-      ).rejects.toMatchObject({ code: "INVALID_INPUT" });
-    });
-
-    it("updates hole and status as provided", async () => {
+    it("updates status as provided", async () => {
       const out = await service.patchRoundState({
         roundId: "rid-1",
         sessionId: "sid-1",
-        currentHole: 2,
         status: "completed" as RoundStatus,
       });
-      expect(stores.states[1].currentHole).toBe(2);
       expect(out.state.status).toBe("completed");
     });
 
@@ -429,7 +416,6 @@ describe("RoundService Behavior", () => {
         roundId: "rid-1",
         sessionId: "sid-1",
       });
-      expect(out.state.currentHole).toBe(initial.currentHole);
       expect(out.state.status).toBe(initial.status);
     });
 
@@ -448,7 +434,6 @@ describe("RoundService Behavior", () => {
       await service.patchRoundState({
         roundId: "rid-1",
         sessionId: "sid-1",
-        currentHole: 2,
       });
 
       // Second update reads the same stale version (states[0]) and thus provides expectedVersion=1,

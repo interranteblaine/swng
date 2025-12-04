@@ -192,7 +192,6 @@ export function sampleRoundState(
 ): RoundState {
   return {
     roundId: "rid-1",
-    currentHole: 1,
     status: null,
     stateVersion: 1,
     updatedAt: NOW,

@@ -20,7 +20,6 @@ export type RoundActions = {
     color?: string;
   }) => void;
   patchRoundState: (args: {
-    currentHole?: number;
     status?: RoundSnapshot["state"]["status"] | null;
   }) => void;
 };

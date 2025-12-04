@@ -146,8 +146,8 @@ export function createHttpClient(http: HttpPort, baseUrl: string) {
     async patchRoundState(
       args: { roundId: RoundId; sessionId: string } & PatchRoundStateRequest
     ): Promise<PatchRoundStateOutput> {
-      const { roundId, sessionId, currentHole, status } = args;
-      const body: PatchRoundStateRequest = { currentHole, status };
+      const { roundId, sessionId, status } = args;
+      const body: PatchRoundStateRequest = { status };
       return fetchJson<PatchRoundStateOutput>(
         http,
         baseUrl,

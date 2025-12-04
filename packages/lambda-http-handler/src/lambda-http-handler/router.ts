@@ -132,7 +132,6 @@ export async function routeRequest(
       const result = await service.patchRoundState({
         roundId,
         sessionId,
-        currentHole: body.currentHole,
         status: body.status,
       });
 

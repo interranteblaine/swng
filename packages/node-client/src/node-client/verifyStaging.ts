@@ -145,22 +145,21 @@ export async function verifyStaging(
     console.log(`[STEP] patchRoundState(A) -> expect RoundStateChanged`);
     clear(events);
     const before = await client.getRound({ roundId, sessionId: sessionA });
-    const nextHole = (before?.snapshot?.state?.currentHole ?? 1) + 1;
+    const nextStatus = "COMPLETED";
     console.log(
-      `[INFO] currentHole(before)=${
-        before?.snapshot?.state?.currentHole ?? "n/a"
-      } nextHole=${nextHole}`
+      `[INFO] status(before)=${
+        before?.snapshot?.state?.status ?? "n/a"
+      } nextHole=${nextStatus}`
     );
     await client.patchRoundState({
       roundId,
       sessionId: sessionA,
-      currentHole: nextHole,
+      status: nextStatus,
     });
     await waitForNextLogged(
       events,
-      (e) =>
-        e?.type === "RoundStateChanged" && e?.state?.currentHole === nextHole,
-      `RoundStateChanged nextHole=${nextHole}`
+      (e) => e?.type === "RoundStateChanged" && e?.state?.status === nextStatus,
+      `RoundStateChanged nextStatus=${nextStatus}`
     );
 
     console.log(`[WS] closing for sessionA`);

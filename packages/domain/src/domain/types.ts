@@ -15,7 +15,6 @@ export interface RoundConfig {
 
 export interface RoundState {
   roundId: RoundId;
-  currentHole: number; // 1-based
   status: RoundStatus | null;
   stateVersion: number; // monotonically increasing
   updatedAt: IsoDateTime;

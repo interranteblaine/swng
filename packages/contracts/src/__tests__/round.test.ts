@@ -94,23 +94,13 @@ describe("contracts/http/rounds request parsers", () => {
       }
     });
 
-    it("accepts a valid currentHole and status", () => {
+    it("accepts a valid status", () => {
       const res = parsePatchRoundStateRequest({
-        currentHole: 2,
         status: "IN_PROGRESS",
       });
       expect(res.ok).toBe(true);
       if (res.ok) {
-        expect(res.data.currentHole).toBe(2);
         expect(res.data.status).toBe("IN_PROGRESS");
-      }
-    });
-
-    it("rejects invalid currentHole", () => {
-      const res = parsePatchRoundStateRequest({ currentHole: 0 });
-      expect(res.ok).toBe(false);
-      if (!res.ok) {
-        expect(res.issues.length).toBeGreaterThan(0);
       }
     });
   });

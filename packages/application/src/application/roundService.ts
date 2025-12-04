@@ -227,25 +227,13 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     async patchRoundState(
       input: PatchRoundStateInput
     ): Promise<PatchRoundStateOutput> {
-      const { roundId, sessionId, currentHole, status } = input;
+      const { roundId, sessionId, status } = input;
 
       await ensureSessionForRound(roundId, sessionId);
 
       const snapshot = await loadRoundSnapshot(roundId);
 
-      const { config: roundConfig, state: stateValue } = snapshot;
-
-      let nextCurrentHole = stateValue.currentHole;
-
-      if (currentHole !== undefined) {
-        if (!isValidHoleNumber(roundConfig, currentHole)) {
-          throw new ApplicationError(
-            "INVALID_INPUT",
-            `Hole number ${currentHole} is not valid for this round`
-          );
-        }
-        nextCurrentHole = currentHole;
-      }
+      const { state: stateValue } = snapshot;
 
       const nextStatus = status !== undefined ? status : stateValue.status;
 
@@ -254,7 +242,6 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
 
       const updatedState: RoundState = {
         roundId,
-        currentHole: nextCurrentHole,
         status: nextStatus,
         stateVersion: nextStateVersion,
         updatedAt: now,

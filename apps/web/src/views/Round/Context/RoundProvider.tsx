@@ -19,7 +19,6 @@ type UpdatePlayerArgs = {
 };
 
 type PatchRoundStateArgs = {
-  currentHole?: number;
   status?: RoundSnapshot["state"]["status"] | null;
 };
 

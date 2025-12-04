@@ -9,7 +9,6 @@ import { getSessionId } from "../lib/session";
 import { reduceEvent } from "../lib/eventsReducer";
 
 type Args = {
-  currentHole?: number;
   status?: RoundStatus | null;
 };
 
@@ -18,17 +17,16 @@ export function usePatchRoundState(roundId: string) {
 
   return useMutation({
     mutationKey: ["patchRoundState", roundId],
-    mutationFn: async ({ currentHole, status }: Args) => {
+    mutationFn: async ({ status }: Args) => {
       const sessionId = getSessionId(roundId);
       if (!sessionId) throw new Error("NO_SESSION");
       return client.patchRoundState({
         roundId,
         sessionId,
-        currentHole,
         status,
       });
     },
-    onMutate: async ({ currentHole, status }) => {
+    onMutate: async ({ status }) => {
       await queryClient.cancelQueries({ queryKey: ["round", roundId] });
 
       const previous = queryClient.getQueryData<RoundSnapshot>([
@@ -45,7 +43,6 @@ export function usePatchRoundState(roundId: string) {
 
           const nextState = {
             ...old.state,
-            ...(currentHole !== undefined && { currentHole }),
             ...(status !== undefined && { status }),
             updatedAt: nowIso,
             // keep stateVersion as-is for optimistic update; server will correct via WS

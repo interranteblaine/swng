@@ -47,7 +47,6 @@ describe("round module", () => {
       const createdAt = "2025-11-15T17:05:00Z" as IsoDateTime;
       const state = createInitialRoundState(roundId, createdAt);
       expect(state.roundId).toBe(roundId);
-      expect(state.currentHole).toBe(1);
       expect(state.status).toBe("IN_PROGRESS");
       expect(state.stateVersion).toBe(1);
       expect(state.updatedAt).toBe(createdAt);

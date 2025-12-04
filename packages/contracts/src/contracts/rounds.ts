@@ -26,7 +26,6 @@ export const UpdateScoreRequest = z.object({
 export type UpdateScoreRequest = z.infer<typeof UpdateScoreRequest>;
 
 export const PatchRoundStateRequest = z.object({
-  currentHole: z.number().int().positive().optional(),
   status: RoundStatusDto.nullable().optional(),
 });
 export type PatchRoundStateRequest = z.infer<typeof PatchRoundStateRequest>;

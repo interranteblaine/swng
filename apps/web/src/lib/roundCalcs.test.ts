@@ -43,7 +43,6 @@ function makeSnapshot(): RoundSnapshot {
     },
     state: {
       roundId: "r1",
-      currentHole: 1,
       status: null,
       stateVersion: 1,
       updatedAt: now,

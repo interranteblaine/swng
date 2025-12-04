@@ -32,7 +32,6 @@ export function createInitialRoundState(
 ): RoundState {
   return {
     roundId,
-    currentHole: 1,
     status: "IN_PROGRESS",
     stateVersion: 1,
     updatedAt: createdAt,

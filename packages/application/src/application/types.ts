@@ -143,7 +143,6 @@ export interface UpdateScoreOutput {
 export interface PatchRoundStateInput {
   roundId: RoundId;
   sessionId: string;
-  currentHole?: number;
   status?: RoundStatus | null;
 }
 

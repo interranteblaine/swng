@@ -23,7 +23,6 @@ export interface RoundStateItem {
   PK: string;
   SK: typeof STATE_SK;
   roundId: RoundId;
-  currentHole: number;
   status: RoundState["status"];
   stateVersion: number;
   updatedAt: IsoDateTime;
@@ -60,7 +59,6 @@ export function toStateItem(state: RoundState): RoundStateItem {
     PK: roundPk(state.roundId),
     SK: STATE_SK,
     roundId: state.roundId,
-    currentHole: state.currentHole,
     status: state.status,
     stateVersion: state.stateVersion,
     updatedAt: state.updatedAt,
@@ -70,7 +68,6 @@ export function toStateItem(state: RoundState): RoundStateItem {
 export function fromStateItem(item: RoundStateItem): RoundState {
   return {
     roundId: item.roundId,
-    currentHole: item.currentHole,
     status: item.status,
     stateVersion: item.stateVersion,
     updatedAt: item.updatedAt,

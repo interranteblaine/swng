@@ -49,7 +49,6 @@ describe("client http (stateless)", () => {
               },
               state: {
                 roundId: "r1",
-                currentHole: 1,
                 status: "IN_PROGRESS",
                 stateVersion: 1,
                 updatedAt: "2020-01-01T00:00:00Z",
@@ -78,7 +77,6 @@ describe("client http (stateless)", () => {
               },
               state: {
                 roundId: "r1",
-                currentHole: 1,
                 status: "IN_PROGRESS",
                 stateVersion: 1,
                 updatedAt: "2020-01-01T00:00:00Z",

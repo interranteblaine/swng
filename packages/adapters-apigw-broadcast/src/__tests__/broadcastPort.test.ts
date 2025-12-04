@@ -62,7 +62,6 @@ function makeRoundStateChanged(roundId: RoundId): DomainEvent {
     occurredAt: NOW,
     state: {
       roundId,
-      currentHole: 1,
       status: "IN_PROGRESS",
       stateVersion: 1,
       updatedAt: NOW,

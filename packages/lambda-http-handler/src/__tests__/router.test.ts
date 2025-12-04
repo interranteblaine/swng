@@ -88,7 +88,6 @@ function sampleRound(): {
   };
   const state: RoundState = {
     roundId: "rnd_1",
-    currentHole: 1,
     status: "IN_PROGRESS",
     stateVersion: 1,
     updatedAt: new Date().toISOString(),
@@ -211,7 +210,7 @@ describe("router.routeRequest", () => {
 
     const event = mkEvent("PATCH", "/rounds/rnd_1/state", {
       headers: { "x-session-id": "sess_1" },
-      body: { currentHole: 2 },
+      body: { status: "COMPLETED" },
     });
 
     try {

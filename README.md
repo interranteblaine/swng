@@ -1,33 +1,58 @@
 ## Development
 
-### Common Commands
+Prereqs
 
-```bash
-# Install dependencies
-pnpm install                                    # Install all packages
-pnpm -F domain add lodash                       # Add dependency to domain
-pnpm -F domain add -D vitest                    # Add dev dependency to domain
-pnpm add -Dw eslint                             # Add dev tool to root
+- Node 20+, pnpm 8+
+- AWS CLI configured (profile: swng, region: us-east-1)
 
-# Run scripts
-pnpm -F domain run dev                          # Run dev in domain
-pnpm -F domain run build                        # Build domain
-pnpm -F domain run test                         # Test domain
+Install
 
-# Multiple packages
-pnpm --parallel -F api -F web run dev           # Run dev servers in parallel
-pnpm -r run build                               # Build all packages in apps/* and packages/*
+- pnpm install
 
-# Validation
-pnpm validate                                   # Run lint + build + test (before commit/push/deploy)
+Local development
 
-# Update/remove
-pnpm -F domain update                           # Update domain dependencies
-pnpm -F domain remove lodash                    # Remove dependency from domain
+- Web app (Vite):
+  - Start dev: pnpm dev:web (http://localhost:5173)
+- Validate before commit/push/deploy:
+  - pnpm validate # lint + build + test
 
-# Clean
-pnpm -r exec rm -rf node_modules dist           # Delete node_modules and dist in all apps/* and packages/*
+Scaffold a new package
 
-# Generate new package
-pnpm gen new my-package                         # Scaffold new package from template in packages/
-```
+- Quick shortcut to create a package under packages with sensible defaults:
+  - pnpm gen new my-package
+
+Backend (AWS CDK)
+
+- First-time account setup (one-time per account/region):
+  - pnpm cdk:bootstrap:beta
+  - pnpm cdk:deploy:account # API Gateway account-level resources
+- Beta environment:
+  - Diff: pnpm cdk:diff:beta
+  - Deploy: pnpm cdk:deploy:beta # writes outputs to apps/infra-cdk/cdk-outputs-beta.json
+- Prod environment:
+  - Diff: pnpm cdk:diff:prod
+  - Deploy: pnpm cdk:deploy:prod # writes outputs to apps/infra-cdk/cdk-outputs-prod.json
+- Safety wrapper (ensures AWS_PROFILE is set):
+  - pnpm cdk:deploy:safe
+
+Endpoints
+
+- After a deploy, HTTP and WebSocket endpoints are in:
+  - apps/infra-cdk/cdk-outputs-beta.json (beta)
+  - apps/infra-cdk/cdk-outputs-prod.json (prod)
+  - Look for HttpApiUrl-<stage> and WsWssUrl-<stage>
+
+Smoke test (end-to-end verify)
+
+- Verify deployed endpoints using the node client:
+  - pnpm -F @swng/node-client run verify --api <HTTP base URL> --ws <WSS URL>
+
+Web app deploy (S3 + CloudFront)
+
+- Build for target stage:
+  - Beta: pnpm build:web:beta
+  - Prod: pnpm build:web:prod
+- Publish static site and invalidate CloudFront:
+  - Beta: pnpm run web:publish:beta
+  - Prod: pnpm run web:publish:prod
+- The publish script discovers S3/CloudFront via CloudFormation exports created by the CDK stacks.

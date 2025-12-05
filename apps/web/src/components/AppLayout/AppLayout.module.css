@@ -1,0 +1,37 @@
+.appLayout { 
+    min-height: 100vh; 
+    display: flex; 
+    flex-direction: column; 
+}
+
+.mobileOnly { 
+    display: block; 
+}
+
+.desktopOnly { 
+    display: none; 
+}
+
+@media (min-width: 768px) {
+  .appLayout { flex-direction: row; }
+  .mobileOnly { display: none; }
+  .desktopOnly { display: block; }
+}
+
+.drawerOverlay { 
+    position: fixed; 
+    inset: 0; 
+    background: rgba(0,0,0,.4); 
+}
+
+.drawerContent { 
+    position: fixed; 
+    top: 0; 
+    bottom: 0; 
+    left: 0; 
+    width: 80vw; 
+    max-width: 320px; 
+    background: #fff; 
+    padding: 16px; 
+    box-shadow: 0 6px 24px rgba(0,0,0,.2); 
+}

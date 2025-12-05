@@ -1,5 +1,6 @@
 import { type FormEvent, useMemo } from "react";
 import { useCreateRound } from "../../hooks/useCreateRound";
+import { Button } from "@/components/ui/button";
 
 export function CreateRoundView() {
   const createRound = useCreateRound();
@@ -133,9 +134,9 @@ export function CreateRoundView() {
         )}
 
         <div>
-          <button type="submit" disabled={createRound.isPending}>
+          <Button type="submit" disabled={createRound.isPending}>
             {createRound.isPending ? "Creating…" : "Create round"}
-          </button>
+          </Button>
         </div>
       </form>
     </section>

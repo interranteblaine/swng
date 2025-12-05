@@ -8,6 +8,14 @@
     "types": ["vite/client"],
     "skipLibCheck": true,
 
+    /* Shadcn support */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    },
+
     /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

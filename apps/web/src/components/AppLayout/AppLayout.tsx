@@ -1,5 +1,6 @@
-import { NavLink, Outlet } from "react-router-dom";
-import { useCurrentRoundId } from "../../hooks/useCurrentRoundId";
+import { Outlet } from "react-router-dom";
+import { useCurrentRoundId } from "@/hooks/useCurrentRoundId";
+import { useRouteTitle } from "@/hooks/useRouteTitle";
 import {
   SidebarProvider,
   SidebarTrigger,
@@ -13,9 +14,11 @@ import {
 } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { LandPlot } from "lucide-react";
+import { SidebarNavLink } from "@/components/AppLayout/SidebarNavLink";
 
 export function AppLayout() {
   const roundId = useCurrentRoundId();
+  const title = useRouteTitle();
 
   return (
     <SidebarProvider>
@@ -24,10 +27,10 @@ export function AppLayout() {
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton asChild>
-                <NavLink to="/">
-                  <LandPlot size={48} />
+                <SidebarNavLink to="/">
+                  <LandPlot />
                   <span className="text-base font-semibold">Swng</span>
-                </NavLink>
+                </SidebarNavLink>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -37,14 +40,18 @@ export function AppLayout() {
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton asChild>
-                  <NavLink to="/rounds/create">Create Round</NavLink>
+                  <SidebarNavLink to="/rounds/create">
+                    Create Round
+                  </SidebarNavLink>
                 </SidebarMenuButton>
                 <SidebarMenuButton asChild>
-                  <NavLink to="/rounds/join">Join Round</NavLink>
+                  <SidebarNavLink to="/rounds/join">Join Round</SidebarNavLink>
                 </SidebarMenuButton>
                 {roundId ? (
                   <SidebarMenuButton asChild>
-                    <NavLink to={`/rounds/${roundId}`}>Round</NavLink>
+                    <SidebarNavLink to={`/rounds/${roundId}`}>
+                      Round
+                    </SidebarNavLink>
                   </SidebarMenuButton>
                 ) : null}
               </SidebarMenuItem>
@@ -60,7 +67,7 @@ export function AppLayout() {
               orientation="vertical"
               className="mx-2 data-[orientation=vertical]:h-4"
             />
-            <h1 className="text-base font-medium">Create</h1>
+            <h1 className="text-base font-medium">{title}</h1>
           </div>
         </header>
         <Outlet />

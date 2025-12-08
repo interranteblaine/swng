@@ -80,8 +80,7 @@ export function CreateRoundView() {
   return (
     <section id="create-view" aria-labelledby="create-heading">
       <header>
-        <h2 id="create-heading">Create Round</h2>
-        <p>Set up a new round.</p>
+        <h2 id="create-heading">Set up a new round.</h2>
       </header>
 
       <form aria-describedby="create-description" onSubmit={handleSubmit}>

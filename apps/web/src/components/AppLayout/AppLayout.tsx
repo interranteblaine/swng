@@ -59,7 +59,7 @@ export function AppLayout() {
           </SidebarGroup>
         </SidebarContent>
       </Sidebar>
-      <main>
+      <main className="flex min-h-dvh flex-col">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b">
           <div className="flex w-full items-center gap-1 px-4 lg:gap-2 lg:px-6">
             <SidebarTrigger />
@@ -70,7 +70,11 @@ export function AppLayout() {
             <h1 className="text-base font-medium">{title}</h1>
           </div>
         </header>
-        <Outlet />
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="container mx-auto px-4 py-4 sm:px-6 lg:px-8">
+            <Outlet />
+          </div>
+        </div>
       </main>
     </SidebarProvider>
   );

@@ -89,7 +89,11 @@ export function CreateRoundView() {
   }, [createRound.error]);
 
   return (
-    <section id="create-view" aria-labelledby="create-heading">
+    <section
+      id="create-view"
+      aria-labelledby="create-heading"
+      className="lg:max-w-2xl"
+    >
       <header className="mb-6">
         <h2 id="create-heading" className="text-l md:text-xl font-semibold">
           Set up a new round.

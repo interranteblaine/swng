@@ -1,11 +1,21 @@
-import * as React from "react";
+import { useCallback } from "react";
 import { NavLink, type NavLinkProps } from "react-router-dom";
 import { useSidebar } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 
-export function SidebarNavLink({ onClick, ...props }: NavLinkProps) {
+type SidebarNavLinkProps = NavLinkProps & {
+  highlightActive?: boolean;
+};
+
+export function SidebarNavLink({
+  onClick,
+  className,
+  highlightActive = false,
+  ...props
+}: SidebarNavLinkProps) {
   const { isMobile, setOpenMobile } = useSidebar();
 
-  const handleClick = React.useCallback(
+  const handleClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement, MouseEvent>) => {
       onClick?.(e);
       if (isMobile) setOpenMobile(false);
@@ -13,5 +23,15 @@ export function SidebarNavLink({ onClick, ...props }: NavLinkProps) {
     [isMobile, onClick, setOpenMobile]
   );
 
-  return <NavLink {...props} onClick={handleClick} />;
+  const activeClasses = highlightActive
+    ? "aria-[current=page]:font-semibold"
+    : undefined;
+
+  return (
+    <NavLink
+      {...props}
+      onClick={handleClick}
+      className={cn(activeClasses, className)}
+    />
+  );
 }

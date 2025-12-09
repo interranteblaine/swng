@@ -40,16 +40,18 @@ export function AppLayout() {
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton asChild>
-                  <SidebarNavLink to="/rounds/create">
+                  <SidebarNavLink to="/rounds/create" highlightActive>
                     Create Round
                   </SidebarNavLink>
                 </SidebarMenuButton>
                 <SidebarMenuButton asChild>
-                  <SidebarNavLink to="/rounds/join">Join Round</SidebarNavLink>
+                  <SidebarNavLink to="/rounds/join" highlightActive>
+                    Join Round
+                  </SidebarNavLink>
                 </SidebarMenuButton>
                 {roundId ? (
                   <SidebarMenuButton asChild>
-                    <SidebarNavLink to={`/rounds/${roundId}`}>
+                    <SidebarNavLink to={`/rounds/${roundId}`} highlightActive>
                       Round
                     </SidebarNavLink>
                   </SidebarMenuButton>

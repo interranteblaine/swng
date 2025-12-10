@@ -6,9 +6,9 @@ export function HomeView() {
     <section
       id="home-view"
       aria-labelledby="home-heading"
-      className="lg:max-w-2xl flex flex-col items-center"
+      className="lg:max-w-2xl flex flex-col"
     >
-      <header className="mb-6 flex flex-col items-center">
+      <header className="mb-6 flex flex-col">
         <h2 id="home-heading" className="text-l md:text-xl font-semibold">
           Welcome to SWNG
         </h2>
@@ -16,7 +16,7 @@ export function HomeView() {
       </header>
 
       <nav aria-label="Primary actions">
-        <ul className="space-y-6 flex flex-col items-center">
+        <ul className="flex gap-6">
           <li>
             <Button asChild size="lg">
               <Link to="/rounds/create" id="home-create-link">

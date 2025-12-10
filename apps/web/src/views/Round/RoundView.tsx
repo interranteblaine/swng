@@ -1,5 +1,5 @@
 import { useParams } from "react-router-dom";
-import * as Tabs from "@radix-ui/react-tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PlayTab } from "./PlayTab/PlayTab";
 import { SettingsTab } from "./SettingsTab/SettingsTab";
 import { TotalsTab } from "./TotalsTab/TotalsTab";
@@ -18,29 +18,35 @@ export function RoundView() {
 
   return (
     <RoundProvider roundId={roundId}>
-      <section id="round-view" aria-labelledby="round-heading">
-        <header>
-          <h2 id="round-heading">Round</h2>
-          <p>Score and manage the current round.</p>
+      <section
+        id="round-view"
+        aria-labelledby="round-heading"
+        className="lg:max-w-2xl flex flex-col"
+      >
+        <header className="mb-6 flex flex-col">
+          <h2 id="round-heading" className="text-l md:text-xl font-semibold">
+            Current Round
+          </h2>
+          <p className="sr-only">Score and manage the current round.</p>
         </header>
 
-        <Tabs.Root defaultValue="play">
-          <Tabs.List aria-label="Round sections">
-            <Tabs.Trigger value="play">Play</Tabs.Trigger>
-            <Tabs.Trigger value="totals">Totals</Tabs.Trigger>
-            <Tabs.Trigger value="settings">Settings</Tabs.Trigger>
-          </Tabs.List>
+        <Tabs defaultValue="play">
+          <TabsList>
+            <TabsTrigger value="play">Play</TabsTrigger>
+            <TabsTrigger value="totals">Totals</TabsTrigger>
+            <TabsTrigger value="settings">Settings</TabsTrigger>
+          </TabsList>
 
-          <Tabs.Content value="play">
+          <TabsContent value="play">
             <PlayTab />
-          </Tabs.Content>
-          <Tabs.Content value="totals">
+          </TabsContent>
+          <TabsContent value="totals">
             <TotalsTab />
-          </Tabs.Content>
-          <Tabs.Content value="settings">
+          </TabsContent>
+          <TabsContent value="settings">
             <SettingsTab />
-          </Tabs.Content>
-        </Tabs.Root>
+          </TabsContent>
+        </Tabs>
       </section>
     </RoundProvider>
   );

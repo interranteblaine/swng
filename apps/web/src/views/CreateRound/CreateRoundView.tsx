@@ -17,16 +17,18 @@ import { Button } from "@/components/ui/button";
 const formSchema = z.object({
   courseName: z
     .string()
+    .trim()
     .min(1, "Course must be at least 1 character")
     .max(32, "Course must be at most 32 characters"),
   playerName: z
     .string()
+    .trim()
     .min(1, "Player name must be at least 1 character")
     .max(32, "Player name must be at most 32 characters"),
-  teeColor: z
-    .string()
-    .min(1, "Tee color must be at least 1 character")
-    .max(12, "Tee color must be at most 12 characters"),
+  teeColor: z.union([
+    z.literal(""),
+    z.string().trim().max(12, "Tee color must be at most 12 characters"),
+  ]),
   holeCount: z.union(
     [z.literal(9), z.literal(18)],
     "Hole count must be either 9 or 18"
@@ -47,13 +49,14 @@ export function CreateRoundView() {
 
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
     const { courseName, playerName, teeColor, holeCount } = data;
+    const color = teeColor.trim() === "" ? undefined : teeColor.trim();
     const par = Array.from({ length: holeCount }, () => 4);
     try {
       await createRound.mutateAsync({
         courseName,
         par,
         playerName,
-        color: teeColor,
+        color,
       });
     } catch {
       // error surface via createRound.error; prevent unhandled rejection
@@ -106,8 +109,8 @@ export function CreateRoundView() {
         className="space-y-6"
         onSubmit={(e) => void form.handleSubmit(onSubmit)(e)}
       >
-        <p id="create-description" className="sr-only">
-          Enter basic course and player information to create a round.
+        <p id="create-description">
+          Configure course and player information to create a round.
         </p>
 
         <FieldGroup>
@@ -132,6 +135,48 @@ export function CreateRoundView() {
                 {fieldState.invalid && (
                   <FieldError
                     id="create-course-name-error"
+                    errors={[fieldState.error]}
+                  />
+                )}
+              </Field>
+            )}
+          />
+
+          <Controller
+            name="holeCount"
+            control={form.control}
+            render={({ field, fieldState }) => (
+              <Field data-invalid={fieldState.invalid}>
+                <FieldLabel
+                  id="create-hole-count-label"
+                  htmlFor="create-hole-count"
+                >
+                  Holes
+                </FieldLabel>
+                <RadioGroup
+                  id="create-hole-count"
+                  value={String(field.value)}
+                  onValueChange={(v) => field.onChange(Number(v))}
+                  onBlur={field.onBlur}
+                  disabled={field.disabled}
+                  aria-labelledby="create-hole-count-label"
+                  aria-invalid={fieldState.invalid || undefined}
+                  aria-describedby={
+                    fieldState.invalid ? "create-hole-count-error" : undefined
+                  }
+                >
+                  <div className="flex items-center gap-3">
+                    <RadioGroupItem value="18" id="create-hole-count-18" />
+                    <Label htmlFor="create-hole-count-18">18</Label>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <RadioGroupItem value="9" id="create-hole-count-9" />
+                    <Label htmlFor="create-hole-count-9">9</Label>
+                  </div>
+                </RadioGroup>
+                {fieldState.invalid && (
+                  <FieldError
+                    id="create-hole-count-error"
                     errors={[fieldState.error]}
                   />
                 )}
@@ -186,48 +231,6 @@ export function CreateRoundView() {
                 {fieldState.invalid && (
                   <FieldError
                     id="create-tee-color-error"
-                    errors={[fieldState.error]}
-                  />
-                )}
-              </Field>
-            )}
-          />
-
-          <Controller
-            name="holeCount"
-            control={form.control}
-            render={({ field, fieldState }) => (
-              <Field data-invalid={fieldState.invalid}>
-                <FieldLabel
-                  id="create-hole-count-label"
-                  htmlFor="create-hole-count"
-                >
-                  Holes
-                </FieldLabel>
-                <RadioGroup
-                  id="create-hole-count"
-                  value={String(field.value)}
-                  onValueChange={(v) => field.onChange(Number(v))}
-                  onBlur={field.onBlur}
-                  disabled={field.disabled}
-                  aria-labelledby="create-hole-count-label"
-                  aria-invalid={fieldState.invalid || undefined}
-                  aria-describedby={
-                    fieldState.invalid ? "create-hole-count-error" : undefined
-                  }
-                >
-                  <div className="flex items-center gap-3">
-                    <RadioGroupItem value="18" id="create-hole-count-18" />
-                    <Label htmlFor="create-hole-count-18">18</Label>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <RadioGroupItem value="9" id="create-hole-count-9" />
-                    <Label htmlFor="create-hole-count-9">9</Label>
-                  </div>
-                </RadioGroup>
-                {fieldState.invalid && (
-                  <FieldError
-                    id="create-hole-count-error"
                     errors={[fieldState.error]}
                   />
                 )}

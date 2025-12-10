@@ -1,39 +1,63 @@
-import { type FormEvent, useMemo } from "react";
-import { useJoinRound } from "../../hooks/useJoinRound";
+import { useMemo } from "react";
+import * as z from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Controller, useForm } from "react-hook-form";
+import { useJoinRound } from "@/hooks/useJoinRound";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+
+const formSchema = z.object({
+  accessCode: z
+    .string()
+    .trim()
+    .min(4, "Code must be at least 4 characters")
+    .max(12, "Code must be at most 12 characters"),
+  playerName: z
+    .string()
+    .trim()
+    .min(1, "Player name must be at least 1 character")
+    .max(32, "Player name must be at most 32 characters"),
+  teeColor: z.union([
+    z.literal(""),
+    z.string().trim().max(12, "Tee color must be at most 12 characters"),
+  ]),
+});
 
 export function JoinRoundView() {
   const joinRound = useJoinRound();
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      accessCode: "",
+      playerName: "",
+      teeColor: "",
+    },
+  });
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-
-    const accessCodeRaw = fd.get("accessCode");
-    const playerNameRaw = fd.get("playerName");
-    const playerColorRaw = fd.get("playerColor");
-
-    const accessCode =
-      typeof accessCodeRaw === "string" ? accessCodeRaw.trim() : "";
-    const playerName =
-      typeof playerNameRaw === "string" ? playerNameRaw.trim() : "";
-    const color =
-      typeof playerColorRaw === "string" && playerColorRaw.trim().length > 0
-        ? playerColorRaw.trim()
-        : undefined;
-
-    if (!accessCode || !playerName) {
-      return;
-    }
-
-    void joinRound
-      .mutateAsync({
+  const onSubmit = async (data: z.infer<typeof formSchema>) => {
+    const { accessCode, playerName, teeColor } = data;
+    const color = teeColor.trim() === "" ? undefined : teeColor.trim();
+    try {
+      await joinRound.mutateAsync({
         accessCode,
         playerName,
         color,
-      })
-      .catch(() => {
-        // error is surfaced via joinRound.error; avoid unhandled promise rejection
       });
+    } catch {
+      // error is surfaced via joinRound.error; avoid unhandled promise rejection
+    }
+  };
+
+  const onReset = () => {
+    joinRound.reset();
+    form.reset();
+    console.log("reset");
   };
 
   const errorMessage = useMemo(() => {
@@ -60,48 +84,140 @@ export function JoinRoundView() {
   }, [joinRound.error]);
 
   return (
-    <section id="join-view" aria-labelledby="join-heading">
-      <header>
-        <h2 id="join-heading">Join Round</h2>
-        <p>Join an existing round using an access code.</p>
+    <section
+      id="join-view"
+      aria-labelledby="join-heading"
+      className="lg:max-w-2xl"
+    >
+      <header className="mb-6">
+        <h2 id="join-heading" className="text-l md:text-xl font-semibold">
+          Join Round
+        </h2>
       </header>
 
-      <form aria-describedby="join-description" onSubmit={handleSubmit}>
+      <form
+        id="join-round-form"
+        aria-describedby="join-description"
+        className="space-y-6"
+        onSubmit={(e) => void form.handleSubmit(onSubmit)(e)}
+      >
         <p id="join-description">
-          Enter the access code and your name to join a round.
+          Enter access code and your name to join a round.
         </p>
 
-        <div>
-          <label htmlFor="join-access-code">Access code</label>
-          <input id="join-access-code" name="accessCode" type="text" required />
-        </div>
+        <FieldGroup>
+          <Controller
+            name="accessCode"
+            control={form.control}
+            render={({ field, fieldState }) => (
+              <Field data-invalid={fieldState.invalid}>
+                <FieldLabel htmlFor="join-round-access-code">
+                  Access code
+                </FieldLabel>
+                <Input
+                  {...field}
+                  id="join-round-access-code"
+                  aria-invalid={fieldState.invalid || undefined}
+                  placeholder="XYSHSFL"
+                  autoComplete="off"
+                  aira-describedby={
+                    fieldState.invalid
+                      ? "join-round-access-code-error"
+                      : undefined
+                  }
+                />
 
-        <div>
-          <label htmlFor="join-player-name">Your name</label>
-          <input id="join-player-name" name="playerName" type="text" required />
-        </div>
-
-        <div>
-          <label htmlFor="join-player-color">Tee / color</label>
-          <input
-            id="join-player-color"
-            name="playerColor"
-            type="text"
-            placeholder="e.g. White"
+                {fieldState.invalid && (
+                  <FieldError
+                    id="join-round-access-code-error"
+                    errors={[fieldState.error]}
+                  />
+                )}
+              </Field>
+            )}
           />
-        </div>
+        </FieldGroup>
+
+        <FieldGroup>
+          <Controller
+            name="playerName"
+            control={form.control}
+            render={({ field, fieldState }) => (
+              <Field data-invalid={fieldState.invalid}>
+                <FieldLabel htmlFor="join-round-player-name">Name</FieldLabel>
+                <Input
+                  {...field}
+                  id="join-round-player-name"
+                  aria-invalid={fieldState.invalid || undefined}
+                  placeholder="Your name"
+                  autoComplete="off"
+                  aira-describedby={
+                    fieldState.invalid
+                      ? "join-round-player-name-error"
+                      : undefined
+                  }
+                />
+
+                {fieldState.invalid && (
+                  <FieldError
+                    id="join-round-player-name-error"
+                    errors={[fieldState.error]}
+                  />
+                )}
+              </Field>
+            )}
+          />
+        </FieldGroup>
+
+        <FieldGroup>
+          <Controller
+            name="teeColor"
+            control={form.control}
+            render={({ field, fieldState }) => (
+              <Field data-invalid={fieldState.invalid}>
+                <FieldLabel htmlFor="join-round-tee-color">
+                  Tee color
+                </FieldLabel>
+                <Input
+                  {...field}
+                  id="join-round-tee-color"
+                  aria-invalid={fieldState.invalid || undefined}
+                  placeholder="White"
+                  autoComplete="off"
+                  aira-describedby={
+                    fieldState.invalid
+                      ? "join-round-tee-color-error"
+                      : undefined
+                  }
+                />
+
+                {fieldState.invalid && (
+                  <FieldError
+                    id="join-round-tee-color-error"
+                    errors={[fieldState.error]}
+                  />
+                )}
+              </Field>
+            )}
+          />
+        </FieldGroup>
 
         {errorMessage && (
-          <p role="alert" aria-live="assertive">
-            {errorMessage}
-          </p>
+          <FieldError aria-live="assertive">{errorMessage}</FieldError>
         )}
 
-        <div>
-          <button type="submit" disabled={joinRound.isPending}>
+        <Field orientation="horizontal">
+          <Button type="button" variant="outline" onClick={onReset}>
+            Reset
+          </Button>
+          <Button
+            type="submit"
+            form="join-round-form"
+            disabled={joinRound.isPending}
+          >
             {joinRound.isPending ? "Joining…" : "Join round"}
-          </button>
-        </div>
+          </Button>
+        </Field>
       </form>
     </section>
   );

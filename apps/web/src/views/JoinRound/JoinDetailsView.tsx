@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   IonHeader,
   IonToolbar,
@@ -13,12 +14,9 @@ import {
   IonList,
   IonItem,
   IonInput,
-  IonSearchbar,
-  IonRadioGroup,
-  IonRadio,
   IonNote,
 } from "@ionic/react";
-import { useCreateRound } from "@/hooks/useCreateRound";
+import { useJoinRound } from "@/hooks/useJoinRound";
 import { navyToolbarStyle } from "@/components/theme";
 import { TeePicker } from "@/components/TeePicker";
 import { TEE_COLORS } from "@/components/teeBadges";
@@ -30,54 +28,51 @@ import {
 } from "@/lib/playerPrefs";
 
 const formSchema = z.object({
-  courseName: z
-    .string()
-    .trim()
-    .min(1, "Course must be at least 1 character")
-    .max(32, "Course must be at most 32 characters"),
   playerName: z
     .string()
     .trim()
     .min(1, "Player name must be at least 1 character")
     .max(32, "Player name must be at most 32 characters"),
   teeColor: z.enum(TEE_COLORS),
-  holeCount: z.union(
-    [z.literal(9), z.literal(18)],
-    "Hole count must be either 9 or 18"
-  ),
 });
 
-export function CreateRoundView() {
-  const createRound = useCreateRound();
+export function JoinDetailsView() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const accessCode = searchParams.get("code") ?? "";
+
+  useEffect(() => {
+    if (!accessCode) {
+      void navigate("/rounds/join", { replace: true });
+    }
+  }, [accessCode, navigate]);
+
+  const joinRound = useJoinRound();
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      courseName: "",
       playerName: getLastPlayerName() || "",
       teeColor: getLastTeeColor() as z.infer<typeof formSchema>["teeColor"],
-      holeCount: 18,
     },
   });
 
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
-    const { courseName, playerName, teeColor, holeCount } = data;
-    const par = Array.from({ length: holeCount }, () => 4);
+    const { playerName, teeColor } = data;
     setLastPlayerName(playerName);
     setLastTeeColor(teeColor);
     try {
-      await createRound.mutateAsync({
-        courseName,
-        par,
+      await joinRound.mutateAsync({
+        accessCode,
         playerName,
         color: teeColor,
       });
     } catch {
-      // error surface via createRound.error; prevent unhandled rejection
+      // error surfaced via joinRound.error
     }
   };
 
   const errorMessage = useMemo(() => {
-    const error = createRound.error;
+    const error = joinRound.error;
 
     if (!error) return undefined;
 
@@ -97,50 +92,32 @@ export function CreateRoundView() {
     }
 
     return "An unexpected error occurred";
-  }, [createRound.error]);
+  }, [joinRound.error]);
+
+  if (!accessCode) return null;
 
   return (
     <>
       <IonHeader>
         <IonToolbar style={navyToolbarStyle}>
           <IonButtons slot="start">
-            <IonBackButton defaultHref="/" color="light" />
+            <IonBackButton defaultHref="/rounds/join" color="light" />
           </IonButtons>
-          <IonTitle>Create Round</IonTitle>
+          <IonTitle>Your Details</IonTitle>
         </IonToolbar>
       </IonHeader>
 
       <IonContent>
         <form
-          id="create-round-form"
+          id="join-details-form"
           className="ion-padding"
           onSubmit={(e) => void form.handleSubmit(onSubmit)(e)}
         >
-          <IonList>
-            <Controller
-              name="courseName"
-              control={form.control}
-              render={({ field, fieldState }) => (
-                <IonItem>
-                  <div className="w-full py-1">
-                    <IonSearchbar
-                      placeholder="Search courses..."
-                      value={field.value}
-                      onIonInput={(e) => field.onChange(e.detail.value ?? "")}
-                      onIonBlur={field.onBlur}
-                      debounce={0}
-                      className={fieldState.invalid ? "ion-invalid ion-touched" : ""}
-                    />
-                    {fieldState.invalid && (
-                      <IonNote className="text-red-600 text-sm px-4">
-                        {fieldState.error?.message}
-                      </IonNote>
-                    )}
-                  </div>
-                </IonItem>
-              )}
-            />
+          <p className="text-sm text-gray-500 mb-4">
+            Joining with code: <span className="font-mono font-semibold">{accessCode}</span>
+          </p>
 
+          <IonList>
             <Controller
               name="playerName"
               control={form.control}
@@ -176,32 +153,6 @@ export function CreateRoundView() {
                 </IonItem>
               )}
             />
-
-            <Controller
-              name="holeCount"
-              control={form.control}
-              render={({ field, fieldState }) => (
-                <IonItem>
-                  <div className="w-full py-2">
-                    <label className="block text-sm font-medium mb-2">Holes</label>
-                    <IonRadioGroup
-                      value={field.value}
-                      onIonChange={(e) => field.onChange(e.detail.value as number)}
-                    >
-                      <div className="flex gap-6">
-                        <IonRadio value={18} labelPlacement="end">18</IonRadio>
-                        <IonRadio value={9} labelPlacement="end">9</IonRadio>
-                      </div>
-                    </IonRadioGroup>
-                    {fieldState.invalid && (
-                      <IonNote className="text-red-600 text-sm">
-                        {fieldState.error?.message}
-                      </IonNote>
-                    )}
-                  </div>
-                </IonItem>
-              )}
-            />
           </IonList>
 
           {errorMessage && (
@@ -215,10 +166,10 @@ export function CreateRoundView() {
               expand="block"
               type="submit"
               style={{ "--background": "#3d5a80" }}
-              disabled={createRound.isPending}
+              disabled={joinRound.isPending}
               className="flex-1"
             >
-              {createRound.isPending ? "Creating\u2026" : "Create & Start"}
+              {joinRound.isPending ? "Joining\u2026" : "Join round"}
             </IonButton>
           </div>
         </form>

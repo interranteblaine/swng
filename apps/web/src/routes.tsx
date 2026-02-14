@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/AppLayout/AppLayout";
 import { HomeView } from "@/views/Home/HomeView";
 import { CreateRoundView } from "@/views/CreateRound/CreateRoundView";
 import { JoinRoundView } from "@/views/JoinRound/JoinRoundView";
+import { JoinDetailsView } from "@/views/JoinRound/JoinDetailsView";
 import { RoundView } from "@/views/Round/RoundView";
 
 const routes: RouteObject[] = [
@@ -25,6 +26,10 @@ const routes: RouteObject[] = [
       {
         path: "/rounds/join",
         element: <JoinRoundView />,
+      },
+      {
+        path: "/rounds/join/details",
+        element: <JoinDetailsView />,
       },
       { path: "*", element: <Navigate to="/" replace /> },
     ],

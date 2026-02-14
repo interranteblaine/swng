@@ -17,11 +17,13 @@ import { HoleNavigator } from "./HoleNavigator";
 import { ScoreEntryList } from "./ScoreEntryList";
 import { TotalsStrip } from "./TotalsStrip";
 import { navyToolbarStyle } from "@/components/theme";
+import { OptionsMenu } from "./OptionsMenu";
 
 export function ScoreEntryPage() {
   const { snapshot } = useRoundData();
   const { updateScore } = useRoundActions();
   const [visibleHole, setVisibleHole] = useState(1);
+  const [showOptions, setShowOptions] = useState(false);
 
   if (!snapshot) return null;
 
@@ -50,7 +52,7 @@ export function ScoreEntryPage() {
           </IonButtons>
           <IonTitle>{snapshot.config.courseName}</IonTitle>
           <IonButtons slot="end">
-            <IonButton aria-label="Options" color="light">
+            <IonButton aria-label="Options" color="light" onClick={() => setShowOptions(true)}>
               <IonIcon slot="icon-only" icon={menuOutline} />
             </IonButton>
           </IonButtons>
@@ -76,6 +78,8 @@ export function ScoreEntryPage() {
       <IonFooter>
         <TotalsStrip snapshot={snapshot} />
       </IonFooter>
+
+      <OptionsMenu isOpen={showOptions} onClose={() => setShowOptions(false)} />
     </IonPage>
   );
 }

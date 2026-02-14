@@ -7,9 +7,11 @@ import {
 } from "@ionic/react";
 import { useNavigate } from "react-router-dom";
 import { navyToolbarStyle } from "@/components/theme";
+import { useCurrentRoundId } from "@/hooks/useCurrentRoundId";
 
 export function HomeView() {
   const navigate = useNavigate();
+  const currentRoundId = useCurrentRoundId();
 
   return (
     <>
@@ -41,6 +43,19 @@ export function HomeView() {
               Join a round
             </IonButton>
           </div>
+
+          {currentRoundId && (
+            <div className="w-full max-w-xs rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+              <p className="text-sm text-gray-600 mb-3">You have an active round</p>
+              <IonButton
+                expand="block"
+                style={{ "--background": "#3d5a80" }}
+                onClick={() => void navigate(`/rounds/${currentRoundId}`)}
+              >
+                Resume round
+              </IonButton>
+            </div>
+          )}
         </div>
       </IonContent>
     </>

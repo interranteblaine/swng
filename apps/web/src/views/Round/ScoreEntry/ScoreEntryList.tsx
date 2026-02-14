@@ -1,5 +1,6 @@
 import { IonList, IonItem, IonLabel } from "@ionic/react";
 import { ScoreStepper } from "./ScoreStepper";
+import { teeBadgeClasses } from "@/components/teeBadges";
 
 type PlayerView = {
   playerId: string;
@@ -11,13 +12,6 @@ type ScoreEntryListProps = {
   players: PlayerView[];
   strokesByPlayer: Record<string, number | undefined>;
   onChangeStrokes: (playerId: string, strokes: number) => void;
-};
-
-const teeBadgeClasses: Record<string, string> = {
-  Blue: "bg-blue-600 text-white",
-  Red: "bg-red-600 text-white",
-  White: "bg-white text-gray-800 border border-gray-300",
-  Gold: "bg-amber-500 text-white",
 };
 
 export function ScoreEntryList({

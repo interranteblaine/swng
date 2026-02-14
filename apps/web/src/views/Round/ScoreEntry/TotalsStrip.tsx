@@ -38,34 +38,25 @@ export function TotalsStrip({ snapshot }: TotalsStripProps) {
   }, [snapshot]);
 
   return (
-    <div style={{ overflowX: "auto", padding: "8px 0", borderTop: "1px solid var(--ion-border-color, #c8c7cc)" }}>
-      <table
-        style={{
-          width: "100%",
-          fontSize: "0.8rem",
-          borderCollapse: "collapse",
-          textAlign: "center",
-        }}
-      >
+    <div className="overflow-x-auto border-t border-gray-200 py-2">
+      <table className="w-full border-collapse text-center text-sm">
         <thead>
-          <tr>
-            <th style={{ textAlign: "left", padding: "4px 8px" }}>Player</th>
-            <th style={{ padding: "4px 8px" }}>Out</th>
-            <th style={{ padding: "4px 8px" }}>In</th>
-            <th style={{ padding: "4px 8px" }}>Tot</th>
-            <th style={{ padding: "4px 8px" }}>+/-</th>
+          <tr className="bg-navy text-white">
+            <th className="px-3 py-2 text-left font-semibold">Player</th>
+            <th className="px-3 py-2 font-semibold">Out</th>
+            <th className="px-3 py-2 font-semibold">In</th>
+            <th className="px-3 py-2 font-semibold">Tot</th>
+            <th className="px-3 py-2 font-semibold">+/-</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.playerId}>
-              <td style={{ textAlign: "left", padding: "4px 8px", fontWeight: 500 }}>
-                {r.name}
-              </td>
-              <td style={{ padding: "4px 8px" }}>{r.out || "—"}</td>
-              <td style={{ padding: "4px 8px" }}>{r.inn || "—"}</td>
-              <td style={{ padding: "4px 8px" }}>{r.total || "—"}</td>
-              <td style={{ padding: "4px 8px" }}>{r.toPar}</td>
+            <tr key={r.playerId} className="border-b border-gray-100">
+              <td className="px-3 py-2 text-left font-medium">{r.name}</td>
+              <td className="px-3 py-2">{r.out || "—"}</td>
+              <td className="px-3 py-2">{r.inn || "—"}</td>
+              <td className="px-3 py-2">{r.total || "—"}</td>
+              <td className="px-3 py-2">{r.toPar}</td>
             </tr>
           ))}
         </tbody>

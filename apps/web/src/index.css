@@ -1,1 +1,6 @@
 @import "tailwindcss";
+
+@theme {
+  --color-navy: #3d5a80;
+  --color-row-alt: #f5f7fa;
+}

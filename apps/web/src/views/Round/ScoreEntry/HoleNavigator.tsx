@@ -1,11 +1,4 @@
-import {
-  IonToolbar,
-  IonButtons,
-  IonButton,
-  IonIcon,
-  IonSelect,
-  IonSelectOption,
-} from "@ionic/react";
+import { IonToolbar, IonButton, IonIcon } from "@ionic/react";
 import { chevronBack, chevronForward } from "ionicons/icons";
 
 type HoleNavigatorProps = {
@@ -26,66 +19,33 @@ export function HoleNavigator({
   const visiblePar = par[visibleHole - 1];
 
   return (
-    <IonToolbar>
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          padding: "4px 0",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            width: "100%",
-            justifyContent: "center",
-          }}
-        >
-          <IonButtons>
-            <IonButton
-              disabled={!canPrev}
-              onClick={() => onChangeHole(visibleHole - 1)}
-              aria-label="Previous hole"
-            >
-              <IonIcon slot="icon-only" icon={chevronBack} />
-            </IonButton>
-          </IonButtons>
-
-          <IonSelect
-            interface="popover"
-            value={visibleHole}
-            onIonChange={(e) => onChangeHole(e.detail.value as number)}
-            aria-label="Select hole"
-            style={{ maxWidth: 120, textAlign: "center" }}
+    <IonToolbar style={{ "--background": "#ffffff", "--border-color": "#e5e7eb" }}>
+      <div className="flex flex-col items-center py-1">
+        <div className="flex w-full items-center justify-center gap-1">
+          <IonButton
+            fill="clear"
+            disabled={!canPrev}
+            onClick={() => onChangeHole(visibleHole - 1)}
+            aria-label="Previous hole"
           >
-            {Array.from({ length: holeCount }, (_, i) => (
-              <IonSelectOption key={i + 1} value={i + 1}>
-                Hole {i + 1}
-              </IonSelectOption>
-            ))}
-          </IonSelect>
+            <IonIcon slot="icon-only" icon={chevronBack} />
+          </IonButton>
 
-          <IonButtons>
-            <IonButton
-              disabled={!canNext}
-              onClick={() => onChangeHole(visibleHole + 1)}
-              aria-label="Next hole"
-            >
-              <IonIcon slot="icon-only" icon={chevronForward} />
-            </IonButton>
-          </IonButtons>
+          <span className="text-2xl font-bold text-gray-900">
+            Hole {visibleHole}
+          </span>
+
+          <IonButton
+            fill="clear"
+            disabled={!canNext}
+            onClick={() => onChangeHole(visibleHole + 1)}
+            aria-label="Next hole"
+          >
+            <IonIcon slot="icon-only" icon={chevronForward} />
+          </IonButton>
         </div>
 
-        <div
-          style={{
-            fontSize: "0.85rem",
-            color: "var(--ion-color-medium)",
-            marginTop: 2,
-          }}
-        >
+        <div className="mt-0.5 text-sm text-gray-500">
           Par {visiblePar} &middot; HCP —
         </div>
       </div>

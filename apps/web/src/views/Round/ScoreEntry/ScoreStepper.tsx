@@ -1,4 +1,4 @@
-import { IonButton, IonIcon } from "@ionic/react";
+import { IonIcon } from "@ionic/react";
 import { add, remove } from "ionicons/icons";
 
 type ScoreStepperProps = {
@@ -11,10 +11,9 @@ const MAX = 12;
 
 export function ScoreStepper({ value, onChange }: ScoreStepperProps) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      <IonButton
-        fill="clear"
-        size="small"
+    <div className="flex items-center">
+      <button
+        className="flex h-12 w-12 items-center justify-center rounded-l-lg border border-gray-300 bg-white text-gray-700 active:bg-gray-100 disabled:opacity-40"
         disabled={value === undefined || value <= MIN}
         onClick={() => {
           if (value !== undefined && value > MIN) {
@@ -23,23 +22,15 @@ export function ScoreStepper({ value, onChange }: ScoreStepperProps) {
         }}
         aria-label="Decrease score"
       >
-        <IonIcon slot="icon-only" icon={remove} />
-      </IonButton>
+        <IonIcon icon={remove} className="text-xl" />
+      </button>
 
-      <span
-        style={{
-          minWidth: 28,
-          textAlign: "center",
-          fontSize: "1.125rem",
-          fontWeight: 600,
-        }}
-      >
+      <span className="flex h-12 w-14 items-center justify-center border-y border-gray-300 bg-white text-2xl font-bold text-gray-900">
         {value ?? "-"}
       </span>
 
-      <IonButton
-        fill="clear"
-        size="small"
+      <button
+        className="flex h-12 w-12 items-center justify-center rounded-r-lg border border-gray-300 bg-white text-gray-700 active:bg-gray-100 disabled:opacity-40"
         disabled={value !== undefined && value >= MAX}
         onClick={() => {
           if (value === undefined) {
@@ -50,8 +41,8 @@ export function ScoreStepper({ value, onChange }: ScoreStepperProps) {
         }}
         aria-label="Increase score"
       >
-        <IonIcon slot="icon-only" icon={add} />
-      </IonButton>
+        <IonIcon icon={add} className="text-xl" />
+      </button>
     </div>
   );
 }

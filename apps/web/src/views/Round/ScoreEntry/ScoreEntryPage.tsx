@@ -11,7 +11,7 @@ import {
   IonButton,
   IonIcon,
 } from "@ionic/react";
-import { ellipsisVertical } from "ionicons/icons";
+import { menuOutline } from "ionicons/icons";
 import { useRoundData, useRoundActions } from "../Context/useRoundContext";
 import { HoleNavigator } from "./HoleNavigator";
 import { ScoreEntryList } from "./ScoreEntryList";
@@ -43,14 +43,14 @@ export function ScoreEntryPage() {
   return (
     <IonPage>
       <IonHeader>
-        <IonToolbar>
+        <IonToolbar style={{ "--background": "#3d5a80", "--color": "#ffffff" }}>
           <IonButtons slot="start">
-            <IonBackButton defaultHref="/" />
+            <IonBackButton defaultHref="/" color="light" />
           </IonButtons>
           <IonTitle>{snapshot.config.courseName}</IonTitle>
           <IonButtons slot="end">
-            <IonButton aria-label="Options">
-              <IonIcon slot="icon-only" icon={ellipsisVertical} />
+            <IonButton aria-label="Options" color="light">
+              <IonIcon slot="icon-only" icon={menuOutline} />
             </IonButton>
           </IonButtons>
         </IonToolbar>

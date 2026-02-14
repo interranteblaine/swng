@@ -21,6 +21,10 @@ export type AppRouteObject = RouteObject & {
 
 const routes: AppRouteObject[] = [
   {
+    path: "/rounds/:roundId",
+    element: <RoundView />,
+  },
+  {
     element: <AppLayout />,
     children: [
       { index: true, element: <HomeView />, handle: { title: "Home" } },
@@ -33,13 +37,6 @@ const routes: AppRouteObject[] = [
         path: "/rounds/join",
         element: <JoinRoundView />,
         handle: { title: "Join Round" },
-      },
-      {
-        path: "/rounds/:roundId",
-        element: <RoundView />,
-        handle: {
-          title: "Current Round",
-        },
       },
       { path: "*", element: <Navigate to="/" replace /> },
     ],

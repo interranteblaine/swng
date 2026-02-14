@@ -58,6 +58,20 @@ export function formatRelative(delta: number): string {
   return delta > 0 ? `+${delta}` : `${delta}`;
 }
 
+export function computeParThroughPlayedHoles(
+  snapshot: RoundSnapshot,
+  index: Map<string, number>,
+  playerId: PlayerId
+): number {
+  let total = 0;
+  for (let hole = 1; hole <= snapshot.config.par.length; hole++) {
+    if (index.has(`${playerId}:${hole}`)) {
+      total += snapshot.config.par[hole - 1] ?? 0;
+    }
+  }
+  return total;
+}
+
 export function sortPlayersByTotalFromIndex(
   index: Map<string, number>,
   players: Player[]

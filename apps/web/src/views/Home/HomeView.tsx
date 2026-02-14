@@ -1,41 +1,48 @@
-import { Link } from "react-router-dom";
+import {
+  IonHeader,
+  IonToolbar,
+  IonTitle,
+  IonContent,
+  IonButton,
+} from "@ionic/react";
+import { useNavigate } from "react-router-dom";
+import { navyToolbarStyle } from "@/components/theme";
 
 export function HomeView() {
-  return (
-    <section
-      id="home-view"
-      aria-labelledby="home-heading"
-      className="lg:max-w-2xl flex flex-col"
-    >
-      <header className="mb-6 flex flex-col">
-        <h2 id="home-heading" className="text-l md:text-xl font-semibold">
-          Welcome to SWNG
-        </h2>
-        <p className="sr-only">Create a new round or join one.</p>
-      </header>
+  const navigate = useNavigate();
 
-      <nav aria-label="Primary actions">
-        <ul className="flex gap-6">
-          <li>
-            <Link
-              to="/rounds/create"
-              id="home-create-link"
-              className="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-6 py-3 text-sm font-medium"
+  return (
+    <>
+      <IonHeader>
+        <IonToolbar style={navyToolbarStyle}>
+          <IonTitle>Swng</IonTitle>
+        </IonToolbar>
+      </IonHeader>
+
+      <IonContent>
+        <div className="flex flex-col items-center justify-center px-6 py-16 gap-8">
+          <h2 className="text-xl font-semibold">Welcome to Swng</h2>
+          <p className="text-gray-500">Create a new round or join one.</p>
+
+          <div className="flex flex-col gap-3 w-full max-w-xs">
+            <IonButton
+              expand="block"
+              style={{ "--background": "#3d5a80" }}
+              onClick={() => void navigate("/rounds/create")}
             >
               Create a round
-            </Link>
-          </li>
-          <li>
-            <Link
-              to="/rounds/join"
-              id="home-join-link"
-              className="inline-flex items-center justify-center rounded-md border border-input bg-background px-6 py-3 text-sm font-medium"
+            </IonButton>
+            <IonButton
+              expand="block"
+              fill="outline"
+              style={{ "--color": "#3d5a80", "--border-color": "#3d5a80" }}
+              onClick={() => void navigate("/rounds/join")}
             >
               Join a round
-            </Link>
-          </li>
-        </ul>
-      </nav>
-    </section>
+            </IonButton>
+          </div>
+        </div>
+      </IonContent>
+    </>
   );
 }

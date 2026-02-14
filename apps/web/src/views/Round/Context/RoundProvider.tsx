@@ -1,9 +1,21 @@
 import { useCallback, useMemo, type ReactNode } from "react";
+import {
+  IonPage,
+  IonHeader,
+  IonToolbar,
+  IonTitle,
+  IonContent,
+  IonButtons,
+  IonBackButton,
+  IonButton,
+  IonSpinner,
+} from "@ionic/react";
 import { useRound } from "../../../hooks/useRound";
 import { useUpdateScore } from "../../../hooks/useUpdateScore";
 import { useUpdatePlayer } from "../../../hooks/useUpdatePlayer";
 import { usePatchRoundState } from "../../../hooks/usePatchRoundState";
 import { RoundActionsContext, RoundDataContext } from "./RoundContexts";
+import { navyToolbarStyle } from "@/components/theme";
 import type { RoundSnapshot } from "@swng/domain";
 
 type UpdateScoreArgs = {
@@ -74,7 +86,21 @@ export function RoundProvider({
   );
 
   if (isLoading) {
-    return <>{loadingFallback ?? <div aria-busy="true">Loading round…</div>}</>;
+    if (loadingFallback) return <>{loadingFallback}</>;
+    return (
+      <IonPage>
+        <IonHeader>
+          <IonToolbar style={navyToolbarStyle}>
+            <IonTitle>Loading...</IonTitle>
+          </IonToolbar>
+        </IonHeader>
+        <IonContent>
+          <div className="flex items-center justify-center h-full" aria-busy="true">
+            <IonSpinner />
+          </div>
+        </IonContent>
+      </IonPage>
+    );
   }
 
   if (error) {
@@ -83,14 +109,48 @@ export function RoundProvider({
       (error as { message?: string })?.message ??
       (typeof error === "string" ? error : "Failed to load round.");
     return (
-      <div role="alert" aria-live="assertive">
-        {msg}
-      </div>
+      <IonPage>
+        <IonHeader>
+          <IonToolbar style={navyToolbarStyle}>
+            <IonButtons slot="start">
+              <IonBackButton defaultHref="/" color="light" />
+            </IonButtons>
+            <IonTitle>Error</IonTitle>
+          </IonToolbar>
+        </IonHeader>
+        <IonContent>
+          <div className="flex flex-col items-center justify-center gap-4 p-6" role="alert" aria-live="assertive">
+            <p className="text-red-600">{msg}</p>
+            <IonButton
+              style={{ "--background": "#3d5a80" }}
+              onClick={() => void refetch()}
+            >
+              Try again
+            </IonButton>
+          </div>
+        </IonContent>
+      </IonPage>
     );
   }
 
   if (!snapshot) {
-    return <div role="status">No round data available.</div>;
+    return (
+      <IonPage>
+        <IonHeader>
+          <IonToolbar style={navyToolbarStyle}>
+            <IonButtons slot="start">
+              <IonBackButton defaultHref="/" color="light" />
+            </IonButtons>
+            <IonTitle>Round</IonTitle>
+          </IonToolbar>
+        </IonHeader>
+        <IonContent>
+          <div className="flex items-center justify-center p-6" role="status">
+            No round data available.
+          </div>
+        </IonContent>
+      </IonPage>
+    );
   }
 
   return (

@@ -16,6 +16,7 @@ import { useRoundData, useRoundActions } from "../Context/useRoundContext";
 import { HoleNavigator } from "./HoleNavigator";
 import { ScoreEntryList } from "./ScoreEntryList";
 import { TotalsStrip } from "./TotalsStrip";
+import { navyToolbarStyle } from "@/components/theme";
 
 export function ScoreEntryPage() {
   const { snapshot } = useRoundData();
@@ -43,7 +44,7 @@ export function ScoreEntryPage() {
   return (
     <IonPage>
       <IonHeader>
-        <IonToolbar style={{ "--background": "#3d5a80", "--color": "#ffffff" }}>
+        <IonToolbar style={navyToolbarStyle}>
           <IonButtons slot="start">
             <IonBackButton defaultHref="/" color="light" />
           </IonButtons>

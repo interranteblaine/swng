@@ -2,7 +2,21 @@ import { useMemo } from "react";
 import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
+import {
+  IonHeader,
+  IonToolbar,
+  IonTitle,
+  IonContent,
+  IonButtons,
+  IonBackButton,
+  IonButton,
+  IonList,
+  IonItem,
+  IonInput,
+  IonNote,
+} from "@ionic/react";
 import { useJoinRound } from "@/hooks/useJoinRound";
+import { navyToolbarStyle } from "@/components/theme";
 
 const formSchema = z.object({
   accessCode: z
@@ -49,7 +63,6 @@ export function JoinRoundView() {
   const onReset = () => {
     joinRound.reset();
     form.reset();
-    console.log("reset");
   };
 
   const errorMessage = useMemo(() => {
@@ -76,156 +89,117 @@ export function JoinRoundView() {
   }, [joinRound.error]);
 
   return (
-    <section
-      id="join-view"
-      aria-labelledby="join-heading"
-      className="lg:max-w-2xl"
-    >
-      <header className="mb-6">
-        <h2 id="join-heading" className="text-l md:text-xl font-semibold">
-          Join Round
-        </h2>
-      </header>
+    <>
+      <IonHeader>
+        <IonToolbar style={navyToolbarStyle}>
+          <IonButtons slot="start">
+            <IonBackButton defaultHref="/" color="light" />
+          </IonButtons>
+          <IonTitle>Join Round</IonTitle>
+        </IonToolbar>
+      </IonHeader>
 
-      <form
-        id="join-round-form"
-        aria-describedby="join-description"
-        className="space-y-6"
-        onSubmit={(e) => void form.handleSubmit(onSubmit)(e)}
-      >
-        <p id="join-description">
-          Enter access code and your name to join a round.
-        </p>
+      <IonContent>
+        <form
+          id="join-round-form"
+          className="ion-padding"
+          onSubmit={(e) => void form.handleSubmit(onSubmit)(e)}
+        >
+          <IonList>
+            <Controller
+              name="accessCode"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <IonItem>
+                  <IonInput
+                    label="Access code"
+                    labelPlacement="stacked"
+                    placeholder="XYSHSFL"
+                    value={field.value}
+                    onIonInput={(e) => field.onChange(e.detail.value ?? "")}
+                    onIonBlur={field.onBlur}
+                    className={fieldState.invalid ? "ion-invalid ion-touched" : ""}
+                  />
+                  {fieldState.invalid && (
+                    <IonNote slot="error" className="text-red-600 text-sm">
+                      {fieldState.error?.message}
+                    </IonNote>
+                  )}
+                </IonItem>
+              )}
+            />
 
-        <div className="space-y-4">
-          <Controller
-            name="accessCode"
-            control={form.control}
-            render={({ field, fieldState }) => (
-              <div data-invalid={fieldState.invalid || undefined}>
-                <label htmlFor="join-round-access-code" className="block text-sm font-medium mb-1">
-                  Access code
-                </label>
-                <input
-                  {...field}
-                  id="join-round-access-code"
-                  aria-invalid={fieldState.invalid || undefined}
-                  placeholder="XYSHSFL"
-                  autoComplete="off"
-                  aria-describedby={
-                    fieldState.invalid
-                      ? "join-round-access-code-error"
-                      : undefined
-                  }
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-                {fieldState.invalid && (
-                  <span
-                    id="join-round-access-code-error"
-                    className="text-sm text-destructive"
-                  >
-                    {fieldState.error?.message}
-                  </span>
-                )}
-              </div>
-            )}
-          />
-        </div>
+            <Controller
+              name="playerName"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <IonItem>
+                  <IonInput
+                    label="Player name"
+                    labelPlacement="stacked"
+                    placeholder="Your name"
+                    value={field.value}
+                    onIonInput={(e) => field.onChange(e.detail.value ?? "")}
+                    onIonBlur={field.onBlur}
+                    className={fieldState.invalid ? "ion-invalid ion-touched" : ""}
+                  />
+                  {fieldState.invalid && (
+                    <IonNote slot="error" className="text-red-600 text-sm">
+                      {fieldState.error?.message}
+                    </IonNote>
+                  )}
+                </IonItem>
+              )}
+            />
 
-        <div className="space-y-4">
-          <Controller
-            name="playerName"
-            control={form.control}
-            render={({ field, fieldState }) => (
-              <div data-invalid={fieldState.invalid || undefined}>
-                <label htmlFor="join-round-player-name" className="block text-sm font-medium mb-1">
-                  Name
-                </label>
-                <input
-                  {...field}
-                  id="join-round-player-name"
-                  aria-invalid={fieldState.invalid || undefined}
-                  placeholder="Your name"
-                  autoComplete="off"
-                  aria-describedby={
-                    fieldState.invalid
-                      ? "join-round-player-name-error"
-                      : undefined
-                  }
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-                {fieldState.invalid && (
-                  <span
-                    id="join-round-player-name-error"
-                    className="text-sm text-destructive"
-                  >
-                    {fieldState.error?.message}
-                  </span>
-                )}
-              </div>
-            )}
-          />
-        </div>
+            <Controller
+              name="teeColor"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <IonItem>
+                  <IonInput
+                    label="Tee color"
+                    labelPlacement="stacked"
+                    placeholder="White"
+                    value={field.value}
+                    onIonInput={(e) => field.onChange(e.detail.value ?? "")}
+                    onIonBlur={field.onBlur}
+                    className={fieldState.invalid ? "ion-invalid ion-touched" : ""}
+                  />
+                  {fieldState.invalid && (
+                    <IonNote slot="error" className="text-red-600 text-sm">
+                      {fieldState.error?.message}
+                    </IonNote>
+                  )}
+                </IonItem>
+              )}
+            />
+          </IonList>
 
-        <div className="space-y-4">
-          <Controller
-            name="teeColor"
-            control={form.control}
-            render={({ field, fieldState }) => (
-              <div data-invalid={fieldState.invalid || undefined}>
-                <label htmlFor="join-round-tee-color" className="block text-sm font-medium mb-1">
-                  Tee color
-                </label>
-                <input
-                  {...field}
-                  id="join-round-tee-color"
-                  aria-invalid={fieldState.invalid || undefined}
-                  placeholder="White"
-                  autoComplete="off"
-                  aria-describedby={
-                    fieldState.invalid
-                      ? "join-round-tee-color-error"
-                      : undefined
-                  }
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-                {fieldState.invalid && (
-                  <span
-                    id="join-round-tee-color-error"
-                    className="text-sm text-destructive"
-                  >
-                    {fieldState.error?.message}
-                  </span>
-                )}
-              </div>
-            )}
-          />
-        </div>
+          {errorMessage && (
+            <p className="text-red-600 text-sm ion-padding-start" aria-live="assertive">
+              {errorMessage}
+            </p>
+          )}
 
-        {errorMessage && (
-          <span className="text-sm text-destructive" aria-live="assertive">
-            {errorMessage}
-          </span>
-        )}
-
-        <div className="flex gap-3">
-          <button
-            type="button"
-            className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium"
-            onClick={onReset}
-          >
-            Reset
-          </button>
-          <button
-            type="submit"
-            form="join-round-form"
-            disabled={joinRound.isPending}
-            className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50"
-          >
-            {joinRound.isPending ? "Joining\u2026" : "Join round"}
-          </button>
-        </div>
-      </form>
-    </section>
+          <div className="flex gap-3 ion-padding-top">
+            <IonButton
+              fill="outline"
+              style={{ "--color": "#3d5a80", "--border-color": "#3d5a80" }}
+              onClick={onReset}
+            >
+              Reset
+            </IonButton>
+            <IonButton
+              type="submit"
+              style={{ "--background": "#3d5a80" }}
+              disabled={joinRound.isPending}
+            >
+              {joinRound.isPending ? "Joining\u2026" : "Join round"}
+            </IonButton>
+          </div>
+        </form>
+      </IonContent>
+    </>
   );
 }

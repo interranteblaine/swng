@@ -16,8 +16,6 @@ describe("App smoke test", () => {
   it("renders the home route without crashing", () => {
     renderWithProviders();
     // Simple, stable assertion based on HomeView content
-    expect(
-      screen.getByRole("link", { name: /create a round/i })
-    ).toBeInTheDocument();
+    expect(screen.getByText(/create a round/i)).toBeInTheDocument();
   });
 });

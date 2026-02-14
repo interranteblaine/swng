@@ -1,8 +1,24 @@
 import { useMemo } from "react";
 import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useCreateRound } from "@/hooks/useCreateRound";
 import { Controller, useForm } from "react-hook-form";
+import {
+  IonHeader,
+  IonToolbar,
+  IonTitle,
+  IonContent,
+  IonButtons,
+  IonBackButton,
+  IonButton,
+  IonList,
+  IonItem,
+  IonInput,
+  IonRadioGroup,
+  IonRadio,
+  IonNote,
+} from "@ionic/react";
+import { useCreateRound } from "@/hooks/useCreateRound";
+import { navyToolbarStyle } from "@/components/theme";
 
 const formSchema = z.object({
   courseName: z
@@ -82,207 +98,143 @@ export function CreateRoundView() {
   }, [createRound.error]);
 
   return (
-    <section
-      id="create-view"
-      aria-labelledby="create-heading"
-      className="lg:max-w-2xl"
-    >
-      <header className="mb-6">
-        <h2 id="create-heading" className="text-l md:text-xl font-semibold">
-          Set up a new round.
-        </h2>
-      </header>
+    <>
+      <IonHeader>
+        <IonToolbar style={navyToolbarStyle}>
+          <IonButtons slot="start">
+            <IonBackButton defaultHref="/" color="light" />
+          </IonButtons>
+          <IonTitle>Create Round</IonTitle>
+        </IonToolbar>
+      </IonHeader>
 
-      <form
-        id="create-round-form"
-        aria-describedby="create-description"
-        className="space-y-6"
-        onSubmit={(e) => void form.handleSubmit(onSubmit)(e)}
-      >
-        <p id="create-description">
-          Configure course and player information to create a round.
-        </p>
+      <IonContent>
+        <form
+          id="create-round-form"
+          className="ion-padding"
+          onSubmit={(e) => void form.handleSubmit(onSubmit)(e)}
+        >
+          <IonList>
+            <Controller
+              name="courseName"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <IonItem>
+                  <IonInput
+                    label="Course name"
+                    labelPlacement="stacked"
+                    placeholder="Pebble Beach"
+                    value={field.value}
+                    onIonInput={(e) => field.onChange(e.detail.value ?? "")}
+                    onIonBlur={field.onBlur}
+                    className={fieldState.invalid ? "ion-invalid ion-touched" : ""}
+                  />
+                  {fieldState.invalid && (
+                    <IonNote slot="error" className="text-red-600 text-sm">
+                      {fieldState.error?.message}
+                    </IonNote>
+                  )}
+                </IonItem>
+              )}
+            />
 
-        <div className="space-y-4">
-          <Controller
-            name="courseName"
-            control={form.control}
-            render={({ field, fieldState }) => (
-              <div data-invalid={fieldState.invalid || undefined}>
-                <label htmlFor="create-course-name" className="block text-sm font-medium mb-1">
-                  Course name
-                </label>
-                <input
-                  {...field}
-                  id="create-course-name"
-                  aria-invalid={fieldState.invalid || undefined}
-                  placeholder="Pebble Beach"
-                  autoComplete="off"
-                  aria-describedby={
-                    fieldState.invalid ? "create-course-name-error" : undefined
-                  }
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-                {fieldState.invalid && (
-                  <span
-                    id="create-course-name-error"
-                    className="text-sm text-destructive"
-                  >
-                    {fieldState.error?.message}
-                  </span>
-                )}
-              </div>
-            )}
-          />
-
-          <Controller
-            name="holeCount"
-            control={form.control}
-            render={({ field, fieldState }) => (
-              <div data-invalid={fieldState.invalid || undefined}>
-                <label
-                  id="create-hole-count-label"
-                  htmlFor="create-hole-count"
-                  className="block text-sm font-medium mb-1"
-                >
-                  Holes
-                </label>
-                <div
-                  id="create-hole-count"
-                  role="radiogroup"
-                  aria-labelledby="create-hole-count-label"
-                  aria-invalid={fieldState.invalid || undefined}
-                  aria-describedby={
-                    fieldState.invalid ? "create-hole-count-error" : undefined
-                  }
-                  className="flex gap-4"
-                >
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="holeCount"
-                      value="18"
-                      id="create-hole-count-18"
-                      checked={field.value === 18}
-                      onChange={() => field.onChange(18)}
-                      onBlur={field.onBlur}
-                      disabled={field.disabled}
-                    />
-                    <label htmlFor="create-hole-count-18">18</label>
+            <Controller
+              name="holeCount"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <IonItem>
+                  <div className="w-full py-2">
+                    <label className="block text-sm font-medium mb-2">Holes</label>
+                    <IonRadioGroup
+                      value={field.value}
+                      onIonChange={(e) => field.onChange(e.detail.value as number)}
+                    >
+                      <div className="flex gap-6">
+                        <IonRadio value={18} labelPlacement="end">18</IonRadio>
+                        <IonRadio value={9} labelPlacement="end">9</IonRadio>
+                      </div>
+                    </IonRadioGroup>
+                    {fieldState.invalid && (
+                      <IonNote className="text-red-600 text-sm">
+                        {fieldState.error?.message}
+                      </IonNote>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="holeCount"
-                      value="9"
-                      id="create-hole-count-9"
-                      checked={field.value === 9}
-                      onChange={() => field.onChange(9)}
-                      onBlur={field.onBlur}
-                      disabled={field.disabled}
-                    />
-                    <label htmlFor="create-hole-count-9">9</label>
-                  </div>
-                </div>
-                {fieldState.invalid && (
-                  <span
-                    id="create-hole-count-error"
-                    className="text-sm text-destructive"
-                  >
-                    {fieldState.error?.message}
-                  </span>
-                )}
-              </div>
-            )}
-          />
+                </IonItem>
+              )}
+            />
 
-          <Controller
-            name="playerName"
-            control={form.control}
-            render={({ field, fieldState }) => (
-              <div data-invalid={fieldState.invalid || undefined}>
-                <label htmlFor="create-player-name" className="block text-sm font-medium mb-1">
-                  Player name
-                </label>
-                <input
-                  {...field}
-                  id="create-player-name"
-                  aria-invalid={fieldState.invalid || undefined}
-                  placeholder="Your name"
-                  autoComplete="off"
-                  aria-describedby={
-                    fieldState.invalid ? "create-player-name-error" : undefined
-                  }
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-                {fieldState.invalid && (
-                  <span
-                    id="create-player-name-error"
-                    className="text-sm text-destructive"
-                  >
-                    {fieldState.error?.message}
-                  </span>
-                )}
-              </div>
-            )}
-          />
+            <Controller
+              name="playerName"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <IonItem>
+                  <IonInput
+                    label="Player name"
+                    labelPlacement="stacked"
+                    placeholder="Your name"
+                    value={field.value}
+                    onIonInput={(e) => field.onChange(e.detail.value ?? "")}
+                    onIonBlur={field.onBlur}
+                    className={fieldState.invalid ? "ion-invalid ion-touched" : ""}
+                  />
+                  {fieldState.invalid && (
+                    <IonNote slot="error" className="text-red-600 text-sm">
+                      {fieldState.error?.message}
+                    </IonNote>
+                  )}
+                </IonItem>
+              )}
+            />
 
-          <Controller
-            name="teeColor"
-            control={form.control}
-            render={({ field, fieldState }) => (
-              <div data-invalid={fieldState.invalid || undefined}>
-                <label htmlFor="create-tee-color" className="block text-sm font-medium mb-1">
-                  Tee color
-                </label>
-                <input
-                  {...field}
-                  id="create-tee-color"
-                  aria-invalid={fieldState.invalid || undefined}
-                  placeholder="White"
-                  autoComplete="off"
-                  aria-describedby={
-                    fieldState.invalid ? "create-tee-color-error" : undefined
-                  }
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                />
-                {fieldState.invalid && (
-                  <span
-                    id="create-tee-color-error"
-                    className="text-sm text-destructive"
-                  >
-                    {fieldState.error?.message}
-                  </span>
-                )}
-              </div>
-            )}
-          />
-        </div>
+            <Controller
+              name="teeColor"
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <IonItem>
+                  <IonInput
+                    label="Tee color"
+                    labelPlacement="stacked"
+                    placeholder="White"
+                    value={field.value}
+                    onIonInput={(e) => field.onChange(e.detail.value ?? "")}
+                    onIonBlur={field.onBlur}
+                    className={fieldState.invalid ? "ion-invalid ion-touched" : ""}
+                  />
+                  {fieldState.invalid && (
+                    <IonNote slot="error" className="text-red-600 text-sm">
+                      {fieldState.error?.message}
+                    </IonNote>
+                  )}
+                </IonItem>
+              )}
+            />
+          </IonList>
 
-        {errorMessage && (
-          <span className="text-sm text-destructive" aria-live="assertive">
-            {errorMessage}
-          </span>
-        )}
+          {errorMessage && (
+            <p className="text-red-600 text-sm ion-padding-start" aria-live="assertive">
+              {errorMessage}
+            </p>
+          )}
 
-        <div className="flex gap-3">
-          <button
-            type="button"
-            className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium"
-            onClick={onReset}
-          >
-            Reset
-          </button>
-          <button
-            type="submit"
-            form="create-round-form"
-            disabled={createRound.isPending}
-            className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50"
-          >
-            {createRound.isPending ? "Creating\u2026" : "Create round"}
-          </button>
-        </div>
-      </form>
-    </section>
+          <div className="flex gap-3 ion-padding-top">
+            <IonButton
+              fill="outline"
+              style={{ "--color": "#3d5a80", "--border-color": "#3d5a80" }}
+              onClick={onReset}
+            >
+              Reset
+            </IonButton>
+            <IonButton
+              type="submit"
+              style={{ "--background": "#3d5a80" }}
+              disabled={createRound.isPending}
+            >
+              {createRound.isPending ? "Creating\u2026" : "Create round"}
+            </IonButton>
+          </div>
+        </form>
+      </IonContent>
+    </>
   );
 }

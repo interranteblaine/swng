@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 
 export function HomeView() {
@@ -18,18 +17,22 @@ export function HomeView() {
       <nav aria-label="Primary actions">
         <ul className="flex gap-6">
           <li>
-            <Button asChild size="lg">
-              <Link to="/rounds/create" id="home-create-link">
-                Create a round
-              </Link>
-            </Button>
+            <Link
+              to="/rounds/create"
+              id="home-create-link"
+              className="inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground px-6 py-3 text-sm font-medium"
+            >
+              Create a round
+            </Link>
           </li>
           <li>
-            <Button asChild variant="outline" size="lg">
-              <Link to="/rounds/join" id="home-join-link">
-                Join a round
-              </Link>
-            </Button>
+            <Link
+              to="/rounds/join"
+              id="home-join-link"
+              className="inline-flex items-center justify-center rounded-md border border-input bg-background px-6 py-3 text-sm font-medium"
+            >
+              Join a round
+            </Link>
           </li>
         </ul>
       </nav>

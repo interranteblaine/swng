@@ -3,16 +3,6 @@ import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useCreateRound } from "@/hooks/useCreateRound";
 import { Controller, useForm } from "react-hook-form";
-import {
-  Field,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 
 const formSchema = z.object({
   courseName: z
@@ -113,16 +103,16 @@ export function CreateRoundView() {
           Configure course and player information to create a round.
         </p>
 
-        <FieldGroup>
+        <div className="space-y-4">
           <Controller
             name="courseName"
             control={form.control}
             render={({ field, fieldState }) => (
-              <Field data-invalid={fieldState.invalid}>
-                <FieldLabel htmlFor="create-course-name">
+              <div data-invalid={fieldState.invalid || undefined}>
+                <label htmlFor="create-course-name" className="block text-sm font-medium mb-1">
                   Course name
-                </FieldLabel>
-                <Input
+                </label>
+                <input
                   {...field}
                   id="create-course-name"
                   aria-invalid={fieldState.invalid || undefined}
@@ -131,14 +121,17 @@ export function CreateRoundView() {
                   aria-describedby={
                     fieldState.invalid ? "create-course-name-error" : undefined
                   }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
                 {fieldState.invalid && (
-                  <FieldError
+                  <span
                     id="create-course-name-error"
-                    errors={[fieldState.error]}
-                  />
+                    className="text-sm text-destructive"
+                  >
+                    {fieldState.error?.message}
+                  </span>
                 )}
-              </Field>
+              </div>
             )}
           />
 
@@ -146,41 +139,60 @@ export function CreateRoundView() {
             name="holeCount"
             control={form.control}
             render={({ field, fieldState }) => (
-              <Field data-invalid={fieldState.invalid}>
-                <FieldLabel
+              <div data-invalid={fieldState.invalid || undefined}>
+                <label
                   id="create-hole-count-label"
                   htmlFor="create-hole-count"
+                  className="block text-sm font-medium mb-1"
                 >
                   Holes
-                </FieldLabel>
-                <RadioGroup
+                </label>
+                <div
                   id="create-hole-count"
-                  value={String(field.value)}
-                  onValueChange={(v) => field.onChange(Number(v))}
-                  onBlur={field.onBlur}
-                  disabled={field.disabled}
+                  role="radiogroup"
                   aria-labelledby="create-hole-count-label"
                   aria-invalid={fieldState.invalid || undefined}
                   aria-describedby={
                     fieldState.invalid ? "create-hole-count-error" : undefined
                   }
+                  className="flex gap-4"
                 >
-                  <div className="flex items-center gap-3">
-                    <RadioGroupItem value="18" id="create-hole-count-18" />
-                    <Label htmlFor="create-hole-count-18">18</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="holeCount"
+                      value="18"
+                      id="create-hole-count-18"
+                      checked={field.value === 18}
+                      onChange={() => field.onChange(18)}
+                      onBlur={field.onBlur}
+                      disabled={field.disabled}
+                    />
+                    <label htmlFor="create-hole-count-18">18</label>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <RadioGroupItem value="9" id="create-hole-count-9" />
-                    <Label htmlFor="create-hole-count-9">9</Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="holeCount"
+                      value="9"
+                      id="create-hole-count-9"
+                      checked={field.value === 9}
+                      onChange={() => field.onChange(9)}
+                      onBlur={field.onBlur}
+                      disabled={field.disabled}
+                    />
+                    <label htmlFor="create-hole-count-9">9</label>
                   </div>
-                </RadioGroup>
+                </div>
                 {fieldState.invalid && (
-                  <FieldError
+                  <span
                     id="create-hole-count-error"
-                    errors={[fieldState.error]}
-                  />
+                    className="text-sm text-destructive"
+                  >
+                    {fieldState.error?.message}
+                  </span>
                 )}
-              </Field>
+              </div>
             )}
           />
 
@@ -188,11 +200,11 @@ export function CreateRoundView() {
             name="playerName"
             control={form.control}
             render={({ field, fieldState }) => (
-              <Field data-invalid={fieldState.invalid}>
-                <FieldLabel htmlFor="create-player-name">
+              <div data-invalid={fieldState.invalid || undefined}>
+                <label htmlFor="create-player-name" className="block text-sm font-medium mb-1">
                   Player name
-                </FieldLabel>
-                <Input
+                </label>
+                <input
                   {...field}
                   id="create-player-name"
                   aria-invalid={fieldState.invalid || undefined}
@@ -201,14 +213,17 @@ export function CreateRoundView() {
                   aria-describedby={
                     fieldState.invalid ? "create-player-name-error" : undefined
                   }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
                 {fieldState.invalid && (
-                  <FieldError
+                  <span
                     id="create-player-name-error"
-                    errors={[fieldState.error]}
-                  />
+                    className="text-sm text-destructive"
+                  >
+                    {fieldState.error?.message}
+                  </span>
                 )}
-              </Field>
+              </div>
             )}
           />
 
@@ -216,9 +231,11 @@ export function CreateRoundView() {
             name="teeColor"
             control={form.control}
             render={({ field, fieldState }) => (
-              <Field data-invalid={fieldState.invalid}>
-                <FieldLabel htmlFor="create-tee-color">Tee color</FieldLabel>
-                <Input
+              <div data-invalid={fieldState.invalid || undefined}>
+                <label htmlFor="create-tee-color" className="block text-sm font-medium mb-1">
+                  Tee color
+                </label>
+                <input
                   {...field}
                   id="create-tee-color"
                   aria-invalid={fieldState.invalid || undefined}
@@ -227,34 +244,44 @@ export function CreateRoundView() {
                   aria-describedby={
                     fieldState.invalid ? "create-tee-color-error" : undefined
                   }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
                 {fieldState.invalid && (
-                  <FieldError
+                  <span
                     id="create-tee-color-error"
-                    errors={[fieldState.error]}
-                  />
+                    className="text-sm text-destructive"
+                  >
+                    {fieldState.error?.message}
+                  </span>
                 )}
-              </Field>
+              </div>
             )}
           />
-        </FieldGroup>
+        </div>
 
         {errorMessage && (
-          <FieldError aria-live="assertive">{errorMessage}</FieldError>
+          <span className="text-sm text-destructive" aria-live="assertive">
+            {errorMessage}
+          </span>
         )}
 
-        <Field orientation="horizontal">
-          <Button type="button" variant="outline" onClick={onReset}>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium"
+            onClick={onReset}
+          >
             Reset
-          </Button>
-          <Button
+          </button>
+          <button
             type="submit"
             form="create-round-form"
             disabled={createRound.isPending}
+            className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
-            {createRound.isPending ? "Creating…" : "Create round"}
-          </Button>
-        </Field>
+            {createRound.isPending ? "Creating\u2026" : "Create round"}
+          </button>
+        </div>
       </form>
     </section>
   );

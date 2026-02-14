@@ -3,14 +3,6 @@ import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
 import { useJoinRound } from "@/hooks/useJoinRound";
-import {
-  Field,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 
 const formSchema = z.object({
   accessCode: z
@@ -105,119 +97,134 @@ export function JoinRoundView() {
           Enter access code and your name to join a round.
         </p>
 
-        <FieldGroup>
+        <div className="space-y-4">
           <Controller
             name="accessCode"
             control={form.control}
             render={({ field, fieldState }) => (
-              <Field data-invalid={fieldState.invalid}>
-                <FieldLabel htmlFor="join-round-access-code">
+              <div data-invalid={fieldState.invalid || undefined}>
+                <label htmlFor="join-round-access-code" className="block text-sm font-medium mb-1">
                   Access code
-                </FieldLabel>
-                <Input
+                </label>
+                <input
                   {...field}
                   id="join-round-access-code"
                   aria-invalid={fieldState.invalid || undefined}
                   placeholder="XYSHSFL"
                   autoComplete="off"
-                  aira-describedby={
+                  aria-describedby={
                     fieldState.invalid
                       ? "join-round-access-code-error"
                       : undefined
                   }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
-
                 {fieldState.invalid && (
-                  <FieldError
+                  <span
                     id="join-round-access-code-error"
-                    errors={[fieldState.error]}
-                  />
+                    className="text-sm text-destructive"
+                  >
+                    {fieldState.error?.message}
+                  </span>
                 )}
-              </Field>
+              </div>
             )}
           />
-        </FieldGroup>
+        </div>
 
-        <FieldGroup>
+        <div className="space-y-4">
           <Controller
             name="playerName"
             control={form.control}
             render={({ field, fieldState }) => (
-              <Field data-invalid={fieldState.invalid}>
-                <FieldLabel htmlFor="join-round-player-name">Name</FieldLabel>
-                <Input
+              <div data-invalid={fieldState.invalid || undefined}>
+                <label htmlFor="join-round-player-name" className="block text-sm font-medium mb-1">
+                  Name
+                </label>
+                <input
                   {...field}
                   id="join-round-player-name"
                   aria-invalid={fieldState.invalid || undefined}
                   placeholder="Your name"
                   autoComplete="off"
-                  aira-describedby={
+                  aria-describedby={
                     fieldState.invalid
                       ? "join-round-player-name-error"
                       : undefined
                   }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
-
                 {fieldState.invalid && (
-                  <FieldError
+                  <span
                     id="join-round-player-name-error"
-                    errors={[fieldState.error]}
-                  />
+                    className="text-sm text-destructive"
+                  >
+                    {fieldState.error?.message}
+                  </span>
                 )}
-              </Field>
+              </div>
             )}
           />
-        </FieldGroup>
+        </div>
 
-        <FieldGroup>
+        <div className="space-y-4">
           <Controller
             name="teeColor"
             control={form.control}
             render={({ field, fieldState }) => (
-              <Field data-invalid={fieldState.invalid}>
-                <FieldLabel htmlFor="join-round-tee-color">
+              <div data-invalid={fieldState.invalid || undefined}>
+                <label htmlFor="join-round-tee-color" className="block text-sm font-medium mb-1">
                   Tee color
-                </FieldLabel>
-                <Input
+                </label>
+                <input
                   {...field}
                   id="join-round-tee-color"
                   aria-invalid={fieldState.invalid || undefined}
                   placeholder="White"
                   autoComplete="off"
-                  aira-describedby={
+                  aria-describedby={
                     fieldState.invalid
                       ? "join-round-tee-color-error"
                       : undefined
                   }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 />
-
                 {fieldState.invalid && (
-                  <FieldError
+                  <span
                     id="join-round-tee-color-error"
-                    errors={[fieldState.error]}
-                  />
+                    className="text-sm text-destructive"
+                  >
+                    {fieldState.error?.message}
+                  </span>
                 )}
-              </Field>
+              </div>
             )}
           />
-        </FieldGroup>
+        </div>
 
         {errorMessage && (
-          <FieldError aria-live="assertive">{errorMessage}</FieldError>
+          <span className="text-sm text-destructive" aria-live="assertive">
+            {errorMessage}
+          </span>
         )}
 
-        <Field orientation="horizontal">
-          <Button type="button" variant="outline" onClick={onReset}>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium"
+            onClick={onReset}
+          >
             Reset
-          </Button>
-          <Button
+          </button>
+          <button
             type="submit"
             form="join-round-form"
             disabled={joinRound.isPending}
+            className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
-            {joinRound.isPending ? "Joining…" : "Join round"}
-          </Button>
-        </Field>
+            {joinRound.isPending ? "Joining\u2026" : "Join round"}
+          </button>
+        </div>
       </form>
     </section>
   );

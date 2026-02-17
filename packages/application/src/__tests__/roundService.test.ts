@@ -120,6 +120,11 @@ function createTestDeps(): {
     }) => {
       sessions[session.sessionId] = session;
     },
+    updateSessionExpiry: async (sessionId: string, newExpiresAt: string) => {
+      if (sessions[sessionId]) {
+        sessions[sessionId].expiresAt = newExpiresAt;
+      }
+    },
   };
 
   const idGenerator = {
@@ -285,6 +290,43 @@ describe("RoundService Behavior", () => {
         code: "NOT_FOUND",
         message: "Round not found",
       });
+    });
+
+    it("rejects expired session", async () => {
+      const sid = Object.keys(stores.sessions)[0];
+      // Advance clock past session expiry
+      deps.clock.now = () => "2025-11-16T02:00:00.000Z";
+      await expect(
+        service.getRound({ roundId: "rid-1", sessionId: sid })
+      ).rejects.toMatchObject({
+        code: "UNAUTHORIZED",
+        message: "Session expired",
+      });
+    });
+
+    it("refreshes session when remaining lifetime is below half TTL", async () => {
+      const sid = Object.keys(stores.sessions)[0];
+      const sessionBefore = stores.sessions[sid];
+      const expiryBefore = sessionBefore.expiresAt;
+
+      // Advance clock to 40 minutes after creation (TTL is 60 min, so 20 min remaining < 30 min threshold)
+      deps.clock.now = () => "2025-11-16T00:40:00.000Z";
+      await service.getRound({ roundId: "rid-1", sessionId: sid });
+
+      expect(new Date(stores.sessions[sid].expiresAt).getTime()).toBeGreaterThan(
+        new Date(expiryBefore).getTime()
+      );
+    });
+
+    it("does not refresh session when remaining lifetime is above half TTL", async () => {
+      const sid = Object.keys(stores.sessions)[0];
+      const expiryBefore = stores.sessions[sid].expiresAt;
+
+      // Advance clock to 10 minutes after creation (50 min remaining > 30 min threshold)
+      deps.clock.now = () => "2025-11-16T00:10:00.000Z";
+      await service.getRound({ roundId: "rid-1", sessionId: sid });
+
+      expect(stores.sessions[sid].expiresAt).toBe(expiryBefore);
     });
   });
 

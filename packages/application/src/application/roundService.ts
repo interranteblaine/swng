@@ -57,6 +57,9 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     if (!session) {
       throw new ApplicationError("UNAUTHORIZED", "Session not found");
     }
+    if (new Date(session.expiresAt) < new Date(clock.now())) {
+      throw new ApplicationError("UNAUTHORIZED", "Session expired");
+    }
     if (session.roundId !== roundId) {
       throw new ApplicationError(
         "UNAUTHORIZED",
@@ -67,6 +70,14 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     if (!player) {
       throw new ApplicationError("UNAUTHORIZED", "Player no longer in this round");
     }
+
+    const now = new Date(clock.now());
+    const remainingMs = new Date(session.expiresAt).getTime() - now.getTime();
+    if (remainingMs < config.sessionTtlMs / 2) {
+      const newExpiresAt = computeExpiry(clock.now(), config.sessionTtlMs);
+      await sessionRepo.updateSessionExpiry(sessionId, newExpiresAt);
+    }
+
     return session;
   }
 

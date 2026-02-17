@@ -103,6 +103,11 @@ export const handler: APIGatewayRequestAuthorizerHandler = async (
       return denyPolicy();
     }
 
+    if (new Date(session.expiresAt) < new Date()) {
+      invocationLogger.info("Session expired", { sessionId, expiresAt: session.expiresAt });
+      return denyPolicy();
+    }
+
     const result = allowPolicy(session.playerId, {
       roundId: session.roundId,
       playerId: session.playerId,

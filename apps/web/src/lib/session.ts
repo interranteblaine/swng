@@ -21,7 +21,7 @@ const selfKeyFor = (roundId: string) => `player:self:${roundId}`;
  */
 export function getSessionId(roundId: string): string | null {
   try {
-    return sessionStorage.getItem(keyFor(roundId));
+    return localStorage.getItem(keyFor(roundId));
   } catch {
     return null;
   }
@@ -29,7 +29,7 @@ export function getSessionId(roundId: string): string | null {
 
 export function setSessionId(roundId: string, sessionId: string): void {
   try {
-    sessionStorage.setItem(keyFor(roundId), sessionId);
+    localStorage.setItem(keyFor(roundId), sessionId);
     notifySessionUpdate();
   } catch {
     // ignore quota/availability errors
@@ -38,7 +38,7 @@ export function setSessionId(roundId: string, sessionId: string): void {
 
 export function clearSession(roundId: string): void {
   try {
-    sessionStorage.removeItem(keyFor(roundId));
+    localStorage.removeItem(keyFor(roundId));
     notifySessionUpdate();
   } catch {
     // ignore
@@ -50,7 +50,7 @@ export function clearSession(roundId: string): void {
  */
 export function getSelfPlayerId(roundId: string): string | null {
   try {
-    return sessionStorage.getItem(selfKeyFor(roundId));
+    return localStorage.getItem(selfKeyFor(roundId));
   } catch {
     return null;
   }
@@ -58,7 +58,7 @@ export function getSelfPlayerId(roundId: string): string | null {
 
 export function setSelfPlayerId(roundId: string, playerId: string): void {
   try {
-    sessionStorage.setItem(selfKeyFor(roundId), playerId);
+    localStorage.setItem(selfKeyFor(roundId), playerId);
     notifySessionUpdate();
   } catch {
     // ignore
@@ -67,7 +67,7 @@ export function setSelfPlayerId(roundId: string, playerId: string): void {
 
 export function clearSelfPlayerId(roundId: string): void {
   try {
-    sessionStorage.removeItem(selfKeyFor(roundId));
+    localStorage.removeItem(selfKeyFor(roundId));
     notifySessionUpdate();
   } catch {
     // ignore
@@ -76,7 +76,7 @@ export function clearSelfPlayerId(roundId: string): void {
 
 export function getCurrentRoundId(): string | null {
   try {
-    return sessionStorage.getItem(CURRENT_ROUND_KEY);
+    return localStorage.getItem(CURRENT_ROUND_KEY);
   } catch {
     return null;
   }
@@ -84,7 +84,7 @@ export function getCurrentRoundId(): string | null {
 
 export function setCurrentRoundId(roundId: string): void {
   try {
-    sessionStorage.setItem(CURRENT_ROUND_KEY, roundId);
+    localStorage.setItem(CURRENT_ROUND_KEY, roundId);
     notifySessionUpdate();
   } catch {
     // ignore quota/availability errors
@@ -93,7 +93,7 @@ export function setCurrentRoundId(roundId: string): void {
 
 export function clearCurrentRoundId(): void {
   try {
-    sessionStorage.removeItem(CURRENT_ROUND_KEY);
+    localStorage.removeItem(CURRENT_ROUND_KEY);
     notifySessionUpdate();
   } catch {
     // ignore

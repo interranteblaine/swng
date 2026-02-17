@@ -43,6 +43,7 @@ export interface Session {
 export interface SessionRepository {
   getSession(sessionId: string): Promise<Session | null>;
   createSession(session: Session): Promise<void>;
+  updateSessionExpiry(sessionId: string, newExpiresAt: IsoDateTime): Promise<void>;
 }
 
 export interface Connection {

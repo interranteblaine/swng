@@ -1,4 +1,4 @@
-import type { RoundId, PlayerId } from "@swng/domain";
+import type { RoundId, PlayerId, CourseId } from "@swng/domain";
 
 /**
  * Table design:
@@ -47,4 +47,15 @@ export function scoreSk(playerId: PlayerId, holeNumber: number): string {
 
 export function connectionSk(connectionId: string): string {
   return `${CONNECTION_SK_PREFIX}${connectionId}`;
+}
+
+export const COURSE_METADATA_SK = "METADATA";
+export const COURSES_GSI1PK = "COURSES";
+
+export function coursePk(courseId: CourseId): string {
+  return `COURSE#${courseId}`;
+}
+
+export function courseGsi1Sk(courseId: CourseId): string {
+  return `COURSE#${courseId}`;
 }

@@ -8,6 +8,7 @@ import type {
   UpdatePlayerOutput,
   RemovePlayerOutput,
 } from "@swng/application";
+import type { Course } from "@swng/domain";
 import type {
   CreateRoundRequest,
   JoinRoundRequest,
@@ -212,6 +213,27 @@ export function createHttpClient(http: HttpPort, baseUrl: string) {
         )}`,
         undefined,
         sessionId
+      );
+    },
+
+    async listCourses(): Promise<{ courses: Course[] }> {
+      return fetchJson<{ courses: Course[] }>(
+        http,
+        baseUrl,
+        "GET",
+        "/courses"
+      );
+    },
+
+    async getCourse(args: {
+      courseId: string;
+    }): Promise<{ course: Course }> {
+      const { courseId } = args;
+      return fetchJson<{ course: Course }>(
+        http,
+        baseUrl,
+        "GET",
+        `/courses/${encodeURIComponent(courseId)}`
       );
     },
   };

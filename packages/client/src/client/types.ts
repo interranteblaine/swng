@@ -16,7 +16,7 @@ import type {
   PatchRoundStateRequest,
   UpdatePlayerRequest,
 } from "@swng/contracts";
-import type { RoundId } from "@swng/domain";
+import type { Course, RoundId } from "@swng/domain";
 import type { DomainEvent } from "@swng/domain";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -89,6 +89,8 @@ export interface Client {
     sessionId: string;
     playerId: string;
   }): Promise<RemovePlayerOutput>;
+  listCourses(): Promise<{ courses: Course[] }>;
+  getCourse(args: { courseId: string }): Promise<{ course: Course }>;
   connectEvents(
     sessionId: string,
     onEvent: (evt: DomainEvent) => void,

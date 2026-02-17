@@ -16,6 +16,7 @@ export const idGenerator: IdGenerator = {
   newPlayerId: () => `ply_${uuid()}`,
   newSessionId: () => `sess_${uuid()}`,
   newAccessCode: () => randomAccessCode(6),
+  newCourseId: () => `crs_${uuid()}`,
 };
 
 export const clock: Clock = {

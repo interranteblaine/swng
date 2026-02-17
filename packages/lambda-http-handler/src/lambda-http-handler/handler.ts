@@ -1,7 +1,8 @@
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
-import { createRoundService } from "@swng/application";
+import { createRoundService, createCourseService } from "@swng/application";
 import {
   createDynamoDocClient,
+  createDynamoCourseRepository,
   createDynamoPlayerRepository,
   createDynamoRoundRepository,
   createDynamoScoreRepository,
@@ -63,19 +64,28 @@ export const handler: APIGatewayProxyHandlerV2 = async (event, context) => {
     logger: invocationLogger,
   });
 
+  const courseRepo = createDynamoCourseRepository(dynamoCfg);
+
   const service = createRoundService({
     roundRepo: createDynamoRoundRepository(dynamoCfg),
     playerRepo: createDynamoPlayerRepository(dynamoCfg),
     scoreRepo: createDynamoScoreRepository(dynamoCfg),
     sessionRepo: createDynamoSessionRepository(dynamoCfg),
+    courseRepo,
     idGenerator,
     clock,
     config: { sessionTtlMs },
     broadcast,
   });
 
+  const courseService = createCourseService({
+    courseRepo,
+    idGenerator,
+    clock,
+  });
+
   try {
-    const result = await routeRequest(event, service);
+    const result = await routeRequest(event, service, courseService);
     return result;
   } catch (err: unknown) {
     return toHttpErrorResponse(err, invocationLogger);

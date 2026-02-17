@@ -2,7 +2,7 @@ import type {
   APIGatewayProxyHandlerV2,
   APIGatewayProxyStructuredResultV2,
 } from "aws-lambda";
-import { ApplicationError, type RoundService } from "@swng/application";
+import { ApplicationError, type RoundService, type CourseService } from "@swng/application";
 import { json, parseJson, requireSessionId } from "./httpUtils";
 import {
   parseCreateRoundRequest,
@@ -36,10 +36,13 @@ const RE_ROUND = /^\/rounds\/([^/]+)$/;
 const RE_SCORES = /^\/rounds\/([^/]+)\/scores$/;
 const RE_STATE = /^\/rounds\/([^/]+)\/state$/;
 const RE_PLAYER = /^\/rounds\/([^/]+)\/players\/([^/]+)$/;
+const RE_COURSES = /^\/courses$/;
+const RE_COURSE = /^\/courses\/([^/]+)$/;
 
 export async function routeRequest(
   event: HttpEvent,
-  service: RoundService
+  service: RoundService,
+  courseService?: CourseService
 ): Promise<HttpResult> {
   const { method, path } = getMethodAndPath(event);
 
@@ -52,10 +55,7 @@ export async function routeRequest(
     }
     const body = parsed.data;
 
-    const result = await service.createRound({
-      courseName: body.courseName,
-      par: body.par,
-    });
+    const result = await service.createRound(body);
 
     return json(201, result);
   }
@@ -206,6 +206,22 @@ export async function routeRequest(
         color: body.color,
       });
 
+      return json(200, result);
+    }
+  }
+
+  // GET /courses
+  if (method === "GET" && RE_COURSES.test(path) && courseService) {
+    const result = await courseService.listCourses();
+    return json(200, result);
+  }
+
+  // GET /courses/{courseId}
+  {
+    const m = path.match(RE_COURSE);
+    if (method === "GET" && m && courseService) {
+      const courseId = decodeURIComponent(m[1]);
+      const result = await courseService.getCourse(courseId);
       return json(200, result);
     }
   }

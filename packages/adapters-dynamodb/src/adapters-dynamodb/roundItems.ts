@@ -1,4 +1,5 @@
 import type {
+  CourseSnapshot,
   RoundConfig,
   RoundId,
   RoundState,
@@ -17,6 +18,7 @@ export interface RoundConfigItem {
   holes: number;
   par: number[];
   createdAt: IsoDateTime;
+  course?: CourseSnapshot;
 }
 
 export interface RoundStateItem {
@@ -29,7 +31,7 @@ export interface RoundStateItem {
 }
 
 export function toConfigItem(config: RoundConfig): RoundConfigItem {
-  return {
+  const item: RoundConfigItem = {
     PK: roundPk(config.roundId),
     SK: CONFIG_SK,
     GSI1PK: `CODE#${config.accessCode}`,
@@ -41,10 +43,14 @@ export function toConfigItem(config: RoundConfig): RoundConfigItem {
     par: [...config.par],
     createdAt: config.createdAt,
   };
+  if (config.course) {
+    item.course = config.course;
+  }
+  return item;
 }
 
 export function fromConfigItem(item: RoundConfigItem): RoundConfig {
-  return {
+  const config: RoundConfig = {
     roundId: item.roundId,
     accessCode: item.accessCode,
     courseName: item.courseName,
@@ -52,6 +58,10 @@ export function fromConfigItem(item: RoundConfigItem): RoundConfig {
     par: item.par,
     createdAt: item.createdAt,
   };
+  if (item.course) {
+    config.course = item.course;
+  }
+  return config;
 }
 
 export function toStateItem(state: RoundState): RoundStateItem {

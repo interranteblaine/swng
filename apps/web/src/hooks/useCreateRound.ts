@@ -9,8 +9,7 @@ import {
 } from "../lib/session";
 
 type CreateArgs = {
-  courseName: string;
-  par: number[];
+  courseId: string;
   playerName: string;
   color?: string;
 };
@@ -22,9 +21,9 @@ export function useCreateRound() {
   return useMutation({
     mutationKey: ["createRound"],
     mutationFn: async (args: CreateArgs) => {
-      const { courseName, par, playerName, color } = args;
+      const { courseId, playerName, color } = args;
 
-      const created = await client.createRound({ courseName, par });
+      const created = await client.createRound({ courseId });
 
       const accessCode = created.config.accessCode;
       const joined = await client.joinRound({ accessCode, playerName, color });

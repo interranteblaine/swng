@@ -4,6 +4,8 @@ import { createRoundService } from "../application/roundService";
 import { RoundServiceDeps } from "../application/types";
 import { ApplicationError } from "../application/errors";
 import type {
+  Course,
+  CourseId,
   RoundConfig,
   RoundState,
   RoundSnapshot,
@@ -132,6 +134,7 @@ function createTestDeps(): {
     newAccessCode: () => "code-1",
     newPlayerId: () => `pid-${players.length + 1}`,
     newSessionId: () => `sid-${Object.keys(sessions).length + 1}`,
+    newCourseId: () => "crs-1",
   };
 
   const clock = {
@@ -142,18 +145,56 @@ function createTestDeps(): {
   const broadcastNotify = vi.fn(async (_roundId: string, _msg: unknown) => {});
   const broadcast = { notify: broadcastNotify };
 
+  const courses: Record<string, Course> = {};
+
+  const courseRepo = {
+    getCourse: async (courseId: CourseId) => courses[courseId] ?? null,
+    listCourses: async () => Object.values(courses),
+    saveCourse: async (course: Course) => {
+      courses[course.courseId] = course;
+    },
+    deleteCourse: async (courseId: CourseId) => {
+      delete courses[courseId];
+    },
+  };
+
   return {
     deps: {
       roundRepo,
       playerRepo,
       scoreRepo,
       sessionRepo,
+      courseRepo,
       idGenerator,
       clock,
       config,
       broadcast,
     },
-    stores: { configs, states, players, sessions, scores },
+    stores: { configs, states, players, sessions, scores, courses },
+  };
+}
+
+function makeTestCourse(par: number[]): Course {
+  return {
+    courseId: "crs-test",
+    name: "Test Course",
+    holeCount: par.length,
+    teeSets: [
+      {
+        name: "White",
+        color: "#FFFFFF",
+        courseRating: 72,
+        slopeRating: 113,
+        holes: par.map((p, i) => ({
+          holeNumber: i + 1,
+          par: p,
+          yardage: 300 + i * 10,
+          handicapIndex: i + 1,
+        })),
+      },
+    ],
+    createdAt: "2025-11-15T00:00:00.000Z",
+    updatedAt: "2025-11-15T00:00:00.000Z",
   };
 }
 
@@ -170,23 +211,28 @@ describe("RoundService Behavior", () => {
   });
 
   describe("createRound", () => {
-    it("rejects empty par array", async () => {
+    it("rejects unknown courseId", async () => {
       await expect(
-        service.createRound({ courseName: "C", par: [] })
+        service.createRound({ courseId: "nope" })
       ).rejects.toMatchObject({
-        code: "INVALID_INPUT",
-        message: "par array must be non-empty",
+        code: "NOT_FOUND",
+        message: "Course not found",
       });
     });
 
-    it("creates and persists config and initial state", async () => {
+    it("creates and persists config and initial state from course", async () => {
       const par = [3, 4, 5];
-      const result = await service.createRound({ courseName: "Test", par });
+      const course = makeTestCourse(par);
+      stores.courses[course.courseId] = course;
+
+      const result = await service.createRound({ courseId: course.courseId });
       const cfg = stores.configs[0];
       const st = stores.states[0];
 
-      expect(cfg.courseName).toBe("Test");
+      expect(cfg.courseName).toBe("Test Course");
       expect(cfg.par).toEqual(par);
+      expect(cfg.course).toBeDefined();
+      expect(cfg.course!.courseId).toBe(course.courseId);
       expect(st.stateVersion).toBe(1);
       expect(result.config).toEqual(cfg);
       expect(result.state).toEqual(st);
@@ -195,7 +241,8 @@ describe("RoundService Behavior", () => {
 
   describe("joinRound", () => {
     beforeEach(async () => {
-      await service.createRound({ courseName: "R", par: [3, 4] });
+      stores.courses["crs-test"] = makeTestCourse([3, 4]);
+      await service.createRound({ courseId: "crs-test" });
     });
 
     it("rejects unknown access code", async () => {
@@ -246,7 +293,8 @@ describe("RoundService Behavior", () => {
 
   describe("getRound", () => {
     beforeEach(async () => {
-      await service.createRound({ courseName: "R", par: [3] });
+      stores.courses["crs-test"] = makeTestCourse([3]);
+      await service.createRound({ courseId: "crs-test" });
       await service.joinRound({ accessCode: "code-1", playerName: "Bob" });
     });
 
@@ -332,7 +380,8 @@ describe("RoundService Behavior", () => {
 
   describe("updateScore", () => {
     beforeEach(async () => {
-      await service.createRound({ courseName: "R", par: [3, 4] });
+      stores.courses["crs-test"] = makeTestCourse([3, 4]);
+      await service.createRound({ courseId: "crs-test" });
       await service.joinRound({ accessCode: "code-1", playerName: "P1" });
     });
 
@@ -423,7 +472,8 @@ describe("RoundService Behavior", () => {
 
   describe("patchRoundState", () => {
     beforeEach(async () => {
-      await service.createRound({ courseName: "R", par: [3, 4] });
+      stores.courses["crs-test"] = makeTestCourse([3, 4]);
+      await service.createRound({ courseId: "crs-test" });
       await service.joinRound({ accessCode: "code-1", playerName: "P" });
     });
 
@@ -518,7 +568,8 @@ describe("RoundService Behavior", () => {
 
   describe("updatePlayer", () => {
     beforeEach(async () => {
-      await service.createRound({ courseName: "R", par: [3] });
+      stores.courses["crs-test"] = makeTestCourse([3]);
+      await service.createRound({ courseId: "crs-test" });
       await service.joinRound({ accessCode: "code-1", playerName: "X" });
     });
 
@@ -574,7 +625,8 @@ describe("RoundService Behavior", () => {
         return `2025-11-16T00:00:0${callCount}.000Z`;
       };
 
-      await service.createRound({ courseName: "R", par: [3] });
+      stores.courses["crs-test"] = makeTestCourse([3]);
+      await service.createRound({ courseId: "crs-test" });
 
       // First player = creator
       const first = await service.joinRound({

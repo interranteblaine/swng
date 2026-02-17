@@ -33,12 +33,16 @@ export async function verifyStaging(
 
   const client = createNodeClient({ baseUrl: apiUrl, wsUrl });
 
-  // 1) Create round
+  // 1) Pick a course then create round
+  console.log(`[STEP] listCourses`);
+  const { courses } = await client.listCourses();
+  if (courses.length === 0)
+    throw new Error("listCourses: no courses available — seed one first");
+  const courseId = courses[0].courseId;
+  console.log(`[OK] listCourses found ${courses.length} course(s), using courseId=${courseId}`);
+
   console.log(`[STEP] createRound`);
-  const created = await client.createRound({
-    courseName: "Smoke",
-    par: [3, 3, 3],
-  });
+  const created = await client.createRound({ courseId });
   if (!created?.config?.roundId)
     throw new Error("createRound: missing roundId");
   if (!created?.config?.accessCode)

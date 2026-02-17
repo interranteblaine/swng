@@ -1,5 +1,11 @@
 import { DomainError } from "./error";
-import type { IsoDateTime, RoundConfig, RoundId, RoundState } from "./types";
+import type {
+  CourseSnapshot,
+  IsoDateTime,
+  RoundConfig,
+  RoundId,
+  RoundState,
+} from "./types";
 
 export function createRoundConfig(options: {
   roundId: RoundId;
@@ -7,8 +13,9 @@ export function createRoundConfig(options: {
   courseName: string;
   par: number[];
   createdAt: IsoDateTime;
+  course?: CourseSnapshot;
 }): RoundConfig {
-  const { roundId, accessCode, courseName, par, createdAt } = options;
+  const { roundId, accessCode, courseName, par, createdAt, course } = options;
 
   if (par.length === 0) {
     throw new DomainError("par array must be non-empty");
@@ -23,6 +30,7 @@ export function createRoundConfig(options: {
     holes,
     par: [...par],
     createdAt,
+    course,
   };
 }
 

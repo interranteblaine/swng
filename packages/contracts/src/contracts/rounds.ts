@@ -6,8 +6,7 @@ export const RoundStatusDto = z.union([
 ]);
 
 export const CreateRoundRequest = z.object({
-  courseName: z.string().min(1).max(200),
-  par: z.array(z.number().int().min(1).max(99)).min(1).max(36),
+  courseId: z.string().min(1),
 });
 export type CreateRoundRequest = z.infer<typeof CreateRoundRequest>;
 

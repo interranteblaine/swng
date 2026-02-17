@@ -2,6 +2,8 @@ import {
   createRoundConfig,
   createInitialRoundState,
   isValidHoleNumber,
+  teeSetPar,
+  toCourseSnapshot,
 } from "@swng/domain";
 import type {
   RoundState,
@@ -44,6 +46,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     playerRepo,
     scoreRepo,
     sessionRepo,
+    courseRepo,
     idGenerator,
     clock,
     config,
@@ -96,14 +99,13 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
 
   return {
     async createRound(input: CreateRoundInput): Promise<CreateRoundOutput> {
-      const { courseName, par } = input;
-
-      if (par.length === 0) {
-        throw new ApplicationError(
-          "INVALID_INPUT",
-          "par array must be non-empty"
-        );
+      const course = await courseRepo.getCourse(input.courseId);
+      if (!course) {
+        throw new ApplicationError("NOT_FOUND", "Course not found");
       }
+
+      const courseSnapshot = toCourseSnapshot(course);
+      const par = teeSetPar(course.teeSets[0]);
 
       const roundId = idGenerator.newRoundId();
       const accessCode = idGenerator.newAccessCode();
@@ -112,9 +114,10 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       const configValue = createRoundConfig({
         roundId,
         accessCode,
-        courseName,
+        courseName: course.name,
         par,
         createdAt,
+        course: courseSnapshot,
       });
 
       const stateValue = createInitialRoundState(roundId, createdAt);

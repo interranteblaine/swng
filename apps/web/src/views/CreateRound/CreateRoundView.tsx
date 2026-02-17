@@ -13,9 +13,6 @@ import {
   IonList,
   IonItem,
   IonInput,
-  IonSearchbar,
-  IonRadioGroup,
-  IonRadio,
   IonNote,
 } from "@ionic/react";
 import { useCreateRound } from "@/hooks/useCreateRound";
@@ -30,21 +27,13 @@ import {
 } from "@/lib/playerPrefs";
 
 const formSchema = z.object({
-  courseName: z
-    .string()
-    .trim()
-    .min(1, "Course must be at least 1 character")
-    .max(32, "Course must be at most 32 characters"),
+  courseId: z.string().trim().min(1, "Course is required"),
   playerName: z
     .string()
     .trim()
     .min(1, "Player name must be at least 1 character")
     .max(32, "Player name must be at most 32 characters"),
   teeColor: z.enum(TEE_COLORS),
-  holeCount: z.union(
-    [z.literal(9), z.literal(18)],
-    "Hole count must be either 9 or 18"
-  ),
 });
 
 export function CreateRoundView() {
@@ -52,22 +41,19 @@ export function CreateRoundView() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      courseName: "",
+      courseId: "",
       playerName: getLastPlayerName() || "",
       teeColor: getLastTeeColor() as z.infer<typeof formSchema>["teeColor"],
-      holeCount: 18,
     },
   });
 
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
-    const { courseName, playerName, teeColor, holeCount } = data;
-    const par = Array.from({ length: holeCount }, () => 4);
+    const { courseId, playerName, teeColor } = data;
     setLastPlayerName(playerName);
     setLastTeeColor(teeColor);
     try {
       await createRound.mutateAsync({
-        courseName,
-        par,
+        courseId,
         playerName,
         color: teeColor,
       });
@@ -118,25 +104,24 @@ export function CreateRoundView() {
         >
           <IonList>
             <Controller
-              name="courseName"
+              name="courseId"
               control={form.control}
               render={({ field, fieldState }) => (
                 <IonItem>
-                  <div className="w-full py-1">
-                    <IonSearchbar
-                      placeholder="Search courses..."
-                      value={field.value}
-                      onIonInput={(e) => field.onChange(e.detail.value ?? "")}
-                      onIonBlur={field.onBlur}
-                      debounce={0}
-                      className={fieldState.invalid ? "ion-invalid ion-touched" : ""}
-                    />
-                    {fieldState.invalid && (
-                      <IonNote className="text-red-600 text-sm px-4">
-                        {fieldState.error?.message}
-                      </IonNote>
-                    )}
-                  </div>
+                  <IonInput
+                    label="Course"
+                    labelPlacement="stacked"
+                    placeholder="Course ID"
+                    value={field.value}
+                    onIonInput={(e) => field.onChange(e.detail.value ?? "")}
+                    onIonBlur={field.onBlur}
+                    className={fieldState.invalid ? "ion-invalid ion-touched" : ""}
+                  />
+                  {fieldState.invalid && (
+                    <IonNote slot="error" className="text-red-600 text-sm">
+                      {fieldState.error?.message}
+                    </IonNote>
+                  )}
                 </IonItem>
               )}
             />
@@ -172,32 +157,6 @@ export function CreateRoundView() {
                   <div className="w-full py-2">
                     <label className="block text-sm font-medium mb-2">Tee</label>
                     <TeePicker value={field.value} onChange={field.onChange} />
-                  </div>
-                </IonItem>
-              )}
-            />
-
-            <Controller
-              name="holeCount"
-              control={form.control}
-              render={({ field, fieldState }) => (
-                <IonItem>
-                  <div className="w-full py-2">
-                    <label className="block text-sm font-medium mb-2">Holes</label>
-                    <IonRadioGroup
-                      value={field.value}
-                      onIonChange={(e) => field.onChange(e.detail.value as number)}
-                    >
-                      <div className="flex gap-6">
-                        <IonRadio value={18} labelPlacement="end">18</IonRadio>
-                        <IonRadio value={9} labelPlacement="end">9</IonRadio>
-                      </div>
-                    </IonRadioGroup>
-                    {fieldState.invalid && (
-                      <IonNote className="text-red-600 text-sm">
-                        {fieldState.error?.message}
-                      </IonNote>
-                    )}
                   </div>
                 </IonItem>
               )}

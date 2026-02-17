@@ -10,19 +10,15 @@ import {
 describe("contracts/http/rounds request parsers", () => {
   describe("parseCreateRoundRequest", () => {
     it("accepts a valid payload", () => {
-      const res = parseCreateRoundRequest({
-        courseName: "Course",
-        par: [3, 4, 5],
-      });
+      const res = parseCreateRoundRequest({ courseId: "crs_1" });
       expect(res.ok).toBe(true);
       if (res.ok) {
-        expect(res.data.courseName).toBe("Course");
-        expect(res.data.par).toEqual([3, 4, 5]);
+        expect(res.data.courseId).toBe("crs_1");
       }
     });
 
-    it("rejects when required fields are missing or invalid", () => {
-      const res = parseCreateRoundRequest({ par: "nope" });
+    it("rejects when courseId is missing", () => {
+      const res = parseCreateRoundRequest({});
       expect(res.ok).toBe(false);
       if (!res.ok) {
         expect(res.error.length).toBeGreaterThan(0);

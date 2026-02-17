@@ -1,4 +1,5 @@
 export { createDynamoConnectionRepository } from "./adapters-dynamodb/connectionRepository";
+export { createDynamoCourseRepository } from "./adapters-dynamodb/courseRepository";
 export { createDynamoPlayerRepository } from "./adapters-dynamodb/playerRepository";
 export { createDynamoRoundRepository } from "./adapters-dynamodb/roundRepository";
 export { createDynamoScoreRepository } from "./adapters-dynamodb/scoreRepository";
@@ -21,6 +22,8 @@ export {
   fromConfigItem,
   fromStateItem,
 } from "./adapters-dynamodb/roundItems";
+export type { CourseItem } from "./adapters-dynamodb/courseItems";
+export { toCourseItem, fromCourseItem } from "./adapters-dynamodb/courseItems";
 export type { ScoreItem } from "./adapters-dynamodb/scoreItems";
 export { toScoreItem, fromScoreItem } from "./adapters-dynamodb/scoreItems";
 export type { SessionItem } from "./adapters-dynamodb/sessionItems";

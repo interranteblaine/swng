@@ -1,8 +1,42 @@
 export type RoundId = string;
 export type PlayerId = string;
+export type CourseId = string;
 export type IsoDateTime = string;
 
 export type RoundStatus = "IN_PROGRESS" | "COMPLETED";
+
+export interface TeeHole {
+  holeNumber: number;
+  par: number;
+  yardage: number;
+  handicapIndex: number;
+}
+
+export interface TeeSet {
+  name: string;
+  color: string;
+  courseRating: number;
+  slopeRating: number;
+  holes: TeeHole[];
+}
+
+export interface Course {
+  courseId: CourseId;
+  name: string;
+  location?: string;
+  holeCount: number;
+  teeSets: TeeSet[];
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export interface CourseSnapshot {
+  courseId: CourseId;
+  name: string;
+  location?: string;
+  holeCount: number;
+  teeSets: TeeSet[];
+}
 
 export interface RoundConfig {
   roundId: RoundId;
@@ -11,6 +45,7 @@ export interface RoundConfig {
   holes: number;
   par: number[];
   createdAt: IsoDateTime;
+  course?: CourseSnapshot;
 }
 
 export interface RoundState {

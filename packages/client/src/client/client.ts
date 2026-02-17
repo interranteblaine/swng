@@ -15,6 +15,8 @@ export function createClient(opts: CreateClientOptions): Client {
     patchRoundState: httpClient.patchRoundState,
     updatePlayer: httpClient.updatePlayer,
     removePlayer: httpClient.removePlayer,
+    listCourses: httpClient.listCourses,
+    getCourse: httpClient.getCourse,
     connectEvents: (sessionId, onEvent, opts) =>
       connectEvents(ws, wsUrl, sessionId, onEvent, opts),
   };

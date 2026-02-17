@@ -151,7 +151,7 @@ describe("router.routeRequest", () => {
     });
 
     const event = mkEvent("POST", "/rounds", {
-      body: { courseName: "Course", par: [3, 4, 5] },
+      body: { courseId: "crs_1" },
     });
 
     const res = await routeRequest(event, service);
@@ -266,7 +266,7 @@ describe("router.routeRequest", () => {
     const res = await routeRequest(
       mkEvent("POST", "/beta/rounds", {
         stage: "beta",
-        body: { courseName: "Course", par: [3, 4, 5] },
+        body: { courseId: "crs_1" },
       }),
       service
     );

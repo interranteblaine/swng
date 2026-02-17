@@ -1,4 +1,6 @@
 import type {
+  Course,
+  CourseId,
   IsoDateTime,
   Player,
   PlayerId,
@@ -60,6 +62,13 @@ export interface ConnectionRepository {
   listConnections(roundId: RoundId): Promise<Connection[]>;
 }
 
+export interface CourseRepository {
+  getCourse(courseId: CourseId): Promise<Course | null>;
+  listCourses(): Promise<Course[]>;
+  saveCourse(course: Course): Promise<void>;
+  deleteCourse(courseId: CourseId): Promise<void>;
+}
+
 export interface BroadcastPort {
   notify(roundId: RoundId, message: unknown): Promise<void>;
 }
@@ -73,6 +82,7 @@ export interface IdGenerator {
   newPlayerId(): PlayerId;
   newSessionId(): string;
   newAccessCode(): string;
+  newCourseId(): CourseId;
 }
 
 export interface Logger {
@@ -92,6 +102,7 @@ export interface RoundServiceDeps {
   playerRepo: PlayerRepository;
   scoreRepo: ScoreRepository;
   sessionRepo: SessionRepository;
+  courseRepo: CourseRepository;
 
   idGenerator: IdGenerator;
   clock: Clock;
@@ -100,9 +111,9 @@ export interface RoundServiceDeps {
 }
 
 export interface CreateRoundInput {
-  courseName: string;
-  par: number[];
+  courseId: CourseId;
 }
+
 
 export interface CreateRoundOutput {
   config: RoundConfig;
@@ -196,4 +207,26 @@ export interface RoundService {
   patchRoundState(input: PatchRoundStateInput): Promise<PatchRoundStateOutput>;
   updatePlayer(input: UpdatePlayerInput): Promise<UpdatePlayerOutput>;
   removePlayer(input: RemovePlayerInput): Promise<RemovePlayerOutput>;
+}
+
+export interface CreateCourseInput {
+  name: string;
+  location?: string;
+  holeCount: number;
+  teeSets: import("@swng/domain").TeeSet[];
+}
+
+export interface CourseServiceDeps {
+  courseRepo: CourseRepository;
+  idGenerator: IdGenerator;
+  clock: Clock;
+}
+
+export interface CourseService {
+  createCourse(
+    input: CreateCourseInput
+  ): Promise<{ course: Course }>;
+  getCourse(courseId: CourseId): Promise<{ course: Course }>;
+  listCourses(): Promise<{ courses: Course[] }>;
+  deleteCourse(courseId: CourseId): Promise<void>;
 }

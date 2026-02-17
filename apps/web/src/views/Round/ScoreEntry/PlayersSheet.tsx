@@ -90,7 +90,7 @@ export function PlayersSheet({ isOpen, onClose }: PlayersSheetProps) {
               const isSelf = player.playerId === selfPlayerId;
               const isCreator = player.playerId === creatorId;
               const canEdit = isSelf || selfPlayerId === creatorId;
-              const canRemove = isSelf || selfPlayerId === creatorId;
+              const canRemove = isSelf ? !isCreator : selfPlayerId === creatorId;
 
               return (
                 <IonItem key={player.playerId}>

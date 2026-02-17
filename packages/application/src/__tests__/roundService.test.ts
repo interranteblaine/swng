@@ -576,18 +576,21 @@ describe("RoundService Behavior", () => {
       expect(stores.players[0].name).toBe("Creator");
     });
 
-    it("creator can remove themselves", async () => {
+    it("creator cannot remove themselves", async () => {
       const creatorPlayerId = stores.players.find(
         (p) => p.name === "Creator"
       )!.playerId;
-      const result = await service.removePlayer({
-        roundId: "rid-1",
-        sessionId: creatorSessionId,
-        playerId: creatorPlayerId,
+      await expect(
+        service.removePlayer({
+          roundId: "rid-1",
+          sessionId: creatorSessionId,
+          playerId: creatorPlayerId,
+        })
+      ).rejects.toMatchObject({
+        code: "INVALID_INPUT",
+        message: "Round creator cannot leave",
       });
-      expect(result.playerId).toBe(creatorPlayerId);
-      expect(stores.players).toHaveLength(1);
-      expect(stores.players[0].name).toBe("Guest");
+      expect(stores.players).toHaveLength(2);
     });
 
     it("rejects removing non-existent player", async () => {

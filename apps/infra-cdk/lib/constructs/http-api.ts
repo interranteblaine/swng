@@ -79,6 +79,7 @@ export class HttpApiInfra extends Construct {
           CorsHttpMethod.POST,
           CorsHttpMethod.PUT,
           CorsHttpMethod.PATCH,
+          CorsHttpMethod.DELETE,
           CorsHttpMethod.OPTIONS,
         ],
         allowOrigins: props.allowedOrigins ?? ["*"],
@@ -92,6 +93,7 @@ export class HttpApiInfra extends Construct {
         HttpMethod.POST,
         HttpMethod.PUT,
         HttpMethod.PATCH,
+        HttpMethod.DELETE,
       ],
       integration: new HttpLambdaIntegration(
         `HttpIntegration-${props.stageName}`,

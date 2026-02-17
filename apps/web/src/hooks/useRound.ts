@@ -3,7 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { RoundSnapshot, DomainEvent } from "@swng/domain";
 import { reduceEvent } from "../lib/eventsReducer";
 import { client } from "../lib/client";
-import { getSessionId } from "../lib/session";
+import {
+  getSessionId,
+  getSelfPlayerId,
+  clearSession,
+  clearSelfPlayerId,
+  clearCurrentRoundId,
+} from "../lib/session";
 
 export function useRound(roundId: string) {
   const queryClient = useQueryClient();
@@ -25,11 +31,20 @@ export function useRound(roundId: string) {
   useEffect(() => {
     if (!sessionId) return;
 
+    const selfPlayerId = getSelfPlayerId(roundId);
+
     const onEvent = (evt: DomainEvent) => {
       queryClient.setQueryData<RoundSnapshot | undefined>(
         ["round", roundId],
         (prev) => reduceEvent(prev, evt)
       );
+
+      if (evt.type === "PlayerRemoved" && evt.playerId === selfPlayerId) {
+        clearSession(roundId);
+        clearSelfPlayerId(roundId);
+        clearCurrentRoundId();
+        window.location.href = "/";
+      }
     };
 
     const ws = client.connectEvents(sessionId, onEvent);

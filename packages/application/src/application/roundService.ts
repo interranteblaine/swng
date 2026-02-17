@@ -63,6 +63,10 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         "Session does not belong to this round"
       );
     }
+    const player = await playerRepo.getPlayer(session.roundId, session.playerId);
+    if (!player) {
+      throw new ApplicationError("UNAUTHORIZED", "Player no longer in this round");
+    }
     return session;
   }
 
@@ -308,6 +312,13 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
 
       const isSelf = playerId === session.playerId;
       const isCreator = session.playerId === creatorId;
+
+      if (isSelf && isCreator) {
+        throw new ApplicationError(
+          "INVALID_INPUT",
+          "Round creator cannot leave"
+        );
+      }
 
       if (!isSelf && !isCreator) {
         throw new ApplicationError(

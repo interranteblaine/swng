@@ -29,9 +29,9 @@ type PlayersSheetProps = {
 
 export function PlayersSheet({ isOpen, onClose }: PlayersSheetProps) {
   const { snapshot } = useRoundData();
-  const { updatePlayer } = useRoundActions();
+  const { updatePlayer, removePlayer } = useRoundActions();
 
-  const [editingPlayerId, setEditingPlayerId] = useState<string | null>(null);
+  const [editPlayer, setEditPlayer] = useState<Player | null>(null);
   const [editName, setEditName] = useState("");
   const [editTee, setEditTee] = useState("White");
 
@@ -45,131 +45,147 @@ export function PlayersSheet({ isOpen, onClose }: PlayersSheetProps) {
   const creatorId = sortedPlayers[0]?.playerId;
 
   const startEdit = (player: Player) => {
-    setEditingPlayerId(player.playerId);
     setEditName(player.name);
     setEditTee(player.color ?? "White");
+    setEditPlayer(player);
   };
 
   const saveEdit = () => {
-    if (!editingPlayerId) return;
-    updatePlayer({ playerId: editingPlayerId, name: editName.trim(), color: editTee });
-    if (editingPlayerId === selfPlayerId) {
+    if (!editPlayer) return;
+    updatePlayer({ playerId: editPlayer.playerId, name: editName.trim(), color: editTee });
+    if (editPlayer.playerId === selfPlayerId) {
       setLastPlayerName(editName.trim());
       setLastTeeColor(editTee);
     }
-    setEditingPlayerId(null);
-  };
-
-  const cancelEdit = () => {
-    setEditingPlayerId(null);
+    setEditPlayer(null);
   };
 
   const handleRemove = (playerId: string) => {
-    console.warn("Remove player not yet implemented", playerId);
+    removePlayer({ playerId });
   };
 
   return (
-    <IonModal
-      isOpen={isOpen}
-      onDidDismiss={onClose}
-      initialBreakpoint={0.5}
-      breakpoints={[0, 0.5, 0.75]}
-    >
-      <IonHeader>
-        <IonToolbar style={navyToolbarStyle}>
-          <IonTitle>Players</IonTitle>
-          <IonButtons slot="end">
-            <IonButton color="light" onClick={onClose}>
-              Done
-            </IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+    <>
+      {/* Players list */}
+      <IonModal
+        isOpen={isOpen}
+        onDidDismiss={onClose}
+        initialBreakpoint={0.5}
+        breakpoints={[0, 0.5, 0.75]}
+      >
+        <IonHeader>
+          <IonToolbar style={navyToolbarStyle}>
+            <IonTitle>Players</IonTitle>
+            <IonButtons slot="end">
+              <IonButton color="light" onClick={onClose}>
+                Done
+              </IonButton>
+            </IonButtons>
+          </IonToolbar>
+        </IonHeader>
 
-      <IonContent>
-        <IonList>
-          {sortedPlayers.map((player) => {
-            const isSelf = player.playerId === selfPlayerId;
-            const isCreator = player.playerId === creatorId;
-            const isEditing = editingPlayerId === player.playerId;
+        <IonContent>
+          <IonList>
+            {sortedPlayers.map((player) => {
+              const isSelf = player.playerId === selfPlayerId;
+              const isCreator = player.playerId === creatorId;
+              const canEdit = isSelf || selfPlayerId === creatorId;
+              const canRemove = isSelf || selfPlayerId === creatorId;
 
-            if (isEditing) {
               return (
                 <IonItem key={player.playerId}>
-                  <div className="w-full py-2 flex flex-col gap-2">
-                    <IonInput
-                      value={editName}
-                      onIonInput={(e) => setEditName(e.detail.value ?? "")}
-                      placeholder="Player name"
-                    />
-                    <TeePicker value={editTee} onChange={setEditTee} />
-                    <div className="flex gap-2 justify-end">
-                      <IonButton size="small" fill="outline" onClick={cancelEdit}
-                        style={{ "--color": "#3d5a80", "--border-color": "#3d5a80" }}
+                  <IonLabel>
+                    <h2 className="text-base font-semibold">
+                      {player.name}
+                      {isSelf && (
+                        <span className="text-xs text-gray-400 ml-1">(you)</span>
+                      )}
+                      {isCreator && (
+                        <span className="text-xs text-gray-400 ml-1">creator</span>
+                      )}
+                    </h2>
+                    <p>
+                      <span
+                        className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
+                          teeBadgeClasses[player.color ?? ""] ?? "bg-gray-500 text-white"
+                        }`}
                       >
-                        Cancel
-                      </IonButton>
-                      <IonButton size="small" onClick={saveEdit}
-                        style={{ "--background": "#3d5a80" }}
+                        {player.color ?? "\u2014"}
+                      </span>
+                    </p>
+                  </IonLabel>
+                  <div slot="end" className="flex gap-1">
+                    {canEdit && (
+                      <IonButton
+                        fill="clear"
+                        size="small"
+                        onClick={() => startEdit(player)}
+                        aria-label={isSelf ? "Edit your details" : `Edit ${player.name}`}
                       >
-                        Save
+                        <IonIcon slot="icon-only" icon={createOutline} />
                       </IonButton>
-                    </div>
+                    )}
+                    {canRemove && (
+                      <IonButton
+                        fill="clear"
+                        size="small"
+                        color="danger"
+                        onClick={() => handleRemove(player.playerId)}
+                        aria-label={isSelf ? "Leave round" : `Remove ${player.name}`}
+                      >
+                        <IonIcon slot="icon-only" icon={trashOutline} />
+                      </IonButton>
+                    )}
                   </div>
                 </IonItem>
               );
-            }
+            })}
+          </IonList>
+        </IonContent>
+      </IonModal>
 
-            return (
-              <IonItem key={player.playerId}>
-                <IonLabel>
-                  <h2 className="text-base font-semibold">
-                    {player.name}
-                    {isSelf && (
-                      <span className="text-xs text-gray-400 ml-1">(you)</span>
-                    )}
-                    {isCreator && (
-                      <span className="text-xs text-gray-400 ml-1">creator</span>
-                    )}
-                  </h2>
-                  <p>
-                    <span
-                      className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                        teeBadgeClasses[player.color ?? ""] ?? "bg-gray-500 text-white"
-                      }`}
-                    >
-                      {player.color ?? "\u2014"}
-                    </span>
-                  </p>
-                </IonLabel>
-                <div slot="end" className="flex gap-1">
-                  {isSelf && (
-                    <IonButton
-                      fill="clear"
-                      size="small"
-                      onClick={() => startEdit(player)}
-                      aria-label="Edit your details"
-                    >
-                      <IonIcon slot="icon-only" icon={createOutline} />
-                    </IonButton>
-                  )}
-                  {selfPlayerId === creatorId && !isSelf && (
-                    <IonButton
-                      fill="clear"
-                      size="small"
-                      color="danger"
-                      onClick={() => handleRemove(player.playerId)}
-                      aria-label={`Remove ${player.name}`}
-                    >
-                      <IonIcon slot="icon-only" icon={trashOutline} />
-                    </IonButton>
-                  )}
-                </div>
-              </IonItem>
-            );
-          })}
-        </IonList>
-      </IonContent>
-    </IonModal>
+      {/* Edit player */}
+      <IonModal
+        isOpen={!!editPlayer}
+        onDidDismiss={() => setEditPlayer(null)}
+        initialBreakpoint={0.5}
+        breakpoints={[0, 0.5, 0.75]}
+      >
+        <IonHeader>
+          <IonToolbar style={navyToolbarStyle}>
+            <IonTitle>Edit {editPlayer?.name}</IonTitle>
+            <IonButtons slot="end">
+              <IonButton color="light" onClick={() => setEditPlayer(null)}>
+                Cancel
+              </IonButton>
+            </IonButtons>
+          </IonToolbar>
+        </IonHeader>
+
+        <IonContent>
+          <div className="px-4 py-3 flex flex-col gap-3">
+            <IonInput
+              value={editName}
+              onIonInput={(e) => setEditName(e.detail.value ?? "")}
+              placeholder="Player name"
+              fill="outline"
+              label="Name"
+              labelPlacement="stacked"
+            />
+            <div>
+              <div className="text-xs text-gray-500 mb-1 ml-1">Tee</div>
+              <TeePicker value={editTee} onChange={setEditTee} />
+            </div>
+            <IonButton
+              expand="block"
+              onClick={saveEdit}
+              style={{ "--background": "#3d5a80" }}
+            >
+              Save
+            </IonButton>
+          </div>
+        </IonContent>
+      </IonModal>
+    </>
   );
 }

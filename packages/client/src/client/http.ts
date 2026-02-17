@@ -5,6 +5,7 @@ import type {
   UpdateScoreOutput,
   PatchRoundStateOutput,
   UpdatePlayerOutput,
+  RemovePlayerOutput,
 } from "@swng/application";
 import type {
   CreateRoundRequest,
@@ -16,7 +17,7 @@ import type {
 import type { RoundId } from "@swng/domain";
 import type { HttpPort } from "./types";
 
-type HttpMethod = "GET" | "POST" | "PUT" | "PATCH";
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 type ErrorEnvelope = {
   error?: {
@@ -175,6 +176,24 @@ export function createHttpClient(http: HttpPort, baseUrl: string) {
           playerId
         )}`,
         body,
+        sessionId
+      );
+    },
+
+    async removePlayer(args: {
+      roundId: RoundId;
+      sessionId: string;
+      playerId: string;
+    }): Promise<RemovePlayerOutput> {
+      const { roundId, sessionId, playerId } = args;
+      return fetchJson<RemovePlayerOutput>(
+        http,
+        baseUrl,
+        "DELETE",
+        `/rounds/${encodeURIComponent(roundId)}/players/${encodeURIComponent(
+          playerId
+        )}`,
+        undefined,
         sessionId
       );
     },

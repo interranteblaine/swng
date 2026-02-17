@@ -13,6 +13,7 @@ export function createClient(opts: CreateClientOptions): Client {
     updateScore: httpClient.updateScore,
     patchRoundState: httpClient.patchRoundState,
     updatePlayer: httpClient.updatePlayer,
+    removePlayer: httpClient.removePlayer,
     connectEvents: (sessionId, onEvent, opts) =>
       connectEvents(ws, wsUrl, sessionId, onEvent, opts),
   };

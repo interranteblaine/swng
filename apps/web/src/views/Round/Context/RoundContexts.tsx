@@ -19,6 +19,7 @@ export type RoundActions = {
     name?: string;
     color?: string;
   }) => void;
+  removePlayer: (args: { playerId: string }) => void;
   patchRoundState: (args: {
     status?: RoundSnapshot["state"]["status"] | null;
   }) => void;

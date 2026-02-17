@@ -48,6 +48,7 @@ export interface RoundSnapshot {
 export type DomainEvent =
   | PlayerJoinedEvent
   | PlayerUpdatedEvent
+  | PlayerRemovedEvent
   | ScoreChangedEvent
   | RoundStateChangedEvent;
 
@@ -64,6 +65,11 @@ export interface PlayerJoinedEvent extends BaseEvent {
 export interface PlayerUpdatedEvent extends BaseEvent {
   type: "PlayerUpdated";
   player: Player;
+}
+
+export interface PlayerRemovedEvent extends BaseEvent {
+  type: "PlayerRemoved";
+  playerId: PlayerId;
 }
 
 export interface ScoreChangedEvent extends BaseEvent {

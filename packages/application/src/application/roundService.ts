@@ -10,6 +10,7 @@ import type {
   RoundSnapshot,
   PlayerJoinedEvent,
   PlayerUpdatedEvent,
+  PlayerRemovedEvent,
   ScoreChangedEvent,
   RoundStateChangedEvent,
 } from "@swng/domain";
@@ -29,6 +30,8 @@ import type {
   PatchRoundStateOutput,
   UpdatePlayerInput,
   UpdatePlayerOutput,
+  RemovePlayerInput,
+  RemovePlayerOutput,
   Session,
 } from "./types";
 
@@ -290,6 +293,46 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       await broadcast.notify(roundId, evt);
 
       return { player: updated };
+    },
+
+    async removePlayer(input: RemovePlayerInput): Promise<RemovePlayerOutput> {
+      const { roundId, sessionId, playerId } = input;
+
+      const session = await ensureSessionForRound(roundId, sessionId);
+
+      const players = await playerRepo.listPlayers(roundId);
+      const sorted = [...players].sort((a, b) =>
+        a.joinedAt.localeCompare(b.joinedAt)
+      );
+      const creatorId = sorted[0]?.playerId;
+
+      const isSelf = playerId === session.playerId;
+      const isCreator = session.playerId === creatorId;
+
+      if (!isSelf && !isCreator) {
+        throw new ApplicationError(
+          "FORBIDDEN",
+          "Only the round creator can remove other players"
+        );
+      }
+
+      const target = players.find((p) => p.playerId === playerId);
+      if (!target) {
+        throw new ApplicationError("NOT_FOUND", "Player not found");
+      }
+
+      await playerRepo.deletePlayer(roundId, playerId);
+
+      const now = clock.now();
+      const evt: PlayerRemovedEvent = {
+        type: "PlayerRemoved",
+        roundId,
+        occurredAt: now,
+        playerId,
+      };
+      await broadcast.notify(roundId, evt);
+
+      return { playerId };
     },
   };
 }

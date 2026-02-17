@@ -1,4 +1,4 @@
-import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { DeleteCommand, GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import type { Player, PlayerId, RoundId } from "@swng/domain";
 import type { PlayerRepository } from "@swng/application";
 import { roundPk, PLAYER_SK_PREFIX, playerSk } from "./keys";
@@ -67,6 +67,20 @@ export function createDynamoPlayerRepository(
     return fromPlayerItem(raw);
   }
 
+  async function deletePlayer(roundId: RoundId, playerId: PlayerId): Promise<void> {
+    logger?.debug("DDB deletePlayer", { tableName, roundId, playerId });
+
+    await docClient.send(
+      new DeleteCommand({
+        TableName: tableName,
+        Key: {
+          PK: roundPk(roundId),
+          SK: playerSk(playerId),
+        },
+      })
+    );
+  }
+
   async function listPlayers(roundId: RoundId): Promise<Player[]> {
     const result = await docClient.send(
       new QueryCommand({
@@ -92,6 +106,7 @@ export function createDynamoPlayerRepository(
   return {
     createPlayer,
     updatePlayer,
+    deletePlayer,
     getPlayer,
     listPlayers,
   };

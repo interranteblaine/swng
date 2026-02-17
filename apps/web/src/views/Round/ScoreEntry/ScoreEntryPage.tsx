@@ -18,12 +18,16 @@ import { ScoreEntryList } from "./ScoreEntryList";
 import { TotalsStrip } from "./TotalsStrip";
 import { navyToolbarStyle } from "@/components/theme";
 import { OptionsMenu } from "./OptionsMenu";
+import { InviteSheet } from "./InviteSheet";
+import { PlayersSheet } from "./PlayersSheet";
 
 export function ScoreEntryPage() {
   const { snapshot } = useRoundData();
   const { updateScore } = useRoundActions();
   const [visibleHole, setVisibleHole] = useState(1);
   const [showOptions, setShowOptions] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
+  const [showPlayers, setShowPlayers] = useState(false);
 
   if (!snapshot) return null;
 
@@ -79,7 +83,23 @@ export function ScoreEntryPage() {
         <TotalsStrip snapshot={snapshot} />
       </IonFooter>
 
-      <OptionsMenu isOpen={showOptions} onClose={() => setShowOptions(false)} />
+      <OptionsMenu
+        isOpen={showOptions}
+        onClose={() => setShowOptions(false)}
+        onShowInvite={() => setShowInvite(true)}
+        onShowPlayers={() => setShowPlayers(true)}
+      />
+
+      <InviteSheet
+        isOpen={showInvite}
+        onClose={() => setShowInvite(false)}
+        accessCode={snapshot.config.accessCode}
+      />
+
+      <PlayersSheet
+        isOpen={showPlayers}
+        onClose={() => setShowPlayers(false)}
+      />
     </IonPage>
   );
 }

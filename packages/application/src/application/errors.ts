@@ -1,6 +1,7 @@
 export type ApplicationErrorCode =
   | "NOT_FOUND"
   | "UNAUTHORIZED"
+  | "FORBIDDEN"
   | "INVALID_INPUT"
   | "INVARIANT_VIOLATION"
   | "CONFLICT";

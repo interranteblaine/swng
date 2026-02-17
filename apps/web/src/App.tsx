@@ -1,8 +1,13 @@
 import { RouterProvider } from "react-router-dom";
+import { IonApp } from "@ionic/react";
 import { router } from "./routes";
 
 function App() {
-  return <RouterProvider router={router} />;
+  return (
+    <IonApp>
+      <RouterProvider router={router} />
+    </IonApp>
+  );
 }
 
 export default App;

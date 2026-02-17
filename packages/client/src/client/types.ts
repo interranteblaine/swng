@@ -5,6 +5,7 @@ import type {
   UpdateScoreOutput,
   PatchRoundStateOutput,
   UpdatePlayerOutput,
+  RemovePlayerOutput,
 } from "@swng/application";
 import type {
   CreateRoundRequest,
@@ -16,7 +17,7 @@ import type {
 import type { RoundId } from "@swng/domain";
 import type { DomainEvent } from "@swng/domain";
 
-export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH";
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export interface HttpRequest {
   url: string;
@@ -78,6 +79,11 @@ export interface Client {
       playerId: string;
     } & UpdatePlayerRequest
   ): Promise<UpdatePlayerOutput>;
+  removePlayer(args: {
+    roundId: RoundId;
+    sessionId: string;
+    playerId: string;
+  }): Promise<RemovePlayerOutput>;
   connectEvents(
     sessionId: string,
     onEvent: (evt: DomainEvent) => void,

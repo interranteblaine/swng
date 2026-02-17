@@ -23,6 +23,7 @@ export interface RoundRepository {
 export interface PlayerRepository {
   createPlayer(player: Player): Promise<void>;
   updatePlayer(player: Player): Promise<void>;
+  deletePlayer(roundId: RoundId, playerId: PlayerId): Promise<void>;
   getPlayer(roundId: RoundId, playerId: PlayerId): Promise<Player | null>;
   listPlayers(roundId: RoundId): Promise<Player[]>;
 }
@@ -162,6 +163,16 @@ export interface UpdatePlayerOutput {
   player: Player;
 }
 
+export interface RemovePlayerInput {
+  roundId: RoundId;
+  sessionId: string;
+  playerId: PlayerId;
+}
+
+export interface RemovePlayerOutput {
+  playerId: PlayerId;
+}
+
 export interface RoundService {
   createRound(input: CreateRoundInput): Promise<CreateRoundOutput>;
   joinRound(input: JoinRoundInput): Promise<JoinRoundOutput>;
@@ -169,4 +180,5 @@ export interface RoundService {
   updateScore(input: UpdateScoreInput): Promise<UpdateScoreOutput>;
   patchRoundState(input: PatchRoundStateInput): Promise<PatchRoundStateOutput>;
   updatePlayer(input: UpdatePlayerInput): Promise<UpdatePlayerOutput>;
+  removePlayer(input: RemovePlayerInput): Promise<RemovePlayerOutput>;
 }

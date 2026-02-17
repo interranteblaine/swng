@@ -85,6 +85,10 @@ function createTestDeps(): {
       const idx = players.findIndex((p) => p.playerId === player.playerId);
       if (idx >= 0) players[idx] = player;
     },
+    deletePlayer: async (_roundId: string, playerId: string) => {
+      const idx = players.findIndex((p) => p.playerId === playerId);
+      if (idx >= 0) players.splice(idx, 1);
+    },
     getPlayer: async (roundId: string, playerId: string) => {
       return (
         players.find((p) => p.roundId === roundId && p.playerId === playerId) ??
@@ -489,6 +493,114 @@ describe("RoundService Behavior", () => {
       });
       expect(result.player.name).toBe(orig.name);
       expect(result.player.color).toBe(orig.color);
+    });
+  });
+
+  describe("removePlayer", () => {
+    let creatorSessionId: string;
+    let secondSessionId: string;
+    let secondPlayerId: string;
+
+    beforeEach(async () => {
+      // Use a counter so each join gets a distinct timestamp
+      let callCount = 0;
+      deps.clock.now = () => {
+        callCount++;
+        return `2025-11-16T00:00:0${callCount}.000Z`;
+      };
+
+      await service.createRound({ courseName: "R", par: [3] });
+
+      // First player = creator
+      const first = await service.joinRound({
+        accessCode: "code-1",
+        playerName: "Creator",
+      });
+      creatorSessionId = first.sessionId;
+
+      // Second player
+      const second = await service.joinRound({
+        accessCode: "code-1",
+        playerName: "Guest",
+      });
+      secondSessionId = second.sessionId;
+      secondPlayerId = second.player.playerId;
+    });
+
+    it("creator can remove another player", async () => {
+      const result = await service.removePlayer({
+        roundId: "rid-1",
+        sessionId: creatorSessionId,
+        playerId: secondPlayerId,
+      });
+      expect(result.playerId).toBe(secondPlayerId);
+      expect(stores.players).toHaveLength(1);
+      expect(stores.players[0].name).toBe("Creator");
+    });
+
+    it("emits PlayerRemoved event", async () => {
+      const before = (deps.broadcast as any).notify.mock.calls.length;
+      await service.removePlayer({
+        roundId: "rid-1",
+        sessionId: creatorSessionId,
+        playerId: secondPlayerId,
+      });
+      const calls = (deps.broadcast as any).notify.mock.calls;
+      expect(calls.length).toBeGreaterThan(before);
+      const last = calls[calls.length - 1];
+      expect(last[1]?.type).toBe("PlayerRemoved");
+      expect(last[1]?.playerId).toBe(secondPlayerId);
+    });
+
+    it("non-creator gets FORBIDDEN when removing others", async () => {
+      await expect(
+        service.removePlayer({
+          roundId: "rid-1",
+          sessionId: secondSessionId,
+          playerId: stores.players[0].playerId,
+        })
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: "Only the round creator can remove other players",
+      });
+    });
+
+    it("any player can remove themselves", async () => {
+      const result = await service.removePlayer({
+        roundId: "rid-1",
+        sessionId: secondSessionId,
+        playerId: secondPlayerId,
+      });
+      expect(result.playerId).toBe(secondPlayerId);
+      expect(stores.players).toHaveLength(1);
+      expect(stores.players[0].name).toBe("Creator");
+    });
+
+    it("creator can remove themselves", async () => {
+      const creatorPlayerId = stores.players.find(
+        (p) => p.name === "Creator"
+      )!.playerId;
+      const result = await service.removePlayer({
+        roundId: "rid-1",
+        sessionId: creatorSessionId,
+        playerId: creatorPlayerId,
+      });
+      expect(result.playerId).toBe(creatorPlayerId);
+      expect(stores.players).toHaveLength(1);
+      expect(stores.players[0].name).toBe("Guest");
+    });
+
+    it("rejects removing non-existent player", async () => {
+      await expect(
+        service.removePlayer({
+          roundId: "rid-1",
+          sessionId: creatorSessionId,
+          playerId: "pid-999",
+        })
+      ).rejects.toMatchObject({
+        code: "NOT_FOUND",
+        message: "Player not found",
+      });
     });
   });
 });

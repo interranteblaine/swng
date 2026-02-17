@@ -24,6 +24,16 @@ export function reduceEvent(
       return { ...snapshot, players };
     }
 
+    case "PlayerRemoved": {
+      const { playerId } = evt;
+      if (!playerId) return snapshot;
+
+      return {
+        ...snapshot,
+        players: snapshot.players.filter((p) => p.playerId !== playerId),
+      };
+    }
+
     case "ScoreChanged": {
       const { score } = evt;
       if (!score || typeof score !== "object") return snapshot;

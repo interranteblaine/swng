@@ -62,6 +62,8 @@ export function mapAppErrorToStatus(code: ApplicationError["code"]): number {
       return 404;
     case "UNAUTHORIZED":
       return 401;
+    case "FORBIDDEN":
+      return 403;
     case "CONFLICT":
     case "INVARIANT_VIOLATION":
       return 409;

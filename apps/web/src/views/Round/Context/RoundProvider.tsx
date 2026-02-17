@@ -13,6 +13,7 @@ import {
 import { useRound } from "../../../hooks/useRound";
 import { useUpdateScore } from "../../../hooks/useUpdateScore";
 import { useUpdatePlayer } from "../../../hooks/useUpdatePlayer";
+import { useRemovePlayer } from "../../../hooks/useRemovePlayer";
 import { usePatchRoundState } from "../../../hooks/usePatchRoundState";
 import { RoundActionsContext, RoundDataContext } from "./RoundContexts";
 import { navyToolbarStyle } from "@/components/theme";
@@ -28,6 +29,10 @@ type UpdatePlayerArgs = {
   playerId: string;
   name?: string;
   color?: string;
+};
+
+type RemovePlayerArgs = {
+  playerId: string;
 };
 
 type PatchRoundStateArgs = {
@@ -58,6 +63,7 @@ export function RoundProvider({
 
   const updateScoreMutation = useUpdateScore(roundId);
   const updatePlayerMutation = useUpdatePlayer(roundId);
+  const removePlayerMutation = useRemovePlayer(roundId);
   const patchRoundStateMutation = usePatchRoundState(roundId);
 
   const updateScore = useCallback(
@@ -68,6 +74,11 @@ export function RoundProvider({
   const updatePlayer = useCallback(
     (args: UpdatePlayerArgs) => updatePlayerMutation.mutate(args),
     [updatePlayerMutation]
+  );
+
+  const removePlayer = useCallback(
+    (args: RemovePlayerArgs) => removePlayerMutation.mutate(args),
+    [removePlayerMutation]
   );
 
   const patchRoundState = useCallback(
@@ -81,8 +92,8 @@ export function RoundProvider({
   );
 
   const actionsValue = useMemo(
-    () => ({ updateScore, updatePlayer, patchRoundState }),
-    [updateScore, updatePlayer, patchRoundState]
+    () => ({ updateScore, updatePlayer, removePlayer, patchRoundState }),
+    [updateScore, updatePlayer, removePlayer, patchRoundState]
   );
 
   if (isLoading) {

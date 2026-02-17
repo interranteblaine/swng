@@ -139,6 +139,24 @@ export async function routeRequest(
     }
   }
 
+  // DELETE /rounds/{roundId}/players/{playerId}
+  {
+    const m = path.match(RE_PLAYER);
+    if (method === "DELETE" && m) {
+      const roundId = decodeURIComponent(m[1]);
+      const playerId = decodeURIComponent(m[2]);
+      const sessionId = requireSessionId(event.headers);
+
+      const result = await service.removePlayer({
+        roundId,
+        sessionId,
+        playerId,
+      });
+
+      return json(200, result);
+    }
+  }
+
   // PATCH /rounds/{roundId}/players/{playerId}
   {
     const m = path.match(RE_PLAYER);

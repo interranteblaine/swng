@@ -25,6 +25,12 @@ export const UpdateScoreRequest = z.object({
 });
 export type UpdateScoreRequest = z.infer<typeof UpdateScoreRequest>;
 
+export const DeleteScoreRequest = z.object({
+  playerId: z.string().min(1).max(100),
+  holeNumber: z.number().int().positive(),
+});
+export type DeleteScoreRequest = z.infer<typeof DeleteScoreRequest>;
+
 export const PatchRoundStateRequest = z.object({
   status: RoundStatusDto.nullable().optional(),
 });
@@ -70,6 +76,18 @@ export function parseJoinRoundRequest(
   input: unknown
 ): ParseOk<JoinRoundRequest> | ParseErr {
   const res = JoinRoundRequest.safeParse(input);
+  if (res.success) return { ok: true, data: res.data };
+  const issues: ValidationIssue[] = res.error.issues.map((i) => ({
+    path: i.path as (string | number)[],
+    message: i.message,
+  }));
+  return { ok: false, error: formatIssues(issues), issues };
+}
+
+export function parseDeleteScoreRequest(
+  input: unknown
+): ParseOk<DeleteScoreRequest> | ParseErr {
+  const res = DeleteScoreRequest.safeParse(input);
   if (res.success) return { ok: true, data: res.data };
   const issues: ValidationIssue[] = res.error.issues.map((i) => ({
     path: i.path as (string | number)[],

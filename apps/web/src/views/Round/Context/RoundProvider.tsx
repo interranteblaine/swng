@@ -22,7 +22,7 @@ import type { RoundSnapshot } from "@swng/domain";
 type UpdateScoreArgs = {
   playerId: string;
   holeNumber: number;
-  strokes: number;
+  strokes: number | undefined;
 };
 
 type UpdatePlayerArgs = {

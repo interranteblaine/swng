@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { RoundSnapshot, ScoreChangedEvent } from "@swng/domain";
+import type { RoundSnapshot, ScoreChangedEvent, ScoreClearedEvent } from "@swng/domain";
 import { client } from "../lib/client";
 import { getSessionId, getSelfPlayerId } from "../lib/session";
 import { reduceEvent } from "../lib/eventsReducer";
@@ -8,7 +8,7 @@ import { reduceEvent } from "../lib/eventsReducer";
 type Args = {
   playerId: string;
   holeNumber: number;
-  strokes: number;
+  strokes: number | undefined;
 };
 
 const DEBOUNCE_MS = 300;
@@ -47,13 +47,22 @@ export function useUpdateScore(roundId: string) {
       try {
         const sessionId = getSessionId(roundId);
         if (!sessionId) throw new Error("NO_SESSION");
-        await client.updateScore({
-          roundId,
-          sessionId,
-          playerId: args.playerId,
-          holeNumber: args.holeNumber,
-          strokes: args.strokes,
-        });
+        if (args.strokes === undefined) {
+          await client.deleteScore({
+            roundId,
+            sessionId,
+            playerId: args.playerId,
+            holeNumber: args.holeNumber,
+          });
+        } else {
+          await client.updateScore({
+            roundId,
+            sessionId,
+            playerId: args.playerId,
+            holeNumber: args.holeNumber,
+            strokes: args.strokes,
+          });
+        }
       } catch (err) {
         // Rollback to pre-burst snapshot on error
         const snap = rollbackRef.current.get(key);
@@ -89,6 +98,18 @@ export function useUpdateScore(roundId: string) {
           if (!old) return old;
 
           const nowIso = new Date().toISOString();
+
+          if (args.strokes === undefined) {
+            const optimisticEvt: ScoreClearedEvent = {
+              type: "ScoreCleared",
+              roundId,
+              occurredAt: nowIso,
+              playerId: args.playerId,
+              holeNumber: args.holeNumber,
+            };
+            return reduceEvent(old, optimisticEvt) ?? old;
+          }
+
           const author = getSelfPlayerId(roundId) ?? args.playerId;
 
           const optimisticEvt: ScoreChangedEvent = {

@@ -12,7 +12,7 @@ export type RoundActions = {
   updateScore: (args: {
     playerId: string;
     holeNumber: number;
-    strokes: number;
+    strokes: number | undefined;
   }) => void;
   updatePlayer: (args: {
     playerId: string;

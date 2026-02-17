@@ -3,7 +3,7 @@ import { add, remove } from "ionicons/icons";
 
 type ScoreStepperProps = {
   value: number | undefined;
-  onChange: (value: number) => void;
+  onChange: (value: number | undefined) => void;
 };
 
 const MIN = 1;
@@ -14,10 +14,10 @@ export function ScoreStepper({ value, onChange }: ScoreStepperProps) {
     <div className="flex items-center">
       <button
         className="flex h-12 w-12 items-center justify-center rounded-l-lg border border-gray-300 bg-white text-gray-700 active:bg-gray-100 disabled:opacity-40"
-        disabled={value === undefined || value <= MIN}
+        disabled={value === undefined}
         onClick={() => {
-          if (value !== undefined && value > MIN) {
-            onChange(value - 1);
+          if (value !== undefined) {
+            onChange(value <= MIN ? undefined : value - 1);
           }
         }}
         aria-label="Decrease score"

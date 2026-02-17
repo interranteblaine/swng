@@ -54,6 +54,18 @@ export function reduceEvent(
       return { ...snapshot, scores };
     }
 
+    case "ScoreCleared": {
+      const { playerId, holeNumber } = evt;
+      if (!playerId) return snapshot;
+
+      return {
+        ...snapshot,
+        scores: snapshot.scores.filter(
+          (s) => !(s.playerId === playerId && s.holeNumber === holeNumber)
+        ),
+      };
+    }
+
     case "RoundStateChanged": {
       const { state } = evt;
       if (!state || typeof state !== "object") return snapshot;

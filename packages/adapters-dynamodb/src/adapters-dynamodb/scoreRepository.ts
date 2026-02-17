@@ -1,7 +1,7 @@
-import { PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import type { RoundId, Score } from "@swng/domain";
+import { DeleteCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import type { PlayerId, RoundId, Score } from "@swng/domain";
 import type { ScoreRepository } from "@swng/application";
-import { roundPk, SCORE_SK_PREFIX } from "./keys";
+import { roundPk, scoreSk, SCORE_SK_PREFIX } from "./keys";
 import type { DynamoConfig } from "./config";
 import { ScoreItem, toScoreItem, fromScoreItem } from "./scoreItems";
 
@@ -24,6 +24,25 @@ export function createDynamoScoreRepository(
       new PutCommand({
         TableName: tableName,
         Item: item,
+      })
+    );
+  }
+
+  async function deleteScore(roundId: RoundId, playerId: PlayerId, holeNumber: number): Promise<void> {
+    logger?.debug("DDB deleteScore", {
+      tableName,
+      roundId,
+      playerId,
+      holeNumber,
+    });
+
+    await docClient.send(
+      new DeleteCommand({
+        TableName: tableName,
+        Key: {
+          PK: roundPk(roundId),
+          SK: scoreSk(playerId, holeNumber),
+        },
       })
     );
   }
@@ -52,6 +71,7 @@ export function createDynamoScoreRepository(
 
   return {
     upsertScore,
+    deleteScore,
     listScores,
   };
 }

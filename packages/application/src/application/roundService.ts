@@ -12,6 +12,7 @@ import type {
   PlayerUpdatedEvent,
   PlayerRemovedEvent,
   ScoreChangedEvent,
+  ScoreClearedEvent,
   RoundStateChangedEvent,
 } from "@swng/domain";
 import { ApplicationError } from "./errors";
@@ -26,6 +27,8 @@ import type {
   GetRoundOutput,
   UpdateScoreInput,
   UpdateScoreOutput,
+  DeleteScoreInput,
+  DeleteScoreOutput,
   PatchRoundStateInput,
   PatchRoundStateOutput,
   UpdatePlayerInput,
@@ -240,6 +243,36 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       await broadcast.notify(roundId, evt);
 
       return { score };
+    },
+
+    async deleteScore(input: DeleteScoreInput): Promise<DeleteScoreOutput> {
+      const { roundId, sessionId, playerId, holeNumber } = input;
+
+      await ensureSessionForRound(roundId, sessionId);
+
+      const snapshot = await loadRoundSnapshot(roundId);
+      const { config: roundConfig } = snapshot;
+
+      if (!isValidHoleNumber(roundConfig, holeNumber)) {
+        throw new ApplicationError(
+          "INVALID_INPUT",
+          `Hole number ${holeNumber} is not valid for this round`
+        );
+      }
+
+      await scoreRepo.deleteScore(roundId, playerId, holeNumber);
+
+      const now = clock.now();
+      const evt: ScoreClearedEvent = {
+        type: "ScoreCleared",
+        roundId,
+        occurredAt: now,
+        playerId,
+        holeNumber,
+      };
+      await broadcast.notify(roundId, evt);
+
+      return { playerId, holeNumber };
     },
 
     async patchRoundState(

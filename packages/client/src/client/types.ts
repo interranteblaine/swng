@@ -3,6 +3,7 @@ import type {
   JoinRoundOutput,
   GetRoundOutput,
   UpdateScoreOutput,
+  DeleteScoreOutput,
   PatchRoundStateOutput,
   UpdatePlayerOutput,
   RemovePlayerOutput,
@@ -11,6 +12,7 @@ import type {
   CreateRoundRequest,
   JoinRoundRequest,
   UpdateScoreRequest,
+  DeleteScoreRequest,
   PatchRoundStateRequest,
   UpdatePlayerRequest,
 } from "@swng/contracts";
@@ -69,6 +71,9 @@ export interface Client {
   updateScore(
     args: { roundId: RoundId; sessionId: string } & UpdateScoreRequest
   ): Promise<UpdateScoreOutput>;
+  deleteScore(
+    args: { roundId: RoundId; sessionId: string } & DeleteScoreRequest
+  ): Promise<DeleteScoreOutput>;
   patchRoundState(
     args: { roundId: RoundId; sessionId: string } & PatchRoundStateRequest
   ): Promise<PatchRoundStateOutput>;

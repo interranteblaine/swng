@@ -8,6 +8,7 @@ import {
   parseCreateRoundRequest,
   parseJoinRoundRequest,
   parseUpdateScoreRequest,
+  parseDeleteScoreRequest,
   parsePatchRoundStateRequest,
   parseUpdatePlayerRequest,
 } from "@swng/contracts";
@@ -109,6 +110,31 @@ export async function routeRequest(
         playerId: body.playerId,
         holeNumber: body.holeNumber,
         strokes: body.strokes,
+      });
+
+      return json(200, result);
+    }
+  }
+
+  // DELETE /rounds/{roundId}/scores
+  {
+    const m = path.match(RE_SCORES);
+    if (method === "DELETE" && m) {
+      const roundId = decodeURIComponent(m[1]);
+      const sessionId = requireSessionId(event.headers);
+
+      const raw = parseJson<unknown>(event.body, event.isBase64Encoded);
+      const parsed = parseDeleteScoreRequest(raw);
+      if (!parsed.ok) {
+        throw new ApplicationError("INVALID_INPUT", parsed.error);
+      }
+      const body = parsed.data;
+
+      const result = await service.deleteScore({
+        roundId,
+        sessionId,
+        playerId: body.playerId,
+        holeNumber: body.holeNumber,
       });
 
       return json(200, result);

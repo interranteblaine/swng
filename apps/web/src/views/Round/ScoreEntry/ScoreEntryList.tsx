@@ -11,7 +11,7 @@ type PlayerView = {
 type ScoreEntryListProps = {
   players: PlayerView[];
   strokesByPlayer: Record<string, number | undefined>;
-  onChangeStrokes: (playerId: string, strokes: number) => void;
+  onChangeStrokes: (playerId: string, strokes: number | undefined) => void;
 };
 
 export function ScoreEntryList({

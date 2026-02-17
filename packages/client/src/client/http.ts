@@ -3,6 +3,7 @@ import type {
   JoinRoundOutput,
   GetRoundOutput,
   UpdateScoreOutput,
+  DeleteScoreOutput,
   PatchRoundStateOutput,
   UpdatePlayerOutput,
   RemovePlayerOutput,
@@ -11,6 +12,7 @@ import type {
   CreateRoundRequest,
   JoinRoundRequest,
   UpdateScoreRequest,
+  DeleteScoreRequest,
   PatchRoundStateRequest,
   UpdatePlayerRequest,
 } from "@swng/contracts";
@@ -138,6 +140,21 @@ export function createHttpClient(http: HttpPort, baseUrl: string) {
         http,
         baseUrl,
         "PUT",
+        `/rounds/${encodeURIComponent(roundId)}/scores`,
+        body,
+        sessionId
+      );
+    },
+
+    async deleteScore(
+      args: { roundId: RoundId; sessionId: string } & DeleteScoreRequest
+    ): Promise<DeleteScoreOutput> {
+      const { roundId, sessionId, playerId, holeNumber } = args;
+      const body: DeleteScoreRequest = { playerId, holeNumber };
+      return fetchJson<DeleteScoreOutput>(
+        http,
+        baseUrl,
+        "DELETE",
         `/rounds/${encodeURIComponent(roundId)}/scores`,
         body,
         sessionId

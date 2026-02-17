@@ -50,6 +50,7 @@ export type DomainEvent =
   | PlayerUpdatedEvent
   | PlayerRemovedEvent
   | ScoreChangedEvent
+  | ScoreClearedEvent
   | RoundStateChangedEvent;
 
 export interface BaseEvent {
@@ -75,6 +76,12 @@ export interface PlayerRemovedEvent extends BaseEvent {
 export interface ScoreChangedEvent extends BaseEvent {
   type: "ScoreChanged";
   score: Score;
+}
+
+export interface ScoreClearedEvent extends BaseEvent {
+  type: "ScoreCleared";
+  playerId: PlayerId;
+  holeNumber: number;
 }
 
 export interface RoundStateChangedEvent extends BaseEvent {

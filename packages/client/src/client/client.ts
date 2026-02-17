@@ -11,6 +11,7 @@ export function createClient(opts: CreateClientOptions): Client {
     joinRound: httpClient.joinRound,
     getRound: httpClient.getRound,
     updateScore: httpClient.updateScore,
+    deleteScore: httpClient.deleteScore,
     patchRoundState: httpClient.patchRoundState,
     updatePlayer: httpClient.updatePlayer,
     removePlayer: httpClient.removePlayer,

@@ -45,6 +45,7 @@ export function reduceEvent(
       );
 
       if (idx >= 0) {
+        if (scores[idx].updatedAt > score.updatedAt) return snapshot;
         scores[idx] = score;
       } else {
         scores.push(score);

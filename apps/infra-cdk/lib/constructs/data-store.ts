@@ -1,5 +1,5 @@
 import { RemovalPolicy } from "aws-cdk-lib";
-import { AttributeType, BillingMode, Table } from "aws-cdk-lib/aws-dynamodb";
+import { AttributeType, BillingMode, Table, TableEncryption } from "aws-cdk-lib/aws-dynamodb";
 import { Construct } from "constructs";
 
 export interface DataStoreProps {
@@ -24,6 +24,8 @@ export class DataStore extends Construct {
       sortKey: { name: "SK", type: AttributeType.STRING },
       removalPolicy: RemovalPolicy.RETAIN,
       timeToLiveAttribute: "ttl",
+      pointInTimeRecovery: true,
+      encryption: TableEncryption.AWS_MANAGED,
     });
 
     this.table.addGlobalSecondaryIndex({

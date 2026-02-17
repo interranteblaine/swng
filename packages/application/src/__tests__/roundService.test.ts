@@ -474,6 +474,29 @@ describe("RoundService Behavior", () => {
       expect(res.state.status).toBeNull();
     });
 
+    it("rejects non-creator from changing round status", async () => {
+      // Add a second player
+      let callCount = 0;
+      deps.clock.now = () => {
+        callCount++;
+        return `2025-11-16T00:00:0${callCount}.000Z`;
+      };
+      const second = await service.joinRound({
+        accessCode: "code-1",
+        playerName: "Guest",
+      });
+      await expect(
+        service.patchRoundState({
+          roundId: "rid-1",
+          sessionId: second.sessionId,
+          status: "COMPLETED" as RoundStatus,
+        })
+      ).rejects.toMatchObject({
+        code: "FORBIDDEN",
+        message: "Only the round creator can change round status",
+      });
+    });
+
     it("propagates CONFLICT when repository detects a concurrent update", async () => {
       // First update succeeds; our stub getRoundSnapshot returns the initial state (states[0])
       // which simulates a stale read on subsequent calls.
@@ -499,7 +522,7 @@ describe("RoundService Behavior", () => {
       await service.joinRound({ accessCode: "code-1", playerName: "X" });
     });
 
-    it("rejects missing player", async () => {
+    it("rejects updating another player's profile", async () => {
       await expect(
         service.updatePlayer({
           roundId: "rid-1",
@@ -507,8 +530,8 @@ describe("RoundService Behavior", () => {
           playerId: "nope",
         })
       ).rejects.toMatchObject({
-        code: "NOT_FOUND",
-        message: "Player not found",
+        code: "FORBIDDEN",
+        message: "Cannot update another player's profile",
       });
     });
 

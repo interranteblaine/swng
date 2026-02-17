@@ -6,22 +6,22 @@ export const RoundStatusDto = z.union([
 ]);
 
 export const CreateRoundRequest = z.object({
-  courseName: z.string().min(1),
-  par: z.array(z.number().int().positive()).min(1),
+  courseName: z.string().min(1).max(200),
+  par: z.array(z.number().int().min(1).max(99)).min(1).max(36),
 });
 export type CreateRoundRequest = z.infer<typeof CreateRoundRequest>;
 
 export const JoinRoundRequest = z.object({
-  accessCode: z.string().min(1),
-  playerName: z.string().min(1),
-  color: z.string().min(1).optional(),
+  accessCode: z.string().min(1).max(20),
+  playerName: z.string().min(1).max(100),
+  color: z.string().min(1).max(50).optional(),
 });
 export type JoinRoundRequest = z.infer<typeof JoinRoundRequest>;
 
 export const UpdateScoreRequest = z.object({
-  playerId: z.string().min(1),
+  playerId: z.string().min(1).max(100),
   holeNumber: z.number().int().positive(),
-  strokes: z.number().int().positive(),
+  strokes: z.number().int().min(1).max(99),
 });
 export type UpdateScoreRequest = z.infer<typeof UpdateScoreRequest>;
 
@@ -31,8 +31,8 @@ export const PatchRoundStateRequest = z.object({
 export type PatchRoundStateRequest = z.infer<typeof PatchRoundStateRequest>;
 
 export const UpdatePlayerRequest = z.object({
-  name: z.string().min(1).optional(),
-  color: z.string().min(1).optional(),
+  name: z.string().min(1).max(100).optional(),
+  color: z.string().min(1).max(50).optional(),
 });
 export type UpdatePlayerRequest = z.infer<typeof UpdatePlayerRequest>;
 

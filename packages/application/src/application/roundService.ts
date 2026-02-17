@@ -247,7 +247,19 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     ): Promise<PatchRoundStateOutput> {
       const { roundId, sessionId, status } = input;
 
-      await ensureSessionForRound(roundId, sessionId);
+      const session = await ensureSessionForRound(roundId, sessionId);
+
+      const players = await playerRepo.listPlayers(roundId);
+      const sorted = [...players].sort((a, b) =>
+        a.joinedAt.localeCompare(b.joinedAt)
+      );
+      const creatorId = sorted[0]?.playerId;
+      if (session.playerId !== creatorId) {
+        throw new ApplicationError(
+          "FORBIDDEN",
+          "Only the round creator can change round status"
+        );
+      }
 
       const snapshot = await loadRoundSnapshot(roundId);
 
@@ -281,7 +293,13 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     async updatePlayer(input: UpdatePlayerInput): Promise<UpdatePlayerOutput> {
       const { roundId, sessionId, playerId, name, color } = input;
 
-      await ensureSessionForRound(roundId, sessionId);
+      const session = await ensureSessionForRound(roundId, sessionId);
+      if (playerId !== session.playerId) {
+        throw new ApplicationError(
+          "FORBIDDEN",
+          "Cannot update another player's profile"
+        );
+      }
 
       const existing = await playerRepo.getPlayer(roundId, playerId);
       if (!existing) {

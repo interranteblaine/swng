@@ -26,7 +26,7 @@ export interface HttpApiInfraProps {
   wsApiId: string;
   rateLimit?: number;
   burstLimit?: number;
-  allowedOrigins?: string[];
+  allowedOrigins: string[];
 }
 
 export class HttpApiInfra extends Construct {
@@ -82,7 +82,7 @@ export class HttpApiInfra extends Construct {
           CorsHttpMethod.DELETE,
           CorsHttpMethod.OPTIONS,
         ],
-        allowOrigins: props.allowedOrigins ?? ["*"],
+        allowOrigins: props.allowedOrigins,
       },
     });
 

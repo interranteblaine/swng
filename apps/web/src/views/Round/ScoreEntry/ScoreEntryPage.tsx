@@ -31,8 +31,10 @@ export function ScoreEntryPage() {
 
   if (!snapshot) return null;
 
-  const par = snapshot.config.par;
-  const holeCount = par.length;
+  const par = [...snapshot.config.course.teeSets[0].holes]
+    .sort((a, b) => a.holeNumber - b.holeNumber)
+    .map((h) => h.par);
+  const holeCount = snapshot.config.course.holeCount;
 
   const players = snapshot.players.map((p) => ({
     playerId: p.playerId,
@@ -54,7 +56,7 @@ export function ScoreEntryPage() {
           <IonButtons slot="start">
             <IonBackButton defaultHref="/" color="light" />
           </IonButtons>
-          <IonTitle>{snapshot.config.courseName}</IonTitle>
+          <IonTitle>{snapshot.config.course.name}</IonTitle>
           <IonButtons slot="end">
             <IonButton aria-label="Options" color="light" onClick={() => setShowOptions(true)}>
               <IonIcon slot="icon-only" icon={menuOutline} />

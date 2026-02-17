@@ -1,4 +1,10 @@
-import type { Player, PlayerId, RoundSnapshot } from "@swng/domain";
+import type { CourseSnapshot, Player, PlayerId, RoundSnapshot } from "@swng/domain";
+
+function coursePar(course: CourseSnapshot): number[] {
+  return [...course.teeSets[0].holes]
+    .sort((a, b) => a.holeNumber - b.holeNumber)
+    .map((h) => h.par);
+}
 
 export function buildScoreIndex(snapshot: RoundSnapshot): Map<string, number> {
   const index = new Map<string, number>();
@@ -43,8 +49,7 @@ export function computeTotalFromIndex(
 }
 
 export function computeParTotal(snapshot: RoundSnapshot): number {
-  // Use the first 18 entries of par array per spec.
-  return snapshot.config.par.slice(0, 18).reduce((acc, p) => acc + (p ?? 0), 0);
+  return coursePar(snapshot.config.course).slice(0, 18).reduce((acc, p) => acc + (p ?? 0), 0);
 }
 
 /**
@@ -63,10 +68,11 @@ export function computeParThroughPlayedHoles(
   index: Map<string, number>,
   playerId: PlayerId
 ): number {
+  const par = coursePar(snapshot.config.course);
   let total = 0;
-  for (let hole = 1; hole <= snapshot.config.par.length; hole++) {
+  for (let hole = 1; hole <= par.length; hole++) {
     if (index.has(`${playerId}:${hole}`)) {
-      total += snapshot.config.par[hole - 1] ?? 0;
+      total += par[hole - 1] ?? 0;
     }
   }
   return total;

@@ -41,11 +41,8 @@ export interface CourseSnapshot {
 export interface RoundConfig {
   roundId: RoundId;
   accessCode: string;
-  courseName: string;
-  holes: number;
-  par: number[];
   createdAt: IsoDateTime;
-  course?: CourseSnapshot;
+  course: CourseSnapshot;
 }
 
 export interface RoundState {

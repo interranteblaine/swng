@@ -137,6 +137,10 @@ export function createCourse(options: {
   };
 }
 
+export function coursePar(course: CourseSnapshot): number[] {
+  return teeSetPar(course.teeSets[0]);
+}
+
 export function teeSetPar(teeSet: TeeSet): number[] {
   return [...teeSet.holes]
     .sort((a, b) => a.holeNumber - b.holeNumber)

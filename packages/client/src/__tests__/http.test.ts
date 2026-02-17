@@ -26,6 +26,21 @@ describe("client http (stateless)", () => {
         });
 
         // simulate endpoints used by tests
+        const sampleCourse = {
+          courseId: "crs-1",
+          name: "Course",
+          holeCount: 1,
+          teeSets: [
+            {
+              name: "White",
+              color: "#FFFFFF",
+              courseRating: 72,
+              slopeRating: 113,
+              holes: [{ holeNumber: 1, par: 3, yardage: 300, handicapIndex: 1 }],
+            },
+          ],
+        };
+
         if (String(req.url).endsWith("/rounds/join")) {
           const out = {
             roundId: "r1",
@@ -42,10 +57,8 @@ describe("client http (stateless)", () => {
               config: {
                 roundId: "r1",
                 accessCode: "AC",
-                courseName: "Course",
-                holes: 1,
-                par: [3],
                 createdAt: "2020-01-01T00:00:00Z",
+                course: sampleCourse,
               },
               state: {
                 roundId: "r1",
@@ -70,10 +83,8 @@ describe("client http (stateless)", () => {
               config: {
                 roundId: "r1",
                 accessCode: "AC",
-                courseName: "Course",
-                holes: 1,
-                par: [3],
                 createdAt: "2020-01-01T00:00:00Z",
+                course: sampleCourse,
               },
               state: {
                 roundId: "r1",

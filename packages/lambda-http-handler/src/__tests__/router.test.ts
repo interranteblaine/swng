@@ -81,10 +81,25 @@ function sampleRound(): {
   const config: RoundConfig = {
     roundId: "rnd_1",
     accessCode: "ABC123",
-    courseName: "Course",
-    holes: 3,
-    par: [3, 4, 5],
     createdAt: new Date().toISOString(),
+    course: {
+      courseId: "crs_1",
+      name: "Course",
+      holeCount: 3,
+      teeSets: [
+        {
+          name: "White",
+          color: "#FFFFFF",
+          courseRating: 72,
+          slopeRating: 113,
+          holes: [
+            { holeNumber: 1, par: 3, yardage: 300, handicapIndex: 1 },
+            { holeNumber: 2, par: 4, yardage: 310, handicapIndex: 2 },
+            { holeNumber: 3, par: 5, yardage: 320, handicapIndex: 3 },
+          ],
+        },
+      ],
+    },
   };
   const state: RoundState = {
     roundId: "rnd_1",

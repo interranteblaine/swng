@@ -99,8 +99,8 @@ describe("createDynamoRoundRepository behavior", () => {
       await roundRepo.saveConfig(sampleRoundConfig());
       await roundRepo.saveState(sampleRoundState());
       const out = await roundRepo.getRoundSnapshot("rid-1");
-      expect(out!.config.courseName).toBe("Course");
-      expect(out!.config.par).toEqual([3, 4, 5]);
+      expect(out!.config.course.name).toBe("Course");
+      expect(out!.config.course.holeCount).toBe(3);
     });
   });
 

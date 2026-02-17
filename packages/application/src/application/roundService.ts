@@ -2,7 +2,6 @@ import {
   createRoundConfig,
   createInitialRoundState,
   isValidHoleNumber,
-  teeSetPar,
   toCourseSnapshot,
 } from "@swng/domain";
 import type {
@@ -105,7 +104,6 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       }
 
       const courseSnapshot = toCourseSnapshot(course);
-      const par = teeSetPar(course.teeSets[0]);
 
       const roundId = idGenerator.newRoundId();
       const accessCode = idGenerator.newAccessCode();
@@ -114,10 +112,8 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       const configValue = createRoundConfig({
         roundId,
         accessCode,
-        courseName: course.name,
-        par,
-        createdAt,
         course: courseSnapshot,
+        createdAt,
       });
 
       const stateValue = createInitialRoundState(roundId, createdAt);

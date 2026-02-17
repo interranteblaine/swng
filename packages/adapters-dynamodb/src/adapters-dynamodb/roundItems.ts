@@ -14,11 +14,8 @@ export interface RoundConfigItem {
   GSI1SK: string;
   roundId: RoundId;
   accessCode: string;
-  courseName: string;
-  holes: number;
-  par: number[];
   createdAt: IsoDateTime;
-  course?: CourseSnapshot;
+  course: CourseSnapshot;
 }
 
 export interface RoundStateItem {
@@ -31,37 +28,25 @@ export interface RoundStateItem {
 }
 
 export function toConfigItem(config: RoundConfig): RoundConfigItem {
-  const item: RoundConfigItem = {
+  return {
     PK: roundPk(config.roundId),
     SK: CONFIG_SK,
     GSI1PK: `CODE#${config.accessCode}`,
     GSI1SK: `ROUND#${config.roundId}`,
     roundId: config.roundId,
     accessCode: config.accessCode,
-    courseName: config.courseName,
-    holes: config.holes,
-    par: [...config.par],
     createdAt: config.createdAt,
+    course: config.course,
   };
-  if (config.course) {
-    item.course = config.course;
-  }
-  return item;
 }
 
 export function fromConfigItem(item: RoundConfigItem): RoundConfig {
-  const config: RoundConfig = {
+  return {
     roundId: item.roundId,
     accessCode: item.accessCode,
-    courseName: item.courseName,
-    holes: item.holes,
-    par: item.par,
     createdAt: item.createdAt,
+    course: item.course,
   };
-  if (item.course) {
-    config.course = item.course;
-  }
-  return config;
 }
 
 export function toStateItem(state: RoundState): RoundStateItem {

@@ -36,10 +36,26 @@ function makeSnapshot(): RoundSnapshot {
     config: {
       roundId: "r1",
       accessCode: "ABCD",
-      courseName: "Course",
-      holes: 18,
-      par,
       createdAt: now,
+      course: {
+        courseId: "crs-1",
+        name: "Course",
+        holeCount: 18,
+        teeSets: [
+          {
+            name: "White",
+            color: "#FFFFFF",
+            courseRating: 72,
+            slopeRating: 113,
+            holes: par.map((p, i) => ({
+              holeNumber: i + 1,
+              par: p,
+              yardage: 300 + i * 10,
+              handicapIndex: i + 1,
+            })),
+          },
+        ],
+      },
     },
     state: {
       roundId: "r1",
@@ -238,8 +254,11 @@ describe("roundCalcs helpers", () => {
 
   it("computes Par total for 18 holes", () => {
     const snapshot = makeSnapshot();
+    const par = snapshot.config.course.teeSets[0].holes
+      .sort((a, b) => a.holeNumber - b.holeNumber)
+      .map((h) => h.par);
     expect(computeParTotal(snapshot)).toBe(
-      snapshot.config.par.slice(0, 18).reduce((a, b) => a + b, 0)
+      par.slice(0, 18).reduce((a, b) => a + b, 0)
     );
   });
 

@@ -4,8 +4,31 @@ import {
   createRoundConfig,
   createInitialRoundState,
   isValidHoleNumber,
+  coursePar,
 } from "../index";
-import type { RoundConfig, IsoDateTime } from "../index";
+import type { RoundConfig, CourseSnapshot, IsoDateTime } from "../index";
+
+function makeCourseSnapshot(par: number[]): CourseSnapshot {
+  return {
+    courseId: "crs-1",
+    name: "Test Course",
+    holeCount: par.length,
+    teeSets: [
+      {
+        name: "White",
+        color: "#FFFFFF",
+        courseRating: 72,
+        slopeRating: 113,
+        holes: par.map((p, i) => ({
+          holeNumber: i + 1,
+          par: p,
+          yardage: 300 + i * 10,
+          handicapIndex: i + 1,
+        })),
+      },
+    ],
+  };
+}
 
 describe("round module", () => {
   describe("createRoundConfig", () => {
@@ -13,8 +36,7 @@ describe("round module", () => {
       const options = {
         roundId: "r2",
         accessCode: "empty",
-        courseName: "Empty Course",
-        par: [] as number[],
+        course: makeCourseSnapshot([]),
         createdAt: "2025-11-15T17:00:00Z" as IsoDateTime,
       };
       expect(() => createRoundConfig(options)).toThrow(DomainError);
@@ -24,19 +46,20 @@ describe("round module", () => {
     });
 
     it("builds a valid config", () => {
+      const par = [3, 4, 5];
+      const course = makeCourseSnapshot(par);
       const options = {
         roundId: "r1",
         accessCode: "code123",
-        courseName: "Test Course",
-        par: [3, 4, 5],
+        course,
         createdAt: "2025-11-15T17:00:00Z" as IsoDateTime,
       };
       const config = createRoundConfig(options);
       expect(config.roundId).toBe(options.roundId);
       expect(config.accessCode).toBe(options.accessCode);
-      expect(config.courseName).toBe(options.courseName);
-      expect(config.par).toEqual(options.par);
-      expect(config.holes).toBe(options.par.length);
+      expect(config.course.name).toBe("Test Course");
+      expect(coursePar(config.course)).toEqual(par);
+      expect(config.course.holeCount).toBe(par.length);
       expect(config.createdAt).toBe(options.createdAt);
     });
   });
@@ -60,21 +83,19 @@ describe("round module", () => {
       config = {
         roundId: "r1",
         accessCode: "code",
-        courseName: "Course",
-        holes: 4,
-        par: [4, 4, 4, 4],
         createdAt: "2025-11-15T17:00:00Z" as IsoDateTime,
+        course: makeCourseSnapshot([4, 4, 4, 4]),
       };
     });
 
     it("returns true for valid hole numbers", () => {
       expect(isValidHoleNumber(config, 1)).toBe(true);
-      expect(isValidHoleNumber(config, config.holes)).toBe(true);
+      expect(isValidHoleNumber(config, config.course.holeCount)).toBe(true);
     });
 
     it("returns false for invalid hole numbers", () => {
       expect(isValidHoleNumber(config, 0)).toBe(false);
-      expect(isValidHoleNumber(config, config.holes + 1)).toBe(false);
+      expect(isValidHoleNumber(config, config.course.holeCount + 1)).toBe(false);
       expect(isValidHoleNumber(config, 2.5)).toBe(false);
     });
   });

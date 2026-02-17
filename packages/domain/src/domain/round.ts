@@ -1,4 +1,5 @@
 import { DomainError } from "./error";
+import { coursePar } from "./course";
 import type {
   CourseSnapshot,
   IsoDateTime,
@@ -10,25 +11,19 @@ import type {
 export function createRoundConfig(options: {
   roundId: RoundId;
   accessCode: string;
-  courseName: string;
-  par: number[];
+  course: CourseSnapshot;
   createdAt: IsoDateTime;
-  course?: CourseSnapshot;
 }): RoundConfig {
-  const { roundId, accessCode, courseName, par, createdAt, course } = options;
+  const { roundId, accessCode, course, createdAt } = options;
 
+  const par = coursePar(course);
   if (par.length === 0) {
     throw new DomainError("par array must be non-empty");
   }
 
-  const holes = par.length; // define away "holes vs par" mismatch
-
   return {
     roundId,
     accessCode,
-    courseName,
-    holes,
-    par: [...par],
     createdAt,
     course,
   };
@@ -53,6 +48,6 @@ export function isValidHoleNumber(
   return (
     Number.isInteger(holeNumber) &&
     holeNumber >= 1 &&
-    holeNumber <= config.holes
+    holeNumber <= config.course.holeCount
   );
 }

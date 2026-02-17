@@ -13,6 +13,7 @@ import type {
   Player,
   Score,
   IsoDateTime,
+  CourseSnapshot,
 } from "@swng/domain";
 import type { Session, Connection } from "@swng/application";
 
@@ -173,16 +174,33 @@ export function newTestConfig(docClient = createDocClientFake()) {
 export const NOW: IsoDateTime = "2025-01-01T00:00:00.000Z";
 export const LATER: IsoDateTime = "2025-01-01T00:00:01.000Z";
 
+export const sampleCourseSnapshot: CourseSnapshot = {
+  courseId: "crs-1",
+  name: "Course",
+  holeCount: 3,
+  teeSets: [
+    {
+      name: "White",
+      color: "#FFFFFF",
+      courseRating: 72,
+      slopeRating: 113,
+      holes: [
+        { holeNumber: 1, par: 3, yardage: 300, handicapIndex: 1 },
+        { holeNumber: 2, par: 4, yardage: 310, handicapIndex: 2 },
+        { holeNumber: 3, par: 5, yardage: 320, handicapIndex: 3 },
+      ],
+    },
+  ],
+};
+
 export function sampleRoundConfig(
   overrides: Partial<RoundConfig> = {}
 ): RoundConfig {
   return {
     roundId: "rid-1",
     accessCode: "code-1",
-    courseName: "Course",
-    holes: 3,
-    par: [3, 4, 5],
     createdAt: NOW,
+    course: sampleCourseSnapshot,
     ...overrides,
   };
 }

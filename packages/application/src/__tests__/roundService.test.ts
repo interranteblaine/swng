@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createRoundService } from "../application/roundService";
 import { RoundServiceDeps } from "../application/types";
 import { ApplicationError } from "../application/errors";
+import { coursePar } from "@swng/domain";
 import type {
   Course,
   CourseId,
@@ -229,10 +230,9 @@ describe("RoundService Behavior", () => {
       const cfg = stores.configs[0];
       const st = stores.states[0];
 
-      expect(cfg.courseName).toBe("Test Course");
-      expect(cfg.par).toEqual(par);
-      expect(cfg.course).toBeDefined();
-      expect(cfg.course!.courseId).toBe(course.courseId);
+      expect(cfg.course.name).toBe("Test Course");
+      expect(coursePar(cfg.course)).toEqual(par);
+      expect(cfg.course.courseId).toBe(course.courseId);
       expect(st.stateVersion).toBe(1);
       expect(result.config).toEqual(cfg);
       expect(result.state).toEqual(st);

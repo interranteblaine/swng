@@ -5,6 +5,7 @@ type HoleNavigatorProps = {
   visibleHole: number;
   holeCount: number;
   par: number[];
+  handicapIndex: number[];
   onChangeHole: (hole: number) => void;
 };
 
@@ -12,11 +13,13 @@ export function HoleNavigator({
   visibleHole,
   holeCount,
   par,
+  handicapIndex,
   onChangeHole,
 }: HoleNavigatorProps) {
   const canPrev = visibleHole > 1;
   const canNext = visibleHole < holeCount;
   const visiblePar = par[visibleHole - 1];
+  const visibleHcp = handicapIndex[visibleHole - 1];
 
   return (
     <IonToolbar style={{ "--background": "#ffffff", "--border-color": "#e5e7eb" }}>
@@ -46,7 +49,7 @@ export function HoleNavigator({
         </div>
 
         <div className="mt-0.5 text-sm text-gray-500">
-          Par {visiblePar} &middot; HCP —
+          Par {visiblePar} &middot; HCP {visibleHcp}
         </div>
       </div>
     </IonToolbar>

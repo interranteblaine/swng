@@ -31,16 +31,27 @@ export function ScoreEntryPage() {
 
   if (!snapshot) return null;
 
-  const par = [...snapshot.config.course.teeSets[0].holes]
-    .sort((a, b) => a.holeNumber - b.holeNumber)
-    .map((h) => h.par);
+  const sortedHoles = [...snapshot.config.course.teeSets[0].holes].sort(
+    (a, b) => a.holeNumber - b.holeNumber
+  );
+  const par = sortedHoles.map((h) => h.par);
+  const handicapIndex = sortedHoles.map((h) => h.handicapIndex);
   const holeCount = snapshot.config.course.holeCount;
 
-  const players = snapshot.players.map((p) => ({
-    playerId: p.playerId,
-    name: p.name,
-    color: p.color,
-  }));
+  const { teeSets } = snapshot.config.course;
+  const players = snapshot.players.map((p) => {
+    const color = p.color?.toLowerCase();
+    const teeSet = color
+      ? teeSets.find((ts) => ts.name.toLowerCase() === color)
+      : undefined;
+    const hole = teeSet?.holes.find((h) => h.holeNumber === visibleHole);
+    return {
+      playerId: p.playerId,
+      name: p.name,
+      color: p.color,
+      yardage: hole?.yardage,
+    };
+  });
 
   const strokesByPlayer = snapshot.scores
     .filter((s) => s.holeNumber === visibleHole)
@@ -67,6 +78,7 @@ export function ScoreEntryPage() {
           visibleHole={visibleHole}
           holeCount={holeCount}
           par={par}
+          handicapIndex={handicapIndex}
           onChangeHole={setVisibleHole}
         />
       </IonHeader>

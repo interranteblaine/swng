@@ -6,6 +6,7 @@ type PlayerView = {
   playerId: string;
   name: string;
   color?: string;
+  yardage?: number;
 };
 
 type ScoreEntryListProps = {
@@ -36,7 +37,7 @@ export function ScoreEntryList({
               >
                 {p.color ?? "—"}
               </span>
-              <span className="text-xs text-gray-500">— yds</span>
+              <span className="text-xs text-gray-500">{p.yardage ?? "—"} yds</span>
             </p>
           </IonLabel>
           <div slot="end">

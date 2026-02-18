@@ -18,13 +18,9 @@ import {
 } from "@ionic/react";
 import { useJoinRound } from "@/hooks/useJoinRound";
 import { navyToolbarStyle } from "@/components/theme";
-import { TeePicker } from "@/components/TeePicker";
-import { TEE_COLORS } from "@/components/teeBadges";
 import {
   getLastPlayerName,
   setLastPlayerName,
-  getLastTeeColor,
-  setLastTeeColor,
 } from "@/lib/playerPrefs";
 
 const formSchema = z.object({
@@ -33,7 +29,6 @@ const formSchema = z.object({
     .trim()
     .min(1, "Player name must be at least 1 character")
     .max(32, "Player name must be at most 32 characters"),
-  teeColor: z.enum(TEE_COLORS),
 });
 
 export function JoinDetailsView() {
@@ -52,19 +47,16 @@ export function JoinDetailsView() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       playerName: getLastPlayerName() || "",
-      teeColor: getLastTeeColor() as z.infer<typeof formSchema>["teeColor"],
     },
   });
 
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
-    const { playerName, teeColor } = data;
+    const { playerName } = data;
     setLastPlayerName(playerName);
-    setLastTeeColor(teeColor);
     try {
       await joinRound.mutateAsync({
         accessCode,
         playerName,
-        color: teeColor,
       });
     } catch {
       // error surfaced via joinRound.error
@@ -137,19 +129,6 @@ export function JoinDetailsView() {
                       {fieldState.error?.message}
                     </IonNote>
                   )}
-                </IonItem>
-              )}
-            />
-
-            <Controller
-              name="teeColor"
-              control={form.control}
-              render={({ field }) => (
-                <IonItem>
-                  <div className="w-full py-2">
-                    <label className="block text-sm font-medium mb-2">Tee</label>
-                    <TeePicker value={field.value} onChange={field.onChange} />
-                  </div>
                 </IonItem>
               )}
             />

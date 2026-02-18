@@ -72,7 +72,6 @@ export async function routeRequest(
     const result = await service.joinRound({
       accessCode: body.accessCode,
       playerName: body.playerName,
-      color: body.color,
     });
 
     return json(200, result, { "x-session-id": result.sessionId });

@@ -52,8 +52,6 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     broadcast,
   } = deps;
 
-  const defaultColor = "#000000";
-
   async function ensureSessionForRound(
     roundId: string,
     sessionId: string
@@ -128,7 +126,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     },
 
     async joinRound(input: JoinRoundInput): Promise<JoinRoundOutput> {
-      const { accessCode, playerName, color } = input;
+      const { accessCode, playerName } = input;
 
       const result = await roundRepo.getRoundSnapshotByAccessCode(accessCode);
       if (!result) {
@@ -145,7 +143,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         roundId,
         playerId,
         name: playerName,
-        color: color ?? defaultColor,
+        color: roundConfig.course.teeSets[0].name,
         joinedAt: now,
         updatedAt: now,
       };

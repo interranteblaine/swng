@@ -259,23 +259,14 @@ describe("RoundService Behavior", () => {
       const res = await service.joinRound({
         accessCode: "code-1",
         playerName: "Alice",
-        color: "#abc",
       });
 
       expect(res.roundId).toBe(roundId);
       expect(res.player.name).toBe("Alice");
-      expect(res.player.color).toBe("#abc");
+      expect(res.player.color).toBe("White");
       expect(Object.keys(stores.sessions)).toHaveLength(1);
       expect(stores.players).toHaveLength(1);
       expect(res.snapshot.players).toContainEqual(res.player);
-    });
-
-    it("uses default color when none provided", async () => {
-      const { player } = await service.joinRound({
-        accessCode: stores.configs[0].accessCode,
-        playerName: "NoColorUser",
-      });
-      expect(player.color).toBe("#000000");
     });
 
     it("emits notify with PlayerJoined", async () => {

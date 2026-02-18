@@ -20,7 +20,7 @@ import { getSelfPlayerId } from "@/lib/session";
 import { navyToolbarStyle } from "@/components/theme";
 import { teeBadgeClasses } from "@/components/teeBadges";
 import { TeePicker } from "@/components/TeePicker";
-import { setLastPlayerName, setLastTeeColor } from "@/lib/playerPrefs";
+import { setLastPlayerName } from "@/lib/playerPrefs";
 
 type PlayersSheetProps = {
   isOpen: boolean;
@@ -55,7 +55,6 @@ export function PlayersSheet({ isOpen, onClose }: PlayersSheetProps) {
     updatePlayer({ playerId: editPlayer.playerId, name: editName.trim(), color: editTee });
     if (editPlayer.playerId === selfPlayerId) {
       setLastPlayerName(editName.trim());
-      setLastTeeColor(editTee);
     }
     setEditPlayer(null);
   };
@@ -174,7 +173,11 @@ export function PlayersSheet({ isOpen, onClose }: PlayersSheetProps) {
             />
             <div>
               <div className="text-xs text-gray-500 mb-1 ml-1">Tee</div>
-              <TeePicker value={editTee} onChange={setEditTee} />
+              <TeePicker
+                value={editTee}
+                onChange={setEditTee}
+                teeSets={snapshot.config.course.teeSets}
+              />
             </div>
             <IonButton
               expand="block"

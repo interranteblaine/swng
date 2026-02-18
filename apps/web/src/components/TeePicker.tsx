@@ -1,19 +1,13 @@
 import { IonSegment, IonSegmentButton, IonLabel } from "@ionic/react";
-import { TEE_COLORS, type TeeColor } from "./teeBadges";
+import type { TeeSet } from "@swng/domain";
 
 type TeePickerProps = {
   value: string;
   onChange: (value: string) => void;
+  teeSets: TeeSet[];
 };
 
-const dotClasses: Record<TeeColor, string> = {
-  Blue: "bg-blue-600",
-  White: "bg-white border border-gray-400",
-  Red: "bg-red-600",
-  Gold: "bg-amber-500",
-};
-
-export function TeePicker({ value, onChange }: TeePickerProps) {
+export function TeePicker({ value, onChange, teeSets }: TeePickerProps) {
   return (
     <IonSegment
       value={value}
@@ -22,13 +16,14 @@ export function TeePicker({ value, onChange }: TeePickerProps) {
         if (typeof val === "string") onChange(val);
       }}
     >
-      {TEE_COLORS.map((color) => (
-        <IonSegmentButton key={color} value={color}>
+      {teeSets.map((ts) => (
+        <IonSegmentButton key={ts.name} value={ts.name}>
           <IonLabel className="flex items-center gap-1.5">
             <span
-              className={`inline-block h-3 w-3 rounded-full ${dotClasses[color]}`}
+              className="inline-block h-3 w-3 rounded-full border border-gray-400"
+              style={{ backgroundColor: ts.color }}
             />
-            {color}
+            {ts.name}
           </IonLabel>
         </IonSegmentButton>
       ))}

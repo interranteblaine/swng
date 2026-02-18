@@ -123,7 +123,6 @@ export interface CreateRoundOutput {
 export interface JoinRoundInput {
   accessCode: string;
   playerName: string;
-  color?: string;
 }
 
 export interface JoinRoundOutput {

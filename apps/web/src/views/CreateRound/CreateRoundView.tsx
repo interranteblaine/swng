@@ -14,17 +14,14 @@ import {
   IonItem,
   IonInput,
   IonNote,
+  IonSelect,
+  IonSelectOption,
+  IonSpinner,
 } from "@ionic/react";
 import { useCreateRound } from "@/hooks/useCreateRound";
+import { useCourses } from "@/hooks/useCourses";
 import { navyToolbarStyle } from "@/components/theme";
-import { TeePicker } from "@/components/TeePicker";
-import { TEE_COLORS } from "@/components/teeBadges";
-import {
-  getLastPlayerName,
-  setLastPlayerName,
-  getLastTeeColor,
-  setLastTeeColor,
-} from "@/lib/playerPrefs";
+import { getLastPlayerName, setLastPlayerName } from "@/lib/playerPrefs";
 
 const formSchema = z.object({
   courseId: z.string().trim().min(1, "Course is required"),
@@ -33,30 +30,25 @@ const formSchema = z.object({
     .trim()
     .min(1, "Player name must be at least 1 character")
     .max(32, "Player name must be at most 32 characters"),
-  teeColor: z.enum(TEE_COLORS),
 });
 
 export function CreateRoundView() {
   const createRound = useCreateRound();
+  const { courses, isLoading: coursesLoading } = useCourses();
+
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       courseId: "",
       playerName: getLastPlayerName() || "",
-      teeColor: getLastTeeColor() as z.infer<typeof formSchema>["teeColor"],
     },
   });
 
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
-    const { courseId, playerName, teeColor } = data;
+    const { courseId, playerName } = data;
     setLastPlayerName(playerName);
-    setLastTeeColor(teeColor);
     try {
-      await createRound.mutateAsync({
-        courseId,
-        playerName,
-        color: teeColor,
-      });
+      await createRound.mutateAsync({ courseId, playerName });
     } catch {
       // error surface via createRound.error; prevent unhandled rejection
     }
@@ -108,15 +100,33 @@ export function CreateRoundView() {
               control={form.control}
               render={({ field, fieldState }) => (
                 <IonItem>
-                  <IonInput
-                    label="Course"
-                    labelPlacement="stacked"
-                    placeholder="Course ID"
-                    value={field.value}
-                    onIonInput={(e) => field.onChange(e.detail.value ?? "")}
-                    onIonBlur={field.onBlur}
-                    className={fieldState.invalid ? "ion-invalid ion-touched" : ""}
-                  />
+                  {coursesLoading ? (
+                    <div className="flex items-center gap-2 py-3">
+                      <IonSpinner name="crescent" />
+                      <span className="text-sm text-gray-500">Loading courses…</span>
+                    </div>
+                  ) : courses.length === 0 ? (
+                    <div className="py-3">
+                      <span className="text-sm text-gray-500">No courses available</span>
+                    </div>
+                  ) : (
+                    <IonSelect
+                      label="Course"
+                      labelPlacement="stacked"
+                      interface="action-sheet"
+                      value={field.value}
+                      onIonChange={(e) => field.onChange(e.detail.value ?? "")}
+                      onIonBlur={field.onBlur}
+                      className={fieldState.invalid ? "ion-invalid ion-touched" : ""}
+                    >
+                      {courses.map((course) => (
+                        <IonSelectOption key={course.courseId} value={course.courseId}>
+                          {course.name}
+                          {course.location ? ` — ${course.location}` : ""}
+                        </IonSelectOption>
+                      ))}
+                    </IonSelect>
+                  )}
                   {fieldState.invalid && (
                     <IonNote slot="error" className="text-red-600 text-sm">
                       {fieldState.error?.message}
@@ -148,19 +158,6 @@ export function CreateRoundView() {
                 </IonItem>
               )}
             />
-
-            <Controller
-              name="teeColor"
-              control={form.control}
-              render={({ field }) => (
-                <IonItem>
-                  <div className="w-full py-2">
-                    <label className="block text-sm font-medium mb-2">Tee</label>
-                    <TeePicker value={field.value} onChange={field.onChange} />
-                  </div>
-                </IonItem>
-              )}
-            />
           </IonList>
 
           {errorMessage && (
@@ -174,7 +171,7 @@ export function CreateRoundView() {
               expand="block"
               type="submit"
               style={{ "--background": "#3d5a80" }}
-              disabled={createRound.isPending}
+              disabled={createRound.isPending || coursesLoading || courses.length === 0}
               className="flex-1"
             >
               {createRound.isPending ? "Creating\u2026" : "Create & Start"}

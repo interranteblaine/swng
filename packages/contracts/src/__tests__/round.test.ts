@@ -32,13 +32,11 @@ describe("contracts/http/rounds request parsers", () => {
       const res = parseJoinRoundRequest({
         accessCode: "ABC123",
         playerName: "Alice",
-        color: "#000000",
       });
       expect(res.ok).toBe(true);
       if (res.ok) {
         expect(res.data.accessCode).toBe("ABC123");
         expect(res.data.playerName).toBe("Alice");
-        expect(res.data.color).toBe("#000000");
       }
     });
 

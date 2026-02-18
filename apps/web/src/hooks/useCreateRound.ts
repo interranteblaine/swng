@@ -11,7 +11,6 @@ import {
 type CreateArgs = {
   courseId: string;
   playerName: string;
-  color?: string;
 };
 
 export function useCreateRound() {
@@ -21,12 +20,12 @@ export function useCreateRound() {
   return useMutation({
     mutationKey: ["createRound"],
     mutationFn: async (args: CreateArgs) => {
-      const { courseId, playerName, color } = args;
+      const { courseId, playerName } = args;
 
       const created = await client.createRound({ courseId });
 
       const accessCode = created.config.accessCode;
-      const joined = await client.joinRound({ accessCode, playerName, color });
+      const joined = await client.joinRound({ accessCode, playerName });
 
       const { roundId, sessionId, player, snapshot } = joined;
 

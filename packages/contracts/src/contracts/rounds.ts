@@ -13,7 +13,6 @@ export type CreateRoundRequest = z.infer<typeof CreateRoundRequest>;
 export const JoinRoundRequest = z.object({
   accessCode: z.string().min(1).max(20),
   playerName: z.string().min(1).max(100),
-  color: z.string().min(1).max(50).optional(),
 });
 export type JoinRoundRequest = z.infer<typeof JoinRoundRequest>;
 

@@ -11,7 +11,6 @@ import {
 type JoinArgs = {
   accessCode: string;
   playerName: string;
-  color?: string;
 };
 
 export function useJoinRound() {

@@ -188,7 +188,7 @@ describe("router.routeRequest", () => {
     });
 
     const event = mkEvent("POST", "/rounds/join", {
-      body: { accessCode: "ABC123", playerName: "Alice", color: "#000000" },
+      body: { accessCode: "ABC123", playerName: "Alice" },
     });
 
     const res = await routeRequest(event, service);
@@ -305,7 +305,7 @@ describe("router.routeRequest", () => {
     const res = await routeRequest(
       mkEvent("POST", "/prod/rounds/join", {
         stage: "prod",
-        body: { accessCode: "ABC123", playerName: "Alice", color: "#000000" },
+        body: { accessCode: "ABC123", playerName: "Alice" },
       }),
       service
     );

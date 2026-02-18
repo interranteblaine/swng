@@ -1,5 +1,4 @@
 import type {
-  CreateRoundOutput,
   JoinRoundOutput,
   GetRoundOutput,
   UpdateScoreOutput,
@@ -97,8 +96,8 @@ async function fetchJson<T>(
 
 export function createHttpClient(http: HttpPort, baseUrl: string) {
   return {
-    async createRound(input: CreateRoundRequest): Promise<CreateRoundOutput> {
-      return fetchJson<CreateRoundOutput>(
+    async createRound(input: CreateRoundRequest): Promise<JoinRoundOutput> {
+      return fetchJson<JoinRoundOutput>(
         http,
         baseUrl,
         "POST",

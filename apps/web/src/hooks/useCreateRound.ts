@@ -22,12 +22,10 @@ export function useCreateRound() {
     mutationFn: async (args: CreateArgs) => {
       const { courseId, playerName } = args;
 
-      const created = await client.createRound({ courseId });
-
-      const accessCode = created.config.accessCode;
-      const joined = await client.joinRound({ accessCode, playerName });
-
-      const { roundId, sessionId, player, snapshot } = joined;
+      const { roundId, sessionId, player, snapshot } = await client.createRound({
+        courseId,
+        playerName,
+      });
 
       setSessionId(roundId, sessionId);
       setSelfPlayerId(roundId, player.playerId);

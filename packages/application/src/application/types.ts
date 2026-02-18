@@ -112,12 +112,14 @@ export interface RoundServiceDeps {
 
 export interface CreateRoundInput {
   courseId: CourseId;
+  playerName: string;
 }
 
-
 export interface CreateRoundOutput {
-  config: RoundConfig;
-  state: RoundState;
+  roundId: RoundId;
+  player: Player;
+  sessionId: string;
+  snapshot: RoundSnapshot;
 }
 
 export interface JoinRoundInput {

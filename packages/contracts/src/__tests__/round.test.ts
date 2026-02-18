@@ -10,10 +10,11 @@ import {
 describe("contracts/http/rounds request parsers", () => {
   describe("parseCreateRoundRequest", () => {
     it("accepts a valid payload", () => {
-      const res = parseCreateRoundRequest({ courseId: "crs_1" });
+      const res = parseCreateRoundRequest({ courseId: "crs_1", playerName: "Alice" });
       expect(res.ok).toBe(true);
       if (res.ok) {
         expect(res.data.courseId).toBe("crs_1");
+        expect(res.data.playerName).toBe("Alice");
       }
     });
 

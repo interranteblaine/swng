@@ -7,6 +7,7 @@ export const RoundStatusDto = z.union([
 
 export const CreateRoundRequest = z.object({
   courseId: z.string().min(1),
+  playerName: z.string().min(1).max(100),
 });
 export type CreateRoundRequest = z.infer<typeof CreateRoundRequest>;
 

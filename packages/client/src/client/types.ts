@@ -1,5 +1,4 @@
 import type {
-  CreateRoundOutput,
   JoinRoundOutput,
   GetRoundOutput,
   UpdateScoreOutput,
@@ -62,7 +61,7 @@ export interface WsSession {
 }
 
 export interface Client {
-  createRound(input: CreateRoundRequest): Promise<CreateRoundOutput>;
+  createRound(input: CreateRoundRequest): Promise<JoinRoundOutput>;
   joinRound(input: JoinRoundRequest): Promise<JoinRoundOutput>;
   getRound(args: {
     roundId: RoundId;

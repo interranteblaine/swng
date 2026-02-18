@@ -41,29 +41,20 @@ export async function verifyStaging(
   const courseId = courses[0].courseId;
   console.log(`[OK] listCourses found ${courses.length} course(s), using courseId=${courseId}`);
 
-  console.log(`[STEP] createRound`);
-  const created = await client.createRound({ courseId });
-  if (!created?.config?.roundId)
-    throw new Error("createRound: missing roundId");
-  if (!created?.config?.accessCode)
-    throw new Error("createRound: missing accessCode");
-  console.log(
-    `[OK] createRound roundId=${created.config.roundId} accessCode=${created.config.accessCode}`
-  );
-
-  // 2) Join round as A and open WS
-  console.log(`[STEP] joinRound as A and open WS`);
-  const joinA = await client.joinRound({
-    accessCode: created.config.accessCode,
+  console.log(`[STEP] createRound (creates + joins as A)`);
+  const created = await client.createRound({
+    courseId,
     playerName: `A-${Date.now()}`,
   });
-  const roundId = joinA.roundId;
-  const sessionA = joinA.sessionId;
-  if (!roundId) throw new Error("joinRound(A): missing roundId");
-  if (!sessionA) throw new Error("joinRound(A): missing sessionId");
+  const roundId = created.roundId;
+  const sessionA = created.sessionId;
+  const accessCode = created.snapshot.config.accessCode;
+  if (!roundId) throw new Error("createRound: missing roundId");
+  if (!sessionA) throw new Error("createRound: missing sessionId");
+  if (!accessCode) throw new Error("createRound: missing accessCode");
   console.log(
-    `[OK] joinRound(A) roundId=${roundId} sessionA=${sessionA} playerId=${
-      joinA.player?.playerId ?? "n/a"
+    `[OK] createRound roundId=${roundId} accessCode=${accessCode} sessionA=${sessionA} playerId=${
+      created.player?.playerId ?? "n/a"
     }`
   );
 
@@ -87,7 +78,7 @@ export async function verifyStaging(
     console.log(`[STEP] joinRound as B -> expect PlayerJoined`);
     clear(events);
     const joinB = await client.joinRound({
-      accessCode: created.config.accessCode,
+      accessCode,
       playerName: `B-${Date.now()}`,
     });
     if (!joinB?.player?.playerId)

@@ -159,21 +159,27 @@ function mockService(overrides: Partial<RoundService> = {}): RoundService {
 }
 
 describe("router.routeRequest", () => {
-  it("POST /rounds -> creates a round and returns 201", async () => {
-    const { config, state } = sampleRound();
+  it("POST /rounds -> creates a round and returns 201 with x-session-id", async () => {
+    const { snapshot, player } = sampleRound();
     const service = mockService({
-      createRound: async () => ({ config, state }),
+      createRound: async () => ({
+        roundId: snapshot.config.roundId,
+        player,
+        sessionId: "sess_1",
+        snapshot,
+      }),
     });
 
     const event = mkEvent("POST", "/rounds", {
-      body: { courseId: "crs_1" },
+      body: { courseId: "crs_1", playerName: "Alice" },
     });
 
     const res = await routeRequest(event, service);
 
     expect(res.statusCode).toBe(201);
+    expect(res.headers?.["x-session-id"]).toBe("sess_1");
     const body = JSON.parse(res.body!);
-    expect(body).toEqual({ config, state });
+    expect(body.roundId).toBe(snapshot.config.roundId);
   });
 
   it("POST /rounds/join -> returns 200 and sets x-session-id header", async () => {
@@ -273,22 +279,27 @@ describe("router.routeRequest", () => {
   });
 
   it("POST /beta/rounds is normalized and routed to /rounds", async () => {
-    const { config, state } = sampleRound();
+    const { snapshot, player } = sampleRound();
     const service = mockService({
-      createRound: async () => ({ config, state }),
+      createRound: async () => ({
+        roundId: snapshot.config.roundId,
+        player,
+        sessionId: "sess_1",
+        snapshot,
+      }),
     });
 
     const res = await routeRequest(
       mkEvent("POST", "/beta/rounds", {
         stage: "beta",
-        body: { courseId: "crs_1" },
+        body: { courseId: "crs_1", playerName: "Alice" },
       }),
       service
     );
 
     expect(res.statusCode).toBe(201);
     const body = JSON.parse(res.body!);
-    expect(body).toEqual({ config, state });
+    expect(body.roundId).toBe(snapshot.config.roundId);
   });
 
   it("POST /prod/rounds/join is normalized and routed to /rounds/join", async () => {

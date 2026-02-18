@@ -214,19 +214,19 @@ describe("RoundService Behavior", () => {
   describe("createRound", () => {
     it("rejects unknown courseId", async () => {
       await expect(
-        service.createRound({ courseId: "nope" })
+        service.createRound({ courseId: "nope", playerName: "A" })
       ).rejects.toMatchObject({
         code: "NOT_FOUND",
         message: "Course not found",
       });
     });
 
-    it("creates and persists config and initial state from course", async () => {
+    it("creates round, player, and session in one call", async () => {
       const par = [3, 4, 5];
       const course = makeTestCourse(par);
       stores.courses[course.courseId] = course;
 
-      const result = await service.createRound({ courseId: course.courseId });
+      const result = await service.createRound({ courseId: course.courseId, playerName: "Alice" });
       const cfg = stores.configs[0];
       const st = stores.states[0];
 
@@ -234,15 +234,22 @@ describe("RoundService Behavior", () => {
       expect(coursePar(cfg.course)).toEqual(par);
       expect(cfg.course.courseId).toBe(course.courseId);
       expect(st.stateVersion).toBe(1);
-      expect(result.config).toEqual(cfg);
-      expect(result.state).toEqual(st);
+      expect(result.roundId).toBe(cfg.roundId);
+      expect(result.player.name).toBe("Alice");
+      expect(result.sessionId).toBeDefined();
+      expect(result.snapshot.config).toEqual(cfg);
+      expect(result.snapshot.state).toEqual(st);
+      expect(result.snapshot.players).toHaveLength(1);
+      expect(result.snapshot.players).toContainEqual(result.player);
+      expect(stores.players).toHaveLength(1);
+      expect(Object.keys(stores.sessions)).toHaveLength(1);
     });
   });
 
   describe("joinRound", () => {
     beforeEach(async () => {
       stores.courses["crs-test"] = makeTestCourse([3, 4]);
-      await service.createRound({ courseId: "crs-test" });
+      await service.createRound({ courseId: "crs-test", playerName: "Setup" });
     });
 
     it("rejects unknown access code", async () => {
@@ -264,8 +271,8 @@ describe("RoundService Behavior", () => {
       expect(res.roundId).toBe(roundId);
       expect(res.player.name).toBe("Alice");
       expect(res.player.color).toBe("White");
-      expect(Object.keys(stores.sessions)).toHaveLength(1);
-      expect(stores.players).toHaveLength(1);
+      expect(Object.keys(stores.sessions)).toHaveLength(2);
+      expect(stores.players).toHaveLength(2);
       expect(res.snapshot.players).toContainEqual(res.player);
     });
 
@@ -285,7 +292,7 @@ describe("RoundService Behavior", () => {
   describe("getRound", () => {
     beforeEach(async () => {
       stores.courses["crs-test"] = makeTestCourse([3]);
-      await service.createRound({ courseId: "crs-test" });
+      await service.createRound({ courseId: "crs-test", playerName: "Setup" });
       await service.joinRound({ accessCode: "code-1", playerName: "Bob" });
     });
 
@@ -372,7 +379,7 @@ describe("RoundService Behavior", () => {
   describe("updateScore", () => {
     beforeEach(async () => {
       stores.courses["crs-test"] = makeTestCourse([3, 4]);
-      await service.createRound({ courseId: "crs-test" });
+      await service.createRound({ courseId: "crs-test", playerName: "Setup" });
       await service.joinRound({ accessCode: "code-1", playerName: "P1" });
     });
 
@@ -464,7 +471,7 @@ describe("RoundService Behavior", () => {
   describe("patchRoundState", () => {
     beforeEach(async () => {
       stores.courses["crs-test"] = makeTestCourse([3, 4]);
-      await service.createRound({ courseId: "crs-test" });
+      await service.createRound({ courseId: "crs-test", playerName: "Setup" });
       await service.joinRound({ accessCode: "code-1", playerName: "P" });
     });
 
@@ -560,7 +567,7 @@ describe("RoundService Behavior", () => {
   describe("updatePlayer", () => {
     beforeEach(async () => {
       stores.courses["crs-test"] = makeTestCourse([3]);
-      await service.createRound({ courseId: "crs-test" });
+      await service.createRound({ courseId: "crs-test", playerName: "Setup" });
       await service.joinRound({ accessCode: "code-1", playerName: "X" });
     });
 
@@ -617,14 +624,10 @@ describe("RoundService Behavior", () => {
       };
 
       stores.courses["crs-test"] = makeTestCourse([3]);
-      await service.createRound({ courseId: "crs-test" });
 
-      // First player = creator
-      const first = await service.joinRound({
-        accessCode: "code-1",
-        playerName: "Creator",
-      });
-      creatorSessionId = first.sessionId;
+      // createRound now also joins the creator
+      const created = await service.createRound({ courseId: "crs-test", playerName: "Creator" });
+      creatorSessionId = created.sessionId;
 
       // Second player
       const second = await service.joinRound({

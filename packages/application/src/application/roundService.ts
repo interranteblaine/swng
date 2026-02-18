@@ -105,24 +105,60 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
 
       const roundId = idGenerator.newRoundId();
       const accessCode = idGenerator.newAccessCode();
-      const createdAt = clock.now();
+      const now = clock.now();
 
       const configValue = createRoundConfig({
         roundId,
         accessCode,
         course: courseSnapshot,
-        createdAt,
+        createdAt: now,
       });
 
-      const stateValue = createInitialRoundState(roundId, createdAt);
+      const stateValue = createInitialRoundState(roundId, now);
 
       await roundRepo.saveConfig(configValue);
       await roundRepo.saveState(stateValue);
 
-      return {
+      const playerId = idGenerator.newPlayerId();
+      const player: Player = {
+        roundId,
+        playerId,
+        name: input.playerName,
+        color: courseSnapshot.teeSets[0].name,
+        joinedAt: now,
+        updatedAt: now,
+      };
+
+      await playerRepo.createPlayer(player);
+
+      const sessionId = idGenerator.newSessionId();
+      const expiresAt = computeExpiry(now, config.sessionTtlMs);
+
+      const session: Session = {
+        sessionId,
+        roundId,
+        playerId,
+        expiresAt,
+      };
+
+      await sessionRepo.createSession(session);
+
+      const evt: PlayerJoinedEvent = {
+        type: "PlayerJoined",
+        roundId,
+        occurredAt: player.joinedAt,
+        player,
+      };
+      await broadcast.notify(roundId, evt);
+
+      const snapshot: RoundSnapshot = {
         config: configValue,
         state: stateValue,
+        players: [player],
+        scores: [],
       };
+
+      return { roundId, player, sessionId, snapshot };
     },
 
     async joinRound(input: JoinRoundInput): Promise<JoinRoundOutput> {

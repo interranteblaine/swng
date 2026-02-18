@@ -57,7 +57,7 @@ export async function routeRequest(
 
     const result = await service.createRound(body);
 
-    return json(201, result);
+    return json(201, result, { "x-session-id": result.sessionId });
   }
 
   // POST /rounds/join

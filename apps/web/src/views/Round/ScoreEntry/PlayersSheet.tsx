@@ -33,7 +33,7 @@ export function PlayersSheet({ isOpen, onClose }: PlayersSheetProps) {
 
   const [editPlayer, setEditPlayer] = useState<Player | null>(null);
   const [editName, setEditName] = useState("");
-  const [editTee, setEditTee] = useState("White");
+  const [editTee, setEditTee] = useState("");
 
   if (!snapshot) return null;
 
@@ -46,7 +46,7 @@ export function PlayersSheet({ isOpen, onClose }: PlayersSheetProps) {
 
   const startEdit = (player: Player) => {
     setEditName(player.name);
-    setEditTee(player.color ?? "White");
+    setEditTee(player.color ?? snapshot.config.course.teeSets[0].name);
     setEditPlayer(player);
   };
 
@@ -88,7 +88,7 @@ export function PlayersSheet({ isOpen, onClose }: PlayersSheetProps) {
             {sortedPlayers.map((player) => {
               const isSelf = player.playerId === selfPlayerId;
               const isCreator = player.playerId === creatorId;
-              const canEdit = isSelf || selfPlayerId === creatorId;
+              const canEdit = isSelf;
               const canRemove = isSelf ? !isCreator : selfPlayerId === creatorId;
 
               return (
@@ -119,7 +119,7 @@ export function PlayersSheet({ isOpen, onClose }: PlayersSheetProps) {
                         fill="clear"
                         size="small"
                         onClick={() => startEdit(player)}
-                        aria-label={isSelf ? "Edit your details" : `Edit ${player.name}`}
+                        aria-label="Edit your details"
                       >
                         <IonIcon slot="icon-only" icon={createOutline} />
                       </IonButton>

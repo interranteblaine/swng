@@ -1,9 +1,8 @@
 # swng — Domain & Backend Architecture
 
-> Status: **proposed** (2026-07-07). The target architecture for the full product
+> Status: **approved** (2026-07-07). The target architecture for the full product
 > (`product.md`), sequenced by `roadmap.md`, written to `engineering-conventions.md`.
 > v1 ships on this; v2/v3 grow in without rework — §6 demonstrates that claim.
-> Implementation planning follows agreement.
 
 ## 1. Three decisions everything follows from
 

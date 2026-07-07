@@ -36,48 +36,12 @@ Web tests use Vitest with jsdom environment and `@testing-library/react`. Global
 
 ## Architecture
 
-> This section describes the current **proof-of-concept**, which is reference-only — the
-> product is being rebuilt ground-up to `docs/product.md` / `docs/roadmap.md`. Write new code
-> to the target conventions (`docs/engineering-conventions.md`), not the POC's patterns.
-> Update this section as the rebuild lands so it stays true to the code.
-
-This is a **pnpm monorepo** (Node 20+, pnpm 8+) for a real-time golf scoring app. ESM throughout (`"type": "module"`).
-
-### Workspace Layout
-
-- **`apps/web`** — React 19 SPA (Vite, Tailwind CSS 4, React Router 7, TanStack React Query 5)
-- **`apps/infra-cdk`** — AWS CDK infrastructure (API Gateway HTTP + WebSocket, DynamoDB, S3/CloudFront)
-- **`packages/`** — Shared libraries following clean architecture
-
-### Clean Architecture (packages)
-
-Strict dependency direction — inner layers never import outer layers:
-
-```
-domain          → Pure types, entities, domain logic (no dependencies)
-application     → Services orchestrating domain logic
-contracts       → Zod schemas for API request/response validation
-adapters-*      → External integrations (DynamoDB, API Gateway, Powertools)
-lambda-*        → AWS Lambda entry points (HTTP handler, WebSocket handlers)
-client          → Client SDK (createClient, createHttpClient, connectEvents)
-browser-client  → Browser-specific build of client (built with tsup)
-```
-
-### Web App Patterns
-
-- **Path alias**: `@/*` maps to `apps/web/src/*`
-- **UI components**: Shadcn/Radix UI primitives in `apps/web/src/components/ui/`
-- **State flow**: React Query fetches initial round snapshot → WebSocket `connectEvents()` streams domain events → `eventsReducer` applies events to cached snapshot
-- **Session persistence**: `sessionStorage` keyed by `round:{roundId}:{key}` stores sessionId, selfPlayerId, currentRoundId
-- **Routes**: `/` (home), `/rounds/create`, `/rounds/join`, `/rounds/:roundId` (tabbed view: Play, Totals, Settings)
-- **Round view context**: `RoundDataContext` + `RoundActionsContext` provide round state and mutations to child components
-- **Forms**: React Hook Form + Zod validation via contracts
-
-### TypeScript
-
-- Base config: `tsconfig.base.json` (ES2020, NodeNext modules, strict)
-- Web app: ES2022 target, ESNext modules, DOM libs
-- ESLint: Unused vars prefixed with `_` are allowed
+This is a **pnpm monorepo** (Node 20+, pnpm 8+) for a real-time golf scoring app, ESM
+throughout. The code currently in the repo is the **proof-of-concept**, which is
+reference-only and being replaced ground-up per `docs/product.md` / `docs/roadmap.md` —
+never patch it, and never treat its patterns as design input. The POC's architecture is
+deliberately not described here; if you need to consult it, read the code knowing it holds
+no authority.
 
 ### CDK / Deployment
 

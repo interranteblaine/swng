@@ -3,7 +3,6 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": ".",
-    "declaration": false,
     "types": ["node"]
   },
   "include": ["bin"],

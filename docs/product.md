@@ -1,8 +1,9 @@
 # swng — Product Design
 
-> Status: **proposed** (2026-07-07). Written one-shot from golf domain knowledge per
+> Status: **approved** (2026-07-07). Written one-shot from golf domain knowledge per
 > `product-invention-brief.md`, deliberately not derived from the POC or prior docs.
-> Awaiting reaction. Supersedes nothing until it does.
+> This is the product north star. It supersedes `product-design.md`, `product-v1.md`,
+> and the other prior-session docs.
 
 **swng is the app for the golf you actually play: real games, with the same people, year after year — and it makes every round count.**
 

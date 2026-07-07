@@ -6,9 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Design intent lives in `docs/` — read before non-trivial work:
 
-- `docs/product-design.md` — what swng is and why (the product north star)
-- `docs/backend-design.md` — the target domain & backend architecture
+- `docs/product.md` — what swng is and why (the product north star)
+- `docs/roadmap.md` — v1 scope and the release arc
 - `docs/engineering-conventions.md` — how code should read (naming, layout, layering)
+
+There is no current backend/domain design doc — the target architecture for the rebuild is
+the next design artifact to produce. Do not resurrect superseded designs from git history.
 
 Conventions are enforced by ESLint where possible — a lint failure is the source of truth, not prose here.
 
@@ -33,9 +36,10 @@ Web tests use Vitest with jsdom environment and `@testing-library/react`. Global
 
 ## Architecture
 
-> This section describes the current **proof-of-concept**. The target design is in
-> `docs/backend-design.md`; write new code to the target conventions (`docs/engineering-conventions.md`),
-> not the POC's patterns. Update this section as the rebuild lands so it stays true to the code.
+> This section describes the current **proof-of-concept**, which is reference-only — the
+> product is being rebuilt ground-up to `docs/product.md` / `docs/roadmap.md`. Write new code
+> to the target conventions (`docs/engineering-conventions.md`), not the POC's patterns.
+> Update this section as the rebuild lands so it stays true to the code.
 
 This is a **pnpm monorepo** (Node 20+, pnpm 8+) for a real-time golf scoring app. ESM throughout (`"type": "module"`).
 

@@ -1,8 +1,10 @@
 # swng — Domain & Backend Architecture
 
-> Status: **approved** (2026-07-07). The target architecture for the full product
-> (`product.md`), sequenced by `roadmap.md`, written to `engineering-conventions.md`.
-> v1 ships on this; v2/v3 grow in without rework — §6 demonstrates that claim.
+> Status: **approved** (2026-07-07; revised same day after blind clean-room validation —
+> two independent designs from `product.md`+`roadmap.md` alone converged on this spine and
+> corrected the conflict-resolution rule). The target architecture for the full product
+> (`product.md`), sequenced by `roadmap.md`. v1 ships on this; v2/v3 grow in without
+> rework — §6 demonstrates that claim.
 
 ## 1. Three decisions everything follows from
 
@@ -57,7 +59,9 @@ interface Golfer {
 ```
 
 The computed swng Index takes over automatically once 54 holes are archived (roadmap's
-bootstrap rule); an official index, if maintained, always wins.
+bootstrap rule); an official index, if maintained, always wins. If a claim collides with an
+existing account, `GolferMerged { fromId, toId }` is a recorded fact: the old id becomes a
+permanent alias and projections rebuild with alias resolution — a script, not a crisis.
 
 ### Course
 
@@ -65,8 +69,9 @@ bootstrap rule); an official index, if maintained, always wins.
 Course ─ TeeSet[] ─ rating, slope (18- and 9-hole) ─ Hole[] { par, yardage, strokeIndex }
 ```
 
-Courses carry provenance (community-entered | imported) and verification state. **Rounds
-freeze a `CourseCard` snapshot at start** — later course corrections never rewrite history.
+Tee sets are **versioned and immutable** — corrections create a new version; verification
+(`verifiedBy`) and provenance (community-entered | imported) are per-version metadata.
+**Rounds freeze a `CourseCard` snapshot at start**, so history never rewrites regardless.
 The licensing buy-vs-build stays open (roadmap); the entity models either source.
 
 ### Round — the only event-sourced aggregate
@@ -78,17 +83,20 @@ Lifecycle is an explicit enum: `setup → live → final` (plus `abandoned`); no
 ```ts
 type RoundEvent =
   | RoundCreated | ParticipantJoined | GameAdded
-  | ScoreRecorded      // { golferId, hole, result: strokes | 'picked-up' | 'conceded', recordedBy, opId }
+  | ScoreRecorded      // { golferId, hole, result: strokes | 'picked-up' | 'conceded', recordedBy, opId, hlc }
   | ScoreCorrected
   | PressOpened | ConcessionGiven | PartnerPicked   // game decisions live in the same log
   | RoundFinalized | RoundReopened
 ```
 
-- `seq` is server-assigned and authoritative; every client event carries an `opId` for
-  idempotent dedupe. Ordering is never inferred from wall clocks (conventions §4).
-- Concurrent writes to the same score cell resolve last-write-wins with full audit — golf's
-  social contract handles the rest; a `ScoreCorrected` fixes anything, and every game
-  recomputes.
+- Two clocks, two jobs. **`seq`** is server-assigned and gapless — the canonical log order
+  and every client's catch-up cursor. **`hlc`** (a hybrid logical clock stamped at authoring)
+  resolves conflicts: each score cell `(golferId, hole)` is a last-writer-wins register by
+  `hlc` (tie-break `deviceId`), with full audit. Author time, not arrival time: a phone
+  syncing stale scores out of a dead zone can never overwrite a correction made after them,
+  and the fold is order-independent — any device applying any delivery order converges.
+  Every client event carries an `opId` for idempotent dedupe. Naive wall-clock comparison
+  appears nowhere.
 - An explicit `ScoringPolicy` on the round says who may score for whom (default: anyone in
   the group, matching how real cards are kept).
 - **The event schema is append-only** (new event types and optional fields only), and reducers
@@ -96,6 +104,12 @@ type RoundEvent =
   forever.
 - Reopen-and-refinalize is the correction path after finalization; projections treat finalize
   as an idempotent upsert by `roundId` and recompute.
+- Finalization writes the **`RoundArchive`**: one immutable record holding the setup and
+  course snapshot, the final grid, the full event log, per-game results, and per-golfer
+  differentials. Completeness rule: **the archive captures everything a projection that
+  doesn't exist yet could need** — it is the replay source for all of them, and it is never
+  mutated. Settlement is deterministic: re-settling the same log yields a byte-identical
+  archive (enforced by test).
 
 Rounds are small (4 players × 18 holes ≈ low hundreds of events), so full replay is cheap; a
 maintained snapshot item exists purely as a read optimization, never as truth.
@@ -160,10 +174,11 @@ DynamoDB:  rounds (log + snapshot) │ core (entities) │ projections │ conne
   projection channels — the trip's Cup board and the outing's banquet leaderboard are just
   big-screen subscribers to a standings channel. Spectator mode is the round channel with a
   read-only token.
-- **Offline sync** is owned by the client SDK: local event queue + last-seen `seq`; on
-  reconnect, push queued events (deduped by `opId`), pull since `seq`, rebase optimistic local
-  state on server order. The POC proved the reconnection UX; the protocol is rebuilt around
-  explicit `seq`/`opId` rather than timestamps.
+- **Offline sync** is owned by the client SDK: a durable outbox (IndexedDB behind a storage
+  port) + last-seen `seq`; the sync loop pushes queued events (deduped by `opId`) and pulls
+  since `seq`, and the HLC merge makes rebasing free — stale pushes can't clobber newer
+  intent. **The WebSocket is delivery sugar; HTTP catch-up is the correctness path** — a
+  dropped socket costs latency, never state.
 
 ### Identity & access
 
@@ -176,7 +191,7 @@ DynamoDB:  rounds (log + snapshot) │ core (entities) │ projections │ conne
 
 | Table | Keys | Holds |
 | --- | --- | --- |
-| `rounds` | `ROUND#id` / `EVT#seq`, `SNAPSHOT`, `META` | the log; conditional put on seq enforces order |
+| `rounds` | `ROUND#id` / `EVT#seq`, `SNAPSHOT`, `ARCHIVE`, `META` | the log (conditional put on seq enforces order) and the immutable archive |
 | `core` | `GOLFER#id`, `CREW#id` (+member items), `COURSE#id`, `COMP#id` (+fixtures) | entities; GSIs: join code, cognito sub, golfer→crews |
 | `projections` | `INDEX#golfer`, `LEDGER#crew#season`, `H2H#crew#a#b`, `STANDINGS#comp`, `HISTORY#golfer` | versioned, rebuildable by replay (a rebuild entry point replays finalized rounds) |
 | `connections` | `connectionId` → subscriptions | WS fan-out |
@@ -208,8 +223,13 @@ layout (conventions §2c), including the client→contracts-only rule.
 - **Golden cards** — the correctness heart. Fixture scorecards with known outcomes per format:
   dots land on the right holes, allowances apply, skins carry and validate, net double bogey
   caps, 3&2 means 3&2. Every format ships with its deck; every scoring bug becomes a card.
-- **Property tests:** net ≤ gross; client/server reducer parity; replay idempotence;
-  order-insensitivity for events that claim commutativity.
+- **Property tests:** net ≤ gross; client/server reducer parity; replay idempotence; merge
+  order-independence (the HLC/LWW claim, tested as a property).
+- **Convergence simulation:** N virtual phones, randomized offline windows, corrections,
+  duplicate and out-of-order delivery — every interleaving must converge to the sequential
+  oracle's state. One bench covers ordering, merge, and idempotency.
+- **Settlement determinism:** settle every fixture twice, assert byte-identical archives;
+  rebuild projections from archives and diff against incrementally-built ones.
 - Adapters get contract tests against local DynamoDB; `lambda` entries stay too thin to need
   much. Weight goes where the complexity hides (conventions §5).
 
@@ -217,10 +237,14 @@ layout (conventions §2c), including the client→contracts-only rule.
 
 - **No event sourcing outside the Round.** Crews, courses, golfers, competitions are boring
   CRUD entities. ES pays rent only where the domain *is* a stream.
-- **No CRDTs.** Per-cell LWW with audit and cheap correction fits how golfers actually resolve
-  disputes.
+- **No general CRDT machinery.** One LWW-register per score cell, resolved by author HLC with
+  full audit, is the entire merge surface — no merge libraries, no operational transforms.
 - **No microservices, no queues beyond DynamoDB streams, no GraphQL.** One lambda package,
-  per-trigger entries, Zod-contracted HTTP + WS.
+  per-trigger entries, Zod-contracted HTTP + WS. An event bus earns its place only when
+  projector count demands it.
+- **Cognito stays a dumb credential box** behind the `IdentityProvider` port — all identity
+  subtlety lives in the domain (`GolferId` ≠ sub), so swapping it later is an adapter, not a
+  redesign.
 - **Nothing imported from the POC.** Its validated lessons — join-code friction, reconnection
   UX, events-reduced-on-client — are re-designed here, not carried over as code.
 

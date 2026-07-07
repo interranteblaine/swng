@@ -33,7 +33,8 @@ Every milestone's detailed plan inherits these:
   `*.test.ts`, one barrel per package; layer direction `domain → application → adapters →
   lambda` lint-enforced; second instance ⇒ extract; comment the why only.
 - **Derive, don't store**: persist irreducible facts; compute the rest.
-- **Explicit `seq` and `opId`** for ordering and idempotency — never wall clocks.
+- **Two clocks, two jobs:** server-assigned `seq` for canonical order and cursors, authoring
+  `hlc` for score-cell conflict resolution, `opId` for idempotency — naive wall clocks never.
 - Packages are `@swng/*`; client depends on `contracts`, never `application`.
 - AWS profile `swng`, region `us-east-1`, stages `beta`/`prod`.
 - POC is reference-only. Never import its code; it exists at tag `poc-final`.
@@ -79,8 +80,9 @@ that exercise handicaps hardest.
 **Tasks:**
 1. Core types: branded ids; `CourseCard`/`TeeSet`/`Hole { par, yardage, strokeIndex }`;
    `Participant { golferId, tee, courseHandicap }`.
-2. `RoundEvent` union (`architecture.md` §2) and `reduceRound(events: RoundEvent[]): RoundState`
-   — lifecycle enum, per-cell LWW by `seq` with audit, unknown-event tolerance.
+2. `RoundEvent` union (`architecture.md` §2) with HLC envelope, and
+   `reduceRound(events: RoundEvent[]): RoundState` — lifecycle enum, per-cell LWW registers
+   resolved by author `hlc` (tie-break `deviceId`) with audit, unknown-event tolerance.
 3. Games framework: `GameConfig`/`GameState`/`GameResult` discriminated unions,
    `scoreGame(config, card, participants, events): GameState` dispatch, allowances table.
 4. `allocateStrokes(courseHandicap: number, teeSet: TeeSet): number[]` — dots by stroke
@@ -89,7 +91,8 @@ that exercise handicaps hardest.
    incomplete) + golden-card deck.
 6. `singlesMatch` reducer (holes up/dormie/closed out `3&2`, concessions, full-difference
    allowance) + golden-card deck.
-7. Property tests: net ≤ gross, reducer determinism, replay idempotence.
+7. Property tests: net ≤ gross, reducer determinism, replay idempotence, merge
+   order-independence (any delivery order converges).
 
 **Produces:** `reduceRound`, `scoreGame`, `allocateStrokes`, the event and config unions —
 the signatures every later milestone consumes.
@@ -109,8 +112,9 @@ the signatures every later milestone consumes.
 5. Handicap engine: net-double-bogey adjusted gross; differential
    `(113/slope) × (AGS − rating)`; 9-hole handling; `computeIndex(differentials)` — best 8 of
    20 with WHS small-sample table; `courseHandicap(index, teeSet)`.
-6. `settleRound(round): RoundResult` — per-game results + per-golfer differentials, emitted
-   at finalize.
+6. `settleRound(round): RoundArchive` — the immutable archive (setup + course snapshot, final
+   grid, event log, per-game results, per-golfer differentials; complete by rule). Settlement
+   determinism test: settling the same log twice is byte-identical.
 
 **Gate:** every format's deck passes; handicap engine verified against published WHS worked
 examples; concurrency deck passes.
@@ -144,10 +148,11 @@ card. Idempotent re-send of an `opId` is a no-op.
 1. HTTP client + WS subscription from `contracts` types.
 2. `createRoundSession(...)`: optimistic local append reduced through **the same
    `@swng/domain`** reducers; `opId` generation.
-3. Outbox queue + reconnect protocol: push pending (deduped), pull since `seq`, rebase local
-   state on server order; queue persistence behind a storage port (memory + localStorage).
-4. Parity property test: any interleaving of local/remote events converges to the
-   server-reduced state (`client result === server result`).
+3. Outbox queue + reconnect protocol: push pending (deduped by `opId`), pull since `seq`,
+   HLC merge on refold; queue persistence behind a storage port (memory + IndexedDB).
+4. Convergence simulation: N virtual devices, randomized offline windows, corrections,
+   duplicate/out-of-order delivery — every interleaving converges to the sequential oracle
+   (`client result === server result`).
 
 **Produces:** `createRoundSession` — the only API the web app scores through.
 

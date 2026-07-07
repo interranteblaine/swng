@@ -99,12 +99,17 @@ packages to ~10 while the system grows:
 - **Tests co-locate as `*.test.ts` beside their subject** — not in a separate `__tests__/` tree. A test
   sits next to the thing it tests.
 
-### 2c. The dependency direction is law, and it is enforced
+### 2c. The dependency direction is law — enforced in the rebuild
 
 `domain → application → adapters → lambda`, inner never importing outer. `domain` depends on nothing.
-Ports live in `application`; adapters implement them; lambdas wire them. This is **enforced in
-`eslint.config.js`** (`import/no-restricted-paths` or dependency-cruiser), not left to discipline — the
-POC's layering is correct but one careless import from eroding.
+Ports live in `application`; adapters implement them; the `lambda` composition root wires them. This gets
+**enforced in `eslint.config.js`** via per-package `no-restricted-imports` allow-lists — but authored
+against the *target* package layout (single `lambda`, `stores`, `adapters-cognito`) as a step of the
+rebuild, not retrofitted onto the POC packages we're replacing. Until then the direction holds by review.
+
+Known back-edge to fix in the rebuild: the client SDK imports response types from `@swng/application`;
+those wire DTOs move to `contracts` so the client depends only on the contract. (This is a rebuild task,
+not a POC patch.)
 
 ---
 

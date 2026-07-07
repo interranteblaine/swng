@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Start here
+
+Design intent lives in `docs/` — read before non-trivial work:
+
+- `docs/product-design.md` — what swng is and why (the product north star)
+- `docs/backend-design.md` — the target domain & backend architecture
+- `docs/engineering-conventions.md` — how code should read (naming, layout, layering)
+
+Conventions are enforced by ESLint where possible — a lint failure is the source of truth, not prose here.
+
 ## Build & Development Commands
 
 ```bash
@@ -19,7 +29,13 @@ Run a single test file: `pnpm -F <package> vitest run <file>` (e.g. `pnpm -F @sw
 
 Web tests use Vitest with jsdom environment and `@testing-library/react`. Globals are enabled (no vitest imports needed).
 
+**Before claiming a change is done, run `pnpm validate`** — lint + build + test, the same gate CI enforces.
+
 ## Architecture
+
+> This section describes the current **proof-of-concept**. The target design is in
+> `docs/backend-design.md`; write new code to the target conventions (`docs/engineering-conventions.md`),
+> not the POC's patterns. Update this section as the rebuild lands so it stays true to the code.
 
 This is a **pnpm monorepo** (Node 20+, pnpm 8+) for a real-time golf scoring app. ESM throughout (`"type": "module"`).
 

@@ -6,6 +6,6 @@
     "declaration": false,
     "types": ["node"]
   },
-  "include": ["bin", "lib"],
+  "include": ["bin"],
   "exclude": ["cdk.out", "node_modules"]
 }

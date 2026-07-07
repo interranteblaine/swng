@@ -1,8 +1,8 @@
 # swng — v1 Scope and the Release Arc
 
-> Status: **proposed** (2026-07-07). Scopes the first shippable slice of `product.md` and the
-> order the rest lands. Product altitude only — domain architecture and implementation
-> planning follow once this is agreed.
+> Status: **approved** (2026-07-07). Scopes the first shippable slice of `product.md` and the
+> order the rest lands. Product altitude only — see `architecture.md` for the domain and
+> backend design that carries this arc.
 
 ## The scoping principle
 

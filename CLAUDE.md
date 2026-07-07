@@ -8,10 +8,10 @@ Design intent lives in `docs/` — read before non-trivial work:
 
 - `docs/product.md` — what swng is and why (the product north star)
 - `docs/roadmap.md` — v1 scope and the release arc
+- `docs/architecture.md` — the target domain & backend architecture
 - `docs/engineering-conventions.md` — how code should read (naming, layout, layering)
 
-There is no current backend/domain design doc — the target architecture for the rebuild is
-the next design artifact to produce. Do not resurrect superseded designs from git history.
+Do not resurrect superseded designs from git history.
 
 Conventions are enforced by ESLint where possible — a lint failure is the source of truth, not prose here.
 

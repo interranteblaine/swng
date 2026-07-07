@@ -1,7 +1,7 @@
 # swng — Engineering Conventions
 
-> How we write the code this time. The [backend design](./backend-design.md) says *what* to build and
-> the [product design](./product-design.md) says *why*; this says *how the code should read*. These are
+> How we write the code this time. The [architecture](./architecture.md) says *what* to build and
+> the [product design](./product.md) says *why*; this says *how the code should read*. These are
 > the rules for the rebuild, informed by what the proof-of-concept accreted.
 >
 > Two audiences: humans, and the coding agent. The enforceable subset is mirrored as a tight block in

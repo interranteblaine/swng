@@ -4,6 +4,15 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    typescript:
+      specifier: ^5.9.3
+      version: 5.9.3
+    vitest:
+      specifier: ^4.0.9
+      version: 4.0.9
+
 importers:
 
   .:
@@ -51,6 +60,167 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+
+  packages/adapters-apigateway:
+    dependencies:
+      '@swng/application':
+        specifier: workspace:*
+        version: link:../application
+      '@swng/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.9(@types/node@22.19.1)(jiti@2.6.1)(jsdom@24.1.3)(lightningcss@1.30.2)
+
+  packages/adapters-cognito:
+    dependencies:
+      '@swng/application':
+        specifier: workspace:*
+        version: link:../application
+      '@swng/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.9(@types/node@22.19.1)(jiti@2.6.1)(jsdom@24.1.3)(lightningcss@1.30.2)
+
+  packages/adapters-dynamodb:
+    dependencies:
+      '@swng/application':
+        specifier: workspace:*
+        version: link:../application
+      '@swng/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.9(@types/node@22.19.1)(jiti@2.6.1)(jsdom@24.1.3)(lightningcss@1.30.2)
+
+  packages/adapters-powertools:
+    dependencies:
+      '@swng/application':
+        specifier: workspace:*
+        version: link:../application
+      '@swng/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.9(@types/node@22.19.1)(jiti@2.6.1)(jsdom@24.1.3)(lightningcss@1.30.2)
+
+  packages/application:
+    dependencies:
+      '@swng/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.9(@types/node@22.19.1)(jiti@2.6.1)(jsdom@24.1.3)(lightningcss@1.30.2)
+
+  packages/client:
+    dependencies:
+      '@swng/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.9(@types/node@22.19.1)(jiti@2.6.1)(jsdom@24.1.3)(lightningcss@1.30.2)
+
+  packages/contracts:
+    dependencies:
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.9(@types/node@22.19.1)(jiti@2.6.1)(jsdom@24.1.3)(lightningcss@1.30.2)
+
+  packages/domain:
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.9(@types/node@22.19.1)(jiti@2.6.1)(jsdom@24.1.3)(lightningcss@1.30.2)
+
+  packages/lambda:
+    dependencies:
+      '@swng/adapters-apigateway':
+        specifier: workspace:*
+        version: link:../adapters-apigateway
+      '@swng/adapters-cognito':
+        specifier: workspace:*
+        version: link:../adapters-cognito
+      '@swng/adapters-dynamodb':
+        specifier: workspace:*
+        version: link:../adapters-dynamodb
+      '@swng/adapters-powertools':
+        specifier: workspace:*
+        version: link:../adapters-powertools
+      '@swng/application':
+        specifier: workspace:*
+        version: link:../application
+      '@swng/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@swng/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.9(@types/node@22.19.1)(jiti@2.6.1)(jsdom@24.1.3)(lightningcss@1.30.2)
 
 packages:
 

@@ -34,3 +34,6 @@ cdk.context.json
 # Environment files
 .env*
 !.env.example
+
+# Superpowers scratch (ledger, briefs, review packages)
+.superpowers/

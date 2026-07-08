@@ -38,42 +38,71 @@ export const participantSchema: z.ZodType<Participant> = z.object({
   courseHandicap: z.number(),
 });
 
+// The per-kind fields shared by GameConfig (below) and GameConfigInput (the id-less,
+// client-submitted shape built in commands.ts) — the single source of truth so a new
+// game kind only needs its fields declared once. GameConfig wraps the array/tuple
+// fields in `.readonly()` (frozen, matching the domain type's shape at game-added
+// time); GameConfigInput reuses these same field schemas unwrapped — mutable, as a
+// client request body should be — then adds `.strict()` on top.
+export const gameConfigFields = {
+  "stroke-play": {
+    scoring: z.enum(["gross", "net"]),
+    players: z.array(golferIdSchema),
+    allowance: z.number().optional(),
+  },
+  "singles-match": {
+    a: golferIdSchema,
+    b: golferIdSchema,
+    allowance: z.number().optional(),
+  },
+  stableford: {
+    players: z.array(golferIdSchema),
+    allowance: z.number().optional(),
+  },
+  "fourball-match": {
+    a: z.tuple([golferIdSchema, golferIdSchema]),
+    b: z.tuple([golferIdSchema, golferIdSchema]),
+    allowance: z.number().optional(),
+  },
+  skins: {
+    players: z.array(golferIdSchema),
+    allowance: z.number().optional(),
+  },
+} as const;
+
 const strokePlayConfigSchema = z.object({
   kind: z.literal("stroke-play"),
   id: gameIdSchema,
-  scoring: z.enum(["gross", "net"]),
-  players: z.array(golferIdSchema).readonly(),
-  allowance: z.number().optional(),
+  ...gameConfigFields["stroke-play"],
+  players: gameConfigFields["stroke-play"].players.readonly(),
 });
 
 const singlesMatchConfigSchema = z.object({
   kind: z.literal("singles-match"),
   id: gameIdSchema,
-  a: golferIdSchema,
-  b: golferIdSchema,
-  allowance: z.number().optional(),
+  ...gameConfigFields["singles-match"],
 });
 
 const stablefordConfigSchema = z.object({
   kind: z.literal("stableford"),
   id: gameIdSchema,
-  players: z.array(golferIdSchema).readonly(),
-  allowance: z.number().optional(),
+  ...gameConfigFields.stableford,
+  players: gameConfigFields.stableford.players.readonly(),
 });
 
 const fourballMatchConfigSchema = z.object({
   kind: z.literal("fourball-match"),
   id: gameIdSchema,
-  a: z.tuple([golferIdSchema, golferIdSchema]).readonly(),
-  b: z.tuple([golferIdSchema, golferIdSchema]).readonly(),
-  allowance: z.number().optional(),
+  ...gameConfigFields["fourball-match"],
+  a: gameConfigFields["fourball-match"].a.readonly(),
+  b: gameConfigFields["fourball-match"].b.readonly(),
 });
 
 const skinsConfigSchema = z.object({
   kind: z.literal("skins"),
   id: gameIdSchema,
-  players: z.array(golferIdSchema).readonly(),
-  allowance: z.number().optional(),
+  ...gameConfigFields.skins,
+  players: gameConfigFields.skins.players.readonly(),
 });
 
 export const gameConfigSchema: z.ZodType<GameConfig> = z.discriminatedUnion("kind", [

@@ -1,53 +1,21 @@
 import { z } from "zod";
 import type { GameId, GameResult, GolferId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
 import { gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
-import { courseCardSchema, gameResultSchema, holeResultSchema, roundEventSchema } from "./round.js";
+import { courseCardSchema, gameConfigFields, gameResultSchema, holeResultSchema, roundEventSchema } from "./round.js";
 
-// gameConfigSchema's five members, minus `id` — the server assigns the id on the
+// gameConfigFields' five field sets, minus `id` (they never had one — id-ness is
+// GameConfig's addition, applied in round.ts) — the server assigns the id on the
 // authoritative game-added event, so a client never gets to propose one. `.strict()`
 // on every member makes "carries an id" a rejection, not a silently-dropped extra key.
-const strokePlayConfigInputSchema = z
-  .object({
-    kind: z.literal("stroke-play"),
-    scoring: z.enum(["gross", "net"]),
-    players: z.array(golferIdSchema),
-    allowance: z.number().optional(),
-  })
-  .strict();
+const strokePlayConfigInputSchema = z.object({ kind: z.literal("stroke-play"), ...gameConfigFields["stroke-play"] }).strict();
 
-const singlesMatchConfigInputSchema = z
-  .object({
-    kind: z.literal("singles-match"),
-    a: golferIdSchema,
-    b: golferIdSchema,
-    allowance: z.number().optional(),
-  })
-  .strict();
+const singlesMatchConfigInputSchema = z.object({ kind: z.literal("singles-match"), ...gameConfigFields["singles-match"] }).strict();
 
-const stablefordConfigInputSchema = z
-  .object({
-    kind: z.literal("stableford"),
-    players: z.array(golferIdSchema),
-    allowance: z.number().optional(),
-  })
-  .strict();
+const stablefordConfigInputSchema = z.object({ kind: z.literal("stableford"), ...gameConfigFields.stableford }).strict();
 
-const fourballMatchConfigInputSchema = z
-  .object({
-    kind: z.literal("fourball-match"),
-    a: z.tuple([golferIdSchema, golferIdSchema]),
-    b: z.tuple([golferIdSchema, golferIdSchema]),
-    allowance: z.number().optional(),
-  })
-  .strict();
+const fourballMatchConfigInputSchema = z.object({ kind: z.literal("fourball-match"), ...gameConfigFields["fourball-match"] }).strict();
 
-const skinsConfigInputSchema = z
-  .object({
-    kind: z.literal("skins"),
-    players: z.array(golferIdSchema),
-    allowance: z.number().optional(),
-  })
-  .strict();
+const skinsConfigInputSchema = z.object({ kind: z.literal("skins"), ...gameConfigFields.skins }).strict();
 
 export const gameConfigInputSchema = z.discriminatedUnion("kind", [
   strokePlayConfigInputSchema,

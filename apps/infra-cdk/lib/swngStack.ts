@@ -27,8 +27,10 @@ export interface SwngStackProps extends StackProps {
 // function — but the six routes are declared here explicitly (matching
 // packages/lambda/src/http/routes.ts) rather than via a single $default catch-all, so the
 // API's shape is visible in the CloudFormation template and the AWS console, not hidden
-// inside the Lambda.
-const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly path: string }> = [
+// inside the Lambda. Exported (not module-private) so test/routesParity.test.ts can pin
+// this table against buildRoutes' own {method, path} set — infra depends on lambda, the
+// correct direction, so that guard lives here rather than in packages/lambda.
+export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly path: string }> = [
   { method: HttpMethod.POST, path: "/rounds" },
   { method: HttpMethod.POST, path: "/rounds/join" },
   { method: HttpMethod.POST, path: "/rounds/{roundId}/games" },

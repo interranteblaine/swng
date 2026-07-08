@@ -66,6 +66,9 @@ importers:
         specifier: ^10.0.0
         version: 10.4.3
     devDependencies:
+      '@swng/lambda':
+        specifier: workspace:*
+        version: link:../../packages/lambda
       '@types/node':
         specifier: 'catalog:'
         version: 22.19.1

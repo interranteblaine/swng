@@ -17,6 +17,7 @@
     "constructs": "^10.0.0"
   },
   "devDependencies": {
+    "@swng/lambda": "workspace:*",
     "aws-cdk": "2.1033.0",
     "ts-node": "^10.9.2",
     "typescript": "catalog:",

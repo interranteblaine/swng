@@ -6,6 +6,7 @@ import { adjustedGrossScore, scoreDifferential } from "../handicap/whs.js";
 import { playGoldenRoundLog } from "../scoring/golden/deck.js";
 import { fixtureLinks, fixtureWhite } from "../scoring/golden/fixtureCourse.js";
 import { settleRound } from "./archive.js";
+import type { RoundEvent } from "./events.js";
 
 // The milestone's headline concurrency deck (scoring/concurrent.test.ts): one log, two
 // games with different handicap allowances over the same cells, one correction that
@@ -121,6 +122,42 @@ describe("settleRound — concurrency deck", () => {
   });
 });
 
+describe("settleRound — incomplete handicapping", () => {
+  it("resolves a match decided early while both golfers' cards stay incomplete (holes 8-9 never recorded)", () => {
+    const D = golferId("dee");
+    const E = golferId("eve");
+    const twoPlayers = [
+      { golferId: D, name: "Dee", tee: "white", courseHandicap: 8 },
+      { golferId: E, name: "Eve", tee: "white", courseHandicap: 2 },
+    ];
+    const match = { kind: "singles-match", id: gameId("m2"), a: D, b: E } as const;
+    // Same shape as singlesMatch.test.ts's "full-difference strokes close it out 3&2"
+    // deck (Dee/Eve standing in for that test's Ann/Bo, same course handicaps): Dee
+    // (higher, ch 8) gets 6 dots on SI 1..6 (holes 1,2,4,7,8,9). h1 halve(4/4),
+    // h2 Dee(4/5), h3 Dee(3/4), h4 halve(5/5), h5 Dee(4/5), h6 Eve(4/3), h7 Dee(4/5)
+    // -> Dee 3 up thru 7, 2 remaining -> closes out 3&2. Holes 8-9 are never recorded
+    // for either golfer, so the round finalizes with the game resolved but both
+    // cards short of a full 9 — exactly the "holes-undecided" path handicappingFor
+    // catches and downgrades to "incomplete" rather than throwing.
+    const log = playGoldenRoundLog(fixtureLinks, twoPlayers, [match], {
+      [D]: [5, 5, 3, 6, 4, 4, 5],
+      [E]: [4, 5, 4, 5, 5, 3, 5],
+    });
+    const archive = settleRound(log);
+
+    expect(archive.results).toHaveLength(1);
+    expect(archive.results[0]).toMatchObject({ kind: "singles-match", outcome: { winner: D, closing: "3&2" } });
+
+    expect(archive.handicapping).toHaveLength(2);
+    expect(archive.handicapping).toEqual(
+      expect.arrayContaining([
+        { golferId: D, kind: "incomplete" },
+        { golferId: E, kind: "incomplete" },
+      ]),
+    );
+  });
+});
+
 describe("settleRound — determinism", () => {
   it("is order-independent: JSON.stringify is identical for any shuffle of the same log", () => {
     const expected = JSON.stringify(settleRound(finalLog));
@@ -144,6 +181,15 @@ describe("settleRound — determinism", () => {
   it("strips seq from every archived event's envelope", () => {
     const archive = settleRound(finalLog);
     expect(archive.events.every((event) => !("seq" in event))).toBe(true);
+  });
+
+  it("is independent of seq: stamping seq onto every event of the log settles byte-identically to the unstamped log", () => {
+    // The strip-seq test above only proves the OUTPUT carries no seq; it's vacuous
+    // against a broken strip because this golden log never stamps seq in the first
+    // place. This test stamps one on, so a regression that lets seq leak into
+    // canonicalStringify's tiebreak (or into the archive's own fields) would fail it.
+    const stamped: readonly RoundEvent[] = finalLog.map((event, index) => ({ ...event, seq: index }));
+    expect(JSON.stringify(settleRound(stamped))).toBe(JSON.stringify(settleRound(finalLog)));
   });
 
   it("orders archived events in canonical domain order (ascending hlc.wallMs, the golden deck's monotone clock)", () => {

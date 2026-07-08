@@ -29,4 +29,21 @@ describe("fourball match — golden cards", () => {
       outcome: { winner: "a", closing: "3&1" },
     });
   });
+
+  it("a hole where all four are out (picked-up/conceded) halves outright: up unchanged, thru advances through it", () => {
+    // Plan rule: a side with no ball halves the hole if the other side has none
+    // either. All four cells recorded on h1 (so the hole IS decided), none of them
+    // "strokes" — sideBest returns undefined for both a and b, which the winners
+    // reducer resolves to "halved" rather than crediting either side. One cell uses
+    // "conceded" instead of "picked-up" so that kind also gets its first exercise
+    // here (fourballMatch's netFor guards on `kind !== "strokes"`, treating both
+    // the same way).
+    const [state] = playGoldenRound(fixtureLinks, players, [game], {
+      [A]: ["picked-up"],
+      [B]: ["conceded"],
+      [C]: ["picked-up"],
+      [D]: ["picked-up"],
+    });
+    expect(state).toMatchObject({ kind: "fourball-match", up: 0, thru: 1, remaining: 8, dormie: false });
+  });
 });

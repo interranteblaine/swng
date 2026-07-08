@@ -9,9 +9,13 @@ import type { RoundState } from "../../round/state.js";
 import { scoreGame } from "../game.js";
 import type { GameConfig, GameState } from "../game.js";
 
-// Fixtures write scores as numbers or the "picked-up"/"conceded" literals — the
-// same vocabulary a scorer taps in on the wire, kept out of HoleResult's shape.
-export type FixtureScores = Readonly<Record<string, ReadonlyArray<number | "picked-up" | "conceded">>>;
+// Fixtures write scores as numbers, the "picked-up"/"conceded" literals, or null —
+// the same vocabulary a scorer taps in on the wire, kept out of HoleResult's shape.
+// null means "no cell recorded for this hole": the deck emits no score-recorded event
+// for it at all, letting a card leave a gap anywhere (not just a dense unrecorded
+// suffix) — the medal-family engines (stableford, stroke play, skins) resolve a
+// decided hole wherever its cell exists, unlike match play's sequential decided-prefix.
+export type FixtureScores = Readonly<Record<string, ReadonlyArray<number | "picked-up" | "conceded" | null>>>;
 
 // A correction rewrites one already-recorded cell: the deck appends it as a raw
 // score-recorded event AFTER every initial score, so its hlc is strictly later
@@ -29,9 +33,11 @@ const DEVICE = deviceId("golden-deck");
 
 // Builds a minimal, canonically-ordered event log — genesis, joins, games, start,
 // then one score-recorded per (golfer, hole) in fixture order, then any corrections,
-// optionally closed out with a round-finalized. Sequential hlcs are enough here
-// because the golden decks never need to exercise conflict resolution; that's
-// state.properties.test.ts's job.
+// optionally closed out with a round-finalized. hlcs are sequential and never tie:
+// a correction's hlc is always strictly later than the score it replaces, which is
+// exactly what lets it win the fold's LWW cell resolution deterministically. Same-hlc
+// concurrency (two writes racing at the identical instant) is deliberately out of
+// scope here — that's state.properties.test.ts's job.
 const buildGoldenLog = (
   card: CourseCard,
   participants: readonly Participant[],
@@ -58,6 +64,7 @@ const buildGoldenLog = (
 
   for (const [golfer, holeScores] of Object.entries(scores)) {
     holeScores.forEach((score, index) => {
+      if (score === null) return; // deliberate gap — no cell recorded for this hole
       events.push({
         kind: "score-recorded",
         golferId: golferId(golfer),

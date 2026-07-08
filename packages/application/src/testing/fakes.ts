@@ -95,6 +95,17 @@ export const createFixedClock = (startMs: number): Clock => {
   };
 };
 
+// A clock that never advances — every call to now() returns the same wallMs. Exists
+// specifically to exercise createServerHlcSource's collision-avoidance path (serverEnvelope.ts):
+// createFixedClock above advances 1ms per call, which never lets a same-millisecond batch
+// occur, so it can't catch the M3 status-register bug (StartRound's three server events
+// landing on identical hlcs and racing on random opId for canonical order). This fake
+// reproduces the real-world condition — a fast server minting several events within one
+// clock tick — deterministically.
+export const createFrozenClock = (atMs: number): Clock => ({
+  now: () => atMs,
+});
+
 // The same human-facing alphabet compositionRoot.ts's real `newJoinCode` draws from (no
 // 0/O/1/I/L — visually unambiguous read aloud or typed on a phone).
 const JOIN_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";

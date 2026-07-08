@@ -7,7 +7,7 @@ import type { EventJournal } from "../ports/eventJournal.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { TokenIssuer } from "../ports/tokenIssuer.js";
-import { serverEnvelope } from "./serverEnvelope.js";
+import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 
 // Rounds are live from creation (M3 plan): no go-live command in v1, so the one append a
 // round is born with is already the full setup-to-live transition — genesis, the host's
@@ -23,10 +23,16 @@ export const startRound =
 
     const hostParticipant: Participant = { golferId: host, name: command.host.name, tee: command.host.tee, courseHandicap: command.host.courseHandicap };
 
+    // One hlc source for the whole batch: round-created, the host's own join, and start all
+    // stamp from the same server clock in this single call, so without a shared monotonic
+    // source they could land in the same millisecond and collide on hlc (see
+    // serverEnvelope.ts) — losing the fold's canonical order and stranding the round in
+    // "setup" whenever round-created wins the coin flip instead of round-started.
+    const hlc = createServerHlcSource(deps.clock);
     const events: readonly RoundEvent[] = [
-      { kind: "round-created", roundId: id, card: command.card, ...serverEnvelope(deps, host) },
-      { kind: "participant-joined", participant: hostParticipant, ...serverEnvelope(deps, host) },
-      { kind: "round-started", ...serverEnvelope(deps, host) },
+      { kind: "round-created", roundId: id, card: command.card, ...serverEnvelope({ hlc, ids: deps.ids }, host) },
+      { kind: "participant-joined", participant: hostParticipant, ...serverEnvelope({ hlc, ids: deps.ids }, host) },
+      { kind: "round-started", ...serverEnvelope({ hlc, ids: deps.ids }, host) },
     ];
 
     // META (the join code) is written before the journal append, not after or alongside it

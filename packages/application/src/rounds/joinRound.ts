@@ -9,7 +9,7 @@ import type { IdGenerator } from "../ports/idGenerator.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { TokenIssuer } from "../ports/tokenIssuer.js";
 import { loadRoundState } from "./loadRoundState.js";
-import { serverEnvelope } from "./serverEnvelope.js";
+import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 
 export const joinRound =
   (deps: { journal: EventJournal; store: RoundStore; broadcast: Broadcast; tokens: TokenIssuer; clock: Clock; ids: IdGenerator }) =>
@@ -24,7 +24,8 @@ export const joinRound =
     const golfer = golferId(deps.ids.newId());
     const participant: Participant = { golferId: golfer, name: command.name, tee: command.tee, courseHandicap: command.courseHandicap };
 
-    const result = await deps.journal.append(id, [{ kind: "participant-joined", participant, ...serverEnvelope(deps, golfer) }]);
+    const hlc = createServerHlcSource(deps.clock);
+    const result = await deps.journal.append(id, [{ kind: "participant-joined", participant, ...serverEnvelope({ hlc, ids: deps.ids }, golfer) }]);
     await deps.broadcast.publish(id, result.appended);
 
     const token = deps.tokens.issue({ roundId: id, golferId: golfer });

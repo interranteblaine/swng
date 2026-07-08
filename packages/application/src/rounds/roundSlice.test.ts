@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { HoleResult } from "@swng/domain";
-import { deviceId, fixtureLinks, golferId, opId } from "@swng/domain";
+import { compareHlc, deviceId, fixtureLinks, golferId, opId, reduceRound } from "@swng/domain";
+import type { Clock } from "../ports/clock.js";
 import type { ParticipantClaims, TokenIssuer } from "../ports/tokenIssuer.js";
-import { createCapturingBroadcast, createFixedClock, createInMemoryJournal, createInMemoryRoundStore, createSequentialIds } from "../testing/fakes.js";
+import {
+  createCapturingBroadcast,
+  createFixedClock,
+  createFrozenClock,
+  createInMemoryJournal,
+  createInMemoryRoundStore,
+  createSequentialIds,
+} from "../testing/fakes.js";
 import { addGame } from "./addGame.js";
 import { finalizeRound } from "./finalizeRound.js";
 import { joinRound } from "./joinRound.js";
@@ -38,12 +46,11 @@ const createClientOps = (device: string) => {
   return () => ({ opId: opId(`${device}-op-${(opCounter += 1)}`), hlc: { wallMs: wallMs++, counter: 0, deviceId: deviceId(device) } });
 };
 
-const setup = () => {
+const setup = (clock: Clock = createFixedClock(1_000)) => {
   const journal = createInMemoryJournal();
   const store = createInMemoryRoundStore();
   const broadcast = createCapturingBroadcast();
   const tokens = createTestTokenIssuer();
-  const clock = createFixedClock(1_000);
   const ids = createSequentialIds("t");
 
   return {
@@ -83,6 +90,11 @@ describe("round use cases — golden path over in-memory ports", () => {
       expect(event.authorId).toBe(host.golferId);
     }
     expect(new Set(genesis.events.map((event) => event.hlc.wallMs)).size).toBe(3);
+
+    // Deterministic pin on the bug this suite exists to catch: reducing StartRound's own
+    // batch must land the round "live", not stuck in "setup" because round-created outraced
+    // round-started on the status register's canonical (hlc, opId) order.
+    expect(reduceRound(genesis.events).status).toBe("live");
 
     const bo = await ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2 });
     const boJoined = (await ctx.events(host.roundId, 3)).events[0];
@@ -208,5 +220,35 @@ describe("round use cases — golden path over in-memory ports", () => {
     const round = await freshLiveRound();
     const beyondHead = await round.events(round.host.roundId, 100);
     expect(beyondHead).toEqual({ events: [], nextSeq: 100 });
+  });
+});
+
+// A clock frozen at a single wallMs reproduces the real-world condition createFixedClock's
+// 1ms-per-call advance can never hit: several server events minted within the same
+// millisecond. Before createServerHlcSource (serverEnvelope.ts), every one of StartRound's
+// three envelopes stamped `counter: 0` off the same frozen wallMs — identical hlcs, so the
+// status register's canonical (hlc, then opId) order fell back to comparing random UUIDs,
+// making round-created vs. round-started win the tie on a coin flip. This is the fault this
+// suite exists to pin: it must FAIL against that pre-fix construction (identical hlcs, no
+// guaranteed order) and PASS once hlcs are strictly increasing within the batch.
+describe("StartRound's batch under a frozen clock (regression: same-ms server events)", () => {
+  it("stamps round-created, participant-joined, and round-started with strictly increasing hlc, and reduces to status live", async () => {
+    const ctx = setup(createFrozenClock(1_000));
+
+    const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
+    const genesis = await ctx.events(host.roundId, 0);
+
+    expect(genesis.events.map((event) => event.kind)).toEqual(["round-created", "participant-joined", "round-started"]);
+
+    // Every event shares the frozen wallMs — the collision this test forces — so ordering
+    // can only come from the counter createServerHlcSource increments per stamp.
+    expect(new Set(genesis.events.map((event) => event.hlc.wallMs)).size).toBe(1);
+    expect(genesis.events.map((event) => event.hlc.counter)).toEqual([0, 1, 2]);
+
+    for (let i = 1; i < genesis.events.length; i += 1) {
+      expect(compareHlc(genesis.events[i - 1]!.hlc, genesis.events[i]!.hlc)).toBeLessThan(0);
+    }
+
+    expect(reduceRound(genesis.events).status).toBe("live");
   });
 });

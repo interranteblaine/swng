@@ -8,7 +8,7 @@ import type { RoundStore } from "../ports/roundStore.js";
 import type { ParticipantClaims } from "../ports/tokenIssuer.js";
 import { requireParticipant } from "../scoringPolicy.js";
 import { loadRoundState } from "./loadRoundState.js";
-import { serverEnvelope } from "./serverEnvelope.js";
+import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 
 // Finalize is idempotent by design (architecture.md §3: "projections treat finalize as an
 // idempotent upsert"): a round that's already final just recomputes and returns — never a
@@ -34,7 +34,8 @@ export const finalizeRound =
       return { results: archive.results, handicapping: archive.handicapping };
     }
 
-    const result = await deps.journal.append(claims.roundId, [{ kind: "round-finalized", ...serverEnvelope(deps, claims.golferId) }]);
+    const hlc = createServerHlcSource(deps.clock);
+    const result = await deps.journal.append(claims.roundId, [{ kind: "round-finalized", ...serverEnvelope({ hlc, ids: deps.ids }, claims.golferId) }]);
     const fullLog = await deps.journal.read(claims.roundId, 0); // the FULL post-append log
     const archive = settleRound(fullLog);
     await deps.store.putArchive(archive);

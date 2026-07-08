@@ -9,7 +9,7 @@ import type { IdGenerator } from "../ports/idGenerator.js";
 import type { ParticipantClaims } from "../ports/tokenIssuer.js";
 import { isParticipant, requireParticipant } from "../scoringPolicy.js";
 import { loadRoundState } from "./loadRoundState.js";
-import { serverEnvelope } from "./serverEnvelope.js";
+import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 
 // Every golfer id a config mentions — players for the medal-family formats, the a/b sides
 // for the match formats — is what AddGame checks against the roster before the game is
@@ -59,7 +59,8 @@ export const addGame =
     const id = gameId(deps.ids.newId());
     const config = withGameId(command.game, id);
 
-    const result = await deps.journal.append(claims.roundId, [{ kind: "game-added", config, ...serverEnvelope(deps, claims.golferId) }]);
+    const hlc = createServerHlcSource(deps.clock);
+    const result = await deps.journal.append(claims.roundId, [{ kind: "game-added", config, ...serverEnvelope({ hlc, ids: deps.ids }, claims.golferId) }]);
     await deps.broadcast.publish(claims.roundId, result.appended);
 
     // A fresh gameId's opId is never a duplicate — invariant of this call, not a runtime

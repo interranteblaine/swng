@@ -33,13 +33,34 @@ const LIFECYCLE_STATUS: Record<"round-created" | "round-started" | "round-finali
   "round-reopened": "live",
 };
 
-// Total order over events that depends only on event content (hlc, then opId as a
-// deterministic tiebreak), never on array position. Every downstream step processes
-// events in this canonical order, which is what makes the whole fold a pure function
-// of the event *set* rather than of delivery/arrival order — true commutativity, not
-// just "commutative unless two ops happen to collide."
+// Deterministic serialization with explicitly sorted object keys — NOT plain
+// JSON.stringify, whose key order is insertion-dependent and therefore not a
+// canonical representation of the value.
+const canonicalStringify = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const keys = Object.keys(value as Record<string, unknown>).sort();
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalStringify((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+};
+
+// Total order over events that depends only on event content (hlc, then opId, then a
+// full canonical serialization as a last-resort tiebreak), never on array position.
+// Every downstream step processes events in this canonical order, which is what makes
+// the whole fold a pure function of the event *set* rather than of delivery/arrival
+// order — true commutativity, not just "commutative unless two ops happen to collide."
+//
+// The third term matters for the dedupe-collision case this comparator exists to make
+// deterministic: two events that share an opId (and, in the worst case, an identical
+// hlc too) but carry different payloads. Without it, (hlc, opId) both compare equal and
+// the comparator returns 0 for genuinely different events — 0 only for identical events
+// is required; otherwise stable sort would fall back to arrival order and break
+// convergence.
 const byCanonicalOrder = (a: RoundEvent, b: RoundEvent): number =>
-  compareHlc(a.hlc, b.hlc) || (a.opId < b.opId ? -1 : a.opId > b.opId ? 1 : 0);
+  compareHlc(a.hlc, b.hlc) ||
+  (a.opId < b.opId ? -1 : a.opId > b.opId ? 1 : 0) ||
+  (canonicalStringify(a) < canonicalStringify(b) ? -1 : canonicalStringify(a) > canonicalStringify(b) ? 1 : 0);
 
 export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
   // Every sub-structure is an hlc-resolved LWW register/map, which is what makes

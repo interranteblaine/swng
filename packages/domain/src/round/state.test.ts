@@ -64,6 +64,15 @@ describe("reduceRound", () => {
     expect(reduceRound([genesis, joinA, alien]).participants).toHaveLength(1);
   });
 
+  it("converges on same-opId, same-hlc collisions with different payloads (arrival order must not matter)", () => {
+    const collisionHlc = at(30, "device-x");
+    const x: RoundEvent = { opId: opId("collide-1"), hlc: collisionHlc, authorId: A, kind: "score-recorded", golferId: A, hole: 1, result: { kind: "strokes", strokes: 4 } };
+    const y: RoundEvent = { opId: opId("collide-1"), hlc: collisionHlc, authorId: A, kind: "score-recorded", golferId: A, hole: 1, result: { kind: "strokes", strokes: 7 } };
+    const forward = reduceRound([genesis, joinA, started, x, y]);
+    const backward = reduceRound([genesis, joinA, started, y, x]);
+    expect(backward).toEqual(forward);
+  });
+
   it("records picked-up and conceded as first-class results", () => {
     const pu: RoundEvent = { ...base(11), kind: "score-recorded", golferId: A, hole: 1, result: { kind: "picked-up" } };
     const cc: RoundEvent = { ...base(12), kind: "score-recorded", golferId: B, hole: 1, result: { kind: "conceded" } };

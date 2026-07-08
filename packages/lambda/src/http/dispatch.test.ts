@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { deviceId, fixtureLinks, opId } from "@swng/domain";
-import type { IdGenerator } from "@swng/application";
 import {
   addGame,
   createCapturingBroadcast,
@@ -9,6 +8,7 @@ import {
   createInMemoryJournal,
   createInMemoryRoundStore,
   createNullLogger,
+  createSequentialIds,
   finalizeRound,
   joinRound,
   readEvents,
@@ -67,23 +67,12 @@ const makeEvent = (opts: {
 const asStructured = (result: Awaited<ReturnType<ReturnType<typeof createDispatcher>>>): APIGatewayProxyStructuredResultV2 =>
   result as APIGatewayProxyStructuredResultV2;
 
-// application's shared `createSequentialIds` fake (testing/fakes.ts) mints join codes like
-// "t-join-1" — fine for roundSlice.test.ts, which calls the use cases directly and never
-// touches contracts validation, but the dispatcher parses every inbound body against the
-// real wire schemas, and joinRoundRequestSchema requires `code` to be exactly 6 chars. A
-// fixed 6-char code is enough here: each test's `setup()` gets its own fresh in-memory
-// journal/store, so there's never a collision to dedupe against.
-const createTestIds = (): IdGenerator => {
-  let counter = 0;
-  return { newId: () => `id-${(counter += 1)}`, newJoinCode: () => "ABCDEF" };
-};
-
 const setup = () => {
   const journal = createInMemoryJournal();
   const store = createInMemoryRoundStore();
   const broadcast = createCapturingBroadcast();
   const clock = createFixedClock(1_000);
-  const ids = createTestIds();
+  const ids = createSequentialIds("id");
   const tokens = createHmacTokenIssuer({ secret: "dispatch-test-secret", clock });
   const logger = createNullLogger();
 
@@ -292,5 +281,12 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     const { dispatcher } = setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "DELETE", path: "/rounds" })));
     expect(resp.statusCode).toBe(404);
+  });
+
+  it("maps a malformed percent-escape in the path to a structured 400, not a raw throw", async () => {
+    const { dispatcher } = setup();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/%zz/scores" })));
+    expect(resp.statusCode).toBe(400);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
 });

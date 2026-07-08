@@ -101,4 +101,39 @@ describe("createApiGatewayBroadcast", () => {
     // A generic failure isn't a signal the connection is dead — it stays registered.
     expect(await connections.listByRound(rid)).toEqual(["conn-a"]);
   });
+
+  it("logs but never rejects when connections.listByRound throws, and never attempts a send", async () => {
+    const rid = roundId("round-1");
+    const connections: ConnectionRegistry = {
+      register: vi.fn(),
+      deregister: vi.fn(),
+      listByRound: vi.fn().mockRejectedValue(new Error("registry unavailable")),
+    };
+    const send = vi.fn();
+    const client = { send } as unknown as ApiGatewayManagementApiClient;
+    const logger: Logger = { info: vi.fn(), error: vi.fn() };
+    const broadcast = createApiGatewayBroadcast({ client, connections, logger });
+
+    await expect(broadcast.publish(rid, [sampleEvent])).resolves.toBeUndefined();
+
+    expect(send).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs but never rejects when connections.deregister throws during Gone-cleanup", async () => {
+    const connections = createInMemoryConnectionRegistry();
+    const rid = roundId("round-1");
+    await connections.register("conn-gone", rid);
+
+    const send = vi.fn().mockRejectedValue(new GoneException({ message: "connection is gone", $metadata: {} }));
+    const client = { send } as unknown as ApiGatewayManagementApiClient;
+    const logger: Logger = { info: vi.fn(), error: vi.fn() };
+    const deregisterSpy = vi.spyOn(connections, "deregister").mockRejectedValue(new Error("registry unavailable"));
+    const broadcast = createApiGatewayBroadcast({ client, connections, logger });
+
+    await expect(broadcast.publish(rid, [sampleEvent])).resolves.toBeUndefined();
+
+    expect(deregisterSpy).toHaveBeenCalledWith("conn-gone");
+    expect(logger.error).toHaveBeenCalledTimes(1);
+  });
 });

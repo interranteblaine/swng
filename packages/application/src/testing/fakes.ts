@@ -87,12 +87,32 @@ export const createFixedClock = (startMs: number): Clock => {
   };
 };
 
+// The same human-facing alphabet compositionRoot.ts's real `newJoinCode` draws from (no
+// 0/O/1/I/L — visually unambiguous read aloud or typed on a phone).
+const JOIN_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+// join codes are a distinct wire shape from newId's free-form "prefix-N": the real command
+// schema (contracts' joinRoundRequestSchema) requires exactly 6 characters drawn from
+// JOIN_CODE_ALPHABET. This module's doc comment declares it the exported surface for
+// lambda/E2E tests too, so a fake code has to honor that shape, not just look plausible —
+// a two-char head deterministically derived from `prefix` (so different fakes' codes stay
+// visually distinct), plus the counter zero-padded to 4 decimal digits and mapped
+// digit-by-digit into the alphabet's first 10 entries. The tail is injective in the counter,
+// so codes never collide within one generator instance.
+const joinCodeFromCounter = (prefix: string, counter: number): string => {
+  const prefixHash = [...prefix].reduce((sum, char, index) => sum + char.charCodeAt(0) * (index + 1), 0);
+  const head = `${JOIN_CODE_ALPHABET[prefixHash % JOIN_CODE_ALPHABET.length]}${JOIN_CODE_ALPHABET[(prefixHash * 7) % JOIN_CODE_ALPHABET.length]}`;
+  const tailDigits = String(counter % 10_000).padStart(4, "0");
+  const tail = [...tailDigits].map((digit) => JOIN_CODE_ALPHABET[Number(digit)]).join("");
+  return `${head}${tail}`;
+};
+
 export const createSequentialIds = (prefix: string): IdGenerator => {
   let idCounter = 0;
   let joinCodeCounter = 0;
   return {
     newId: () => `${prefix}-${++idCounter}`,
-    newJoinCode: () => `${prefix}-join-${++joinCodeCounter}`,
+    newJoinCode: () => joinCodeFromCounter(prefix, ++joinCodeCounter),
   };
 };
 

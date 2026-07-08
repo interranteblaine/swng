@@ -7,19 +7,33 @@ import { toHttpError } from "./errorMapping.js";
 
 const BEARER_PREFIX = "Bearer ";
 
-// Splits a request path into non-empty segments and matches it against a route's `{name}`
-// template one segment at a time — the one generic path matcher every route shares
-// (conventions §3: "do each cross-cutting thing once"), rather than each route hand-rolling
-// its own parse.
-const matchPath = (template: string, actualPath: string): Record<string, string> | undefined => {
+// Splits a request path into decoded, non-empty segments. Decoding happens ONCE per request
+// here rather than per candidate route in matchPath below — and a malformed percent-escape
+// (e.g. `/rounds/%zz/scores`) is a client mistake, not a routing failure, so it's raised as
+// a ContractError (400 via errorMapping.ts) rather than left to throw a raw URIError.
+const decodePathSegments = (path: string): string[] =>
+  path
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        throw new ContractError("invalid-request", [`path: malformed percent-escape in segment "${segment}"`]);
+      }
+    });
+
+// Matches already-decoded path segments against a route's `{name}` template one segment at a
+// time — the one generic path matcher every route shares (conventions §3: "do each
+// cross-cutting thing once"), rather than each route hand-rolling its own parse.
+const matchPath = (template: string, actualSegments: readonly string[]): Record<string, string> | undefined => {
   const templateSegments = template.split("/").filter(Boolean);
-  const actualSegments = actualPath.split("/").filter(Boolean);
   if (templateSegments.length !== actualSegments.length) return undefined;
 
   const pathParams: Record<string, string> = {};
   for (let i = 0; i < templateSegments.length; i += 1) {
     const templateSegment = templateSegments[i]!;
-    const actualSegment = decodeURIComponent(actualSegments[i]!);
+    const actualSegment = actualSegments[i]!;
     if (templateSegment.startsWith("{") && templateSegment.endsWith("}")) {
       pathParams[templateSegment.slice(1, -1)] = actualSegment;
     } else if (templateSegment !== actualSegment) {
@@ -53,22 +67,27 @@ export const createDispatcher =
     const method = event.requestContext.http.method.toUpperCase();
     const path = event.rawPath;
 
-    let route: Route | undefined;
-    let pathParams: Record<string, string> | undefined;
-    for (const candidate of routes) {
-      if (candidate.method !== method) continue;
-      const candidateParams = matchPath(candidate.path, path);
-      if (candidateParams) {
-        route = candidate;
-        pathParams = candidateParams;
-        break;
-      }
-    }
-    if (!route || !pathParams) {
-      return { statusCode: 404, body: JSON.stringify({ code: "not-found", message: `no route for ${method} ${path}` }) };
-    }
-
     try {
+      // Route matching (including decodePathSegments, which can throw on a malformed
+      // percent-escape) lives inside this try too — every failure from here down must come
+      // out mapped, never as an unhandled Lambda crash.
+      const pathSegments = decodePathSegments(path);
+
+      let route: Route | undefined;
+      let pathParams: Record<string, string> | undefined;
+      for (const candidate of routes) {
+        if (candidate.method !== method) continue;
+        const candidateParams = matchPath(candidate.path, pathSegments);
+        if (candidateParams) {
+          route = candidate;
+          pathParams = candidateParams;
+          break;
+        }
+      }
+      if (!route || !pathParams) {
+        return { statusCode: 404, body: JSON.stringify({ code: "not-found", message: `no route for ${method} ${path}` }) };
+      }
+
       let claims: ParticipantClaims | undefined;
       if (route.auth === "participant") {
         const token = bearerToken(event);

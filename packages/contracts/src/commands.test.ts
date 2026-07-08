@@ -61,7 +61,7 @@ describe("recordScoreRequestSchema", () => {
   it("accepts a valid record-score request", () => {
     const request = { ...base, hole: 5 };
     const parsed = parse(recordScoreRequestSchema, request);
-    expect(parsed.hole).toBe(5);
+    expect(parsed).toEqual(request);
   });
 
   it("rejects hole 0", () => {

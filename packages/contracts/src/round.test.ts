@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { deviceId, gameId, golferId, opId } from "@swng/domain";
 import type { GameConfig, GameResult, RoundEvent } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
-import { gameConfigSchema, gameResultSchema, roundEventSchema } from "./round.js";
+import { gameConfigSchemaImpl, gameResultSchemaImpl, roundEventSchema, roundEventSchemaImpl } from "./round.js";
 
 const baseHlc = { wallMs: 1_000, counter: 0, deviceId: deviceId("device-1") };
 
@@ -52,12 +52,22 @@ describe("roundEventSchema", () => {
   });
 
   it("roundEventSchema, gameConfigSchema, and gameResultSchema type-parity holds in both directions (compile-time check)", () => {
-    const forwardEvent: RoundEvent = {} as z.infer<typeof roundEventSchema>;
-    const backwardEvent: z.infer<typeof roundEventSchema> = {} as RoundEvent;
-    const forwardConfig: GameConfig = {} as z.infer<typeof gameConfigSchema>;
-    const backwardConfig: z.infer<typeof gameConfigSchema> = {} as GameConfig;
-    const forwardResult: GameResult = {} as z.infer<typeof gameResultSchema>;
-    const backwardResult: z.infer<typeof gameResultSchema> = {} as GameResult;
+    // Deliberately checked against the *Impl consts (round.ts), not the exported
+    // roundEventSchema / gameConfigSchema / gameResultSchema aliases: those aliases carry
+    // an explicit `z.ZodType<RoundEvent>` annotation, which makes
+    // `z.infer<typeof roundEventSchema>` equal RoundEvent by declaration — a tautology
+    // that compiles even if a union member silently falls out of the schema array. The
+    // *Impl consts are unannotated, so z.infer here is TypeScript's own structural
+    // inference of what the schema actually parses to; diffing that against the domain
+    // type in both directions is the real check. (roundEventSchema — the annotated public
+    // alias, same runtime object as roundEventSchemaImpl — is still exercised for real by
+    // every parse(...) call elsewhere in this file.)
+    const forwardEvent: RoundEvent = {} as z.infer<typeof roundEventSchemaImpl>;
+    const backwardEvent: z.infer<typeof roundEventSchemaImpl> = {} as RoundEvent;
+    const forwardConfig: GameConfig = {} as z.infer<typeof gameConfigSchemaImpl>;
+    const backwardConfig: z.infer<typeof gameConfigSchemaImpl> = {} as GameConfig;
+    const forwardResult: GameResult = {} as z.infer<typeof gameResultSchemaImpl>;
+    const backwardResult: z.infer<typeof gameResultSchemaImpl> = {} as GameResult;
     // These assignments above are the actual test — they only compile if z.infer and the
     // domain type are structurally identical in both directions. This assertion just gives
     // vitest something to run.

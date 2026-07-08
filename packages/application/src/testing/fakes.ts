@@ -10,6 +10,14 @@ import type { RoundStore } from "../ports/roundStore.js";
 // unit tests later in M3 — the Dynamo journal adapter is tested against this SAME
 // contract (contiguous seq from 1, opId dedupe via duplicateOpIds), so this fake doubles
 // as the spec every real journal must satisfy.
+//
+// One deliberate divergence, scoped here rather than left implicit: an in-batch duplicate
+// opId (two events in the SAME `events` array sharing an opId) dedupes cleanly in this fake
+// (the loop below sees the second one as already `seen`) but would throw a DynamoDB
+// ValidationException in createDynamoEventJournal — a single TransactWriteCommand can't
+// carry two Put operations against the same item key (opIdSk(event.opId) collides). This is
+// unreachable by every current caller: every real batch is either 1 event (RecordScore,
+// FinalizeRound) or 3 freshly-minted events with distinct opIds (StartRound).
 export const createInMemoryJournal = (): EventJournal => {
   const byRound = new Map<RoundId, RoundEvent[]>();
   const seenOpIds = new Map<RoundId, Set<OpId>>();
@@ -97,8 +105,10 @@ const JOIN_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 // lambda/E2E tests too, so a fake code has to honor that shape, not just look plausible —
 // a two-char head deterministically derived from `prefix` (so different fakes' codes stay
 // visually distinct), plus the counter zero-padded to 4 decimal digits and mapped
-// digit-by-digit into the alphabet's first 10 entries. The tail is injective in the counter,
-// so codes never collide within one generator instance.
+// digit-by-digit into the alphabet's first 10 entries. The tail is injective for the first
+// 10,000 codes per instance (`counter % 10_000` wraps after that, so a generator instance
+// pushed past 10,000 join codes could repeat a tail) — comfortably beyond any test run's
+// call count.
 const joinCodeFromCounter = (prefix: string, counter: number): string => {
   const prefixHash = [...prefix].reduce((sum, char, index) => sum + char.charCodeAt(0) * (index + 1), 0);
   const head = `${JOIN_CODE_ALPHABET[prefixHash % JOIN_CODE_ALPHABET.length]}${JOIN_CODE_ALPHABET[(prefixHash * 7) % JOIN_CODE_ALPHABET.length]}`;

@@ -117,6 +117,12 @@ export const createDynamoEventJournal = (config: {
 
   return {
     append: async (roundId: RoundId, events: readonly RoundEvent[]): Promise<AppendResult> => {
+      // Each event costs 2 TransactItems (the EVT Put + its OPID marker Put, see
+      // attemptCommit above), and DynamoDB caps a single TransactWriteItems call at 100
+      // items — so a batch of more than 50 events would exceed the cap and fail at the SDK
+      // layer before this loop ever runs. No caller does that today: the largest real
+      // batch is StartRound's 3 events (genesis, host join, round-started). Chunking a
+      // >50-event batch into multiple transactions is deliberate future work, not a v1 gap.
       let pending = events;
       const duplicateOpIds: OpId[] = [];
 

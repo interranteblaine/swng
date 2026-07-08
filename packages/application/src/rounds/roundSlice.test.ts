@@ -186,4 +186,27 @@ describe("round use cases — golden path over in-memory ports", () => {
       round.addStableford(hostClaims, { game: { kind: "stableford", players: [round.host.golferId, golferId("ghost")] } }),
     ).rejects.toMatchObject({ code: "unknown-golfer-in-game" });
   });
+
+  // requireParticipant (recordScore's first guard) only ever checks the AUTHOR (claims.golferId)
+  // — see "rejects recordScore from a token whose golfer never joined" above. mayScore's own
+  // participant check on the SUBJECT (command.golferId) is a separate branch that guard never
+  // reaches: a real participant recording a score for someone who never joined.
+  it("rejects recordScore for a subject who never joined, from a real participant's token — not-a-participant", async () => {
+    const round = await freshLiveRound();
+    const hostClaims: ParticipantClaims = { roundId: round.host.roundId, golferId: round.host.golferId };
+    const hostPhone = createClientOps("host-phone");
+    await expect(
+      round.record(hostClaims, { golferId: golferId("ghost"), hole: 1, result: toResult(4), ...hostPhone() }),
+    ).rejects.toMatchObject({ code: "not-a-participant" });
+  });
+
+  // readEvents' nextSeq fallback (readEvents.ts: "the fallback to sinceSeq only fires on an
+  // empty page, keeping the client's cursor unchanged") — pinned here for a cursor already
+  // beyond the round's head (genesis + Bo's join tops out at seq 4), so the journal hands
+  // back an empty page and nextSeq must echo the caller's cursor, not silently reset it.
+  it("readEvents beyond the head returns an empty page with nextSeq pinned to the caller's cursor", async () => {
+    const round = await freshLiveRound();
+    const beyondHead = await round.events(round.host.roundId, 100);
+    expect(beyondHead).toEqual({ events: [], nextSeq: 100 });
+  });
 });

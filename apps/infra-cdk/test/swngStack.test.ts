@@ -59,6 +59,10 @@ describe("SwngStack", () => {
           { AttributeName: "pk", KeyType: "HASH" },
           { AttributeName: "sk", KeyType: "RANGE" },
         ],
+        // "pk/sk only" in the test name is only actually pinned by this: without it, a
+        // stray GSI could be added to this table and every other assertion here would
+        // still pass.
+        GlobalSecondaryIndexes: Match.absent(),
       });
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-core-beta" }) });
     });
@@ -71,6 +75,8 @@ describe("SwngStack", () => {
           { AttributeName: "pk", KeyType: "HASH" },
           { AttributeName: "sk", KeyType: "RANGE" },
         ],
+        // Same rationale as swng-core-beta above: pins "pk/sk only" for real.
+        GlobalSecondaryIndexes: Match.absent(),
       });
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-projections-beta" }) });
     });
@@ -151,6 +157,13 @@ describe("SwngStack", () => {
       for (const expected of expectedRouteKeys) {
         expect(routeKeys).toContain(expected);
       }
+    });
+
+    // Pins the total route count exactly (6 HTTP + $connect + $disconnect): the two tests
+    // above each check membership, neither pins the count, so a stray extra route (or one
+    // silently dropped) could pass both without this.
+    it("has exactly 8 routes total (6 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 8);
     });
   });
 

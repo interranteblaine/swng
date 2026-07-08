@@ -8,5 +8,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     testTimeout: 60_000,
+    // Steps are sequential and dependent (start a round, join it, score it, finalize it —
+    // each later step needs the earlier one's state) — stop at the first failure instead of
+    // running the rest against a round that never got where it needed to be.
+    bail: 1,
   },
 });

@@ -29,6 +29,12 @@ export const startRound =
       { kind: "round-started", ...serverEnvelope(deps, host) },
     ];
 
+    // META (the join code) is written before the journal append, not after or alongside it
+    // atomically — so a journal append that fails after this succeeds strands a join code
+    // pointing at a round with an empty (or partial) log: joinRound's later read finds no
+    // genesis event and 404s the joiner. Accepted for beta: no atomic cross-write exists
+    // between the round store and the journal, and a stranded code just fails closed rather
+    // than admitting anyone into a broken round. Deliberate, not an oversight.
     await deps.store.createRound({ roundId: id, joinCode });
     const result = await deps.journal.append(id, events);
     await deps.broadcast.publish(id, result.appended);

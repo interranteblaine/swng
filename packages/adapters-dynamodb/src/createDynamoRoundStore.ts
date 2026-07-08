@@ -21,6 +21,11 @@ export const createDynamoRoundStore = (config: { client: DynamoDBDocumentClient;
     },
 
     findByJoinCode: async (code: string) => {
+      // gsi1 lookups are always eventually consistent — DynamoDB GSIs don't support
+      // ConsistentRead at all, unlike the base-table reads in createDynamoEventJournal. A
+      // join code minted by createRound's Put a moment ago can transiently miss here before
+      // the GSI catches up. Accepted: humans read a 6-character code off one screen and type
+      // it into another over several seconds, which comfortably outlasts GSI propagation.
       const result = await client.send(
         new QueryCommand({
           TableName: tableName,

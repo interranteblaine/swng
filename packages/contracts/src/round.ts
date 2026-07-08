@@ -105,13 +105,19 @@ const skinsConfigSchema = z.object({
   players: gameConfigFields.skins.players.readonly(),
 });
 
-export const gameConfigSchema: z.ZodType<GameConfig> = z.discriminatedUnion("kind", [
+// Unannotated on purpose: the compile-time parity check in round.test.ts infers this impl's
+// own Output type (no `z.ZodType<GameConfig>` steering it toward the domain type) and diffs it
+// against GameConfig in both directions, so a union member silently dropped from the array
+// below fails typecheck instead of vanishing behind the annotation. `gameConfigSchema` below
+// is the same schema object, just re-typed for callers — runtime behavior is identical.
+export const gameConfigSchemaImpl = z.discriminatedUnion("kind", [
   strokePlayConfigSchema,
   singlesMatchConfigSchema,
   stablefordConfigSchema,
   fourballMatchConfigSchema,
   skinsConfigSchema,
 ]);
+export const gameConfigSchema: z.ZodType<GameConfig> = gameConfigSchemaImpl;
 
 // Envelope fields shared by every RoundEvent kind (see domain's RoundEventBase).
 const envelope = {
@@ -121,15 +127,19 @@ const envelope = {
   seq: z.number().int().min(0).optional(),
 };
 
-export const roundEventSchema: z.ZodType<RoundEvent> = z.discriminatedUnion("kind", [
+// Same unannotated-impl / annotated-alias split as gameConfigSchema above, for the same
+// reason: round.test.ts's parity check needs this impl's own inferred Output type, not one
+// steered to RoundEvent by an annotation on this const itself.
+export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
   z.object({ ...envelope, kind: z.literal("round-created"), roundId: roundIdSchema, card: courseCardSchema }),
   z.object({ ...envelope, kind: z.literal("participant-joined"), participant: participantSchema }),
-  z.object({ ...envelope, kind: z.literal("game-added"), config: gameConfigSchema }),
+  z.object({ ...envelope, kind: z.literal("game-added"), config: gameConfigSchemaImpl }),
   z.object({ ...envelope, kind: z.literal("round-started") }),
   z.object({ ...envelope, kind: z.literal("score-recorded"), golferId: golferIdSchema, hole: z.number(), result: holeResultSchema }),
   z.object({ ...envelope, kind: z.literal("round-finalized") }),
   z.object({ ...envelope, kind: z.literal("round-reopened") }),
 ]);
+export const roundEventSchema: z.ZodType<RoundEvent> = roundEventSchemaImpl;
 
 const runningTotalSchema = z.object({ total: z.number(), pickups: z.number() });
 
@@ -144,7 +154,10 @@ const matchOutcomeSchema = z.union([z.object({ winner: golferIdSchema, closing: 
 
 const fourballOutcomeSchema = z.union([z.object({ winner: z.enum(["a", "b"]), closing: z.string() }), z.object({ halved: z.literal(true) })]);
 
-export const gameResultSchema: z.ZodType<GameResult> = z.discriminatedUnion("kind", [
+// Same unannotated-impl / annotated-alias split as gameConfigSchema and roundEventSchema
+// above, for the same reason: round.test.ts's parity check needs this impl's own inferred
+// Output type, not one steered to GameResult by an annotation on this const itself.
+export const gameResultSchemaImpl = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("stroke-play"), id: gameIdSchema, scoring: z.enum(["gross", "net"]), lines: z.array(strokePlayLineSchema).readonly() }),
   z.object({ kind: z.literal("singles-match"), id: gameIdSchema, outcome: matchOutcomeSchema, thru: z.number() }),
   z.object({
@@ -160,3 +173,4 @@ export const gameResultSchema: z.ZodType<GameResult> = z.discriminatedUnion("kin
     carriedOut: z.number(),
   }),
 ]);
+export const gameResultSchema: z.ZodType<GameResult> = gameResultSchemaImpl;

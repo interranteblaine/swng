@@ -1,11 +1,11 @@
-import type { GolferId, GameId, OpId, RoundId } from "../ids.js";
+import type { GolferId, OpId, RoundId } from "../ids.js";
 import type { CourseCard } from "../course/card.js";
+import type { GameConfig } from "../scoring/game.js";
 import type { Hlc } from "./hlc.js";
 import type { Participant } from "./participant.js";
 import type { HoleResult } from "./holeResult.js";
 
-// Placeholder until Task 4 defines the real union in scoring/game.ts.
-export type GameConfig = { readonly kind: string; readonly id: GameId };
+export type { GameConfig };
 
 // seq is server-assigned canonical order (absent until acked); the fold never uses it —
 // conflicts resolve by hlc so offline replays can't clobber later intent.

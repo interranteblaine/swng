@@ -15,7 +15,8 @@
     "cdk:guard": "node -e \"if(!process.env.AWS_PROFILE){console.error('Set AWS_PROFILE before running CDK');process.exit(1)}\"",
     "cdk:synth": "pnpm -F @swng/infra-cdk cdk synth",
     "cdk:diff": "pnpm -F @swng/infra-cdk cdk diff",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test:contract": "pnpm -F @swng/adapters-dynamodb test:contract"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

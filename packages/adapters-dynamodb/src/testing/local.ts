@@ -1,0 +1,242 @@
+import { execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import * as fs from "node:fs/promises";
+import { createServer } from "node:net";
+import * as path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { CreateTableCommand, DynamoDBClient, ListTablesCommand, waitUntilTableExists } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+
+// Contract-test-only infrastructure (M3 plan, Global Constraints): boots a real DynamoDB
+// Local JVM so the journal/store/registry adapters are proven against the actual service,
+// not a mock of it. Never imported by product code — `pnpm validate` stays hermetic because
+// nothing under src/contract runs by default (see vitest.config.ts) and this module is
+// excluded from the build (tsconfig.build.json).
+
+const execFileAsync = promisify(execFile);
+
+const DOWNLOAD_URL = "https://d1ni2b6xgvw0s0.cloudfront.net/v2.x/dynamodb_local_latest.tar.gz";
+const READY_TIMEOUT_MS = 30_000;
+const STOP_TIMEOUT_MS = 5_000;
+
+// packages/adapters-dynamodb — two levels up from this file (src/testing/local.ts).
+const packageRoot = fileURLToPath(new URL("../../", import.meta.url));
+const cacheDir = path.join(packageRoot, "node_modules", ".cache", "dynamodb-local");
+const jarPath = path.join(cacheDir, "DynamoDBLocal.jar");
+const libDir = path.join(cacheDir, "DynamoDBLocal_lib");
+
+export interface LocalDynamo {
+  readonly client: DynamoDBDocumentClient;
+  readonly roundsTable: string;
+  readonly connectionsTable: string;
+  readonly stop: () => Promise<void>;
+}
+
+const ensureJavaAvailable = async (): Promise<void> => {
+  try {
+    await execFileAsync("java", ["-version"]);
+  } catch (error) {
+    throw new Error(
+      "DynamoDB Local requires a `java` binary on PATH (Java 21+), but `java -version` failed. " +
+        "Install Java or run the contract suite where it's available — this is a hard failure, not a skip.",
+      { cause: error },
+    );
+  }
+};
+
+// Contract test files each boot their own DynamoDB Local (separate vitest worker
+// processes), so a cold cache is downloaded/extracted by more than one process at once.
+// Stage into a private per-process directory and atomically rename it into place — a
+// sibling process can then never spawn java against a jar this process is still mid-write
+// on, and `fs.rename` onto an existing non-empty `cacheDir` fails cleanly (ENOTEMPTY),
+// which just means a sibling already won; its result is used instead.
+const ensureJar = async (): Promise<void> => {
+  if (existsSync(jarPath)) return;
+
+  await ensureJavaAvailable();
+  await fs.mkdir(path.dirname(cacheDir), { recursive: true });
+  const stagingDir = `${cacheDir}.staging-${process.pid}-${randomUUID()}`;
+  await fs.mkdir(stagingDir, { recursive: true });
+
+  try {
+    const tarPath = path.join(stagingDir, "dynamodb-local.tar.gz");
+
+    try {
+      const response = await fetch(DOWNLOAD_URL);
+      if (!response.ok) {
+        throw new Error(`unexpected response ${response.status} ${response.statusText}`);
+      }
+      // A one-time ~50MB fetch (M3 plan) — buffering it whole avoids reconciling the DOM
+      // vs. node:stream/web ReadableStream types, and this never runs on a hot path.
+      await fs.writeFile(tarPath, Buffer.from(await response.arrayBuffer()));
+    } catch (error) {
+      throw new Error(`Failed to download DynamoDB Local from ${DOWNLOAD_URL}: ${(error as Error).message}`, { cause: error });
+    }
+
+    try {
+      await execFileAsync("tar", ["-xzf", tarPath, "-C", stagingDir]);
+    } catch (error) {
+      throw new Error(`Failed to extract DynamoDB Local archive at ${tarPath}: ${(error as Error).message}`, { cause: error });
+    } finally {
+      await fs.rm(tarPath, { force: true });
+    }
+
+    if (!existsSync(path.join(stagingDir, "DynamoDBLocal.jar"))) {
+      throw new Error(`DynamoDB Local archive extracted into ${stagingDir}, but DynamoDBLocal.jar is missing — unexpected archive layout.`);
+    }
+
+    if (existsSync(jarPath)) return; // a sibling process already won the race
+
+    try {
+      await fs.rename(stagingDir, cacheDir);
+    } catch (error) {
+      if (!existsSync(jarPath)) throw error; // genuine failure, not just losing the race
+    }
+  } finally {
+    await fs.rm(stagingDir, { recursive: true, force: true });
+  }
+};
+
+const findFreePort = (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.on("error", reject);
+    server.listen(0, () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        server.close(() => reject(new Error("could not determine a free port")));
+        return;
+      }
+      const { port } = address;
+      server.close(() => resolve(port));
+    });
+  });
+
+const waitUntilReachable = async (dynamo: DynamoDBClient, isAlive: () => boolean, diagnostics: () => string): Promise<void> => {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  for (;;) {
+    if (!isAlive()) throw new Error(`DynamoDB Local exited before becoming reachable.\n${diagnostics()}`);
+    try {
+      await dynamo.send(new ListTablesCommand({}));
+      return;
+    } catch {
+      if (Date.now() > deadline) {
+        throw new Error(`DynamoDB Local did not become reachable within ${READY_TIMEOUT_MS}ms.\n${diagnostics()}`);
+      }
+      await sleep(200);
+    }
+  }
+};
+
+const createTables = async (dynamo: DynamoDBClient, roundsTable: string, connectionsTable: string): Promise<void> => {
+  // Rounds table (M3 plan, Global Constraints): pk `ROUND#<id>` / sk `EVT#<seq>` | META |
+  // ARCHIVE | `OPID#<opId>`; gsi1 on `joinCode` (META items only).
+  await dynamo.send(
+    new CreateTableCommand({
+      TableName: roundsTable,
+      BillingMode: "PAY_PER_REQUEST",
+      AttributeDefinitions: [
+        { AttributeName: "pk", AttributeType: "S" },
+        { AttributeName: "sk", AttributeType: "S" },
+        { AttributeName: "joinCode", AttributeType: "S" },
+      ],
+      KeySchema: [
+        { AttributeName: "pk", KeyType: "HASH" },
+        { AttributeName: "sk", KeyType: "RANGE" },
+      ],
+      GlobalSecondaryIndexes: [
+        { IndexName: "gsi1", KeySchema: [{ AttributeName: "joinCode", KeyType: "HASH" }], Projection: { ProjectionType: "ALL" } },
+      ],
+    }),
+  );
+
+  // Connections table: pk `CONN#<connectionId>` with attribute `roundId`; gsi1 on `roundId`.
+  await dynamo.send(
+    new CreateTableCommand({
+      TableName: connectionsTable,
+      BillingMode: "PAY_PER_REQUEST",
+      AttributeDefinitions: [
+        { AttributeName: "pk", AttributeType: "S" },
+        { AttributeName: "roundId", AttributeType: "S" },
+      ],
+      KeySchema: [{ AttributeName: "pk", KeyType: "HASH" }],
+      GlobalSecondaryIndexes: [
+        { IndexName: "gsi1", KeySchema: [{ AttributeName: "roundId", KeyType: "HASH" }], Projection: { ProjectionType: "ALL" } },
+      ],
+    }),
+  );
+
+  await Promise.all([
+    waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: roundsTable }),
+    waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: connectionsTable }),
+  ]);
+};
+
+// Downloads DynamoDB Local if absent, boots it in-memory on a free port, creates the
+// `rounds` + `connections` tables, and returns a ready-to-use document client plus a `stop`
+// that tears the JVM down. Any failure along the way (no java, download/extract failure,
+// the process never becoming reachable) throws — the contract suite must fail loudly, never
+// silently skip.
+export const startLocalDynamo = async (): Promise<LocalDynamo> => {
+  await ensureJar();
+
+  const port = await findFreePort();
+  const proc = spawn("java", [`-Djava.library.path=${libDir}`, "-jar", jarPath, "-inMemory", "-port", String(port)], {
+    cwd: cacheDir,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdout = "";
+  let stderr = "";
+  let exited = false;
+  proc.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+  proc.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+  proc.on("exit", () => (exited = true));
+  proc.on("error", () => (exited = true));
+  const diagnostics = () => `--- stdout ---\n${stdout}\n--- stderr ---\n${stderr}`;
+
+  const dynamo = new DynamoDBClient({
+    endpoint: `http://127.0.0.1:${port}`,
+    region: "local",
+    credentials: { accessKeyId: "local", secretAccessKey: "local" },
+  });
+
+  try {
+    await waitUntilReachable(dynamo, () => !exited, diagnostics);
+
+    const roundsTable = "rounds";
+    const connectionsTable = "connections";
+    await createTables(dynamo, roundsTable, connectionsTable);
+
+    const client = DynamoDBDocumentClient.from(dynamo);
+
+    const stop = async (): Promise<void> => {
+      client.destroy();
+      if (exited) return;
+      const forceKill = new AbortController();
+      await new Promise<void>((resolve) => {
+        proc.once("exit", () => {
+          forceKill.abort();
+          resolve();
+        });
+        proc.kill("SIGTERM");
+        // In-memory Local should exit promptly on SIGTERM; force it if it doesn't. The
+        // abort on exit above cancels this timer so `stop()` never holds the process open
+        // for the full STOP_TIMEOUT_MS on the (normal) prompt-exit path.
+        sleep(STOP_TIMEOUT_MS, undefined, { signal: forceKill.signal })
+          .then(() => proc.kill("SIGKILL"))
+          .catch(() => {});
+      });
+    };
+
+    return { client, roundsTable, connectionsTable, stop };
+  } catch (error) {
+    proc.kill("SIGKILL");
+    dynamo.destroy();
+    throw error;
+  }
+};

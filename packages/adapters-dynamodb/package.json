@@ -15,15 +15,20 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:contract": "DYNAMO_CONTRACT=1 vitest run src/contract"
   },
   "dependencies": {
     "@swng/domain": "workspace:*",
     "@swng/application": "workspace:*",
-    "@swng/contracts": "workspace:*"
+    "@swng/contracts": "workspace:*",
+    "@aws-sdk/client-dynamodb": "catalog:",
+    "@aws-sdk/lib-dynamodb": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "fast-check": "catalog:",
+    "@types/node": "catalog:"
   }
 }

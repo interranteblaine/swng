@@ -244,7 +244,7 @@ it("carryovers chain, outright net wins the pot, pickup is out: Ann 6, Bo 3", ()
   // h5 tie(A,B) carry→2; h6 Ann takes 2; h7 Bo takes 1; h8 tie(A,B) carry→2; h9 Bo takes 2.
   const [state] = playGoldenRound(fixtureLinks, players3, [game], {
     [A]: [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"],
-    [B]: [4, 5, 3, 6, 4, 4, 4, 5, 5],
+    [B]: [4, 5, 3, 6, 4, 4, 4, 5, 4],
     [C]: [6, 7, 4, 8, 6, 5, 6, 7, 6],
   });
   expect(state).toMatchObject({
@@ -261,7 +261,7 @@ it("carryovers chain, outright net wins the pot, pickup is out: Ann 6, Bo 3", ()
 Plus: a mid-round card asserting `carrying` > 0 and `complete: false`; and a card ending on a tie asserting `carriedOut`.
 
 - [ ] **Step 2: RED → implement → GREEN**; `resultOf` case.
-- [ ] **Step 3: The concurrency deck** (`concurrent.test.ts`) — the milestone's headline claim. Same log, TWO games with DIFFERENT handicapping over one set of strokes: the skins card above plus `{ kind: "stableford", id: "s9", players: [A, B, C] }` (Cal at 95% → 11 dots: all nine + extras h2, h7). Assert pre-correction: skins Ann 6 / Bo 3 / Cal 0; stableford Ann 15 / Bo 16 / Cal 10 (plan-author verified: Bo pts 2,2,2,1,2,1,3,2,1; Cal nets 5,5,3,7,5,4,4,6,5 → pts 1,1,2,0,1,1,2,1,1). Then append ONE correcting `score-recorded` (later hlc): Ann h9 picked-up → 4 gross. Assert BOTH games recompute from the same cell write: skins Ann 8 / Bo 1 / Cal 0; stableford Ann 18 / Bo 16 / Cal 10. This test must construct the correction as a raw event appended to the deck's log (extend `playGoldenRound` with an optional `corrections` parameter carrying later-hlc score events — additive, existing decks untouched).
+- [ ] **Step 3: The concurrency deck** (`concurrent.test.ts`) — the milestone's headline claim. Same log, TWO games with DIFFERENT handicapping over one set of strokes: the skins card above plus `{ kind: "stableford", id: "s9", players: [A, B, C] }` (Cal at 95% → 11 dots: all nine + extras h2, h7). Assert pre-correction: skins Ann 6 / Bo 3 / Cal 0; stableford Ann 15 / Bo 17 / Cal 10 (plan-author verified, corrected during execution — Bo h9 gross is 4: Bo pts 2,2,2,1,2,1,3,2,2; Cal nets 5,5,3,7,5,4,4,6,5 → pts 1,1,2,0,1,1,2,1,1). Then append ONE correcting `score-recorded` (later hlc): Ann h9 picked-up → 4 gross. Assert BOTH games recompute from the same cell write: skins Ann 8 / Bo 1 / Cal 0; stableford Ann 18 / Bo 17 / Cal 10. This test must construct the correction as a raw event appended to the deck's log (extend `playGoldenRound` with an optional `corrections` parameter carrying later-hlc score events — additive, existing decks untouched).
 - [ ] **Step 4:** `pnpm validate`; suite ×2; commit (`feat(domain): skins with carryovers; concurrent-games deck proves one log, many games`).
 
 ---

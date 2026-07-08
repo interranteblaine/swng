@@ -34,6 +34,7 @@ export const startRoundRequestSchema = z.object({
     courseHandicap: z.number().int(), // may be negative (plus handicap)
   }),
 });
+export type StartRoundRequest = z.infer<typeof startRoundRequestSchema>;
 
 export const joinRoundRequestSchema = z.object({
   code: z.string().length(6),
@@ -41,10 +42,12 @@ export const joinRoundRequestSchema = z.object({
   tee: z.string().min(1),
   courseHandicap: z.number().int(),
 });
+export type JoinRoundRequest = z.infer<typeof joinRoundRequestSchema>;
 
 export const addGameRequestSchema = z.object({
   game: gameConfigInputSchema,
 });
+export type AddGameRequest = z.infer<typeof addGameRequestSchema>;
 
 export const recordScoreRequestSchema = z.object({
   golferId: golferIdSchema,
@@ -53,6 +56,7 @@ export const recordScoreRequestSchema = z.object({
   opId: opIdSchema,
   hlc: hlcSchema,
 });
+export type RecordScoreRequest = z.infer<typeof recordScoreRequestSchema>;
 
 export interface StartRoundResponse {
   readonly roundId: RoundId;

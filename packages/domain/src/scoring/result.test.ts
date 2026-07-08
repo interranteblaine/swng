@@ -83,4 +83,45 @@ describe("resultOf", () => {
     });
     expect(resultOf(state!)).toBeUndefined();
   });
+
+  it("settles a closed fourball match into its outcome and thru", () => {
+    const C = golferId("cal");
+    const D = golferId("dee");
+    const fourPlayers = [
+      ...players,
+      { golferId: C, name: "Cal", tee: "white", courseHandicap: 12 },
+      { golferId: D, name: "Dee", tee: "white", courseHandicap: 5 },
+    ];
+    const fourball = { kind: "fourball-match", id: gameId("f1"), a: [A, B], b: [C, D] } as const;
+    const [state] = playGoldenRound(fixtureLinks, fourPlayers, [fourball], {
+      [A]: [5, 5, 3, 6, 4, 4, 6, 6],
+      [B]: [4, 5, 4, 5, 5, 3, 4, 6],
+      [C]: [5, 6, 4, 7, 6, 4, 6, 7],
+      [D]: [5, 5, 4, 6, 5, 4, 6, "picked-up"],
+    });
+    expect(resultOf(state!)).toEqual({
+      kind: "fourball-match",
+      id: gameId("f1"),
+      outcome: { winner: "a", closing: "3&1" },
+      thru: 8,
+    });
+  });
+
+  it("returns undefined for a fourball match still in progress", () => {
+    const C = golferId("cal");
+    const D = golferId("dee");
+    const fourPlayers = [
+      ...players,
+      { golferId: C, name: "Cal", tee: "white", courseHandicap: 12 },
+      { golferId: D, name: "Dee", tee: "white", courseHandicap: 5 },
+    ];
+    const fourball = { kind: "fourball-match", id: gameId("f1"), a: [A, B], b: [C, D] } as const;
+    const [state] = playGoldenRound(fixtureLinks, fourPlayers, [fourball], {
+      [A]: [5, 5],
+      [B]: [4, 5],
+      [C]: [5, 6],
+      [D]: [5, 5],
+    });
+    expect(resultOf(state!)).toBeUndefined();
+  });
 });

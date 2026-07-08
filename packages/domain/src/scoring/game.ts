@@ -1,6 +1,7 @@
 import type { GameId, GolferId } from "../ids.js";
 import { DomainError } from "../errors.js";
 import type { RoundState } from "../round/state.js";
+import { scoreFourballMatch } from "./fourballMatch.js";
 import { scoreSinglesMatch } from "./singlesMatch.js";
 import { scoreStableford } from "./stableford.js";
 import { scoreStrokePlay } from "./strokePlay.js";
@@ -11,7 +12,8 @@ import { scoreStrokePlay } from "./strokePlay.js";
 export type GameConfig =
   | { readonly kind: "stroke-play"; readonly id: GameId; readonly scoring: "gross" | "net"; readonly players: readonly GolferId[]; readonly allowance?: number }
   | { readonly kind: "singles-match"; readonly id: GameId; readonly a: GolferId; readonly b: GolferId; readonly allowance?: number }
-  | { readonly kind: "stableford"; readonly id: GameId; readonly players: readonly GolferId[]; readonly allowance?: number };
+  | { readonly kind: "stableford"; readonly id: GameId; readonly players: readonly GolferId[]; readonly allowance?: number }
+  | { readonly kind: "fourball-match"; readonly id: GameId; readonly a: readonly [GolferId, GolferId]; readonly b: readonly [GolferId, GolferId]; readonly allowance?: number };
 
 // pickups > 0 means the total is a running/partial figure, not a completed gross score.
 export interface RunningTotal {
@@ -34,6 +36,11 @@ export interface StablefordLine {
 
 export type MatchOutcome = { readonly winner: GolferId; readonly closing: string } | { readonly halved: true };
 
+// Fourball's sides are pairs, not individuals, so its outcome/leader stay in the
+// ladder's "a"/"b" vocabulary rather than resolving to a single GolferId like
+// singles-match's MatchOutcome does.
+export type FourballOutcome = { readonly winner: "a" | "b"; readonly closing: string } | { readonly halved: true };
+
 export type GameState =
   | { readonly kind: "stroke-play"; readonly id: GameId; readonly scoring: "gross" | "net"; readonly lines: readonly StrokePlayLine[]; readonly complete: boolean }
   | {
@@ -46,7 +53,17 @@ export type GameState =
       readonly dormie: boolean;
       readonly outcome?: MatchOutcome;
     }
-  | { readonly kind: "stableford"; readonly id: GameId; readonly lines: readonly StablefordLine[]; readonly complete: boolean };
+  | { readonly kind: "stableford"; readonly id: GameId; readonly lines: readonly StablefordLine[]; readonly complete: boolean }
+  | {
+      readonly kind: "fourball-match";
+      readonly id: GameId;
+      readonly up: number;
+      readonly leader?: "a" | "b";
+      readonly thru: number;
+      readonly remaining: number;
+      readonly dormie: boolean;
+      readonly outcome?: FourballOutcome;
+    };
 
 // Dispatch by kind, not a per-format if/else — each engine owns exactly one entry here.
 export const scoreGame = (config: GameConfig, state: RoundState): GameState => {
@@ -57,6 +74,8 @@ export const scoreGame = (config: GameConfig, state: RoundState): GameState => {
       return scoreSinglesMatch(config, state);
     case "stableford":
       return scoreStableford(config, state);
+    case "fourball-match":
+      return scoreFourballMatch(config, state);
     default:
       // The union is exhaustive at compile time; this guards runtime inputs that
       // bypass the type system (e.g. deserialized events from an older client).

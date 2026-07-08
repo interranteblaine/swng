@@ -1,17 +1,18 @@
 import type { GameId, GolferId } from "../ids.js";
 import { DomainError } from "../errors.js";
-import type { GameState, MatchOutcome, StrokePlayLine } from "./game.js";
+import type { FourballOutcome, GameState, MatchOutcome, StrokePlayLine } from "./game.js";
 
 // The settlement currency every game format reduces to once it's resolved — what
 // a scorecard shows when it's over, as opposed to GameState which also carries
 // the in-progress shape live views render. This union is the END state across
 // M2: this task lands only the members for the formats that exist today
-// (stroke-play, singles-match, stableford); Tasks 3-4 each add their member
-// (and their resultOf case) alongside their engine.
+// (stroke-play, singles-match, stableford, fourball-match); Task 4 adds skins'
+// member (and its resultOf case) alongside its engine.
 export type GameResult =
   | { readonly kind: "stroke-play"; readonly id: GameId; readonly scoring: "gross" | "net"; readonly lines: readonly StrokePlayLine[] }
   | { readonly kind: "singles-match"; readonly id: GameId; readonly outcome: MatchOutcome; readonly thru: number }
-  | { readonly kind: "stableford"; readonly id: GameId; readonly points: readonly { readonly golferId: GolferId; readonly points: number }[] };
+  | { readonly kind: "stableford"; readonly id: GameId; readonly points: readonly { readonly golferId: GolferId; readonly points: number }[] }
+  | { readonly kind: "fourball-match"; readonly id: GameId; readonly outcome: FourballOutcome; readonly thru: number };
 
 // A game "resolves" when: stroke-play/stableford's complete === true; a match's
 // outcome !== undefined; skins' complete === true. Undefined means keep polling —
@@ -26,6 +27,8 @@ export const resultOf = (state: GameState): GameResult | undefined => {
       return state.complete
         ? { kind: state.kind, id: state.id, points: state.lines.map(({ golferId, points }) => ({ golferId, points })) }
         : undefined;
+    case "fourball-match":
+      return state.outcome ? { kind: state.kind, id: state.id, outcome: state.outcome, thru: state.thru } : undefined;
     default:
       // The union is exhaustive at compile time; this guards runtime inputs that
       // bypass the type system (e.g. deserialized state from an older client).

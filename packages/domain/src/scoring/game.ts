@@ -1,6 +1,7 @@
 import type { GameId, GolferId } from "../ids.js";
 import { DomainError } from "../errors.js";
 import type { RoundState } from "../round/state.js";
+import { scoreSinglesMatch } from "./singlesMatch.js";
 import { scoreStrokePlay } from "./strokePlay.js";
 
 // The framework every game format plugs into: a GameConfig (frozen at game-added
@@ -44,7 +45,11 @@ export const scoreGame = (config: GameConfig, state: RoundState): GameState => {
   switch (config.kind) {
     case "stroke-play":
       return scoreStrokePlay(config, state);
+    case "singles-match":
+      return scoreSinglesMatch(config, state);
     default:
-      throw new DomainError("unknown-game-kind", `no scoring engine for game kind "${config.kind}"`);
+      // The union is exhaustive at compile time; this guards runtime inputs that
+      // bypass the type system (e.g. deserialized events from an older client).
+      throw new DomainError("unknown-game-kind", `no scoring engine for game kind "${(config as { kind: string }).kind}"`);
   }
 };

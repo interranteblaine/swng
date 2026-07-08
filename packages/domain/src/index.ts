@@ -9,6 +9,7 @@ export * from "./round/state.js";
 export * from "./scoring/strokes.js";
 export * from "./scoring/allowances.js";
 export * from "./scoring/strokePlay.js";
+export * from "./scoring/singlesMatch.js";
 export * from "./scoring/golden/fixtureCourse.js";
 export * from "./scoring/golden/deck.js";
 // GameConfig is already re-exported via ./round/events.js (game.ts owns the

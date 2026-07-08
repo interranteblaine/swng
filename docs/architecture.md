@@ -14,7 +14,7 @@ moment. The honest model is an append-only log of scoring facts per round. Every
 skins, Stableford, Nassau, Wolf — is a pure reducer over that log:
 
 ```ts
-scoreGame(config: GameConfig, card: CourseCard, participants: Participant[], events: RoundEvent[]): GameState
+scoreGame(config: GameConfig, state: RoundState): GameState   // state = reduceRound(events); N games share one fold
 ```
 
 Games never store mutable state. A score correction is a new event and every game simply
@@ -84,7 +84,6 @@ Lifecycle is an explicit enum: `setup → live → final` (plus `abandoned`); no
 type RoundEvent =
   | RoundCreated | ParticipantJoined | GameAdded
   | ScoreRecorded      // { golferId, hole, result: strokes | 'picked-up' | 'conceded', recordedBy, opId, hlc }
-  | ScoreCorrected
   | PressOpened | ConcessionGiven | PartnerPicked   // game decisions live in the same log
   | RoundFinalized | RoundReopened
 ```

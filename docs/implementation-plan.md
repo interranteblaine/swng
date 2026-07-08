@@ -94,7 +94,7 @@ that exercise handicaps hardest.
 7. Property tests: net ≤ gross, reducer determinism, replay idempotence, merge
    order-independence (any delivery order converges).
 
-**Produces:** `reduceRound`, `scoreGame`, `allocateStrokes`, the event and config unions —
+**Produces:** `reduceRound`, `scoreGame(config, reducedState)`, `allocateStrokes`, the event and config unions —
 the signatures every later milestone consumes.
 
 **Gate:** golden decks pass; `pnpm -F @swng/domain test` green; property suite green.

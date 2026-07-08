@@ -58,5 +58,8 @@ export const playGoldenRound = (
   }
 
   const state = reduceRound(events);
-  return games.map((config) => scoreGame(config, state));
+  // Score the games as reduceRound ordered them (join order by first-write hlc),
+  // not the caller's array — the two coincide in every deck here, but this is
+  // the shape production code actually consumes (it only ever has state.games).
+  return state.games.map((config) => scoreGame(config, state));
 };

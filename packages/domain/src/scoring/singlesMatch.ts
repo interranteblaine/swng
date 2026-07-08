@@ -3,7 +3,9 @@ import { DomainError } from "../errors.js";
 import type { RoundState, ScoreCell } from "../round/state.js";
 import { cellKey } from "../round/state.js";
 import { defaultAllowance } from "./allowances.js";
-import type { GameConfig, GameState, MatchOutcome } from "./game.js";
+import type { GameConfig, GameState } from "./game.js";
+import type { HoleWinner } from "./matchLadder.js";
+import { matchLadder } from "./matchLadder.js";
 import { dotsByHole, roundHalfUp } from "./strokes.js";
 
 type SinglesMatchConfig = Extract<GameConfig, { kind: "singles-match" }>;
@@ -36,48 +38,35 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
   const cardTeeSet = findTeeSet(state.card, participantA.tee); // course card order is shared; hole numbers, not tee choice, drive it
   const holeCount = cardTeeSet.holes.length;
 
-  let up = 0; // signed toward A: positive = A leads, negative = B leads
-  let decided = 0;
-  let outcome: MatchOutcome | undefined;
-
-  for (const hole of cardTeeSet.holes) {
-    if (outcome) break; // match already closed out — later holes are ignored (junk lives in other games)
-
+  // Per-hole winner in the ladder's "a"/"b" vocabulary (config.a is always "a"
+  // here) — undefined when either side hasn't posted a cell yet.
+  const winners: (HoleWinner | undefined)[] = cardTeeSet.holes.map((hole): HoleWinner | undefined => {
     const cellA = state.cells[cellKey(config.a, hole.number)];
     const cellB = state.cells[cellKey(config.b, hole.number)];
-    if (!cellA || !cellB) break; // not decided yet — card order means the rest aren't either
+    if (!cellA || !cellB) return undefined;
 
     const netA = netFor(higherIsA, cellA, hole.number);
     const netB = netFor(!higherIsA, cellB, hole.number);
 
     // picked-up/conceded (net undefined) loses the hole outright; both → halve.
-    if (netA !== undefined && (netB === undefined || netA < netB)) up += 1;
-    else if (netB !== undefined && (netA === undefined || netB < netA)) up -= 1;
-    // else: both present and equal, or both undefined — halve, up unchanged
+    if (netA !== undefined && (netB === undefined || netA < netB)) return "a";
+    if (netB !== undefined && (netA === undefined || netB < netA)) return "b";
+    return "halved";
+  });
 
-    decided += 1;
-    const remaining = holeCount - decided;
-
-    // Decided on the very last hole reads "N up" (or halved), never "N&0" — check
-    // that before the general closeout rule, which would otherwise also match.
-    if (remaining === 0) {
-      outcome = up === 0 ? { halved: true } : { winner: up > 0 ? config.a : config.b, closing: `${Math.abs(up)} up` };
-    } else if (Math.abs(up) > remaining) {
-      outcome = { winner: up > 0 ? config.a : config.b, closing: `${Math.abs(up)}&${remaining}` };
-    }
-  }
-
-  const remaining = holeCount - decided;
-  const dormie = Math.abs(up) === remaining && remaining > 0;
+  const ladder = matchLadder(winners, holeCount);
+  const golferFor = (side: "a" | "b") => (side === "a" ? config.a : config.b);
 
   return {
     kind: "singles-match",
     id: config.id,
-    up: Math.abs(up),
-    ...(up !== 0 ? { leader: up > 0 ? config.a : config.b } : {}),
-    thru: decided,
-    remaining,
-    dormie,
-    ...(outcome ? { outcome } : {}),
+    up: ladder.up,
+    ...(ladder.leader ? { leader: golferFor(ladder.leader) } : {}),
+    thru: ladder.thru,
+    remaining: ladder.remaining,
+    dormie: ladder.dormie,
+    ...(ladder.outcome
+      ? { outcome: "halved" in ladder.outcome ? ladder.outcome : { winner: golferFor(ladder.outcome.winner), closing: ladder.outcome.closing } }
+      : {}),
   };
 };

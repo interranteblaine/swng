@@ -128,8 +128,11 @@ renders and a `GameResult` settles.
 ### The handicap engine (in `domain/handicap/`)
 
 Pure WHS math: differential `(113 / slope) × (adjustedGross − rating)`; adjusted gross via net
-double bogey; index = average of best 8 of last 20; 9-hole differentials per current WHS
-rules. PCC deliberately omitted — the swng Index is honest-unofficial (`product.md` §10).
+double bogey; index = average of best 8 of last 20; 9-hole rounds emit raw 9-hole
+differentials, and the index projection combines two into one 18-hole differential per the
+published 2020 WHS rule — the 2024 expected-differential method is a closed calculation the
+governing bodies do not publish, and swng does not ship unverifiable constants. PCC likewise
+deliberately omitted — the swng Index is honest-unofficial (`product.md` §10).
 Index history is a projection of `IndexSnapshot`s recomputed at each finalize.
 
 ### Crew — plain entity, no event sourcing

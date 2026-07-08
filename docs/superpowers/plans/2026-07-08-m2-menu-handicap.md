@@ -269,9 +269,18 @@ Plus: a mid-round card asserting `carrying` > 0 and `complete: false`; and a car
 ### Task 5: The handicap engine
 
 **Files:**
-- Create: `packages/domain/src/handicap/whs.ts`, `packages/domain/src/handicap/expected.ts`
+- Create: `packages/domain/src/handicap/whs.ts`
 - Modify: barrel
 - Test: `packages/domain/src/handicap/whs.test.ts` (+ `whs.properties.test.ts`)
+
+> **Amended during execution:** the 2024 9-hole expected-differential method failed Step 1's
+> source verification — the official Rules of Handicapping describe it as a closed, automated
+> calculation and publish no formula or table (one numeric example exists publicly; a
+> forum-reverse-engineered formula was found and rejected as unverifiable). Decision: swng
+> uses the **published 2020 WHS combining rule** — two raw 9-hole differentials combine into
+> one 18-hole differential — applied at the index projection, not in M2. `eighteenFromNine`
+> and `expected.ts` are removed from this task; `combineNines` lands with the index
+> projection milestone. `docs/architecture.md` handicap section updated to match.
 
 **Interfaces:**
 
@@ -280,12 +289,11 @@ export const adjustedGrossScore: (teeSet: TeeSet, courseHandicap: number, holes:
   // per hole: min(strokes, netDoubleBogey(par, dots)); picked-up/conceded count AT net double bogey.
   // Throws DomainError("holes-undecided") if any tee-set hole lacks a result.
 export const scoreDifferential: (teeSet: TeeSet, ags: number) => number;          // (113/slope) × (AGS − rating), unrounded
-export const eighteenFromNine: (nineDifferential: number, currentIndex: number) => number; // 9-hole SD + expected second-9 (WHS 2024)
 export const computeIndex: (differentials: readonly number[]) => number | undefined; // most recent ≤20; best-8 avg per the WHS small-sample table; undefined under 3 scores; result rounded to 0.1
 export const courseHandicapFor: (index: number, teeSet: TeeSet) => number;        // roundHalfUp(index × slope/113 + (rating − par))
 ```
 
-- [ ] **Step 1 — MANDATORY SOURCE VERIFICATION.** Before writing tests: WebSearch the current USGA/R&A WHS references and pin, with cited URLs in your report: (a) the small-sample adjustment table (3 scores → lowest −2.0 … 20 → average of best 8), (b) the 2024 9-hole rule (18-hole SD = 9-hole SD + expected differential from the player's index) and its expected-differential formula/table, (c) at least two published worked examples for differentials and one for an index computation. **The plan deliberately does not supply these constants from memory — the verified sources are the spec.** If the 9-hole expected-differential source cannot be verified, STOP and report BLOCKED with what you found.
+- [ ] **Step 1 — MANDATORY SOURCE VERIFICATION.** Before writing tests: WebSearch the current USGA/R&A WHS references and pin, with cited URLs in your report: (a) the small-sample adjustment table (3 scores → lowest −2.0 … 20 → average of best 8), (b) at least two published worked examples for differentials and one for an index computation. **The plan deliberately does not supply these constants from memory — the verified sources are the spec.** (The 2024 9-hole expected-differential rule was part of this step and failed verification — see the amendment note above.)
 - [ ] **Step 2: Failing conformance tests** pinned to the verified worked examples (cite each source in a test comment), plus fixture-course cases: AGS on `fixtureWhite` for Ann's net golden card (pickup capped at NDB), differential arithmetic `(113/128) × (AGS − 35.8)`, `courseHandicapFor` round-trip. Property tests: index is within [min, max] of its differentials; adding a worse 21st score never raises the index once 20 exist; AGS ≤ raw gross sum when no pickups.
 - [ ] **Step 3: RED → implement → GREEN.** `pnpm validate`; suite ×2; commit (`feat(domain): WHS handicap engine verified against published worked examples`).
 
@@ -317,7 +325,7 @@ export interface RoundArchive {
 export const settleRound: (events: readonly RoundEvent[]) => RoundArchive;
 ```
 
-Rules (fixed): reduce internally; throw `DomainError("round-not-final")` unless status `final`; results = every game's `resultOf`, throw `DomainError("game-unresolved")` on any undefined; `handicapping` per participant — complete (all tee-set holes decided) → 18-hole-equivalent differential (9-hole tee sets emit the RAW 9-hole differential here; `eighteenFromNine` is applied by the index projection, which knows the player's index — the archive stays index-independent); archive `events` in canonical domain order with `seq` stripped from the envelope (the archive's identity is content, not ack metadata).
+Rules (fixed): reduce internally; throw `DomainError("round-not-final")` unless status `final`; results = every game's `resultOf`, throw `DomainError("game-unresolved")` on any undefined; `handicapping` per participant — complete (all tee-set holes decided) → differential (9-hole tee sets emit the RAW 9-hole differential here; the index projection combines two nines per the published 2020 WHS rule — the archive stays index-independent); archive `events` in canonical domain order with `seq` stripped from the envelope (the archive's identity is content, not ack metadata).
 
 - [ ] **Step 1: Failing tests:** settle the concurrency deck's log → archive carries both `GameResult`s and both golfers' differentials (Ann incomplete pre-correction? no — post-correction card is complete; assert Ann/Bo/Cal all complete with hand-checked AGS); un-finalized log throws; a final log with an unresolvable game throws.
 - [ ] **Step 2: Determinism tests:** `JSON.stringify(settleRound(log)) === JSON.stringify(settleRound(shuffle(log)))` (fast-check over shuffles), and double-settle byte-identical.

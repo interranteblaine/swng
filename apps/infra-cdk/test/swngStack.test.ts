@@ -107,6 +107,16 @@ describe("SwngStack", () => {
         }
       }
     });
+
+    it("every function has an explicit 15s timeout and 512MB memory (not CDK's 3s/128MB defaults)", () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      const entries = Object.values(functions);
+      expect(entries.length).toBe(3);
+      for (const fn of entries) {
+        expect(fn.Properties.Timeout).toBe(15);
+        expect(fn.Properties.MemorySize).toBe(512);
+      }
+    });
   });
 
   describe("APIs", () => {

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { CfnOutput, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
+import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
 import { AttributeType, BillingMode, ProjectionType, Table } from "aws-cdk-lib/aws-dynamodb";
 import { CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration, WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
@@ -143,6 +143,14 @@ export class SwngStack extends Stack {
         handler: "handler",
         runtime: Runtime.NODEJS_20_X,
         environment: sharedEnv,
+        // Explicit, not CDK's 3s default: createDynamoEventJournal's append path can need
+        // several sequential Query+TransactWrite round trips under a hot write burst (its own
+        // full-jitter backoff can itself sleep close to 1s per collision), and the 3s default
+        // was independently truncating in-flight retries before MAX_APPEND_ATTEMPTS would have
+        // (task-6-report.md). 512MB matches the workload (JSON in/out, no heavy compute) while
+        // giving a bit more CPU share than the 128MB default for esbuild-bundled cold starts.
+        timeout: Duration.seconds(15),
+        memorySize: 512,
       });
 
     const httpFn = makeFunction("HttpFunction", "http");

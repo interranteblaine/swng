@@ -122,4 +122,28 @@ describe("createDynamoEventJournal", () => {
     const log = await journal.read(roundId(randomUUID()), 0);
     expect(log).toEqual([]);
   });
+
+  // Regression for task-6-report.md: 27 fully-concurrent single-event appends (one journal
+  // instance per call, matching 27 separate Lambda invocations racing one round's head slot,
+  // as in the M3 E2E deck's RecordScore burst) must ALL converge — no throw, seqs exactly
+  // 1..27, no duplicates. Before the full-jitter backoff + ConsistentRead fix, this reliably
+  // produced ~7/27 "did not converge after 10 attempts" failures under lockstep retries.
+  it("27 fully-concurrent single-event appends from 27 journal instances all converge to 1..27", async () => {
+    const id = roundId(randomUUID());
+
+    const results = await Promise.all(Array.from({ length: 27 }, (_, i) => newJournal().append(id, [makeEvent(i + 1)])));
+
+    for (const result of results) {
+      expect(result.duplicateOpIds).toEqual([]);
+      expect(result.appended).toHaveLength(1);
+    }
+
+    const seqs = results.map((result) => result.appended[0]?.seq).sort((a, b) => (a ?? 0) - (b ?? 0));
+    expect(seqs).toEqual(Array.from({ length: 27 }, (_, i) => i + 1));
+
+    const log = await newJournal().read(id, 0);
+    expect(log).toHaveLength(27);
+    expect(log.map((event) => event.seq)).toEqual(Array.from({ length: 27 }, (_, i) => i + 1));
+    expect(new Set(log.map((event) => event.opId)).size).toBe(27);
+  }, 30_000);
 });

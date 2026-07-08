@@ -11,8 +11,24 @@ import { evtSk, evtSkMax, opIdSk, roundPk } from "./keys.js";
 const READ_PAGE_SIZE = 50;
 
 // A seq race or an opId race can each cost one round-trip; this bounds the retry loop so a
-// pathological hot round fails loudly instead of spinning forever.
-const MAX_APPEND_ATTEMPTS = 10;
+// pathological hot round fails loudly instead of spinning forever. Raised from 10 to 30
+// alongside the full-jitter backoff below: with retries spaced out instead of firing in
+// lockstep, a genuinely hot round (e.g. 27-way concurrent RecordScore appends, the M3 E2E
+// deck) needs more attempts to converge, not fewer — see .superpowers/sdd/task-6-report.md.
+const MAX_APPEND_ATTEMPTS = 30;
+
+// Full-jitter exponential backoff (AWS's own recommended formula: random(0, min(cap, base *
+// 2^attempt))), applied only between seq-collision retries. Base 25ms, capped at 1000ms —
+// with 27-way concurrency (the E2E deck) this spreads losers out over a handful of attempts
+// instead of every concurrent writer re-querying head and racing the same slot again
+// immediately, which is what produced "did not converge after 10 attempts" under load
+// (task-6-report.md).
+const BACKOFF_BASE_MS = 25;
+const BACKOFF_CAP_MS = 1000;
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const backoffMs = (attempt: number, random: () => number): number => random() * Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
 
 const headSeq = async (client: DynamoDBDocumentClient, tableName: string, roundId: RoundId): Promise<number> => {
   const result = await client.send(
@@ -22,6 +38,11 @@ const headSeq = async (client: DynamoDBDocumentClient, tableName: string, roundI
       ExpressionAttributeValues: { ":pk": roundPk(roundId), ":evtPrefix": "EVT#" },
       ScanIndexForward: false,
       Limit: 1,
+      // The rounds table's event log is the source of truth for every command — an
+      // eventually-consistent read here can hand out a seq another writer already claimed
+      // under a hot write burst, widening the collision window instead of just costing one
+      // retry (task-6-report.md). This is the correctness path, not a scan; pay the 2x RCU.
+      ConsistentRead: true,
     }),
   );
   const head = result.Items?.[0] as { event: RoundEvent } | undefined;
@@ -84,8 +105,15 @@ const attemptCommit = async (
   }
 };
 
-export const createDynamoEventJournal = (config: { client: DynamoDBDocumentClient; tableName: string }): EventJournal => {
-  const { client, tableName } = config;
+export const createDynamoEventJournal = (config: {
+  client: DynamoDBDocumentClient;
+  tableName: string;
+  // Injection points for the contract suite to run fast/deterministic if it ever needs to —
+  // production callers omit both and get a real timer-based sleep and Math.random.
+  sleep?: (ms: number) => Promise<void>;
+  random?: () => number;
+}): EventJournal => {
+  const { client, tableName, sleep = defaultSleep, random = Math.random } = config;
 
   return {
     append: async (roundId: RoundId, events: readonly RoundEvent[]): Promise<AppendResult> => {
@@ -101,6 +129,15 @@ export const createDynamoEventJournal = (config: { client: DynamoDBDocumentClien
         const outcome = await attemptCommit(client, tableName, roundId, pending, head);
 
         if ("committed" in outcome) return { appended: outcome.committed, duplicateOpIds };
+
+        // A duplicate-opId split needs no backoff — attemptCommit already told us definitively
+        // which events landed elsewhere, so retrying the remainder isn't racing anyone. A pure
+        // seq collision (nothing in this attempt resolved to a duplicate) means we're actually
+        // contending with concurrent writers for the same head slot, so back off with full
+        // jitter before the next attempt to break the lockstep.
+        if (outcome.duplicateOpIds.length === 0) {
+          await sleep(backoffMs(attempt, random));
+        }
 
         duplicateOpIds.push(...outcome.duplicateOpIds);
         pending = outcome.retry;
@@ -121,6 +158,12 @@ export const createDynamoEventJournal = (config: { client: DynamoDBDocumentClien
             ExpressionAttributeValues: { ":pk": roundPk(roundId), ":lo": evtSk(sinceSeq + 1), ":hi": evtSkMax },
             Limit: READ_PAGE_SIZE,
             ExclusiveStartKey: exclusiveStartKey,
+            // Same rationale as headSeq above: every use case reduces this log (via
+            // loadRoundState) to decide things like "is this round live" — a stale read here
+            // silently drops recent events (e.g. round-started) and produces a spurious
+            // rejection under a hot write burst, not just a delayed broadcast
+            // (task-6-report.md's "round-not-live" failure mode).
+            ConsistentRead: true,
           }),
         );
         for (const item of result.Items ?? []) events.push((item as { event: RoundEvent }).event);

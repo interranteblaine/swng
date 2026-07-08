@@ -1,2 +1,2 @@
-// Bootstrap barrel — replaced by real exports from M1 on.
-export const packageName = "@swng/client";
+export * from "./hlc.js";
+export * from "./transport.js";

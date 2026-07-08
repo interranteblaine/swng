@@ -3,6 +3,7 @@ import { DomainError } from "../errors.js";
 import type { RoundState } from "../round/state.js";
 import { scoreFourballMatch } from "./fourballMatch.js";
 import { scoreSinglesMatch } from "./singlesMatch.js";
+import { scoreSkins } from "./skins.js";
 import { scoreStableford } from "./stableford.js";
 import { scoreStrokePlay } from "./strokePlay.js";
 
@@ -13,7 +14,8 @@ export type GameConfig =
   | { readonly kind: "stroke-play"; readonly id: GameId; readonly scoring: "gross" | "net"; readonly players: readonly GolferId[]; readonly allowance?: number }
   | { readonly kind: "singles-match"; readonly id: GameId; readonly a: GolferId; readonly b: GolferId; readonly allowance?: number }
   | { readonly kind: "stableford"; readonly id: GameId; readonly players: readonly GolferId[]; readonly allowance?: number }
-  | { readonly kind: "fourball-match"; readonly id: GameId; readonly a: readonly [GolferId, GolferId]; readonly b: readonly [GolferId, GolferId]; readonly allowance?: number };
+  | { readonly kind: "fourball-match"; readonly id: GameId; readonly a: readonly [GolferId, GolferId]; readonly b: readonly [GolferId, GolferId]; readonly allowance?: number }
+  | { readonly kind: "skins"; readonly id: GameId; readonly players: readonly GolferId[]; readonly allowance?: number };
 
 // pickups > 0 means the total is a running/partial figure, not a completed gross score.
 export interface RunningTotal {
@@ -32,6 +34,11 @@ export interface StablefordLine {
   readonly golferId: GolferId;
   readonly thru: number;
   readonly points: number;
+}
+
+export interface SkinsLine {
+  readonly golferId: GolferId;
+  readonly skins: number;
 }
 
 export type MatchOutcome = { readonly winner: GolferId; readonly closing: string } | { readonly halved: true };
@@ -63,6 +70,14 @@ export type GameState =
       readonly remaining: number;
       readonly dormie: boolean;
       readonly outcome?: FourballOutcome;
+    }
+  | {
+      readonly kind: "skins";
+      readonly id: GameId;
+      readonly lines: readonly SkinsLine[];
+      readonly carrying: number; // pot riding into the next undecided hole
+      readonly carriedOut: number; // pot stranded after the last hole (complete only)
+      readonly complete: boolean;
     };
 
 // Dispatch by kind, not a per-format if/else — each engine owns exactly one entry here.
@@ -76,6 +91,8 @@ export const scoreGame = (config: GameConfig, state: RoundState): GameState => {
       return scoreStableford(config, state);
     case "fourball-match":
       return scoreFourballMatch(config, state);
+    case "skins":
+      return scoreSkins(config, state);
     default:
       // The union is exhaustive at compile time; this guards runtime inputs that
       // bypass the type system (e.g. deserialized events from an older client).

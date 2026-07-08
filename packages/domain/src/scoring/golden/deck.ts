@@ -12,6 +12,15 @@ import type { GameConfig, GameState } from "../game.js";
 // same vocabulary a scorer taps in on the wire, kept out of HoleResult's shape.
 export type FixtureScores = Readonly<Record<string, ReadonlyArray<number | "picked-up" | "conceded">>>;
 
+// A correction rewrites one already-recorded cell: the deck appends it as a raw
+// score-recorded event AFTER every initial score, so its hlc is strictly later
+// and the fold's LWW cell register resolves it as the winner.
+export interface FixtureCorrection {
+  readonly golfer: string;
+  readonly hole: number;
+  readonly score: number | "picked-up" | "conceded";
+}
+
 // A golden deck only needs a single fictitious recorder — provenance of the
 // scaffolding events (genesis, joins, game-added, started) is never asserted on.
 const RECORDER = golferId("golden-recorder");
@@ -27,11 +36,14 @@ export const playGoldenRound = (
   participants: readonly Participant[],
   games: readonly GameConfig[],
   scores: FixtureScores,
+  corrections: readonly FixtureCorrection[] = [],
 ): GameState[] => {
   let wallMs = 0;
   let seq = 0;
   const nextHlc = (): Hlc => ({ wallMs: wallMs++, counter: 0, deviceId: DEVICE });
   const nextOpId = () => opId(`golden-${seq++}`);
+  const toResult = (score: number | "picked-up" | "conceded"): HoleResult =>
+    score === "picked-up" || score === "conceded" ? { kind: score } : { kind: "strokes", strokes: score };
 
   const events: RoundEvent[] = [
     { kind: "round-created", roundId: roundId("golden"), card, opId: nextOpId(), hlc: nextHlc(), authorId: RECORDER },
@@ -44,16 +56,27 @@ export const playGoldenRound = (
 
   for (const [golfer, holeScores] of Object.entries(scores)) {
     holeScores.forEach((score, index) => {
-      const result: HoleResult = score === "picked-up" || score === "conceded" ? { kind: score } : { kind: "strokes", strokes: score };
       events.push({
         kind: "score-recorded",
         golferId: golferId(golfer),
         hole: index + 1,
-        result,
+        result: toResult(score),
         opId: nextOpId(),
         hlc: nextHlc(),
         authorId: golferId(golfer),
       });
+    });
+  }
+
+  for (const { golfer, hole, score } of corrections) {
+    events.push({
+      kind: "score-recorded",
+      golferId: golferId(golfer),
+      hole,
+      result: toResult(score),
+      opId: nextOpId(),
+      hlc: nextHlc(),
+      authorId: golferId(golfer),
     });
   }
 

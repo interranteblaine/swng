@@ -107,6 +107,40 @@ describe("resultOf", () => {
     });
   });
 
+  it("settles a complete skins game into who won what plus the stranded pot", () => {
+    const C = golferId("cal");
+    const threePlayers = [...players, { golferId: C, name: "Cal", tee: "white", courseHandicap: 12 }];
+    const skins = { kind: "skins", id: gameId("k1"), players: [A, B, C] } as const;
+    // The end-on-tie golden card from skins.test.ts: h9 ties, stranding a pot of 2.
+    const [state] = playGoldenRound(fixtureLinks, threePlayers, [skins], {
+      [A]: [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"],
+      [B]: [4, 5, 3, 6, 4, 4, 4, 5, 5],
+      [C]: [6, 7, 4, 8, 6, 5, 6, 7, 6],
+    });
+    expect(resultOf(state!)).toEqual({
+      kind: "skins",
+      id: gameId("k1"),
+      won: [
+        { golferId: A, skins: 6 },
+        { golferId: B, skins: 1 },
+        { golferId: C, skins: 0 },
+      ],
+      carriedOut: 2,
+    });
+  });
+
+  it("returns undefined for a skins game that isn't complete yet", () => {
+    const C = golferId("cal");
+    const threePlayers = [...players, { golferId: C, name: "Cal", tee: "white", courseHandicap: 12 }];
+    const skins = { kind: "skins", id: gameId("k1"), players: [A, B, C] } as const;
+    const [state] = playGoldenRound(fixtureLinks, threePlayers, [skins], {
+      [A]: [5, 5],
+      [B]: [4, 5],
+      [C]: [6, 7],
+    });
+    expect(resultOf(state!)).toBeUndefined();
+  });
+
   it("returns undefined for a fourball match still in progress", () => {
     const C = golferId("cal");
     const D = golferId("dee");

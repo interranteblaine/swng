@@ -13,6 +13,7 @@ export * from "./scoring/matchLadder.js";
 export * from "./scoring/singlesMatch.js";
 export * from "./scoring/stableford.js";
 export * from "./scoring/fourballMatch.js";
+export * from "./scoring/skins.js";
 export * from "./scoring/result.js";
 export * from "./scoring/golden/fixtureCourse.js";
 export * from "./scoring/golden/deck.js";
@@ -20,5 +21,5 @@ export * from "./scoring/golden/deck.js";
 // type; events.ts re-exports it so RoundEvent's "game-added" arm has a name to
 // reference) — re-export game.ts's other members individually so `export *`
 // here doesn't collide on GameConfig.
-export type { GameState, RunningTotal, StrokePlayLine, StablefordLine, MatchOutcome, FourballOutcome } from "./scoring/game.js";
+export type { GameState, RunningTotal, StrokePlayLine, StablefordLine, SkinsLine, MatchOutcome, FourballOutcome } from "./scoring/game.js";
 export { scoreGame } from "./scoring/game.js";

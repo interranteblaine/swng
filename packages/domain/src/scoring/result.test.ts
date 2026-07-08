@@ -58,4 +58,29 @@ describe("resultOf", () => {
     });
     expect(resultOf(state!)).toBeUndefined();
   });
+
+  it("settles a complete stableford game into its points", () => {
+    const stableford = { kind: "stableford", id: gameId("s1"), players: [A, B] } as const;
+    const [state] = playGoldenRound(fixtureLinks, players, [stableford], {
+      [A]: [5, 6, 3, "picked-up", 5, 4, 5, 6, 5],
+      [B]: [4, 4, 3, 5, 5, 3, 4, 5, 4],
+    });
+    expect(resultOf(state!)).toEqual({
+      kind: "stableford",
+      id: gameId("s1"),
+      points: [
+        { golferId: A, points: 15 },
+        { golferId: B, points: 19 },
+      ],
+    });
+  });
+
+  it("returns undefined for a stableford game that isn't complete yet", () => {
+    const stableford = { kind: "stableford", id: gameId("s1"), players: [A, B] } as const;
+    const [state] = playGoldenRound(fixtureLinks, players, [stableford], {
+      [A]: [5, 6],
+      [B]: [4],
+    });
+    expect(resultOf(state!)).toBeUndefined();
+  });
 });

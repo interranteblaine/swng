@@ -1,18 +1,15 @@
-import { findTeeSet } from "../course/card.js";
-import { DomainError } from "../errors.js";
 import type { RoundState } from "../round/state.js";
 import { cellKey } from "../round/state.js";
 import { defaultAllowance, playingHandicap } from "./allowances.js";
 import type { GameConfig, GameState, RunningTotal } from "./game.js";
+import { allPlayersComplete, playerTeeSet } from "./players.js";
 import { dotsByHole, netDoubleBogey } from "./strokes.js";
 
 type StrokePlayConfig = Extract<GameConfig, { kind: "stroke-play" }>;
 
 export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): GameState => {
   const lines = config.players.map((golferId) => {
-    const participant = state.participants.find((p) => p.golferId === golferId);
-    if (!participant) throw new DomainError("unknown-participant", `no participant ${golferId} joined this round`);
-    const teeSet = findTeeSet(state.card, participant.tee);
+    const { participant, teeSet } = playerTeeSet(state, golferId);
     // Net needs a playing handicap even when nobody has picked up yet; computed
     // once per player rather than per hole.
     const playingHcp = config.scoring === "net" ? playingHandicap(participant.courseHandicap, config.allowance ?? defaultAllowance("stroke-play")) : 0;
@@ -56,12 +53,7 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
     return { golferId, thru, gross, ...(net ? { net } : {}) };
   });
 
-  const complete = config.players.every((golferId) => {
-    const participant = state.participants.find((p) => p.golferId === golferId);
-    if (!participant) return false;
-    const teeSet = findTeeSet(state.card, participant.tee);
-    return teeSet.holes.every((hole) => state.cells[cellKey(golferId, hole.number)] !== undefined);
-  });
+  const complete = allPlayersComplete(state, config.players);
 
   return { kind: "stroke-play", id: config.id, scoring: config.scoring, lines, complete };
 };

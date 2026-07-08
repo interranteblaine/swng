@@ -1,18 +1,15 @@
-import { findTeeSet } from "../course/card.js";
-import { DomainError } from "../errors.js";
 import type { RoundState } from "../round/state.js";
 import { cellKey } from "../round/state.js";
 import { defaultAllowance, playingHandicap } from "./allowances.js";
 import type { GameConfig, GameState } from "./game.js";
+import { allPlayersComplete, playerTeeSet } from "./players.js";
 import { dotsByHole } from "./strokes.js";
 
 type StablefordConfig = Extract<GameConfig, { kind: "stableford" }>;
 
 export const scoreStableford = (config: StablefordConfig, state: RoundState): GameState => {
   const lines = config.players.map((golferId) => {
-    const participant = state.participants.find((p) => p.golferId === golferId);
-    if (!participant) throw new DomainError("unknown-participant", `no participant ${golferId} joined this round`);
-    const teeSet = findTeeSet(state.card, participant.tee);
+    const { participant, teeSet } = playerTeeSet(state, golferId);
     // One allocation for the whole card, not one per hole (see dotsByHole's doc comment).
     const playingHcp = playingHandicap(participant.courseHandicap, config.allowance ?? defaultAllowance("stableford"));
     const dots = dotsByHole(playingHcp, teeSet);
@@ -37,12 +34,7 @@ export const scoreStableford = (config: StablefordConfig, state: RoundState): Ga
     return { golferId, thru, points };
   });
 
-  const complete = config.players.every((golferId) => {
-    const participant = state.participants.find((p) => p.golferId === golferId);
-    if (!participant) return false;
-    const teeSet = findTeeSet(state.card, participant.tee);
-    return teeSet.holes.every((hole) => state.cells[cellKey(golferId, hole.number)] !== undefined);
-  });
+  const complete = allPlayersComplete(state, config.players);
 
   return { kind: "stableford", id: config.id, lines, complete };
 };

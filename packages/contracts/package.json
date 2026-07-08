@@ -18,7 +18,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@swng/domain": "workspace:*"
+    "@swng/domain": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",

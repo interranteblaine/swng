@@ -1,2 +1,5 @@
-// Bootstrap barrel — replaced by real exports from M1 on.
-export const packageName = "@swng/contracts";
+export * from "./parse.js";
+export * from "./ids.js";
+export * from "./round.js";
+export * from "./commands.js";
+export * from "./ws.js";

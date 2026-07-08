@@ -1,20 +1,17 @@
-import { findTeeSet } from "../course/card.js";
-import { DomainError } from "../errors.js";
 import type { RoundState, ScoreCell } from "../round/state.js";
 import { cellKey } from "../round/state.js";
-import { defaultAllowance } from "./allowances.js";
+import { defaultAllowance, playingHandicap } from "./allowances.js";
 import type { GameConfig, GameState } from "./game.js";
 import type { HoleWinner } from "./matchLadder.js";
 import { matchLadder } from "./matchLadder.js";
-import { dotsByHole, roundHalfUp } from "./strokes.js";
+import { playerTeeSet } from "./players.js";
+import { dotsByHole } from "./strokes.js";
 
 type SinglesMatchConfig = Extract<GameConfig, { kind: "singles-match" }>;
 
 export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState): GameState => {
-  const participantA = state.participants.find((p) => p.golferId === config.a);
-  const participantB = state.participants.find((p) => p.golferId === config.b);
-  if (!participantA) throw new DomainError("unknown-participant", `no participant ${config.a} joined this round`);
-  if (!participantB) throw new DomainError("unknown-participant", `no participant ${config.b} joined this round`);
+  const { participant: participantA, teeSet: teeSetA } = playerTeeSet(state, config.a);
+  const { participant: participantB, teeSet: teeSetB } = playerTeeSet(state, config.b);
 
   // Match strokes are relative, not each player's own course handicap: only the
   // higher-handicap player receives dots (chHigh - chLow), the lower plays scratch.
@@ -22,8 +19,8 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
   const higherIsA = participantA.courseHandicap >= participantB.courseHandicap;
   const higher = higherIsA ? participantA : participantB;
   const lower = higherIsA ? participantB : participantA;
-  const diff = roundHalfUp((higher.courseHandicap - lower.courseHandicap) * allowance);
-  const higherTeeSet = findTeeSet(state.card, higher.tee);
+  const higherTeeSet = higherIsA ? teeSetA : teeSetB;
+  const diff = playingHandicap(higher.courseHandicap - lower.courseHandicap, allowance);
   // One allocation for the whole card, not one per hole (see dotsByHole's doc comment).
   const higherDots = dotsByHole(diff, higherTeeSet);
 
@@ -35,7 +32,7 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
     return cell.result.strokes - dots;
   };
 
-  const cardTeeSet = findTeeSet(state.card, participantA.tee); // course card order is shared; hole numbers, not tee choice, drive it
+  const cardTeeSet = teeSetA; // course card order is shared; hole numbers, not tee choice, drive it
   const holeCount = cardTeeSet.holes.length;
 
   // Per-hole winner in the ladder's "a"/"b" vocabulary (config.a is always "a"

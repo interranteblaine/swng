@@ -45,6 +45,9 @@ const canonicalStringify = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
+// withoutSeq and byCanonicalOrder are deliberately published via the barrel (not
+// module-private) — sync/journal tooling and M4 tests are the intended consumers.
+//
 // seq is server-assigned canonical-order metadata (see events.ts), not event content —
 // a seq-stamped copy of an op (post-ack) and its unstamped copy (pre-ack, still in a
 // client's outbox) must tiebreak identically, so it's excluded before serializing.

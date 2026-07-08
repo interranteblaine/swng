@@ -47,9 +47,9 @@ const buildGoldenLog = (
   finalize: boolean,
 ): { readonly events: readonly RoundEvent[]; readonly state: RoundState } => {
   let wallMs = 0;
-  let seq = 0;
+  let opCounter = 0;
   const nextHlc = (): Hlc => ({ wallMs: wallMs++, counter: 0, deviceId: DEVICE });
-  const nextOpId = () => opId(`golden-${seq++}`);
+  const nextOpId = () => opId(`golden-${opCounter++}`);
   const toResult = (score: number | "picked-up" | "conceded"): HoleResult =>
     score === "picked-up" || score === "conceded" ? { kind: score } : { kind: "strokes", strokes: score };
 

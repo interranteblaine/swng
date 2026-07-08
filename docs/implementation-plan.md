@@ -83,8 +83,8 @@ that exercise handicaps hardest.
 2. `RoundEvent` union (`architecture.md` §2) with HLC envelope, and
    `reduceRound(events: RoundEvent[]): RoundState` — lifecycle enum, per-cell LWW registers
    resolved by author `hlc` (tie-break `deviceId`) with audit, unknown-event tolerance.
-3. Games framework: `GameConfig`/`GameState`/`GameResult` discriminated unions,
-   `scoreGame(config, card, participants, events): GameState` dispatch, allowances table.
+3. Games framework: `GameConfig`/`GameState` discriminated unions (`GameResult` settlement
+   currency lands in M2), `scoreGame(config, reducedState)` dispatch, allowances table.
 4. `allocateStrokes(courseHandicap: number, teeSet: TeeSet): number[]` — dots by stroke
    index, including >18 and plus handicaps.
 5. `strokePlay` reducer (gross/net; picked-up scores net via net double bogey, gross marked

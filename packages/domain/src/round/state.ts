@@ -45,6 +45,15 @@ const canonicalStringify = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
+// seq is server-assigned canonical-order metadata (see events.ts), not event content —
+// a seq-stamped copy of an op (post-ack) and its unstamped copy (pre-ack, still in a
+// client's outbox) must tiebreak identically, so it's excluded before serializing.
+const withoutSeq = (event: RoundEvent): Omit<RoundEvent, "seq"> => {
+  const rest: Record<string, unknown> = { ...event };
+  delete rest.seq;
+  return rest as Omit<RoundEvent, "seq">;
+};
+
 // Total order over events that depends only on event content (hlc, then opId, then a
 // full canonical serialization as a last-resort tiebreak), never on array position.
 // Every downstream step processes events in this canonical order, which is what makes
@@ -57,10 +66,15 @@ const canonicalStringify = (value: unknown): string => {
 // the comparator returns 0 for genuinely different events — 0 only for identical events
 // is required; otherwise stable sort would fall back to arrival order and break
 // convergence.
-const byCanonicalOrder = (a: RoundEvent, b: RoundEvent): number =>
-  compareHlc(a.hlc, b.hlc) ||
-  (a.opId < b.opId ? -1 : a.opId > b.opId ? 1 : 0) ||
-  (canonicalStringify(a) < canonicalStringify(b) ? -1 : canonicalStringify(a) > canonicalStringify(b) ? 1 : 0);
+const byCanonicalOrder = (a: RoundEvent, b: RoundEvent): number => {
+  const contentA = withoutSeq(a);
+  const contentB = withoutSeq(b);
+  return (
+    compareHlc(a.hlc, b.hlc) ||
+    (a.opId < b.opId ? -1 : a.opId > b.opId ? 1 : 0) ||
+    (canonicalStringify(contentA) < canonicalStringify(contentB) ? -1 : canonicalStringify(contentA) > canonicalStringify(contentB) ? 1 : 0)
+  );
+};
 
 export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
   // Every sub-structure is an hlc-resolved LWW register/map, which is what makes
@@ -93,37 +107,55 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
     }
   }
 
-  // 4. participants: LWW map keyed by golferId. Canonical ascending processing order
-  //    means a later overwrite always has hlc >= the one it replaces.
-  const participantsByGolfer = new Map<GolferId, { participant: Participant; hlc: Hlc }>();
+  // 4. participants: LWW map keyed by golferId, but roster ORDER is join order —
+  //    tracked separately as the first-write hlc — while the payload stays LWW
+  //    (latest write wins). Canonical ascending processing order means the first
+  //    time we see a golferId is necessarily their earliest write, and a later
+  //    overwrite always has hlc >= the one it replaces, so a correction updates
+  //    the payload in place without moving the golfer to the end of the roster.
+  const participantsByGolfer = new Map<GolferId, { participant: Participant; hlc: Hlc; firstHlc: Hlc }>();
   for (const event of deduped) {
     if (event.kind !== "participant-joined") continue;
-    participantsByGolfer.set(event.participant.golferId, { participant: event.participant, hlc: event.hlc });
+    const existing = participantsByGolfer.get(event.participant.golferId);
+    participantsByGolfer.set(event.participant.golferId, { participant: event.participant, hlc: event.hlc, firstHlc: existing?.firstHlc ?? event.hlc });
   }
   const participants = [...participantsByGolfer.values()]
-    .sort((a, b) => compareHlc(a.hlc, b.hlc) || (a.participant.golferId < b.participant.golferId ? -1 : a.participant.golferId > b.participant.golferId ? 1 : 0))
+    .sort((a, b) => compareHlc(a.firstHlc, b.firstHlc) || (a.participant.golferId < b.participant.golferId ? -1 : a.participant.golferId > b.participant.golferId ? 1 : 0))
     .map((entry) => entry.participant);
 
-  // 5. games: same LWW-map treatment keyed by config.id.
-  const gamesById = new Map<string, { config: GameConfig; hlc: Hlc }>();
+  // 5. games: same LWW-map treatment keyed by config.id, with the same
+  //    join-order-by-first-write-hlc roster ordering as participants (#4).
+  const gamesById = new Map<string, { config: GameConfig; hlc: Hlc; firstHlc: Hlc }>();
   for (const event of deduped) {
     if (event.kind !== "game-added") continue;
-    gamesById.set(event.config.id, { config: event.config, hlc: event.hlc });
+    const existing = gamesById.get(event.config.id);
+    gamesById.set(event.config.id, { config: event.config, hlc: event.hlc, firstHlc: existing?.firstHlc ?? event.hlc });
   }
   const games = [...gamesById.values()]
-    .sort((a, b) => compareHlc(a.hlc, b.hlc) || (a.config.id < b.config.id ? -1 : a.config.id > b.config.id ? 1 : 0))
+    .sort((a, b) => compareHlc(a.firstHlc, b.firstHlc) || (a.config.id < b.config.id ? -1 : a.config.id > b.config.id ? 1 : 0))
     .map((entry) => entry.config);
 
   // 6. cells: keyed by cellKey; apply score-recorded iff absent or the incoming hlc
   //    strictly beats the stored one. On an hlc tie (distinct opIds, same instant),
   //    canonical order makes the winner deterministic regardless of arrival order.
+  //    Deliberate asymmetry vs. participants/games (#4, #5) above: cells keep the
+  //    FIRST event in canonical order on an exact tie (via "<=" here) while the
+  //    lifecycle/participant/game registers keep the LAST (via a max-hlc scan or
+  //    an unconditional overwrite in ascending order). Both are equally
+  //    deterministic — a tie only ever needs ONE consistent rule, and which one
+  //    was picked per register isn't a bug to reconcile, so don't "fix" one to
+  //    match the other.
   const cells: Record<string, ScoreCell> = {};
   for (const event of deduped) {
     if (event.kind !== "score-recorded") continue;
     const key = cellKey(event.golferId, event.hole);
     const existing = cells[key];
     if (existing && compareHlc(event.hlc, existing.hlc) <= 0) continue;
-    cells[key] = { result: event.result, recordedBy: event.golferId, hlc: event.hlc, opId: event.opId };
+    // recordedBy is the WRITE AUTHOR, not the score's subject (golferId) — the
+    // subject is already the cell key, so this field only earns its keep by
+    // capturing who entered the score, which is not always the golfer themself
+    // (score-for-anyone means author !== subject is the normal case).
+    cells[key] = { result: event.result, recordedBy: event.authorId, hlc: event.hlc, opId: event.opId };
   }
 
   // 7. Unknown kinds: never matched by any of the checks above, so they're silently skipped.

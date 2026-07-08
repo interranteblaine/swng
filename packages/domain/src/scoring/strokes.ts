@@ -22,9 +22,17 @@ export const allocateStrokes = (strokes: number, teeSet: TeeSet): number[] => {
   });
 };
 
+// Hole-number → dots lookup, computed from a SINGLE allocateStrokes run. Callers that
+// need dots for every hole (a full scorecard) must build this once and reuse it —
+// calling strokesReceivedOnHole per hole instead re-runs allocateStrokes per hole,
+// which is O(holes²) for no benefit since one allocation already covers the round.
+export const dotsByHole = (strokes: number, teeSet: TeeSet): ReadonlyMap<number, number> => {
+  const dots = allocateStrokes(strokes, teeSet);
+  return new Map(teeSet.holes.map((hole, index) => [hole.number, dots[index]!]));
+};
+
 export const strokesReceivedOnHole = (strokes: number, teeSet: TeeSet, hole: number): number => {
-  const index = teeSet.holes.findIndex((h) => h.number === hole);
-  const dots = index === -1 ? undefined : allocateStrokes(strokes, teeSet)[index];
+  const dots = dotsByHole(strokes, teeSet).get(hole);
   if (dots === undefined) throw new DomainError("unknown-hole", `no hole numbered ${hole}`);
   return dots;
 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TeeSet } from "../course/card.js";
-import { allocateStrokes, netDoubleBogey, roundHalfUp, strokesReceivedOnHole } from "./strokes.js";
+import { allocateStrokes, dotsByHole, netDoubleBogey, roundHalfUp, strokesReceivedOnHole } from "./strokes.js";
 
 // 9 holes; strokeIndex permutation [5,1,9,3,7,8,2,4,6]
 const nine: TeeSet = {
@@ -41,6 +41,15 @@ describe("allocateStrokes", () => {
   });
   it("zero means a clean card", () => {
     expect(allocateStrokes(0, nine)).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  });
+});
+
+describe("dotsByHole", () => {
+  it("computes the full hole-number → dots map from one allocateStrokes run", () => {
+    // 6 strokes → SI 1..6 → holes 2,7,4,8,1,9 get one dot (same allocation as
+    // the allocateStrokes test above, indexed by hole number instead of array position).
+    const dots = dotsByHole(6, nine);
+    expect(Object.fromEntries(dots)).toEqual({ 1: 1, 2: 1, 3: 0, 4: 1, 5: 0, 6: 0, 7: 1, 8: 1, 9: 1 });
   });
 });
 

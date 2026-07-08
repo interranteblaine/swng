@@ -4,7 +4,7 @@ import type { RoundState } from "../round/state.js";
 import { cellKey } from "../round/state.js";
 import { defaultAllowance, playingHandicap } from "./allowances.js";
 import type { GameConfig, GameState, RunningTotal } from "./game.js";
-import { netDoubleBogey, strokesReceivedOnHole } from "./strokes.js";
+import { dotsByHole, netDoubleBogey } from "./strokes.js";
 
 type StrokePlayConfig = Extract<GameConfig, { kind: "stroke-play" }>;
 
@@ -16,6 +16,8 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
     // Net needs a playing handicap even when nobody has picked up yet; computed
     // once per player rather than per hole.
     const playingHcp = config.scoring === "net" ? playingHandicap(participant.courseHandicap, config.allowance ?? defaultAllowance("stroke-play")) : 0;
+    // One allocation for the whole card, not one per hole (see dotsByHole's doc comment).
+    const dots = config.scoring === "net" ? dotsByHole(playingHcp, teeSet) : undefined;
 
     let grossTotal = 0;
     let grossPickups = 0;
@@ -29,22 +31,26 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
 
       if (cell.result.kind === "strokes") {
         grossTotal += cell.result.strokes;
-        if (config.scoring === "net") {
-          const dots = strokesReceivedOnHole(playingHcp, teeSet, hole.number);
-          netTotal += cell.result.strokes - dots;
+        if (dots) {
+          netTotal += cell.result.strokes - (dots.get(hole.number) ?? 0);
         }
       } else {
         // Picked-up/conceded holes have no gross number, but net still resolves
         // them at net double bogey (par + 2) so a running net total never stalls.
         grossPickups += 1;
-        if (config.scoring === "net") {
-          const dots = strokesReceivedOnHole(playingHcp, teeSet, hole.number);
-          netTotal += netDoubleBogey(hole.par, dots) - dots;
+        if (dots) {
+          const holeDots = dots.get(hole.number) ?? 0;
+          netTotal += netDoubleBogey(hole.par, holeDots) - holeDots;
         }
       }
     }
 
     const gross: RunningTotal = { total: grossTotal, pickups: grossPickups };
+    // net.pickups is always 0, not tracked like gross.pickups: a pickup only makes
+    // the GROSS total partial. Net resolves every picked-up/conceded hole at net
+    // double bogey above, so a net total is never partial — that's the rule (WHS
+    // net double bogey exists precisely to give picked-up holes a definite net
+    // score), not a field we forgot to populate.
     const net: RunningTotal | undefined = config.scoring === "net" ? { total: netTotal, pickups: 0 } : undefined;
 
     return { golferId, thru, gross, ...(net ? { net } : {}) };

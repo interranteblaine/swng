@@ -4,7 +4,7 @@ import type { RoundState, ScoreCell } from "../round/state.js";
 import { cellKey } from "../round/state.js";
 import { defaultAllowance } from "./allowances.js";
 import type { GameConfig, GameState, MatchOutcome } from "./game.js";
-import { allocateStrokes, roundHalfUp } from "./strokes.js";
+import { dotsByHole, roundHalfUp } from "./strokes.js";
 
 type SinglesMatchConfig = Extract<GameConfig, { kind: "singles-match" }>;
 
@@ -22,13 +22,14 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
   const lower = higherIsA ? participantB : participantA;
   const diff = roundHalfUp((higher.courseHandicap - lower.courseHandicap) * allowance);
   const higherTeeSet = findTeeSet(state.card, higher.tee);
-  const dotsByHole = new Map(higherTeeSet.holes.map((hole, index) => [hole.number, allocateStrokes(diff, higherTeeSet)[index]!]));
+  // One allocation for the whole card, not one per hole (see dotsByHole's doc comment).
+  const higherDots = dotsByHole(diff, higherTeeSet);
 
   // Net for the higher player subtracts their dots on the hole; the lower player
   // always plays scratch (0 dots).
   const netFor = (isHigher: boolean, cell: ScoreCell | undefined, holeNumber: number): number | undefined => {
     if (!cell || cell.result.kind !== "strokes") return undefined; // absent/picked-up/conceded
-    const dots = isHigher ? (dotsByHole.get(holeNumber) ?? 0) : 0;
+    const dots = isHigher ? (higherDots.get(holeNumber) ?? 0) : 0;
     return cell.result.strokes - dots;
   };
 

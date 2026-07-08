@@ -80,4 +80,36 @@ describe("reduceRound", () => {
     expect(state.cells[cellKey(A, 1)]?.result.kind).toBe("picked-up");
     expect(state.cells[cellKey(B, 1)]?.result.kind).toBe("conceded");
   });
+
+  it("audits recordedBy as the WRITE AUTHOR, not the score's subject (score-for-anyone means they differ)", () => {
+    const joinB: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: B, name: "Bea", tee: "white", courseHandicap: 12 } };
+    const aRecordsForB: RoundEvent = { opId: opId(`op-${op++}`), hlc: at(11), authorId: A, kind: "score-recorded", golferId: B, hole: 1, result: { kind: "strokes", strokes: 5 } };
+    const state = reduceRound([genesis, joinA, joinB, started, aRecordsForB]);
+    expect(state.cells[cellKey(B, 1)]?.recordedBy).toBe(A);
+  });
+
+  it("orders participants and games by join order (first-write hlc), not by the hlc of the winning correction", () => {
+    const joinB: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: B, name: "Bea", tee: "white", courseHandicap: 12 } };
+    // A joins first, B joins second, then A's handicap is corrected much later.
+    const correctA: RoundEvent = { ...base(100), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", courseHandicap: 6 } };
+    const state = reduceRound([genesis, joinA, joinB, correctA]);
+    expect(state.participants.map((p) => p.golferId)).toEqual([A, B]);
+    expect(state.participants[0]?.courseHandicap).toBe(6);
+
+    const gameG1: RoundEvent = { ...base(2), kind: "game-added", config: { kind: "stroke-play", id: gameId("g1"), scoring: "gross", players: [A, B] } };
+    const gameG2: RoundEvent = { ...base(3), kind: "game-added", config: { kind: "stroke-play", id: gameId("g2"), scoring: "gross", players: [A, B] } };
+    const correctG1: RoundEvent = { ...base(100), kind: "game-added", config: { kind: "stroke-play", id: gameId("g1"), scoring: "net", players: [A, B] } };
+    const gameState = reduceRound([genesis, joinA, joinB, gameG1, gameG2, correctG1]);
+    expect(gameState.games.map((g) => g.id)).toEqual([gameId("g1"), gameId("g2")]);
+    expect(gameState.games[0]).toMatchObject({ scoring: "net" });
+  });
+
+  it("excludes the seq envelope field from the canonical tiebreak (non-content metadata must not affect ordering)", () => {
+    const collisionHlc = at(30, "device-x");
+    const withoutSeq: RoundEvent = { opId: opId("seq-test-1"), hlc: collisionHlc, authorId: A, kind: "score-recorded", golferId: A, hole: 1, result: { kind: "strokes", strokes: 4 } };
+    const withSeq: RoundEvent = { ...withoutSeq, seq: 42 };
+    const forward = reduceRound([genesis, joinA, started, withoutSeq, withSeq]);
+    const backward = reduceRound([genesis, joinA, started, withSeq, withoutSeq]);
+    expect(backward).toEqual(forward);
+  });
 });

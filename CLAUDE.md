@@ -19,18 +19,14 @@ Conventions are enforced by ESLint where possible — a lint failure is the sour
 
 ```bash
 pnpm install              # Install all dependencies
-pnpm dev:web              # Start Vite dev server (localhost:5173)
 pnpm validate             # Lint + build + test (full CI check)
-pnpm lint                 # ESLint across all packages
-pnpm build                # Build all packages
-pnpm test                 # Run all tests
-pnpm -F @swng/web test    # Run web app tests only
-pnpm -F @swng/adapters-dynamodb test  # Run a single package's tests
+pnpm lint                 # ESLint once at the root (one flat config governs all packages)
+pnpm build                # Build all packages (topological)
+pnpm test                 # Run all package tests
+pnpm -F @swng/domain test # Run a single package's tests
 ```
 
-Run a single test file: `pnpm -F <package> vitest run <file>` (e.g. `pnpm -F @swng/web vitest run src/lib/roundCalcs.test.ts`).
-
-Web tests use Vitest with jsdom environment and `@testing-library/react`. Globals are enabled (no vitest imports needed).
+Run a single test file: `pnpm -F <package> vitest run <file>` (e.g. `pnpm -F @swng/domain vitest run src/index.test.ts`). Tests are Vitest, co-located as `*.test.ts`, importing from `vitest` explicitly. The web app and its dev server return in M5.
 
 **Before claiming a change is done, run `pnpm validate`** — lint + build + test, the same gate CI enforces.
 

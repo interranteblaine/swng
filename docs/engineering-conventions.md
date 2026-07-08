@@ -24,13 +24,20 @@ A name is the cheapest documentation and the cheapest bug-prevention; a name tha
 worse than no name.
 
 - **Don't borrow a pattern's vocabulary unless you honor the pattern.** Our persistence
-  interfaces are thin key-value/table stores, not DDD Repositories (no unit-of-work, no
-  collection semantics) — so they are `<Thing>Store`, never `<Thing>Repository`.
-- **Ports are capabilities; adapters are technologies.** A port (interface, owned by
-  `application`) is named for its capability with no `Port` suffix — the `ports/` folder
-  already says it. An adapter (implementation, in `adapters-*`) is named
-  `create<Technology><Capability>` — e.g. `createDynamoRoundStore`,
-  `createCognitoIdentityProvider`. An adapter named `…Port` is a category error.
+  interfaces are thin key-value/table stores, so they are named `<Thing>Store`. `Repository`
+  is not a banned word — it is a name that must be *earned*: if a genuine Repository
+  (collection semantics, unit-of-work) is ever built, `Repository` is exactly the honest
+  name for it. What's forbidden is calling a thin store `Repository` — promising a pattern
+  the code doesn't deliver.
+- **Ports are capabilities; adapters are technologies.** The hard rule: an *adapter*
+  (implementation, in `adapters-*`) named `…Port` is a category error — adapters are named
+  `create<Technology><Capability>` (e.g. `createDynamoRoundStore`,
+  `createCognitoIdentityProvider`). As house style (not law), port *interfaces* are named
+  for the capability without a `Port` suffix — `Broadcast`, `Clock` — because the `ports/`
+  folder already carries the role.
+- **Naming rules are review-enforced, not lint-enforced.** Whether a name tells the truth
+  is a judgment about the code behind it; lint can only match strings, which bans honest
+  names and permits lying ones. Lint enforces the import graph; reviewers enforce names.
 - **Fields hold what their names say.** A tee-set field is `tee`, not a color; a per-hole
   difficulty ranking is `strokeIndex` — "handicap index" is a golfer's rating and may only
   ever mean that. Domain vocabulary follows `architecture.md` (`Golfer` not "user",
@@ -95,13 +102,17 @@ worse than no name.
 
 ## 6. The enforceable subset
 
-The rules an agent can violate silently, checked mechanically or stated as hard constraints:
+The rules an agent can violate silently, checked mechanically (lint) or held as hard
+constraints at review:
 
-1. Persistence interfaces are `…Store`, never `…Repository`.
-2. Adapters are `create<Tech><Capability>`; port interfaces carry no `Port` suffix.
-3. No misleading field names; no `| null` state unions — explicit enums.
-4. Flat `src/`; group by concept; co-located `*.test.ts`; one barrel per package.
-5. Layer direction is lint-enforced; `domain` imports nothing; AWS SDKs only in adapters.
-6. Ordering by `seq`, conflict resolution by `hlc`, wall-clock comparison never.
-7. Second instance of a pattern → extract the general version.
-8. Comment the why, never the what.
+1. Layer direction is lint-enforced; `domain` imports nothing; AWS SDKs only in adapters;
+   browser-shared packages (`domain`, `contracts`, `client`) use no Node built-ins.
+2. Review-enforced naming: thin stores are `…Store` (`Repository` only for the real
+   pattern); adapters are `create<Tech><Capability>`, never `…Port`; no misleading field
+   names; no `| null` state unions — explicit enums.
+3. Flat `src/`; group by concept; co-located `*.test.ts`; one barrel per package.
+4. Ordering by `seq`, conflict resolution by `hlc`, wall-clock comparison never.
+5. Second instance of a pattern → extract the general version.
+6. Comment the why, never the what.
+7. Tests are typechecked: each package's `tsconfig.json` includes tests (`pnpm typecheck`),
+   while `tsconfig.build.json` excludes them from emit.

@@ -32,20 +32,26 @@ Run a single test file: `pnpm -F <package> vitest run <file>` (e.g. `pnpm -F @sw
 
 ## Architecture
 
-This is a **pnpm monorepo** (Node 20+, pnpm 8+) for a real-time golf scoring app, ESM
-throughout. The code currently in the repo is the **proof-of-concept**, which is
-reference-only and being replaced ground-up per `docs/product.md` / `docs/roadmap.md` —
-never patch it, and never treat its patterns as design input. The POC's architecture is
-deliberately not described here; if you need to consult it, read the code knowing it holds
-no authority.
+This is a **pnpm monorepo** (Node 20+, pnpm 9.5+, ESM throughout) for the ground-up rebuild
+of swng per `docs/product.md` → `docs/roadmap.md` → `docs/architecture.md`. The old
+proof-of-concept is **deleted from the tree** — it exists only at git tag `poc-final`, holds
+no authority, and must never be resurrected as design input.
+
+Current state (M0 complete): nine skeleton packages under `packages/` matching
+`docs/architecture.md` §3 (`domain`, `contracts`, `application`, `client`, four `adapters-*`,
+`lambda`), with the layer direction and package boundaries enforced by `eslint.config.mjs`.
+Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
+section as it does.
 
 ### CDK / Deployment
 
-- AWS profile: `swng`, region: `us-east-1`
-- Stages: `beta` and `prod` (separate CDK stacks: `InfraCdkStack-beta`, `InfraCdkStack-prod`)
-- CDK outputs written to `apps/infra-cdk/cdk-outputs-{stage}.json`
-- `pnpm cdk:deploy:beta` / `pnpm cdk:deploy:prod` for infrastructure
-- `pnpm web:publish:beta` / `pnpm web:publish:prod` for frontend (S3 + CloudFront invalidation)
+- AWS profile: `swng`, region: `us-east-1`; stages `beta` and `prod`.
+- `apps/infra-cdk` currently contains only a synthesizable `PlaceholderStack`; the real
+  stacks and stage deploy scripts return in M3.
+- The **deployed POC stacks still exist in AWS** under the names `InfraCdkStack-beta` /
+  `InfraCdkStack-prod`. Do not create or deploy stacks under those names until M3
+  deliberately replaces them — deploying an empty stack under a live name deletes its
+  resources.
 
 ## Code Authoring
 

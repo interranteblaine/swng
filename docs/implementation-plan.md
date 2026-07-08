@@ -126,8 +126,11 @@ examples; concurrency deck passes.
 **Tasks:**
 1. `contracts`: Zod schemas for round commands/queries and the WS envelope.
 2. `application`: ports `EventJournal`, `RoundStore`, `Broadcast`, `TokenIssuer`, `Clock`,
-   `IdGenerator`, `Logger`; use cases `StartRound`, `JoinRound`, `RecordScore`,
-   `FinalizeRound`; typed errors; `ScoringPolicy` authorization.
+   `IdGenerator`, `Logger`; use cases `StartRound`, `JoinRound`, `AddGame` (a game's config
+   references join-time golfer ids, so it can only be added once the round has participants
+   to reference), `RecordScore`, `FinalizeRound`; typed errors; `ScoringPolicy` authorization.
+   Rounds are live from creation in v1 — `StartRound`'s one append is already
+   genesis + host-join + start, in that fixed order; there is no separate go-live command.
 3. `adapters-dynamodb`: `createDynamoEventJournal` (conditional put on `seq`),
    `createDynamoRoundStore`; contract tests against local DynamoDB.
 4. `lambda`: declarative dispatcher table, one composition root, `http/` and `ws/` entries;
@@ -138,7 +141,10 @@ examples; concurrency deck passes.
 
 **Gate:** scripted E2E against beta: two simulated clients join by code, score concurrently,
 both receive each other's events over WS, finalize returns `RoundResult`s matching a golden
-card. Idempotent re-send of an `opId` is a no-op.
+card. Idempotent re-send of an `opId` is a no-op. The golden card is the M2 concurrency
+deck's own hand-verified post-correction numbers (`packages/domain/src/scoring/concurrent.test.ts`)
+— the E2E gate's job is proving the deployed server reproduces those exact numbers over the
+wire, not inventing a new fixture.
 
 ### M4 — Client SDK: live sync + offline
 

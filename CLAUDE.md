@@ -37,11 +37,15 @@ of swng per `docs/product.md` → `docs/roadmap.md` → `docs/architecture.md`. 
 proof-of-concept is **deleted from the tree** — it exists only at git tag `poc-final`, holds
 no authority, and must never be resurrected as design input.
 
-Current state (M0 complete): nine skeleton packages under `packages/` matching
+Current state (M0–M2 complete): nine packages under `packages/` matching
 `docs/architecture.md` §3 (`domain`, `contracts`, `application`, `client`, four `adapters-*`,
 `lambda`), with the layer direction and package boundaries enforced by `eslint.config.mjs`.
-Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
-section as it does.
+`@swng/domain` is real: the event-sourced round core (commutative `reduceRound` fold, HLC
+conflict resolution), all five v1 scoring engines over one log, the WHS handicap engine
+(constants pinned to published sources; 9-hole rounds use the published 2020 combining rule
+— the 2024 expected-differential method is unpublished), and deterministic `settleRound` →
+`RoundArchive`. Real code lands milestone by milestone per `docs/implementation-plan.md` —
+update this section as it does.
 
 ### CDK / Deployment
 

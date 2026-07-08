@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "fake-indexeddb": "catalog:"
   }
 }

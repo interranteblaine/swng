@@ -5,6 +5,7 @@ import type { HoleResult } from "../../round/holeResult.js";
 import type { Participant } from "../../round/participant.js";
 import type { RoundEvent } from "../../round/events.js";
 import { reduceRound } from "../../round/state.js";
+import type { RoundState } from "../../round/state.js";
 import { scoreGame } from "../game.js";
 import type { GameConfig, GameState } from "../game.js";
 
@@ -27,17 +28,18 @@ const RECORDER = golferId("golden-recorder");
 const DEVICE = deviceId("golden-deck");
 
 // Builds a minimal, canonically-ordered event log — genesis, joins, games, start,
-// then one score-recorded per (golfer, hole) in fixture order — reduces it, and
-// scores every configured game against the result. Sequential hlcs are enough
-// here because the golden decks never need to exercise conflict resolution;
-// that's state.properties.test.ts's job.
-export const playGoldenRound = (
+// then one score-recorded per (golfer, hole) in fixture order, then any corrections,
+// optionally closed out with a round-finalized. Sequential hlcs are enough here
+// because the golden decks never need to exercise conflict resolution; that's
+// state.properties.test.ts's job.
+const buildGoldenLog = (
   card: CourseCard,
   participants: readonly Participant[],
   games: readonly GameConfig[],
   scores: FixtureScores,
-  corrections: readonly FixtureCorrection[] = [],
-): GameState[] => {
+  corrections: readonly FixtureCorrection[],
+  finalize: boolean,
+): { readonly events: readonly RoundEvent[]; readonly state: RoundState } => {
   let wallMs = 0;
   let seq = 0;
   const nextHlc = (): Hlc => ({ wallMs: wallMs++, counter: 0, deviceId: DEVICE });
@@ -80,9 +82,36 @@ export const playGoldenRound = (
     });
   }
 
-  const state = reduceRound(events);
+  if (finalize) {
+    events.push({ kind: "round-finalized", opId: nextOpId(), hlc: nextHlc(), authorId: RECORDER });
+  }
+
+  return { events, state: reduceRound(events) };
+};
+
+export const playGoldenRound = (
+  card: CourseCard,
+  participants: readonly Participant[],
+  games: readonly GameConfig[],
+  scores: FixtureScores,
+  corrections: readonly FixtureCorrection[] = [],
+): GameState[] => {
+  const { state } = buildGoldenLog(card, participants, games, scores, corrections, false);
   // Score the games as reduceRound ordered them (join order by first-write hlc),
   // not the caller's array — the two coincide in every deck here, but this is
   // the shape production code actually consumes (it only ever has state.games).
   return state.games.map((config) => scoreGame(config, state));
 };
+
+// Same deck, but exposes the raw event log instead of scored GameStates — what
+// settlement tests need (settleRound consumes an event log, not a GameState array).
+// finalize defaults true since the common settlement case is "the round is over";
+// pass false to build a log settleRound should reject as not-yet-final.
+export const playGoldenRoundLog = (
+  card: CourseCard,
+  participants: readonly Participant[],
+  games: readonly GameConfig[],
+  scores: FixtureScores,
+  corrections: readonly FixtureCorrection[] = [],
+  finalize = true,
+): readonly RoundEvent[] => buildGoldenLog(card, participants, games, scores, corrections, finalize).events;

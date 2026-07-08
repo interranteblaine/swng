@@ -48,10 +48,18 @@ const canonicalStringify = (value: unknown): string => {
 // seq is server-assigned canonical-order metadata (see events.ts), not event content —
 // a seq-stamped copy of an op (post-ack) and its unstamped copy (pre-ack, still in a
 // client's outbox) must tiebreak identically, so it's excluded before serializing.
-const withoutSeq = (event: RoundEvent): Omit<RoundEvent, "seq"> => {
+// Return type is RoundEvent, not Omit<RoundEvent, "seq"> — seq is already optional on
+// RoundEventBase, so a copy missing it is still a valid RoundEvent, and typing it that
+// way (rather than Omit, which collapses a discriminated union to its common keys)
+// keeps this composable with call sites that need a real RoundEvent back, e.g. the
+// archive's canonical event log.
+export const withoutSeq = (event: RoundEvent): RoundEvent => {
   const rest: Record<string, unknown> = { ...event };
   delete rest.seq;
-  return rest as Omit<RoundEvent, "seq">;
+  // Two-step cast: TS's single-step assertion rejects Record<string, unknown> -> RoundEvent
+  // as "insufficient overlap" against a discriminated union, even though every payload key
+  // is still present at runtime — only "seq" was ever removed.
+  return rest as unknown as RoundEvent;
 };
 
 // Total order over events that depends only on event content (hlc, then opId, then a
@@ -66,7 +74,7 @@ const withoutSeq = (event: RoundEvent): Omit<RoundEvent, "seq"> => {
 // the comparator returns 0 for genuinely different events — 0 only for identical events
 // is required; otherwise stable sort would fall back to arrival order and break
 // convergence.
-const byCanonicalOrder = (a: RoundEvent, b: RoundEvent): number => {
+export const byCanonicalOrder = (a: RoundEvent, b: RoundEvent): number => {
   const contentA = withoutSeq(a);
   const contentB = withoutSeq(b);
   return (

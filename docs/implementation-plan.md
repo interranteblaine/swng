@@ -107,12 +107,12 @@ the signatures every later milestone consumes.
 1. `stableford` reducer (standard points; pickup = 0) + deck.
 2. `fourballMatch` reducer (best ball per side, table allowance) + deck.
 3. `skins` reducer (carryovers, tie-push, optional validation) + deck.
-4. Concurrent-games integration deck: `fourballMatch` + `skins` on one log; one
+4. Concurrent-games integration deck: `stableford` + `skins` on one log; one
    `ScoreCorrected` recomputes both.
 5. Handicap engine: net-double-bogey adjusted gross; differential
    `(113/slope) × (AGS − rating)`; 9-hole handling; `computeIndex(differentials)` — best 8 of
    20 with WHS small-sample table; `courseHandicap(index, teeSet)`.
-6. `settleRound(round): RoundArchive` — the immutable archive (setup + course snapshot, final
+6. `settleRound(events): RoundArchive` — the immutable archive (setup + course snapshot, final
    grid, event log, per-game results, per-golfer differentials; complete by rule). Settlement
    determinism test: settling the same log twice is byte-identical.
 

@@ -6,6 +6,7 @@ export * from "./round/participant.js";
 export * from "./round/holeResult.js";
 export * from "./round/events.js";
 export * from "./round/state.js";
+export * from "./round/archive.js";
 export * from "./scoring/strokes.js";
 export * from "./scoring/allowances.js";
 export * from "./scoring/strokePlay.js";

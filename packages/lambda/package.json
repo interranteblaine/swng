@@ -24,10 +24,13 @@
     "@swng/adapters-dynamodb": "workspace:*",
     "@swng/adapters-apigateway": "workspace:*",
     "@swng/adapters-cognito": "workspace:*",
-    "@swng/adapters-powertools": "workspace:*"
+    "@swng/adapters-powertools": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@types/node": "catalog:",
+    "@types/aws-lambda": "catalog:"
   }
 }

@@ -1,2 +1,4 @@
-// Bootstrap barrel — replaced by real exports from M1 on.
-export const packageName = "@swng/adapters-apigateway";
+// The package's one public interface (conventions §2) — consumers (lambda, its tests)
+// import "@swng/adapters-apigateway", never a deep path.
+export { createApiGatewayBroadcast } from "./createApiGatewayBroadcast.js";
+export { createManagementClient } from "./createManagementClient.js";

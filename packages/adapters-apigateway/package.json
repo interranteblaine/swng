@@ -20,10 +20,12 @@
   "dependencies": {
     "@swng/domain": "workspace:*",
     "@swng/application": "workspace:*",
-    "@swng/contracts": "workspace:*"
+    "@swng/contracts": "workspace:*",
+    "@aws-sdk/client-apigatewaymanagementapi": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@types/node": "catalog:"
   }
 }

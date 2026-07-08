@@ -5,3 +5,4 @@
 export { createDynamoEventJournal } from "./createDynamoEventJournal.js";
 export { createDynamoRoundStore } from "./createDynamoRoundStore.js";
 export { createDynamoConnectionRegistry } from "./createDynamoConnectionRegistry.js";
+export { createDocumentClient } from "./createDocumentClient.js";

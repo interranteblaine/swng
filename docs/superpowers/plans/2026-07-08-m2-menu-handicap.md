@@ -15,7 +15,7 @@
 - TDD; brief test code verbatim; domain imports nothing; fixtures are TS modules; comment the why only.
 - Golden fixtures reuse `fixtureLinks`/`fixtureWhite` (9-hole, pars [4,4,3,5,4,3,4,5,4], SI [5,1,9,3,7,8,2,4,6], rating 35.8, slope 128) and the standing cast: **Ann ch 8, Bo ch 2, Cal ch 12, Dee ch 5**.
 - **Design decisions fixed by this plan** (do not relitigate):
-  - `thru` semantics: medal-family formats (stroke play, stableford, skins tallies) count decided holes anywhere on the card; **match-family formats count the decided prefix** (matches are sequential; a gap pauses the ladder). Recorded as a why-comment on the ladder.
+  - `thru` semantics: medal-family formats (stroke play, stableford) count decided holes anywhere on the card; **match-family formats count the decided prefix** (matches are sequential; a gap pauses the ladder). Recorded as a why-comment on the ladder. (Amended during execution: skins was originally listed medal-family here, but Task 4's carryover chain requires the decided prefix — the chain cannot skip a hole — and that is what shipped; this bullet originally contradicted Task 4.)
   - Default allowances: stableford 0.95 (WHS individual), fourball match 0.90 **relative to the lowest playing handicap** (all four reduced by the low man's), skins 1.0 (full handicap, net).
   - Stableford points per hole: `max(0, 2 + par − net)`; picked-up/conceded = 0 points.
   - Skins: outright lowest net wins the hole's skin plus all carried; any tie carries; picked-up/conceded is out of the hole; pot left carrying at the last decided hole reports as `carriedOut`. No validation variants in v1 (v1.1 config).

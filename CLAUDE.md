@@ -19,16 +19,19 @@ Conventions are enforced by ESLint where possible — a lint failure is the sour
 
 ```bash
 pnpm install              # Install all dependencies
-pnpm validate             # Lint + build + test (full CI check)
+pnpm validate             # Lint + typecheck + build + test (full CI check, hermetic — no network/AWS)
 pnpm lint                 # ESLint once at the root (one flat config governs all packages)
 pnpm build                # Build all packages (topological)
-pnpm test                 # Run all package tests
+pnpm test                 # Run all package tests (hermetic)
 pnpm -F @swng/domain test # Run a single package's tests
+pnpm test:contract        # DynamoDB adapter contract tests (DynamoDB Local under Java; NOT in validate)
+pnpm e2e:beta             # E2E gate against the deployed beta stack (AWS creds; NOT in validate)
+pnpm deploy:beta          # CDK deploy of swng-beta (profile swng)
 ```
 
 Run a single test file: `pnpm -F <package> vitest run <file>` (e.g. `pnpm -F @swng/domain vitest run src/index.test.ts`). Tests are Vitest, co-located as `*.test.ts`, importing from `vitest` explicitly. The web app and its dev server return in M5.
 
-**Before claiming a change is done, run `pnpm validate`** — lint + build + test, the same gate CI enforces.
+**Before claiming a change is done, run `pnpm validate`** — lint + typecheck + build + test, the same gate CI enforces. Changes to `adapters-dynamodb` also warrant `pnpm test:contract`; changes deployed to beta warrant `pnpm e2e:beta`.
 
 ## Architecture
 
@@ -37,25 +40,33 @@ of swng per `docs/product.md` → `docs/roadmap.md` → `docs/architecture.md`. 
 proof-of-concept is **deleted from the tree** — it exists only at git tag `poc-final`, holds
 no authority, and must never be resurrected as design input.
 
-Current state (M0–M2 complete): nine packages under `packages/` matching
+Current state (M0–M3 complete): nine packages under `packages/` matching
 `docs/architecture.md` §3 (`domain`, `contracts`, `application`, `client`, four `adapters-*`,
-`lambda`), with the layer direction and package boundaries enforced by `eslint.config.mjs`.
-`@swng/domain` is real: the event-sourced round core (commutative `reduceRound` fold, HLC
-conflict resolution), all five v1 scoring engines over one log, the WHS handicap engine
+`lambda`), plus the root `e2e/` workspace, with the layer direction and package boundaries
+enforced by `eslint.config.mjs`.
+`@swng/domain` is real (M1–M2): the event-sourced round core (commutative `reduceRound` fold,
+HLC conflict resolution), all five v1 scoring engines over one log, the WHS handicap engine
 (constants pinned to published sources; 9-hole rounds use the published 2020 combining rule
 — the 2024 expected-differential method is unpublished), and deterministic `settleRound` →
-`RoundArchive`. Real code lands milestone by milestone per `docs/implementation-plan.md` —
-update this section as it does.
+`RoundArchive`.
+The backend vertical slice is live (M3): `contracts` (Zod wire schemas), `application`
+(ports + StartRound/JoinRound/AddGame/RecordScore/FinalizeRound; rounds are live from
+creation), `adapters-dynamodb` (transactional seq+opId journal with jittered backoff and
+consistent reads), `lambda` + `adapters-apigateway` (declarative dispatcher, HMAC
+round-scoped participant tokens, WS broadcast), deployed as the `swng-beta` stack and gated
+by `e2e/` reproducing the M2 concurrency deck over the wire. Real code lands milestone by
+milestone per `docs/implementation-plan.md` — update this section as it does.
 
 ### CDK / Deployment
 
 - AWS profile: `swng`, region: `us-east-1`; stages `beta` and `prod`.
-- `apps/infra-cdk` currently contains only a synthesizable `PlaceholderStack`; the real
-  stacks and stage deploy scripts return in M3.
-- The **deployed POC stacks still exist in AWS** under the names `InfraCdkStack-beta` /
-  `InfraCdkStack-prod`. Do not create or deploy stacks under those names until M3
-  deliberately replaces them — deploying an empty stack under a live name deletes its
-  resources.
+- `apps/infra-cdk` holds `SwngStack`, deployed as **`swng-beta`** (4 DynamoDB tables, HTTP +
+  WebSocket APIs, three entry functions). `pnpm deploy:beta` deploys it; outputs land in
+  `apps/infra-cdk/cdk-outputs.json` (gitignored).
+- The **old POC stacks still exist in AWS** under the names `InfraCdkStack-beta` /
+  `InfraCdkStack-prod` and are deliberately untouched. `SwngStack`'s constructor throws on
+  those ids. Never create, deploy, or destroy stacks under those names — decommissioning
+  them is a separate, user-confirmed act.
 
 ## Code Authoring
 

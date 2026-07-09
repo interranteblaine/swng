@@ -170,6 +170,25 @@ describe("ScorecardGrid — dots", () => {
   });
 });
 
+describe("ScorecardGrid — readOnly (the archived card, Task 6)", () => {
+  it("a cell tap never opens the pad, and recordScore is never called — native disabled, not just an inert recordScore", () => {
+    const recordScore = vi.fn();
+    const state = twoPlayerState({ cells: { [cellKey(ANN, 1)]: scoreCell({ kind: "strokes", strokes: 4 }, ANN) } });
+    render(<ScorecardGrid state={state} activeGame={undefined} recordScore={recordScore} readOnly />);
+
+    expect(cellButton("Ann", 1).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(cellButton("Ann", 1));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(recordScore).not.toHaveBeenCalled();
+  });
+
+  it("defaults to interactive (readOnly omitted) — every existing live call site is unaffected", () => {
+    render(<ScorecardGrid state={twoPlayerState()} activeGame={undefined} recordScore={vi.fn()} />);
+    expect(cellButton("Ann", 1).hasAttribute("disabled")).toBe(false);
+  });
+});
+
 describe("ScorecardGrid — picked-up / conceded glyphs", () => {
   it("a picked-up cell shows PU and a conceded cell shows CN, not a numeric gross", () => {
     const state = twoPlayerState({

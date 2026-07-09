@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryOutboxStore } from "@swng/client";
-import { deviceId, fixtureLinks, golferId, opId, roundId } from "@swng/domain";
+import { deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { GolferId, OpId, RoundEvent, RoundId } from "@swng/domain";
 import { credentialStore } from "../identity";
 import { createUseRoundSession } from "../session/useRoundSession";
@@ -25,6 +25,28 @@ const buildServerLog = (roundIdValue: RoundId, golferIdValue: GolferId, name: st
     { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: golferIdValue, name, tee: "white", courseHandicap: 8 }, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
+  ];
+  return stampSeq(events);
+};
+
+// Two participants + two games (a singles-match and a gross stroke-play) — buildServerLog
+// above only ever joins ONE participant, which the standings-chip and hole-digest tests below
+// both need more than one of to be meaningful (a hole can't "complete" with only one cell
+// needed, and dots can't differ between games with only one player in each).
+const buildTwoPlayerServerLog = (roundIdValue: RoundId, ann: GolferId, bo: GolferId): RoundEvent[] => {
+  let wallMs = 2_000;
+  const nextHlc = () => ({ wallMs: wallMs++, counter: 0, deviceId: SERVER_DEVICE });
+  let opCounter = 0;
+  const nextOpId = (): OpId => opId(`two-op-${(opCounter += 1)}`);
+  const events: RoundEvent[] = [
+    { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "participant-joined", participant: { golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 }, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "participant-joined", participant: { golferId: bo, name: "Bo", tee: "white", courseHandicap: 2 }, authorId: bo, opId: nextOpId(), hlc: nextHlc() },
+    // Added in this order deliberately: state.games' join-order (by first-write hlc) makes
+    // the singles-match the DEFAULT active game (Task 5's "default stays first game" rule).
+    { kind: "game-added", config: { kind: "singles-match", id: gameId("single-1"), a: ann, b: bo }, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "game-added", config: { kind: "stroke-play", id: gameId("gross-1"), scoring: "gross", players: [ann, bo] }, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-started", authorId: ann, opId: nextOpId(), hlc: nextHlc() },
   ];
   return stampSeq(events);
 };
@@ -157,5 +179,178 @@ describe("RoundPage", () => {
 
     expect(screen.queryByRole("dialog")).toBeNull(); // posts and closes, no confirm step
     await waitFor(() => expect(screen.getByRole("button", { name: "Ann hole 1" }).textContent).toContain("5"));
+  });
+
+  it("tapping a standings chip changes which game drives the grid's dots (Task 5's fixed seam)", async () => {
+    const id = roundId("round-chip");
+    const ann = golferId("ann");
+    const bo = golferId("bo");
+    credentialStore.save(id, { token: "tok-chip", golferId: ann, name: "Ann", joinCode: "CHIP01" });
+
+    const transport = createScriptedTransport(buildTwoPlayerServerLog(id, ann, bo));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("CHIP01")).toBeTruthy());
+
+    // Default active game is the singles-match (added first) — Ann (ch8) vs Bo (ch2) gives
+    // Ann a dot on hole 1 (fixtureLinks SI 5, within her 6-dot allocation).
+    const annHole1 = () => screen.getByRole("button", { name: "Ann hole 1" });
+    await waitFor(() => expect(annHole1().textContent).toMatch("●"));
+
+    // Tapping the gross stroke-play chip switches the active game — gross carries no
+    // allowance at all (dots.ts's own rule), so Ann's dot disappears.
+    fireEvent.click(screen.getByRole("tab", { name: /Stroke play \(gross\)/ }));
+    expect(annHole1().textContent).not.toMatch("●");
+
+    // And back — the singles-match chip is still there and still switches correctly.
+    fireEvent.click(screen.getByRole("tab", { name: /Singles match/ }));
+    expect(annHole1().textContent).toMatch("●");
+  });
+
+  it("completing a hole fires the between-holes digest exactly once, dismissible by tap", async () => {
+    const id = roundId("round-digest");
+    const ann = golferId("ann");
+    const bo = golferId("bo");
+    credentialStore.save(id, { token: "tok-digest", golferId: ann, name: "Ann", joinCode: "DIG001" });
+
+    const transport = createScriptedTransport(buildTwoPlayerServerLog(id, ann, bo));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("DIG001")).toBeTruthy());
+    expect(screen.queryByText("After 1")).toBeNull();
+
+    // Ann posts hole 1 alone — Bo hasn't, so hole 1 isn't complete yet: no digest.
+    fireEvent.click(screen.getByRole("button", { name: "Ann hole 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "5" }));
+    expect(screen.queryByText("After 1")).toBeNull();
+
+    // Bo posts hole 1 too — every participant now has a cell for it: the digest fires.
+    fireEvent.click(screen.getByRole("button", { name: "Bo hole 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "4" }));
+    await waitFor(() => expect(screen.getByText("After 1")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText("After 1")).toBeNull();
+  });
+
+  it("a round that's already final (a rejoining/refreshed client) renders ResultsView directly, locked — no finalize call needed", async () => {
+    const id = roundId("round-final");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-final", golferId: ann, name: "Ann", joinCode: "FIN001" });
+
+    const finalized: RoundEvent = { kind: "round-finalized", authorId: ann, opId: opId("final-op"), hlc: { wallMs: 9_999, counter: 0, deviceId: SERVER_DEVICE } };
+    const transport = createScriptedTransport(stampSeq([...buildServerLog(id, ann, "Ann"), finalized]));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
+    // The live scoring chrome never renders once status is already final — this tab never
+    // called finalizeRound itself, so there is no response object either (brief's WS-push
+    // contract: ResultsView must render fully from folded state + games() alone).
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Finalize round" })).toBeNull();
+
+    const cell = screen.getByRole("button", { name: "Ann hole 1" });
+    expect(cell.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(cell);
+    expect(screen.queryByRole("dialog")).toBeNull(); // the pad never opens on a final round
+  });
+
+  it("finalizing from this tab: confirm dialog -> POST /finalize -> ResultsView, using the response", async () => {
+    const id = roundId("round-finalize-flow");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-flow", golferId: ann, name: "Ann", joinCode: "FLW001" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    // Stands in for the real HTTP finalize endpoint: mirrors what it actually does server-side
+    // (append round-finalized to the journal) directly onto the scripted transport's log, so
+    // this tab's own session.sync() (called by RoundPage right after the fetch resolves) picks
+    // it up the same way it would pick up a real server append.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        expect(String(url)).toBe(`https://api.example.test/rounds/${id}/finalize`);
+        expect(init?.method).toBe("POST");
+        // `.log` is `readonly RoundEvent[]` on the shared ScriptedTransport type (every OTHER
+        // test in this file only ever reads it) — this cast is scoped to this one push, not a
+        // widening of the shared testSupport type for a single test's needs.
+        (transport.log as RoundEvent[]).push({
+          kind: "round-finalized",
+          authorId: ann,
+          opId: opId("srv-finalize"),
+          hlc: { wallMs: 9_999, counter: 0, deviceId: SERVER_DEVICE },
+          seq: transport.log.length + 1,
+        });
+        return { ok: true, status: 200, json: async () => ({ results: [], handicapping: [] }) } as unknown as Response;
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("FLW001")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Finalize round" }));
+    expect(screen.getByRole("dialog", { name: "Confirm finalize" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Finalize" }));
+
+    await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Finalize round" })).toBeNull();
   });
 });

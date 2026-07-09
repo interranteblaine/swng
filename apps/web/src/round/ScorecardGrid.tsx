@@ -13,6 +13,11 @@ export interface ScorecardGridProps {
   // `state.games` below, since GameState alone doesn't carry it.
   readonly activeGame: GameState | undefined;
   readonly recordScore: (golferId: GolferId, hole: number, result: HoleResult) => void;
+  // Task 6's archived-card reuse: a `final` round's ScorecardGrid is the same component, just
+  // with every cell's tap made inert (native `disabled`, not merely "recordScore is a no-op")
+  // — the brief's "the pad NEVER opens" is about the tap itself, not just where its result
+  // goes. Defaults false so every existing (live) call site is unaffected.
+  readonly readOnly?: boolean;
 }
 
 interface Selection {
@@ -60,11 +65,12 @@ interface CellProps {
   readonly cell: ScoreCell | undefined;
   readonly dots: number;
   readonly onTap: () => void;
+  readonly readOnly: boolean;
 }
 
 // A tappable scorecard cell — dots above, gross (large) + net (small, only where dots apply)
 // below. This IS the "tap 1" of the two-tap contract; ScorePad below is "tap 2".
-function Cell({ participant, hole, cell, dots, onTap }: CellProps) {
+function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
   const net = cell?.result.kind === "strokes" && dots > 0 ? cell.result.strokes - dots : undefined;
 
   return (
@@ -72,7 +78,8 @@ function Cell({ participant, hole, cell, dots, onTap }: CellProps) {
       type="button"
       aria-label={`${participant.name} hole ${hole.number}`}
       onClick={onTap}
-      className="flex min-h-14 min-w-14 flex-col items-center justify-center gap-0.5 rounded-md bg-slate-800 px-1 py-1 active:bg-slate-700"
+      disabled={readOnly}
+      className="flex min-h-14 min-w-14 flex-col items-center justify-center gap-0.5 rounded-md bg-slate-800 px-1 py-1 active:bg-slate-700 disabled:active:bg-slate-800"
     >
       {dots > 0 && (
         <span aria-hidden className="text-[10px] leading-none text-amber-400">
@@ -94,7 +101,7 @@ function Cell({ participant, hole, cell, dots, onTap }: CellProps) {
 // and closes with no confirm step. Rendering is purely a function of `state` (+ `activeGame`
 // for dots) — recordScore's optimistic fold (the session layer) is what makes the tapped
 // value show up here on the very next render; this component adds no local echo of its own.
-export function ScorecardGrid({ state, activeGame, recordScore }: ScorecardGridProps) {
+export function ScorecardGrid({ state, activeGame, recordScore, readOnly = false }: ScorecardGridProps) {
   const [selection, setSelection] = useState<Selection | undefined>(undefined);
 
   const holes = canonicalHoles(state.card);
@@ -149,6 +156,7 @@ export function ScorecardGrid({ state, activeGame, recordScore }: ScorecardGridP
                         cell={state.cells[cellKey(p.golferId, hole.number)]}
                         dots={dotsByGolfer?.get(p.golferId)?.get(hole.number) ?? 0}
                         onTap={() => setSelection({ golferId: p.golferId, hole: hole.number })}
+                        readOnly={readOnly}
                       />
                     </td>
                   ))}

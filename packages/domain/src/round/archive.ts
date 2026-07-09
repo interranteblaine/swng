@@ -1,17 +1,15 @@
 import type { CourseCard } from "../course/card.js";
-import { findTeeSet } from "../course/card.js";
 import { DomainError } from "../errors.js";
-import { adjustedGrossScore, scoreDifferential } from "../handicap/whs.js";
 import type { GolferId, RoundId } from "../ids.js";
+import { handicappingFor } from "../scoring/allocation.js";
 import type { GameConfig } from "../scoring/game.js";
 import { scoreGame } from "../scoring/game.js";
 import type { GameResult } from "../scoring/result.js";
 import { resultOf } from "../scoring/result.js";
-import type { HoleResult } from "./holeResult.js";
 import type { Participant } from "./participant.js";
 import type { RoundEvent } from "./events.js";
 import type { ScoreCell } from "./state.js";
-import { byCanonicalOrder, cellKey, reduceRound, withoutSeq } from "./state.js";
+import { byCanonicalOrder, reduceRound, withoutSeq } from "./state.js";
 
 // The event log's write side is RoundState — a live projection that keeps re-folding as
 // new events arrive. RoundArchive is its terminal read side: the frozen, content-addressed
@@ -32,39 +30,6 @@ export interface RoundArchive {
     | { readonly golferId: GolferId; readonly kind: "incomplete" }
   )[];
 }
-
-// A differential can only be posted once every tee-set hole has decided (a stroke count, a
-// pickup, or a concession — adjustedGrossScore's own rule). Mid-round, or for a golfer who
-// never finished, that's not an error — it's the ordinary "incomplete" case a v1 crew hits
-// whenever someone walks in after a few holes or picks up on the last one.
-const handicappingFor = (
-  participant: Participant,
-  card: CourseCard,
-  cells: Readonly<Record<string, ScoreCell>>,
-): RoundArchive["handicapping"][number] => {
-  const teeSet = findTeeSet(card, participant.tee);
-  const holes = new Map<number, HoleResult>();
-  for (const hole of teeSet.holes) {
-    const cell = cells[cellKey(participant.golferId, hole.number)];
-    if (cell) holes.set(hole.number, cell.result);
-  }
-  try {
-    const ags = adjustedGrossScore(teeSet, participant.courseHandicap, holes);
-    // Raw per-tee-set differential only — combining two 9-hole differentials into one
-    // 18-hole-equivalent is the index projection's job (published 2020 WHS rule), not
-    // settlement's; the archive stays index-independent, per this tee set alone.
-    const differential = scoreDifferential(teeSet, ags);
-    return { golferId: participant.golferId, kind: "complete", ags, differential };
-  } catch (error) {
-    // holes-undecided is the one expected failure of a partial card; anything else (e.g.
-    // an unknown tee-set name, which would mean a corrupt round) is a real bug and must
-    // surface rather than be swallowed into a silent "incomplete".
-    if (error instanceof DomainError && error.code === "holes-undecided") {
-      return { golferId: participant.golferId, kind: "incomplete" };
-    }
-    throw error;
-  }
-};
 
 // Folds the log, then freezes it. Settlement only ever runs against a `final` round (the
 // one lifecycle state that means "no more events are coming" in practice — a reopened round

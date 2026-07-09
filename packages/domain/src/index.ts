@@ -1,6 +1,7 @@
 export * from "./ids.js";
 export * from "./errors.js";
 export * from "./course/card.js";
+export * from "./course/course.js";
 export * from "./round/hlc.js";
 export * from "./round/participant.js";
 export * from "./round/holeResult.js";
@@ -9,6 +10,7 @@ export * from "./round/state.js";
 export * from "./round/archive.js";
 export * from "./scoring/strokes.js";
 export * from "./scoring/allowances.js";
+export * from "./scoring/allocation.js";
 export * from "./scoring/strokePlay.js";
 export * from "./scoring/matchLadder.js";
 export * from "./scoring/singlesMatch.js";

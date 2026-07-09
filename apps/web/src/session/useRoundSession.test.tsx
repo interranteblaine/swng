@@ -116,8 +116,37 @@ describe("useRoundSession", () => {
     const { result } = renderHook(() => useRoundSession(ROUND_ID));
 
     expect(result.current).toMatchObject({ hydrated: false, state: undefined, games: [], pending: 0, rejected: [], connected: false });
-    // recordScore/sync on an idle view must be safe no-ops, never throw.
+    // recordScore/sync/connect on an idle view must be safe no-ops, never throw.
     expect(() => result.current.recordScore(ANN_ID, 1, { kind: "strokes", strokes: 4 })).not.toThrow();
     await expect(result.current.sync()).resolves.toBeUndefined();
+    expect(() => result.current.connect()).not.toThrow();
+  });
+
+  it("connect() is idempotent — calling it again on an already-connected live session doesn't reopen the socket", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: ROUND_ID,
+      golferId: ANN_ID,
+      deviceId: deviceId("ann-tab-4"),
+    });
+    const useRoundSession = createUseRoundSession(resolveSessionConfig);
+
+    const { result } = renderHook(() => useRoundSession(ROUND_ID));
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+
+    // The mount effect's own session.connect() already opened the socket once — this is the
+    // "Sync now" button's exact call, fired again while nothing changed (e.g. a double tap,
+    // or a tap that lands while the socket never actually dropped).
+    expect(transport.socketOpenCalls).toBe(1);
+    expect(result.current.connected).toBe(true);
+
+    act(() => {
+      result.current.connect();
+    });
+
+    expect(transport.socketOpenCalls).toBe(1); // still just the one real socket
+    expect(result.current.connected).toBe(true);
   });
 });

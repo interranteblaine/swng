@@ -1,0 +1,229 @@
+// Shared plumbing for fieldTest.spec.ts: reading the live endpoint the built app itself was
+// compiled against, Cal/Dee's out-of-browser joins, the deck-derived expected UI strings, and
+// the two-tap grid interaction every score entry in the spec goes through. Split out of the
+// spec file for the same reason e2e/support/client.ts is split from the root workspace's own
+// specs: one place for the plumbing, one file per scenario for the story.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
+import { joinRoundRequestSchema, joinRoundResponseSchema, parse } from "@swng/contracts";
+import type { JoinRoundResponse } from "@swng/contracts";
+import { fieldDeck18, fixtureLinks18, playGoldenRoundLog, reduceRound, scoreGame } from "@swng/domain";
+import type { FixtureScores, GolferId, RoundState } from "@swng/domain";
+import { describeGame } from "../src/games/describeGame.js";
+
+// --- Endpoints ---------------------------------------------------------------------------
+
+export interface WebEnv {
+  readonly httpUrl: string;
+  readonly wsUrl: string;
+}
+
+// Reads the SAME apps/web/.env.local playwright.config.ts's webServer.command generates
+// (via scripts/webEnv.mjs) before `vite build` runs — the spec's own direct joinRound calls
+// for Cal/Dee (brief: score-for-anyone makes their browsers unnecessary) must hit the
+// identical, already-trailing-slash-stripped origin the built app was compiled against, not a
+// second independently-loaded copy of apps/infra-cdk/cdk-outputs.json that could drift from
+// it. By the time a test body runs, webServer has already succeeded, so this file is
+// guaranteed to exist.
+export const loadWebEnv = (): WebEnv => {
+  const envPath = fileURLToPath(new URL("../.env.local", import.meta.url));
+  const contents = readFileSync(envPath, "utf8");
+  const read = (key: string): string => {
+    const line = contents.split("\n").find((candidate) => candidate.startsWith(`${key}=`));
+    if (!line) throw new Error(`${key} not found in ${envPath} — did scripts/webEnv.mjs run (playwright.config.ts's webServer.command)?`);
+    return line.slice(key.length + 1).trim();
+  };
+  return { httpUrl: read("VITE_HTTP_URL"), wsUrl: read("VITE_WS_URL") };
+};
+
+// --- Cal/Dee's out-of-browser joins ---------------------------------------------------------
+
+// Joins the round the same way JoinRoundPage's own submit handler does, but via a direct
+// fetch instead of a browser (brief step 2: joining Cal/Dee through context A would overwrite
+// Ann's localStorage credential for the round — `swng:credential:<roundId>` is one key per
+// round per browser, not per golfer).
+export const joinRoundDirect = async (
+  httpUrl: string,
+  input: { readonly code: string; readonly name: string; readonly tee: string; readonly courseHandicap: number },
+): Promise<JoinRoundResponse> => {
+  const body = parse(joinRoundRequestSchema, input);
+  const response = await fetch(`${httpUrl}/rounds/join`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /rounds/join -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(joinRoundResponseSchema, json);
+};
+
+// --- The deck as the oracle: expected UI strings, derived, not hand-copied -----------------
+
+const { players, fourball, skins, scores, corrections } = fieldDeck18;
+
+// Same truncation idiom as fieldDeck18.test.ts/describeGame.test.ts's own `thru`/thru16
+// helpers — a mid-round snapshot is the same deck cut off after hole n.
+const truncate = (n: number): FixtureScores => Object.fromEntries(Object.entries(scores).map(([golfer, holes]) => [golfer, holes.slice(0, n)]));
+
+// Rebuilds the RoundState the deck's own scores (thru n, with or without the h9 correction)
+// fold to — mirrors describeGame.test.ts's own `playRound` helper. This is what lets the
+// spec assert against text derived from the SAME domain engines the real app's session runs,
+// rather than a hand-typed expectation that could silently drift from either.
+const roundThru = (n: number, withCorrection: boolean): RoundState => {
+  const events = playGoldenRoundLog(fixtureLinks18, players, [fourball, skins], truncate(n), withCorrection ? corrections : [], false);
+  return reduceRound(events);
+};
+
+// The fourball-match chip/digest line at hole n (with or without the h9 correction folded in).
+export const describeFourballAt = (n: number, withCorrection: boolean): string => {
+  const round = roundThru(n, withCorrection);
+  return describeGame(scoreGame(fourball, round), round).line;
+};
+
+// The skins chip/digest line at hole n (with or without the h9 correction folded in) — this
+// is what lets the spec assert B's stale offline view (thru 12, correction withheld, since B
+// never received it) and A's/B's post-reconnect refold (thru 12, correction applied) without
+// either being a hand-typed string.
+export const describeSkinsAt = (n: number, withCorrection: boolean): string => {
+  const round = roundThru(n, withCorrection);
+  return describeGame(scoreGame(skins, round), round).line;
+};
+
+// name -> the deck's own golferId key ("ann"/"bo"/"cal"/"dee") for indexing into
+// fieldDeck18.scores — derived from fieldDeck18.players rather than a second hand-authored
+// name map, so a deck edit can't silently desync this from the actual roster.
+export const golferKeyFor = (name: string): GolferId => {
+  const found = players.find((p) => p.name === name);
+  if (!found) throw new Error(`no fieldDeck18 player named "${name}"`);
+  return found.golferId;
+};
+
+export const scoreFor = (name: string, hole: number): number | "picked-up" | "conceded" => {
+  const value = fieldDeck18.scores[golferKeyFor(name)]?.[hole - 1];
+  if (value === undefined || value === null) throw new Error(`fieldDeck18 has no hole ${hole} score for ${name}`);
+  return value;
+};
+
+export const correctedScore = (golferName: string, hole: number): number | "picked-up" | "conceded" => {
+  const found = corrections.find((c) => c.golfer === golferKeyFor(golferName) && c.hole === hole);
+  if (!found) throw new Error(`no fieldDeck18 correction for ${golferName} hole ${hole}`);
+  return found.score;
+};
+
+export const PLAYER_NAMES = ["Ann", "Bo", "Cal", "Dee"] as const;
+
+// --- UI interaction: the two-tap contract, everywhere -------------------------------------
+
+const scoreButtonText = (score: number | "picked-up" | "conceded"): string =>
+  score === "picked-up" ? "Picked up" : score === "conceded" ? "Conceded" : String(score);
+
+// A hole-complete digest overlay (role="status", fixed at the bottom of the viewport, z-40)
+// sits ABOVE the scorecard grid in stacking order — the grid itself only auto-dismisses it on
+// the NEXT score entry (a cells change), never on merely opening a cell's pad, so a lingering
+// digest can block the very next tap. Dismissed here before every entry, not just where a
+// digest is expected, since exactly which hole a batch collapses onto (Task 6: highest newly-
+// completed hole) isn't always the caller's to predict.
+const clearDigestIfPresent = async (page: Page): Promise<void> => {
+  const digest = page.getByRole("status", { name: /^After hole / });
+  if ((await digest.count()) === 0) return;
+  if (await digest.first().isVisible()) {
+    await digest.first().getByRole("button", { name: "Dismiss" }).click();
+  }
+};
+
+// The two-tap contract (product.md §9), literally: exactly two `.click()` calls take the grid
+// from idle to a posted score, and the pad closes on the second one — no separate confirm
+// step. Every score entry in the spec goes through this one function, so the M5 Task 7 brief's
+// "assert exactly two click() calls on one representative entry" holds for every entry, not
+// just the one the spec calls out explicitly.
+export const enterScore = async (page: Page, golferName: string, hole: number, score: number | "picked-up" | "conceded"): Promise<void> => {
+  await clearDigestIfPresent(page);
+
+  // exact: true throughout — "hole 1" is a substring of "hole 10".."hole 18" (and the dialog's
+  // "hole 1" likewise), so a non-exact name match would resolve to every one of them at once.
+  const cell = page.getByRole("button", { name: `${golferName} hole ${hole}`, exact: true });
+  await cell.click(); // tap 1
+
+  const dialog = page.getByRole("dialog", { name: `Score for ${golferName}, hole ${hole}`, exact: true });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: scoreButtonText(score), exact: true }).click(); // tap 2
+
+  await expect(dialog).toBeHidden(); // no confirm step: the pad closes on the posting tap itself
+
+  // The cell's rendered text is dots (●, non-digit) + the score glyph + an optional net digit,
+  // concatenated with no separators (e.g. "●65" — 1 dot, gross 6, net 5) — for a numeric score
+  // (always exactly one digit; ScorePad only ever offers 1-9), matching on "the first digit in
+  // the text" is what keeps this from a false-positive match against the net span's own digit
+  // (e.g. posting 7 with 2 dots renders net 5, so a bare `toContainText("5")` would wrongly
+  // pass even though 5 was never the posted score — but net can never be the FIRST digit).
+  if (score === "picked-up") await expect(cell).toContainText("PU");
+  else if (score === "conceded") await expect(cell).toContainText("CN");
+  else await expect(cell).toHaveText(new RegExp(`^\\D*${score}`));
+};
+
+// --- Setup: waiting on cross-context participant/game propagation --------------------------
+
+// Waits until `name` has propagated into this page's own folded round state (via WS/pull) —
+// needed before driving a <select> whose <option>s come from state.participants (e.g.
+// AddGameForm's side pickers), since Cal/Dee joined out-of-browser and their
+// participant-joined events reach context A asynchronously.
+export const waitForParticipant = async (page: Page, name: string): Promise<void> => {
+  await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+};
+
+// WS is delivery sugar, not the correctness path (architecture.md §3) — this session has no
+// periodic pull, so if a push is ever silently lost, the ONLY thing that recovers a live tab is
+// the same user-visible "Sync now" affordance StatusChrome ships (session/useRoundSession.ts's
+// own connect()+sync()). Races the awaited heading against the offline banner appearing first;
+// if the banner wins, taps Sync now (exactly what a real golfer would do) and then waits for the
+// heading normally. Used for the round's finalize — the one WS-arrival wait in this spec with
+// enough elapsed real time and backend work (settleRound + the archive write) for a rare
+// delivery hiccup to matter.
+export const waitForFinalOrRecover = async (page: Page): Promise<void> => {
+  const finalHeading = page.getByRole("heading", { name: "Final results" });
+  const offlineBanner = page.getByRole("status").filter({ hasText: "Offline" });
+
+  const bannerFirst = await Promise.race([
+    finalHeading.waitFor({ state: "visible", timeout: 45_000 }).then(() => false),
+    offlineBanner.waitFor({ state: "visible", timeout: 45_000 }).then(() => true),
+  ]);
+
+  if (bannerFirst) {
+    await page.getByRole("button", { name: "Sync now" }).click();
+  }
+  await expect(finalHeading).toBeVisible({ timeout: 15_000 });
+};
+
+// <select>s only, never getByLabel — Playwright's getByLabel match text for a <label> wrapping
+// a <select> includes the currently-DISPLAYED option's own text (e.g. "CourseFixture Links",
+// the label's own text concatenated with the collapsed dropdown's visible value), not just the
+// label's literal text, so an exact match against just "Course" finds nothing and a substring
+// match over-matches (e.g. "Course" also substring-matches "Course handicap"). getByRole's
+// accessible-name computation for the CONTROL itself doesn't have this contamination — the
+// combobox's own name is cleanly "Course", excluding its own displayed option text.
+export const gameKindSelect = (page: Page) => page.getByRole("combobox", { name: "Kind", exact: true });
+
+export const addFourballGame = async (
+  page: Page,
+  sides: { readonly a1: string; readonly a2: string; readonly b1: string; readonly b2: string },
+): Promise<void> => {
+  await gameKindSelect(page).selectOption({ value: "fourball-match" });
+  await page.getByRole("combobox", { name: "Side A – Player 1", exact: true }).selectOption({ label: sides.a1 });
+  await page.getByRole("combobox", { name: "Side A – Player 2", exact: true }).selectOption({ label: sides.a2 });
+  await page.getByRole("combobox", { name: "Side B – Player 1", exact: true }).selectOption({ label: sides.b1 });
+  await page.getByRole("combobox", { name: "Side B – Player 2", exact: true }).selectOption({ label: sides.b2 });
+  await page.getByRole("button", { name: "Add game" }).click();
+};
+
+export const addSkinsGame = async (page: Page, names: readonly string[]): Promise<void> => {
+  await gameKindSelect(page).selectOption({ value: "skins" });
+  const group = page.getByRole("group", { name: "Players" });
+  for (const name of names) {
+    await group.getByLabel(name, { exact: true }).check();
+  }
+  await page.getByRole("button", { name: "Add game" }).click();
+};
+
+// StandingsHeader's chip text is the CONCATENATION of two adjacent <span>s (title, line) with
+// no separating whitespace in the DOM — using the computed accessible NAME (which may insert
+// its own separator depending on the browser's accname algorithm) would be a fragile way to
+// assert on it. `.filter({ hasText })` + raw textContent-based matchers sidestep that.
+export const chip = (page: Page, titlePrefix: string) => page.getByRole("tab").filter({ hasText: titlePrefix });

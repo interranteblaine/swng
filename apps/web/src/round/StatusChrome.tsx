@@ -11,6 +11,11 @@ export interface StatusChromeProps {
   // holds.
   readonly rejected: readonly RejectedOp[];
   readonly participants: readonly Participant[];
+  // Re-triggers the session's connect()+sync() (session/useRoundSession.ts's own doc comment:
+  // the client SDK has no reconnect timer — a caller that wants to reconnect calls connect()
+  // again). This button is the only user-visible way to resume after coming back online; it
+  // lives beside the offline banner it's paired with, not as a separate always-there control.
+  readonly onReconnect: () => void;
 }
 
 const nameFor = (participants: readonly Participant[], golfer: GolferId): string => participants.find((p) => p.golferId === golfer)?.name ?? golfer;
@@ -28,7 +33,7 @@ const describeRejection = (participants: readonly Participant[], rejected: Rejec
 // IS the feature, not an error state), a pending badge that drains as the outbox does, and
 // rejected ops surfaced twice — a dismissible toast (so it doesn't nag forever) plus a
 // persistent row per op (so a rejection is never silently lost while it's still in memory).
-export function StatusChrome({ connected, pending, rejected, participants }: StatusChromeProps) {
+export function StatusChrome({ connected, pending, rejected, participants, onReconnect }: StatusChromeProps) {
   const [toastDismissed, setToastDismissed] = useState(false);
   const seenCountRef = useRef(rejected.length);
 
@@ -42,9 +47,12 @@ export function StatusChrome({ connected, pending, rejected, participants }: Sta
   return (
     <div className="flex flex-col gap-2 p-3 text-slate-100">
       {!connected && (
-        <p role="status" className="rounded-md bg-amber-950 px-3 py-2 text-sm text-amber-200">
-          Offline — scores queue and sync when signal returns.
-        </p>
+        <div role="status" className="flex items-center justify-between gap-2 rounded-md bg-amber-950 px-3 py-2 text-sm text-amber-200">
+          <p>Offline — scores queue and sync when signal returns.</p>
+          <button type="button" onClick={onReconnect} className="min-h-8 shrink-0 rounded-md bg-amber-900 px-2 text-xs font-medium">
+            Sync now
+          </button>
+        </div>
       )}
 
       {pending > 0 && (

@@ -16,6 +16,7 @@ export interface ScriptedTransport extends RoundTransport {
   readonly log: readonly RoundEvent[];
   offline: boolean;
   socketCloseCalls: number;
+  socketOpenCalls: number; // proves connect()'s own idempotency (session.ts: "if (connectedFlag) return")
 }
 
 export const createScriptedTransport = (seed: readonly RoundEvent[]): ScriptedTransport => {
@@ -27,6 +28,7 @@ export const createScriptedTransport = (seed: readonly RoundEvent[]): ScriptedTr
     log,
     offline: false,
     socketCloseCalls: 0,
+    socketOpenCalls: 0,
     push: async (event) => {
       if (transport.offline) throw new TransportError("network");
       const existing = log.find((logged) => logged.opId === event.opId);
@@ -43,6 +45,7 @@ export const createScriptedTransport = (seed: readonly RoundEvent[]): ScriptedTr
       return { events, nextSeq: maxSeq };
     },
     openSocket: (onEvents, onClose, onOpen) => {
+      transport.socketOpenCalls += 1;
       socketListener = { onEvents, onClose };
       onOpen?.();
       return () => {

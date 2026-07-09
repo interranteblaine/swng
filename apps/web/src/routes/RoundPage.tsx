@@ -143,7 +143,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     // Destructured so useCallback's deps list a stable function reference (sync's own
     // useCallback([]) in useRoundSession.ts) rather than the whole `session` object, which is
     // a fresh literal every render (snapshot spread) and would defeat memoization entirely.
-    const { sync } = session;
+    const { sync, connect } = session;
     const onFinalize = useCallback(async () => {
       const response = await finalizeRound(roundId, credential.token);
       setFinalizeResponse(response);
@@ -153,6 +153,16 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
       // tick, so the live→ResultsView swap below follows almost immediately.
       await sync();
     }, [roundId, credential.token, sync]);
+
+    // StatusChrome's "Sync now" button: connect() re-opens the socket if it dropped (a no-op
+    // otherwise — session.ts's own idempotency), then sync() explicitly pushes+pulls once,
+    // through the same serialized gate as every other trigger, so it coalesces onto whatever
+    // pass connect()'s own opportunistic sync may already have started rather than running
+    // twice.
+    const reconnect = useCallback(() => {
+      connect();
+      void sync();
+    }, [connect, sync]);
 
     // session.state is only guaranteed once hydrated() is true (RoundSessionView's own
     // contract, mirroring @swng/client's render guard) — checked together so TS narrows
@@ -171,7 +181,13 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
 
     return (
       <main className="min-h-screen bg-slate-950">
-        <StatusChrome connected={session.connected} pending={session.pending} rejected={session.rejected} participants={session.state.participants} />
+        <StatusChrome
+          connected={session.connected}
+          pending={session.pending}
+          rejected={session.rejected}
+          participants={session.state.participants}
+          onReconnect={reconnect}
+        />
         {isFinal ? (
           <ResultsView state={session.state} games={session.games} response={finalizeResponse} />
         ) : (

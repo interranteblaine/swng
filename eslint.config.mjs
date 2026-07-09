@@ -104,4 +104,13 @@ export default [
       "react-hooks/exhaustive-deps": "warn",
     },
   },
+  {
+    // scripts/webEnv.mjs is a plain Node script (run via `node scripts/webEnv.mjs`, never
+    // bundled) — it's the one place in the repo that's actually plain JS instead of TS, so
+    // it needs the Node globals TS's own lib/types normally supply implicitly elsewhere.
+    files: ["apps/web/scripts/**/*.mjs"],
+    languageOptions: {
+      globals: { process: "readonly", console: "readonly", URL: "readonly" },
+    },
+  },
 ];

@@ -211,6 +211,31 @@ action ≤ 2 taps.
   `session.test.ts`'s `buildServerLog`) — extract it to a shared spot on the next touch to
   either file, rather than letting a third copy accrete.
 
+**M5 gate — as executed (Task 7):** `apps/web/e2e/fieldTest.spec.ts` (`pnpm e2e:field`,
+Playwright) plays the deck in `@swng/domain`'s `fieldDeck18`/`fixtureLinks18`
+(`packages/domain/src/scoring/golden/fieldDeck18.ts` — fourball Ann+Bo vs Cal+Dee closing
+2&1, skins 0/7/0/8 with 3 carried out) through the real UI, two Chromium contexts against the
+deployed `swng-beta` stack (`playwright.config.ts`'s `webServer` runs
+`scripts/webEnv.mjs && vite build && vite preview`). Expected UI strings are derived, not
+hand-copied: the spec folds the deck's own scores/corrections through `reduceRound` +
+`scoreGame` and reads the result back through the app's own `describeGame`
+(`apps/web/e2e/support.ts`), so a UI wording change and a deck change can't silently drift
+apart. Per-tab identity: each Playwright `BrowserContext` is one browser tab in the M4→M5
+handoff's sense, so `tabDeviceId()`'s per-tab `sessionStorage` id already gives contexts A/B
+distinct `deviceId`s with no test-side plumbing. Cal and Dee join over a direct HTTP fetch
+from the spec (`joinRoundDirect`), not a third browser context — score-for-anyone makes their
+own tabs unnecessary, and joining them through context A's browser would overwrite Ann's
+`swng:credential:<roundId>` entry (one credential per round per browser, not per golfer).
+Debugging finding: Chromium's `context.setOffline(true)` blocks new HTTP/WS connections but
+does **not** close an already-open WebSocket, so B's socket needed an explicit
+`routeWebSocket(...).close()` to produce the client-visible disconnect (offline banner, the
+"Sync now" reconnect affordance) a real dropped connection would — see the spec's own
+`beforeAll` comment. A proxied connection was also observed to occasionally die silently late
+in a run without firing the page's `onclose` (no periodic pull in this client to notice and
+recover on its own); `waitForFinalOrRecover` races the finalize heading against the offline
+banner and taps "Sync now" if the banner wins — the same recovery a real golfer has, not a
+hidden retry. Gate met: 3 consecutive green `pnpm e2e:field` runs (fresh round each time).
+
 ### M6 — Courses
 
 **Goal:** real courses replace fixtures; course data becomes a product surface.

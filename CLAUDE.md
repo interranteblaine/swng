@@ -26,6 +26,8 @@ pnpm test                 # Run all package tests (hermetic)
 pnpm -F @swng/domain test # Run a single package's tests
 pnpm test:contract        # DynamoDB adapter contract tests (DynamoDB Local under Java; NOT in validate)
 pnpm e2e:beta             # E2E gate against the deployed beta stack (AWS creds; NOT in validate)
+pnpm e2e:field            # Two-browser field-test gate against beta (Playwright; AWS creds; NOT in validate)
+pnpm -F @swng/web dev     # Web dev server (Vite; needs apps/web/.env.local — see scripts/webEnv.mjs)
 pnpm deploy:beta          # CDK deploy of swng-beta (profile swng)
 ```
 

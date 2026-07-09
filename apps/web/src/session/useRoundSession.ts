@@ -14,6 +14,12 @@ export interface RoundSessionView {
   readonly connected: boolean;
   recordScore(golferId: GolferId, hole: number, result: HoleResult): void;
   sync(): Promise<void>;
+  // Re-opens the socket (idempotent; a no-op if already connected) and fires an immediate
+  // catch-up sync — the client SDK has no reconnect timer ("a caller that wants to reconnect
+  // calls connect() again," session.ts's own doc comment), so this is the only thing that
+  // resumes a session after connected flips false (e.g. StatusChrome's "Sync now" button,
+  // wired after the device's network comes back).
+  connect(): void;
 }
 
 // What createRoundSession needs to construct THIS round's session, resolved from a roundId
@@ -147,7 +153,11 @@ export const createUseRoundSession = (resolveSessionConfig: ResolveSessionConfig
 
     const sync = useCallback(() => sessionRef.current?.sync() ?? Promise.resolve(), []);
 
-    return { ...snapshot, recordScore, sync };
+    // Safe no-op on an idle view (no session yet/no credential) — same idle-tolerance
+    // precedent as recordScore/sync above.
+    const connect = useCallback(() => sessionRef.current?.connect(), []);
+
+    return { ...snapshot, recordScore, sync, connect };
   };
 };
 

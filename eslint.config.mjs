@@ -1,12 +1,16 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
+import reactHooks from "eslint-plugin-react-hooks";
 
 // The layer direction (domain → application → adapters → entry points) is enforced here as
 // allow-lists: each layer block bans every import that would point the dependency arrow
 // outward. Naming rules are NOT lint-enforced — whether a name tells the truth is a review
-// judgment, not a string property.
-const layer = (dirGlob, patterns) => ({
-  files: [`packages/${dirGlob}/src/**/*.ts`],
+// judgment, not a string property. `pathGlob` is the package's full path from the repo root
+// (e.g. "packages/domain", "apps/web") so this one helper covers both packages/* and apps/*;
+// `extensions` defaults to source-only ".ts" and widens to include ".tsx" for the one
+// consumer (apps/web) that has React components.
+const layer = (pathGlob, patterns, extensions = ["ts"]) => ({
+  files: [`${pathGlob}/src/**/*.${extensions.length === 1 ? extensions[0] : `{${extensions.join(",")}}`}`],
   rules: {
     "no-restricted-imports": ["error", { patterns }],
   },
@@ -38,24 +42,24 @@ export default [
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
-  layer("domain", [
+  layer("packages/domain", [
     { group: ["@swng/*"], message: "domain imports nothing." },
     NODE,
     AWS,
   ]),
-  layer("contracts", [
+  layer("packages/contracts", [
     { group: ["@swng/*", "!@swng/domain"], message: "contracts may import only @swng/domain." },
     NODE,
     AWS,
   ]),
-  layer("application", [
+  layer("packages/application", [
     {
       group: ["@swng/adapters-*", "@swng/lambda", "@swng/client"],
       message: "application depends on the ports it defines, never on adapters, entries, or the client.",
     },
     AWS,
   ]),
-  layer("client", [
+  layer("packages/client", [
     {
       group: ["@swng/*", "!@swng/domain", "!@swng/contracts"],
       message: "client depends on domain + contracts only.",
@@ -63,14 +67,41 @@ export default [
     NODE,
     AWS,
   ]),
-  layer("adapters-*", [
+  layer("packages/adapters-*", [
     {
       group: ["@swng/*", "!@swng/domain", "!@swng/contracts", "!@swng/application"],
       message: "adapters implement application's ports; they import only domain, contracts, and application.",
     },
   ]),
-  layer("lambda", [
+  layer("packages/lambda", [
     { group: ["@swng/client"], message: "server entries never import the client SDK." },
     AWS,
   ]),
+  layer(
+    "apps/web",
+    [
+      {
+        group: ["@swng/*", "!@swng/domain", "!@swng/contracts", "!@swng/client"],
+        message: "the web app depends on domain, contracts, and the client SDK only — never application, adapters, or lambda directly.",
+      },
+      NODE,
+      AWS,
+    ],
+    ["ts", "tsx"],
+  ),
+  {
+    // eslint-plugin-react-hooks@7's own `configs.recommended-latest`/`configs.recommended`
+    // ship a legacy `plugins: ["react-hooks"]` array — flat config rejects that outright
+    // (ESLint: "plugins" must be an object) — so it can't be spread in directly. Wiring the
+    // plugin object plus just the two classic "essentials" rules (not the newer, stricter
+    // React Compiler rule bundle v7 also ships, e.g. purity/immutability/gating — untried
+    // against this codebase and not what "essentials" means here) is what actually drops in
+    // trivially.
+    files: ["apps/web/src/**/*.{ts,tsx}"],
+    plugins: { "react-hooks": reactHooks },
+    rules: {
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
+    },
+  },
 ];

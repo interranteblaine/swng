@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    // Vite bundles this app directly from source (no tsc emit step) — "ESNext" + "bundler"
+    // resolution matches how Vite/esbuild actually resolve modules (extensionless relative
+    // imports, package.json "exports"), unlike the rest of the workspace's NodeNext + explicit
+    // ".js" convention, which exists for packages that ship compiled output. Scoped to this
+    // app only.
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"]
+  },
+  "include": ["src", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
+}

@@ -14,3 +14,15 @@ catalog:
   "@aws-sdk/lib-dynamodb": ^3.700.0
   "@aws-sdk/client-apigatewaymanagementapi": ^3.700.0
   "@types/aws-lambda": ^8.10.0
+  react: ^19.1.0
+  react-dom: ^19.1.0
+  "react-router": ^7.6.0
+  vite: ^7.0.0
+  "@vitejs/plugin-react": ^5.0.0
+  tailwindcss: ^4.1.0
+  "@tailwindcss/vite": ^4.1.0
+  "@testing-library/react": ^16.3.0
+  happy-dom: ^18.0.0
+  "@playwright/test": ^1.54.0
+  "@types/react": ^19
+  "@types/react-dom": ^19

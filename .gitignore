@@ -10,6 +10,11 @@ build
 # Caching
 .vite/
 
+# Playwright artifacts (apps/web e2e:field)
+test-results/
+playwright-report/
+playwright/.cache/
+
 # Logs
 logs
 *.log

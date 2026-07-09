@@ -74,7 +74,9 @@ game), two-tap score-for-anyone entry (picked-up/conceded first-class; the two-t
 as a feature, a between-holes digest (multi-hole catch-up batches collapse to one card),
 and finalize → archived card (ResultsView renders the local fold; a structural test pins
 its agreement with the server's `settleRound`). `useSyncExternalStore` over one seam
-(`useRoundSession`); `describeGame` is the only game-kind switch site in the UI. Gated by
+(`useRoundSession`); `describeGame` is the sole site that renders per-kind game standings
+(`dots.ts` holds the sanctioned `GameConfig` allocation switch; SetupPanel builds configs
+per kind). Gated by
 `pnpm e2e:field`: a two-browser Playwright field test against beta playing the full
 18-hole `fieldDeck18` (engine-pinned oracle exported from `@swng/domain`) with an offline
 stretch, a mid-round correction that moves a 5-skin pot, and finalize parity across

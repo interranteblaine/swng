@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cellKey, deviceId, fieldDeck18, fixtureLinks, fixtureLinks18, fixtureWhite18, golferId, opId, roundId } from "@swng/domain";
-import type { GameState, GolferId, HoleResult, Participant, RoundState, ScoreCell } from "@swng/domain";
+import { cellKey, deviceId, fieldDeck18, fixtureLinks, fixtureLinks18, fixtureWhite18, gameId, golferId, opId, roundId } from "@swng/domain";
+import type { GameConfig, GameState, GolferId, HoleResult, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { gameDots } from "./dots";
 import { ScorecardGrid } from "./ScorecardGrid";
 
@@ -143,6 +143,45 @@ describe("ScorecardGrid — dots", () => {
     const cell = cellButton("Ann", 2);
     expect(within(cell).getByText("5")).toBeTruthy(); // gross
     expect(within(cell).getByText("4")).toBeTruthy(); // net = 5 - 1 dot
+  });
+
+  it("a player whose relative playing handicap is 19+ gets a second dot on the SI-1 hole, but only one on SI-18", () => {
+    // singles-match plays full (100%) allowance and its dots are relative — chHigh - chLow —
+    // so a 19-course-handicap gap against a 0-handicap opponent lands Bo's relative playing
+    // handicap at 19: allocateStrokes' "one lap + 1 extra" rule (strokes.ts) puts that 19th
+    // stroke on the hardest hole (SI 1), the only hole on an 18-hole card that gets 2 dots.
+    const ann0 = participant(ANN, "Ann", "white", 0);
+    const bo19 = participant(BO, "Bo", "white", 19);
+    const singles: GameConfig = { kind: "singles-match", id: gameId("singles"), a: ANN, b: BO };
+    const state: RoundState = { id: roundId("round-4"), status: "live", card: fixtureLinks18, participants: [ann0, bo19], games: [singles], cells: {} };
+    const activeGame: GameState = { kind: "singles-match", id: singles.id, up: 0, thru: 0, remaining: 18, dormie: false };
+
+    render(<ScorecardGrid state={state} activeGame={activeGame} recordScore={vi.fn()} />);
+
+    const expectedBoDots = gameDots(singles, state.participants, fixtureLinks18).get(BO)!;
+    const si1Hole = fixtureWhite18.holes.find((h) => h.strokeIndex === 1)!;
+    const si18Hole = fixtureWhite18.holes.find((h) => h.strokeIndex === 18)!;
+    expect(expectedBoDots.get(si1Hole.number)).toBe(2);
+    expect(expectedBoDots.get(si18Hole.number)).toBe(1);
+
+    expect(cellButton("Bo", si1Hole.number).textContent).toMatch("●●");
+    expect(cellButton("Bo", si18Hole.number).textContent).toMatch("●");
+    expect(cellButton("Bo", si18Hole.number).textContent).not.toMatch("●●");
+  });
+});
+
+describe("ScorecardGrid — picked-up / conceded glyphs", () => {
+  it("a picked-up cell shows PU and a conceded cell shows CN, not a numeric gross", () => {
+    const state = twoPlayerState({
+      cells: {
+        [cellKey(ANN, 1)]: scoreCell({ kind: "picked-up" }, ANN),
+        [cellKey(BO, 1)]: scoreCell({ kind: "conceded" }, BO),
+      },
+    });
+    render(<ScorecardGrid state={state} activeGame={undefined} recordScore={vi.fn()} />);
+
+    expect(within(cellButton("Ann", 1)).getByText("PU")).toBeTruthy();
+    expect(within(cellButton("Bo", 1)).getByText("CN")).toBeTruthy();
   });
 });
 

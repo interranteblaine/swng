@@ -2,7 +2,7 @@ import { TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import type { OpId, RoundEvent, RoundId } from "@swng/domain";
-import type { AppendResult, EventJournal } from "@swng/application";
+import type { AppendOptions, AppendResult, EventJournal } from "@swng/application";
 import { evtSk, evtSkMax, opIdSk, roundPk } from "./keys.js";
 import { queryAllPages } from "./paginate.js";
 
@@ -117,7 +117,7 @@ export const createDynamoEventJournal = (config: {
   const { client, tableName, sleep = defaultSleep, random = Math.random } = config;
 
   return {
-    append: async (roundId: RoundId, events: readonly RoundEvent[]): Promise<AppendResult> => {
+    append: async (roundId: RoundId, events: readonly RoundEvent[], options?: AppendOptions): Promise<AppendResult> => {
       // Each event costs 2 TransactItems (the EVT Put + its OPID marker Put, see
       // attemptCommit above), and DynamoDB caps a single TransactWriteItems call at 100
       // items — so a batch of more than 50 events would exceed the cap and fail with a
@@ -128,6 +128,7 @@ export const createDynamoEventJournal = (config: {
       // future work, not a v1 gap.
       let pending = events;
       const duplicateOpIds: OpId[] = [];
+      const expectedHeadSeq = options?.expectedHeadSeq;
 
       for (let attempt = 0; pending.length > 0; attempt += 1) {
         if (attempt >= MAX_APPEND_ATTEMPTS) {
@@ -135,9 +136,25 @@ export const createDynamoEventJournal = (config: {
         }
 
         const head = await headSeq(client, tableName, roundId);
+        // A conditional append validates against ONE specific head, queried fresh right
+        // here — if it's already moved past `expectedHeadSeq`, something landed since the
+        // caller's settle-check read and this must fail now, not retry against the new head
+        // (eventJournal.ts's AppendOptions doc).
+        if (expectedHeadSeq !== undefined && head !== expectedHeadSeq) {
+          return { appended: [], duplicateOpIds: [], headSeqConflict: true };
+        }
+
         const outcome = await attemptCommit(client, tableName, roundId, pending, head);
 
         if ("committed" in outcome) return { appended: outcome.committed, duplicateOpIds };
+
+        if (expectedHeadSeq !== undefined) {
+          // Same single-shot rule as the stale-head check above: attemptCommit only lands
+          // here if the EVT slot it just tried lost a race (or a sibling in the batch did),
+          // meaning the head moved between the query above and this transaction — surface as
+          // a conflict rather than looping around to a new, unvalidated head.
+          return { appended: [], duplicateOpIds, headSeqConflict: true };
+        }
 
         // A duplicate-opId split needs no backoff — attemptCommit already told us definitively
         // which events landed elsewhere, so retrying the remainder isn't racing anyone. A pure

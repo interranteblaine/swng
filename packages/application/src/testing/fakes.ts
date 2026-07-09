@@ -1,7 +1,7 @@
 import type { Course, CourseId, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
 import { courseNameKey } from "@swng/domain";
 import { ApplicationError } from "../errors.js";
-import type { AppendResult, EventJournal } from "../ports/eventJournal.js";
+import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
 import type { Broadcast } from "../ports/broadcast.js";
 import type { Clock } from "../ports/clock.js";
 import type { CourseStore } from "../ports/courseStore.js";
@@ -26,8 +26,16 @@ export const createInMemoryJournal = (): EventJournal => {
   const seenOpIds = new Map<RoundId, Set<OpId>>();
 
   return {
-    append: async (roundId: RoundId, events: readonly RoundEvent[]): Promise<AppendResult> => {
+    append: async (roundId: RoundId, events: readonly RoundEvent[], options?: AppendOptions): Promise<AppendResult> => {
       const stored = byRound.get(roundId) ?? [];
+      // Contiguous seq from 1 means the current head IS the stored length — same fact
+      // createDynamoEventJournal's headSeq query answers with a real Query, this fake
+      // answers with the array it already has.
+      const headSeq = stored.length;
+      if (options?.expectedHeadSeq !== undefined && options.expectedHeadSeq !== headSeq) {
+        return { appended: [], duplicateOpIds: [], headSeqConflict: true };
+      }
+
       const seen = seenOpIds.get(roundId) ?? new Set<OpId>();
       const appended: RoundEvent[] = [];
       const duplicateOpIds: OpId[] = [];

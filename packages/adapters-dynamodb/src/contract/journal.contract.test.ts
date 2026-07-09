@@ -123,6 +123,45 @@ describe("createDynamoEventJournal", () => {
     expect(log).toEqual([]);
   });
 
+  // M6 Task 4 carry 2: AppendOptions.expectedHeadSeq — the conditional append finalizeRound
+  // uses to close the settle-check-vs-append race (eventJournal.ts's doc comment).
+  describe("append(..., { expectedHeadSeq })", () => {
+    it("succeeds when expectedHeadSeq matches the round's current head", async () => {
+      const journal = newJournal();
+      const id = roundId(randomUUID());
+
+      await journal.append(id, [makeEvent(1), makeEvent(2)]); // head is now 2
+
+      const result = await journal.append(id, [makeEvent(3)], { expectedHeadSeq: 2 });
+      expect(result.headSeqConflict).toBeFalsy();
+      expect(result.appended.map((event) => event.seq)).toEqual([3]);
+    });
+
+    it("returns headSeqConflict and appends nothing when expectedHeadSeq is stale", async () => {
+      const journal = newJournal();
+      const id = roundId(randomUUID());
+
+      await journal.append(id, [makeEvent(1), makeEvent(2)]); // head is now 2
+
+      // Validated against a head of 1, but the real head has already moved to 2 — the exact
+      // shape of the race finalizeRound.ts's carry 2 closes.
+      const result = await journal.append(id, [makeEvent(3)], { expectedHeadSeq: 1 });
+      expect(result).toEqual({ appended: [], duplicateOpIds: [], headSeqConflict: true });
+
+      const log = await journal.read(id, 0);
+      expect(log.map((event) => event.seq)).toEqual([1, 2]); // unchanged — nothing landed
+    });
+
+    it("a conditional append against an empty round (expectedHeadSeq: 0) succeeds", async () => {
+      const journal = newJournal();
+      const id = roundId(randomUUID());
+
+      const result = await journal.append(id, [makeEvent(1)], { expectedHeadSeq: 0 });
+      expect(result.headSeqConflict).toBeFalsy();
+      expect(result.appended.map((event) => event.seq)).toEqual([1]);
+    });
+  });
+
   // Regression for task-6-report.md: 27 fully-concurrent single-event appends (one journal
   // instance per call, matching 27 separate Lambda invocations racing one round's head slot,
   // as in the M3 E2E deck's RecordScore burst) must ALL converge — no throw, seqs exactly

@@ -1,7 +1,7 @@
 // The package's one public interface (conventions §2) — consumers (adapters, lambda,
 // their tests) import "@swng/application", never a deep path.
 
-export type { AppendResult, EventJournal } from "./ports/eventJournal.js";
+export type { AppendOptions, AppendResult, EventJournal } from "./ports/eventJournal.js";
 export type { RoundStore } from "./ports/roundStore.js";
 export type { CourseStore } from "./ports/courseStore.js";
 export type { Broadcast } from "./ports/broadcast.js";

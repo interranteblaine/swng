@@ -1,9 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { createMemoryOutboxStore, TransportError } from "@swng/client";
-import type { RoundTransport } from "@swng/client";
+import { createMemoryOutboxStore } from "@swng/client";
 import { cellKey, deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { GameConfig, OpId, RoundEvent } from "@swng/domain";
+import { createScriptedTransport, stampSeq } from "../testSupport/scriptedTransport";
 import { createUseRoundSession } from "./useRoundSession";
 import type { ResolveSessionConfig } from "./useRoundSession";
 
@@ -11,13 +11,10 @@ const ROUND_ID = roundId("round-1");
 const ANN_ID = golferId("ann");
 const SERVER_DEVICE = deviceId("server");
 
-// Mirrors packages/client/src/session.test.ts's buildServerLog/createScriptedTransport,
-// trimmed to what this seam test needs. Duplicated deliberately, not extracted: @swng/client
-// doesn't publicly export the domain-event-building helpers (only RoundTransport's TYPE,
-// used here structurally), and apps/web may import only @swng/client's public surface (the
-// eslint layer rule) — see docs/implementation-plan.md's M5 handoff note, which already
-// flags this exact duplication (this file makes a third copy) as a future extraction, not
-// this task's job.
+// This scenario (creation + one join + start + one stableford game) is specific to this
+// file's tests, unlike createScriptedTransport (the generic transport plumbing, shared via
+// ../testSupport/scriptedTransport since every apps/web spec needing a live session needs
+// one) — every spec builds its own server log tailored to what it's asserting.
 const buildServerLog = (): RoundEvent[] => {
   let wallMs = 1_000;
   const nextHlc = () => ({ wallMs: wallMs++, counter: 0, deviceId: SERVER_DEVICE });
@@ -30,49 +27,7 @@ const buildServerLog = (): RoundEvent[] => {
     { kind: "round-started", authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "game-added", config: stableford, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
   ];
-  return events.map((event, index) => ({ ...event, seq: index + 1 }));
-};
-
-interface ScriptedTransport extends RoundTransport {
-  readonly log: readonly RoundEvent[];
-  offline: boolean;
-  socketCloseCalls: number;
-}
-
-const createScriptedTransport = (seed: readonly RoundEvent[]): ScriptedTransport => {
-  const log: RoundEvent[] = [...seed];
-  let nextSeq = log.length + 1;
-  let socketListener: { onEvents: (events: readonly RoundEvent[]) => void; onClose: () => void } | undefined;
-
-  const transport: ScriptedTransport = {
-    log,
-    offline: false,
-    socketCloseCalls: 0,
-    push: async (event) => {
-      if (transport.offline) throw new TransportError("network");
-      const existing = log.find((logged) => logged.opId === event.opId);
-      if (existing) return { seq: existing.seq, duplicate: true };
-      const stamped: RoundEvent = { ...event, seq: nextSeq };
-      nextSeq += 1;
-      log.push(stamped);
-      return { seq: stamped.seq, duplicate: false };
-    },
-    pull: async (sinceSeq) => {
-      if (transport.offline) throw new TransportError("network");
-      const events = log.filter((event) => (event.seq ?? 0) > sinceSeq);
-      const maxSeq = events.reduce((max, event) => Math.max(max, event.seq ?? 0), sinceSeq);
-      return { events, nextSeq: maxSeq };
-    },
-    openSocket: (onEvents, onClose, onOpen) => {
-      socketListener = { onEvents, onClose };
-      onOpen?.();
-      return () => {
-        transport.socketCloseCalls += 1;
-        if (socketListener?.onEvents === onEvents) socketListener = undefined;
-      };
-    },
-  };
-  return transport;
+  return stampSeq(events);
 };
 
 describe("useRoundSession", () => {

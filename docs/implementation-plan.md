@@ -152,10 +152,16 @@ wire, not inventing a new fixture.
 
 **Tasks:**
 1. HTTP client + WS subscription from `contracts` types.
-2. `createRoundSession(...)`: optimistic local append reduced through **the same
-   `@swng/domain`** reducers; `opId` generation.
+2. `createRoundSession(config)`: optimistic local append reduced through **the same
+   `@swng/domain`** reducers; `opId` generation. Returns the session object itself (`state()`,
+   `games()`, `recordScore()`, `sync()`, `connect()`/`disconnect()`, `pending()`/`rejected()`,
+   `onChange()`, `close()`) — sessions do not auto-sync on construction; the caller drives
+   `connect()`/`sync()` explicitly.
 3. Outbox queue + reconnect protocol: push pending (deduped by `opId`), pull since `seq`,
-   HLC merge on refold; queue persistence behind a storage port (memory + IndexedDB).
+   HLC merge on refold; queue persistence behind a storage port (memory + IndexedDB). The full
+   HLC (not just wall-clock) is the merge key, with an explicit receive rule: observing a
+   remote hlc floors the local clock source at it, so a correction authored on a skewed-behind
+   phone still wins the LWW register it corrects once that phone's next op is stamped.
 4. Convergence simulation: N virtual devices, randomized offline windows, corrections,
    duplicate/out-of-order delivery — every interleaving converges to the sequential oracle
    (`client result === server result`).
@@ -163,7 +169,11 @@ wire, not inventing a new fixture.
 **Produces:** `createRoundSession` — the only API the web app scores through.
 
 **Gate:** parity suite green; kill-network integration test (queue, reconnect, converge)
-green against beta.
+green against beta. As executed: the convergence simulation
+(`packages/client/src/convergence.properties.test.ts`) plus a kill-network scenario against
+the deployed beta stack (`e2e/syncSession.e2e.test.ts` — two real sessions, one goes dark
+mid-round and queues its whole card offline, network restored, both converge on the M2 golden
+stableford numbers over the real HTTP + WS transport).
 
 ### M5 — The Round on the phone
 

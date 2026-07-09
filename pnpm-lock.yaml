@@ -93,6 +93,9 @@ importers:
 
   e2e:
     dependencies:
+      '@swng/client':
+        specifier: workspace:*
+        version: link:../packages/client
       '@swng/contracts':
         specifier: workspace:*
         version: link:../packages/contracts

@@ -213,7 +213,7 @@ adapters-apigateway  createApiGatewayBroadcast
 adapters-cognito  createCognitoIdentityProvider
 adapters-powertools  createPowertoolsLogger
 lambda            ONE package: entries http/, ws/, projector/, rebuild/; one composition root
-client            sync engine + SDK (browser build via tsup)
+client            sync engine + SDK (ESM build consumed by the web app's bundler)
 apps/web, apps/infra-cdk
 ```
 

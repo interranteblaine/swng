@@ -1,27 +1,40 @@
 import { describe, expect, it } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
-import { deviceId, fixtureLinks, opId } from "@swng/domain";
+import { deviceId, fixtureLinks, fixtureWhite, opId } from "@swng/domain";
 import {
   addGame,
+  addTeeSet,
   createCapturingBroadcast,
+  createCourse,
   createFixedClock,
+  createInMemoryCourseStore,
   createInMemoryJournal,
   createInMemoryRoundStore,
   createNullLogger,
   createSequentialIds,
   finalizeRound,
+  getCourse,
   joinRound,
+  peekRound,
   readEvents,
   recordScore,
+  searchCourses,
   startRound,
+  verifyTeeSet,
 } from "@swng/application";
 import {
   addGameResponseSchema,
+  addTeeSetResponseSchema,
+  createCourseResponseSchema,
   errorResponseSchema,
   finalizeRoundResponseSchema,
+  getCourseResponseSchema,
   joinRoundResponseSchema,
+  peekRoundResponseSchema,
   recordScoreResponseSchema,
+  searchCoursesResponseSchema,
   startRoundResponseSchema,
+  verifyTeeSetResponseSchema,
 } from "@swng/contracts";
 import { createHmacTokenIssuer } from "../auth/hmacTokenIssuer.js";
 import { buildRoutes } from "./routes.js";
@@ -70,6 +83,7 @@ const asStructured = (result: Awaited<ReturnType<ReturnType<typeof createDispatc
 const setup = () => {
   const journal = createInMemoryJournal();
   const store = createInMemoryRoundStore();
+  const courseStore = createInMemoryCourseStore();
   const broadcast = createCapturingBroadcast();
   const clock = createFixedClock(1_000);
   const ids = createSequentialIds("id");
@@ -83,6 +97,12 @@ const setup = () => {
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, store, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
+    peekRound: peekRound({ journal, store }),
+    createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
+    addTeeSet: addTeeSet({ courseStore, clock, logger }),
+    verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
+    getCourse: getCourse({ courseStore }),
+    searchCourses: searchCourses({ courseStore }),
   };
 
   const dispatcher = createDispatcher(buildRoutes(useCases), tokens, logger);
@@ -313,5 +333,133 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     );
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
+  });
+});
+
+// M6 Task 4: the course CRUD/search surface + the pre-join peek — all `auth: "none"`
+// (routes.ts's why-comment: identity is M7, rate-limiting/abuse is M9).
+describe("createDispatcher — course routes + peek (M6 Task 4)", () => {
+  it("drives create -> add a second tee -> verify -> get -> search over HTTP", async () => {
+    const { dispatcher } = setup();
+
+    const createResp = asStructured(
+      await dispatcher(
+        makeEvent({ method: "POST", path: "/courses", body: { name: "Casa Verde GC", tee: fixtureWhite, enteredBy: "Ann" } }),
+      ),
+    );
+    expect(createResp.statusCode).toBe(201);
+    const created = createCourseResponseSchema.parse(JSON.parse(createResp.body!));
+    expect(created.course.name).toBe("Casa Verde GC");
+
+    const blueTee = { ...fixtureWhite, name: "blue", rating: 73.1, slope: 132 };
+    const addTeeResp = asStructured(
+      await dispatcher(
+        makeEvent({
+          method: "POST",
+          path: `/courses/${created.course.courseId}/tees`,
+          body: { tee: blueTee, enteredBy: "Bo" },
+        }),
+      ),
+    );
+    expect(addTeeResp.statusCode).toBe(201);
+    const withTee = addTeeSetResponseSchema.parse(JSON.parse(addTeeResp.body!));
+    expect(withTee.course.card.teeSets.map((tee) => tee.name).sort()).toEqual(["blue", "white"]);
+
+    const verifyResp = asStructured(
+      await dispatcher(
+        makeEvent({
+          method: "POST",
+          path: `/courses/${created.course.courseId}/verify`,
+          body: { teeName: "white", verifierName: "Cal" },
+        }),
+      ),
+    );
+    expect(verifyResp.statusCode).toBe(200);
+    const verified = verifyTeeSetResponseSchema.parse(JSON.parse(verifyResp.body!));
+    expect(verified.course.teeSets.find((tee) => tee.name === "white")?.verifiedBy).toEqual(["Cal"]);
+
+    const getResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/courses/${created.course.courseId}` })));
+    expect(getResp.statusCode).toBe(200);
+    const fetched = getCourseResponseSchema.parse(JSON.parse(getResp.body!));
+    expect(fetched.course.courseId).toBe(created.course.courseId);
+
+    const searchResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses", query: { query: "Casa" } })));
+    expect(searchResp.statusCode).toBe(200);
+    const searched = searchCoursesResponseSchema.parse(JSON.parse(searchResp.body!));
+    expect(searched.courses.map((c) => c.name)).toEqual(["Casa Verde GC"]);
+  });
+
+  it("404s GET /courses/{courseId} for an unknown id — course-not-found", async () => {
+    const { dispatcher } = setup();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses/does-not-exist" })));
+    expect(resp.statusCode).toBe(404);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "course-not-found" });
+  });
+
+  it("400s GET /courses with no ?query= — invalid-request, never an empty-string search", async () => {
+    const { dispatcher } = setup();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses" })));
+    expect(resp.statusCode).toBe(400);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
+  });
+
+  it("400s a zod-invalid POST /courses body — invalid-request", async () => {
+    const { dispatcher } = setup();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", body: { name: "Casa Verde GC" } })));
+    expect(resp.statusCode).toBe(400);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
+  });
+
+  it("peeks a live round by join code — courseName + tee summaries, over HTTP", async () => {
+    const { dispatcher } = setup();
+    const startResp = asStructured(
+      await dispatcher(
+        makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+      ),
+    );
+    const started = startRoundResponseSchema.parse(JSON.parse(startResp.body!));
+
+    const peekResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek", query: { code: started.joinCode } })));
+    expect(peekResp.statusCode).toBe(200);
+    const peeked = peekRoundResponseSchema.parse(JSON.parse(peekResp.body!));
+    expect(peeked.courseName).toBe(fixtureLinks.courseName);
+  });
+
+  it("400s GET /rounds/peek with no ?code= — invalid-request", async () => {
+    const { dispatcher } = setup();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek" })));
+    expect(resp.statusCode).toBe(400);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
+  });
+
+  it("404s GET /rounds/peek with an unknown join code — bad-join-code, not a 401", async () => {
+    const { dispatcher } = setup();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek", query: { code: "ZZZZZZ" } })));
+    expect(resp.statusCode).toBe(404);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "bad-join-code" });
+  });
+
+  // The invariant routes.ts's own comment documents: GET /rounds/peek (2 path segments) must
+  // never be dispatched as GET /rounds/{roundId}/events (3 segments) with roundId bound to
+  // the literal string "peek". Proven here by calling peek with NO bearer token: the events
+  // route is `auth: "participant"` and would 401 without one (dispatch.ts's auth gate runs
+  // BEFORE any handler, so a wrong match would surface as 401, never reaching peekRound at
+  // all) — peek succeeding with 200 and the peekRound response shape is the proof it took
+  // the unauthenticated 2-segment route, not the participant-gated 3-segment one.
+  it("GET /rounds/peek never binds {roundId}=\"peek\" against the /rounds/{roundId}/events template", async () => {
+    const { dispatcher } = setup();
+    const startResp = asStructured(
+      await dispatcher(
+        makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+      ),
+    );
+    const started = startRoundResponseSchema.parse(JSON.parse(startResp.body!));
+
+    // No `token` — if this were (mis)matched to the participant-gated events route it would
+    // 401 (invalid-token), never reach peekRound.
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek", query: { code: started.joinCode } })));
+    expect(resp.statusCode).toBe(200);
+    const peeked = peekRoundResponseSchema.parse(JSON.parse(resp.body!));
+    expect(Object.keys(peeked).sort()).toEqual(["courseName", "teeSets"]);
   });
 });

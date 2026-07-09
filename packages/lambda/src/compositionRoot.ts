@@ -1,9 +1,28 @@
 import { randomUUID } from "node:crypto";
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import type { Clock, ConnectionRegistry, IdGenerator, Logger, TokenIssuer } from "@swng/application";
-import { addGame, finalizeRound, joinRound, readEvents, recordScore, startRound } from "@swng/application";
+import {
+  addGame,
+  addTeeSet,
+  createCourse,
+  finalizeRound,
+  getCourse,
+  joinRound,
+  peekRound,
+  readEvents,
+  recordScore,
+  searchCourses,
+  startRound,
+  verifyTeeSet,
+} from "@swng/application";
 import { createApiGatewayBroadcast, createManagementClient } from "@swng/adapters-apigateway";
-import { createDocumentClient, createDynamoConnectionRegistry, createDynamoEventJournal, createDynamoRoundStore } from "@swng/adapters-dynamodb";
+import {
+  createDocumentClient,
+  createDynamoConnectionRegistry,
+  createDynamoCourseStore,
+  createDynamoEventJournal,
+  createDynamoRoundStore,
+} from "@swng/adapters-dynamodb";
 import { createHmacTokenIssuer } from "./auth/hmacTokenIssuer.js";
 import { createDispatcher } from "./http/dispatch.js";
 import { buildRoutes } from "./http/routes.js";
@@ -49,10 +68,12 @@ export interface App {
 
 // Built ONCE at module scope by each entry (cold start), never re-instantiated per
 // invocation (conventions §3) — every dependency this Lambda deployment needs, wired from
-// env: TABLE_ROUNDS, TABLE_CONNECTIONS, TOKEN_SECRET, WS_ENDPOINT (apps/infra-cdk, M3 Task 5).
+// env: TABLE_ROUNDS, TABLE_CONNECTIONS, TABLE_CORE, TOKEN_SECRET, WS_ENDPOINT (apps/infra-cdk,
+// M3 Task 5 / M6 Task 4 — TABLE_CORE only reaches httpFn, see swngStack.ts).
 export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const tableRounds = requireEnv(env, "TABLE_ROUNDS");
   const tableConnections = requireEnv(env, "TABLE_CONNECTIONS");
+  const tableCore = requireEnv(env, "TABLE_CORE");
   const tokenSecret = requireEnv(env, "TOKEN_SECRET");
   const wsEndpoint = requireEnv(env, "WS_ENDPOINT");
 
@@ -64,6 +85,7 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const journal = createDynamoEventJournal({ client: documentClient, tableName: tableRounds });
   const store = createDynamoRoundStore({ client: documentClient, tableName: tableRounds });
   const registry = createDynamoConnectionRegistry({ client: documentClient, tableName: tableConnections });
+  const courseStore = createDynamoCourseStore({ client: documentClient, tableName: tableCore });
 
   const managementClient = createManagementClient(wsEndpoint);
   const broadcast = createApiGatewayBroadcast({ client: managementClient, connections: registry, logger });
@@ -77,6 +99,12 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, store, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
+    peekRound: peekRound({ journal, store }),
+    createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
+    addTeeSet: addTeeSet({ courseStore, clock, logger }),
+    verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
+    getCourse: getCourse({ courseStore }),
+    searchCourses: searchCourses({ courseStore }),
   };
 
   const dispatcher = createDispatcher(buildRoutes(useCases), tokens, logger);

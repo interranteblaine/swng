@@ -1,24 +1,43 @@
 import type { z } from "zod";
-import { roundId } from "@swng/domain";
-import type { RoundId } from "@swng/domain";
+import { courseId, roundId } from "@swng/domain";
+import type { CourseId, RoundId } from "@swng/domain";
 import type { ParticipantClaims } from "@swng/application";
 import type {
   AddGameRequest,
   AddGameResponse,
+  AddTeeSetRequest,
+  AddTeeSetResponse,
+  CreateCourseRequest,
+  CreateCourseResponse,
   EventsResponse,
   FinalizeRoundResponse,
+  GetCourseResponse,
   JoinRoundRequest,
   JoinRoundResponse,
+  PeekRoundResponse,
   RecordScoreRequest,
   RecordScoreResponse,
+  SearchCoursesResponse,
   StartRoundRequest,
   StartRoundResponse,
+  VerifyTeeSetRequest,
+  VerifyTeeSetResponse,
 } from "@swng/contracts";
-import { ContractError, addGameRequestSchema, joinRoundRequestSchema, recordScoreRequestSchema, startRoundRequestSchema } from "@swng/contracts";
+import {
+  ContractError,
+  addGameRequestSchema,
+  addTeeSetRequestSchema,
+  createCourseRequestSchema,
+  joinRoundRequestSchema,
+  recordScoreRequestSchema,
+  startRoundRequestSchema,
+  verifyTeeSetRequestSchema,
+} from "@swng/contracts";
 
-// The deps-applied use-case functions from Task 2 (application/src/rounds/*.ts), one per
-// route — the dispatcher is generic over this shape so it never imports application's use
-// cases directly; compositionRoot.ts is the only place that builds one.
+// The deps-applied use-case functions from Task 2/M6 Task 2 (application/src/rounds/*.ts,
+// application/src/courses/*.ts), one per route — the dispatcher is generic over this shape
+// so it never imports application's use cases directly; compositionRoot.ts is the only place
+// that builds one.
 export interface UseCases {
   startRound: (command: StartRoundRequest) => Promise<StartRoundResponse>;
   joinRound: (command: JoinRoundRequest) => Promise<JoinRoundResponse>;
@@ -26,6 +45,12 @@ export interface UseCases {
   recordScore: (claims: ParticipantClaims, command: RecordScoreRequest) => Promise<RecordScoreResponse>;
   finalizeRound: (claims: ParticipantClaims) => Promise<FinalizeRoundResponse>;
   readEvents: (id: RoundId, sinceSeq: number) => Promise<EventsResponse>;
+  peekRound: (code: string) => Promise<PeekRoundResponse>;
+  createCourse: (command: CreateCourseRequest) => Promise<CreateCourseResponse>;
+  addTeeSet: (id: CourseId, command: AddTeeSetRequest) => Promise<AddTeeSetResponse>;
+  verifyTeeSet: (id: CourseId, command: VerifyTeeSetRequest) => Promise<VerifyTeeSetResponse>;
+  getCourse: (id: CourseId) => Promise<GetCourseResponse>;
+  searchCourses: (query: string, limit?: number) => Promise<SearchCoursesResponse>;
 }
 
 // What a route handler sees once the dispatcher has matched the path, verified auth, and
@@ -62,6 +87,38 @@ const parseSinceSeq = (raw: string | undefined): number => {
     throw new ContractError("invalid-request", [`since: must be an integer, got "${raw}"`]);
   }
   return parsed;
+};
+
+// GET /courses?query=&limit= (M6 Task 4): searchCourses.ts's own doc comment anticipates
+// this exact rejection ("empty-after-trim queries are rejected at the route layer... before
+// this ever runs") — a missing or blank `query` is a 400 here, never an empty-string search
+// silently reaching the store.
+const parseSearchQuery = (raw: string | undefined): string => {
+  if (raw === undefined || raw.trim().length === 0) {
+    throw new ContractError("invalid-request", [`query: must be a non-empty string, got ${JSON.stringify(raw)}`]);
+  }
+  return raw;
+};
+
+// `limit` is optional (searchCourses.ts defaults and clamps it) — only its SHAPE is this
+// layer's job, same split as `since` above: reject a non-integer here rather than let
+// searchCourses' Math.trunc silently coerce "abc" into NaN and clamp that into MIN_LIMIT.
+const parseLimit = (raw: string | undefined): number | undefined => {
+  if (raw === undefined) return undefined;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) {
+    throw new ContractError("invalid-request", [`limit: must be an integer, got "${raw}"`]);
+  }
+  return parsed;
+};
+
+// GET /rounds/peek?code= — same "missing/blank is a 400, not an empty-string lookup" shape
+// as parseSearchQuery above.
+const parseJoinCode = (raw: string | undefined): string => {
+  if (raw === undefined || raw.trim().length === 0) {
+    throw new ContractError("invalid-request", [`code: must be a non-empty string, got ${JSON.stringify(raw)}`]);
+  }
+  return raw;
 };
 
 export const buildRoutes = (useCases: UseCases): readonly Route[] => [
@@ -107,6 +164,20 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     successStatus: 200,
     handler: async (ctx) => useCases.finalizeRound(ctx.claims!),
   },
+  // GET /rounds/peek must be matched BEFORE any /rounds/{roundId}/... template below it —
+  // the dispatcher (http/dispatch.ts) walks this array in order and returns the first match,
+  // so a 2-segment "/rounds/peek" and a 3-segment "/rounds/{roundId}/events" can never
+  // actually collide (matchPath rejects on segment-count mismatch before comparing
+  // literals/params — see dispatch.test.ts's "peek never binds {roundId}=\"peek\"" pin), but
+  // this route still lives ahead of every rounds/{roundId}/* template here so the table
+  // itself reads unambiguous, not just "happens to be safe by segment count today."
+  {
+    method: "GET",
+    path: "/rounds/peek",
+    auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — no participant exists to hold a token before joining.
+    successStatus: 200,
+    handler: async (ctx) => useCases.peekRound(parseJoinCode(ctx.query.code)),
+  },
   {
     method: "GET",
     path: "/rounds/{roundId}/events",
@@ -115,5 +186,43 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     // Every "participant" route's path template declares {roundId} (this table, by
     // construction), so the dispatcher's path match always populates it.
     handler: async (ctx) => useCases.readEvents(roundId(ctx.pathParams.roundId!), parseSinceSeq(ctx.query.since)),
+  },
+  {
+    method: "POST",
+    path: "/courses",
+    schema: createCourseRequestSchema,
+    auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
+    successStatus: 201,
+    handler: async (_ctx, body) => useCases.createCourse(body as CreateCourseRequest),
+  },
+  {
+    method: "POST",
+    path: "/courses/{courseId}/tees",
+    schema: addTeeSetRequestSchema,
+    auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
+    successStatus: 201,
+    handler: async (ctx, body) => useCases.addTeeSet(courseId(ctx.pathParams.courseId!), body as AddTeeSetRequest),
+  },
+  {
+    method: "POST",
+    path: "/courses/{courseId}/verify",
+    schema: verifyTeeSetRequestSchema,
+    auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
+    successStatus: 200,
+    handler: async (ctx, body) => useCases.verifyTeeSet(courseId(ctx.pathParams.courseId!), body as VerifyTeeSetRequest),
+  },
+  {
+    method: "GET",
+    path: "/courses/{courseId}",
+    auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
+    successStatus: 200,
+    handler: async (ctx) => useCases.getCourse(courseId(ctx.pathParams.courseId!)),
+  },
+  {
+    method: "GET",
+    path: "/courses",
+    auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
+    successStatus: 200,
+    handler: async (ctx) => useCases.searchCourses(parseSearchQuery(ctx.query.query), parseLimit(ctx.query.limit)),
   },
 ];

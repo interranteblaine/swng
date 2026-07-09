@@ -25,12 +25,30 @@ const stubUseCases: UseCases = {
   readEvents: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
+  peekRound: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  createCourse: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  addTeeSet: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  verifyTeeSet: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  getCourse: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  searchCourses: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
 };
 
 const sortKey = (route: { readonly method: string; readonly path: string }): string => `${route.method} ${route.path}`;
 
 // The dispatcher (packages/lambda/src/http/routes.ts) and the CDK stack (lib/swngStack.ts)
-// each hand-declare the same six-route table independently — swngStack.ts's own comment
+// each hand-declare the same route table independently — swngStack.ts's own comment
 // says "matching packages/lambda/src/http/routes.ts", but nothing enforced that until now.
 // This pins the two tables together so a route added to one and forgotten in the other
 // fails CI instead of 404ing (or silently never being reachable) in beta.

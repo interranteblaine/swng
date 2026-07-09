@@ -24,7 +24,7 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the six routes are declared here explicitly (matching
+// function — but the twelve routes are declared here explicitly (matching
 // packages/lambda/src/http/routes.ts) rather than via a single $default catch-all, so the
 // API's shape is visible in the CloudFormation template and the AWS console, not hidden
 // inside the Lambda. Exported (not module-private) so test/routesParity.test.ts can pin
@@ -37,6 +37,13 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.POST, path: "/rounds/{roundId}/scores" },
   { method: HttpMethod.POST, path: "/rounds/{roundId}/finalize" },
   { method: HttpMethod.GET, path: "/rounds/{roundId}/events" },
+  // M6 Task 4: peek + the course CRUD/search surface.
+  { method: HttpMethod.GET, path: "/rounds/peek" },
+  { method: HttpMethod.POST, path: "/courses" },
+  { method: HttpMethod.POST, path: "/courses/{courseId}/tees" },
+  { method: HttpMethod.POST, path: "/courses/{courseId}/verify" },
+  { method: HttpMethod.GET, path: "/courses/{courseId}" },
+  { method: HttpMethod.GET, path: "/courses" },
 ];
 
 // packages/lambda/src/entries/*.ts — resolved relative to this file so bundling works

@@ -206,7 +206,7 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "$disconnect" });
     });
 
-    it("wires all six HTTP routes", () => {
+    it("wires all twelve HTTP routes", () => {
       const expectedRouteKeys = [
         "POST /rounds",
         "POST /rounds/join",
@@ -214,6 +214,12 @@ describe("SwngStack", () => {
         "POST /rounds/{roundId}/scores",
         "POST /rounds/{roundId}/finalize",
         "GET /rounds/{roundId}/events",
+        "GET /rounds/peek",
+        "POST /courses",
+        "POST /courses/{courseId}/tees",
+        "POST /courses/{courseId}/verify",
+        "GET /courses/{courseId}",
+        "GET /courses",
       ];
       const routes = template.findResources("AWS::ApiGatewayV2::Route");
       const routeKeys = Object.values(routes).map((route) => route.Properties.RouteKey);
@@ -222,11 +228,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (6 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (12 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 8 routes total (6 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 8);
+    it("has exactly 14 routes total (12 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 14);
     });
   });
 

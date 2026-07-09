@@ -58,7 +58,16 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   // kill-network test constructs a session offline and never lets it touch the network).
   const persisted = await store.load(config.roundId);
   let pending: readonly RoundEvent[] = persisted?.pending ?? [];
-  let lastSeq = persisted?.lastSeq ?? 0;
+  // Plan amendment: `persisted.lastSeq` is deliberately NOT read here. It summarizes a
+  // confirmed log that v1 never persists (confirmed always starts empty below), so seeding
+  // the in-memory cursor from it would make a restarted session pull only events AFTER
+  // that point — permanently missing everything before it, with no persisted confirmed
+  // copy to fall back on. The in-memory cursor therefore always starts at 0 whenever
+  // confirmed is empty at construction, which is unconditionally true in v1. The field
+  // stays in `PersistedSync` (and is still written by persist() below) only so a future
+  // version that DOES persist confirmed events has a stable storage shape to grow into,
+  // without a migration.
+  let lastSeq = 0;
   let opCounter = persisted?.opCounter ?? 0;
   let confirmed: readonly RoundEvent[] = [];
   let rejectedOps: readonly RejectedOp[] = [];
@@ -67,6 +76,11 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   let cachedState: RoundState | undefined;
   let saveChain: Promise<void> = Promise.resolve();
   const listeners = new Set<() => void>();
+
+  // Gate state for requestSync() below — see its own comment for the coalescing scheme.
+  let syncRunning: Promise<void> | undefined;
+  let syncRerunRequested = false;
+  let syncRerunWaiters: { resolve: () => void; reject: (error: unknown) => void }[] = [];
 
   const notify = (): void => {
     for (const listener of listeners) listener();
@@ -86,11 +100,29 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
 
   // Chained (not fire-and-forget per call) so concurrent saves never land out of order —
   // each snapshot is captured synchronously at call time, so a slower earlier save can
-  // never clobber a faster later one with stale data.
+  // never clobber a faster later one with stale data. Critically, the chain link is wrapped
+  // in `attempt.catch(() => {})` BEFORE becoming the next call's `saveChain` — a rejecting
+  // store.save() (IndexedDB quota, private mode) must not poison the chain, or every save
+  // after the first failure would be silently skipped rather than attempted. The returned
+  // `attempt` still carries the real outcome for whichever caller wants to observe it
+  // (close(), specifically); in-memory state is authoritative regardless of what persist()
+  // does.
   const persist = (): Promise<void> => {
     const snapshot: PersistedSync = { pending, lastSeq, opCounter };
-    saveChain = saveChain.then(() => store.save(config.roundId, snapshot));
-    return saveChain;
+    const attempt = saveChain.then(() => store.save(config.roundId, snapshot));
+    saveChain = attempt.catch(() => {});
+    return attempt;
+  };
+
+  // The three fire-and-forget call sites below don't need (and mustn't block on) this
+  // save's outcome — but discarding persist()'s promise with a bare `void` would turn a
+  // rejection into an unhandled rejection. This is the SDK's log-and-drop precedent
+  // (transport.ts drops a malformed socket message rather than throwing); persistence
+  // failure is the same shape of "recoverable, report it, move on."
+  const persistInBackground = (): void => {
+    persist().catch((error: unknown) => {
+      console.warn(`swng client: failed to persist outbox for round ${config.roundId}`, error);
+    });
   };
 
   // Shared by pull batches and socket batches: observe every remote hlc into the
@@ -115,7 +147,7 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
     pending = pending.filter((event) => !knownOpIds.has(event.opId));
 
     invalidateCache();
-    void persist();
+    persistInBackground();
     notify();
   };
 
@@ -140,7 +172,7 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
         rejectedOps = [...rejectedOps, { event, code: error.code ?? `http-${error.status ?? "unknown"}` }];
         pending = pending.filter((pendingEvent) => pendingEvent.opId !== event.opId);
         invalidateCache();
-        void persist();
+        persistInBackground();
         notify();
       }
     }
@@ -155,6 +187,50 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
       if (!(error instanceof TransportError)) throw error;
       // Offline: sync() resolves without throwing — the queue IS the feature.
     }
+  };
+
+  // Serializes the whole sync loop. sync(), recordScore's opportunistic push, and
+  // connect()'s socket-open catch-up all funnel through this one gate — without it, each
+  // trigger calls doSync() independently, and since pushPending() snapshots `pending`
+  // unguarded, two overlapping passes can push the same op twice or double-reject it into
+  // rejected(). The scheme: at most one doSync() pass runs at a time; a request that
+  // arrives while a pass is running doesn't start a second pass — it just sets a flag and
+  // waits. When the running pass finishes, that flag causes exactly ONE more pass to run
+  // before any of the coalesced callers' promises resolve, so a late-arriving op (e.g. a
+  // recordScore mid-sync) is guaranteed to be picked up by that trailing pass rather than
+  // silently waiting for some unrelated future sync() call. Multiple requests that arrive
+  // during the same pass all coalesce onto that single trailing pass — they don't queue up
+  // additional passes.
+  const requestSync = (): Promise<void> => {
+    if (syncRunning) {
+      syncRerunRequested = true;
+      return new Promise<void>((resolve, reject) => {
+        syncRerunWaiters.push({ resolve, reject });
+      });
+    }
+
+    const runPasses = async (): Promise<void> => {
+      try {
+        for (;;) {
+          syncRerunRequested = false;
+          const waiters = syncRerunWaiters;
+          syncRerunWaiters = [];
+          try {
+            await doSync();
+            for (const waiter of waiters) waiter.resolve();
+          } catch (error) {
+            for (const waiter of waiters) waiter.reject(error);
+            throw error;
+          }
+          if (!syncRerunRequested) break;
+        }
+      } finally {
+        syncRunning = undefined;
+      }
+    };
+
+    syncRunning = runPasses();
+    return syncRunning;
   };
 
   const doDisconnect = (): void => {
@@ -192,12 +268,16 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
       };
       pending = [...pending, event];
       invalidateCache();
-      void persist();
+      persistInBackground();
       notify();
-      if (connectedFlag) void pushPending();
+      // Opportunistic, not required for correctness: an unconnected/offline session just
+      // leaves this queued for the next explicit sync(). Routed through requestSync() (the
+      // full push+pull loop), not a bare push, so it shares the same serialization gate as
+      // every other trigger — see requestSync()'s comment.
+      if (connectedFlag) void requestSync();
     },
 
-    sync: () => doSync(),
+    sync: () => requestSync(),
 
     connect: () => {
       if (connectedFlag) return; // idempotent
@@ -208,10 +288,13 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
           connectedFlag = false;
           closeSocket = undefined;
           notify();
+          // No auto-reconnect timer in v1: the UI owns retry cadence (backoff policy,
+          // offline-banner UX, etc. are presentation concerns, not sync-loop concerns).
+          // A caller that wants to reconnect calls connect() again.
         },
       );
       notify();
-      void doSync(); // socket open triggers a catch-up sync
+      void requestSync(); // socket open triggers a catch-up sync, through the same gate as every other trigger
     },
 
     disconnect: () => doDisconnect(),

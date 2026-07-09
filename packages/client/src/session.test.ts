@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cellKey, deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { GameConfig, HoleResult, OpId, RoundEvent } from "@swng/domain";
 import { createMemoryOutboxStore } from "./outbox.js";
+import type { OutboxStore, PersistedSync } from "./outbox.js";
 import { createRoundSession } from "./session.js";
 import { TransportError } from "./transport.js";
 import type { RoundTransport } from "./transport.js";
@@ -38,25 +39,33 @@ const buildServerLog = (extraGames: readonly GameConfig[] = []): RoundEvent[] =>
 
 // A scripted, in-memory RoundTransport standing in for the server: push dedupes by opId
 // (mirroring recordScore's use case), pull serves everything past `sinceSeq`, and a single
-// opId can be pinned to always reject — the "permanent 409" test case. openSocket is unused
-// by these tests (session.test.ts drives sync() directly); it returns a no-op closer so the
-// object still satisfies RoundTransport.
+// opId can be pinned to always reject — the "permanent 409" test case. `offline` flips both
+// push and pull to a network TransportError, for the offline-burst tests. openSocket keeps
+// the single most recently registered listener so a test can drive it directly:
+// `emitSocketEvents` simulates a server broadcast, `triggerSocketClose` simulates the
+// connection dropping — both needed for the socket-lifecycle and duplicate-delivery tests.
 interface ScriptedTransport extends RoundTransport {
   readonly log: readonly RoundEvent[];
   readonly pushedOpIds: readonly OpId[];
   rejectOpId: OpId | undefined;
+  offline: boolean;
+  emitSocketEvents(events: readonly RoundEvent[]): void;
+  triggerSocketClose(): void;
 }
 
 const createScriptedTransport = (seed: readonly RoundEvent[]): ScriptedTransport => {
   const log: RoundEvent[] = [...seed];
   let nextSeq = log.length + 1;
   const pushedOpIds: OpId[] = [];
+  let socketListener: { onEvents: (events: readonly RoundEvent[]) => void; onClose: () => void } | undefined;
 
   const transport: ScriptedTransport = {
     log,
     pushedOpIds,
     rejectOpId: undefined,
+    offline: false,
     push: async (event) => {
+      if (transport.offline) throw new TransportError("network");
       pushedOpIds.push(event.opId);
       if (transport.rejectOpId === event.opId) throw new TransportError("server", 409, "round-not-live");
       const existing = log.find((logged) => logged.opId === event.opId);
@@ -67,13 +76,45 @@ const createScriptedTransport = (seed: readonly RoundEvent[]): ScriptedTransport
       return { seq: stamped.seq, duplicate: false };
     },
     pull: async (sinceSeq) => {
+      if (transport.offline) throw new TransportError("network");
       const events = log.filter((event) => (event.seq ?? 0) > sinceSeq);
       const maxSeq = events.reduce((max, event) => Math.max(max, event.seq ?? 0), sinceSeq);
       return { events, nextSeq: maxSeq };
     },
-    openSocket: () => () => {},
+    openSocket: (onEvents, onClose) => {
+      socketListener = { onEvents, onClose };
+      return () => {
+        if (socketListener?.onEvents === onEvents) socketListener = undefined;
+      };
+    },
+    emitSocketEvents: (events) => {
+      socketListener?.onEvents(events);
+    },
+    triggerSocketClose: () => {
+      const listener = socketListener;
+      socketListener = undefined;
+      listener?.onClose();
+    },
   };
   return transport;
+};
+
+// Defers a scripted transport's NEXT pull() call until `release()` is invoked, then
+// restores normal (immediate) pulling for every call after that. Used to force a real
+// overlap between two sync-loop triggers — an await gap a test can land a second trigger
+// inside of — without relying on incidental timing.
+const withDeferredNextPull = (transport: ScriptedTransport): { release: () => void } => {
+  const originalPull = transport.pull.bind(transport);
+  let resolveGate: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    resolveGate = resolve;
+  });
+  transport.pull = async (sinceSeq: number) => {
+    await gate;
+    transport.pull = originalPull;
+    return originalPull(sinceSeq);
+  };
+  return { release: () => resolveGate?.() };
 };
 
 describe("createRoundSession", () => {
@@ -216,5 +257,288 @@ describe("createRoundSession", () => {
     unsubscribe();
     await session.sync();
     expect(notifications).toBe(1); // unsubscribed — no further notifications
+  });
+});
+
+describe("createRoundSession — sync + reconnect", () => {
+  it("(a) offline burst: recordScore queues while the transport is down; sync() drains oldest-first once it returns, unchanged by the round trip", async () => {
+    const annPhone = deviceId("ann-phone");
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: annPhone });
+    await session.sync(); // ingest genesis while still online
+
+    transport.offline = true;
+    session.recordScore(ANN_ID, 1, toResult(4));
+    session.recordScore(ANN_ID, 2, toResult(5));
+    session.recordScore(ANN_ID, 3, toResult(3));
+    expect(session.pending()).toBe(3);
+
+    const beforeRoundTrip = session.state();
+    await expect(session.sync()).resolves.toBeUndefined(); // offline is not an error — the queue IS the feature
+    expect(session.pending()).toBe(3); // nothing lost
+    expect(session.state()).toEqual(beforeRoundTrip);
+
+    transport.offline = false;
+    await session.sync();
+
+    expect(transport.pushedOpIds).toEqual([opId(`${annPhone}-1`), opId(`${annPhone}-2`), opId(`${annPhone}-3`)]); // author order
+    expect(session.pending()).toBe(0);
+    expect(session.state()).toEqual(beforeRoundTrip); // unchanged by the round trip (now confirmed, not pending)
+  });
+
+  it("(b) interleaved remote events: a pull-observed remote hlc, plausibly ahead of the local clock, is beaten by a subsequent local correction to the same cell", async () => {
+    const boPhone = deviceId("bo-phone");
+    const seed = buildServerLog();
+    const remoteScore: RoundEvent = {
+      kind: "score-recorded",
+      opId: opId(`${boPhone}-1`),
+      hlc: { wallMs: 50_000, counter: 0, deviceId: boPhone }, // far ahead of the local clock below
+      authorId: BO_ID,
+      golferId: BO_ID,
+      hole: 5,
+      result: toResult(4),
+    };
+    const transport = createScriptedTransport([...seed, { ...remoteScore, seq: seed.length + 1 }]);
+
+    const session = await createRoundSession({
+      transport,
+      roundId: ROUND_ID,
+      golferId: ANN_ID,
+      deviceId: deviceId("ann-phone"),
+      clock: { now: () => 100 }, // skewed far behind the remote author — observe() is load-bearing
+    });
+
+    session.recordScore(ANN_ID, 1, toResult(2)); // this device's own cell, still pending
+    await session.sync(); // pulls genesis + bo-phone's remote score; observes its hlc
+
+    // Both devices' cells present after ingest.
+    expect(session.state().cells[cellKey(ANN_ID, 1)]).toBeDefined();
+    expect(session.state().cells[cellKey(BO_ID, 5)]).toMatchObject({ result: toResult(4), recordedBy: BO_ID });
+
+    session.recordScore(BO_ID, 5, toResult(9)); // score-for-anyone: a local correction to the SAME cell the remote just wrote
+
+    const winner = session.state().cells[cellKey(BO_ID, 5)];
+    expect(winner?.result).toEqual(toResult(9)); // the local correction wins the fold, proving observe() floored this device past the remote hlc
+    expect(winner?.recordedBy).toBe(ANN_ID); // authored by this session even though scoring BO's cell
+  });
+
+  it("(c) duplicate wire delivery: the same confirmed event arriving via socket AND pull doesn't change state twice or storm notifications", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+
+    session.connect(); // registers the scripted transport's socket listener (needed below)
+    await session.sync(); // catch-up: ingest genesis
+
+    session.recordScore(ANN_ID, 1, toResult(4)); // connected: also fires its own opportunistic sync
+    await session.sync(); // join/await it — the score is pushed AND pulled back (confirmed), pruned from the outbox
+    expect(session.pending()).toBe(0);
+
+    const confirmedEvent = transport.log.find((event) => event.kind === "score-recorded" && event.golferId === ANN_ID && event.hole === 1)!;
+
+    let notifications = 0;
+    session.onChange(() => {
+      notifications += 1;
+    });
+    const beforeDuplicate = session.state();
+
+    transport.emitSocketEvents([confirmedEvent]); // "arrives via socket" — an already-confirmed event, redelivered
+    expect(notifications).toBe(1); // exactly one notify for this ingest batch
+    expect(session.state()).toEqual(beforeDuplicate);
+
+    await session.sync(); // "arrives via pull" too — push is a no-op (nothing pending), pull re-delivers the same confirmed event
+    expect(notifications).toBe(2); // one more notify for the pull's ingest batch — per BATCH, not per event
+    expect(session.state()).toEqual(beforeDuplicate); // deduped by opId: no change from the duplicate delivery
+  });
+
+  it("(d) socket lifecycle: connect opens and catches up, socket events ingest live, close flips connected(), reconnect + sync converges on what the closed socket missed", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+
+    expect(session.connected()).toBe(false);
+    session.connect();
+    expect(session.connected()).toBe(true);
+    await session.sync(); // join/await the catch-up sync connect() triggered
+    expect(session.state().participants).toHaveLength(2); // genesis pulled via the catch-up
+
+    // A remote device's score arrives live over the socket.
+    const live: RoundEvent = { kind: "score-recorded", opId: opId("bo-phone-1"), hlc: { wallMs: 9_000, counter: 0, deviceId: deviceId("bo-phone") }, authorId: BO_ID, golferId: BO_ID, hole: 1, result: toResult(4) };
+    const livePush = await transport.push(live);
+    transport.emitSocketEvents([{ ...live, seq: livePush.seq! }]);
+    expect(session.state().cells[cellKey(BO_ID, 1)]).toBeDefined();
+
+    transport.triggerSocketClose(); // the server drops the connection
+    expect(session.connected()).toBe(false);
+
+    // Another device scores while this session's socket is down — only a re-pull can catch it up.
+    const missed: RoundEvent = { kind: "score-recorded", opId: opId("bo-phone-2"), hlc: { wallMs: 9_500, counter: 0, deviceId: deviceId("bo-phone") }, authorId: BO_ID, golferId: BO_ID, hole: 2, result: toResult(5) };
+    await transport.push(missed);
+
+    session.connect(); // reconnect
+    expect(session.connected()).toBe(true);
+    await session.sync(); // converge: pulls what the closed socket missed
+
+    expect(session.state().cells[cellKey(BO_ID, 2)]).toMatchObject({ result: toResult(5) });
+  });
+
+  it("(e) a permanent 409 mid-queue drops only that entry into rejected() and still pushes the rest", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+    await session.sync();
+
+    session.recordScore(ANN_ID, 1, toResult(4));
+    session.recordScore(ANN_ID, 2, toResult(5));
+    session.recordScore(ANN_ID, 3, toResult(3));
+    const middleOpId = session.state().cells[cellKey(ANN_ID, 2)]!.opId;
+    transport.rejectOpId = middleOpId;
+
+    await session.sync();
+
+    expect(session.pending()).toBe(0); // the two good ops went through; the bad one didn't wedge the queue
+    expect(session.rejected()).toHaveLength(1);
+    expect(session.rejected()[0]!.event.opId).toBe(middleOpId);
+    expect(session.state().cells[cellKey(ANN_ID, 1)]).toBeDefined();
+    expect(session.state().cells[cellKey(ANN_ID, 3)]).toBeDefined();
+    expect(session.state().cells[cellKey(ANN_ID, 2)]).toBeUndefined(); // the rejected score never landed
+  });
+
+  it("(f) restart reconstruction: a second session over the same store re-derives the FULL round, not a since-cursor suffix", async () => {
+    const deviceIdValue = deviceId("ann-phone");
+    const seed = buildServerLog();
+    const store = createMemoryOutboxStore();
+
+    const transport1 = createScriptedTransport(seed);
+    const session1 = await createRoundSession({ transport: transport1, store, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceIdValue });
+    await session1.sync(); // cursor advances past genesis; confirmed events are never persisted
+    const session1State = session1.state();
+    await session1.close();
+
+    // A fresh transport instance over the SAME server log — "app restarted", new HTTP
+    // client, same server — sharing only the persisted OutboxStore with session1.
+    const transport2 = createScriptedTransport(seed);
+    const session2 = await createRoundSession({ transport: transport2, store, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceIdValue });
+    await session2.sync();
+
+    expect(session2.state()).toEqual(session1State);
+  });
+});
+
+describe("createRoundSession — sync loop hardening (Task 3 required items 1 & 2)", () => {
+  describe("item 1: the sync loop is serialized (single in-flight pass + coalesced rerun)", () => {
+    it("a recordScore landing mid-sync() is picked up by the trailing run, without the leading run's older op being pushed twice", async () => {
+      const annPhone = deviceId("ann-phone");
+      const transport = createScriptedTransport(buildServerLog());
+      const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: annPhone });
+
+      session.recordScore(ANN_ID, 1, toResult(4)); // an "older" op, queued before connect(), not yet pushed
+      const gate = withDeferredNextPull(transport);
+
+      session.connect(); // starts the leading pass: pushes hole 1, then blocks on the deferred pull
+
+      // Land a new op WHILE the leading pass is stuck awaiting its pull. connectedFlag is
+      // now true, so this also fires its own opportunistic trigger — both this and the
+      // explicit sync() below must coalesce onto a single trailing pass.
+      session.recordScore(ANN_ID, 2, toResult(5));
+      const syncPromise = session.sync();
+
+      gate.release(); // let the leading pass's pull resolve; it should then run exactly one more pass
+
+      await syncPromise;
+
+      expect(transport.pushedOpIds).toEqual([opId(`${annPhone}-1`), opId(`${annPhone}-2`)]); // each pushed exactly once
+      expect(session.pending()).toBe(0);
+      expect(session.state().cells[cellKey(ANN_ID, 1)]).toBeDefined();
+      expect(session.state().cells[cellKey(ANN_ID, 2)]).toBeDefined();
+    });
+
+    it("a permanent rejection under overlapping sync() triggers yields exactly one rejected() entry for that op", async () => {
+      const transport = createScriptedTransport(buildServerLog());
+      const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+      await session.sync();
+
+      session.recordScore(ANN_ID, 1, toResult(4));
+      const rejectedOpId = session.state().cells[cellKey(ANN_ID, 1)]!.opId;
+      transport.rejectOpId = rejectedOpId;
+
+      // Two overlapping triggers, no await between them — without the gate, each would
+      // independently snapshot `pending` and push (and reject) the same op separately.
+      const first = session.sync();
+      const second = session.sync();
+      await Promise.all([first, second]);
+
+      expect(session.rejected()).toHaveLength(1); // not two
+      expect(transport.pushedOpIds.filter((id) => id === rejectedOpId)).toHaveLength(1); // pushed (and rejected) exactly once
+    });
+  });
+
+  describe("item 2: a failing OutboxStore.save() cannot poison the save chain or vanish", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    const alwaysFailingStore: OutboxStore = {
+      load: async () => undefined,
+      save: async () => {
+        throw new Error("simulated store failure (quota exceeded)");
+      },
+    };
+
+    it("recordScore and sync() tolerate a persistently failing store without throwing or emitting an unhandled rejection", async () => {
+      const transport = createScriptedTransport(buildServerLog());
+      const session = await createRoundSession({ transport, store: alwaysFailingStore, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+
+      expect(() => session.recordScore(ANN_ID, 1, toResult(4))).not.toThrow();
+      await expect(session.sync()).resolves.toBeUndefined();
+
+      // In-memory state stays authoritative regardless of the store's outcome.
+      expect(session.state().cells[cellKey(ANN_ID, 1)]).toBeDefined();
+
+      // No Node `process` global is available in this browser-safe package's test typing
+      // (layer law), so this test can't hook `unhandledRejection` directly — but Vitest
+      // itself catches an unhandled rejection surfacing anywhere during a test run and
+      // fails that run (proven earlier, pre-fix: this exact scenario produced a top-level
+      // "Unhandled Rejection" failure). A flush past the failing save's microtask, plus
+      // asserting the failure WAS reported via console.warn, is sufficient: absence of a
+      // vitest-level failure here plus a present warnSpy call together mean the rejection
+      // was handled, not merely delayed or silently dropped.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(warnSpy).toHaveBeenCalled(); // reported, not silently dropped
+    });
+
+    it("keeps attempting later saves after an earlier save failure, instead of skipping them forever", async () => {
+      let saveCount = 0;
+      const saveSnapshots: PersistedSync[] = [];
+      const store: OutboxStore = {
+        load: async () => undefined,
+        save: async (_roundId, snapshot) => {
+          saveCount += 1;
+          saveSnapshots.push(snapshot);
+          if (saveCount === 1) throw new Error("simulated transient store failure");
+        },
+      };
+      const transport = createScriptedTransport(buildServerLog());
+      const session = await createRoundSession({ transport, store, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+
+      session.recordScore(ANN_ID, 1, toResult(4)); // persist #1 — fails
+      session.recordScore(ANN_ID, 2, toResult(5)); // persist #2 — must still be ATTEMPTED, not skipped by a poisoned chain
+
+      // Let both fire-and-forget persist() chains settle.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(saveCount).toBeGreaterThanOrEqual(2);
+      expect(saveSnapshots.at(-1)?.pending).toHaveLength(2); // the latest attempted save reflects the up-to-date snapshot
+    });
+
+    it("close() rejects when the final save fails", async () => {
+      const transport = createScriptedTransport(buildServerLog());
+      const session = await createRoundSession({ transport, store: alwaysFailingStore, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+
+      await expect(session.close()).rejects.toThrow("simulated store failure");
+    });
   });
 });

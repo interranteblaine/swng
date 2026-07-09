@@ -150,7 +150,7 @@ export const enterScore = async (page: Page, golferName: string, hole: number, s
 
   // The cell's rendered text is dots (●, non-digit) + the score glyph + an optional net digit,
   // concatenated with no separators (e.g. "●65" — 1 dot, gross 6, net 5) — for a numeric score
-  // (always exactly one digit; ScorePad only ever offers 1-9), matching on "the first digit in
+  // (always exactly one digit; ScorePad only ever offers 1-12), matching on "the first digit in
   // the text" is what keeps this from a false-positive match against the net span's own digit
   // (e.g. posting 7 with 2 dots renders net 5, so a bare `toContainText("5")` would wrongly
   // pass even though 5 was never the posted score — but net can never be the FIRST digit).

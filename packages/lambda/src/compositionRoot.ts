@@ -46,12 +46,14 @@ const createRandomIds = (): IdGenerator => ({
 // Exported (rather than kept module-private like createSystemClock/createRandomIds above)
 // solely so compositionRoot.test.ts can pin its message-wins ordering without standing up a
 // whole buildApp.
-// `data` spreads FIRST, `message` second — a caller-supplied `data.message` key (coincidental
-// or otherwise) must never clobber the actual log message; spreading `data` after `message`
-// would let it win instead.
+// `data` spreads FIRST, `level` and `message` both LAST — a caller-supplied `data.level` or
+// `data.message` key (coincidental or otherwise) must never clobber the log entry's own
+// fields; spreading `data` in between two reserved keys, rather than before just one, is what
+// protects both. (`level` used to sit ahead of the spread — the M4 fix reserved `message` but
+// missed `level`, which a `data.level` key could still clobber.)
 export const createConsoleLogger = (): Logger => ({
-  info: (message, data) => console.log(JSON.stringify({ level: "info", ...data, message })),
-  error: (message, data) => console.error(JSON.stringify({ level: "error", ...data, message })),
+  info: (message, data) => console.log(JSON.stringify({ ...data, level: "info", message })),
+  error: (message, data) => console.error(JSON.stringify({ ...data, level: "error", message })),
 });
 
 const requireEnv = (env: NodeJS.ProcessEnv, key: string): string => {

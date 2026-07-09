@@ -40,7 +40,7 @@ of swng per `docs/product.md` → `docs/roadmap.md` → `docs/architecture.md`. 
 proof-of-concept is **deleted from the tree** — it exists only at git tag `poc-final`, holds
 no authority, and must never be resurrected as design input.
 
-Current state (M0–M3 complete): nine packages under `packages/` matching
+Current state (M0–M4 complete): nine packages under `packages/` matching
 `docs/architecture.md` §3 (`domain`, `contracts`, `application`, `client`, four `adapters-*`,
 `lambda`), plus the root `e2e/` workspace, with the layer direction and package boundaries
 enforced by `eslint.config.mjs`.
@@ -54,8 +54,18 @@ The backend vertical slice is live (M3): `contracts` (Zod wire schemas), `applic
 creation), `adapters-dynamodb` (transactional seq+opId journal with jittered backoff and
 consistent reads), `lambda` + `adapters-apigateway` (declarative dispatcher, HMAC
 round-scoped participant tokens, WS broadcast), deployed as the `swng-beta` stack and gated
-by `e2e/` reproducing the M2 concurrency deck over the wire. Real code lands milestone by
-milestone per `docs/implementation-plan.md` — update this section as it does.
+by `e2e/` reproducing the M2 concurrency deck over the wire.
+The client SDK is real (M4): `@swng/client` — `createRoundSession` folds confirmed∪outbox
+through the domain `reduceRound` (optimistic scoring), full client HLC (send + receive
+rules — the floor survives restarts, like the persisted `opCounter`), a durable
+`OutboxStore` (memory + IndexedDB), a serialized sync loop (oldest-first push,
+transient-keep/permanent-reject, pull as sole cursor authority, WS as sugar with
+socket-open catch-up). Gated by an N-device fast-check convergence simulation
+(frozen-clock and skewed-behind devices; every interleaving folds to the server log) and
+a kill-network e2e against beta. `SessionConfig.deviceId` must be unique per live session
+(multi-tab: per-tab ids — see the M5 handoff notes in `docs/implementation-plan.md`).
+Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
+section as it does.
 
 ### CDK / Deployment
 

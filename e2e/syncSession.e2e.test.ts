@@ -9,9 +9,10 @@ import type { GameResult, GameState, GolferId, HoleResult, RoundId } from "@swng
 import { apiUrl, loadEndpoints, post, waitUntil } from "./support/client.js";
 
 // The M2 golden stableford deck for two golfers — reproduced verbatim from
-// packages/domain/src/scoring/stableford.test.ts, and already proven over the wire (without
-// offline queueing) by application/src/rounds/roundSlice.test.ts and, client-side, by
-// packages/client/src/session.test.ts. Ann (courseHandicap 8) and Bo (courseHandicap 2),
+// packages/domain/src/scoring/stableford.test.ts. The card and its 15/19 lines are pinned by the domain golden fixture
+// (`packages/domain/src/scoring/stableford.test.ts`) and exercised in-memory by
+// `application/src/rounds/roundSlice.test.ts` and `packages/client/src/session.test.ts`;
+// THIS suite is what first proves them over the wire, offline queueing included. Ann (courseHandicap 8) and Bo (courseHandicap 2),
 // white tees, one stableford game referencing both. Ann's h4 is a pickup. This suite's whole
 // point is proving that the SAME Ann 15 / Bo 19 numbers survive a real offline outbox drained
 // over the real deployed stack — not deriving them fresh.

@@ -160,6 +160,50 @@ describe("createDynamoEventJournal", () => {
       expect(result.headSeqConflict).toBeFalsy();
       expect(result.appended.map((event) => event.seq)).toEqual([1]);
     });
+
+    // Permanent regression for the M6 Task 4 review (task-4-report.md, "Task review" ->
+    // "Important"): the reviewer proved concurrency safety with throwaway probes — 8-way
+    // concurrent conditional appends at the same head, exactly one winner, log contiguous,
+    // never a false success — then deleted them. This captures that proof for good. The
+    // check-then-act head read above is only a fast-path optimization; genuine mutual
+    // exclusion comes from the per-slot `attribute_not_exists(sk)` transactional condition
+    // (attemptCommit above), which is what this test actually exercises under real
+    // concurrency rather than by inspection.
+    it("N concurrent conditional appends at the same head: exactly one winner, log stays contiguous", async () => {
+      const id = roundId(randomUUID());
+      const N = 8;
+
+      await newJournal().append(id, [makeEvent(1), makeEvent(2)]); // head is now 2
+
+      // Every append call is fired (one journal instance each, mirroring the 27-way
+      // regression below) before any promise is awaited — genuine concurrency, not
+      // sequential turns wearing a Promise.all costume.
+      const contenders = Array.from({ length: N }, (_, i) => makeEvent(i + 1));
+      const results = await Promise.all(contenders.map((event) => newJournal().append(id, [event], { expectedHeadSeq: 2 })));
+
+      const winners = results.filter((result) => !result.headSeqConflict);
+      const losers = results.filter((result) => result.headSeqConflict);
+
+      // Exactly one winner is a correctness guarantee of the transactional per-slot
+      // condition, not a timing accident — deterministic to assert even though WHICH
+      // contender wins is not.
+      expect(winners).toHaveLength(1);
+      expect(losers).toHaveLength(N - 1);
+      for (const loser of losers) {
+        expect(loser).toEqual({ appended: [], duplicateOpIds: [], headSeqConflict: true });
+      }
+
+      const winner = winners[0]!;
+      expect(winner.headSeqConflict).toBeFalsy();
+      expect(winner.appended).toHaveLength(1);
+      expect(winner.duplicateOpIds).toEqual([]);
+      const winningOpId = winner.appended[0]!.opId;
+
+      const log = await newJournal().read(id, 0);
+      expect(log.map((event) => event.seq)).toEqual([1, 2, 3]); // contiguous — no gaps, no dupes
+      expect(log).toHaveLength(3);
+      expect(log[2]!.opId).toBe(winningOpId); // the log's only new event is the winner's
+    });
   });
 
   // Regression for task-6-report.md: 27 fully-concurrent single-event appends (one journal

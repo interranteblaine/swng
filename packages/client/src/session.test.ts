@@ -323,9 +323,16 @@ describe("createRoundSession — sync + reconnect", () => {
     expect(winner?.recordedBy).toBe(ANN_ID); // authored by this session even though scoring BO's cell
   });
 
-  it("(c) duplicate wire delivery: the same confirmed event arriving via socket AND pull doesn't change state twice or storm notifications", async () => {
+  it("(c) duplicate wire delivery: the same confirmed event arriving via socket AND pull is a silent no-op — zero notifies, zero saves (M5: supersedes M4's notify-per-batch)", async () => {
     const transport = createScriptedTransport(buildServerLog());
-    const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+    let saveCount = 0;
+    const store: OutboxStore = {
+      load: async () => undefined,
+      save: async () => {
+        saveCount += 1;
+      },
+    };
+    const session = await createRoundSession({ transport, store, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
 
     session.connect(); // registers the scripted transport's socket listener (needed below)
     await session.sync(); // catch-up: ingest genesis
@@ -341,14 +348,16 @@ describe("createRoundSession — sync + reconnect", () => {
       notifications += 1;
     });
     const beforeDuplicate = session.state();
+    const saveCountBeforeDuplicates = saveCount;
 
     transport.emitSocketEvents([confirmedEvent]); // "arrives via socket" — an already-confirmed event, redelivered
-    expect(notifications).toBe(1); // exactly one notify for this ingest batch
+    expect(notifications).toBe(0); // pure duplicate: nothing newly confirmed, nothing pruned, cursor unchanged — silent
     expect(session.state()).toEqual(beforeDuplicate);
 
-    await session.sync(); // "arrives via pull" too — push is a no-op (nothing pending), pull re-delivers the same confirmed event
-    expect(notifications).toBe(2); // one more notify for the pull's ingest batch — per BATCH, not per event
+    await session.sync(); // "arrives via pull" too — push is a no-op (nothing pending), pull returns nothing new (cursor already past it)
+    expect(notifications).toBe(0); // still silent — the pull's own batch is equally a no-op
     expect(session.state()).toEqual(beforeDuplicate); // deduped by opId: no change from the duplicate delivery
+    expect(saveCount).toBe(saveCountBeforeDuplicates); // neither duplicate ingest triggered a persist
   });
 
   it("(d) socket lifecycle: connect opens and catches up, socket events ingest live, close flips connected(), reconnect + sync converges on what the closed socket missed", async () => {
@@ -496,6 +505,104 @@ describe("createRoundSession — sync + reconnect", () => {
     await session2.sync();
 
     expect(session2.state()).toEqual(session1State);
+  });
+});
+
+describe("createRoundSession — M5 Task 1: hydrated(), games() identity, close() quiescence", () => {
+  describe("hydrated()", () => {
+    it("is false on a fresh session, state()/games() throw until a pull ingests genesis, and it never regresses afterward", async () => {
+      const transport = createScriptedTransport(buildServerLog());
+      const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+
+      expect(session.hydrated()).toBe(false);
+      expect(() => session.state()).toThrow(); // reduceRound refuses to fold a log with no round-created event
+      expect(() => session.games()).toThrow(); // games() folds through the same computeState()
+
+      await session.sync(); // first pull ingests genesis (round-created among the events)
+
+      expect(session.hydrated()).toBe(true);
+      expect(() => session.state()).not.toThrow();
+
+      // A later, unrelated ingest must not flip it back.
+      session.recordScore(ANN_ID, 1, toResult(4));
+      await session.sync();
+      expect(session.hydrated()).toBe(true);
+    });
+
+    it("is true immediately once genesis arrives over the socket, even while the connect-time catch-up pull is still in flight", async () => {
+      const transport = createScriptedTransport(buildServerLog());
+      const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+
+      const gate = withDeferredNextPull(transport); // block connect()'s own catch-up pull
+      session.connect(); // registers the socket listener; also fires the (now-blocked) catch-up sync
+
+      expect(session.hydrated()).toBe(false); // neither the blocked pull nor the socket has delivered anything yet
+
+      const genesisEvent = transport.log.find((event) => event.kind === "round-created")!;
+      transport.emitSocketEvents([genesisEvent]); // genesis arrives live over the socket, ahead of the still-blocked pull
+
+      expect(session.hydrated()).toBe(true); // hydrated from the socket batch alone — no pull needed
+      expect(() => session.state()).not.toThrow();
+
+      gate.release();
+      await session.sync(); // let the blocked pull settle so it doesn't leak into a later test
+    });
+  });
+
+  describe("games() identity", () => {
+    it("returns the same reference across calls with no change, and a new reference after a recordScore", async () => {
+      const transport = createScriptedTransport(buildServerLog());
+      const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+      await session.sync();
+
+      const first = session.games();
+      const second = session.games();
+      expect(second).toBe(first); // useSyncExternalStore treats a fresh reference as "store changed" — must not happen absent a real change
+
+      session.recordScore(ANN_ID, 1, toResult(4));
+      const third = session.games();
+      expect(third).not.toBe(first); // state changed — a fresh reference is required
+    });
+  });
+
+  describe("close() quiescence", () => {
+    it("awaits an in-flight sync pass before its final persist — no save lands after close() resolves", async () => {
+      const transport = createScriptedTransport(buildServerLog());
+      let saveCount = 0;
+      const store: OutboxStore = {
+        load: async () => undefined,
+        save: async () => {
+          saveCount += 1;
+        },
+      };
+      const session = await createRoundSession({ transport, store, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+      await session.sync(); // hydrate
+
+      session.recordScore(ANN_ID, 1, toResult(4));
+      const gate = withDeferredNextPull(transport);
+      const syncPromise = session.sync(); // starts an in-flight pass: pushes hole 1, then blocks on the deferred pull
+
+      let closeResolved = false;
+      const closePromise = session.close().then(() => {
+        closeResolved = true;
+      });
+
+      // The pass is still blocked on its pull — close() must not resolve while it's in flight.
+      await Promise.race([closePromise, new Promise((resolve) => setTimeout(resolve, 20))]);
+      expect(closeResolved).toBe(false);
+
+      const saveCountBeforeRelease = saveCount;
+      gate.release();
+      await closePromise;
+      await syncPromise; // the pass close() was awaiting also settles from the caller's own perspective
+
+      expect(closeResolved).toBe(true);
+      expect(saveCount).toBeGreaterThan(saveCountBeforeRelease); // both the pass's own save and close()'s final save landed
+
+      const saveCountAtCloseResolve = saveCount;
+      await new Promise((resolve) => setTimeout(resolve, 20)); // flush anything stray
+      expect(saveCount).toBe(saveCountAtCloseResolve); // nothing saved after close() resolved
+    });
   });
 });
 

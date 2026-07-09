@@ -31,8 +31,10 @@ export interface RejectedOp {
 
 export interface RoundSession {
   readonly roundId: RoundId;
-  state(): RoundState; // reduceRound(confirmed ∪ outbox), cached until change
-  games(): readonly GameState[]; // scoreGame over state().games filtered to known kinds
+  state(): RoundState; // reduceRound(confirmed ∪ outbox), cached until change; THROWS until hydrated()
+  games(): readonly GameState[]; // scoreGame over state().games filtered to known kinds; THROWS until hydrated();
+  // identity-stable — same array reference until the underlying state changes (required for
+  // useSyncExternalStore, which treats a fresh reference as "store changed" and loops)
   recordScore(golferId: GolferId, hole: number, result: HoleResult): void; // optimistic; opportunistic push when connected
   sync(): Promise<void>; // push outbox oldest-first, then pull since lastSeq
   connect(): void; // open socket (idempotent); socket open triggers sync()
@@ -41,7 +43,11 @@ export interface RoundSession {
   pending(): number; // outbox depth (UI badge)
   rejected(): readonly RejectedOp[]; // permanently rejected ops (UI surfacing)
   onChange(listener: () => void): () => void;
-  close(): Promise<void>; // disconnect + final save
+  // True once a round-created event is held (in confirmed or pending) — the render guard:
+  // state()/games() throw (via reduceRound's genesis check) until this is true. Never
+  // regresses to false once set.
+  hydrated(): boolean;
+  close(): Promise<void>; // disconnect + awaits any in-flight sync pass + final save
 }
 
 export interface SessionConfig {
@@ -99,6 +105,11 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   let connectedFlag = false;
   let closeSocket: (() => void) | undefined;
   let cachedState: RoundState | undefined;
+  let cachedGames: readonly GameState[] | undefined; // invalidated in lockstep with cachedState — see invalidateCache()
+  // Seeded from the persisted pending itself: a restart can load a pending array that
+  // already carries genesis (this device queued its own copy locally, never confirmed it),
+  // in which case state() is already foldable without ever calling ingest() this session.
+  let hydratedFlag = pending.some((event) => event.kind === "round-created");
   let saveChain: Promise<void> = Promise.resolve();
   const listeners = new Set<() => void>();
 
@@ -113,6 +124,7 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
 
   const invalidateCache = (): void => {
     cachedState = undefined;
+    cachedGames = undefined;
   };
 
   const computeState = (): RoundState => {
@@ -156,6 +168,10 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   // confirmed, and notify exactly once for the whole batch. `nextSeq` only arrives from a
   // pull — the cursor has exactly one authority, so socket delivery never moves it.
   const ingest = (events: readonly RoundEvent[], nextSeq?: number): void => {
+    // The receive rule runs unconditionally, even for a batch that turns out to be a pure
+    // duplicate below — a true duplicate's hlcs were already observed on ITS first
+    // delivery, so re-observing them here is a no-op, but the floor must never depend on
+    // which delivery path (or how many) an event happens to arrive by.
     for (const event of events) hlcSource.observe(event.hlc);
 
     const knownOpIds = new Set(confirmed.map((event) => event.opId));
@@ -165,11 +181,27 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
       knownOpIds.add(event.opId);
       newlyConfirmed.push(event);
     }
-    if (newlyConfirmed.length > 0) confirmed = [...confirmed, ...newlyConfirmed];
+
+    const prunedPending = pending.filter((event) => !knownOpIds.has(event.opId));
+    const pruned = prunedPending.length !== pending.length;
+    const seqChanged = nextSeq !== undefined && nextSeq !== lastSeq;
+
+    // A socket echo or pull re-delivery of an already-confirmed batch: nothing newly
+    // confirmed, nothing pruned from the outbox, and the cursor unchanged (or absent, as
+    // every socket batch's is). confirmed/pending/lastSeq are therefore byte-identical to
+    // before this call — there is nothing new to cache, persist, or notify a listener
+    // about. This supersedes M4's "notify once per duplicate batch": M5 renders on notify,
+    // so a no-op batch waking a render is a real cost, not a formality.
+    if (newlyConfirmed.length === 0 && !pruned && !seqChanged) return;
+
+    if (newlyConfirmed.length > 0) {
+      confirmed = [...confirmed, ...newlyConfirmed];
+      if (!hydratedFlag && newlyConfirmed.some((event) => event.kind === "round-created")) hydratedFlag = true;
+    }
 
     if (nextSeq !== undefined) lastSeq = nextSeq;
 
-    pending = pending.filter((event) => !knownOpIds.has(event.opId));
+    pending = prunedPending;
 
     invalidateCache();
     persistInBackground();
@@ -293,8 +325,13 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
     state: () => computeState(),
 
     games: () => {
-      const currentState = computeState();
-      return currentState.games.filter((gameConfig) => KNOWN_GAME_KINDS.has(gameConfig.kind)).map((gameConfig) => scoreGame(gameConfig, currentState));
+      // Cached beside cachedState, invalidated by the same invalidateCache() call — same
+      // trigger, so the two can never drift out of sync with each other.
+      if (!cachedGames) {
+        const currentState = computeState();
+        cachedGames = currentState.games.filter((gameConfig) => KNOWN_GAME_KINDS.has(gameConfig.kind)).map((gameConfig) => scoreGame(gameConfig, currentState));
+      }
+      return cachedGames;
     },
 
     recordScore: (golferId: GolferId, hole: number, result: HoleResult) => {
@@ -369,8 +406,20 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
       return () => listeners.delete(listener);
     },
 
+    hydrated: () => hydratedFlag,
+
     close: async () => {
       doDisconnect();
+      // Await whatever sync pass is currently in flight BEFORE the final persist — a
+      // pass always settles promptly (offline is a resolved outcome, not a hang), so this
+      // never turns close() into a hang. Swallowed here deliberately: the pass's own
+      // caller (an explicit sync(), or requestSyncInBackground()'s warn-and-drop) already
+      // owns reporting that rejection — close() rejecting is reserved for its OWN final
+      // save failing (M4 semantics), not for a concurrent pass's unrelated failure. Waiting
+      // for it first also means the final snapshot persist() captures reflects the pass's
+      // settled pending/lastSeq, not a stale mid-pass snapshot.
+      const inFlightPass = syncRunning;
+      if (inFlightPass) await inFlightPass.catch(() => {});
       await persist();
     },
   };

@@ -52,7 +52,7 @@ interface DeviceHandle {
   readonly golferId: GolferId;
   readonly session: RoundSession;
   setOnline(online: boolean): void;
-  redeliver(): void;
+  redeliver(): boolean; // true iff a non-empty batch was actually replayed (vs. a degenerate no-op)
 }
 
 const createDevice = async (server: SimServer, golfer: GolferId, deviceIdValue: DeviceId, clock: { now(): number }): Promise<DeviceHandle> => {
@@ -81,7 +81,16 @@ const createDevice = async (server: SimServer, golfer: GolferId, deviceIdValue: 
     session,
     setOnline: raw.setOnline,
     redeliver: () => {
-      if (liveOnEvents && lastBatch) liveOnEvents(lastBatch);
+      // lastBatch is only ever set from inside the wrapped openSocket callback, which
+      // SimServer's broadcast() only invokes with a non-empty array (see simServer.ts:
+      // `if (events.length === 0) return;`) — so its mere presence already means "a
+      // non-empty batch," but the length check here stays explicit rather than relying on
+      // that invariant silently.
+      if (liveOnEvents && lastBatch && lastBatch.length > 0) {
+        liveOnEvents(lastBatch);
+        return true;
+      }
+      return false;
     },
   };
 };
@@ -262,8 +271,20 @@ const makeClock = (kind: ClockKind, trueClockRef: { value: number }): { now(): n
 
 const golfersByIndex: readonly [GolferId, GolferId] = [ANN_ID, BO_ID];
 
+// Fix-wave (review Finding 1) — aggregate effectiveness counters for the two socket-race
+// ops, accumulated across the WHOLE fc.assert run (all `numRuns` schedules), not per
+// schedule: op targeting (`deviceIndex`, and which op kind gets drawn) is uniformly random,
+// so no single generated schedule is guaranteed to exercise either op meaningfully. Reset
+// at the top of the `it` body below (not here at module scope) so a vitest rerun/watch-mode
+// re-invocation of this same test never lets counts leak from a prior run.
+let redeliverEffectiveCount = 0;
+let pullOutOfOrderRacedCount = 0;
+
 describe("N-device convergence property", () => {
   it("every generated interleaving of 2-4 devices folds to reduceRound(server.log())", async () => {
+    redeliverEffectiveCount = 0;
+    pullOutOfOrderRacedCount = 0;
+
     await fc.assert(
       fc.asyncProperty(scheduleArb, async (schedule) => {
         const server = createSimServer();
@@ -283,11 +304,21 @@ describe("N-device convergence property", () => {
           const clock = makeClock(schedule.clockKinds[i]!, trueClockRef);
           devices.push(await createDevice(server, golfer, deviceId(`sim-device-${i}`), clock));
         }
-        // Every device catches up before the schedule runs — mirrors real usage (a session
-        // always syncs at least once after construction; recordScore before genesis is ever
-        // pulled is not a real client scenario and reduceRound correctly refuses to fold a
-        // log with no round-created event).
-        for (const device of devices) await device.session.sync();
+        // Every device connects (opens its socket) AND catches up before the schedule runs.
+        // connect() mirrors real usage — a session always syncs at least once after
+        // construction; recordScore before genesis is ever pulled is not a real client
+        // scenario and reduceRound correctly refuses to fold a log with no round-created
+        // event. Fix-wave (review Finding 1): connect() here too, not just via the
+        // `comeOnline` op, so every device's socket is live from schedule start — otherwise
+        // a device that never happens to draw `comeOnline` never opens a socket, `lastBatch`
+        // never populates, and every `redeliver`/`pullOutOfOrder` targeting it silently
+        // degenerates to a no-op regardless of what the property is meant to exercise.
+        // Devices that later draw `goOffline` still lose the socket via onClose, and
+        // `comeOnline` still reconnects it — that machinery is unchanged.
+        for (const device of devices) {
+          device.session.connect();
+          await device.session.sync();
+        }
 
         const mintedOpIds = new Set<OpId>();
 
@@ -320,16 +351,21 @@ describe("N-device convergence property", () => {
               await device.session.sync();
               break;
             case "redeliver":
-              device.redeliver();
+              if (device.redeliver()) redeliverEffectiveCount += 1;
               break;
             case "pullOutOfOrder": {
               // Fires the redelivery synchronously in the gap before sync()'s pull settles
               // (JS run-to-first-await semantics: the socket's ingest() runs to completion
               // before the pull's own ingest() gets a chance to), genuinely racing the two
-              // ingest paths against each other rather than just serializing them.
-              const pending = device.session.sync();
-              device.redeliver();
-              await pending;
+              // ingest paths against each other rather than just serializing them. sync()'s
+              // returned promise is already in flight (pushPending/pull have been kicked
+              // off) by the time redeliver() runs synchronously in this same tick, whether
+              // or not that pull ultimately succeeds — so a true (non-empty) redeliver()
+              // here is exactly "a redelivery raced against a real in-flight pull," which is
+              // what pullOutOfOrderRacedCount counts.
+              const pendingSync = device.session.sync();
+              if (device.redeliver()) pullOutOfOrderRacedCount += 1;
+              await pendingSync;
               break;
             }
           }
@@ -345,6 +381,22 @@ describe("N-device convergence property", () => {
         for (const device of devices) {
           expect(device.session.state()).toEqual(expected); // property 1
           expect(device.session.pending()).toBe(0); // property 4
+          // Fix-wave (review Finding 2): this half of property 4 is currently UNFALSIFIABLE
+          // in this harness. SimServer's fixed contract (module comment atop
+          // testing/simServer.ts) only ever rejects a duplicate opId, and a duplicate
+          // surfaces as `{duplicate: true}` from append() — not as a thrown TransportError
+          // — so session.ts's permanent-rejection path (pushPending's catch branch that
+          // moves an event into rejectedOps) can never fire against this sim server, and
+          // this assertion can never fail regardless of what the fix wave changes. The
+          // controller's decision stands: the sim contract per the plan is NOT altered to
+          // add rejection injection just to make this line falsifiable. Real coverage for
+          // the permanent-rejection path already lives in session.test.ts: "(e) a permanent
+          // 409 mid-queue drops only that entry into rejected() and still pushes the rest"
+          // and "a permanent rejection under overlapping sync() triggers yields exactly one
+          // rejected() entry for that op". This assertion stays here as a quiescence
+          // invariant — every device SHOULD converge with an empty rejected() given the sim
+          // never permanently rejects anything — and will automatically start pulling real
+          // weight the moment SimServer ever grows rejection injection.
           expect(device.session.rejected()).toEqual([]); // property 4
           expect(JSON.stringify(device.session.state())).toBe(expectedJson); // property 5
         }
@@ -362,5 +414,17 @@ describe("N-device convergence property", () => {
       }),
       { numRuns: 50 },
     );
+
+    // Fix-wave (review Finding 1) — floor rationale: with op targeting (deviceIndex, op
+    // kind) drawn uniformly at random, no single schedule is guaranteed to make either op
+    // effective, but every device's socket is now armed from schedule start (see the
+    // per-device setup above), and 10-40 ops per schedule across 50 schedules gives both
+    // ops abundant opportunity. A floor of 5 across the WHOLE run is deliberately
+    // conservative: high enough to catch total structural degeneration (e.g. every
+    // redeliver/pullOutOfOrder execution silently collapsing to a no-op, as could happen
+    // before this fix when a device never drew `comeOnline`), low enough that ordinary
+    // randomness in what fc.assert happens to generate can never make this assertion flaky.
+    expect(redeliverEffectiveCount).toBeGreaterThanOrEqual(5);
+    expect(pullOutOfOrderRacedCount).toBeGreaterThanOrEqual(5);
   }, 30_000);
 });

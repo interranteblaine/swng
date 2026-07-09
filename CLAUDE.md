@@ -31,7 +31,7 @@ pnpm -F @swng/web dev     # Web dev server (Vite; needs apps/web/.env.local — 
 pnpm deploy:beta          # CDK deploy of swng-beta (profile swng)
 ```
 
-Run a single test file: `pnpm -F <package> vitest run <file>` (e.g. `pnpm -F @swng/domain vitest run src/index.test.ts`). Tests are Vitest, co-located as `*.test.ts`, importing from `vitest` explicitly. The web app and its dev server return in M5.
+Run a single test file: `pnpm -F <package> vitest run <file>` (e.g. `pnpm -F @swng/domain vitest run src/index.test.ts`). Tests are Vitest, co-located as `*.test.ts`, importing from `vitest` explicitly (web component tests are `*.test.tsx` under happy-dom).
 
 **Before claiming a change is done, run `pnpm validate`** — lint + typecheck + build + test, the same gate CI enforces. Changes to `adapters-dynamodb` also warrant `pnpm test:contract`; changes deployed to beta warrant `pnpm e2e:beta`.
 
@@ -42,10 +42,11 @@ of swng per `docs/product.md` → `docs/roadmap.md` → `docs/architecture.md`. 
 proof-of-concept is **deleted from the tree** — it exists only at git tag `poc-final`, holds
 no authority, and must never be resurrected as design input.
 
-Current state (M0–M4 complete): nine packages under `packages/` matching
+Current state (M0–M5 complete): nine packages under `packages/` matching
 `docs/architecture.md` §3 (`domain`, `contracts`, `application`, `client`, four `adapters-*`,
-`lambda`), plus the root `e2e/` workspace, with the layer direction and package boundaries
-enforced by `eslint.config.mjs`.
+`lambda`), plus `apps/web` and the root `e2e/` workspace, with the layer direction and
+package boundaries enforced by `eslint.config.mjs` (the web app may import
+client/contracts/domain only).
 `@swng/domain` is real (M1–M2): the event-sourced round core (commutative `reduceRound` fold,
 HLC conflict resolution), all five v1 scoring engines over one log, the WHS handicap engine
 (constants pinned to published sources; 9-hole rounds use the published 2020 combining rule
@@ -65,7 +66,19 @@ transient-keep/permanent-reject, pull as sole cursor authority, WS as sugar with
 socket-open catch-up). Gated by an N-device fast-check convergence simulation
 (frozen-clock and skewed-behind devices; every interleaving folds to the server log) and
 a kill-network e2e against beta. `SessionConfig.deviceId` must be unique per live session
-(multi-tab: per-tab ids — see the M5 handoff notes in `docs/implementation-plan.md`).
+(the web app mints per-tab ids in sessionStorage and names its IndexedDB outbox per device).
+The round UI is real (M5): `@swng/web` (Vite + React 19 + Tailwind 4) — create/join by
+code, additive game setup, a real scorecard grid with per-game dots (chip-selected active
+game), two-tap score-for-anyone entry (picked-up/conceded first-class; the two-tap rule is
+`product.md` §9 and is asserted structurally), offline chrome where the queue is presented
+as a feature, a between-holes digest (multi-hole catch-up batches collapse to one card),
+and finalize → archived card (ResultsView renders the local fold; a structural test pins
+its agreement with the server's `settleRound`). `useSyncExternalStore` over one seam
+(`useRoundSession`); `describeGame` is the only game-kind switch site in the UI. Gated by
+`pnpm e2e:field`: a two-browser Playwright field test against beta playing the full
+18-hole `fieldDeck18` (engine-pinned oracle exported from `@swng/domain`) with an offline
+stretch, a mid-round correction that moves a 5-skin pot, and finalize parity across
+browsers.
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

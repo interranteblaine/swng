@@ -14,6 +14,7 @@ import {
 import { addGame } from "./addGame.js";
 import { finalizeRound } from "./finalizeRound.js";
 import { joinRound } from "./joinRound.js";
+import { peekRound } from "./peekRound.js";
 import { readEvents } from "./readEvents.js";
 import { recordScore } from "./recordScore.js";
 import { startRound } from "./startRound.js";
@@ -61,6 +62,7 @@ const setup = (clock: Clock = createFixedClock(1_000)) => {
     record: recordScore({ journal, broadcast }),
     finalize: finalizeRound({ journal, store, broadcast, clock, ids }),
     events: readEvents({ journal }),
+    peek: peekRound({ journal, store }),
   };
 };
 
@@ -220,6 +222,27 @@ describe("round use cases — golden path over in-memory ports", () => {
     const round = await freshLiveRound();
     const beyondHead = await round.events(round.host.roundId, 100);
     expect(beyondHead).toEqual({ events: [], nextSeq: 100 });
+  });
+
+  // Capability discipline (M6 Task 2 brief): a pre-join peek gets exactly courseName + tee
+  // rating/slope summaries — nothing about the round's identity, participants, or scoring.
+  // Asserting the exact key set (not just "has these fields") is what pins that a field
+  // can't be silently added later without this test catching it.
+  it("peekRound returns courseName + tee summaries and nothing else", async () => {
+    const round = await freshLiveRound();
+    const peeked = await round.peek(round.host.joinCode);
+
+    expect(Object.keys(peeked).sort()).toEqual(["courseName", "teeSets"]);
+    expect(peeked.courseName).toBe(fixtureLinks.courseName);
+    expect(peeked.teeSets).toEqual(fixtureLinks.teeSets.map((tee) => ({ name: tee.name, rating: tee.rating, slope: tee.slope })));
+    for (const teeSet of peeked.teeSets) {
+      expect(Object.keys(teeSet).sort()).toEqual(["name", "rating", "slope"]);
+    }
+  });
+
+  it("rejects peekRound with an unknown join code — bad-join-code, same shape as join's", async () => {
+    const ctx = setup();
+    await expect(ctx.peek("ZZZZZZ")).rejects.toMatchObject({ code: "bad-join-code" });
   });
 });
 

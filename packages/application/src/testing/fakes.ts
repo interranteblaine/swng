@@ -1,7 +1,10 @@
-import type { OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import type { Course, CourseId, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import { courseNameKey } from "@swng/domain";
+import { ApplicationError } from "../errors.js";
 import type { AppendResult, EventJournal } from "../ports/eventJournal.js";
 import type { Broadcast } from "../ports/broadcast.js";
 import type { Clock } from "../ports/clock.js";
+import type { CourseStore } from "../ports/courseStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
 import type { RoundStore } from "../ports/roundStore.js";
@@ -66,6 +69,39 @@ export const createInMemoryRoundStore = (): RoundStore => {
     putArchive: async (archive) => {
       archiveByRoundId.set(archive.roundId, archive);
     },
+  };
+};
+
+// CourseStore's real adapter (M6 Task 3) is a plain CRUD item + a name-prefix GSI; this
+// fake reproduces both without Dynamo — a Map keyed by courseId for get/put's optimistic
+// concurrency (the same expectedRevision contract the port doc specifies), and a linear
+// courseNameKey-prefix scan for search (fine at fake/test scale; the real GSI is what
+// makes this cheap in adapters-dynamodb).
+export const createInMemoryCourseStore = (): CourseStore => {
+  const byId = new Map<CourseId, { course: Course; revision: number }>();
+
+  return {
+    put: async (course, expectedRevision) => {
+      const existing = byId.get(course.courseId);
+      if (expectedRevision === undefined) {
+        if (existing) throw new ApplicationError("course-conflict", `course ${course.courseId} already exists`);
+        byId.set(course.courseId, { course, revision: 1 });
+        return;
+      }
+      if (!existing || existing.revision !== expectedRevision) {
+        throw new ApplicationError("course-conflict", `course ${course.courseId} revision mismatch (expected ${expectedRevision})`);
+      }
+      byId.set(course.courseId, { course, revision: existing.revision + 1 });
+    },
+    get: async (courseId) => {
+      const found = byId.get(courseId);
+      return found ? { course: found.course, revision: found.revision } : undefined;
+    },
+    search: async (nameKeyPrefix, limit) =>
+      [...byId.values()]
+        .filter(({ course }) => courseNameKey(course.name).startsWith(nameKeyPrefix))
+        .slice(0, limit)
+        .map(({ course }) => ({ courseId: course.courseId, name: course.name })),
   };
 };
 

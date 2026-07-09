@@ -17,6 +17,14 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "round-not-live": 409,
   "round-final": 409,
   "unknown-golfer-in-game": 400,
+  // M6 Task 2 (application/src/errors.ts): courses are a plain CRUD store, and this map is
+  // a Record<ApplicationErrorCode, number> — exhaustive by construction, so the two new
+  // codes have to land here the moment the union grows, ahead of M6 Task 4's actual course
+  // routes. Same bucketing precedent as the pair above: a failed optimistic-concurrency
+  // write is a 409 like round-not-live/round-final; an unknown courseId is a 404 like
+  // round-not-found/bad-join-code.
+  "course-conflict": 409,
+  "course-not-found": 404,
 };
 
 // The only two DomainError codes this boundary is documented to see: `unknown-tee-set`

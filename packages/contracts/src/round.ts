@@ -19,7 +19,9 @@ const holeSchema = z.object({
   strokeIndex: z.number().int(),
 });
 
-const teeSetSchema = z.object({
+// Exported for reuse wherever a wire tee set is needed outside a CourseCard (courses.ts'
+// tee-input payloads) — the one wire mirror of domain's TeeSet, not duplicated per caller.
+export const teeSetSchema = z.object({
   name: z.string(),
   rating: z.number(),
   slope: z.number(),

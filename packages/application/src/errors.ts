@@ -10,7 +10,13 @@ export type ApplicationErrorCode =
   | "not-a-participant"
   | "round-not-live"
   | "round-final"
-  | "unknown-golfer-in-game";
+  | "unknown-golfer-in-game"
+  // M6: courses are a plain CRUD store (CourseStore), not event-sourced — "conflict" is
+  // this layer's optimistic-concurrency signal (a failed expectedRevision condition),
+  // mirroring what a head-seq condition would be for the journal (see startRound.ts's
+  // accepted-race comment) if one existed there.
+  | "course-conflict"
+  | "course-not-found";
 
 export class ApplicationError extends Error {
   constructor(

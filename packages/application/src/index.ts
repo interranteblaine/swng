@@ -3,6 +3,7 @@
 
 export type { AppendResult, EventJournal } from "./ports/eventJournal.js";
 export type { RoundStore } from "./ports/roundStore.js";
+export type { CourseStore } from "./ports/courseStore.js";
 export type { Broadcast } from "./ports/broadcast.js";
 export type { ParticipantClaims, TokenIssuer } from "./ports/tokenIssuer.js";
 export type { Clock } from "./ports/clock.js";
@@ -22,12 +23,20 @@ export { addGame } from "./rounds/addGame.js";
 export { recordScore } from "./rounds/recordScore.js";
 export { finalizeRound } from "./rounds/finalizeRound.js";
 export { readEvents } from "./rounds/readEvents.js";
+export { peekRound } from "./rounds/peekRound.js";
+
+export { createCourse } from "./courses/createCourse.js";
+export { addTeeSet } from "./courses/addTeeSet.js";
+export { verifyTeeSet } from "./courses/verifyTeeSet.js";
+export { getCourse } from "./courses/getCourse.js";
+export { searchCourses } from "./courses/searchCourses.js";
 
 // In-memory ports — exported product surface for lambda/E2E unit tests (M3 Task 4+), not
 // just this package's own tests.
 export {
   createCapturingBroadcast,
   createFixedClock,
+  createInMemoryCourseStore,
   createInMemoryJournal,
   createInMemoryRoundStore,
   createNullLogger,

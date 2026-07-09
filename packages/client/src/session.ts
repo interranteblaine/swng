@@ -32,7 +32,7 @@ export interface RejectedOp {
 export interface RoundSession {
   readonly roundId: RoundId;
   state(): RoundState; // reduceRound(confirmed ∪ outbox), cached until change; THROWS until hydrated()
-  games(): readonly GameState[]; // scoreGame over state().games filtered to known kinds; THROWS until hydrated();
+  games(): readonly GameState[]; // scoreGame over state().games filtered to known kinds; THROWS until hydrated().
   // identity-stable — same array reference until the underlying state changes (required for
   // useSyncExternalStore, which treats a fresh reference as "store changed" and loops)
   recordScore(golferId: GolferId, hole: number, result: HoleResult): void; // optimistic; opportunistic push when connected

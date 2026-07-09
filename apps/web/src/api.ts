@@ -21,12 +21,17 @@ export class ApiError extends Error {
 // errorResponseSchema: API Gateway's own edge errors (timeouts, throttles) are HTML/plain
 // text, never JSON, so a SyntaxError there must not escape as some other error shape.
 const requestJson = async (path: string, init: (RequestInit & { token?: string }) | undefined): Promise<unknown> => {
-  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
-  if (init?.token) headers.authorization = `Bearer ${init.token}`;
+  // `token` is this function's own bespoke property, not part of RequestInit — it must be
+  // destructured out and never spread into the real fetch() call below (fetch would just
+  // ignore an unknown property, but silently leaking a bearer token into a generic init object
+  // is the kind of thing that bites later, e.g. if `rest` is ever logged or forwarded).
+  const { token, ...rest } = init ?? {};
+  const headers: Record<string, string> = { ...(rest.headers as Record<string, string> | undefined) };
+  if (token) headers.authorization = `Bearer ${token}`;
 
   let response: Response;
   try {
-    response = await fetch(`${config.httpUrl}${path}`, { ...init, headers });
+    response = await fetch(`${config.httpUrl}${path}`, { ...rest, headers });
   } catch {
     throw new ApiError("network", undefined, "network error");
   }

@@ -29,7 +29,10 @@ export function StandingsHeader({ state, games, activeGameId, onSelect }: Standi
             aria-selected={active}
             onClick={() => onSelect(game.id)}
             className={`flex min-h-14 flex-col items-start justify-center gap-0.5 rounded-lg px-3 py-1 text-left whitespace-nowrap ${
-              active ? "bg-emerald-700 text-slate-50" : "bg-slate-800 text-slate-300"
+              // Color alone can't carry "which chip is active" (color-blind / grayscale
+              // readability) — the border + weight are the non-color cue; border-transparent
+              // (not border-0) keeps the inactive chip's box the same size as the active one.
+              active ? "border-2 border-current bg-emerald-700 font-semibold text-slate-50" : "border border-transparent bg-slate-800 text-slate-300"
             }`}
           >
             <span className="text-[10px] font-semibold uppercase tracking-wide opacity-80">{title}</span>

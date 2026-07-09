@@ -5,8 +5,12 @@ import type { HoleResult, Participant } from "@swng/domain";
 // — distance-from-par ascending, ties (equidistant above/below) broken toward the lower value.
 // Exported for its own direct test (product.md §9's "par±window" contract) rather than only
 // asserted indirectly through ScorePad's rendered button order.
+// Capped at 12, not the wire schema's unbounded gross score: gross 10-12 are routine for a
+// high-handicap golfer on a hard hole, so they must be one tap away like any other value, but
+// 12 is a pragmatic v1 UI cap — a triple-digit-adjacent score is rare enough, and a genuinely
+// worse hole is picked-up/conceded territory, not a bigger button grid.
 export const orderedStrokeValues = (par: number): readonly number[] => {
-  const values = Array.from({ length: 9 }, (_, index) => index + 1);
+  const values = Array.from({ length: 12 }, (_, index) => index + 1);
   return values.sort((a, b) => Math.abs(a - par) - Math.abs(b - par) || a - b);
 };
 

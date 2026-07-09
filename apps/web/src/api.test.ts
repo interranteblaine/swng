@@ -93,6 +93,10 @@ describe("addGame", () => {
     expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/games`);
     expect(JSON.parse(String(seenInit?.body))).toEqual({ game });
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-3");
+    // `token` is api.ts's own internal init property, not a real RequestInit member — it must
+    // never reach the actual fetch() call (fetch would ignore it silently, but it's still a
+    // leak of a bespoke property into a standard API surface).
+    expect(seenInit).not.toHaveProperty("token");
     expect(result).toEqual({ gameId: expect.anything(), seq: 5 });
   });
 });
@@ -112,6 +116,7 @@ describe("finalizeRound", () => {
     expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/finalize`);
     expect(seenInit?.method).toBe("POST");
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-4");
+    expect(seenInit).not.toHaveProperty("token");
     expect(result).toEqual({ results: [], handicapping: [] });
   });
 

@@ -58,4 +58,19 @@ describe("StandingsHeader", () => {
     fireEvent.click(stablefordTab);
     expect(onSelect).toHaveBeenCalledWith(stablefordConfig.id);
   });
+
+  it("marks the active chip with a non-color structural cue, not color alone", () => {
+    render(<StandingsHeader state={baseState()} games={gameStates} activeGameId={strokePlayConfig.id} onSelect={vi.fn()} />);
+
+    const strokeTab = screen.getByRole("tab", { name: /Stroke play/ });
+    const stablefordTab = screen.getByRole("tab", { name: /Stableford/ });
+
+    // A sighted, color-blind user must be able to tell the active chip apart from its border
+    // alone: active gets a solid current-color border + bold text; inactive gets a transparent
+    // (layout-preserving) border and regular weight.
+    expect(strokeTab.className).toMatch(/border-2 border-current/);
+    expect(strokeTab.className).toMatch(/font-semibold/);
+    expect(stablefordTab.className).toMatch(/border border-transparent/);
+    expect(stablefordTab.className).not.toMatch(/font-semibold/);
+  });
 });

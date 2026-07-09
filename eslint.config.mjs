@@ -101,7 +101,10 @@ export default [
     plugins: { "react-hooks": reactHooks },
     rules: {
       "react-hooks/rules-of-hooks": "error",
-      "react-hooks/exhaustive-deps": "warn",
+      // "error", not "warn": root lint has no --max-warnings, so a "warn" here can never fail
+      // CI — a missing/stale dependency would lint clean forever. Zero warnings exist today
+      // (verified before promoting), so this is a no-op for the current tree.
+      "react-hooks/exhaustive-deps": "error",
     },
   },
   {

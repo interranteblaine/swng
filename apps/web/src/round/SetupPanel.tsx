@@ -24,9 +24,14 @@ const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
   skins: "Skins",
 };
 
-export function SetupPanel({ state, games, joinCode, onAddGame }: SetupPanelProps) {
-  const inAnyGame = new Set(state.games.flatMap((config) => gamePlayers(config)));
-  const withoutAGame = state.participants.filter((p) => !inAnyGame.has(p.golferId));
+// `games` (live GameState, the Task 5/6 standings seam) isn't read here — this task's dots
+// derive from state.games (the frozen GameConfig) only — but it stays in SetupPanelProps so
+// RoundPage's call site doesn't need a signature change once standings actually render.
+export function SetupPanel({ state, joinCode, onAddGame }: SetupPanelProps) {
+  const hasGames = state.games.length > 0;
+  // Per-game dots, computed once up front rather than per participant row below — each
+  // config's gameDots() call is independent of which row is currently rendering.
+  const perGameDots = state.games.map((config) => ({ config, dots: gameDots(config, state.participants, state.card) }));
 
   return (
     <section className="flex flex-col gap-6 p-6 text-slate-100">
@@ -37,47 +42,42 @@ export function SetupPanel({ state, games, joinCode, onAddGame }: SetupPanelProp
 
       <div>
         <h2 className="text-lg font-semibold">Roster</h2>
-        <ul className="flex flex-col gap-1">
-          {state.participants.map((p) => (
-            <li key={p.golferId}>
-              {p.name} — {p.tee} — CH {p.courseHandicap}
-            </li>
-          ))}
+        {/* One roster view, not two: every participant's name/tee/courseHandicap always
+            renders here. The DOTS presentation is what switches — plain courseHandicap
+            (above) before any game exists, per-game badges (below) once games exist — never
+            a second list of names alongside this one. */}
+        <ul className="flex flex-col gap-2">
+          {state.participants.map((p) => {
+            const badges = perGameDots
+              .filter(({ config }) => gamePlayers(config).includes(p.golferId))
+              .map(({ config, dots }) => {
+                const perHole = dots.get(p.golferId);
+                return { id: config.id, label: GAME_KIND_LABEL[config.kind], total: perHole ? totalDots(perHole) : 0 };
+              });
+
+            return (
+              <li key={p.golferId} className="flex flex-col gap-1">
+                <span>
+                  {p.name} — {p.tee} — CH {p.courseHandicap}
+                </span>
+                {hasGames && (
+                  <span className="flex flex-wrap gap-2 text-sm text-slate-400">
+                    {badges.length > 0 ? (
+                      badges.map((b) => (
+                        <span key={b.id} className="rounded-full bg-slate-800 px-2 py-0.5">
+                          {b.label}: {b.total} dots
+                        </span>
+                      ))
+                    ) : (
+                      <span>Not yet in a game</span>
+                    )}
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       </div>
-
-      {state.games.length > 0 && (
-        <div>
-          <h2 className="text-lg font-semibold">Games ({games.length})</h2>
-          <div className="flex flex-col gap-3">
-            {state.games.map((config) => {
-              const dots = gameDots(config, state.participants, state.card);
-              return (
-                <div key={config.id} className="rounded-lg bg-slate-800 p-3">
-                  <h3 className="font-semibold">{GAME_KIND_LABEL[config.kind]}</h3>
-                  <ul>
-                    {gamePlayers(config).map((id) => {
-                      const player = state.participants.find((p) => p.golferId === id);
-                      const perHole = dots.get(id);
-                      const total = perHole ? totalDots(perHole) : 0;
-                      return (
-                        <li key={id}>
-                          {player?.name ?? id} — {total} dots
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              );
-            })}
-          </div>
-          {withoutAGame.length > 0 && (
-            <div className="mt-2 text-slate-400">
-              Not yet in a game: {withoutAGame.map((p) => p.name).join(", ")}
-            </div>
-          )}
-        </div>
-      )}
 
       <AddGameForm participants={state.participants} onAddGame={onAddGame} />
     </section>

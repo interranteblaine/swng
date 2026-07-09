@@ -41,18 +41,41 @@ describe("SetupPanel", () => {
     expect(screen.queryByText(/^Games/)).toBeNull(); // no games section before any game exists
   });
 
-  it("groups roster by game and shows per-game dots once a game exists", () => {
+  it("shows per-game dots once a game exists, on the same roster row as name/tee/CH", () => {
     const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
     const state = baseState({ games: [stableford] });
     const games: GameState[] = [{ kind: "stableford", id: gameId("game-1"), lines: [], complete: false }];
 
     render(<SetupPanel state={state} games={games} joinCode="ABC123" onAddGame={noopAddGame} />);
 
-    // "Stableford" also appears as an <option> in the Add Game kind picker — scope to the
-    // game group's own heading to disambiguate.
-    expect(screen.getByRole("heading", { name: "Stableford" })).toBeTruthy();
     const expectedDots = playingHandicap(8, defaultAllowance("stableford"));
-    expect(screen.getByText(new RegExp(`${expectedDots} dots`))).toBeTruthy();
+    const annRow = screen.getAllByRole("listitem").find((li) => /CH 8/.test(li.textContent ?? ""));
+    expect(annRow).toBeTruthy();
+    // Same row carries both the identity (name/tee/CH) and the game's dots — one roster, not
+    // a second list keyed off dots alone.
+    expect(within(annRow!).getByText(new RegExp(`Stableford: ${expectedDots} dots`))).toBeTruthy();
+  });
+
+  it("renders each participant's identity row exactly once even once games exist — no second, dots-only roster", () => {
+    const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
+    const state = baseState({ games: [stableford] });
+    const games: GameState[] = [{ kind: "stableford", id: gameId("game-1"), lines: [], complete: false }];
+
+    render(<SetupPanel state={state} games={games} joinCode="ABC123" onAddGame={noopAddGame} />);
+
+    // Scope to <li> rows specifically (not the Add Game form's player checkboxes, which are
+    // <label> elements, not list items) — Ann must appear as exactly one roster row.
+    const annRows = screen.getAllByRole("listitem").filter((li) => /Ann/.test(li.textContent ?? ""));
+    expect(annRows).toHaveLength(1);
+    // And that single row still carries the full identity — tee and courseHandicap didn't
+    // get dropped in favor of a dots-only line.
+    expect(annRows[0]?.textContent).toMatch(/white/);
+    expect(annRows[0]?.textContent).toMatch(/CH 8/);
+
+    // Bo has no game yet — still gets an identity row (just no dots badge).
+    const boRows = screen.getAllByRole("listitem").filter((li) => /Bo/.test(li.textContent ?? ""));
+    expect(boRows).toHaveLength(1);
+    expect(boRows[0]?.textContent).toMatch(/CH 4/);
   });
 
   it("adds a fourball-match game with the exact {kind, a, b} shape (ids from participants) and no id field", async () => {
@@ -89,6 +112,24 @@ describe("SetupPanel", () => {
     // game-added event round-trips) does it show up.
     const stableford: GameConfig = { kind: "stableford", id: gameId("game-9"), players: [ANN] };
     rerender(<SetupPanel state={baseState({ games: [stableford] })} games={[]} joinCode="ABC123" onAddGame={noopAddGame} />);
-    expect(screen.getByRole("heading", { name: "Stableford" })).toBeTruthy();
+    const expectedDots = playingHandicap(8, defaultAllowance("stableford"));
+    expect(screen.getByText(new RegExp(`Stableford: ${expectedDots} dots`))).toBeTruthy();
+  });
+
+  it("sends a hand-edited allowance value (not the per-kind default) in onAddGame's config", async () => {
+    render(<SetupPanel state={baseState()} games={[]} joinCode="ABC123" onAddGame={noopAddGame} />);
+    noopAddGame.mockClear();
+
+    fireEvent.change(screen.getByLabelText(/^kind$/i), { target: { value: "stableford" } });
+    fireEvent.click(within(screen.getByRole("group", { name: /players/i })).getByLabelText("Ann"));
+    // 0.5 isn't stableford's default allowance (0.95, per defaultAllowance) — picking a value
+    // that differs from the default is the point: this guards the step="any" fix (a stricter
+    // step would have silently blocked this exact submit).
+    fireEvent.change(screen.getByLabelText(/allowance/i), { target: { value: "0.5" } });
+    fireEvent.click(screen.getByRole("button", { name: /add game/i }));
+
+    expect(noopAddGame).toHaveBeenCalledTimes(1);
+    const sent = noopAddGame.mock.calls[0]![0];
+    expect(sent).toMatchObject({ kind: "stableford", players: [ANN], allowance: 0.5 });
   });
 });

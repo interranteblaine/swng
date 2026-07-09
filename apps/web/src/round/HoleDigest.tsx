@@ -64,7 +64,15 @@ export const useHoleDigest = (state: RoundState, games: readonly GameState[]): {
     }
 
     if (prevState && newlyComplete.length > 0) {
-      const hole = Math.min(...newlyComplete); // lowest newly-completed hole this pass — chronologically first
+      // A batch of holes can complete in a single snapshot transition — an offline device
+      // reconnects and its queued scores drain in one sync pass, completing holes 10-12 at
+      // once. That's one catch-up moment, not several: label by the HIGHEST newly-completed
+      // hole (the honest read on where the round now stands), not the lowest. Stacking one
+      // overlay card per hole would bury a golfer mid-round in modals for a single reconnect.
+      // The per-game lines below already reflect the fully-caught-up `state`, and the diff is
+      // against `prevState` — the snapshot from BEFORE the whole batch, not just before the
+      // labeled hole — so "what changed" still spans every hole the batch swallowed.
+      const hole = Math.max(...newlyComplete);
       const lines: GameChangeLine[] = state.games.map((config) => {
         const after = games.find((g) => g.id === config.id);
         // `after` should always resolve (games is scoreGame() over these same configs), but a

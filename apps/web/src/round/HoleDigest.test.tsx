@@ -37,6 +37,17 @@ const hole1Complete = stateWith({ ...hole1Incomplete.cells, [cellKey(BO, 1)]: ce
 const hole2Partial = stateWith({ ...hole1Complete.cells, [cellKey(ANN, 2)]: cell({ kind: "strokes", strokes: 4 }, ANN) });
 const hole1Corrected = stateWith({ [cellKey(ANN, 1)]: cell({ kind: "strokes", strokes: 6 }, ANN), [cellKey(BO, 1)]: cell({ kind: "strokes", strokes: 4 }, BO) });
 
+// Simulates an offline device reconnecting and draining several queued scores in one sync
+// pass: holes 1 AND 2 both go from not-yet-complete to complete between one render and the
+// next (no intermediate render where only hole 1 is complete), the way a real snapshot jump
+// from @swng/client's sync loop looks.
+const hole1And2Complete = stateWith({
+  ...hole1Complete.cells,
+  [cellKey(ANN, 2)]: cell({ kind: "strokes", strokes: 4 }, ANN),
+  [cellKey(BO, 2)]: cell({ kind: "strokes", strokes: 5 }, BO),
+});
+const hole1CorrectedAfterBatch = stateWith({ ...hole1And2Complete.cells, [cellKey(ANN, 1)]: cell({ kind: "strokes", strokes: 6 }, ANN) });
+
 function Harness({ state }: { state: RoundState }) {
   const { digest, dismiss } = useHoleDigest(state, gamesFor(state));
   return digest ? <HoleDigest digest={digest} onDismiss={dismiss} /> : null;
@@ -95,5 +106,38 @@ describe("useHoleDigest — trigger semantics", () => {
     expect(card.textContent).toContain(afterLine);
     expect(beforeLine).not.toBe(afterLine); // sanity: this fixture's before/after genuinely differ
     expect(card.textContent).toContain(beforeLine);
+  });
+
+  it("collapses a multi-hole catch-up batch into ONE digest labeled by the HIGHEST newly-completed hole, diffed against the pre-batch snapshot", () => {
+    const { rerender } = render(<Harness state={hole1Incomplete} />); // partially complete: only Ann's hole 1 so far
+    expect(screen.queryByRole("status")).toBeNull();
+
+    rerender(<Harness state={hole1And2Complete} />); // holes 1 AND 2 both complete in the same snapshot transition
+    expect(screen.getAllByRole("status")).toHaveLength(1); // one card for the whole batch, not one per hole
+    expect(screen.getByText("After 2")).toBeTruthy(); // labeled by the highest hole in the batch...
+    expect(screen.queryByText("After 1")).toBeNull(); // ...not the lowest
+
+    const card = screen.getByRole("status");
+    const afterLine = describeGame(gamesFor(hole1And2Complete)[0]!, hole1And2Complete).line;
+    const beforeLine = describeGame(gamesFor(hole1Incomplete)[0]!, hole1Incomplete).line; // pre-BATCH snapshot (before hole 1 completed), not just pre-hole-2
+    expect(card.textContent).toContain(afterLine);
+    expect(card.textContent).toContain(beforeLine); // the diff spans the whole batch, not just the labeled hole's own change
+  });
+
+  it("a batch's swallowed (non-labeled) holes never get a delayed digest of their own", () => {
+    const { rerender } = render(<Harness state={hole1Incomplete} />);
+    rerender(<Harness state={hole1And2Complete} />); // batch fires "After 2"; hole 1 is marked digested too, silently
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("status")).toBeNull();
+
+    rerender(<Harness state={hole1CorrectedAfterBatch} />); // correction to hole 1 only; still complete, not NEWLY complete
+    expect(screen.queryByRole("status")).toBeNull(); // the swallowed hole must not surface a late digest of its own
+  });
+
+  it("a single-hole completion still labels normally (the batch collapse doesn't affect the common case)", () => {
+    const { rerender } = render(<Harness state={hole1Incomplete} />);
+    rerender(<Harness state={hole1Complete} />);
+    expect(screen.getByText("After 1")).toBeTruthy();
   });
 });

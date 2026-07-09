@@ -51,10 +51,10 @@ export interface Route {
 
 // `since` defaults to "read from the start" and otherwise must be an integer seq — a
 // non-integer (e.g. "abc", or Number's own parse of it: NaN) must be rejected here, as a
-// ContractError, rather than reach adapters-dynamodb's evtSk(NaN + 1). evtSk pads the value
-// with String(...).padStart, so evtSk(NaN) is a syntactically valid but numerically
-// meaningless sort key — the BETWEEN range query it feeds just quietly matches nothing,
-// turning a client bug into a silently-empty page instead of a 400.
+// ContractError, rather than reach adapters-dynamodb's evtSk(NaN + 1). Non-integer since
+// feeds evtSk(NaN) = "EVT#0000000NaN"; under lexicographic BETWEEN, this drops seq ≤ 999
+// but still returns seq ≥ 1000, silently amputating the head of the log a client folds
+// over — strictly worse than an empty page. Reject with 400 instead.
 const parseSinceSeq = (raw: string | undefined): number => {
   if (raw === undefined) return 0;
   const parsed = Number(raw);

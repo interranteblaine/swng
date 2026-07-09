@@ -63,13 +63,13 @@ const createDevice = async (server: SimServer, golfer: GolferId, deviceIdValue: 
   const transport = {
     push: raw.push,
     pull: raw.pull,
-    openSocket: (onEvents: (events: readonly RoundEvent[]) => void, onClose: () => void) => {
+    openSocket: (onEvents: (events: readonly RoundEvent[]) => void, onClose: () => void, onOpen?: () => void) => {
       const wrapped = (events: readonly RoundEvent[]): void => {
         lastBatch = events;
         onEvents(events);
       };
       liveOnEvents = wrapped;
-      return raw.openSocket(wrapped, onClose);
+      return raw.openSocket(wrapped, onClose, onOpen);
     },
   };
 

@@ -18,6 +18,7 @@ export * from "./scoring/skins.js";
 export * from "./scoring/result.js";
 export * from "./scoring/golden/fixtureCourse.js";
 export * from "./scoring/golden/deck.js";
+export * from "./scoring/golden/fieldDeck18.js";
 export * from "./handicap/whs.js";
 // GameConfig is already re-exported via ./round/events.js (game.ts owns the
 // type; events.ts re-exports it so RoundEvent's "game-added" arm has a name to

@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryOutboxStore } from "@swng/client";
@@ -120,5 +120,42 @@ describe("RoundPage", () => {
     // Stale-snapshot gap (Task 3's flagged M4→M5 handoff item): without the key={roundId}
     // remount, this would still show round A's join code from the reused session instance.
     expect(screen.queryByText("AAA111")).toBeNull();
+  });
+
+  it("scores a hole through the real ScorecardGrid + ScorePad, wired end to end through the session", async () => {
+    const id = roundId("round-3");
+    const golfer = golferId("ann");
+    credentialStore.save(id, { token: "tok-3", golferId: golfer, name: "Ann", joinCode: "CCC333" });
+
+    const transport = createScriptedTransport(buildServerLog(id, golfer, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: golfer,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("CCC333")).toBeTruthy());
+    // Connected (the scripted transport's openSocket opens synchronously) — StatusChrome
+    // wired to the real session renders no offline banner.
+    expect(screen.queryByRole("status")).toBeNull();
+
+    // Two taps, idle to posted: tap the cell (fixtureLinks hole 1, no games — plain gross),
+    // then tap a value in the pad that opens.
+    fireEvent.click(screen.getByRole("button", { name: "Ann hole 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "5" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull(); // posts and closes, no confirm step
+    await waitFor(() => expect(screen.getByRole("button", { name: "Ann hole 1" }).textContent).toContain("5"));
   });
 });

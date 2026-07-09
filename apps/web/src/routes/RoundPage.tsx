@@ -6,7 +6,9 @@ import type { RoundId } from "@swng/domain";
 import { addGame } from "../api";
 import { credentialStore } from "../identity";
 import type { RoundCredential } from "../identity";
+import { ScorecardGrid } from "../round/ScorecardGrid";
 import { SetupPanel } from "../round/SetupPanel";
+import { StatusChrome } from "../round/StatusChrome";
 import { useRoundSession as defaultUseRoundSession } from "../session/useRoundSession";
 import type { RoundSessionView } from "../session/useRoundSession";
 
@@ -42,6 +44,11 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
 
     return (
       <main className="min-h-screen bg-slate-950">
+        <StatusChrome connected={session.connected} pending={session.pending} rejected={session.rejected} participants={session.state.participants} />
+        {/* Task 6 picks the active game via a standings chip; until then it defaults to the
+            first game (or undefined with none yet) — see ScorecardGrid's own doc comment on
+            the `activeGame` prop for what that seam does and doesn't need. */}
+        <ScorecardGrid state={session.state} activeGame={session.games[0]} recordScore={session.recordScore} />
         <SetupPanel state={session.state} games={session.games} joinCode={credential.joinCode} onAddGame={onAddGame} />
       </main>
     );

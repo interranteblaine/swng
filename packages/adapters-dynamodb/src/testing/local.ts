@@ -32,6 +32,7 @@ export interface LocalDynamo {
   readonly client: DynamoDBDocumentClient;
   readonly roundsTable: string;
   readonly connectionsTable: string;
+  readonly coreTable: string;
   readonly stop: () => Promise<void>;
 }
 
@@ -132,7 +133,7 @@ const waitUntilReachable = async (dynamo: DynamoDBClient, isAlive: () => boolean
   }
 };
 
-const createTables = async (dynamo: DynamoDBClient, roundsTable: string, connectionsTable: string): Promise<void> => {
+const createTables = async (dynamo: DynamoDBClient, roundsTable: string, connectionsTable: string, coreTable: string): Promise<void> => {
   // Rounds table (M3 plan, Global Constraints): pk `ROUND#<id>` / sk `EVT#<seq>` | META |
   // ARCHIVE | `OPID#<opId>`; gsi1 on `joinCode` (META items only).
   await dynamo.send(
@@ -170,17 +171,50 @@ const createTables = async (dynamo: DynamoDBClient, roundsTable: string, connect
     }),
   );
 
+  // Core table (M6 Task 3, mirroring apps/infra-cdk/lib/swngStack.ts's real CoreTable): pk
+  // `COURSE#<id>` / sk `COURSE`; gsi1 is the single-partition course-name search index
+  // (gsi1pk fixed to one constant, gsi1sk the normalized name — see keys.ts), projecting
+  // only `name` so the contract suite can prove search never leaks the full course document
+  // over the wire, not just that the adapter code happens not to read it.
+  await dynamo.send(
+    new CreateTableCommand({
+      TableName: coreTable,
+      BillingMode: "PAY_PER_REQUEST",
+      AttributeDefinitions: [
+        { AttributeName: "pk", AttributeType: "S" },
+        { AttributeName: "sk", AttributeType: "S" },
+        { AttributeName: "gsi1pk", AttributeType: "S" },
+        { AttributeName: "gsi1sk", AttributeType: "S" },
+      ],
+      KeySchema: [
+        { AttributeName: "pk", KeyType: "HASH" },
+        { AttributeName: "sk", KeyType: "RANGE" },
+      ],
+      GlobalSecondaryIndexes: [
+        {
+          IndexName: "gsi1",
+          KeySchema: [
+            { AttributeName: "gsi1pk", KeyType: "HASH" },
+            { AttributeName: "gsi1sk", KeyType: "RANGE" },
+          ],
+          Projection: { ProjectionType: "INCLUDE", NonKeyAttributes: ["name"] },
+        },
+      ],
+    }),
+  );
+
   await Promise.all([
     waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: roundsTable }),
     waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: connectionsTable }),
+    waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: coreTable }),
   ]);
 };
 
 // Downloads DynamoDB Local if absent, boots it in-memory on a free port, creates the
-// `rounds` + `connections` tables, and returns a ready-to-use document client plus a `stop`
-// that tears the JVM down. Any failure along the way (no java, download/extract failure,
-// the process never becoming reachable) throws — the contract suite must fail loudly, never
-// silently skip.
+// `rounds` + `connections` + `core` tables, and returns a ready-to-use document client plus
+// a `stop` that tears the JVM down. Any failure along the way (no java, download/extract
+// failure, the process never becoming reachable) throws — the contract suite must fail
+// loudly, never silently skip.
 export const startLocalDynamo = async (): Promise<LocalDynamo> => {
   await ensureJar();
 
@@ -210,7 +244,8 @@ export const startLocalDynamo = async (): Promise<LocalDynamo> => {
 
     const roundsTable = "rounds";
     const connectionsTable = "connections";
-    await createTables(dynamo, roundsTable, connectionsTable);
+    const coreTable = "core";
+    await createTables(dynamo, roundsTable, connectionsTable, coreTable);
 
     const client = DynamoDBDocumentClient.from(dynamo);
 
@@ -233,7 +268,7 @@ export const startLocalDynamo = async (): Promise<LocalDynamo> => {
       });
     };
 
-    return { client, roundsTable, connectionsTable, stop };
+    return { client, roundsTable, connectionsTable, coreTable, stop };
   } catch (error) {
     proc.kill("SIGKILL");
     dynamo.destroy();

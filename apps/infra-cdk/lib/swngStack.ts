@@ -72,20 +72,35 @@ export class SwngStack extends Stack {
       projectionType: ProjectionType.ALL,
     });
 
-    // Neither of the next two tables is read/written by any M3 Lambda yet — core entities
-    // and projections land in a later milestone (docs/architecture.md §6) — but the stack
-    // shape is fixed by this task's brief, so they're provisioned now rather than added as
-    // a migration later. No construct is assigned to a variable: nothing in this file grants
-    // access to them yet, and a future milestone that adds a reader/writer will look them up
-    // by construct id at that point.
-    new Table(this, "CoreTable", {
+    // The core table now backs courses (M6 Task 3: createDynamoCourseStore) — pk `COURSE#<id>`
+    // / sk `COURSE`, one document per course, no separate event log (CourseStore's port
+    // comment). gsi1 is the course-name search index: a single partition across every course
+    // (gsi1pk fixed to one constant — adapters-dynamodb/src/keys.ts's courseGsi1pk — a
+    // deliberate v1 choice; thousands of courses sit trivially inside one partition's limits,
+    // and re-sharding is real future work only if beta telemetry ever shows it running hot),
+    // sorted by the normalized name (gsi1sk) so search is one begins_with Query. Projected to
+    // `name` only — courseId parses back out of the always-projected base-table `pk`, so the
+    // full course document and its revision counter never leave the base table over the GSI.
+    const coreTable = new Table(this, "CoreTable", {
       tableName: `swng-core-${stage}`,
       partitionKey: { name: "pk", type: AttributeType.STRING },
       sortKey: { name: "sk", type: AttributeType.STRING },
       billingMode: BillingMode.PAY_PER_REQUEST,
       removalPolicy: RemovalPolicy.RETAIN,
     });
+    coreTable.addGlobalSecondaryIndex({
+      indexName: "gsi1",
+      partitionKey: { name: "gsi1pk", type: AttributeType.STRING },
+      sortKey: { name: "gsi1sk", type: AttributeType.STRING },
+      projectionType: ProjectionType.INCLUDE,
+      nonKeyAttributes: ["name"],
+    });
 
+    // Projections land in a later milestone (docs/architecture.md §6) — the stack shape is
+    // fixed by an earlier task's brief, so it's provisioned now rather than added as a
+    // migration later. No construct is assigned to a variable: nothing in this file grants
+    // access to it yet, and a future milestone that adds a reader/writer will look it up by
+    // construct id at that point.
     new Table(this, "ProjectionsTable", {
       tableName: `swng-projections-${stage}`,
       partitionKey: { name: "pk", type: AttributeType.STRING },
@@ -157,6 +172,11 @@ export class SwngStack extends Stack {
     const wsConnectFn = makeFunction("WsConnectFunction", "wsConnect");
     const wsDisconnectFn = makeFunction("WsDisconnectFunction", "wsDisconnect");
 
+    // TABLE_CORE only goes to httpFn: the course routes (M6) are HTTP-only — wsConnect/
+    // wsDisconnect never touch the core table, unlike TABLE_ROUNDS/TABLE_CONNECTIONS above
+    // which every function needs (round broadcast / connection bookkeeping respectively).
+    httpFn.addEnvironment("TABLE_CORE", coreTable.tableName);
+
     // --- WebSocket API ($connect / $disconnect only — no $default route: every WS message
     // this system sends is server -> client broadcast, never client -> server) -----------
 
@@ -194,6 +214,7 @@ export class SwngStack extends Stack {
     // --- Grants ---------------------------------------------------------------------------
 
     roundsTable.grantReadWriteData(httpFn);
+    coreTable.grantReadWriteData(httpFn);
     connectionsTable.grantReadWriteData(httpFn);
     connectionsTable.grantReadWriteData(wsConnectFn);
     connectionsTable.grantReadWriteData(wsDisconnectFn);

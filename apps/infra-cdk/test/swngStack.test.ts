@@ -51,7 +51,7 @@ describe("SwngStack", () => {
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-rounds-beta" }) });
     });
 
-    it("swng-core-beta: pk/sk only, RETAIN", () => {
+    it("swng-core-beta: pk/sk + gsi1 on gsi1pk/gsi1sk (INCLUDE name), RETAIN", () => {
       template.hasResourceProperties("AWS::DynamoDB::Table", {
         TableName: "swng-core-beta",
         BillingMode: "PAY_PER_REQUEST",
@@ -59,12 +59,42 @@ describe("SwngStack", () => {
           { AttributeName: "pk", KeyType: "HASH" },
           { AttributeName: "sk", KeyType: "RANGE" },
         ],
-        // "pk/sk only" in the test name is only actually pinned by this: without it, a
-        // stray GSI could be added to this table and every other assertion here would
-        // still pass.
-        GlobalSecondaryIndexes: Match.absent(),
+        AttributeDefinitions: Match.arrayWith([
+          { AttributeName: "pk", AttributeType: "S" },
+          { AttributeName: "sk", AttributeType: "S" },
+          { AttributeName: "gsi1pk", AttributeType: "S" },
+          { AttributeName: "gsi1sk", AttributeType: "S" },
+        ]),
+        GlobalSecondaryIndexes: [
+          Match.objectLike({
+            IndexName: "gsi1",
+            KeySchema: [
+              { AttributeName: "gsi1pk", KeyType: "HASH" },
+              { AttributeName: "gsi1sk", KeyType: "RANGE" },
+            ],
+            Projection: { ProjectionType: "INCLUDE", NonKeyAttributes: ["name"] },
+          }),
+        ],
       });
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-core-beta" }) });
+    });
+
+    // M6 Task 3 brief: adding a GSI to an already-provisioned table must be an in-place
+    // update, never a replacement — a changed logical id would make CloudFormation delete
+    // and recreate the table (data loss for a RETAIN table's live beta data too, since a
+    // brand-new physical resource starts empty). Pinning the exact logical id "CoreTable"
+    // (the construct id `new Table(this, "CoreTable", ...)` unchanged from before this task)
+    // is the guard against that regression.
+    it("the core table's logical id is unchanged (still derived from construct id \"CoreTable\") — no table replacement", () => {
+      const tables = template.findResources("AWS::DynamoDB::Table");
+      // CDK derives each resource's CloudFormation logical id from its construct id plus a
+      // stable address hash (`new Table(this, "CoreTable", ...)`) — so this id changing means
+      // either the construct id or its position in the tree changed, either of which
+      // CloudFormation treats as a brand-new resource (delete + recreate) rather than an
+      // update to the existing one.
+      const coreTableLogicalId = Object.keys(tables).find((id) => id.startsWith("CoreTable"));
+      expect(coreTableLogicalId).toBeDefined();
+      expect(tables[coreTableLogicalId!]?.Properties.TableName).toBe("swng-core-beta");
     });
 
     it("swng-projections-beta: pk/sk only, RETAIN", () => {
@@ -122,6 +152,39 @@ describe("SwngStack", () => {
         expect(fn.Properties.Timeout).toBe(15);
         expect(fn.Properties.MemorySize).toBe(512);
       }
+    });
+
+    // M6 Task 3: course routes are HTTP-only (no WS entry point ever touches the core
+    // table), unlike TABLE_ROUNDS/TABLE_CONNECTIONS/WS_ENDPOINT above which every function
+    // needs — so exactly one of the three functions (httpFn) should carry TABLE_CORE.
+    it("exactly one function (http) carries TABLE_CORE", () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      const withTableCore = Object.values(functions).filter((fn) => "TABLE_CORE" in (fn.Properties.Environment.Variables as Record<string, unknown>));
+      expect(withTableCore).toHaveLength(1);
+    });
+  });
+
+  describe("grants", () => {
+    // grantReadWriteData(httpFn) (M6 Task 3 brief) attaches an IAM::Policy statement whose
+    // Resource covers the core table (and, per CDK's own convention for a table with GSIs,
+    // its indexes) — pinned by resolving the core table's actual logical id from the
+    // synthesized template rather than hard-coding CDK's hashed id, which is an
+    // implementation detail this test shouldn't need to know.
+    it("httpFn's role has a policy statement covering the core table (read+write actions)", () => {
+      const tables = template.findResources("AWS::DynamoDB::Table");
+      const coreTableLogicalId = Object.entries(tables).find(([, table]) => table.Properties.TableName === "swng-core-beta")?.[0];
+      expect(coreTableLogicalId).toBeDefined();
+
+      template.hasResourceProperties("AWS::IAM::Policy", {
+        PolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: Match.arrayWith(["dynamodb:GetItem", "dynamodb:PutItem"]),
+              Resource: Match.arrayWith([Match.objectLike({ "Fn::GetAtt": Match.arrayWith([coreTableLogicalId]) })]),
+            }),
+          ]),
+        }),
+      });
     });
   });
 

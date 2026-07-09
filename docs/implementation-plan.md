@@ -192,6 +192,25 @@ courses).
 `fourballMatch` + `skins`; digest and final results match the golden deck; every scoring
 action ≤ 2 taps.
 
+**M4 → M5 handoff** (from the M4 closing fix wave):
+- `deviceId` must be minted per LIVE SESSION, not per browser/user — reusing one across
+  concurrent sessions sharing a store makes them mint colliding opIds (same opCounter),
+  which the server silently dedupes down to one side's score. M5 must mint a fresh
+  `deviceId` per browser tab.
+- `createRoundSession` needs a readiness accessor: `state()`/`games()` currently throw
+  `DomainError` before genesis is ingested, which the UI can't call blind on first render —
+  add `hydrated()` or equivalent. Separately, `games()` returns a fresh array on every call;
+  the UI layer must cache it itself for `useSyncExternalStore` identity, or it will re-render
+  in a loop.
+- `close()` only guarantees the final outbox persist completed, not that a sync reached
+  quiescence (pending events may still be un-pushed when it resolves).
+- `rejected()` is in-memory only — not persisted across restarts; a permanently-rejected op
+  is forgotten on reload.
+- The stableford-golden-card server-log-building helper is duplicated across
+  `e2e/syncSession.e2e.test.ts` and `e2e/roundSlice.e2e.test.ts` (and mirrors
+  `session.test.ts`'s `buildServerLog`) — extract it to a shared spot on the next touch to
+  either file, rather than letting a third copy accrete.
+
 ### M6 — Courses
 
 **Goal:** real courses replace fixtures; course data becomes a product surface.

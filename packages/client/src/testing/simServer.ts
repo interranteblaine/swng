@@ -85,8 +85,9 @@ export const createSimServer = (): SimServer => {
           return { events, nextSeq: nextCursor };
         },
 
-        openSocket: (onEvents: (events: readonly RoundEvent[]) => void, onClose: () => void): (() => void) => {
+        openSocket: (onEvents: (events: readonly RoundEvent[]) => void, onClose: () => void, onOpen?: () => void): (() => void) => {
           channel.socket = { onEvents, onClose };
+          onOpen?.(); // this in-memory channel "opens" synchronously, right after registering
           return () => {
             if (channel.socket?.onEvents === onEvents) channel.socket = undefined;
           };

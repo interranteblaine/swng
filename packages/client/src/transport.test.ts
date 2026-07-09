@@ -26,6 +26,18 @@ const fakeResponse = (status: number, body: unknown): Response =>
     json: async () => body,
   }) as unknown as Response;
 
+// API Gateway itself (not the Lambda behind it) emits these for a Lambda timeout, a
+// throttle, or a plain 5xx from the edge — an HTML or plain-text body, never JSON. Models
+// that: .json() rejects exactly like the real Response API does on non-JSON bytes.
+const fakeNonJsonErrorResponse = (status: number): Response =>
+  ({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => {
+      throw new SyntaxError("Unexpected token < in JSON at position 0");
+    },
+  }) as unknown as Response;
+
 describe("createHttpTransport", () => {
   describe("push", () => {
     it("formats the wire body from the event, sends the bearer token, and parses the response", async () => {
@@ -83,6 +95,16 @@ describe("createHttpTransport", () => {
       expect(error).toBeInstanceOf(TransportError);
       expect((error as TransportError).kind).toBe("network");
     });
+
+    it("surfaces a non-JSON 502 body (API Gateway's own error page, not the Lambda's) as TransportError(server, 502, undefined), not a raw SyntaxError", async () => {
+      const fetchImpl = (async () => fakeNonJsonErrorResponse(502)) as unknown as typeof fetch;
+      const transport = createHttpTransport({ httpUrl: HTTP_URL, wsUrl: WS_URL, roundId: ROUND_ID, token: TOKEN, fetchImpl });
+
+      const error = await transport.push(SCORE_EVENT).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(TransportError);
+      expect(error as TransportError).toMatchObject({ kind: "server", status: 502, code: undefined });
+    });
   });
 
   describe("pull", () => {
@@ -99,6 +121,16 @@ describe("createHttpTransport", () => {
       expect(seenUrl).toBe(`${HTTP_URL}/rounds/${ROUND_ID}/events?since=3`);
       expect(result.nextSeq).toBe(7);
       expect(result.events).toEqual([SCORE_EVENT]);
+    });
+
+    it("surfaces a non-JSON 503 body as TransportError(server, 503, undefined), not a raw SyntaxError", async () => {
+      const fetchImpl = (async () => fakeNonJsonErrorResponse(503)) as unknown as typeof fetch;
+      const transport = createHttpTransport({ httpUrl: HTTP_URL, wsUrl: WS_URL, roundId: ROUND_ID, token: TOKEN, fetchImpl });
+
+      const error = await transport.pull(0).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(TransportError);
+      expect(error as TransportError).toMatchObject({ kind: "server", status: 503, code: undefined });
     });
   });
 

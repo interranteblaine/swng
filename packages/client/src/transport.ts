@@ -1,4 +1,5 @@
 import { errorResponseSchema, eventsResponseSchema, parse, recordScoreResponseSchema, wsEnvelopeSchema } from "@swng/contracts";
+import type { RecordScoreRequest } from "@swng/contracts";
 import type { RoundEvent, RoundId } from "@swng/domain";
 
 export interface PushResult {
@@ -19,7 +20,13 @@ export class TransportError extends Error {
 export interface RoundTransport {
   push(event: RoundEvent): Promise<PushResult>; // one score-recorded, no seq
   pull(sinceSeq: number): Promise<{ events: readonly RoundEvent[]; nextSeq: number }>;
-  openSocket(onEvents: (events: readonly RoundEvent[]) => void, onClose: () => void): () => void; // returns close()
+  // onOpen fires when the underlying socket actually finishes connecting — distinct from
+  // "openSocket() was called," since a real WebSocket is CONNECTING (not OPEN) for a while
+  // after construction. The caller needs this to close the gap between "requested a
+  // connection" and "the connection can actually deliver events": events landing in that
+  // gap arrive via neither the connect-time catch-up pull (which already ran) nor the
+  // socket (not open yet) unless something re-syncs exactly when it opens.
+  openSocket(onEvents: (events: readonly RoundEvent[]) => void, onClose: () => void, onOpen?: () => void): () => void; // returns close()
 }
 
 export interface HttpTransportConfig {
@@ -43,12 +50,23 @@ const requestJson = async (fetchImpl: typeof fetch, url: string, token: string, 
     throw new TransportError("network");
   }
 
-  const body: unknown = await response.json();
   if (!response.ok) {
-    const errorBody = errorResponseSchema.safeParse(body);
-    throw new TransportError("server", response.status, errorBody.success ? errorBody.data.code : undefined);
+    // API Gateway itself (not the Lambda behind it) emits a non-JSON body — HTML, plain
+    // text — for a Lambda timeout, a throttle, or its own edge 5xx (502/503/429). Parsing
+    // `code` off that body is therefore best-effort: a SyntaxError here must not escape as
+    // some other error type, or an explicit sync() would REJECT instead of resolving with
+    // the queue intact — breaking "offline is not an error" during exactly the outage the
+    // queue exists to survive.
+    let code: string | undefined;
+    try {
+      const errorBody = errorResponseSchema.safeParse(await response.json());
+      if (errorBody.success) code = errorBody.data.code;
+    } catch {
+      // non-JSON error body: code stays undefined, status alone still carries the failure.
+    }
+    throw new TransportError("server", response.status, code);
   }
-  return body;
+  return response.json();
 };
 
 export const createHttpTransport = (config: HttpTransportConfig): RoundTransport => {
@@ -64,7 +82,10 @@ export const createHttpTransport = (config: HttpTransportConfig): RoundTransport
       if (event.kind !== "score-recorded") {
         throw new Error(`transport.push only accepts score-recorded events, got "${event.kind}"`);
       }
-      const body = { golferId: event.golferId, hole: event.hole, result: event.result, opId: event.opId, hlc: event.hlc };
+      // Typed against the wire contract, not just inferred from the domain event, so a
+      // future drift between RecordScoreRequest's shape and this literal fails the build
+      // here rather than surfacing as a runtime 400 from the server's own schema parse.
+      const body: RecordScoreRequest = { golferId: event.golferId, hole: event.hole, result: event.result, opId: event.opId, hlc: event.hlc };
 
       const json = await requestJson(fetchImpl, `${httpUrl}/rounds/${roundId}/scores`, token, {
         method: "POST",
@@ -79,7 +100,7 @@ export const createHttpTransport = (config: HttpTransportConfig): RoundTransport
       return parse(eventsResponseSchema, json);
     },
 
-    openSocket(onEvents: (events: readonly RoundEvent[]) => void, onClose: () => void): () => void {
+    openSocket(onEvents: (events: readonly RoundEvent[]) => void, onClose: () => void, onOpen?: () => void): () => void {
       const socket = new WebSocketCtor(`${wsUrl}?token=${token}`);
       // The socket can fire both "error" and "close" for the same disconnect; onClose is a
       // lifecycle event for the caller (fire once), not a per-underlying-event echo.
@@ -90,6 +111,7 @@ export const createHttpTransport = (config: HttpTransportConfig): RoundTransport
         onClose();
       };
 
+      socket.onopen = () => onOpen?.();
       socket.onmessage = (event: MessageEvent) => {
         let parsedJson: unknown;
         try {

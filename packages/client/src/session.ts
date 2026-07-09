@@ -9,8 +9,20 @@ import type { RoundTransport } from "./transport.js";
 // scoreGame throws on a kind it doesn't recognize (M2 lesson, carried to the client): a
 // build must survive a round containing a future game kind rather than crashing games().
 // Derived from the same union scoreGame switches on (scoring/game.ts) — the two lists
-// must never drift, so this is the one place that names them.
-const KNOWN_GAME_KINDS: ReadonlySet<GameConfig["kind"]> = new Set<GameConfig["kind"]>(["stroke-play", "singles-match", "stableford", "fourball-match", "skins"]);
+// must never drift, so this is the one place that names them. Written as a `satisfies
+// Record<GameConfig["kind"], true>` object rather than a plain string array so that a
+// future domain change extending the `GameConfig["kind"]` union fails THIS build (a
+// missing key) instead of silently vanishing from games() — a new game kind arriving on
+// the wire would otherwise just be dropped by the KNOWN_GAME_KINDS filter with no compiler
+// signal that this list needs updating.
+const KNOWN_GAME_KINDS_BY_KIND = {
+  "stroke-play": true,
+  "singles-match": true,
+  stableford: true,
+  "fourball-match": true,
+  skins: true,
+} satisfies Record<GameConfig["kind"], true>;
+const KNOWN_GAME_KINDS: ReadonlySet<GameConfig["kind"]> = new Set(Object.keys(KNOWN_GAME_KINDS_BY_KIND) as GameConfig["kind"][]);
 
 export interface RejectedOp {
   readonly event: RoundEvent;
@@ -37,6 +49,11 @@ export interface SessionConfig {
   store?: OutboxStore; // default memory
   roundId: RoundId;
   golferId: GolferId;
+  // Must be unique per LIVE SESSION, not per browser/user. Two concurrent sessions sharing
+  // both a store AND a deviceId load the same persisted opCounter and mint colliding opIds
+  // for different events — the server dedupes by opId, so one side's score is silently
+  // discarded rather than both landing. (M5 must mint a fresh deviceId per browser tab, not
+  // reuse one per device/user.)
   deviceId: DeviceId;
   clock?: { now(): number };
 }
@@ -58,6 +75,14 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   // kill-network test constructs a session offline and never lets it touch the network).
   const persisted = await store.load(config.roundId);
   let pending: readonly RoundEvent[] = persisted?.pending ?? [];
+  // The floor must survive a restart, same invariant as the persisted opCounter just below:
+  // a persisted pending event can carry an hlc ahead of THIS restart's clock (this device
+  // floored on a skewed-ahead peer in the prior session, or its wall clock regressed across
+  // the restart itself), and a fresh HlcSource has no memory of that. Without this, a
+  // post-restart recordScore correcting that same cell mints an hlc that compares LESS than
+  // the pending event it's meant to beat — both push fine (distinct opIds), but LWW keeps
+  // the stale value forever, on every device that ever pulls it.
+  for (const event of pending) hlcSource.observe(event.hlc);
   // Plan amendment: `persisted.lastSeq` is deliberately NOT read here. It summarizes a
   // confirmed log that v1 never persists (confirmed always starts empty below), so seeding
   // the in-memory cursor from it would make a restarted session pull only events AFTER
@@ -314,9 +339,21 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
           // offline-banner UX, etc. are presentation concerns, not sync-loop concerns).
           // A caller that wants to reconnect calls connect() again.
         },
+        // The REAL trigger for the catch-up sync: a real WebSocket is CONNECTING (not
+        // OPEN) for a while after openSocket() returns, and events landing in that gap
+        // reach neither the pull just below (already ran) nor the socket (not open yet)
+        // unless something re-syncs exactly when it opens — v1 has no timer to catch it
+        // otherwise. Through the same serialized gate as every other trigger; warn-and-drop,
+        // see requestSyncInBackground()'s comment.
+        () => requestSyncInBackground(),
       );
       notify();
-      requestSyncInBackground(); // socket open triggers a catch-up sync, through the same gate as every other trigger; warn-and-drop, see requestSyncInBackground()'s comment
+      // Also fire a sync immediately, without waiting for the real open: this is what
+      // catches up a session that's constructed and connected while already offline (the
+      // socket may never open, or take a long time to fail), and it's free — the onOpen
+      // sync above just coalesces onto it (or vice versa) through the same gate rather than
+      // running twice.
+      requestSyncInBackground();
     },
 
     disconnect: () => doDisconnect(),

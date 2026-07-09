@@ -81,8 +81,9 @@ const createScriptedTransport = (seed: readonly RoundEvent[]): ScriptedTransport
       const maxSeq = events.reduce((max, event) => Math.max(max, event.seq ?? 0), sinceSeq);
       return { events, nextSeq: maxSeq };
     },
-    openSocket: (onEvents, onClose) => {
+    openSocket: (onEvents, onClose, onOpen) => {
       socketListener = { onEvents, onClose };
+      onOpen?.(); // this scripted transport's socket "opens" synchronously, right after registering — realistic enough for every test here except the one that deliberately overrides this method to defer it
       return () => {
         if (socketListener?.onEvents === onEvents) socketListener = undefined;
       };
@@ -380,6 +381,41 @@ describe("createRoundSession — sync + reconnect", () => {
     expect(session.state().cells[cellKey(BO_ID, 2)]).toMatchObject({ result: toResult(5) });
   });
 
+  it("connect()'s onOpen callback (not just the redundant connect-time sync) fetches an event that lands between the connect-time pull and the real socket's actual open", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+
+    // Defer the transport's onOpen invocation under test control, standing in for a real
+    // WebSocket whose "open" event fires asynchronously — well after connect() returns and
+    // after the connect-time sync's own pull has already completed. That gap is exactly the
+    // race Fix 2 closes: events landing in it must still be caught by the SOCKET-OPEN path,
+    // not merely by the (redundant, immediate) connect-time sync. onOpen is deliberately NOT
+    // forwarded to the real registration below — the socket "hasn't opened yet".
+    let deferredOnOpen: (() => void) | undefined;
+    const registerSocket = transport.openSocket;
+    transport.openSocket = (onEvents: (events: readonly RoundEvent[]) => void, onClose: () => void, onOpen?: () => void) => {
+      deferredOnOpen = onOpen;
+      return registerSocket(onEvents, onClose);
+    };
+
+    const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+
+    session.connect(); // registers the (still-connecting) socket; fires the connect-time sync
+    await session.sync(); // join/await that connect-time sync's pull — completes with just genesis
+
+    // A new event lands server-side AFTER the connect-time sync's pull already completed,
+    // but BEFORE the real socket has actually opened.
+    const late: RoundEvent = { kind: "score-recorded", opId: opId("bo-phone-late"), hlc: { wallMs: 9_000, counter: 0, deviceId: deviceId("bo-phone") }, authorId: BO_ID, golferId: BO_ID, hole: 3, result: toResult(4) };
+    await transport.push(late);
+
+    expect(session.state().cells[cellKey(BO_ID, 3)]).toBeUndefined(); // invisible via either path so far
+
+    deferredOnOpen?.(); // the real socket's "open" event finally fires
+    await new Promise((resolve) => setTimeout(resolve, 0)); // flush the onOpen-triggered sync, through the serialized gate
+
+    // Picked up without any explicit sync() call from the test after the open.
+    expect(session.state().cells[cellKey(BO_ID, 3)]).toMatchObject({ result: toResult(4) });
+  });
+
   it("(e) a permanent 409 mid-queue drops only that entry into rejected() and still pushes the rest", async () => {
     const transport = createScriptedTransport(buildServerLog());
     const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
@@ -399,6 +435,47 @@ describe("createRoundSession — sync + reconnect", () => {
     expect(session.state().cells[cellKey(ANN_ID, 1)]).toBeDefined();
     expect(session.state().cells[cellKey(ANN_ID, 3)]).toBeDefined();
     expect(session.state().cells[cellKey(ANN_ID, 2)]).toBeUndefined(); // the rejected score never landed
+  });
+
+  it("(g) restart HLC floor: a persisted pending event's hlc, far ahead of the restarted session's clock, still loses to a post-restart correction to the SAME cell", async () => {
+    const deviceIdValue = deviceId("ann-phone");
+    const store = createMemoryOutboxStore();
+
+    // Everything this device knows locally, entirely unconfirmed (confirmed is never
+    // persisted — only `pending` survives a restart) — genesis included, so state() can
+    // fold without any network call in this test. The final event is the one under test:
+    // its hlc.wallMs is far ahead of what a freshly constructed HlcSource would mint (the
+    // restarted session's clock below is pinned far behind it) — modeling either a prior
+    // session that floored on a skewed-ahead peer, or a device clock that regressed across
+    // the restart. Without observing it at construction, a post-restart correction to the
+    // same cell mints an hlc that compares LESS than this stale pending event, so LWW would
+    // keep the stale value forever.
+    const seed = buildServerLog();
+    const staleEvent: RoundEvent = {
+      kind: "score-recorded",
+      opId: opId(`${deviceIdValue}-1`),
+      hlc: { wallMs: 50_000, counter: 0, deviceId: deviceIdValue },
+      authorId: ANN_ID,
+      golferId: BO_ID,
+      hole: 5,
+      result: toResult(4),
+    };
+    await store.save(ROUND_ID, { pending: [...seed, staleEvent], lastSeq: 0, opCounter: 1 });
+
+    const transport = createScriptedTransport([]); // never touched — this test never syncs
+    const session = await createRoundSession({
+      transport,
+      store,
+      roundId: ROUND_ID,
+      golferId: ANN_ID,
+      deviceId: deviceIdValue,
+      clock: { now: () => 100 }, // far behind staleEvent's hlc — observing it at construction is load-bearing
+    });
+
+    session.recordScore(BO_ID, 5, toResult(9)); // post-restart correction to the SAME cell
+
+    const winner = session.state().cells[cellKey(BO_ID, 5)];
+    expect(winner?.result).toEqual(toResult(9)); // the correction must win the fold, not the stale pending value
   });
 
   it("(f) restart reconstruction: a second session over the same store re-derives the FULL round, not a since-cursor suffix", async () => {

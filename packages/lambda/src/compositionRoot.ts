@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
-import type { Clock, ConnectionRegistry, IdGenerator, Logger, TokenIssuer } from "@swng/application";
+import type { Clock, ConnectionRegistry, CourseStore, IdGenerator, Logger, TokenIssuer } from "@swng/application";
 import {
   addGame,
   addTeeSet,
@@ -62,6 +62,22 @@ const requireEnv = (env: NodeJS.ProcessEnv, key: string): string => {
   return value;
 };
 
+// buildApp is the ONE composition root every entry shares (entries/http.ts, wsConnect.ts,
+// wsDisconnect.ts all call it at module scope) — but TABLE_CORE only reaches httpFn's
+// environment (swngStack.ts: "the course routes (M6) are HTTP-only — wsConnect/wsDisconnect
+// never touch the core table"). wsConnect/wsDisconnect only ever reach into `app.tokens`/
+// `app.registry`, never `app.dispatcher`, so their course-backed use cases are dead code —
+// but buildApp still constructs the full UseCases table unconditionally (conventions §3: one
+// composition root, not one per entry). A `requireEnv("TABLE_CORE")` here would crash THEIR
+// cold start over a table they'll never query; this throws only if something actually calls
+// through it, which only http.ts's dispatched course routes ever do.
+const unavailableCourseStore = (): CourseStore => {
+  const unavailable = (): never => {
+    throw new Error("buildApp: TABLE_CORE is not set for this entry — course routes are HTTP-only (see swngStack.ts)");
+  };
+  return { put: unavailable, get: unavailable, search: unavailable };
+};
+
 export interface App {
   readonly dispatcher: (event: APIGatewayProxyEventV2) => Promise<APIGatewayProxyResultV2>;
   readonly registry: ConnectionRegistry;
@@ -70,12 +86,13 @@ export interface App {
 
 // Built ONCE at module scope by each entry (cold start), never re-instantiated per
 // invocation (conventions §3) — every dependency this Lambda deployment needs, wired from
-// env: TABLE_ROUNDS, TABLE_CONNECTIONS, TABLE_CORE, TOKEN_SECRET, WS_ENDPOINT (apps/infra-cdk,
-// M3 Task 5 / M6 Task 4 — TABLE_CORE only reaches httpFn, see swngStack.ts).
+// env: TABLE_ROUNDS, TABLE_CONNECTIONS, TOKEN_SECRET, WS_ENDPOINT (apps/infra-cdk, M3 Task 5),
+// plus TABLE_CORE (M6 Task 4) which is OPTIONAL here — only httpFn's environment carries it
+// (see unavailableCourseStore above / swngStack.ts).
 export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const tableRounds = requireEnv(env, "TABLE_ROUNDS");
   const tableConnections = requireEnv(env, "TABLE_CONNECTIONS");
-  const tableCore = requireEnv(env, "TABLE_CORE");
+  const tableCore = env.TABLE_CORE; // optional — see unavailableCourseStore above
   const tokenSecret = requireEnv(env, "TOKEN_SECRET");
   const wsEndpoint = requireEnv(env, "WS_ENDPOINT");
 
@@ -87,7 +104,7 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const journal = createDynamoEventJournal({ client: documentClient, tableName: tableRounds });
   const store = createDynamoRoundStore({ client: documentClient, tableName: tableRounds });
   const registry = createDynamoConnectionRegistry({ client: documentClient, tableName: tableConnections });
-  const courseStore = createDynamoCourseStore({ client: documentClient, tableName: tableCore });
+  const courseStore = tableCore !== undefined ? createDynamoCourseStore({ client: documentClient, tableName: tableCore }) : unavailableCourseStore();
 
   const managementClient = createManagementClient(wsEndpoint);
   const broadcast = createApiGatewayBroadcast({ client: managementClient, connections: registry, logger });

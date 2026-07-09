@@ -24,6 +24,7 @@
   "devDependencies": {
     "typescript": "catalog:",
     "vitest": "catalog:",
-    "fake-indexeddb": "catalog:"
+    "fake-indexeddb": "catalog:",
+    "fast-check": "catalog:"
   }
 }

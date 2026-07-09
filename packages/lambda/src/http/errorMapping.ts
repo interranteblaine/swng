@@ -28,7 +28,11 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   "game-unresolved": 409,
 };
 
-const jsonResponse = (statusCode: number, body: { code: string; message: string }): { statusCode: number; body: string } => ({
+// Exported so every error-shaped response — including dispatch.ts's route-not-found 404,
+// which never reaches an `error instanceof ...` branch below — is built by this ONE function
+// (M3 plan, Global Constraints: "error mapping lives in ONE lambda module"). Before this, the
+// 404 body was a second, hand-built `{ code, message }` literal in dispatch.ts.
+export const jsonResponse = (statusCode: number, body: { code: string; message: string }): { statusCode: number; body: string } => ({
   statusCode,
   body: JSON.stringify(body),
 });

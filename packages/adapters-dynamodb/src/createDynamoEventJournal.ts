@@ -4,6 +4,7 @@ import { QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import type { OpId, RoundEvent, RoundId } from "@swng/domain";
 import type { AppendResult, EventJournal } from "@swng/application";
 import { evtSk, evtSkMax, opIdSk, roundPk } from "./keys.js";
+import { queryAllPages } from "./paginate.js";
 
 // Each Query page is capped well under DynamoDB's natural ~1MB boundary so `read` always
 // exercises its own pagination loop rather than relying on payload size — a round's log is
@@ -119,10 +120,12 @@ export const createDynamoEventJournal = (config: {
     append: async (roundId: RoundId, events: readonly RoundEvent[]): Promise<AppendResult> => {
       // Each event costs 2 TransactItems (the EVT Put + its OPID marker Put, see
       // attemptCommit above), and DynamoDB caps a single TransactWriteItems call at 100
-      // items — so a batch of more than 50 events would exceed the cap and fail at the SDK
-      // layer before this loop ever runs. No caller does that today: the largest real
-      // batch is StartRound's 3 events (genesis, host join, round-started). Chunking a
-      // >50-event batch into multiple transactions is deliberate future work, not a v1 gap.
+      // items — so a batch of more than 50 events would exceed the cap and fail with a
+      // ValidationException from the SDK, surfaced by the first attemptCommit call this loop
+      // makes (not before the loop — the loop itself doesn't count items). No caller does
+      // that today: the largest real batch is StartRound's 3 events (genesis, host join,
+      // round-started). Chunking a >50-event batch into multiple transactions is deliberate
+      // future work, not a v1 gap.
       let pending = events;
       const duplicateOpIds: OpId[] = [];
 
@@ -152,31 +155,22 @@ export const createDynamoEventJournal = (config: {
       return { appended: [], duplicateOpIds };
     },
 
-    read: async (roundId: RoundId, sinceSeq: number): Promise<readonly RoundEvent[]> => {
-      const events: RoundEvent[] = [];
-      let exclusiveStartKey: Record<string, unknown> | undefined;
-
-      do {
-        const result = await client.send(
-          new QueryCommand({
-            TableName: tableName,
-            KeyConditionExpression: "pk = :pk AND sk BETWEEN :lo AND :hi",
-            ExpressionAttributeValues: { ":pk": roundPk(roundId), ":lo": evtSk(sinceSeq + 1), ":hi": evtSkMax },
-            Limit: READ_PAGE_SIZE,
-            ExclusiveStartKey: exclusiveStartKey,
-            // Same rationale as headSeq above: every use case reduces this log (via
-            // loadRoundState) to decide things like "is this round live" — a stale read here
-            // silently drops recent events (e.g. round-started) and produces a spurious
-            // rejection under a hot write burst, not just a delayed broadcast
-            // (task-6-report.md's "round-not-live" failure mode).
-            ConsistentRead: true,
-          }),
-        );
-        for (const item of result.Items ?? []) events.push((item as { event: RoundEvent }).event);
-        exclusiveStartKey = result.LastEvaluatedKey;
-      } while (exclusiveStartKey);
-
-      return events;
-    },
+    read: (roundId: RoundId, sinceSeq: number): Promise<readonly RoundEvent[]> =>
+      queryAllPages(
+        client,
+        {
+          TableName: tableName,
+          KeyConditionExpression: "pk = :pk AND sk BETWEEN :lo AND :hi",
+          ExpressionAttributeValues: { ":pk": roundPk(roundId), ":lo": evtSk(sinceSeq + 1), ":hi": evtSkMax },
+          Limit: READ_PAGE_SIZE,
+          // Same rationale as headSeq above: every use case reduces this log (via
+          // loadRoundState) to decide things like "is this round live" — a stale read here
+          // silently drops recent events (e.g. round-started) and produces a spurious
+          // rejection under a hot write burst, not just a delayed broadcast
+          // (task-6-report.md's "round-not-live" failure mode).
+          ConsistentRead: true,
+        },
+        (item) => (item as { event: RoundEvent }).event,
+      ),
   };
 };

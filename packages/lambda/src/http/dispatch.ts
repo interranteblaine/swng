@@ -3,7 +3,7 @@ import type { Logger, ParticipantClaims, TokenIssuer } from "@swng/application";
 import { ApplicationError } from "@swng/application";
 import { ContractError, parse } from "@swng/contracts";
 import type { Route, RouteContext } from "./routes.js";
-import { toHttpError } from "./errorMapping.js";
+import { jsonResponse, toHttpError } from "./errorMapping.js";
 
 const BEARER_PREFIX = "Bearer ";
 
@@ -85,7 +85,11 @@ export const createDispatcher =
         }
       }
       if (!route || !pathParams) {
-        return { statusCode: 404, body: JSON.stringify({ code: "not-found", message: `no route for ${method} ${path}` }) };
+        // Routed through errorMapping's jsonResponse rather than hand-built here — one
+        // error-shaping site, even though "no route matched" never becomes a thrown error
+        // (there's nothing to throw against; `route` is just undefined).
+        const { statusCode, body } = jsonResponse(404, { code: "not-found", message: `no route for ${method} ${path}` });
+        return { statusCode, headers: { "content-type": "application/json" }, body };
       }
 
       let claims: ParticipantClaims | undefined;

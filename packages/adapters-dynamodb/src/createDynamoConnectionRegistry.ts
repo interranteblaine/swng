@@ -1,8 +1,9 @@
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { DeleteCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { DeleteCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import type { RoundId } from "@swng/domain";
 import type { ConnectionRegistry } from "@swng/application";
 import { connPk } from "./keys.js";
+import { queryAllPages } from "./paginate.js";
 
 export const createDynamoConnectionRegistry = (config: { client: DynamoDBDocumentClient; tableName: string }): ConnectionRegistry => {
   const { client, tableName } = config;
@@ -26,25 +27,16 @@ export const createDynamoConnectionRegistry = (config: { client: DynamoDBDocumen
       );
     },
 
-    listByRound: async (roundId: RoundId): Promise<readonly string[]> => {
-      const connectionIds: string[] = [];
-      let exclusiveStartKey: Record<string, unknown> | undefined;
-
-      do {
-        const result = await client.send(
-          new QueryCommand({
-            TableName: tableName,
-            IndexName: "gsi1",
-            KeyConditionExpression: "roundId = :roundId",
-            ExpressionAttributeValues: { ":roundId": roundId },
-            ExclusiveStartKey: exclusiveStartKey,
-          }),
-        );
-        for (const item of result.Items ?? []) connectionIds.push((item as { connectionId: string }).connectionId);
-        exclusiveStartKey = result.LastEvaluatedKey;
-      } while (exclusiveStartKey);
-
-      return connectionIds;
-    },
+    listByRound: (roundId: RoundId): Promise<readonly string[]> =>
+      queryAllPages(
+        client,
+        {
+          TableName: tableName,
+          IndexName: "gsi1",
+          KeyConditionExpression: "roundId = :roundId",
+          ExpressionAttributeValues: { ":roundId": roundId },
+        },
+        (item) => (item as { connectionId: string }).connectionId,
+      ),
   };
 };

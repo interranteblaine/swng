@@ -14,7 +14,7 @@ import type {
   StartRoundRequest,
   StartRoundResponse,
 } from "@swng/contracts";
-import { addGameRequestSchema, joinRoundRequestSchema, recordScoreRequestSchema, startRoundRequestSchema } from "@swng/contracts";
+import { ContractError, addGameRequestSchema, joinRoundRequestSchema, recordScoreRequestSchema, startRoundRequestSchema } from "@swng/contracts";
 
 // The deps-applied use-case functions from Task 2 (application/src/rounds/*.ts), one per
 // route — the dispatcher is generic over this shape so it never imports application's use
@@ -48,6 +48,21 @@ export interface Route {
   readonly successStatus: 200 | 201;
   readonly handler: (ctx: RouteContext, body: unknown) => Promise<unknown>;
 }
+
+// `since` defaults to "read from the start" and otherwise must be an integer seq — a
+// non-integer (e.g. "abc", or Number's own parse of it: NaN) must be rejected here, as a
+// ContractError, rather than reach adapters-dynamodb's evtSk(NaN + 1). evtSk pads the value
+// with String(...).padStart, so evtSk(NaN) is a syntactically valid but numerically
+// meaningless sort key — the BETWEEN range query it feeds just quietly matches nothing,
+// turning a client bug into a silently-empty page instead of a 400.
+const parseSinceSeq = (raw: string | undefined): number => {
+  if (raw === undefined) return 0;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) {
+    throw new ContractError("invalid-request", [`since: must be an integer, got "${raw}"`]);
+  }
+  return parsed;
+};
 
 export const buildRoutes = (useCases: UseCases): readonly Route[] => [
   {
@@ -99,6 +114,6 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     successStatus: 200,
     // Every "participant" route's path template declares {roundId} (this table, by
     // construction), so the dispatcher's path match always populates it.
-    handler: async (ctx) => useCases.readEvents(roundId(ctx.pathParams.roundId!), Number(ctx.query.since ?? "0")),
+    handler: async (ctx) => useCases.readEvents(roundId(ctx.pathParams.roundId!), parseSinceSeq(ctx.query.since)),
   },
 ];

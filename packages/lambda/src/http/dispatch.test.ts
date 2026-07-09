@@ -271,10 +271,14 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
 
-  it("404s an unmatched path", async () => {
+  it("404s an unmatched path, shaped through the same error envelope as every other error", async () => {
     const { dispatcher } = setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/not-a-real-route" })));
     expect(resp.statusCode).toBe(404);
+    // The not-found body is hand-built in dispatch.ts, but it must still round-trip through
+    // errorResponseSchema — one error-shaping site (errorMapping.ts), not a second one that
+    // only the 404 path uses.
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-found" });
   });
 
   it("404s a matched path with the wrong method", async () => {
@@ -286,6 +290,27 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
   it("maps a malformed percent-escape in the path to a structured 400, not a raw throw", async () => {
     const { dispatcher } = setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/%zz/scores" })));
+    expect(resp.statusCode).toBe(400);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
+  });
+
+  it("rejects GET events with a non-integer ?since= — 400 invalid-request, not a silently-empty page", async () => {
+    const { dispatcher } = setup();
+    const started = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(
+            makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+          ),
+        ).body!,
+      ),
+    );
+
+    const resp = asStructured(
+      await dispatcher(
+        makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "abc" } }),
+      ),
+    );
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });

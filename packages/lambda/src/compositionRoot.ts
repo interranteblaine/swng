@@ -24,9 +24,15 @@ const createRandomIds = (): IdGenerator => ({
 
 // A structured console Logger — the beta-grade choice (M9 hardens); CloudWatch ingests
 // whatever a Lambda writes to stdout/stderr, so JSON lines here are already log-queryable.
-const createConsoleLogger = (): Logger => ({
-  info: (message, data) => console.log(JSON.stringify({ level: "info", message, ...data })),
-  error: (message, data) => console.error(JSON.stringify({ level: "error", message, ...data })),
+// Exported (rather than kept module-private like createSystemClock/createRandomIds above)
+// solely so compositionRoot.test.ts can pin its message-wins ordering without standing up a
+// whole buildApp.
+// `data` spreads FIRST, `message` second — a caller-supplied `data.message` key (coincidental
+// or otherwise) must never clobber the actual log message; spreading `data` after `message`
+// would let it win instead.
+export const createConsoleLogger = (): Logger => ({
+  info: (message, data) => console.log(JSON.stringify({ level: "info", ...data, message })),
+  error: (message, data) => console.error(JSON.stringify({ level: "error", ...data, message })),
 });
 
 const requireEnv = (env: NodeJS.ProcessEnv, key: string): string => {

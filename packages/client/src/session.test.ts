@@ -542,3 +542,78 @@ describe("createRoundSession — sync loop hardening (Task 3 required items 1 & 
     });
   });
 });
+
+describe("createRoundSession — review fixes: throwing passes must not strand or leak", () => {
+  it("finding 1: a rerun waiter queued mid-pass is rejected (not orphaned) when that pass throws a non-TransportError", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+
+    // Simulates transport.ts's parse(...) throwing a ContractError on a malformed server
+    // response — a real, non-TransportError failure mode the pull path can hit.
+    const boom = new Error("malformed server response");
+    let resolveGate: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      resolveGate = resolve;
+    });
+    transport.pull = async () => {
+      await gate;
+      throw boom;
+    };
+
+    const passA = session.sync(); // leading pass: pushPending is a no-op, then blocks on the gated pull
+
+    // Land a second sync() call WHILE pass A is still stuck awaiting its pull — this queues
+    // a rerun waiter onto syncRerunWaiters mid-iteration, after that iteration's snapshot
+    // was already taken.
+    const passB = session.sync();
+
+    resolveGate?.(); // let pass A's pull reject with a non-TransportError
+
+    await expect(passA).rejects.toBe(boom);
+
+    // Before the fix, passB's waiter is orphaned and never settles — the throwing iteration
+    // only rejected its pre-throw snapshot of syncRerunWaiters, not the one queued during the
+    // await. Race against a bounded timer so a regression fails fast instead of hanging the
+    // runner.
+    const settled = await Promise.race([
+      passB.then(
+        () => "resolved" as const,
+        () => "rejected" as const,
+      ),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 200)),
+    ]);
+    expect(settled).toBe("rejected");
+    await expect(passB).rejects.toBe(boom);
+  });
+
+  describe("finding 2: opportunistic fire-and-forget sync sites warn-and-drop instead of leaking a rejection", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    it("recordScore's opportunistic push doesn't emit an unhandled rejection when the pass throws a non-TransportError, and warns instead", async () => {
+      const transport = createScriptedTransport(buildServerLog());
+      const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+      session.connect();
+      await session.sync(); // let the catch-up settle so recordScore's own opportunistic sync is isolated
+
+      transport.push = async () => {
+        throw new Error("malformed server response");
+      };
+
+      // Vitest itself fails the run with an "Unhandled Rejection" if requestSync()'s
+      // rejection at this fire-and-forget call site weren't caught — same detection this
+      // suite already relies on in the persistence-failure tests above (`item 2`).
+      expect(() => session.recordScore(ANN_ID, 1, toResult(4))).not.toThrow();
+
+      await new Promise((resolve) => setTimeout(resolve, 0)); // flush past the rejected opportunistic sync
+      expect(warnSpy).toHaveBeenCalled(); // reported, not silently dropped
+    });
+  });
+});

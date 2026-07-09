@@ -220,6 +220,15 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
             for (const waiter of waiters) waiter.resolve();
           } catch (error) {
             for (const waiter of waiters) waiter.reject(error);
+            // A requestSync() that landed WHILE doSync() was in flight queues its waiter
+            // onto syncRerunWaiters after this iteration's snapshot was already taken above
+            // — a throw here would otherwise leave that waiter stranded (the loop exits, and
+            // `finally` below only clears syncRunning), so its caller's sync()/close() await
+            // would hang forever. Drain and reject whatever landed mid-pass too, with the
+            // same error, before rethrowing.
+            const strandedWaiters = syncRerunWaiters;
+            syncRerunWaiters = [];
+            for (const waiter of strandedWaiters) waiter.reject(error);
             throw error;
           }
           if (!syncRerunRequested) break;
@@ -231,6 +240,18 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
 
     syncRunning = runPasses();
     return syncRunning;
+  };
+
+  // The two opportunistic (not explicitly awaited) trigger sites below don't need — and
+  // mustn't block on — this sync's outcome, but discarding requestSync()'s promise with a
+  // bare `void` would turn a throwing pass (a non-TransportError bug, e.g. a malformed
+  // server response failing contract parsing) into an unhandled rejection. Same log-and-drop
+  // precedent as persistInBackground() above; an explicit session.sync() caller still gets
+  // the real rejection, since THEIR promise is returned to them, not discarded here.
+  const requestSyncInBackground = (): void => {
+    requestSync().catch((error: unknown) => {
+      console.warn(`swng client: opportunistic sync failed for round ${config.roundId}`, error);
+    });
   };
 
   const doDisconnect = (): void => {
@@ -273,8 +294,9 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
       // Opportunistic, not required for correctness: an unconnected/offline session just
       // leaves this queued for the next explicit sync(). Routed through requestSync() (the
       // full push+pull loop), not a bare push, so it shares the same serialization gate as
-      // every other trigger — see requestSync()'s comment.
-      if (connectedFlag) void requestSync();
+      // every other trigger — see requestSync()'s comment. Warn-and-drop, not `void`
+      // directly — see requestSyncInBackground()'s comment.
+      if (connectedFlag) requestSyncInBackground();
     },
 
     sync: () => requestSync(),
@@ -294,7 +316,7 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
         },
       );
       notify();
-      void requestSync(); // socket open triggers a catch-up sync, through the same gate as every other trigger
+      requestSyncInBackground(); // socket open triggers a catch-up sync, through the same gate as every other trigger; warn-and-drop, see requestSyncInBackground()'s comment
     },
 
     disconnect: () => doDisconnect(),

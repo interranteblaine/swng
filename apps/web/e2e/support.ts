@@ -5,7 +5,7 @@
 // specs: one place for the plumbing, one file per scenario for the story.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { joinRoundRequestSchema, joinRoundResponseSchema, parse } from "@swng/contracts";
 import type { JoinRoundResponse } from "@swng/contracts";
@@ -187,6 +187,11 @@ export const waitForFinalOrRecover = async (page: Page): Promise<void> => {
   ]);
 
   if (bannerFirst) {
+    // WS finalize push failed to arrive — recover via the user-visible "Sync now" button.
+    // This fallback masks a WS-push regression unless it announces itself; gate logs are
+    // the forensic record.
+    console.log("[fieldTest] WS finalize push did not arrive — recovering via Sync now");
+    test.info().annotations.push({ type: "ws-fallback", description: "finalize arrived via Sync-now recovery, not WS push" });
     await page.getByRole("button", { name: "Sync now" }).click();
   }
   await expect(finalHeading).toBeVisible({ timeout: 15_000 });

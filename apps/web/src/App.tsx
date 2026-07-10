@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes } from "react-router";
+import { AddCoursePage } from "./courses/AddCoursePage";
 import { CreateRoundPage } from "./routes/CreateRoundPage";
 import { HomePage } from "./routes/HomePage";
 import { JoinRoundPage } from "./routes/JoinRoundPage";
@@ -10,6 +11,7 @@ export function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/create" element={<CreateRoundPage />} />
+        <Route path="/courses/new" element={<AddCoursePage />} />
         <Route path="/join" element={<JoinRoundPage />} />
         <Route path="/round/:roundId" element={<RoundPage />} />
       </Routes>

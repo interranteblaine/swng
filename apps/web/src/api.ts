@@ -1,6 +1,36 @@
-import { addGameResponseSchema, errorResponseSchema, finalizeRoundResponseSchema, joinRoundResponseSchema, parse, startRoundResponseSchema } from "@swng/contracts";
-import type { AddGameRequest, AddGameResponse, FinalizeRoundResponse, JoinRoundRequest, JoinRoundResponse, StartRoundRequest, StartRoundResponse } from "@swng/contracts";
-import type { RoundId } from "@swng/domain";
+import {
+  addGameResponseSchema,
+  addTeeSetResponseSchema,
+  createCourseResponseSchema,
+  errorResponseSchema,
+  finalizeRoundResponseSchema,
+  getCourseResponseSchema,
+  joinRoundResponseSchema,
+  parse,
+  peekRoundResponseSchema,
+  searchCoursesResponseSchema,
+  startRoundResponseSchema,
+  verifyTeeSetResponseSchema,
+} from "@swng/contracts";
+import type {
+  AddGameRequest,
+  AddGameResponse,
+  AddTeeSetRequest,
+  AddTeeSetResponse,
+  CreateCourseRequest,
+  CreateCourseResponse,
+  FinalizeRoundResponse,
+  GetCourseResponse,
+  JoinRoundRequest,
+  JoinRoundResponse,
+  PeekRoundResponse,
+  SearchCoursesResponse,
+  StartRoundRequest,
+  StartRoundResponse,
+  VerifyTeeSetRequest,
+  VerifyTeeSetResponse,
+} from "@swng/contracts";
+import type { CourseId, RoundId } from "@swng/domain";
 import { config } from "./config";
 
 export class ApiError extends Error {
@@ -74,4 +104,44 @@ export const addGame = async (roundId: RoundId, token: string, game: AddGameRequ
 export const finalizeRound = async (roundId: RoundId, token: string): Promise<FinalizeRoundResponse> => {
   const json = await requestJson(`/rounds/${roundId}/finalize`, { method: "POST", token });
   return parse(finalizeRoundResponseSchema, json);
+};
+
+// M6 Task 5: the six course-surface calls, same requestJson + per-endpoint idiom as the five
+// round calls above — all `auth: "none"` on the wire (lambda/http/routes.ts's own M6 Task 4
+// comment: identity lands in M7), so none of these ever pass a token.
+export const getCourse = async (courseId: CourseId): Promise<GetCourseResponse> => {
+  const json = await requestJson(`/courses/${courseId}`, undefined);
+  return parse(getCourseResponseSchema, json);
+};
+
+// `query` rides the URL, so it's percent-encoded — unlike every other call here, whose body
+// is JSON and needs no such escaping.
+export const searchCourses = async (query: string, limit?: number): Promise<SearchCoursesResponse> => {
+  const params = new URLSearchParams({ query });
+  if (limit !== undefined) params.set("limit", String(limit));
+  const json = await requestJson(`/courses?${params.toString()}`, undefined);
+  return parse(searchCoursesResponseSchema, json);
+};
+
+export const createCourse = async (input: CreateCourseRequest): Promise<CreateCourseResponse> => {
+  const json = await requestJson("/courses", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+  return parse(createCourseResponseSchema, json);
+};
+
+export const addTeeSet = async (courseId: CourseId, input: AddTeeSetRequest): Promise<AddTeeSetResponse> => {
+  const json = await requestJson(`/courses/${courseId}/tees`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+  return parse(addTeeSetResponseSchema, json);
+};
+
+export const verifyTeeSet = async (courseId: CourseId, input: VerifyTeeSetRequest): Promise<VerifyTeeSetResponse> => {
+  const json = await requestJson(`/courses/${courseId}/verify`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+  return parse(verifyTeeSetResponseSchema, json);
+};
+
+// Same "missing/blank is the route layer's own 400, not an empty-string lookup" contract as
+// searchCourses' `query` (lambda/http/routes.ts's parseJoinCode) — `code` rides the URL.
+export const peekRound = async (code: string): Promise<PeekRoundResponse> => {
+  const params = new URLSearchParams({ code });
+  const json = await requestJson(`/rounds/peek?${params.toString()}`, undefined);
+  return parse(peekRoundResponseSchema, json);
 };

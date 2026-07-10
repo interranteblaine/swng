@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fixtureLinks, golferId, roundId } from "@swng/domain";
-import type { AddGameRequest, JoinRoundRequest, StartRoundRequest } from "@swng/contracts";
-import { addGame, ApiError, createRound, finalizeRound, joinRound } from "./api";
+import { courseId, fixtureLinks, golferId, roundId } from "@swng/domain";
+import type { AddGameRequest, AddTeeSetRequest, CreateCourseRequest, JoinRoundRequest, StartRoundRequest, VerifyTeeSetRequest } from "@swng/contracts";
+import { addGame, addTeeSet, ApiError, createCourse, createRound, finalizeRound, getCourse, joinRound, peekRound, searchCourses, verifyTeeSet } from "./api";
 
 // Pinned to match vitest.config.ts's test.env.VITE_HTTP_URL — config.ts reads it at import
 // time, so every test in this file shares the same fake origin.
@@ -12,6 +12,19 @@ const fakeResponse = (status: number, body: unknown): Response =>
 
 const stubFetch = (impl: (url: string, init?: RequestInit) => Promise<Response>): void => {
   vi.stubGlobal("fetch", vi.fn(impl));
+};
+
+// One CourseView wire body reused by every course-endpoint test below — a single hole is
+// enough to exercise courseCardSchema (this is api.ts's own wire-parsing test, not domain's
+// invariant tests, which already cover the real 9/18-hole shape elsewhere).
+const courseViewJson = {
+  courseId: "course-1",
+  name: "Pebble Beach",
+  card: {
+    courseName: "Pebble Beach",
+    teeSets: [{ name: "white", rating: 71.8, slope: 130, holes: [{ number: 1, par: 4, yardage: 380, strokeIndex: 1 }] }],
+  },
+  teeSets: [{ name: "white", version: 1, provenance: "community", enteredBy: "Ann", verifiedBy: [] }],
 };
 
 afterEach(() => {
@@ -129,5 +142,143 @@ describe("finalizeRound", () => {
 
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("network");
+  });
+});
+
+describe("getCourse", () => {
+  it("GETs /courses/{courseId} and parses a CourseView response", async () => {
+    let seenUrl: string | undefined;
+    stubFetch(async (url) => {
+      seenUrl = String(url);
+      return fakeResponse(200, { course: courseViewJson });
+    });
+
+    const result = await getCourse(courseId("course-1"));
+
+    expect(seenUrl).toBe(`${HTTP_URL}/courses/course-1`);
+    expect(result.course.courseId).toBe(courseId("course-1"));
+    expect(result.course.card).toEqual(courseViewJson.card);
+  });
+});
+
+describe("searchCourses", () => {
+  it("GETs /courses?query=... (percent-encoded) and parses the results", async () => {
+    let seenUrl: string | undefined;
+    stubFetch(async (url) => {
+      seenUrl = String(url);
+      return fakeResponse(200, { courses: [{ courseId: "course-1", name: "Pebble Beach" }] });
+    });
+
+    const result = await searchCourses("pebble beach");
+
+    expect(seenUrl).toBe(`${HTTP_URL}/courses?query=pebble+beach`);
+    expect(result).toEqual({ courses: [{ courseId: courseId("course-1"), name: "Pebble Beach" }] });
+  });
+
+  it("adds limit to the query string when given", async () => {
+    let seenUrl: string | undefined;
+    stubFetch(async (url) => {
+      seenUrl = String(url);
+      return fakeResponse(200, { courses: [] });
+    });
+
+    await searchCourses("pebble", 5);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/courses?query=pebble&limit=5`);
+  });
+});
+
+describe("createCourse", () => {
+  const input: CreateCourseRequest = { name: "Pebble Beach", tee: courseViewJson.card.teeSets[0]!, enteredBy: "Ann" };
+
+  it("POSTs the request body to /courses and parses a CourseView response", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(201, { course: courseViewJson });
+    });
+
+    const result = await createCourse(input);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/courses`);
+    expect(seenInit?.method).toBe("POST");
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+    expect(result.course.name).toBe("Pebble Beach");
+  });
+
+  // The exact scenario AddCoursePage's inline-per-code display depends on — a domain
+  // validation rejection surfaces here as a coded ApiError, same shape as every other
+  // rejection this module maps (not a special case).
+  it("throws a coded ApiError for a domain validation rejection", async () => {
+    stubFetch(async () => fakeResponse(400, { code: "invalid-rating", message: 'tee "white" rating 200 outside 30..90' }));
+
+    const error: unknown = await createCourse(input).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("invalid-rating");
+  });
+});
+
+describe("addTeeSet", () => {
+  it("POSTs the request body to /courses/{courseId}/tees and parses a CourseView response", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(201, { course: courseViewJson });
+    });
+
+    const input: AddTeeSetRequest = { tee: courseViewJson.card.teeSets[0]!, enteredBy: "Bo" };
+    const result = await addTeeSet(courseId("course-1"), input);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/courses/course-1/tees`);
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+    expect(result.course.name).toBe("Pebble Beach");
+  });
+});
+
+describe("verifyTeeSet", () => {
+  it("POSTs the request body to /courses/{courseId}/verify and parses a CourseView response", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { course: courseViewJson });
+    });
+
+    const input: VerifyTeeSetRequest = { teeName: "white", verifierName: "Bo" };
+    const result = await verifyTeeSet(courseId("course-1"), input);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/courses/course-1/verify`);
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+    expect(result.course.teeSets).toEqual(courseViewJson.teeSets);
+  });
+});
+
+describe("peekRound", () => {
+  it("GETs /rounds/peek?code=... and parses the preview response", async () => {
+    let seenUrl: string | undefined;
+    stubFetch(async (url) => {
+      seenUrl = String(url);
+      return fakeResponse(200, { courseName: "Pebble Beach", teeSets: [{ name: "white", rating: 71.8, slope: 130 }] });
+    });
+
+    const result = await peekRound("ABC123");
+
+    expect(seenUrl).toBe(`${HTTP_URL}/rounds/peek?code=ABC123`);
+    expect(result).toEqual({ courseName: "Pebble Beach", teeSets: [{ name: "white", rating: 71.8, slope: 130 }] });
+  });
+
+  it("throws a coded ApiError on an unknown code", async () => {
+    stubFetch(async () => fakeResponse(404, { code: "bad-join-code", message: "no round with that code" }));
+
+    const error: unknown = await peekRound("ZZZ999").catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("bad-join-code");
   });
 });

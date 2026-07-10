@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { courseId } from "@swng/domain";
 import type { CourseView } from "@swng/contracts";
@@ -34,13 +35,29 @@ const mockedVerifyTeeSet = vi.mocked(verifyTeeSet);
 const mockedGetCourse = vi.mocked(getCourse);
 const mockedGetMe = vi.mocked(getMe);
 
+// Reads back whatever "Edit this card" navigated to, so a test can assert the router state
+// the Link hands EditCoursePage (teeName + returnTo) without pulling the real EditCoursePage
+// (and its own api mocks) into this file — the same idiom as AddCoursePage.test.tsx's own
+// CreateStub for AddCoursePage's success navigation.
+function EditStub() {
+  const location = useLocation();
+  return <div>edit page — state {JSON.stringify(location.state)}</div>;
+}
+
 // CourseSummaryCard now renders under an AuthProvider in the real app (the verifier prompt's
 // auto-fill calls useAuth) — no tokens saved unless a test saves them, so the provider stays
-// signed out and fetches nothing by default.
-const renderCard = (props: CourseSummaryCardProps) =>
+// signed out and fetches nothing by default. A MemoryRouter joined M7 Task 7: "Edit this
+// card" is a real <Link>, and reading the current location for its own `returnTo` state
+// needs a router context (useLocation) too.
+const renderCard = (props: CourseSummaryCardProps, initialEntry: string | { pathname: string; search?: string } = "/create") =>
   render(
     <AuthProvider>
-      <CourseSummaryCard {...props} />
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/create" element={<CourseSummaryCard {...props} />} />
+          <Route path="/courses/:courseId/edit" element={<EditStub />} />
+        </Routes>
+      </MemoryRouter>
     </AuthProvider>,
   );
 
@@ -177,5 +194,43 @@ describe("CourseSummaryCard", () => {
     expect(mockedGetCourse).toHaveBeenCalledWith(courseId("course-1"));
     // The re-fetched (revised) numbers now render — the golfer sees what actually changed.
     await screen.findByText(/entered by fran/i);
+  });
+
+  // M7 Task 7 (M-i): the verify-409 re-fetch is one of the two onCourseRefreshed call sites
+  // (the other is CreateRoundPage's own edit-return handling — see CreateRoundPage.test.tsx).
+  // Without this, a caller holding this same CourseView (CreateRoundPage's freeze source)
+  // never learns about a revision it didn't cause itself.
+  it("I1/M-i: a tee-set-revised 409 also calls onCourseRefreshed with the re-fetched course", async () => {
+    vi.stubGlobal(
+      "prompt",
+      vi.fn(() => "Ed"),
+    );
+    mockedVerifyTeeSet.mockRejectedValue(new ApiError("tee-set-revised", 409, 'tee "white" is now version 2, expected version 1'));
+    const revisedCourse: CourseView = {
+      ...course,
+      teeSets: course.teeSets.map((t) => (t.name === "white" ? { ...t, version: 2, enteredBy: "Fran" } : t)),
+    };
+    mockedGetCourse.mockResolvedValue({ course: revisedCourse });
+    const onCourseRefreshed = vi.fn();
+
+    renderCard({ course, selectedTee: "white", onSelectTee: vi.fn(), onCourseRefreshed });
+    fireEvent.click(screen.getByRole("button", { name: /verify this card/i }));
+
+    await waitFor(() => expect(onCourseRefreshed).toHaveBeenCalledWith(revisedCourse));
+  });
+
+  // M7 Task 7 (I2, papercut 3): the revise endpoint shipped in M6 with zero web callers.
+  // "Edit this card" is the first — a real navigation (never a callback, since correcting a
+  // card is a whole separate form), carrying which tee to edit and where to come back to.
+  it("'Edit this card' links to the course's edit route, carrying the selected tee and a return path", () => {
+    renderCard({ course, selectedTee: "blue", onSelectTee: vi.fn() }, { pathname: "/create", search: "?foo=bar" });
+
+    const link = screen.getByRole("link", { name: /edit this card/i }) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/courses/course-1/edit");
+
+    fireEvent.click(link);
+    // EditCoursePage's own pre-fill (which tee) and success hand-off (where to return, with
+    // the search string intact) both read this state back out — see EditCoursePage.test.tsx.
+    expect(screen.getByText(/edit page — state/).textContent).toBe(`edit page — state ${JSON.stringify({ teeName: "blue", returnTo: "/create?foo=bar" })}`);
   });
 });

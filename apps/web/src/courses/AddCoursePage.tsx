@@ -3,20 +3,8 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { ApiError, createCourse } from "../api";
 import { useAuth } from "../auth/useAuth";
-
-type HoleCount = 9 | 18;
-
-interface HoleInput {
-  readonly par: string;
-  readonly yardage: string;
-  readonly strokeIndex: string;
-}
-
-// Par defaults to 4 (brief) — the modal case on a real card, so a golfer typing straight down
-// the grid only has to touch the pars that DIFFER from 4. Yardage/strokeIndex start blank:
-// there's no sane default for either (strokeIndex especially — see the "never auto-assign"
-// comment below).
-const defaultHoles = (count: HoleCount): readonly HoleInput[] => Array.from({ length: count }, () => ({ par: "4", yardage: "", strokeIndex: "" }));
+import { HoleGrid, defaultHoles, holesAreComplete, parseHoles } from "./HoleGrid";
+import type { HoleCount, HoleInput } from "./HoleGrid";
 
 type Field = "name" | "teeName" | "rating" | "slope" | "holes";
 
@@ -39,11 +27,11 @@ const FIELD_FOR_CODE: Readonly<Record<string, Field>> = {
   "duplicate-tee-name": "teeName",
 };
 
-// The keyboard-first, single-screen course entry flow (M6 Task 5, built to the product's
-// 10-minute gate): course name, tee name, rating, slope, a 9/18 toggle, then a hole grid whose
-// tab order runs left-to-right top-to-bottom (par, yardage, SI per row) purely from DOM order —
-// no explicit tabIndex plumbing, so a screen reader and a keyboard both get the same order for
-// free.
+// The keyboard-first, single-screen course entry flow (M6 Task 5, redesigned M7 Task 7 —
+// papercut 2's illegible grid): course name, tee name, rating, slope, then HoleGrid (the
+// hole-count toggle + grid, shared with EditCoursePage so a correction pre-fills and
+// validates against the exact same code — see HoleGrid.tsx). This page now owns only the
+// fields the grid doesn't: name/enteredBy/teeName/rating/slope, and the submit wiring.
 export function AddCoursePage() {
   const navigate = useNavigate();
   const auth = useAuth();
@@ -79,20 +67,8 @@ export function AddCoursePage() {
     setHoles((current) => current.map((hole, i) => (i === index ? { ...hole, ...patch } : hole)));
   };
 
-  // The unused indexes, as a HINT only — never written back into a hole's own field. Typos in
-  // stroke index poison every game's dot allocation for the life of the course, so the one
-  // thing this page must never do is guess: the golfer types exactly what the paper card says,
-  // this just tells them what's left to place.
-  const usedStrokeIndexes = new Set(holes.map((h) => h.strokeIndex).filter((v) => v !== ""));
-  const remainingStrokeIndexes = Array.from({ length: holeCount }, (_, i) => i + 1).filter((n) => !usedStrokeIndexes.has(String(n)));
-
-  const parsedHoles = holes.map((hole, index) => ({
-    number: index + 1,
-    par: Number.parseInt(hole.par, 10),
-    yardage: Number.parseInt(hole.yardage, 10),
-    strokeIndex: Number.parseInt(hole.strokeIndex, 10),
-  }));
-  const holesComplete = parsedHoles.every((hole) => Number.isInteger(hole.par) && Number.isInteger(hole.yardage) && Number.isInteger(hole.strokeIndex));
+  const parsedHoles = parseHoles(holes);
+  const holesComplete = holesAreComplete(parsedHoles);
   const parsedRating = Number.parseFloat(rating);
   const parsedSlope = Number.parseInt(slope, 10);
 
@@ -192,55 +168,7 @@ export function AddCoursePage() {
           )}
         </div>
 
-        <fieldset role="radiogroup" aria-label="Holes" className="flex gap-4">
-          {([9, 18] as const).map((count) => (
-            <label key={count} className="flex items-center gap-2">
-              <input type="radio" name="holeCount" checked={holeCount === count} onChange={() => changeHoleCount(count)} className="h-5 w-5" />
-              {count}
-            </label>
-          ))}
-        </fieldset>
-
-        <p aria-label="Stroke index remaining" className="text-xs text-slate-400">
-          SI remaining: {remainingStrokeIndexes.length > 0 ? remainingStrokeIndexes.join(", ") : "none"}
-        </p>
-
-        <div className="flex flex-col gap-1">
-          {holes.map((hole, index) => {
-            const n = index + 1;
-            return (
-              <div key={n} className="grid grid-cols-[2rem_1fr_1fr_1fr] items-center gap-2">
-                <span className="text-sm text-slate-400">{n}</span>
-                <input
-                  aria-label={`Hole ${n} par`}
-                  value={hole.par}
-                  onChange={(event) => updateHole(index, { par: event.target.value })}
-                  inputMode="numeric"
-                  className="rounded-md bg-slate-800 p-2 text-center"
-                />
-                <input
-                  aria-label={`Hole ${n} yardage`}
-                  value={hole.yardage}
-                  onChange={(event) => updateHole(index, { yardage: event.target.value })}
-                  inputMode="numeric"
-                  className="rounded-md bg-slate-800 p-2 text-center"
-                />
-                <input
-                  aria-label={`Hole ${n} stroke index`}
-                  value={hole.strokeIndex}
-                  onChange={(event) => updateHole(index, { strokeIndex: event.target.value })}
-                  inputMode="numeric"
-                  className="rounded-md bg-slate-800 p-2 text-center"
-                />
-              </div>
-            );
-          })}
-        </div>
-        {errorFor("holes") && (
-          <p role="alert" className="text-red-400">
-            {errorFor("holes")}
-          </p>
-        )}
+        <HoleGrid holeCount={holeCount} onChangeHoleCount={changeHoleCount} holes={holes} onChangeHole={updateHole} error={errorFor("holes")} />
 
         {generalError && (
           <p role="alert" className="text-red-400">

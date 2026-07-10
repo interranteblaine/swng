@@ -2,6 +2,7 @@ import { BrowserRouter, Link, Outlet, Route, Routes } from "react-router";
 import { SignInButton } from "./auth/SignInButton";
 import { AuthProvider, useAuth } from "./auth/useAuth";
 import { AddCoursePage } from "./courses/AddCoursePage";
+import { EditCoursePage } from "./courses/EditCoursePage";
 import { AuthCallbackPage } from "./routes/AuthCallbackPage";
 import { CreateRoundPage } from "./routes/CreateRoundPage";
 import { HomePage } from "./routes/HomePage";
@@ -57,6 +58,7 @@ export function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/create" element={<CreateRoundPage />} />
             <Route path="/courses/new" element={<AddCoursePage />} />
+            <Route path="/courses/:courseId/edit" element={<EditCoursePage />} />
             <Route path="/join" element={<JoinRoundPage />} />
             <Route path="/round/:roundId" element={<RoundPage />} />
             <Route path="/profile" element={<ProfilePage />} />

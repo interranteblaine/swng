@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { courseId } from "@swng/domain";
@@ -239,5 +239,46 @@ describe("AddCoursePage", () => {
   it("leaves 'Your name' blank when signed out — no phantom default", () => {
     renderAddCourse();
     expect((screen.getByLabelText(/your name/i) as HTMLInputElement).value).toBe("");
+  });
+
+  // M7 Task 7 (papercut 2): the grid's hole/par/yardage/SI order previously lived ONLY in
+  // aria-labels — a sighted golfer saw three unlabeled boxes. Visible headers now sit over it.
+  it("shows visible column headers over the hole grid, not just aria-labels", () => {
+    renderAddCourse();
+
+    const header = screen.getByTestId("hole-grid-header");
+    expect(within(header).getByText("Hole")).toBeTruthy();
+    expect(within(header).getByText("Par")).toBeTruthy();
+    expect(within(header).getByText("Yards")).toBeTruthy();
+    expect(within(header).getByText("SI")).toBeTruthy();
+  });
+
+  // M7 Task 7 (papercut 2): the grid's column template must never regress to a bare `1fr`
+  // track (its default min-width is `auto` — an input's own intrinsic content width — which
+  // is exactly what rode the third column onto the page background outside the card).
+  // happy-dom implements no layout engine (scrollWidth/clientWidth are permanently 0 on every
+  // element, regardless of CSS — see node_modules/happy-dom's Element/HTMLElement source), so
+  // it cannot make this a real pixel-overflow assertion the way a browser would; the literal
+  // scrollWidth <= clientWidth check is included per the brief and is non-discriminating here
+  // by construction. The discriminating half — and the real signal for this bug — is the
+  // column-template check that follows, plus the Playwright-measured screenshot walk
+  // (papercuts.md #4: "gates verify contracts, not legibility").
+  it("keeps the hole grid's columns inside the card at 375px width (no CSS grid blowout)", () => {
+    const { container } = renderAddCourse();
+
+    const card = container.querySelector("main") as HTMLElement;
+    expect(card.scrollWidth).toBeLessThanOrEqual(card.clientWidth); // see comment above: 0 <= 0 in happy-dom
+
+    const rows = screen.getAllByTestId("hole-row");
+    expect(rows.length).toBe(18);
+    rows.forEach((row) => expect(row.className).toContain("grid-cols-[2rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]"));
+    expect(screen.getByTestId("hole-grid-header").className).toContain("grid-cols-[2rem_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]");
+  });
+
+  // M7 Task 7 (papercut 2): "SI" is unexplained jargon — the "SI remaining" hint assumes a
+  // golfer already knows what it stands for.
+  it("explains what SI means in plain language, not just the jargon hint", () => {
+    renderAddCourse();
+    expect(screen.getByText(/SI = the Handicap\/HDCP row on your scorecard — 1 is the hardest hole\. Type it exactly as printed\./)).toBeTruthy();
   });
 });

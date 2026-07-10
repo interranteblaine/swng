@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link, useLocation } from "react-router";
 import type { CourseView } from "@swng/contracts";
 import { ApiError, getCourse, verifyTeeSet } from "../api";
 import { useAuth } from "../auth/useAuth";
@@ -10,14 +11,24 @@ export interface CourseSummaryCardProps {
   // Absent on AddCoursePage's own post-add summary (there's no search to go back to yet) —
   // present in CreateRoundPage, where it lets a golfer back out of a wrong pick.
   readonly onChangeCourse?: () => void;
+  // M7 Task 7 (M-i): fires whenever this card learns of a course revision it didn't cause
+  // itself — today that's the verify-409 re-fetch below. The edit flow's OWN call site is the
+  // caller's, not this component's: "Edit this card" is a real navigation away (see the Link
+  // below), so whatever mounts here after the golfer returns is a fresh instance re-seeded
+  // from whatever CourseView the caller is holding — the caller must be the one to update it,
+  // which is exactly what a route-level onCourseRefreshed(courseView) hand-off is for
+  // (CreateRoundPage wires this to setCourseView; see its own location-state effect for the
+  // edit-return half of M-i).
+  readonly onCourseRefreshed?: (courseView: CourseView) => void;
 }
 
 // The course detail + tee picker + verify affordance (M6 Task 5) — shown once a course is
 // selected, in CreateRoundPage (via search or via AddCoursePage's own preselect-on-success)
 // and reused as-is rather than duplicated: "shown after add and in the create-flow course
 // detail" (brief) is the SAME component, not two.
-export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCourse }: CourseSummaryCardProps) {
+export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCourse, onCourseRefreshed }: CourseSummaryCardProps) {
   const auth = useAuth();
+  const location = useLocation();
   // Seeded from the prop, then advanced locally from verify's own response (or a 409's
   // re-fetch) — the WHOLE CourseView, not just teeSets, because a revision a golfer didn't
   // cause can change the card's rating/slope shown in the tee picker too.
@@ -53,6 +64,9 @@ export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCo
         try {
           const refreshed = await getCourse(course.courseId);
           setCourseData(refreshed.course);
+          // M-i: tell the caller too — its own held CourseView (CreateRoundPage's freeze
+          // source) must not go stale just because THIS card's local state refreshed.
+          onCourseRefreshed?.(refreshed.course);
         } catch {
           // best-effort only; see comment above
         }
@@ -93,9 +107,22 @@ export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCo
         ))}
       </ul>
 
-      <button type="button" onClick={() => void verify()} className="self-start rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100">
-        Verify this card
-      </button>
+      <div className="flex items-center gap-4">
+        <button type="button" onClick={() => void verify()} className="self-start rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100">
+          Verify this card
+        </button>
+        {/* I2 (papercut 3): the revise endpoint shipped in M6 with zero web callers — a golfer
+            who spots a transposed SI had no in-app remedy. `state` carries the tee being
+            edited and where to return once the correction lands (EditCoursePage's own success
+            hand-off reads `returnTo` back out — see EditCoursePage.tsx). */}
+        <Link
+          to={`/courses/${course.courseId}/edit`}
+          state={{ teeName: selectedTee, returnTo: `${location.pathname}${location.search}` }}
+          className="text-sm text-emerald-400 underline"
+        >
+          Edit this card
+        </Link>
+      </div>
       {verifyError && (
         <p role="alert" className="text-red-400">
           {verifyError}

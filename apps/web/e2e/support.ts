@@ -1,16 +1,24 @@
-// Shared plumbing for fieldTest.spec.ts: reading the live endpoint the built app itself was
-// compiled against, Cal/Dee's out-of-browser joins, the deck-derived expected UI strings, and
-// the two-tap grid interaction every score entry in the spec goes through. Split out of the
-// spec file for the same reason e2e/support/client.ts is split from the root workspace's own
-// specs: one place for the plumbing, one file per scenario for the story.
+// Shared plumbing for fieldTest.spec.ts AND courseEntry.spec.ts: reading the live endpoint the
+// built app itself was compiled against, out-of-browser joins, course seeding via the public
+// course API, the deck-derived expected UI strings, the SetupPanel join-code lookup, and the
+// two-tap grid interaction every score entry in either spec goes through. Split out of the spec
+// files for the same reason e2e/support/client.ts is split from the root workspace's own specs:
+// one place for the plumbing, one file per scenario for the story.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { joinRoundRequestSchema, joinRoundResponseSchema, parse } from "@swng/contracts";
+import {
+  createCourseRequestSchema,
+  createCourseResponseSchema,
+  joinRoundRequestSchema,
+  joinRoundResponseSchema,
+  parse,
+  searchCoursesResponseSchema,
+} from "@swng/contracts";
 import type { JoinRoundResponse } from "@swng/contracts";
 import { fieldDeck18, fixtureLinks18, playGoldenRoundLog, reduceRound, scoreGame } from "@swng/domain";
-import type { FixtureScores, GolferId, RoundState } from "@swng/domain";
+import type { CourseCard, FixtureScores, GolferId, RoundState } from "@swng/domain";
 import { describeGame } from "../src/games/describeGame.js";
 
 // --- Endpoints ---------------------------------------------------------------------------
@@ -36,6 +44,34 @@ export const loadWebEnv = (): WebEnv => {
     return line.slice(key.length + 1).trim();
   };
   return { httpUrl: read("VITE_HTTP_URL"), wsUrl: read("VITE_WS_URL") };
+};
+
+// --- Course seeding: search-first, create-if-absent, via the PUBLIC course API ---------------
+
+// M6 field-test upkeep: the web app's create flow dropped bundled fixtures entirely — search
+// is the only picker (CreateRoundPage now renders CourseSearch, never a fixture <select>) — so
+// fieldTest.spec.ts's own deck (fieldDeck18/fixtureLinks18) needs a REAL course record to find
+// and pick in step 1. Idempotent across repeat runs: searches by the exact name first
+// (courseNameKey's prefix-match GSI — createDynamoCourseStore.ts's own normalization, the same
+// one createCourse's write uses), and only creates when no exact match comes back, so the
+// gate's three consecutive `pnpm e2e:field` runs (brief) seed the course once, not three times.
+export const ensureCourse = async (name: string, card: CourseCard): Promise<void> => {
+  const { httpUrl } = loadWebEnv();
+  const teeSet = card.teeSets[0];
+  if (!teeSet) throw new Error(`course card "${name}" has no tee sets to seed with`);
+
+  const searchParams = new URLSearchParams({ query: name });
+  const searchResponse = await fetch(`${httpUrl}/courses?${searchParams.toString()}`);
+  const searchJson: unknown = await searchResponse.json();
+  if (!searchResponse.ok) throw new Error(`GET /courses -> ${searchResponse.status}: ${JSON.stringify(searchJson)}`);
+  const { courses } = parse(searchCoursesResponseSchema, searchJson);
+  if (courses.some((c) => c.name === name)) return; // already seeded by a prior run
+
+  const body = parse(createCourseRequestSchema, { name, tee: teeSet, enteredBy: "field-test-setup" });
+  const createResponse = await fetch(`${httpUrl}/courses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const createJson: unknown = await createResponse.json();
+  if (!createResponse.ok) throw new Error(`POST /courses -> ${createResponse.status}: ${JSON.stringify(createJson)}`);
+  parse(createCourseResponseSchema, createJson); // shape-check only — step 1's own search UI is what finds it
 };
 
 // --- Cal/Dee's out-of-browser joins ---------------------------------------------------------
@@ -157,6 +193,22 @@ export const enterScore = async (page: Page, golferName: string, hole: number, s
   if (score === "picked-up") await expect(cell).toContainText("PU");
   else if (score === "conceded") await expect(cell).toContainText("CN");
   else await expect(cell).toHaveText(new RegExp(`^\\D*${score}`));
+};
+
+// --- Setup: reading the join code, waiting on cross-context participant/game propagation ----
+
+// SetupPanel's own layout: "Join code" label, then the code itself, as adjacent <p>s — no ARIA
+// name/testid on either, so a structural (following-sibling) lookup is the reliable way to grab
+// it, same convention as ../src/round/SetupPanel.tsx. fieldTest.spec.ts's own step 1 keeps its
+// established inline version of this same xpath (untouched, per this milestone's field-test-
+// upkeep scope) — this export exists for courseEntry.spec.ts's own single-context flow, so any
+// NEW caller has one place to get it from rather than a third copy.
+export const readJoinCode = async (page: Page): Promise<string> => {
+  const joinCodeCell = page.locator("xpath=//p[normalize-space(text())='Join code']/following-sibling::p[1]");
+  await expect(joinCodeCell).toBeVisible();
+  const code = ((await joinCodeCell.textContent()) ?? "").trim();
+  expect(code).toMatch(/^[A-Z0-9]{6}$/);
+  return code;
 };
 
 // --- Setup: waiting on cross-context participant/game propagation --------------------------

@@ -251,6 +251,67 @@ hidden retry. Gate met: 3 consecutive green `pnpm e2e:field` runs (fresh round e
 **Gate:** enter a real course from its paper scorecard in under 10 minutes; a round on it
 allocates dots correctly against a hand-checked card.
 
+**M6 gate — as executed (Task 6):** `apps/web/e2e/courseEntry.spec.ts` (new) plays the
+milestone's own hand-verified gate card ("Casa Verde GC", white tees, rating 71.1, slope 129)
+through the real UI, one Chromium context against the deployed `swng-beta` stack: search comes
+up empty for a per-run-unique name, "Add a course" hands off to `AddCoursePage`, all 18 rows of
+the grid are filled keyboard-only (one script-driven `focus()` into hole 1's par field, then
+Tab/type for every subsequent field — par cells touched only where the card differs from the
+par-4 default, the friction-proxy stand-in for the product's 10-minute paper-card bar), the
+card is verified as "Sam" (`✓ 1 verified`), a round is created on it (Pat, white, ch 21), Quinn
+joins over a direct HTTP fetch (ch 2, same score-for-anyone precedent as `fieldTest.spec.ts`'s
+Cal/Dee), a singles match is added via `SetupPanel`, and the grid's dots are asserted
+hole-by-hole (all 18 holes) against the plan's own hand-verified arithmetic:
+`gameStrokeAllocation`'s singles-match branch is relative (higher-handicap player only),
+`playingHandicap(|21-2|, 1) = 19`, and `allocateStrokes(19, 18 holes)` gives 1 dot every hole
+plus a 2nd on stroke-index 1 (hole 3) — Pat ●● on hole 3, ● on every other hole including hole
+18, Quinn none. The engines agreed with the plan's arithmetic on every hole — no BLOCKED trace
+was needed. A hole is then scored two-tap and the net (gross − dots) is asserted on the cell.
+
+The course API surface (M6 Task 4, `packages/lambda/src/http/routes.ts`, all `auth: "none"`
+pending M7 identity): `POST /courses`, `POST /courses/{courseId}/tees`, `POST
+/courses/{courseId}/verify`, `GET /courses/{courseId}`, `GET /courses?query=&limit=` (prefix
+search on `courseNameKey`'s one normalization, the same one the store's write-side GSI key
+uses), plus `GET /rounds/peek?code=` — a capability-scoped preview (course name + tee summaries
+only, no `roundId`/card/participants) that lets `JoinRoundPage` show a real tee picker before
+`joinRound`, falling back to free text with a note if the peek fails, since joining must never
+be gated by the nicety. The backend carries that shipped alongside the routes: finalize now
+validates settle-ability (`settleRound` over the candidate log) BEFORE appending
+`round-finalized`, closing the "wedged final-but-unsettleable" failure mode a game-unresolved
+throw used to leave behind; the append itself takes an optional `expectedHeadSeq` so a
+`RecordScore` landing in the settle-check's own read gap forces a bounded re-validate instead
+of a blind append.
+
+`fieldTest.spec.ts` upkeep: `beforeAll` gains `ensureCourse("Fixture Links 18",
+fixtureLinks18)` (`e2e/support.ts`) — search the public API by exact name, create-if-absent —
+since `CreateRoundPage`'s fixture `<select>` is gone (M6 Task 5, commit `8d8d1ba`: search is
+now the only picker); step 1 searches and taps the one result instead of selecting an option.
+Idempotent across the gate's three runs: the course is created once, found by the other two.
+
+Debugging finding (a real, deterministic bug, not a flake): that same Task 5 commit replaced
+`ResultsView.tsx`'s own per-game `<ul>` (a direct sibling of the "Final results" `<h1>`) with
+the SAME `StandingsHeader` tablist a live round renders — "the archive gets the same
+chip-selected active game as a live round" (that commit's own message) — so
+`fieldTest.spec.ts`'s finalize-step locator (an xpath `following-sibling::ul[1]` off that
+heading) could never match again. Confirmed via a failed run's own ARIA snapshot, which showed
+the tablist rendering the exact expected text right where the stale locator was looking past —
+the product was correct; the test's own selector had gone stale. `pnpm e2e:field` hadn't been
+re-run since that commit landed (by design it's excluded from `pnpm validate`), so nothing
+caught it until this gate. Fixed to read the same tablist `chip()`/`getByRole("tablist", { name:
+"Games" })` a live round already asserts against — the expected values themselves (still
+derived from the deck via `describeFourballAt`/`describeSkinsAt`) are untouched.
+
+A second, genuinely intermittent flake was also observed early in this gate's own debugging
+runs (the hole-16 digest, and separately the pre-fix finalize step, each timed out waiting on
+context B once, on different runs) — consistent with the M5 "as executed" note's own
+documented risk ("a proxied connection was...observed to occasionally die silently late in a
+run"). Not reproduced in any of the three official consecutive runs below; flagged here as a
+standing risk, not something this task's scope covers fixing.
+
+Gate met: `pnpm e2e:field` green three consecutive runs, 16/16 (7 `courseEntry.spec.ts` + 9
+`fieldTest.spec.ts`) each time, ~18-19s per run — logs at
+`.superpowers/sdd/m6-e2e-run-{1,2,3}.log`.
+
 ### M7 — Identity & the Golfer record
 
 **Goal:** accounts, ghost-claiming, and the permanent record — the index goes live.

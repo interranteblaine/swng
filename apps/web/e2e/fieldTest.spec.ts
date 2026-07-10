@@ -8,6 +8,7 @@ import {
   correctedScore,
   describeFourballAt,
   describeSkinsAt,
+  ensureCourse,
   enterScore,
   joinRoundDirect,
   loadWebEnv,
@@ -51,6 +52,12 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
   let bWsRoute: WebSocketRoute | undefined;
 
   test.beforeAll(async ({ browser }) => {
+    // M6: the web app's create flow dropped bundled fixtures entirely (search is the only
+    // picker now) — this deck needs a REAL course record to search for and pick in step 1
+    // below. Search-first, create-if-absent, via the public course API directly (support.ts's
+    // own doc comment) — idempotent across the gate's three consecutive runs.
+    await ensureCourse(fixtureLinks18.courseName, fixtureLinks18);
+
     contextA = await browser.newContext();
     contextB = await browser.newContext();
     await contextB.routeWebSocket(/.*/, (ws) => {
@@ -74,8 +81,12 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
   test("1: context A creates the round on fixtureLinks18 as Ann (white, ch 8); reads the join code from SetupPanel", async () => {
     await pageA.goto("/create");
-    // getByRole, not getByLabel — see ./support.ts's own note on <select> label contamination.
-    await pageA.getByRole("combobox", { name: "Course", exact: true }).selectOption({ label: fixtureLinks18.courseName });
+    // M6: CourseSearch replaced the old fixture <select> — search by name (ensureCourse above
+    // guarantees exactly one real course record answers to it) and tap the one result.
+    await pageA.getByLabel("Course", { exact: true }).fill(fixtureLinks18.courseName);
+    const result = pageA.getByRole("button", { name: fixtureLinks18.courseName, exact: true }).first();
+    await expect(result).toBeVisible();
+    await result.click();
     await pageA.getByLabel("Your name").fill("Ann");
     await pageA.getByLabel("Course handicap").fill("8");
     await pageA.getByRole("button", { name: "Create round" }).click();
@@ -261,17 +272,27 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     const expectedFourballFinal = describeFourballAt(18, true); // "Ann & Bo win 2&1"
     const expectedSkinsFinal = describeSkinsAt(18, true); // "Bo 7 · Dee 8 · 3 carried out"
 
-    const resultsList = (page: Page) => page.getByRole("heading", { name: "Final results" }).locator("xpath=following-sibling::ul[1]");
+    // M6 field-test upkeep finding: ResultsView.tsx (M6 Task 5, commit 8d8d1ba) replaced its
+    // own standalone per-game <ul> (the direct sibling of the "Final results" <h1>) with the
+    // SAME StandingsHeader tablist a live round renders — "the archive gets the same
+    // chip-selected active game as a live round" per that commit's own message. There is no
+    // longer any <ul> sibling of the heading at all (only the "Handicap differentials" one,
+    // nested inside a <div>), so the xpath this used to use can never match again — a stale
+    // locator from before that restructuring, not a product bug (the ARIA snapshot of a
+    // failed run showed the tablist rendering the exact right text). Fixed here to read the
+    // SAME tablist `chip()` already reads on a LIVE round (support.ts) — the expected VALUES
+    // below are untouched, still derived from the deck via describeFourballAt/describeSkinsAt.
+    const finalGames = (page: Page) => page.getByRole("tablist", { name: "Games" });
 
     for (const page of [pageA, pageB]) {
-      await expect(resultsList(page)).toContainText(expectedFourballFinal);
-      await expect(resultsList(page)).toContainText(expectedSkinsFinal);
+      await expect(finalGames(page)).toContainText(expectedFourballFinal);
+      await expect(finalGames(page)).toContainText(expectedSkinsFinal);
     }
 
     // Deep match: B's ResultsView (rendered from a WS-pushed finalize, per Task 6's own
     // contract) reads byte-identical to A's (rendered from its own finalize response) on the
     // game-results text.
-    const [textA, textB] = await Promise.all([resultsList(pageA).innerText(), resultsList(pageB).innerText()]);
+    const [textA, textB] = await Promise.all([finalGames(pageA).innerText(), finalGames(pageB).innerText()]);
     expect(textB).toBe(textA);
 
     // The archived card: entry locked, no pad ever opens.

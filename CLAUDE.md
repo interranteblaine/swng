@@ -42,7 +42,7 @@ of swng per `docs/product.md` → `docs/roadmap.md` → `docs/architecture.md`. 
 proof-of-concept is **deleted from the tree** — it exists only at git tag `poc-final`, holds
 no authority, and must never be resurrected as design input.
 
-Current state (M0–M5 complete): nine packages under `packages/` matching
+Current state (M0–M6 complete): nine packages under `packages/` matching
 `docs/architecture.md` §3 (`domain`, `contracts`, `application`, `client`, four `adapters-*`,
 `lambda`), plus `apps/web` and the root `e2e/` workspace, with the layer direction and
 package boundaries enforced by `eslint.config.mjs` (the web app may import
@@ -81,6 +81,27 @@ per kind). Gated by
 18-hole `fieldDeck18` (engine-pinned oracle exported from `@swng/domain`) with an offline
 stretch, a mid-round correction that moves a 5-skin pot, and finalize parity across
 browsers.
+Courses are real (M6): `domain/course` — a boring CRUD entity (no event sourcing) with
+versioned immutable tee sets, provenance + verification, and `courseCardOf` assignable to the
+same `CourseCard` `startRound` always froze — plus the consolidated `gameStrokeAllocation`/
+`handicappingFor` scoring exports (the web app's own hand-mirrored dot/AGS arithmetic is
+gone, delegating here instead). `contracts`+`application` gain the course use cases
+(`CreateCourse`/`AddTeeSet`/`VerifyTeeSet`/`GetCourse`/`SearchCourses`) plus `PeekRound` (a
+capability-scoped join-code preview: course name + tee summaries only, nothing else);
+`adapters-dynamodb` gets a course store on the `core` table's own search GSI (prefix match on
+one shared name normalization); `lambda` gains six `auth: "none"` routes (identity lands M7).
+`@swng/web` drops bundled fixtures entirely — `CourseSearch`/`AddCoursePage`/
+`CourseSummaryCard` make search-first picking, keyboard-first single-screen entry (tab order
+alone fills an 18-hole grid), and "Verify this card" the only course path, with
+`JoinRoundPage`'s tee picker sourced from the peek (falling back to free text if it fails —
+joining is never gated by the nicety). Finalize also got a correctness fix landing alongside
+the routes: `settleRound` now validates settle-ability BEFORE `round-finalized` is appended
+(a game-unresolved throw no longer wedges a round permanently final-but-unsettleable), with a
+head-seq condition on that append closing the M4-accepted finalize race. Gated by
+`apps/web/e2e/courseEntry.spec.ts` (a real course entered from a hand-verified paper card —
+"Casa Verde GC" — dots checked hole-by-hole against hand-verified singles-match arithmetic)
+alongside the updated `pnpm e2e:field` (`fieldTest.spec.ts` now searches/seeds a real course
+through the same public course API instead of a bundled fixture).
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

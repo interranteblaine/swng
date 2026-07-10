@@ -14,6 +14,7 @@ import {
   loadWebEnv,
   PLAYER_NAMES,
   scoreFor,
+  waitForDigestOrRecover,
   waitForFinalOrRecover,
   waitForParticipant,
 } from "./support.js";
@@ -226,8 +227,13 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     const expectedSkins = describeSkinsAt(16, true);
 
     for (const page of [pageA, pageB]) {
+      // waitForDigestOrRecover races the digest against the offline banner and falls back to
+      // "Sync now" (announced via console.log + a "ws-fallback" annotation) exactly like step
+      // 9's waitForFinalOrRecover — the digest-flake diagnosis (`.superpowers/sdd/`) found B's
+      // reconnected-in-step-6 socket can silently die with no onclose, stranding this exact
+      // wait with no recovery path before this helper existed.
+      await waitForDigestOrRecover(page, "After hole 16");
       const digest = page.getByRole("status", { name: "After hole 16" });
-      await expect(digest).toBeVisible();
       await expect(digest).toContainText(expectedFourball);
       await expect(digest).toContainText(expectedSkins);
       // Dismiss now (rather than relying solely on the next entry's auto-dismiss) — a digest

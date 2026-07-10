@@ -249,6 +249,35 @@ export const waitForFinalOrRecover = async (page: Page): Promise<void> => {
   await expect(finalHeading).toBeVisible({ timeout: 15_000 });
 };
 
+// Same recovery pattern as waitForFinalOrRecover just above, for a mid-round hole-complete
+// digest instead of the finalize heading — the SAME connection-#2-goes-silent risk
+// (beforeAll's own note in fieldTest.spec.ts) can just as easily strand a digest push as a
+// finalize push; step 7's hole-16 digest wait had no fallback until this was added, unlike
+// steps 6/9. `digestName` is a substring match against the digest's own accessible name (e.g.
+// "After hole 16"), same as the bare locator step 7 used before this helper existed. The
+// initial race uses a 10s bound per side (matching this suite's own `expect.timeout` default,
+// i.e. no slower than the un-recovered wait it replaces on the happy path); the post-recovery
+// assertion gets 15s, same as waitForFinalOrRecover's, for the sync-now round trip.
+export const waitForDigestOrRecover = async (page: Page, digestName: string): Promise<void> => {
+  const digest = page.getByRole("status", { name: digestName });
+  const offlineBanner = page.getByRole("status").filter({ hasText: "Offline" });
+
+  const bannerFirst = await Promise.race([
+    digest.waitFor({ state: "visible", timeout: 10_000 }).then(() => false),
+    offlineBanner.waitFor({ state: "visible", timeout: 10_000 }).then(() => true),
+  ]);
+
+  if (bannerFirst) {
+    // WS digest push failed to arrive — recover via the user-visible "Sync now" button. Same
+    // masking trade-off already accepted for step 9's finalize wait; the annotation below is
+    // the forensic record of how often this actually fires.
+    console.log(`[fieldTest] WS digest push ("${digestName}") did not arrive — recovering via Sync now`);
+    test.info().annotations.push({ type: "ws-fallback", description: `"${digestName}" digest arrived via Sync-now recovery, not WS push` });
+    await page.getByRole("button", { name: "Sync now" }).click();
+  }
+  await expect(digest).toBeVisible({ timeout: 15_000 });
+};
+
 // <select>s only, never getByLabel — Playwright's getByLabel match text for a <label> wrapping
 // a <select> includes the currently-DISPLAYED option's own text (e.g. "CourseFixture Links",
 // the label's own text concatenated with the collapsed dropdown's visible value), not just the

@@ -1,4 +1,4 @@
-import type { GolferId, OpId, RoundId } from "../ids.js";
+import type { GameId, GolferId, OpId, RoundId } from "../ids.js";
 import type { CourseCard } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import { compareHlc, type Hlc } from "./hlc.js";
@@ -22,6 +22,10 @@ export interface RoundState {
   readonly participants: readonly Participant[];
   readonly games: readonly GameConfig[];
   readonly cells: Readonly<Record<string, ScoreCell>>;
+  // Every "game-terminated" gameId ever seen, terminated or not yet added — a config
+  // stays in `games` (audit trail) even once its id lands here; settlement and every
+  // other downstream consumer decide their own filtering (see the fold's step below).
+  readonly terminatedGameIds: ReadonlySet<GameId>;
 }
 
 export const cellKey = (golfer: GolferId, hole: number): string => `${golfer}#${hole}`;
@@ -146,7 +150,19 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
     .sort((a, b) => compareHlc(a.firstHlc, b.firstHlc) || (a.config.id < b.config.id ? -1 : a.config.id > b.config.id ? 1 : 0))
     .map((entry) => entry.config);
 
-  // 6. cells: keyed by cellKey; apply score-recorded iff absent or the incoming hlc
+  // 6. terminatedGameIds: a pure set union over "game-terminated" events — no LWW
+  //    needed (there's no un-terminate event in v1, so membership never regresses),
+  //    which is what makes it commutative and idempotent for free. Deliberately NOT
+  //    gated on a matching entry in `games`: a termination for a gameId whose
+  //    game-added hasn't been folded yet (or arrives later, or never arrives) still
+  //    joins the set — the two registers are independent projections of the same log.
+  const terminatedGameIds = new Set<GameId>();
+  for (const event of deduped) {
+    if (event.kind !== "game-terminated") continue;
+    terminatedGameIds.add(event.gameId);
+  }
+
+  // 7. cells: keyed by cellKey; apply score-recorded iff absent or the incoming hlc
   //    strictly beats the stored one. On an hlc tie (distinct opIds, same instant),
   //    canonical order makes the winner deterministic regardless of arrival order.
   //    Deliberate asymmetry vs. participants/games (#4, #5) above: cells keep the
@@ -169,7 +185,7 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
     cells[key] = { result: event.result, recordedBy: event.authorId, hlc: event.hlc, opId: event.opId };
   }
 
-  // 7. Unknown kinds: never matched by any of the checks above, so they're silently skipped.
+  // 8. Unknown kinds: never matched by any of the checks above, so they're silently skipped.
 
   return {
     id: genesis.roundId,
@@ -178,5 +194,6 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
     participants,
     games,
     cells,
+    terminatedGameIds,
   };
 };

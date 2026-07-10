@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { DomainError } from "../errors.js";
-import { gameId, golferId } from "../ids.js";
+import { deviceId, gameId, golferId, opId } from "../ids.js";
 import { adjustedGrossScore, scoreDifferential } from "../handicap/whs.js";
 import { playGoldenRoundLog } from "../scoring/golden/deck.js";
 import { fixtureLinks, fixtureWhite } from "../scoring/golden/fixtureCourse.js";
@@ -119,6 +119,50 @@ describe("settleRound — concurrency deck", () => {
     const attempt = () => settleRound(partialLog);
     expect(attempt).toThrowError(DomainError);
     expect(attempt).toThrowError(expect.objectContaining({ code: "game-unresolved" }));
+  });
+});
+
+describe("settleRound — game termination", () => {
+  const D = golferId("dee");
+  const E = golferId("eve");
+  const partialPlayers = [
+    { golferId: D, name: "Dee", tee: "white", courseHandicap: 5 },
+    { golferId: E, name: "Eve", tee: "white", courseHandicap: 10 },
+  ];
+  // Dee only has 5 of 9 holes recorded, so a game needing HER card never resolves;
+  // a second game scoped to Eve alone (whose card is full) resolves independently —
+  // exactly the "one resolved game, one terminated-unresolved game" shape the brief
+  // pins, so termination is provably what unlocks settlement, not incidental slack.
+  const unresolvedGame = { kind: "stroke-play", id: gameId("sp-unresolved"), scoring: "gross", players: [D, E] } as const;
+  const resolvedGame = { kind: "stroke-play", id: gameId("sp-resolved"), scoring: "gross", players: [E] } as const;
+  const scores = { [D]: [4, 5, 3, 6, 4], [E]: [5, 5, 4, 6, 5, 3, 4, 5, 4] };
+  const baseLog = playGoldenRoundLog(fixtureLinks, partialPlayers, [unresolvedGame, resolvedGame], scores, [], false);
+  const terminate = {
+    kind: "game-terminated" as const,
+    gameId: unresolvedGame.id,
+    opId: opId("terminate-1"),
+    hlc: { wallMs: 9_000, counter: 0, deviceId: deviceId("test") },
+    authorId: D,
+  };
+  const finalize = {
+    kind: "round-finalized" as const,
+    opId: opId("finalize-1"),
+    hlc: { wallMs: 9_001, counter: 0, deviceId: deviceId("test") },
+    authorId: D,
+  };
+
+  it("throws game-unresolved on this exact round WITHOUT the termination (baseline for the next test)", () => {
+    const attempt = () => settleRound([...baseLog, finalize]);
+    expect(attempt).toThrowError(DomainError);
+    expect(attempt).toThrowError(expect.objectContaining({ code: "game-unresolved" }));
+  });
+
+  it("settles the SAME round once the unresolved game is terminated: results exclude it, terminatedGameIds records it, games keeps both configs", () => {
+    const archive = settleRound([...baseLog, terminate, finalize]);
+    expect(archive.terminatedGameIds).toEqual([unresolvedGame.id]);
+    expect(archive.results).toHaveLength(1);
+    expect(archive.results[0]).toMatchObject({ kind: "stroke-play", id: resolvedGame.id });
+    expect(archive.games.map((g) => g.id)).toEqual([unresolvedGame.id, resolvedGame.id]);
   });
 });
 

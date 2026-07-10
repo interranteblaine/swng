@@ -113,3 +113,40 @@ describe("reduceRound", () => {
     expect(backward).toEqual(forward);
   });
 });
+
+// The terminated-set fold: a pure set union over "game-terminated" events. INVARIANT
+// (task-1-brief): commutative, idempotent, order-independent, and tolerant of a
+// termination arriving before its game-added — every ordering below must fold to the
+// identical terminatedGameIds, and state.games must keep the terminated config (audit;
+// filtering is a downstream concern, never state's).
+describe("reduceRound — game termination", () => {
+  const G1 = gameId("g1");
+  const gameAdded: RoundEvent = { ...base(4), kind: "game-added", config: { kind: "stroke-play", id: G1, scoring: "gross", players: [A] } };
+  const terminated: RoundEvent = { ...base(5), kind: "game-terminated", gameId: G1 };
+
+  it("terminates the game regardless of delivery order: forward, reverse, and shuffled all agree", () => {
+    const forward = reduceRound([genesis, joinA, started, gameAdded, terminated]);
+    const reverse = reduceRound([terminated, gameAdded, started, joinA, genesis]);
+    const shuffled = reduceRound([started, terminated, genesis, gameAdded, joinA]);
+    expect(forward.terminatedGameIds).toEqual(new Set([G1]));
+    expect(reverse).toEqual(forward);
+    expect(shuffled).toEqual(forward);
+  });
+
+  it("is idempotent under duplicate delivery of the same termination", () => {
+    const once = reduceRound([genesis, joinA, started, gameAdded, terminated]);
+    const twice = reduceRound([genesis, joinA, started, gameAdded, terminated, terminated]);
+    expect(twice).toEqual(once);
+  });
+
+  it("terminates a game whose game-terminated arrives BEFORE its game-added", () => {
+    const beforeAdd = reduceRound([genesis, joinA, started, terminated, gameAdded]);
+    expect(beforeAdd.terminatedGameIds).toEqual(new Set([G1]));
+    // state.games keeps the terminated config — settlement/downstream filters, not state.
+    expect(beforeAdd.games.map((g) => g.id)).toEqual([G1]);
+  });
+
+  it("keeps terminatedGameIds empty when nothing was ever terminated", () => {
+    expect(reduceRound([genesis, joinA, started, gameAdded]).terminatedGameIds).toEqual(new Set());
+  });
+});

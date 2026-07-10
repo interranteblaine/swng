@@ -1,4 +1,4 @@
-import type { GolferId, OpId, RoundId } from "../ids.js";
+import type { GameId, GolferId, OpId, RoundId } from "../ids.js";
 import type { CourseCard } from "../course/card.js";
 import type { GameConfig } from "../scoring/game.js";
 import type { Hlc } from "./hlc.js";
@@ -25,4 +25,5 @@ export type RoundEvent = RoundEventBase &
     | { readonly kind: "score-recorded"; readonly golferId: GolferId; readonly hole: number; readonly result: HoleResult }
     | { readonly kind: "round-finalized" }
     | { readonly kind: "round-reopened" }
+    | { readonly kind: "game-terminated"; readonly gameId: GameId }
   );

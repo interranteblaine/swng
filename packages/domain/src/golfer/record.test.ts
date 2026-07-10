@@ -1,0 +1,88 @@
+import { describe, expect, it } from "vitest";
+import { DomainError } from "../errors.js";
+import { deviceId, golferId, opId, roundId } from "../ids.js";
+import { fixtureLinks18 } from "../scoring/golden/fixtureCourse.js";
+import type { RoundArchive } from "../round/archive.js";
+import { cellKey } from "../round/state.js";
+import type { ScoreCell } from "../round/state.js";
+import { archiveGolferLine } from "./record.js";
+
+const G = golferId("gigi");
+
+const cell = (hole: number, strokes: number): ScoreCell => ({
+  result: { kind: "strokes", strokes },
+  recordedBy: G,
+  hlc: { wallMs: hole, counter: 0, deviceId: deviceId("d") },
+  opId: opId(`op-${hole}`),
+});
+
+// Par per hole (fixtureWhite18): 4,4,3,5,4,3,4,5,4, 4,3,5,4,4,5,3,4,4. Strokes chosen so
+// h1 is a birdie, h2-h11 are pars (10 holes), h12-h17 are bogeys (6 holes), h18 a double —
+// the brief's hand-pin: 1 birdie / 10 pars / 6 bogeys / 1 double over 18 holes.
+const strokesByHole: Readonly<Record<number, number>> = {
+  1: 3, 2: 4, 3: 3, 4: 5, 5: 4, 6: 3, 7: 4, 8: 5, 9: 4,
+  10: 4, 11: 3, 12: 6, 13: 5, 14: 5, 15: 6, 16: 4, 17: 5, 18: 6,
+};
+const fullCard = Object.fromEntries(
+  Object.entries(strokesByHole).map(([hole, strokes]) => [cellKey(G, Number(hole)), cell(Number(hole), strokes)]),
+);
+
+const baseArchive: RoundArchive = {
+  roundId: roundId("r1"),
+  card: fixtureLinks18,
+  participants: [{ golferId: G, name: "Gigi", tee: "white", courseHandicap: 10 }],
+  games: [],
+  cells: fullCard,
+  events: [],
+  results: [],
+  handicapping: [{ golferId: G, kind: "complete", ags: 90, differential: 12.34 }],
+  terminatedGameIds: [],
+};
+
+describe("archiveGolferLine", () => {
+  it("counts distribution against par: hand-pinned 1 birdie/10 pars/6 bogeys/1 double", () => {
+    const line = archiveGolferLine(baseArchive, G);
+    expect(line.distribution).toEqual({ eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 });
+  });
+
+  it("carries roundId, courseName, tee, and holes from the archive/participant", () => {
+    const line = archiveGolferLine(baseArchive, G);
+    expect(line.roundId).toBe(baseArchive.roundId);
+    expect(line.courseName).toBe(fixtureLinks18.courseName);
+    expect(line.tee).toBe("white");
+    expect(line.holes).toBe(18);
+  });
+
+  it("surfaces ags/differential when the golfer's handicapping row is complete", () => {
+    const line = archiveGolferLine(baseArchive, G);
+    expect(line.ags).toBe(90);
+    expect(line.differential).toBe(12.34);
+  });
+
+  it("omits ags/differential when the golfer's handicapping row is incomplete", () => {
+    const incomplete: RoundArchive = { ...baseArchive, handicapping: [{ golferId: G, kind: "incomplete" }] };
+    const line = archiveGolferLine(incomplete, G);
+    expect(line.ags).toBeUndefined();
+    expect(line.differential).toBeUndefined();
+  });
+
+  it("excludes picked-up, conceded, and unscored holes from the distribution (only DECIDED stroke cells count)", () => {
+    const sparse: RoundArchive = {
+      ...baseArchive,
+      cells: {
+        [cellKey(G, 1)]: cell(1, 4), // par
+        [cellKey(G, 2)]: { result: { kind: "picked-up" }, recordedBy: G, hlc: { wallMs: 2, counter: 0, deviceId: deviceId("d") }, opId: opId("op-pu") },
+        [cellKey(G, 3)]: { result: { kind: "conceded" }, recordedBy: G, hlc: { wallMs: 3, counter: 0, deviceId: deviceId("d") }, opId: opId("op-cc") },
+        // hole 4 onward: no cell at all — unscored.
+      },
+    };
+    const line = archiveGolferLine(sparse, G);
+    expect(line.distribution).toEqual({ eagles: 0, birdies: 0, pars: 1, bogeys: 0, doublePlus: 0 });
+  });
+
+  it("throws unknown-participant for a golfer not on this archive's roster", () => {
+    const attempt = () => archiveGolferLine(baseArchive, golferId("ghost"));
+    expect(attempt).toThrowError(DomainError);
+    expect(attempt).toThrowError(expect.objectContaining({ code: "unknown-participant" }));
+  });
+});

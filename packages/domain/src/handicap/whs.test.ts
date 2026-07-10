@@ -4,7 +4,7 @@ import { DomainError } from "../errors.js";
 import type { HoleResult } from "../round/holeResult.js";
 import { fixtureWhite } from "../scoring/golden/fixtureCourse.js";
 import { roundHalfUp } from "../scoring/strokes.js";
-import { adjustedGrossScore, computeIndex, courseHandicapFor, scoreDifferential } from "./whs.js";
+import { adjustedGrossScore, combineNineHoleDifferentials, computeIndex, courseHandicapFor, scoreDifferential } from "./whs.js";
 
 // Every conformance case below is pinned to a published USGA/R&A source, per the
 // task's source-verification step — the cited documents are the spec, not memory.
@@ -156,5 +156,49 @@ describe("courseHandicapFor", () => {
     const index = computeIndex([differential, differential, differential]);
     expect(index).toBe(7.9);
     expect(courseHandicapFor(index!, fixtureWhite)).toBe(9);
+  });
+});
+
+describe("combineNineHoleDifferentials — 2020 published combining rule", () => {
+  // Rules of Handicapping (2020 edition, published 9-hole combining rule swng uses
+  // because the 2024 expected-differential ingestion is unpublished — see whs.ts's
+  // file-level comment): 18s pass through in place; 9s pair oldest-first into ONE
+  // 18-hole-equivalent differential, emitted at the position of the pair's second
+  // member; an unpaired trailing 9 contributes nothing until a partner posts.
+  it("hand-pins the mixed sequence: [18:10.0, 9:4.1, 18:12.3, 9:5.2, 9:6.0] -> [10.0, 12.3, 9.3]", () => {
+    const entries = [
+      { differential: 10.0, holes: 18 as const },
+      { differential: 4.1, holes: 9 as const },
+      { differential: 12.3, holes: 18 as const },
+      { differential: 5.2, holes: 9 as const },
+      { differential: 6.0, holes: 9 as const },
+    ];
+    // 4.1 (oldest unpaired 9) pairs with 5.2 (its first-available partner, across
+    // the intervening 18) -> 9.3, emitted at 5.2's position; 6.0 is left waiting.
+    expect(combineNineHoleDifferentials(entries)).toEqual([10.0, 12.3, 9.3]);
+  });
+
+  it("passes 18-hole differentials through untouched and in place", () => {
+    const entries = [
+      { differential: 7.5, holes: 18 as const },
+      { differential: 3.3, holes: 18 as const },
+    ];
+    expect(combineNineHoleDifferentials(entries)).toEqual([7.5, 3.3]);
+  });
+
+  it("pairs two consecutive 9s into one summed differential", () => {
+    const entries = [
+      { differential: 5.0, holes: 9 as const },
+      { differential: 6.0, holes: 9 as const },
+    ];
+    expect(combineNineHoleDifferentials(entries)).toEqual([11.0]);
+  });
+
+  it("drops a trailing unpaired 9 — it waits for a partner that never posts", () => {
+    expect(combineNineHoleDifferentials([{ differential: 5.0, holes: 9 as const }])).toEqual([]);
+  });
+
+  it("returns an empty sequence for no entries", () => {
+    expect(combineNineHoleDifferentials([])).toEqual([]);
   });
 });

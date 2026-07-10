@@ -1,6 +1,6 @@
 import type { CourseCard } from "../course/card.js";
 import { DomainError } from "../errors.js";
-import type { GolferId, RoundId } from "../ids.js";
+import type { GameId, GolferId, RoundId } from "../ids.js";
 import { handicappingFor } from "../scoring/allocation.js";
 import type { GameConfig } from "../scoring/game.js";
 import { scoreGame } from "../scoring/game.js";
@@ -25,6 +25,10 @@ export interface RoundArchive {
   readonly cells: Readonly<Record<string, ScoreCell>>;
   readonly events: readonly RoundEvent[]; // canonical domain order — the replay source
   readonly results: readonly GameResult[];
+  // Sorted lexicographically — canonical, arrival-order-independent, like every other
+  // archive field. `games` above keeps every config regardless (audit trail); this is
+  // the honest record of which of them were terminated rather than resolved.
+  readonly terminatedGameIds: readonly GameId[];
   readonly handicapping: readonly (
     | { readonly golferId: GolferId; readonly kind: "complete"; readonly ags: number; readonly differential: number }
     | { readonly golferId: GolferId; readonly kind: "incomplete" }
@@ -39,11 +43,18 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   const state = reduceRound(events);
   if (state.status !== "final") throw new DomainError("round-not-final", "settleRound requires a final round");
 
-  const results = state.games.map((config) => {
-    const result = resultOf(scoreGame(config, state));
-    if (!result) throw new DomainError("game-unresolved", `game "${config.id}" never resolved`);
-    return result;
-  });
+  // A terminated game never joins the must-resolve set — settlement isn't waiting on a
+  // result that will never come. It stays in `games` below (audit); it's simply absent
+  // from `results`.
+  const results = state.games
+    .filter((config) => !state.terminatedGameIds.has(config.id))
+    .map((config) => {
+      const result = resultOf(scoreGame(config, state));
+      if (!result) throw new DomainError("game-unresolved", `game "${config.id}" never resolved`);
+      return result;
+    });
+
+  const terminatedGameIds = [...state.terminatedGameIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
   const handicapping = state.participants.map((participant) => handicappingFor(participant, state.card, state.cells));
 
@@ -64,6 +75,7 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
     cells: state.cells,
     events: canonicalEvents,
     results,
+    terminatedGameIds,
     handicapping,
   };
 };

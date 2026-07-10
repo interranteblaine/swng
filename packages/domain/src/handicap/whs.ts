@@ -72,3 +72,30 @@ export const courseHandicapFor = (index: number, teeSet: TeeSet): number => {
   const par = teeSet.holes.reduce((sum, hole) => sum + hole.par, 0);
   return roundHalfUp(index * (teeSet.slope / 113) + (teeSet.rating - par));
 };
+
+// 2020 published 9-hole combining rule (see the file-level comment: the 2024
+// expected-differential ingestion has no published formula, so swng combines raw
+// 9-hole differentials at the index projection instead of ingesting them directly).
+// Oldest-first input, chronological output: an 18 always stands alone; two 9s pair
+// in the order they were posted (oldest waits for its partner) and sum into ONE
+// 18-hole-equivalent differential, landing at the position where the pair completed
+// — so a shuffle of unrelated 18s between a 9 and its eventual partner doesn't move
+// where the combined value lands. A 9 left without a partner (record ends mid-pair)
+// contributes nothing; it stays pending until a later round supplies its partner.
+export const combineNineHoleDifferentials = (entries: readonly { readonly differential: number; readonly holes: 9 | 18 }[]): readonly number[] => {
+  const combined: number[] = [];
+  let pendingNine: number | undefined;
+  for (const entry of entries) {
+    if (entry.holes === 18) {
+      combined.push(entry.differential);
+      continue;
+    }
+    if (pendingNine === undefined) {
+      pendingNine = entry.differential;
+      continue;
+    }
+    combined.push(pendingNine + entry.differential);
+    pendingNine = undefined;
+  }
+  return combined;
+};

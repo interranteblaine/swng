@@ -71,11 +71,30 @@ const gameAddedEvent = fc
     opId: opId(`game-${op}`), hlc: { wallMs, counter, deviceId: deviceId(device) }, authorId: golfers[0]!,
   }));
 
-// The shuffled pool every convergence property draws from — mixing all three
-// event kinds means a shuffle also reorders roster joins and game adds
-// relative to scores, exercising firstHlc ordering (state.ts #4/#5) alongside
-// the cell LWW logic scoreEvent alone already covered.
-const anyEvent = fc.oneof(scoreEvent, participantJoinedEvent, gameAddedEvent);
+// gameId pool intentionally overlaps gameAddedEvent's (g0..g4): a termination
+// drawn independently of an add is exactly what exercises the "terminate arrives
+// before its game-added" ordering (state.ts's terminated-set invariant) for free
+// under any shuffle, without a dedicated deck.
+const gameTerminatedEvent = fc
+  .record({
+    id: fc.integer({ min: 0, max: 4 }),
+    wallMs: fc.integer({ min: 1, max: 1_000 }),
+    counter: fc.integer({ min: 0, max: 3 }),
+    device: fc.constantFrom("d1", "d2", "d3"),
+    op: fc.integer({ min: 0, max: 500 }),
+  })
+  .map(({ id, wallMs, counter, device, op }): RoundEvent => ({
+    kind: "game-terminated",
+    gameId: gameId(`g${id}`),
+    opId: opId(`terminate-${op}`), hlc: { wallMs, counter, deviceId: deviceId(device) }, authorId: golfers[0]!,
+  }));
+
+// The shuffled pool every convergence property draws from — mixing all four
+// event kinds means a shuffle also reorders roster joins, game adds, and
+// terminations relative to scores, exercising firstHlc ordering (state.ts #4/#5)
+// and the terminated-set union alongside the cell LWW logic scoreEvent alone
+// already covered.
+const anyEvent = fc.oneof(scoreEvent, participantJoinedEvent, gameAddedEvent, gameTerminatedEvent);
 
 describe("reduceRound convergence", () => {
   it("is order-independent: any shuffle of the same events folds to the same state", () => {

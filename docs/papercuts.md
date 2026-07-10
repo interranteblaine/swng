@@ -5,28 +5,39 @@ knee-jerk fixes. Each entry carries enough context to be picked up cold. This is
 tracker — correctness defects get fixed when found; what lands here is UX friction and
 product-shape questions that deserve real thought.
 
-## Decided direction (2026-07-10)
+## Decided direction (2026-07-10) — LANDED (M7 Tasks 1/6, gated by Task 8)
 
 **swng will offer affordances to terminate a game (or games) mid-round, and to terminate a
 round.** Recorded as product direction; the design pass happens when this is picked up, not
-before. Open questions to answer then:
+before. Open questions to answer then, and how they were resolved:
 
 - What a terminated game means for settlement: excluded from the archive's must-resolve set
   entirely, or recorded as abandoned with its partial standings? (Today `settleRound`
   requires every configured game to resolve — termination presumably shrinks that set.)
+  **Resolved: excluded entirely** — `settleRound` (`domain/round/archive.ts`) filters
+  terminated games out of the must-resolve set and out of `results`; the config stays in
+  `games` (audit) and the archive records `terminatedGameIds` so the record stays honest.
 - Whether terminating a round means finalize-early (settle whatever resolved, mark the rest
   abandoned) or discard-the-round, or both as separate affordances.
+  **Resolved: composition, not a new lifecycle state** — "End unfinished games & finalize"
+  terminates every unresolved game, then runs the existing finalize; there is no separate
+  "terminate the round" event.
 - Who may terminate — any participant, matching the finalize rule?
+  **Resolved: yes**, same rule as finalize.
 - Event shape: termination is a round event like everything else (`game-terminated` /
   `round-terminated`?) so offline crews converge on it.
+  **Resolved: `game-terminated`** — envelope identical to every other round event; the fold's
+  terminated set is a set union (commutative, idempotent, tolerant of arriving before its own
+  `game-added`). No `round-terminated` — round termination is the composition above, not its
+  own event.
 
-Until this lands, the only way to finalize a round with an unfinished game is to mark every
-remaining hole picked-up for every player in that game (see papercut 1 — the error doesn't
-tell you that).
+Landed in M7 Task 1 (domain), Task 6 (web: the "End game…" chip affordance and the finalize
+dialog's unresolved-games list), gated end-to-end by Task 8's termination-coverage addendum in
+`apps/web/e2e/fieldTest.spec.ts`.
 
 ## Papercuts
 
-### 1. Finalize's "game never resolved" error is developer-grade
+### 1. Finalize's "game never resolved" error is developer-grade — ADDRESSED (M7 Task 6/8)
 
 Reproduced 2026-07-10 against the live UI: score one hole, add a game, finalize → red text
 `game "b28a56c9-…" never resolved` under the button. A raw game UUID, no statement of which
@@ -41,7 +52,17 @@ mark them picked-up, then finalize."* Surfacing site: `RoundPage.tsx`'s finalize
 local fold (game config × cells), no backend change needed. Ties into the termination
 direction above — an abandoned game should never force this dance at all.
 
-### 2. AddCoursePage's hole grid is illegible to a sighted human
+**Landed:** M7 Task 6's `finalizeReadiness.ts` (`unresolvedGames`) computes exactly this from
+the local fold and `RoundPage.tsx`'s finalize dialog now lists it by name — e.g. "Stableford —
+holes 11–18 unscored for Pat, Quinn" — with "End unfinished games & finalize" (terminate each,
+then finalize) as the one-tap way out; `caught.message` is gone from the surfaced error
+entirely. The termination direction itself (this doc's "Decided direction" above) shipped
+alongside it: `game-terminated` in the round log, excluded from `settleRound`'s must-resolve
+set. Re-verified end to end by Task 8's gate (`fieldTest.spec.ts`'s termination-coverage
+block): the dialog's unresolved list, the end-and-finalize composition, and `ResultsView`'s
+"Ended" badge on the terminated game all checked against the live system.
+
+### 2. AddCoursePage's hole grid is illegible to a sighted human — ADDRESSED (M7 Task 7)
 
 Confirmed by screenshot 2026-07-10: the 18-row grid renders **no visible column headers** —
 the hole# | par | yardage | stroke-index order exists only in aria-labels, so a screen
@@ -56,7 +77,14 @@ reopens AddCoursePage's *design*, not the milestone. The redesign pass should al
 visible headers vs. per-row inline labels, `minmax(0,1fr)` (or narrower fixed columns) for
 the blowout, and one plain-language line about what SI is and why typing it exactly matters.
 
-### 3. No in-app way to correct a mistyped course card (open decision)
+**Landed:** M7 Task 7 added a sticky `Hole | Par | Yards | SI` header row, fixed the grid
+blowout (narrow explicit columns, verified to stay inside the card at 375px), and a
+plain-language line under the SI hint ("SI = the Handicap/HDCP row on your scorecard — 1 is
+the hardest hole. Type it exactly as printed."), with the 18-row keyboard-fill behavior and
+its own tests unchanged. Screenshots at `.superpowers/sdd/screenshots/add-course-{375,
+375-filled,desktop}.png` (gitignored, controller review only — papercut 4's own discipline).
+
+### 3. No in-app way to correct a mistyped course card — ADDRESSED (M7 Task 7, I2 approved)
 
 Carried from the M6 final review (finding I2), still awaiting adjudication: the revise
 endpoint (`POST /courses/{id}/tees` — same tee name ⇒ new version, supersedes, verifications
@@ -68,6 +96,16 @@ cut with the raw API as the stopgap. A related loose end rides along (M6 review 
 after a verify hits 409 `tee-set-revised`, the summary card re-fetches but CreateRoundPage's
 already-fetched freeze source doesn't — a mid-setup revision race can freeze the stale
 (internally consistent) card.
+
+**Landed:** the user approved I2 (not vetoed) — M7 Task 7 shipped `EditCoursePage.tsx`
+(`/courses/{courseId}/edit`, linked from `CourseSummaryCard`'s "Edit this card"), pre-filling
+the same grid component `AddCoursePage` uses with the current tee's values and posting
+`POST /courses/{id}/tees` under the same tee name (a new version, verifications reset — the UI
+says so: "Saving creates a corrected, unverified version"). M-i closed alongside it: both the
+verify-409 re-fetch and the edit flow's own return hand-off call one `onCourseRefreshed`
+callback, which `CreateRoundPage` uses to replace its held (frozen) `CourseView` so a mid-setup
+revision can no longer freeze a stale card. Screenshots at `.superpowers/sdd/screenshots/
+edit-course-{375,desktop}.png`.
 
 ### 4. Process note: gates verify contracts, not legibility
 

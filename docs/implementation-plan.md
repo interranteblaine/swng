@@ -337,6 +337,88 @@ Gate met: `pnpm e2e:field` green three consecutive runs, 16/16 (7 `courseEntry.s
 **Gate:** on beta — finalize a round: history and index update live; claim a ghost mid-season
 and the record is unbroken; wipe projections, run rebuild, values identical.
 
+**M7 gate — as executed (Task 8):** `docs/superpowers/plans/2026-07-10-m7-identity.md`'s eight
+tasks, real code: `domain/golfer` (`Golfer`/`HandicapProfile`/`effectiveIndex`,
+`archiveGolferLine`, `combineNineHoleDifferentials`'s 2020 published 9-hole pairing rule) and
+`game-terminated` in the round log (a set-union fold — commutative, order-independent, tolerant
+of arriving before its own `game-added`; `settleRound` excludes terminated games from the
+must-resolve set and records `terminatedGameIds` on the archive) (T1); `contracts`/
+`application` golfer and terminate use cases plus the ONE projector implementation
+(`projectArchive` — stream trigger and manual `rebuildProjections` both call it, "no forked
+math") (T2); `adapters-dynamodb` golfer store (sub-claiming via
+`attribute_not_exists(sub)`, a real two-claimant race resolved to exactly one winner) and
+projection store (T3); Cognito user pool + SPA client (authorization-code+PKCE for the real
+app, `USER_PASSWORD_AUTH` enabled beta-grade purely so e2e can mint JWTs without the Hosted
+UI), `adapters-cognito`'s `createCognitoVerifier`, the stream-triggered `ProjectorFunction` and
+manual-invoke-only `RebuildFunction` (T4); the routes + the milestone's deploys (T5); web
+sign-in/claim/profile/termination affordances and the finalize-error rewrite (T6); AddCoursePage
+legibility + EditCoursePage (I2, approved) (T7); this gate (T8).
+
+Two controller amendments landed mid-plan, both still true of the shipped system: **GET /me
+never creates** (`getMyGolfer.ts`) — the plan's original get-or-create bound a sub to a
+freshly-minted golfer the instant any screen called GET /me (e.g. on sign-in), so by the time a
+golfer reached a claim button their own sub was already bound and every `claimGolfer` call hit
+the "already claimed" collision arm; PUT /me (`updateMyGolfer.ts`) is now the one get-or-create
+path, and `claimGolfer` creates the target ghost's row directly. **`differentialsUsed` is WHS
+Rule 5.2a's `use` count** (`computeIndexDetail`'s own `differentialsUsed`, not the window size)
+— e.g. 3 posted differentials → the lowest 1 is averaged → `differentialsUsed: 1`, wired through
+`GetMyRecordResponse.index` unchanged since. Task 5b landed **ghost continuity** alongside
+these: `JoinRoundRequest.golferId` is optional and, when supplied, reused as-is iff the golfer
+is unclaimed (`joinRound.ts` — a claimed golferId, or one already in the round, is rejected) —
+this is what lets one ghost play a whole season under one `GolferId` before anyone claims them,
+and what Task 8's own gate scenario relies on to join round 1 and round 2 and round 3 as the
+same `g`.
+
+Four deploys landed real infrastructure during M7, not one: Task 5's own ("the ONE deploy" —
+Cognito pool/client/domain, the stream + both new functions, the five golfer/terminate routes)
+plus a same-task corrective redeploy (the route table shipped `PUT /me` but the HTTP API's CORS
+preflight only allowed GET/POST, so a browser PUT was blocked until a one-line CORS fix landed
+and redeployed); Task 5b's lambda-code-only redeploy for the `JoinRoundRequest.golferId`
+change; Task 6's redeploy correcting the pool client's `callbackUrls` to carry the
+`/auth/callback` path the web app's `authConfig.ts` actually redirects to (Cognito requires an
+exact match — the bare `WEB_ORIGINS` default would have failed every real Hosted-UI round trip).
+Task 8 itself deploys nothing (constraint: beta already had everything the gate needed).
+
+Task 8's own gate: `apps/web/e2e/identityRecord.spec.ts` (new) mints a throwaway Cognito user
+(`AdminCreateUser`/`AdminSetUserPassword`/`InitiateAuth` `USER_PASSWORD_AUTH`, `@aws-sdk/client-
+cognito-identity-provider`, tokens injected into `localStorage["swng:auth"]` pre-navigation via
+`page.addInitScript` — never the Hosted UI), plays three rounds as one ghost `g` (a fresh UUID
+`GolferId`, reused across all three joins per Task 5b) on a throwaway rating-71.6/slope-128
+course, all-pars-and-bogeys so no net-double-bogey cap bites: gross 82/85/88 → differentials
+9.18125/11.8296875/14.478125 → three-differential small-sample row (use 1, adjustment −2.0) →
+index **7.2**, `differentialsUsed` **1** — the live system agreed with the hand-pinned
+computation exactly, no BLOCKED trace needed. Round 1 is created and finalized through the real
+UI (the browser needs to open it *live* to claim `g` — `ResultsView` carries no roster at all,
+so the claim has to land before that round's own finalize); rounds 2 and 3 are pure API, no
+browser reason for one. `pnpm e2e:field`'s `invokeRebuild` helper resolves the `RebuildFunction`'s
+physical name off the live stack's own CloudFormation resources (a hash-suffixed logical id,
+looked up by prefix rather than hardcoded) and invokes it synchronously; the parity assertion
+deep-equals `GET /me/record` before and after, deliberately excluding `index.computedAtMs` (a
+fresh wall-clock stamp `projectArchive` takes on every recompute) — and separately asserts that
+timestamp *changed*, the positive proof the rebuild actually recomputed rather than reading a
+stale snapshot back untouched. **Debugging finding** (a real race, not a flake): a first
+official run failed with `record.index` still `undefined` after `record.history` had already
+reached 3 lines — `projectArchive`'s two writes per golfer (`putHistoryLine`, then a separate
+later `putIndex` once the bootstrap is met) aren't transactional, and the test's own poll was
+gated on history length alone, catching the gap between them. Fixed in the test (gate on both
+conditions), not the product — nothing in the plan promises that pair is atomic. Termination
+coverage lives in `fieldTest.spec.ts` as its own `describe.serial` block (the plan's own
+suggestion, kept out of the M5 deck's numbered steps so a termination bug can never perturb
+those assertions): a singles match closes 10&8 in 10 holes (the opponent picked up every hole,
+losing each outright regardless of the actual score entered) while a stableford over the same
+two players — which needs every hole decided for every player to resolve — sits at holes
+11–18 unscored; the finalize dialog names it by exactly that clause, "End unfinished games &
+finalize" terminates it and finalizes, and the finalize response itself (captured via
+`page.waitForResponse`, parsed through `finalizeRoundResponseSchema`) has exactly one result
+(the singles match) — `ResultsView` renders that result and the stableford chip's "Ended"
+badge. Gate met: `pnpm e2e:field` green three consecutive runs, 27/27 (7 `courseEntry.spec.ts` +
+9 `fieldTest.spec.ts` + 5 termination + 6 `identityRecord.spec.ts`) each time, ~50-53s per run —
+logs at `.superpowers/sdd/task8-e2e-run-{1,2,3}.log`. Legibility screenshots (papercuts.md §4)
+at `.superpowers/sdd/screenshots/` (gitignored, never committed): ProfilePage with a real
+3-round record (index, trend, distribution), the signed-in header chrome alongside a fresh
+claim confirmation, and the finalize dialog's own unresolved-games list — alongside Task 7's
+already-captured Add/Edit course pages.
+
 ### M8 — Crews & the ledger
 
 **Goal:** the Saturday Boys exist: presets, "play the usual," and the ledger.

@@ -19,6 +19,9 @@
     "react-router": "catalog:"
   },
   "devDependencies": {
+    "@aws-sdk/client-cloudformation": "catalog:",
+    "@aws-sdk/client-cognito-identity-provider": "catalog:",
+    "@aws-sdk/client-lambda": "catalog:",
     "@playwright/test": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@testing-library/react": "catalog:",

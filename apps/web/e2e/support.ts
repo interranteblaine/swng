@@ -4,28 +4,61 @@
 // two-tap grid interaction every score entry in either spec goes through. Split out of the spec
 // files for the same reason e2e/support/client.ts is split from the root workspace's own specs:
 // one place for the plumbing, one file per scenario for the story.
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { CloudFormationClient, DescribeStackResourcesCommand } from "@aws-sdk/client-cloudformation";
+import {
+  AdminCreateUserCommand,
+  AdminSetUserPasswordCommand,
+  CognitoIdentityProviderClient,
+  InitiateAuthCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
+import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page, WebSocketRoute } from "@playwright/test";
 import {
   createCourseRequestSchema,
   createCourseResponseSchema,
+  finalizeRoundResponseSchema,
+  getMyRecordResponseSchema,
   joinRoundRequestSchema,
   joinRoundResponseSchema,
   parse,
+  recordScoreRequestSchema,
+  recordScoreResponseSchema,
   searchCoursesResponseSchema,
+  startRoundRequestSchema,
+  startRoundResponseSchema,
 } from "@swng/contracts";
-import type { JoinRoundResponse } from "@swng/contracts";
-import { fieldDeck18, fixtureLinks18, playGoldenRoundLog, reduceRound, scoreGame } from "@swng/domain";
-import type { CourseCard, FixtureScores, GolferId, RoundState } from "@swng/domain";
+import type { FinalizeRoundResponse, GetMyRecordResponse, JoinRoundResponse, StartRoundResponse } from "@swng/contracts";
+import { deviceId as toDeviceId, fieldDeck18, fixtureLinks18, opId as toOpId, playGoldenRoundLog, reduceRound, scoreGame } from "@swng/domain";
+import type { CourseCard, DeviceId, FixtureScores, GolferId, Hlc, OpId, RoundId, RoundState } from "@swng/domain";
+import type { AuthTokens } from "../src/auth/tokenStore.js";
 import { describeGame } from "../src/games/describeGame.js";
+
+// --- Legibility-walk screenshots (M7 Task 8; papercuts.md §4) -----------------------------
+
+const SCREENSHOT_DIR = fileURLToPath(new URL("../../../.superpowers/sdd/screenshots/", import.meta.url));
+
+// Controller-review scratch folder, gitignored wholesale (`.superpowers/`) — never part of a
+// diff, so these screenshots are a byproduct of running the gate, not a committed artifact.
+// mkdirSync defensively (a fresh checkout won't have this directory yet).
+export const screenshotPath = (name: string): string => {
+  mkdirSync(SCREENSHOT_DIR, { recursive: true });
+  return `${SCREENSHOT_DIR}${name}`;
+};
 
 // --- Endpoints ---------------------------------------------------------------------------
 
 export interface WebEnv {
   readonly httpUrl: string;
   readonly wsUrl: string;
+  // M7 Task 8: the Cognito pool identifiers scripts/webEnv.mjs already writes alongside the
+  // two endpoints above (from the SAME cdk-outputs.json read) — mintThrowawayUser below reads
+  // them from here rather than a second independent parse of cdk-outputs.json, same "one
+  // source, no drift" rationale as this function's own doc comment already gives httpUrl/wsUrl.
+  readonly userPoolId: string;
+  readonly userPoolClientId: string;
 }
 
 // Reads the SAME apps/web/.env.local playwright.config.ts's webServer.command generates
@@ -43,7 +76,7 @@ export const loadWebEnv = (): WebEnv => {
     if (!line) throw new Error(`${key} not found in ${envPath} — did scripts/webEnv.mjs run (playwright.config.ts's webServer.command)?`);
     return line.slice(key.length + 1).trim();
   };
-  return { httpUrl: read("VITE_HTTP_URL"), wsUrl: read("VITE_WS_URL") };
+  return { httpUrl: read("VITE_HTTP_URL"), wsUrl: read("VITE_WS_URL"), userPoolId: read("VITE_USER_POOL_ID"), userPoolClientId: read("VITE_USER_POOL_CLIENT_ID") };
 };
 
 // --- Course seeding: search-first, create-if-absent, via the PUBLIC course API ---------------
@@ -79,16 +112,201 @@ export const ensureCourse = async (name: string, card: CourseCard): Promise<void
 // Joins the round the same way JoinRoundPage's own submit handler does, but via a direct
 // fetch instead of a browser (brief step 2: joining Cal/Dee through context A would overwrite
 // Ann's localStorage credential for the round — `swng:credential:<roundId>` is one key per
-// round per browser, not per golfer).
+// round per browser, not per golfer). `golferId` is optional (Task 5b ghost continuity) —
+// identityRecord.spec.ts is the first caller to pass one, reusing the SAME ghost GolferId
+// across three separate rounds' joins.
 export const joinRoundDirect = async (
   httpUrl: string,
-  input: { readonly code: string; readonly name: string; readonly tee: string; readonly courseHandicap: number },
+  input: { readonly code: string; readonly name: string; readonly tee: string; readonly courseHandicap: number; readonly golferId?: GolferId },
 ): Promise<JoinRoundResponse> => {
   const body = parse(joinRoundRequestSchema, input);
   const response = await fetch(`${httpUrl}/rounds/join`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`POST /rounds/join -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(joinRoundResponseSchema, json);
+};
+
+// --- API-driven rounds, entirely out-of-browser (M7 Task 8) --------------------------------
+
+// api.ts's own createRound/finalizeRound/getMyRecord can't be imported here even for their
+// typed shapes: api.ts pulls in ./config.ts, whose `config` constant reads import.meta.env at
+// MODULE-LOAD time — a Vite-only global that doesn't exist under Playwright's own (non-Vite)
+// Node test runner, so the import crashes before a single test even collects (confirmed
+// against a real e2e:field run: "Cannot read properties of undefined (reading
+// 'VITE_HTTP_URL')" at src/config.ts:16, from api.ts's own top-level `config.httpUrl` read).
+// This is exactly why joinRoundDirect above already hand-rolls its own fetch instead of
+// calling api.ts's joinRound — these three follow the identical *Direct idiom for the same
+// reason, not out of not knowing api.ts exists.
+export const startRoundDirect = async (
+  httpUrl: string,
+  input: { readonly card: CourseCard; readonly host: { readonly name: string; readonly tee: string; readonly courseHandicap: number } },
+): Promise<StartRoundResponse> => {
+  const body = parse(startRoundRequestSchema, input);
+  const response = await fetch(`${httpUrl}/rounds`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /rounds -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(startRoundResponseSchema, json);
+};
+
+export const finalizeRoundDirect = async (httpUrl: string, id: RoundId, token: string): Promise<FinalizeRoundResponse> => {
+  const response = await fetch(`${httpUrl}/rounds/${id}/finalize`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /rounds/${id}/finalize -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(finalizeRoundResponseSchema, json);
+};
+
+export const getMyRecordDirect = async (httpUrl: string, token: string): Promise<GetMyRecordResponse> => {
+  const response = await fetch(`${httpUrl}/me/record`, { headers: { authorization: `Bearer ${token}` } });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`GET /me/record -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(getMyRecordResponseSchema, json);
+};
+
+// --- Direct score recording (M7 Task 8) ----------------------------------------------------
+
+// A per-device opId/hlc generator — the same idiom as the root e2e workspace's own
+// e2e/support/client.ts createClientOps (that file lives in a SIBLING pnpm package apps/web
+// can't import without a new cross-workspace dependency, so this is a deliberately small,
+// self-contained duplicate rather than a structural change this task's scope doesn't call
+// for). wallMs strictly increases per device (clamped to real elapsed time or +1, whichever is
+// greater) so a batch of same-tick scores still gets a total hlc order.
+export interface ScoreOps {
+  readonly deviceId: DeviceId;
+  next(): { readonly opId: OpId; readonly hlc: Hlc };
+}
+
+export const createScoreOps = (device: string): ScoreOps => {
+  const id = toDeviceId(device);
+  let counter = 0;
+  let lastWallMs = 0;
+  return {
+    deviceId: id,
+    next: () => {
+      counter += 1;
+      lastWallMs = Math.max(Date.now(), lastWallMs + 1);
+      return { opId: toOpId(`${device}-op-${counter}`), hlc: { wallMs: lastWallMs, counter: 0, deviceId: id } };
+    },
+  };
+};
+
+// identityRecord.spec.ts's own three API-played rounds need real "strokes" scores posted for
+// a ghost golfer with no browser at all — score/pull is deliberately absent from api.ts
+// ("score/pull go through the session instead, never through here"), so this is the direct-
+// fetch counterpart, matching every other *Direct helper in this file (joinRoundDirect above).
+export const recordScoreDirect = async (
+  httpUrl: string,
+  id: RoundId,
+  token: string,
+  input: { readonly golferId: GolferId; readonly hole: number; readonly strokes: number },
+  ops: ScoreOps,
+): Promise<void> => {
+  const { opId, hlc } = ops.next();
+  const body = parse(recordScoreRequestSchema, { golferId: input.golferId, hole: input.hole, result: { kind: "strokes", strokes: input.strokes }, opId, hlc });
+  const response = await fetch(`${httpUrl}/rounds/${id}/scores`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /rounds/${id}/scores -> ${response.status}: ${JSON.stringify(json)}`);
+  parse(recordScoreResponseSchema, json);
+};
+
+// --- Identity: throwaway Cognito users, auth injection, the rebuild lambda (M7 Task 8) -----
+
+// Fixed per docs/implementation-plan.md's own "AWS profile swng, region us-east-1" constant —
+// every AWS-touching spot in this repo (CDK, adapters-dynamodb contract tests) hardcodes the
+// same region rather than reading it from an env var; the PROFILE, by the same repo-wide
+// convention (root package.json's own cdk:guard script), is never named in source — the
+// caller's shell must already have credentials active (AWS_PROFILE=swng or equivalent) before
+// running `pnpm e2e:field`.
+const AWS_REGION = "us-east-1";
+
+// Mints a per-run throwaway Cognito user via the admin APIs (AdminCreateUser +
+// AdminSetUserPassword, MessageAction SUPPRESS so no real email ever sends) and exchanges it
+// for real tokens via InitiateAuth USER_PASSWORD_AUTH — the same beta-grade flow
+// authConfig.ts's own doc comment names this exact purpose for (never drives the Hosted UI).
+// Returns the SAME shape tokenStore.ts persists, ready to inject verbatim.
+export const mintThrowawayUser = async (label: string): Promise<AuthTokens> => {
+  const { userPoolId, userPoolClientId } = loadWebEnv();
+  const cognito = new CognitoIdentityProviderClient({ region: AWS_REGION });
+  const username = `e2e-${label}-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}@example.com`;
+  const password = `Sw!ng-${Math.random().toString(36).slice(2)}-Aa1`; // meets the pool's default complexity policy
+
+  await cognito.send(
+    new AdminCreateUserCommand({
+      UserPoolId: userPoolId,
+      Username: username,
+      UserAttributes: [
+        { Name: "email", Value: username },
+        { Name: "email_verified", Value: "true" },
+      ],
+      MessageAction: "SUPPRESS",
+      TemporaryPassword: password,
+    }),
+  );
+  // FORCE_CHANGE_PASSWORD -> CONFIRMED, Permanent: true — InitiateAuth's own USER_PASSWORD_AUTH
+  // flow below rejects a still-temporary password with a NEW_PASSWORD_REQUIRED challenge this
+  // helper has no interactive way to answer.
+  await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId: userPoolId, Username: username, Password: password, Permanent: true }));
+
+  const auth = await cognito.send(
+    new InitiateAuthCommand({ AuthFlow: "USER_PASSWORD_AUTH", ClientId: userPoolClientId, AuthParameters: { USERNAME: username, PASSWORD: password } }),
+  );
+  const result = auth.AuthenticationResult;
+  if (!result?.IdToken || !result.RefreshToken || result.ExpiresIn === undefined) {
+    throw new Error(`InitiateAuth for ${username} did not return a complete AuthenticationResult: ${JSON.stringify(auth)}`);
+  }
+  return { idToken: result.IdToken, refreshToken: result.RefreshToken, expiresAt: Date.now() + result.ExpiresIn * 1000 };
+};
+
+// Injects tokenStore.ts's own AUTH_KEY ("swng:auth") — duplicated here as a literal because
+// this runs in Node, outside the page, and can't import a browser-only module's runtime
+// constant; the key string must match tokenStore.ts EXACTLY (the context brief's own
+// instruction) or AuthProvider silently never finds it. addInitScript (not page.evaluate) so
+// this is present BEFORE the page's own first script runs, on every navigation this
+// page/context makes from here on — the pre-navigation injection the brief asks for.
+export const injectAuthTokens = async (page: Page, tokens: AuthTokens): Promise<void> => {
+  await page.addInitScript((t) => {
+    localStorage.setItem("swng:auth", JSON.stringify(t));
+  }, tokens);
+};
+
+// Resolves the RebuildFunction's physical name via the deployed stack's own CloudFormation
+// resources (brief: "find its physical name via the CloudFormation stack resources... or a
+// stack output if one exists" — cdk-outputs.json carries no RebuildFunction output, so this is
+// the CloudFormation path) — CDK's auto-generated physical name carries a hash suffix on the
+// logical id (`RebuildFunction08BA4749` at last check) that would make a literal name brittle
+// across any redeploy that touches this construct, so the lookup is by logical-id PREFIX
+// instead of a hardcoded physical name.
+const resolveRebuildFunctionName = async (): Promise<string> => {
+  const cfn = new CloudFormationClient({ region: AWS_REGION });
+  const resources = await cfn.send(new DescribeStackResourcesCommand({ StackName: "swng-beta" }));
+  const rebuildResource = resources.StackResources?.find((r) => r.LogicalResourceId?.startsWith("RebuildFunction"));
+  if (!rebuildResource?.PhysicalResourceId) {
+    throw new Error(`no RebuildFunction* resource found in the swng-beta stack (${resources.StackResources?.length ?? 0} resources scanned)`);
+  }
+  return rebuildResource.PhysicalResourceId;
+};
+
+// Invokes the manual-only rebuild entry (packages/lambda/src/entries/rebuild.ts) — wipes and
+// replays EVERY finalized round's projections on beta (rebuildProjections.ts's own doc
+// comment: "no forked math", the SAME projectArchive the stream trigger uses), synchronously
+// (RequestResponse), and returns its own { rounds, golfers } summary. No client-side timeout
+// is configured — the function's own 5-minute CDK timeout (apps/infra-cdk/lib/swngStack.ts)
+// is the real bound, and the AWS SDK v3's NodeHttpHandler default (no request timeout) simply
+// waits for it; the caller sets its OWN Playwright test.setTimeout generously instead.
+export const invokeRebuild = async (): Promise<{ readonly rounds: number; readonly golfers: number }> => {
+  const functionName = await resolveRebuildFunctionName();
+  const lambda = new LambdaClient({ region: AWS_REGION });
+  const response = await lambda.send(new InvokeCommand({ FunctionName: functionName, InvocationType: "RequestResponse" }));
+  const payloadText = response.Payload ? Buffer.from(response.Payload).toString("utf8") : "";
+  if (response.FunctionError) throw new Error(`rebuild lambda failed (${response.FunctionError}): ${payloadText}`);
+  const payload = payloadText ? (JSON.parse(payloadText) as { rounds?: unknown; golfers?: unknown }) : {};
+  if (typeof payload.rounds !== "number" || typeof payload.golfers !== "number") {
+    throw new Error(`rebuild lambda returned an unexpected payload: ${payloadText}`);
+  }
+  return { rounds: payload.rounds, golfers: payload.golfers };
 };
 
 // --- The deck as the oracle: expected UI strings, derived, not hand-copied -----------------
@@ -364,6 +582,19 @@ export const addFourballGame = async (
 
 export const addSkinsGame = async (page: Page, names: readonly string[]): Promise<void> => {
   await gameKindSelect(page).selectOption({ value: "skins" });
+  const group = page.getByRole("group", { name: "Players" });
+  for (const name of names) {
+    await group.getByLabel(name, { exact: true }).check();
+  }
+  await page.getByRole("button", { name: "Add game" }).click();
+};
+
+// Same "Players" checkbox-group shape as addSkinsGame above, stableford's own kind selected
+// instead — M7 Task 8's termination-coverage addendum (fieldTest.spec.ts) is the one caller
+// that needs a game requiring EVERY configured player's EVERY hole to resolve (unlike singles
+// match's early-closeout path), so a partial card leaves it deliberately unresolved.
+export const addStablefordGame = async (page: Page, names: readonly string[]): Promise<void> => {
+  await gameKindSelect(page).selectOption({ value: "stableford" });
   const group = page.getByRole("group", { name: "Players" });
   for (const name of names) {
     await group.getByLabel(name, { exact: true }).check();

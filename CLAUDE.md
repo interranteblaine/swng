@@ -105,6 +105,37 @@ head-seq condition on that append closing the M4-accepted finalize race. Gated b
 "Casa Verde GC" — dots checked hole-by-hole against hand-verified singles-match arithmetic)
 alongside the updated `pnpm e2e:field` (`fieldTest.spec.ts` now searches/seeds a real course
 through the same public course API instead of a bundled fixture).
+Identity and the golfer record are real (M7): accounts, ghost-claiming, and a live WHS index.
+`domain/golfer` (`Golfer`/`HandicapProfile`/`effectiveIndex` — official > computed > declared,
+`archiveGolferLine`'s per-round history line, `combineNineHoleDifferentials`'s 2020 published
+9-hole pairing) plus `game-terminated` in the round log (a commutative, order-independent
+set-union fold; `settleRound` excludes terminated games from the must-resolve set and records
+`terminatedGameIds`). `contracts`/`application` gain golfer identity use cases and the ONE
+projector implementation (`projectArchive` — the DynamoDB Streams trigger and the manual
+`rebuildProjections` entry both call it, never two independent implementations); two controller
+amendments landed mid-build and are load-bearing: **GET /me never creates** (PUT /me is the one
+get-or-create path — the original get-or-create bound a sub before a later claim could ever
+run) and **`differentialsUsed` is WHS Rule 5.2a's `use` count**, not the window size. Task 5b
+adds **ghost continuity**: `JoinRoundRequest.golferId` is optional and reused as-is iff
+unclaimed, so one ghost can play a whole season under one `GolferId` before anyone claims them.
+`adapters-dynamodb` gets a golfer store (sub-claiming via a real `attribute_not_exists`
+condition) and a projections store; `adapters-cognito`'s `createCognitoVerifier` backs a new
+`auth: "golfer"` route tier (Bearer ID tokens, verified in the dispatcher, never an API Gateway
+authorizer) alongside the existing `auth: "participant"` tier `terminateGame` uses. Cognito
+(email sign-in, Hosted UI + PKCE for the real app, `USER_PASSWORD_AUTH` enabled beta-grade
+purely so e2e can mint JWTs without driving the Hosted UI), the stream-triggered
+`ProjectorFunction`, and the manual-invoke-only `RebuildFunction` are live on `swng-beta`
+(four deploys across the milestone — the routes/Cognito/stream deploy plus a CORS-preflight
+fix, Task 5b's golferId change, and a Cognito callback-URL correction). `@swng/web` gets
+sign-in chrome, `ProfilePage` (index/trend/distribution/history), the roster's "This is me"
+claim affordance, per-game "End game…" termination with an "Ended" badge, and the finalize
+dialog's human-readable unresolved-games list ("End unfinished games & finalize" terminates
+then finalizes) replacing the old raw-game-uuid error. Gated by `apps/web/e2e/
+identityRecord.spec.ts` (mints a throwaway Cognito user via admin APIs, plays three rounds as
+one ghost via API, claims the ghost live in the browser, asserts the hand-pinned index/history
+against the live system, then proves a projections wipe+rebuild reproduces it exactly) and a
+termination-coverage addendum in `fieldTest.spec.ts` (an unresolved game named in the finalize
+dialog, terminated, and excluded from the settled results).
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

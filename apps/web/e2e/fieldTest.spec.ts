@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
+import { finalizeRoundResponseSchema, parse } from "@swng/contracts";
 import { fixtureLinks18 } from "@swng/domain";
 import {
   addFourballGame,
   addSkinsGame,
+  addStablefordGame,
   chip,
   correctedScore,
   describeFourballAt,
@@ -11,10 +13,13 @@ import {
   ensureCourse,
   enterScore,
   expectOrRecover,
+  gameKindSelect,
   installWsProxy,
   joinRoundDirect,
   loadWebEnv,
   PLAYER_NAMES,
+  readJoinCode,
+  screenshotPath,
   scoreFor,
   waitForDigestOrRecover,
   waitForFinalOrRecover,
@@ -325,5 +330,109 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
     // The archived card: entry locked, no pad ever opens.
     await expect(pageA.getByRole("button", { name: "Ann hole 1", exact: true })).toBeDisabled();
+  });
+});
+
+// M7 Task 8 (docs/superpowers/plans/2026-07-10-m7-identity.md Task 8; docs/papercuts.md's
+// "Decided direction" section): termination coverage — a round with two games, one driven to
+// a real result, one left barely scored, finalized via "End unfinished games & finalize". The
+// plan's own brief names this file as the natural home ("a termination step fits naturally
+// after fieldTest step 7") but as its OWN describe.serial block with a fresh context, not a
+// tenth numbered step inside the M5 deck above — a termination bug here must never perturb
+// (or be perturbed by) the fourball+skins deck's own assertions, and a fresh context is the
+// cheapest way to guarantee that (fixtureLinks18 is idempotently re-seeded either way).
+test.describe.serial("M7 termination coverage — end an unresolved game, finalize the rest", () => {
+  let page: Page;
+
+  test.beforeAll(async ({ browser }) => {
+    await ensureCourse(fixtureLinks18.courseName, fixtureLinks18); // idempotent — already seeded by the M5 block above when both run in the same pnpm e2e:field invocation
+    const context = await browser.newContext();
+    page = await context.newPage();
+  });
+
+  test.afterAll(async () => {
+    await page?.context().close();
+  });
+
+  test("1: Pat creates a throwaway round on fixtureLinks18; Quinn joins over a direct HTTP fetch", async () => {
+    await page.goto("/create");
+    await page.getByLabel("Course", { exact: true }).fill(fixtureLinks18.courseName);
+    const result = page.getByRole("button", { name: fixtureLinks18.courseName, exact: true }).first();
+    await expect(result).toBeVisible();
+    await result.click();
+    await page.getByLabel("Your name").fill("Pat");
+    await page.getByLabel("Course handicap").fill("0");
+    await page.getByRole("button", { name: "Create round" }).click();
+
+    await expect(page).toHaveURL(/\/round\//);
+    const joinCode = await readJoinCode(page);
+
+    // Score-for-anyone precedent (Cal/Dee, Quinn elsewhere in this file) — Quinn's own tab
+    // adds nothing this scenario needs.
+    const { httpUrl } = loadWebEnv();
+    await joinRoundDirect(httpUrl, { code: joinCode, name: "Quinn", tee: "white", courseHandicap: 0 });
+    await waitForParticipant(page, "Quinn");
+  });
+
+  test("2: a singles match (Pat vs Quinn) and a stableford (Pat, Quinn) are both added", async () => {
+    await gameKindSelect(page).selectOption({ value: "singles-match" });
+    await page.getByRole("combobox", { name: "Player A", exact: true }).selectOption({ label: "Pat" });
+    await page.getByRole("combobox", { name: "Player B", exact: true }).selectOption({ label: "Quinn" });
+    await page.getByRole("button", { name: "Add game" }).click();
+    await expect(chip(page, "Singles match")).toBeVisible();
+
+    await addStablefordGame(page, ["Pat", "Quinn"]);
+    await expect(chip(page, "Stableford")).toBeVisible();
+  });
+
+  test("3: 10 holes scored (Pat strokes, Quinn picked up every hole) closes the match 10&8 and leaves stableford barely started", async () => {
+    test.setTimeout(90_000);
+    for (let hole = 1; hole <= 10; hole += 1) {
+      await enterScore(page, "Pat", hole, 4);
+      await enterScore(page, "Quinn", hole, "picked-up");
+    }
+
+    // Quinn's net is undefined (picked-up) on every one of holes 1-10, so Pat wins every hole
+    // outright regardless of his own score (singlesMatch.ts: "picked-up/conceded (net
+    // undefined) loses the hole outright") — 10 up thru 10, remaining 8, and 10 > 8 closes the
+    // match "10&8" (matchLadder.ts's own closeout rule). Hand-derived from the engine's own
+    // documented rules for this fresh throwaway scenario (not fieldDeck18-sourced) — a
+    // disagreement here is this test failing honestly, never something to relax.
+    await expect(chip(page, "Singles match")).toContainText("Pat wins 10&8");
+
+    // Stableford needs EVERY configured player's EVERY hole decided to resolve
+    // (allPlayersComplete, scoring/stableford.ts) — holes 11-18 are untouched for both Pat and
+    // Quinn, so it stays unresolved on purpose (the "barely scored" half of this test's name).
+  });
+
+  test("4: the finalize dialog lists the unresolved stableford; 'End unfinished games & finalize' resolves it", async () => {
+    await page.getByRole("button", { name: "Finalize round" }).click();
+    const dialog = page.getByRole("dialog", { name: "Confirm finalize" });
+    await expect(dialog).toContainText("Some games aren't finished:");
+    // describeMissing (finalizeReadiness.ts) groups both players under ONE clause since
+    // they're missing the identical hole range — Pat and Quinn are both unscored 11-18.
+    await expect(dialog).toContainText("Stableford — holes 11–18 unscored for Pat, Quinn");
+
+    // Legibility walk (papercuts.md §4): the finalize dialog's own unresolved-games list.
+    await page.screenshot({ path: screenshotPath("finalize-dialog-unresolved.png"), fullPage: true });
+
+    const finalizeResponsePromise = page.waitForResponse((r) => r.url().includes("/finalize") && r.request().method() === "POST");
+    await dialog.getByRole("button", { name: "End unfinished games & finalize", exact: true }).click();
+    const finalizeResponse = await finalizeResponsePromise;
+    const body = parse(finalizeRoundResponseSchema, await finalizeResponse.json());
+
+    // The archive's own settle: exactly the singles match resolved — stableford is excluded
+    // from settleRound's must-resolve set once terminated (domain/round/archive.ts), so it
+    // never appears in `results` at all. This server-computed settle is the ground truth
+    // test 5's ResultsView assertions are checked against.
+    expect(body.results).toHaveLength(1);
+    expect(body.results[0]?.kind).toBe("singles-match");
+
+    await expect(page.getByRole("heading", { name: "Final results" })).toBeVisible();
+  });
+
+  test("5: ResultsView shows the singles-match result and the stableford's Ended badge", async () => {
+    await expect(chip(page, "Singles match")).toContainText("Pat wins 10&8");
+    await expect(chip(page, "Stableford")).toContainText("Ended");
   });
 });

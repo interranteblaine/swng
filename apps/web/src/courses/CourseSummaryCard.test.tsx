@@ -3,15 +3,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { courseId } from "@swng/domain";
 import type { CourseView } from "@swng/contracts";
 
-// Faking the api.ts module boundary — CourseSummaryCard only ever calls verifyTeeSet.
+// Faking the api.ts module boundary — CourseSummaryCard calls verifyTeeSet and (on a
+// tee-set-revised 409) getCourse.
 vi.mock("../api", () => ({
   verifyTeeSet: vi.fn(),
+  getCourse: vi.fn(),
+  ApiError: class ApiError extends Error {
+    constructor(
+      readonly code: string,
+      readonly status?: number,
+      message?: string,
+    ) {
+      super(message ?? code);
+      this.name = "ApiError";
+    }
+  },
 }));
 
-import { verifyTeeSet } from "../api";
+import { ApiError, getCourse, verifyTeeSet } from "../api";
 import { CourseSummaryCard } from "./CourseSummaryCard";
 
 const mockedVerifyTeeSet = vi.mocked(verifyTeeSet);
+const mockedGetCourse = vi.mocked(getCourse);
 
 const course: CourseView = {
   courseId: courseId("course-1"),
@@ -31,6 +44,7 @@ const course: CourseView = {
 
 beforeEach(() => {
   mockedVerifyTeeSet.mockReset();
+  mockedGetCourse.mockReset();
 });
 
 afterEach(() => {
@@ -74,7 +88,9 @@ describe("CourseSummaryCard", () => {
     fireEvent.click(screen.getByRole("button", { name: /verify this card/i }));
 
     await screen.findByText(/✓ 1 verified/i);
-    expect(mockedVerifyTeeSet).toHaveBeenCalledWith(courseId("course-1"), { teeName: "white", verifierName: "Ed" });
+    // I1 (M6 closing wave): the version sent is the DISPLAYED card's — CourseView.teeSets[0]'s
+    // version (1) for "white" — not omitted.
+    expect(mockedVerifyTeeSet).toHaveBeenCalledWith(courseId("course-1"), { teeName: "white", verifierName: "Ed", version: 1 });
   });
 
   it("a blank/cancelled name prompt never calls verify", () => {
@@ -87,5 +103,28 @@ describe("CourseSummaryCard", () => {
     fireEvent.click(screen.getByRole("button", { name: /verify this card/i }));
 
     expect(mockedVerifyTeeSet).not.toHaveBeenCalled();
+  });
+
+  it("I1: a tee-set-revised 409 shows an inline notice and re-fetches the course", async () => {
+    vi.stubGlobal(
+      "prompt",
+      vi.fn(() => "Ed"),
+    );
+    mockedVerifyTeeSet.mockRejectedValue(new ApiError("tee-set-revised", 409, 'tee "white" is now version 2, expected version 1'));
+    const revisedCourse: CourseView = {
+      ...course,
+      card: { ...course.card, teeSets: course.card.teeSets.map((t) => (t.name === "white" ? { ...t, rating: 72.5 } : t)) },
+      teeSets: course.teeSets.map((t) => (t.name === "white" ? { ...t, version: 2, enteredBy: "Fran" } : t)),
+    };
+    mockedGetCourse.mockResolvedValue({ course: revisedCourse });
+
+    render(<CourseSummaryCard course={course} selectedTee="white" onSelectTee={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /verify this card/i }));
+
+    const notice = await screen.findByRole("alert");
+    expect(notice.textContent).toMatch(/revised/i);
+    expect(mockedGetCourse).toHaveBeenCalledWith(courseId("course-1"));
+    // The re-fetched (revised) numbers now render — the golfer sees what actually changed.
+    await screen.findByText(/entered by fran/i);
   });
 });

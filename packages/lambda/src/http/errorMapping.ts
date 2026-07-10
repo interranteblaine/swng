@@ -49,6 +49,10 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   "invalid-yardage": 400,
   "invalid-stroke-index": 400,
   "duplicate-tee-name": 400,
+  // A verify raced a revision it never saw (M6 closing wave, I1): the client's own numbers
+  // are stale, the same "your view of the resource is out of date" shape as an optimistic-
+  // concurrency conflict, so it gets the same 409 as course-conflict above.
+  "tee-set-revised": 409,
 };
 
 // Exported so every error-shaped response — including dispatch.ts's route-not-found 404,

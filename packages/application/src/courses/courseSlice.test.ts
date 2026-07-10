@@ -123,17 +123,68 @@ describe("verifyTeeSet", () => {
     const ctx = setup();
     const created = await ctx.create({ name: "Casa Verde GC", tee: whiteTee, enteredBy: "Ann" });
 
-    const once = await ctx.verify(created.course.courseId, { teeName: "white", verifierName: "Bo" });
+    const once = await ctx.verify(created.course.courseId, { teeName: "white", verifierName: "Bo", version: 1 });
     expect(once.course.teeSets[0]?.verifiedBy).toEqual(["Bo"]);
 
-    const twice = await ctx.verify(created.course.courseId, { teeName: "white", verifierName: "Bo" });
+    const twice = await ctx.verify(created.course.courseId, { teeName: "white", verifierName: "Bo", version: 1 });
     expect(twice.course.teeSets[0]?.verifiedBy).toEqual(["Bo"]);
   });
 
   it("on an unknown tee name propagates the domain's unknown-tee-set error", async () => {
     const ctx = setup();
     const created = await ctx.create({ name: "Casa Verde GC", tee: whiteTee, enteredBy: "Ann" });
-    await expect(ctx.verify(created.course.courseId, { teeName: "gold", verifierName: "Bo" })).rejects.toMatchObject({ code: "unknown-tee-set" });
+    await expect(ctx.verify(created.course.courseId, { teeName: "gold", verifierName: "Bo", version: 1 })).rejects.toMatchObject({
+      code: "unknown-tee-set",
+    });
+  });
+
+  // I1 (M6 final review): a verify racing a revision must never silently transplant onto
+  // numbers the verifier never saw. This reproduces the review's exact interleaving — Cal
+  // reads the course at v1 and taps verify, but Bo's correction (a revision to v2) lands
+  // mid-retry, DURING retryOnConflict's own bounded loop (not merely before the whole call):
+  // the `racy` store injects Bo's real addTeeSet the first time Cal's verify attempts to put,
+  // so the put itself genuinely conflicts (a real optimistic-concurrency failure, not a
+  // synthetic one), retryOnConflict re-reads (now v2), and re-applies the SAME expectedVersion
+  // (1) the caller originally pinned — which must now fail outright, not retry into a
+  // transplant.
+  it("a verify racing a revision mid-retry surfaces tee-set-revised, not a silent transplant", async () => {
+    const inner = createInMemoryCourseStore();
+    const innerCtx = setup(inner);
+    const created = await innerCtx.create({ name: "Casa Verde GC", tee: whiteTee, enteredBy: "Ann" });
+    const revisedTee = { ...whiteTee, rating: 72.5 };
+
+    let injected = false;
+    const racy: CourseStore = {
+      get: inner.get,
+      search: inner.search,
+      put: async (course, expectedRevision) => {
+        // On the FIRST put attempt only, land Bo's real revision through the inner store
+        // before delegating — expectedRevision below is now stale, so inner.put's own
+        // optimistic-concurrency check throws a genuine course-conflict (not synthesized).
+        if (!injected) {
+          injected = true;
+          await innerCtx.addTee(created.course.courseId, { tee: revisedTee, enteredBy: "Bo" });
+        }
+        return inner.put(course, expectedRevision);
+      },
+    };
+    const racyCtx = setup(racy);
+
+    await expect(
+      racyCtx.verify(created.course.courseId, { teeName: "white", verifierName: "Cal", version: 1 }),
+    ).rejects.toMatchObject({ code: "tee-set-revised" });
+
+    // The stored course keeps v2 unverified (CourseView.teeSets is current-versions-only, per
+    // toCourseView) — Cal's credit never attached anywhere.
+    const stored = await innerCtx.get(created.course.courseId);
+    expect(stored.course.teeSets).toEqual([{ name: "white", version: 2, provenance: "community", enteredBy: "Bo", verifiedBy: [] }]);
+
+    // The superseded v1 (server-side-only history) also carries no verification — reaching
+    // past the CourseView projection into the raw store to confirm the transplant didn't land
+    // anywhere at all, not just off-screen.
+    const raw = await inner.get(created.course.courseId);
+    const v1 = raw?.course.teeSets.find((v) => v.version === 1);
+    expect(v1).toMatchObject({ status: "superseded", verifications: [] });
   });
 });
 

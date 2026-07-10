@@ -113,7 +113,7 @@ describe("addTeeSet — versioning", () => {
 
   it("the same tee name revises: prior current becomes superseded, verifications are dropped, version increments", () => {
     const course = createCourse({ courseId: ID, name: "Fixture Links", tee: fixtureWhite, enteredBy: "Ann", nowMs: NOW });
-    const verified = verifyTeeSet(course, { teeName: "white", verifierName: "Bo", nowMs: NOW + 1 });
+    const verified = verifyTeeSet(course, { teeName: "white", verifierName: "Bo", expectedVersion: 1, nowMs: NOW + 1 });
     expect(verified.teeSets[0]?.verifications).toHaveLength(1);
 
     const revisedTee: TeeSet = { ...fixtureWhite, rating: 36.2 };
@@ -155,23 +155,39 @@ describe("addTeeSet — versioning", () => {
 describe("verifyTeeSet", () => {
   it("attaches a verification to the current version", () => {
     const course = createCourse({ courseId: ID, name: "Fixture Links", tee: fixtureWhite, enteredBy: "Ann", nowMs: NOW });
-    const verified = verifyTeeSet(course, { teeName: "white", verifierName: "Bo", nowMs: NOW + 1 });
+    const verified = verifyTeeSet(course, { teeName: "white", verifierName: "Bo", expectedVersion: 1, nowMs: NOW + 1 });
     expect(verified.teeSets[0]?.verifications).toEqual([{ name: "Bo", atMs: NOW + 1 }]);
   });
 
   it("is idempotent: the same verifier name on the same version is a no-op", () => {
     const course = createCourse({ courseId: ID, name: "Fixture Links", tee: fixtureWhite, enteredBy: "Ann", nowMs: NOW });
-    const once = verifyTeeSet(course, { teeName: "white", verifierName: "Bo", nowMs: NOW + 1 });
-    const twice = verifyTeeSet(once, { teeName: "white", verifierName: "Bo", nowMs: NOW + 2 });
+    const once = verifyTeeSet(course, { teeName: "white", verifierName: "Bo", expectedVersion: 1, nowMs: NOW + 1 });
+    const twice = verifyTeeSet(once, { teeName: "white", verifierName: "Bo", expectedVersion: 1, nowMs: NOW + 2 });
     expect(twice.teeSets[0]?.verifications).toHaveLength(1);
     expect(twice.teeSets[0]?.verifications[0]).toEqual({ name: "Bo", atMs: NOW + 1 });
   });
 
   it("throws unknown-tee-set for a name that was never entered", () => {
     const course = createCourse({ courseId: ID, name: "Fixture Links", tee: fixtureWhite, enteredBy: "Ann", nowMs: NOW });
-    expect(() => verifyTeeSet(course, { teeName: "blue", verifierName: "Bo", nowMs: NOW + 1 })).toThrowError(
+    expect(() => verifyTeeSet(course, { teeName: "blue", verifierName: "Bo", expectedVersion: 1, nowMs: NOW + 1 })).toThrowError(
       expect.objectContaining({ code: "unknown-tee-set" }),
     );
+  });
+
+  // I1 (M6 closing wave): the core of the fix — a stale expectedVersion is a hard rejection,
+  // never a silent transplant onto whatever's current now.
+  it("throws tee-set-revised when expectedVersion doesn't match the current version", () => {
+    const course = createCourse({ courseId: ID, name: "Fixture Links", tee: fixtureWhite, enteredBy: "Ann", nowMs: NOW });
+    const revisedTee: TeeSet = { ...fixtureWhite, rating: 36.2 };
+    const revised = addTeeSet(course, { tee: revisedTee, enteredBy: "Bo", nowMs: NOW + 1 });
+
+    expect(() => verifyTeeSet(revised, { teeName: "white", verifierName: "Cal", expectedVersion: 1, nowMs: NOW + 2 })).toThrowError(
+      expect.objectContaining({ code: "tee-set-revised" }),
+    );
+    // The rejected verify must never have mutated anything — v2 stays exactly as addTeeSet
+    // left it, still unverified.
+    const current = revised.teeSets.find((v) => v.status === "current");
+    expect(current).toMatchObject({ version: 2, verifications: [] });
   });
 });
 

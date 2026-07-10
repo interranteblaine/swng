@@ -142,9 +142,22 @@ export const addTeeSet = (
   return { ...course, teeSets: [...supersededTeeSets, nextVersion] };
 };
 
-export const verifyTeeSet = (course: Course, input: { readonly teeName: string; readonly verifierName: string; readonly nowMs: number }): Course => {
+export const verifyTeeSet = (
+  course: Course,
+  input: { readonly teeName: string; readonly verifierName: string; readonly expectedVersion: number; readonly nowMs: number },
+): Course => {
   const current = course.teeSets.find((v) => v.tee.name === input.teeName && v.status === "current");
   if (!current) throw new DomainError("unknown-tee-set", `no tee set named "${input.teeName}"`);
+
+  // A verification is an attestation of the exact numbers the verifier looked at — it must
+  // never silently transplant onto a revision the verifier never saw (a corrected card is
+  // unverified until someone re-verifies it; that's the point of verification). If the
+  // caller's expectedVersion doesn't match what's current NOW, someone else's revision beat
+  // them to it — fail outright rather than attach the verifier's credit to numbers they
+  // never read.
+  if (current.version !== input.expectedVersion) {
+    throw new DomainError("tee-set-revised", `tee "${input.teeName}" is now version ${current.version}, expected version ${input.expectedVersion}`);
+  }
 
   // Duplicate verifier name on the same version is a no-op, not an error — re-tapping
   // "verify" a second time (a plausible double-submit) shouldn't accumulate duplicate credit.

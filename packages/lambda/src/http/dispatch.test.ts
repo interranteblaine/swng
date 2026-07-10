@@ -370,7 +370,7 @@ describe("createDispatcher — course routes + peek (M6 Task 4)", () => {
         makeEvent({
           method: "POST",
           path: `/courses/${created.course.courseId}/verify`,
-          body: { teeName: "white", verifierName: "Cal" },
+          body: { teeName: "white", verifierName: "Cal", version: 1 },
         }),
       ),
     );

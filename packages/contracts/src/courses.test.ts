@@ -81,12 +81,15 @@ describe("addTeeSetResponseSchema", () => {
 
 describe("verifyTeeSetRequestSchema", () => {
   it("round-trips a valid verify-tee-set request", () => {
-    roundTrips(verifyTeeSetRequestSchema, { teeName: "white", verifierName: "Bo" });
+    roundTrips(verifyTeeSetRequestSchema, { teeName: "white", verifierName: "Bo", version: 1 });
   });
 
   it.each([
-    ["empty teeName", { teeName: "", verifierName: "Bo" }],
-    ["empty verifierName", { teeName: "white", verifierName: "" }],
+    ["empty teeName", { teeName: "", verifierName: "Bo", version: 1 }],
+    ["empty verifierName", { teeName: "white", verifierName: "", version: 1 }],
+    ["missing version", { teeName: "white", verifierName: "Bo" }],
+    ["version below 1", { teeName: "white", verifierName: "Bo", version: 0 }],
+    ["non-integer version", { teeName: "white", verifierName: "Bo", version: 1.5 }],
   ])("rejects: %s", (_label, payload) => {
     expect(() => parse(verifyTeeSetRequestSchema, payload)).toThrow(ContractError);
   });

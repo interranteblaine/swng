@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CourseView } from "@swng/contracts";
-import { ApiError, verifyTeeSet } from "../api";
+import { ApiError, getCourse, verifyTeeSet } from "../api";
 
 export interface CourseSummaryCardProps {
   readonly course: CourseView;
@@ -16,10 +16,10 @@ export interface CourseSummaryCardProps {
 // and reused as-is rather than duplicated: "shown after add and in the create-flow course
 // detail" (brief) is the SAME component, not two.
 export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCourse }: CourseSummaryCardProps) {
-  // Seeded from the prop, then advanced locally from verify's own response — course.teeSets is
-  // CURRENT-versions-only metadata (contracts/src/courses.ts), and a fresh verify's response
-  // carries the updated count directly, so there's nothing to re-fetch.
-  const [teeSets, setTeeSets] = useState(course.teeSets);
+  // Seeded from the prop, then advanced locally from verify's own response (or a 409's
+  // re-fetch) — the WHOLE CourseView, not just teeSets, because a revision a golfer didn't
+  // cause can change the card's rating/slope shown in the tee picker too.
+  const [courseData, setCourseData] = useState(course);
   const [verifyError, setVerifyError] = useState<string | undefined>(undefined);
 
   const verify = async () => {
@@ -28,11 +28,32 @@ export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCo
     // own UI. A blank/cancelled prompt (returns "" or null) is a silent no-op, not an error.
     const verifierName = window.prompt("Your name, to verify this card:");
     if (!verifierName?.trim()) return;
+
+    // The version of the tee set THIS card is currently DISPLAYING — a verify attests to
+    // exactly the numbers on screen, never whatever happens to be current server-side by the
+    // time the request lands (domain verifyTeeSet's expectedVersion — a revision that beat this
+    // golfer to it must fail the verify, not silently transplant onto numbers never looked at).
+    const displayedVersion = courseData.teeSets.find((t) => t.name === selectedTee)?.version;
+    if (displayedVersion === undefined) return; // selectedTee always names a tee courseData knows; defensive only
+
     try {
-      const response = await verifyTeeSet(course.courseId, { teeName: selectedTee, verifierName: verifierName.trim() });
-      setTeeSets(response.course.teeSets);
+      const response = await verifyTeeSet(course.courseId, { teeName: selectedTee, verifierName: verifierName.trim(), version: displayedVersion });
+      setCourseData(response.course);
       setVerifyError(undefined);
     } catch (caught) {
+      if (caught instanceof ApiError && caught.code === "tee-set-revised") {
+        // Someone else's correction landed first. Re-fetch so the golfer reviews the ACTUAL
+        // current card, not the stale one their verify attempt just bounced off of — a failed
+        // re-fetch just leaves the stale card + notice showing rather than compounding errors.
+        setVerifyError("This card was just revised — review the new numbers before verifying.");
+        try {
+          const refreshed = await getCourse(course.courseId);
+          setCourseData(refreshed.course);
+        } catch {
+          // best-effort only; see comment above
+        }
+        return;
+      }
       setVerifyError(caught instanceof ApiError ? caught.message : "Could not verify — try again.");
     }
   };
@@ -40,7 +61,7 @@ export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCo
   return (
     <div className="flex flex-col gap-3 rounded-lg bg-slate-900 p-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-lg font-semibold">{course.name}</p>
+        <p className="text-lg font-semibold">{courseData.name}</p>
         {onChangeCourse && (
           <button type="button" onClick={onChangeCourse} className="text-sm text-emerald-400 underline">
             Change course
@@ -51,7 +72,7 @@ export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCo
       <label className="flex flex-col gap-1">
         Tee
         <select value={selectedTee} onChange={(event) => onSelectTee(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg">
-          {course.card.teeSets.map((teeSet) => (
+          {courseData.card.teeSets.map((teeSet) => (
             <option key={teeSet.name} value={teeSet.name}>
               {teeSet.name} — rating {teeSet.rating}, slope {teeSet.slope}
             </option>
@@ -60,7 +81,7 @@ export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCo
       </label>
 
       <ul className="flex flex-col gap-1 text-sm text-slate-400">
-        {teeSets.map((teeSet) => (
+        {courseData.teeSets.map((teeSet) => (
           <li key={teeSet.name}>
             {teeSet.name}: entered by {teeSet.enteredBy}
             {teeSet.verifiedBy.length > 0 ? ` · ✓ ${teeSet.verifiedBy.length} verified` : " · not yet verified"}

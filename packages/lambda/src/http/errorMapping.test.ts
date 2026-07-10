@@ -44,6 +44,15 @@ describe("toHttpError — course validation DomainErrors map to coded 400s", () 
     expect(JSON.parse(result.body)).toEqual({ code: "game-unresolved", message: "game not finished" });
   });
 
+  // I1 (M6 closing wave): a verify racing a revision it never saw is a 409, the same
+  // "your view is stale" shape as course-conflict — not a 400 (the request itself is
+  // well-formed) and not silently retried.
+  it("maps tee-set-revised to 409", () => {
+    const result = toHttpError(new DomainError("tee-set-revised", 'tee "white" is now version 2, expected version 1'), logger);
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body)).toEqual({ code: "tee-set-revised", message: 'tee "white" is now version 2, expected version 1' });
+  });
+
   // An unmapped DomainError code is still a genuine-bug 500, never a client-shaped error.
   it("falls through to 500 for a DomainError code this boundary doesn't recognize", () => {
     const result = toHttpError(new DomainError("some-unmapped-code", "boom"), logger);

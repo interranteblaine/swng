@@ -10,10 +10,19 @@ import { retryOnConflict } from "./retryOnConflict.js";
 export const verifyTeeSet =
   (deps: { courseStore: CourseStore; clock: Clock; logger: Logger }) =>
   async (id: CourseId, command: VerifyTeeSetRequest): Promise<VerifyTeeSetResponse> => {
-    // unknown-tee-set (DomainError) propagates uncaught — same idiom as startRound's
-    // findTeeSet call; a genuine write race surfaces as "course-conflict" and is retried.
+    // unknown-tee-set and tee-set-revised (both DomainErrors) propagate uncaught — same idiom
+    // as startRound's findTeeSet call; a genuine write race surfaces as "course-conflict" and
+    // is retried. tee-set-revised is NOT a course-conflict: command.version is fixed by the
+    // caller's own read (the card they looked at), not re-derived from whatever retryOnConflict
+    // re-reads — so a revision landing mid-retry correctly fails the whole verify instead of
+    // retrying into a silent transplant onto numbers the caller never saw.
     const course = await retryOnConflict(deps.courseStore, id, (current) =>
-      verifyTeeSetEntity(current, { teeName: command.teeName, verifierName: command.verifierName, nowMs: deps.clock.now() }),
+      verifyTeeSetEntity(current, {
+        teeName: command.teeName,
+        verifierName: command.verifierName,
+        expectedVersion: command.version,
+        nowMs: deps.clock.now(),
+      }),
     );
     deps.logger.info("tee-set-verified", { courseId: id, teeName: command.teeName, verifierName: command.verifierName });
 

@@ -60,6 +60,12 @@ export const verifyTeeSetRequestSchema = z
   .object({
     teeName: z.string().min(1),
     verifierName: z.string().min(1),
+    // The version of the tee set the golfer is DISPLAYING when they tap verify — matches
+    // CourseView.teeSets[].version, which the UI already shows. Required, not optional: a
+    // verify with no version can't be checked against a revision landing between page load
+    // and POST, which is exactly the transplant this field exists to prevent (domain's
+    // verifyTeeSet, "expectedVersion").
+    version: z.number().int().min(1),
   })
   .strict();
 export type VerifyTeeSetRequest = z.infer<typeof verifyTeeSetRequestSchema>;

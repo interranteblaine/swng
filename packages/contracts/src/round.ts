@@ -177,3 +177,16 @@ export const gameResultSchemaImpl = z.discriminatedUnion("kind", [
   }),
 ]);
 export const gameResultSchema: z.ZodType<GameResult> = gameResultSchemaImpl;
+
+// POST /rounds/{roundId}/games/{gameId}/terminate has no request body (path params only —
+// the M7 plan's Task 2 brief). Response mirrors recordScore's append idiom (commands.ts):
+// `events` carries only what THIS call actually appended, seq-stamped — the idempotent
+// no-op path (terminating an already-terminated game) appends nothing, so it returns [],
+// never a synthesized "as if" event.
+export interface TerminateGameResponse {
+  readonly events: readonly RoundEvent[];
+}
+
+export const terminateGameResponseSchema: z.ZodType<TerminateGameResponse> = z.object({
+  events: z.array(roundEventSchema).readonly(),
+});

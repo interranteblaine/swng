@@ -16,7 +16,17 @@ export type ApplicationErrorCode =
   // mirroring what a head-seq condition would be for the journal (see startRound.ts's
   // accepted-race comment) if one existed there.
   | "course-conflict"
-  | "course-not-found";
+  | "course-not-found"
+  // M7 Task 2: terminateGame's gameId names a game outside the fold — same "referenced id
+  // isn't part of this context" shape as unknown-golfer-in-game above.
+  | "unknown-game"
+  // GolferStore is a plain CRUD store too (see courses' "conflict" precedent above): a
+  // failed expectedRevision condition on a golfer put.
+  | "golfer-conflict"
+  // claimGolfer's one failure code for BOTH collision arms (golferStore.ts's port doc):
+  // the target golferId already has a sub bound, OR the calling sub is already bound to a
+  // DIFFERENT golferId (the "GolferMerged" case, explicitly out of v1 scope).
+  | "golfer-already-claimed";
 
 export class ApplicationError extends Error {
   constructor(

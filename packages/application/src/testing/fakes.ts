@@ -1,12 +1,14 @@
-import type { Course, CourseId, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import type { Course, CourseId, Golfer, GolferId, GolferRoundLine, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
 import { courseNameKey } from "@swng/domain";
 import { ApplicationError } from "../errors.js";
 import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
 import type { Broadcast } from "../ports/broadcast.js";
 import type { Clock } from "../ports/clock.js";
 import type { CourseStore } from "../ports/courseStore.js";
+import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
+import type { ProjectionStore } from "../ports/projectionStore.js";
 import type { RoundStore } from "../ports/roundStore.js";
 
 // In-memory ports for application's own tests AND exported product surface for lambda/E2E
@@ -110,6 +112,79 @@ export const createInMemoryCourseStore = (): CourseStore => {
         .filter(({ course }) => courseNameKey(course.name).startsWith(nameKeyPrefix))
         .slice(0, limit)
         .map(({ course }) => ({ courseId: course.courseId, name: course.name })),
+  };
+};
+
+// GolferStore's real adapter (M7 Task 3) is a plain CRUD item on the core table plus a
+// sub-lookup GSI; this fake reproduces both without Dynamo — a Map keyed by golferId for
+// get/put's optimistic concurrency (the same expectedRevision contract courseStore's fake
+// honors), and a linear scan for getBySub (fine at fake/test scale; the real GSI is what
+// makes this cheap in adapters-dynamodb).
+export const createInMemoryGolferStore = (): GolferStore => {
+  const byId = new Map<GolferId, { golfer: Golfer; sub?: string; revision: number }>();
+
+  return {
+    put: async (golfer, expectedRevision) => {
+      const { sub, ...plain } = golfer;
+      const existing = byId.get(golfer.id);
+      if (expectedRevision === undefined) {
+        if (existing) throw new ApplicationError("golfer-conflict", `golfer ${golfer.id} already exists`);
+        byId.set(golfer.id, { golfer: plain, sub, revision: 1 });
+        return;
+      }
+      if (!existing || existing.revision !== expectedRevision) {
+        throw new ApplicationError("golfer-conflict", `golfer ${golfer.id} revision mismatch (expected ${expectedRevision})`);
+      }
+      byId.set(golfer.id, { golfer: plain, sub, revision: existing.revision + 1 });
+    },
+    get: async (golferId) => {
+      const found = byId.get(golferId);
+      return found ? { golfer: found.golfer, sub: found.sub, revision: found.revision } : undefined;
+    },
+    getBySub: async (sub) => {
+      for (const entry of byId.values()) {
+        if (entry.sub === sub) return { golfer: entry.golfer, sub, revision: entry.revision };
+      }
+      return undefined;
+    },
+    // Mirrors the port doc's exact invariant (golferStore.ts): conditional on no EXISTING
+    // sub binding on this golferId, regardless of whether the item itself pre-exists —
+    // name/handicap only seed a fresh item; an existing unclaimed item keeps its own.
+    claim: async (golferId, sub, name) => {
+      const existing = byId.get(golferId);
+      if (existing?.sub !== undefined) throw new ApplicationError("golfer-already-claimed", `golfer ${golferId} already claimed`);
+      if (existing) {
+        byId.set(golferId, { golfer: existing.golfer, sub, revision: existing.revision + 1 });
+        return;
+      }
+      byId.set(golferId, { golfer: { id: golferId, name, handicap: {} }, sub, revision: 1 });
+    },
+  };
+};
+
+// ProjectionStore's real adapter (M7 Task 3) lives on the `projections` table, sk-ordered
+// so listHistory's oldest-first read is free (architecture.md §3); this fake reproduces
+// that ordering explicitly via a sort, since a Map's insertion order isn't a promise this
+// port doc makes.
+export const createInMemoryProjectionStore = (): ProjectionStore => {
+  const historyByGolfer = new Map<GolferId, Map<RoundId, GolferRoundLine & { finalizedAtMs: number }>>();
+  const indexByGolfer = new Map<GolferId, { value: number; computedAtMs: number; differentialsUsed: number }>();
+
+  return {
+    putHistoryLine: async (golferId, line) => {
+      const lines = historyByGolfer.get(golferId) ?? new Map<RoundId, GolferRoundLine & { finalizedAtMs: number }>();
+      lines.set(line.roundId, line); // upsert by roundId
+      historyByGolfer.set(golferId, lines);
+    },
+    listHistory: async (golferId) => [...(historyByGolfer.get(golferId)?.values() ?? [])].sort((a, b) => a.finalizedAtMs - b.finalizedAtMs),
+    putIndex: async (golferId, snapshot) => {
+      indexByGolfer.set(golferId, snapshot);
+    },
+    getIndex: async (golferId) => indexByGolfer.get(golferId),
+    wipeGolfer: async (golferId) => {
+      historyByGolfer.delete(golferId);
+      indexByGolfer.delete(golferId);
+    },
   };
 };
 

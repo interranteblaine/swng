@@ -4,8 +4,11 @@
 export type { AppendOptions, AppendResult, EventJournal } from "./ports/eventJournal.js";
 export type { RoundStore } from "./ports/roundStore.js";
 export type { CourseStore } from "./ports/courseStore.js";
+export type { GolferStore } from "./ports/golferStore.js";
+export type { ProjectionStore } from "./ports/projectionStore.js";
 export type { Broadcast } from "./ports/broadcast.js";
 export type { ParticipantClaims, TokenIssuer } from "./ports/tokenIssuer.js";
+export type { AccountClaims } from "./ports/accountClaims.js";
 export type { Clock } from "./ports/clock.js";
 export type { IdGenerator } from "./ports/idGenerator.js";
 export type { Logger } from "./ports/logger.js";
@@ -22,6 +25,7 @@ export { joinRound } from "./rounds/joinRound.js";
 export { addGame } from "./rounds/addGame.js";
 export { recordScore } from "./rounds/recordScore.js";
 export { finalizeRound } from "./rounds/finalizeRound.js";
+export { terminateGame } from "./rounds/terminateGame.js";
 export { readEvents } from "./rounds/readEvents.js";
 export { peekRound } from "./rounds/peekRound.js";
 
@@ -31,13 +35,24 @@ export { verifyTeeSet } from "./courses/verifyTeeSet.js";
 export { getCourse } from "./courses/getCourse.js";
 export { searchCourses } from "./courses/searchCourses.js";
 
+export { getMyGolfer } from "./golfers/getMyGolfer.js";
+export { updateMyGolfer } from "./golfers/updateMyGolfer.js";
+export { claimGolfer } from "./golfers/claimGolfer.js";
+export { getMyRecord } from "./golfers/getMyRecord.js";
+
+export { projectArchive, finalizedAtMsOf } from "./projections/projectArchive.js";
+export { rebuildProjections } from "./projections/rebuildProjections.js";
+export type { ArchiveSource } from "./projections/rebuildProjections.js";
+
 // In-memory ports — exported product surface for lambda/E2E unit tests (M3 Task 4+), not
 // just this package's own tests.
 export {
   createCapturingBroadcast,
   createFixedClock,
   createInMemoryCourseStore,
+  createInMemoryGolferStore,
   createInMemoryJournal,
+  createInMemoryProjectionStore,
   createInMemoryRoundStore,
   createNullLogger,
   createSequentialIds,

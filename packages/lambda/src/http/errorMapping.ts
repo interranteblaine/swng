@@ -25,6 +25,14 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // round-not-found/bad-join-code.
   "course-conflict": 409,
   "course-not-found": 404,
+  // M7 Task 2 (application/src/errors.ts): the same exhaustiveness pressure as the pair
+  // above, ahead of M7 Task 5's actual golfer/terminate routes. unknown-game is a
+  // referenced-id-outside-this-context 400, same bucket as unknown-golfer-in-game;
+  // golfer-conflict/golfer-already-claimed are failed-precondition 409s, same bucket as
+  // course-conflict.
+  "unknown-game": 400,
+  "golfer-conflict": 409,
+  "golfer-already-claimed": 409,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`

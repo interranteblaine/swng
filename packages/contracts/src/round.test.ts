@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { deviceId, gameId, golferId, opId } from "@swng/domain";
 import type { GameConfig, GameResult, RoundEvent } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
-import { gameConfigSchemaImpl, gameResultSchemaImpl, roundEventSchema, roundEventSchemaImpl } from "./round.js";
+import { gameConfigSchemaImpl, gameResultSchemaImpl, roundEventSchema, roundEventSchemaImpl, terminateGameResponseSchema } from "./round.js";
 
 const baseHlc = { wallMs: 1_000, counter: 0, deviceId: deviceId("device-1") };
 
@@ -51,6 +51,12 @@ describe("roundEventSchema", () => {
     expect(parse(roundEventSchema, event)).toEqual(event);
   });
 
+  it("parses a valid game-terminated event and round-trips through JSON unchanged (M7 Task 1's union member)", () => {
+    const event: RoundEvent = { kind: "game-terminated", gameId: gameId("g1"), opId: opId("op-terminate"), hlc: baseHlc, authorId: golferId("author") };
+    const roundTripped = parse(roundEventSchema, JSON.parse(JSON.stringify(event)) as unknown);
+    expect(roundTripped).toEqual(event);
+  });
+
   it("roundEventSchema, gameConfigSchema, and gameResultSchema type-parity holds in both directions (compile-time check)", () => {
     // Deliberately checked against the *Impl consts (round.ts), not the exported
     // roundEventSchema / gameConfigSchema / gameResultSchema aliases: those aliases carry
@@ -72,5 +78,18 @@ describe("roundEventSchema", () => {
     // domain type are structurally identical in both directions. This assertion just gives
     // vitest something to run.
     expect([forwardEvent, backwardEvent, forwardConfig, backwardConfig, forwardResult, backwardResult]).toHaveLength(6);
+  });
+});
+
+describe("terminateGameResponseSchema", () => {
+  it("round-trips a response carrying the appended game-terminated event", () => {
+    const event: RoundEvent = { kind: "game-terminated", gameId: gameId("g1"), opId: opId("op-terminate"), hlc: baseHlc, authorId: golferId("author"), seq: 7 };
+    const response = { events: [event] };
+    expect(parse(terminateGameResponseSchema, JSON.parse(JSON.stringify(response)) as unknown)).toEqual(response);
+  });
+
+  it("round-trips the idempotent no-op response — an empty events array", () => {
+    const response = { events: [] };
+    expect(parse(terminateGameResponseSchema, response)).toEqual(response);
   });
 });

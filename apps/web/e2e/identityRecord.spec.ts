@@ -186,14 +186,23 @@ test.describe.serial("M7 identity/record gate — claim mid-season, live index, 
     const record = await pollRecord(httpUrl, userA.idToken, 3);
     expect(record.history).toHaveLength(3);
 
-    // Order-independent: history is newest-finalized-first, and round 1 (played first, scored
-    // first) finalizes LAST here (test 4, after the claim) — its differential can land
-    // anywhere in the array. The SET of differentials is what's pinned, not their position.
-    const actual = [...record.history.map((line) => line.differential)].sort((a, b) => (a ?? 0) - (b ?? 0));
-    const expected = [...PINNED_DIFFERENTIALS].sort((a, b) => a - b);
-    for (const [i, value] of actual.entries()) {
-      expect(value, `history[${i}].differential`).toBeCloseTo(expected[i]!, 6);
+    // history is newest-first (packages/contracts/src/golfers.ts's own doc comment;
+    // getMyRecord.ts implements it via reverse of listHistory's oldest->newest) — and this
+    // describe block's own control flow makes the finalize order, and therefore the position
+    // of each differential, deterministic: round 2 finalizes inside test 2's playApiRound call
+    // (bogeys 13 -> AGS 85), then round 3 (bogeys 16 -> AGS 88), then round 1 finalizes LAST
+    // here in test 4 (bogeys 10 -> AGS 82, after the claim). Newest-first is therefore
+    // [round1 (82), round3 (88), round2 (85)]. Derived from PINNED_DIFFERENTIALS (itself
+    // ordered by AGS 82/85/88, see the constant's own comment) rather than re-typed literals,
+    // so a future re-ordering of this test's own finalize sequence fails this assertion loudly
+    // instead of silently passing a stale expectation.
+    const expectedNewestFirst = [PINNED_DIFFERENTIALS[0], PINNED_DIFFERENTIALS[2], PINNED_DIFFERENTIALS[1]];
+    for (const [i, value] of record.history.map((line) => line.differential).entries()) {
+      expect(value, `history[${i}].differential`).toBeCloseTo(expectedNewestFirst[i]!, 6);
     }
+
+    // round 1 finalizes last (test 4, after the claim) -> newest -> history[0].
+    expect(record.history[0]?.roundId).toBe(roundId1);
 
     // Three differentials -> WHS small-sample table row (<=3: use 1, adjustment -2.0) -> lowest
     // 9.18125 - 2.0 = 7.18125 -> tenth-rounded -> 7.2, differentialsUsed 1 (brief's own

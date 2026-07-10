@@ -27,13 +27,28 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "course-not-found": 404,
 };
 
-// The only two DomainError codes this boundary is documented to see: `unknown-tee-set`
-// (a command names a tee not on the card) and `game-unresolved` (finalize's settleRound
-// over a game that never closed out). Any other DomainError reaching here is a genuine bug,
+// `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`
+// (finalize's settleRound over a game that never closed out) were this boundary's only two
+// documented DomainError codes pre-M6. M6 Task 4 wired POST /courses and POST
+// /courses/{courseId}/tees to domain/src/course/course.ts, which validates the request body
+// itself (validateCourseName / validateTeeSet / addTeeSet's duplicate-name guard) and throws
+// ten more codes on bad input — client-input errors, the same shape as `unknown-tee-set`, so
+// they get the same 400 (`duplicate-tee-name` included: it's a new-name collision the client
+// can correct, not a genuine-bug 409). Any other DomainError reaching here is a genuine bug,
 // not a client-shaped error, so it falls through to the generic 500 below.
 const DOMAIN_ERROR_STATUS: Record<string, number> = {
   "unknown-tee-set": 400,
   "game-unresolved": 409,
+  "invalid-course-name": 400,
+  "invalid-tee-name": 400,
+  "invalid-rating": 400,
+  "invalid-slope": 400,
+  "invalid-hole-count": 400,
+  "invalid-hole-numbering": 400,
+  "invalid-par": 400,
+  "invalid-yardage": 400,
+  "invalid-stroke-index": 400,
+  "duplicate-tee-name": 400,
 };
 
 // Exported so every error-shaped response — including dispatch.ts's route-not-found 404,

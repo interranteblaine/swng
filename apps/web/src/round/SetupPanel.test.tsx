@@ -1,8 +1,12 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultAllowance, fixtureLinks, gameId, golferId, playingHandicap, roundId } from "@swng/domain";
 import type { GameConfig, GameState, Participant, RoundState } from "@swng/domain";
+import { AuthProvider } from "../auth/useAuth";
+import { tokenStore } from "../auth/tokenStore";
+import { createMemoryStorage } from "../testSupport/memoryStorage";
 import { SetupPanel } from "./SetupPanel";
+import type { SetupPanelProps } from "./SetupPanel";
 
 const ANN = golferId("ann");
 const BO = golferId("bo");
@@ -24,18 +28,50 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
 
 const noopAddGame = vi.fn().mockResolvedValue(undefined);
 
-beforeEach(() => noopAddGame.mockClear());
-afterEach(() => cleanup());
+// Every SetupPanel render now needs an AuthProvider ancestor (RosterRow's own "This is me"
+// affordance calls useAuth()) — this is the one place that wrapping lives, so the other ~10
+// tests in this file that don't care about auth stay untouched otherwise. `myGolferId`
+// defaults to ANN (the device's own row, per RoundPage's credential.golferId) unless a test
+// overrides it.
+const renderPanel = (props: Omit<SetupPanelProps, "myGolferId"> & { myGolferId?: SetupPanelProps["myGolferId"] }) =>
+  render(
+    <AuthProvider>
+      <SetupPanel myGolferId={ANN} {...props} />
+    </AuthProvider>,
+  );
+
+const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
+
+const base64url = (obj: unknown): string =>
+  btoa(JSON.stringify(obj))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+const signIn = () => {
+  const idToken = `${base64url({ alg: "none" })}.${base64url({ sub: "sub-1", email: "signed-in@example.com" })}.sig`;
+  tokenStore.save({ idToken, refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+};
+
+beforeEach(() => {
+  noopAddGame.mockClear();
+  vi.stubGlobal("localStorage", createMemoryStorage());
+  vi.stubGlobal("sessionStorage", createMemoryStorage());
+});
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("SetupPanel", () => {
   it("shows the join code prominently", () => {
-    render(<SetupPanel state={baseState()} games={[]} joinCode="ABC123" onAddGame={noopAddGame} />);
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
     expect(screen.getByText("ABC123")).toBeTruthy();
   });
 
   it("shows the plain roster (name, tee, courseHandicap) when no games exist yet", () => {
-    render(<SetupPanel state={baseState()} games={[]} joinCode="ABC123" onAddGame={noopAddGame} />);
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
     expect(screen.getByText("Ann")).toBeTruthy();
     expect(screen.getByText(/CH 8/)).toBeTruthy();
@@ -47,7 +83,7 @@ describe("SetupPanel", () => {
     const state = baseState({ games: [stableford] });
     const games: GameState[] = [{ kind: "stableford", id: gameId("game-1"), lines: [], complete: false }];
 
-    render(<SetupPanel state={state} games={games} joinCode="ABC123" onAddGame={noopAddGame} />);
+    renderPanel({ state, games, joinCode: "ABC123", onAddGame: noopAddGame });
 
     const expectedDots = playingHandicap(8, defaultAllowance("stableford"));
     const annRow = screen.getAllByRole("listitem").find((li) => /CH 8/.test(li.textContent ?? ""));
@@ -57,12 +93,27 @@ describe("SetupPanel", () => {
     expect(within(annRow!).getByText(new RegExp(`Stableford: ${expectedDots} dots`))).toBeTruthy();
   });
 
+  // M7 Task 6: terminated games drop out of roster dot-badges (brief) — a terminated game has
+  // stopped consuming scores, so it shouldn't still claim a dots badge on the roster.
+  it("drops a terminated game's badge from the roster, even though the game config is still in state.games", () => {
+    const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
+    const state = baseState({ games: [stableford], terminatedGameIds: new Set([stableford.id]) });
+    const games: GameState[] = [{ kind: "stableford", id: gameId("game-1"), lines: [], complete: false }];
+
+    renderPanel({ state, games, joinCode: "ABC123", onAddGame: noopAddGame });
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /CH 8/.test(li.textContent ?? ""));
+    expect(annRow).toBeTruthy();
+    expect(within(annRow!).queryByText(/Stableford/)).toBeNull();
+    expect(within(annRow!).getByText("Not yet in a game")).toBeTruthy();
+  });
+
   it("renders each participant's identity row exactly once even once games exist — no second, dots-only roster", () => {
     const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
     const state = baseState({ games: [stableford] });
     const games: GameState[] = [{ kind: "stableford", id: gameId("game-1"), lines: [], complete: false }];
 
-    render(<SetupPanel state={state} games={games} joinCode="ABC123" onAddGame={noopAddGame} />);
+    renderPanel({ state, games, joinCode: "ABC123", onAddGame: noopAddGame });
 
     // Scope to <li> rows specifically (not the Add Game form's player checkboxes, which are
     // <label> elements, not list items) — Ann must appear as exactly one roster row.
@@ -80,7 +131,7 @@ describe("SetupPanel", () => {
   });
 
   it("adds a fourball-match game with the exact {kind, a, b} shape (ids from participants) and no id field", async () => {
-    render(<SetupPanel state={baseState()} games={[]} joinCode="ABC123" onAddGame={noopAddGame} />);
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
     noopAddGame.mockClear();
 
     fireEvent.change(screen.getByLabelText(/^kind$/i), { target: { value: "fourball-match" } });
@@ -97,7 +148,7 @@ describe("SetupPanel", () => {
   });
 
   it("never renders the submitted game optimistically — it only appears once state.games reflects it", async () => {
-    const { rerender } = render(<SetupPanel state={baseState()} games={[]} joinCode="ABC123" onAddGame={noopAddGame} />);
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
     fireEvent.change(screen.getByLabelText(/^kind$/i), { target: { value: "stableford" } });
     fireEvent.click(within(screen.getByRole("group", { name: /players/i })).getByLabelText("Ann"));
@@ -112,13 +163,14 @@ describe("SetupPanel", () => {
     // Only once the parent re-renders with the new game (as the real session would, after the
     // game-added event round-trips) does it show up.
     const stableford: GameConfig = { kind: "stableford", id: gameId("game-9"), players: [ANN] };
-    rerender(<SetupPanel state={baseState({ games: [stableford] })} games={[]} joinCode="ABC123" onAddGame={noopAddGame} />);
+    cleanup();
+    renderPanel({ state: baseState({ games: [stableford] }), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
     const expectedDots = playingHandicap(8, defaultAllowance("stableford"));
     expect(screen.getByText(new RegExp(`Stableford: ${expectedDots} dots`))).toBeTruthy();
   });
 
   it("sends a hand-edited allowance value (not the per-kind default) in onAddGame's config", async () => {
-    render(<SetupPanel state={baseState()} games={[]} joinCode="ABC123" onAddGame={noopAddGame} />);
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
     noopAddGame.mockClear();
 
     fireEvent.change(screen.getByLabelText(/^kind$/i), { target: { value: "stableford" } });
@@ -132,5 +184,86 @@ describe("SetupPanel", () => {
     expect(noopAddGame).toHaveBeenCalledTimes(1);
     const sent = noopAddGame.mock.calls[0]![0];
     expect(sent).toMatchObject({ kind: "stableford", players: [ANN], allowance: 0.5 });
+  });
+});
+
+// M7 Task 6: claim a ghost from the round roster — "This is me" on a row that isn't your own
+// device's row, only once signed in.
+describe("SetupPanel — claim a ghost", () => {
+  it("shows no claim affordance at all when signed out", () => {
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, myGolferId: ANN });
+
+    expect(screen.queryByRole("button", { name: "This is me" })).toBeNull();
+  });
+
+  it("shows no claim affordance on your own device's row, even when signed in", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => fakeResponse(200, { golfer: null })),
+    );
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, myGolferId: ANN });
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "This is me" })).toHaveLength(3)); // Bo, Cal, Dee — not Ann
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    expect(within(annRow!).queryByRole("button", { name: "This is me" })).toBeNull();
+  });
+
+  it("This is me -> confirm -> POST /golfers/claim -> success re-fetches /me", async () => {
+    signIn();
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        calls.push(`${init?.method ?? "GET"} ${path}`);
+        if (path === "/golfers/claim") return fakeResponse(200, { golfer: { golferId: "bo", name: "Bo" } });
+        if (path === "/me") return fakeResponse(200, { golfer: calls.includes("POST /golfers/claim") ? { golferId: "bo", name: "Bo" } : null });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, myGolferId: ANN });
+
+    const boRow = await waitFor(() => {
+      const row = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
+      expect(row).toBeTruthy();
+      return row!;
+    });
+
+    fireEvent.click(within(boRow).getByRole("button", { name: "This is me" }));
+    expect(within(boRow).getByRole("dialog")).toBeTruthy();
+    fireEvent.click(within(boRow).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(within(boRow).getByRole("status")).toBeTruthy());
+    expect(calls).toContain("POST /golfers/claim");
+    // Re-fetches /me after a successful claim (brief) — a real second GET, not a locally
+    // synthesized echo of the claim response.
+    expect(calls.filter((c) => c === "GET /me").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("a 409 shows 'already claimed'", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/golfers/claim") return fakeResponse(409, { code: "golfer-already-claimed", message: "already claimed" });
+        if (path === "/me") return fakeResponse(200, { golfer: null });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, myGolferId: ANN });
+
+    const boRow = await waitFor(() => {
+      const row = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
+      expect(row).toBeTruthy();
+      return row!;
+    });
+
+    fireEvent.click(within(boRow).getByRole("button", { name: "This is me" }));
+    fireEvent.click(within(boRow).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(within(boRow).getByText(/already claimed/i)).toBeTruthy());
   });
 });

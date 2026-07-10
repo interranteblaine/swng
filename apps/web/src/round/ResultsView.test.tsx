@@ -5,6 +5,7 @@ import {
   deviceId,
   fieldDeck18,
   fixtureLinks18,
+  gameId,
   gameStrokeAllocation,
   golferId,
   opId,
@@ -14,7 +15,7 @@ import {
   scoreGame,
   settleRound,
 } from "@swng/domain";
-import type { RoundState, ScoreCell } from "@swng/domain";
+import type { GameConfig, RoundState, ScoreCell } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
 import { describeGame } from "../games/describeGame";
 import { ResultsView } from "./ResultsView";
@@ -140,6 +141,34 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     expect(screen.getByText("Ann & Bo win 2&1")).toBeTruthy();
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole 1` });
     expect(cell.hasAttribute("disabled")).toBe(true);
+  });
+
+  // M7 Task 6: terminated games drop out of the default active-game selection here too — the
+  // exact same rule as RoundPage's LiveRound (the archive gets the same chip-selected default
+  // a live round does, per this file's own M6 Task 5 precedent).
+  it("the default active game skips a terminated one, falling through to the next game", () => {
+    const ann = golferId("ann");
+    const bo = golferId("bo");
+    const terminatedConfig: GameConfig = { kind: "singles-match", id: gameId("terminated-1"), a: ann, b: bo };
+    const resolvedConfig: GameConfig = { kind: "stableford", id: gameId("resolved-1"), players: [ann, bo] };
+    const state: RoundState = {
+      id: roundId("r-archive-term"),
+      status: "final",
+      card: fixtureLinks18,
+      participants: [
+        { golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 },
+        { golferId: bo, name: "Bo", tee: "white", courseHandicap: 2 },
+      ],
+      games: [terminatedConfig, resolvedConfig], // terminated one FIRST — the erroneous default without the fix
+      cells: {},
+      terminatedGameIds: new Set([terminatedConfig.id]),
+    };
+    const games = [scoreGame(terminatedConfig, state), scoreGame(resolvedConfig, state)];
+
+    render(<ResultsView state={state} games={games} response={undefined} />);
+
+    expect(screen.getByRole("tab", { name: /Stableford/ }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: /Singles match/ }).getAttribute("aria-selected")).toBe("false");
   });
 
   it("a golfer with an undecided card (a pickup mid-round, no finalize response) shows 'incomplete', not a crash", () => {

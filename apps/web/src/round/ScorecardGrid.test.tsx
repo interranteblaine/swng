@@ -186,6 +186,29 @@ describe("ScorecardGrid — dots", () => {
     expect(cellButton("Bo", si18Hole.number).textContent).toMatch("●");
     expect(cellButton("Bo", si18Hole.number).textContent).not.toMatch("●●");
   });
+
+  // M7 Task 6: terminated games drop out of dots (brief) — a terminated game's chip stays
+  // selectable (StandingsHeader keeps it with an "ended" badge), but its grid never shows dots
+  // as if it were still consuming scores.
+  it("shows no dots for the active game once it's terminated, even though it's still explicitly selected", () => {
+    const { players, fourball } = fieldDeck18;
+    const state: RoundState = {
+      id: roundId("round-terminated"),
+      status: "live",
+      card: fixtureLinks18,
+      participants: players,
+      games: [fourball],
+      cells: {},
+      terminatedGameIds: new Set([fourball.id]),
+    };
+    const activeGame: GameState = { kind: "fourball-match", id: fourball.id, up: 0, thru: 0, remaining: 18, dormie: false };
+
+    render(<ScorecardGrid state={state} activeGame={activeGame} recordScore={vi.fn()} />);
+
+    for (const hole of fixtureWhite18.holes) {
+      expect(cellButton("Ann", hole.number).textContent).not.toMatch("●");
+    }
+  });
 });
 
 describe("ScorecardGrid — readOnly (the archived card, Task 6)", () => {

@@ -1,7 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { courseId, fixtureLinks, golferId, roundId } from "@swng/domain";
-import type { AddGameRequest, AddTeeSetRequest, CreateCourseRequest, JoinRoundRequest, StartRoundRequest, VerifyTeeSetRequest } from "@swng/contracts";
-import { addGame, addTeeSet, ApiError, createCourse, createRound, finalizeRound, getCourse, joinRound, peekRound, searchCourses, verifyTeeSet } from "./api";
+import { courseId, fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
+import type { AddGameRequest, AddTeeSetRequest, ClaimGolferRequest, CreateCourseRequest, JoinRoundRequest, StartRoundRequest, UpdateMeRequest, VerifyTeeSetRequest } from "@swng/contracts";
+import {
+  addGame,
+  addTeeSet,
+  ApiError,
+  claimGolfer,
+  createCourse,
+  createRound,
+  finalizeRound,
+  getCourse,
+  getMe,
+  getMyRecord,
+  joinRound,
+  peekRound,
+  searchCourses,
+  terminateGame,
+  updateMe,
+  verifyTeeSet,
+} from "./api";
 
 // Pinned to match vitest.config.ts's test.env.VITE_HTTP_URL — config.ts reads it at import
 // time, so every test in this file shares the same fake origin.
@@ -280,5 +297,122 @@ describe("peekRound", () => {
 
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("bad-join-code");
+  });
+});
+
+// M7 Task 6: the golfer identity surface + game termination — same requestJson + bearer-token
+// idiom as addGame/finalizeRound above (auth: "golfer"/"participant" on the wire, never "none").
+describe("getMe", () => {
+  it("GETs /me with the bearer token and parses a GetMeResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+    });
+
+    const result = await getMe("tok-me");
+
+    expect(seenUrl).toBe(`${HTTP_URL}/me`);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
+    expect(result).toEqual({ golfer: { golferId: golferId("ann"), name: "Ann" } });
+  });
+
+  // GET /me NEVER creates (the plan's amendment) — a signed-in user with no golfer row gets
+  // `golfer: null`, and api.ts must pass that through rather than choking on it.
+  it("parses a null golfer for an unbound sub", async () => {
+    stubFetch(async () => fakeResponse(200, { golfer: null }));
+
+    const result = await getMe("tok-me");
+
+    expect(result).toEqual({ golfer: null });
+  });
+});
+
+describe("updateMe", () => {
+  it("PUTs the request body to /me with the bearer token and parses a GolferResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann Updated", declared: 12.3 } });
+    });
+
+    const input: UpdateMeRequest = { name: "Ann Updated", declared: 12.3 };
+    const result = await updateMe("tok-me", input);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/me`);
+    expect(seenInit?.method).toBe("PUT");
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
+    expect(result.golfer.name).toBe("Ann Updated");
+  });
+});
+
+describe("claimGolfer", () => {
+  it("POSTs { golferId } to /golfers/claim with the bearer token and parses a GolferResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { golfer: { golferId: "ghost-1", name: "Ghost" } });
+    });
+
+    const input: ClaimGolferRequest = { golferId: golferId("ghost-1") };
+    const result = await claimGolfer("tok-me", input);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/golfers/claim`);
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
+    expect(result).toEqual({ golfer: { golferId: golferId("ghost-1"), name: "Ghost" } });
+  });
+
+  it("throws a coded ApiError('golfer-already-claimed') on a 409", async () => {
+    stubFetch(async () => fakeResponse(409, { code: "golfer-already-claimed", message: "already claimed" }));
+
+    const error: unknown = await claimGolfer("tok-me", { golferId: golferId("ghost-1") }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("golfer-already-claimed");
+  });
+});
+
+describe("getMyRecord", () => {
+  it("GETs /me/record with the bearer token and parses a GetMyRecordResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { history: [] });
+    });
+
+    const result = await getMyRecord("tok-me");
+
+    expect(seenUrl).toBe(`${HTTP_URL}/me/record`);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
+    expect(result).toEqual({ history: [] });
+  });
+});
+
+describe("terminateGame", () => {
+  it("POSTs to /rounds/{roundId}/games/{gameId}/terminate with the bearer token and parses a TerminateGameResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { events: [] });
+    });
+
+    const result = await terminateGame(roundId("round-1"), "tok-term", gameId("game-1"));
+
+    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/games/game-1/terminate`);
+    expect(seenInit?.method).toBe("POST");
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-term");
+    expect(result).toEqual({ events: [] });
   });
 });

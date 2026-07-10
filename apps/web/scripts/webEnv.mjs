@@ -16,9 +16,11 @@ import { fileURLToPath } from "node:url";
 export const stripTrailingSlash = (url) => url.replace(/\/+$/, "");
 
 // Reads `outputsPath` (a cdk-outputs.json-shaped file: one entry keyed by stack name) and
-// writes VITE_HTTP_URL/VITE_WS_URL to `envPath` in dotenv format. Split from the
-// run-when-invoked-directly block below so stripTrailingSlash's own unit test can import this
-// module without the side effect of touching the filesystem.
+// writes VITE_HTTP_URL/VITE_WS_URL/VITE_USER_POOL_ID/VITE_USER_POOL_CLIENT_ID/
+// VITE_HOSTED_UI_DOMAIN to `envPath` in dotenv format (the last three: M7 Task 6 — authConfig.ts's
+// own vars, from the Cognito pool T4/T5 already deployed). Split from the run-when-invoked-
+// directly block below so stripTrailingSlash's own unit test can import this module without the
+// side effect of touching the filesystem.
 export const generateEnvFile = (outputsPath, envPath) => {
   const outputs = JSON.parse(readFileSync(outputsPath, "utf8"));
   const [stackOutputs] = Object.values(outputs);
@@ -28,9 +30,15 @@ export const generateEnvFile = (outputsPath, envPath) => {
 
   const httpUrl = stripTrailingSlash(stackOutputs.HttpApiUrl);
   const wsUrl = stripTrailingSlash(stackOutputs.WsApiUrl);
+  const userPoolId = stackOutputs.UserPoolId;
+  const userPoolClientId = stackOutputs.UserPoolClientId;
+  const hostedUiDomain = stripTrailingSlash(stackOutputs.HostedUiDomain);
 
-  writeFileSync(envPath, `VITE_HTTP_URL=${httpUrl}\nVITE_WS_URL=${wsUrl}\n`);
-  return { httpUrl, wsUrl };
+  writeFileSync(
+    envPath,
+    `VITE_HTTP_URL=${httpUrl}\nVITE_WS_URL=${wsUrl}\nVITE_USER_POOL_ID=${userPoolId}\nVITE_USER_POOL_CLIENT_ID=${userPoolClientId}\nVITE_HOSTED_UI_DOMAIN=${hostedUiDomain}\n`,
+  );
+  return { httpUrl, wsUrl, userPoolId, userPoolClientId, hostedUiDomain };
 };
 
 // Only run the filesystem side effect when invoked directly (`node scripts/webEnv.mjs`) —
@@ -39,6 +47,8 @@ export const generateEnvFile = (outputsPath, envPath) => {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const outputsPath = fileURLToPath(new URL("../../infra-cdk/cdk-outputs.json", import.meta.url));
   const envPath = fileURLToPath(new URL("../.env.local", import.meta.url));
-  const { httpUrl, wsUrl } = generateEnvFile(outputsPath, envPath);
-  console.log(`wrote ${envPath}\n  VITE_HTTP_URL=${httpUrl}\n  VITE_WS_URL=${wsUrl}`);
+  const { httpUrl, wsUrl, userPoolId, userPoolClientId, hostedUiDomain } = generateEnvFile(outputsPath, envPath);
+  console.log(
+    `wrote ${envPath}\n  VITE_HTTP_URL=${httpUrl}\n  VITE_WS_URL=${wsUrl}\n  VITE_USER_POOL_ID=${userPoolId}\n  VITE_USER_POOL_CLIENT_ID=${userPoolClientId}\n  VITE_HOSTED_UI_DOMAIN=${hostedUiDomain}`,
+  );
 }

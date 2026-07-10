@@ -3,6 +3,8 @@ import type { FormEvent } from "react";
 import { defaultAllowance, golferId } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
+import { ApiError, claimGolfer } from "../api";
+import { useAuth } from "../auth/useAuth";
 import { gameDots, gamePlayers, totalDots } from "./dots";
 
 export interface SetupPanelProps {
@@ -14,6 +16,83 @@ export interface SetupPanelProps {
   readonly games: readonly GameState[];
   readonly joinCode: string;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
+  // The participant THIS device joined as (RoundPage's credential.golferId) — the one roster
+  // row that never shows "This is me" (M7 Task 6 claim flow: you can't claim the row you're
+  // already scoring as on this device).
+  readonly myGolferId: GolferId;
+}
+
+// The ghost-claim affordance on one roster row (M7 Task 6): signed in + not your own row →
+// "This is me" → confirm → POST /golfers/claim → success re-fetches /me (the claim bound this
+// account's sub to the EXISTING GolferId — the header chrome updates to the claimed name; the
+// record is unbroken because nothing else moved). Round-membership-as-claim-capability is
+// beta-grade by design (M9 hardens with a challenge/confirmation).
+function ClaimAffordance({ rowGolferId }: { readonly rowGolferId: GolferId }) {
+  const auth = useAuth();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [claimed, setClaimed] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  if (!auth.signedIn) return null;
+
+  // Checked BEFORE the already-mine guard below: a claim made in THIS session flips
+  // auth.golfer to this very row on refetch, and the success confirmation must survive that.
+  if (claimed) {
+    return (
+      <span role="status" className="text-xs text-emerald-400">
+        Linked to your account
+      </span>
+    );
+  }
+
+  // Hidden once this signed-in account already IS this golfer (claimed in an earlier session,
+  // or the account's own golfer joined this round) — nothing left to claim.
+  if (auth.golfer?.golferId === rowGolferId) return null;
+
+  const confirm = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await auth.withAuth((token) => claimGolfer(token, { golferId: rowGolferId }));
+      // Re-fetch /me (brief): the claim is what binds a fresh account to its season ghost, so
+      // the app's identity chrome must reflect the claimed golfer now, not on the next reload.
+      await auth.refetch();
+      setClaimed(true);
+      setConfirming(false);
+    } catch (caught) {
+      // Never the raw caught.message — the 409 arm gets the brief's own wording, everything
+      // else a generic retry line.
+      setError(caught instanceof ApiError && caught.code === "golfer-already-claimed" ? "Already claimed by another account." : "Could not claim — try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span className="flex flex-col gap-1">
+      {!confirming ? (
+        <button type="button" onClick={() => setConfirming(true)} className="self-start rounded-md bg-slate-800 px-2 py-1 text-xs font-medium text-emerald-400">
+          This is me
+        </button>
+      ) : (
+        <span role="dialog" aria-label="Confirm claim" className="flex items-center gap-2 text-xs">
+          <span className="text-slate-300">Claim this golfer&apos;s history as yours?</span>
+          <button type="button" onClick={() => void confirm()} disabled={busy} className="rounded-md bg-emerald-700 px-2 py-1 font-medium text-slate-100 disabled:opacity-50">
+            Confirm
+          </button>
+          <button type="button" onClick={() => setConfirming(false)} disabled={busy} className="rounded-md bg-slate-800 px-2 py-1 text-slate-300 disabled:opacity-50">
+            Cancel
+          </button>
+        </span>
+      )}
+      {error && (
+        <span role="alert" className="text-xs text-red-400">
+          {error}
+        </span>
+      )}
+    </span>
+  );
 }
 
 const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
@@ -27,11 +106,19 @@ const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
 // `games` (live GameState, the Task 5/6 standings seam) isn't read here — this task's dots
 // derive from state.games (the frozen GameConfig) only — but it stays in SetupPanelProps so
 // RoundPage's call site doesn't need a signature change once standings actually render.
-export function SetupPanel({ state, joinCode, onAddGame }: SetupPanelProps) {
+export function SetupPanel({ state, joinCode, onAddGame, myGolferId }: SetupPanelProps) {
   const hasGames = state.games.length > 0;
   // Per-game dots, computed once up front rather than per participant row below — each
-  // config's gameDots() call is independent of which row is currently rendering.
-  const perGameDots = state.games.map((config) => ({ config, dots: gameDots(config, state.participants, state.card) }));
+  // config's gameDots() call is independent of which row is currently rendering. Terminated
+  // games drop out of roster dot-badges (M7 Task 6 brief) — a game that's stopped consuming
+  // scores shouldn't still claim a dots badge, even though its frozen config stays in
+  // state.games for the audit trail (`hasGames` above stays keyed off the raw list on purpose:
+  // a round whose only game(s) all ended still "has had games," so the roster keeps its
+  // per-player badge row — now honestly showing "Not yet in a game" for everyone — rather than
+  // reverting to the pre-game plain view).
+  const perGameDots = state.games
+    .filter((config) => !state.terminatedGameIds.has(config.id))
+    .map((config) => ({ config, dots: gameDots(config, state.participants, state.card) }));
 
   return (
     <section className="flex flex-col gap-6 p-6 text-slate-100">
@@ -57,8 +144,11 @@ export function SetupPanel({ state, joinCode, onAddGame }: SetupPanelProps) {
 
             return (
               <li key={p.golferId} className="flex flex-col gap-1">
-                <span>
-                  {p.name} — {p.tee} — CH {p.courseHandicap}
+                <span className="flex items-center gap-2">
+                  <span>
+                    {p.name} — {p.tee} — CH {p.courseHandicap}
+                  </span>
+                  {p.golferId !== myGolferId && <ClaimAffordance rowGolferId={p.golferId} />}
                 </span>
                 {hasGames && (
                   <span className="flex flex-wrap gap-2 text-sm text-slate-400">

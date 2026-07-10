@@ -73,7 +73,10 @@ export const useHoleDigest = (state: RoundState, games: readonly GameState[]): {
       // against `prevState` — the snapshot from BEFORE the whole batch, not just before the
       // labeled hole — so "what changed" still spans every hole the batch swallowed.
       const hole = Math.max(...newlyComplete);
-      const lines: GameChangeLine[] = state.games.map((config) => {
+      // Terminated games drop out of digest lines (M7 Task 6 brief) — a game that's stopped
+      // consuming scores has nothing new to report every time another hole completes.
+      const activeConfigs = state.games.filter((config) => !state.terminatedGameIds.has(config.id));
+      const lines: GameChangeLine[] = activeConfigs.map((config) => {
         const after = games.find((g) => g.id === config.id);
         // `after` should always resolve (games is scoreGame() over these same configs), but a
         // future/unknown kind the session already filtered out is a real possibility upstream —

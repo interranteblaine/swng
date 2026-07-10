@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { ApiError, createCourse } from "../api";
+import { useAuth } from "../auth/useAuth";
 
 type HoleCount = 9 | 18;
 
@@ -45,6 +46,7 @@ const FIELD_FOR_CODE: Readonly<Record<string, Field>> = {
 // free.
 export function AddCoursePage() {
   const navigate = useNavigate();
+  const auth = useAuth();
 
   const [name, setName] = useState("");
   const [enteredBy, setEnteredBy] = useState("");
@@ -55,6 +57,16 @@ export function AddCoursePage() {
   const [holes, setHoles] = useState<readonly HoleInput[]>(defaultHoles(18));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<{ readonly code: string; readonly message: string } | undefined>(undefined);
+
+  // Auto-fill (M7 Task 6, an M6 carry): "Your name" defaults to the signed-in golfer's name
+  // once GET /me resolves (it arrives async, hence an effect rather than a useState seed) —
+  // only into a still-empty field, never over something already typed, and the wire shape is
+  // unchanged (enteredBy still submits whatever the field holds).
+  const signedInName = auth.golfer?.name;
+  useEffect(() => {
+    if (!signedInName) return;
+    setEnteredBy((current) => (current === "" ? signedInName : current));
+  }, [signedInName]);
 
   const changeHoleCount = (next: HoleCount) => {
     setHoleCount(next);

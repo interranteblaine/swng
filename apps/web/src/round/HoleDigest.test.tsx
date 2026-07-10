@@ -141,4 +141,17 @@ describe("useHoleDigest — trigger semantics", () => {
     rerender(<Harness state={hole1Complete} />);
     expect(screen.getByText("After 1")).toBeTruthy();
   });
+
+  // M7 Task 6: terminated games drop out of digest lines (brief) — a game that's stopped
+  // consuming scores shouldn't get a "what changed" line every time another hole completes.
+  it("excludes a terminated game's line from the digest", () => {
+    const terminatedState: RoundState = { ...hole1Complete, terminatedGameIds: new Set([config.id]) };
+    const incompleteWithTermination: RoundState = { ...hole1Incomplete, terminatedGameIds: new Set([config.id]) };
+
+    const { rerender } = render(<Harness state={incompleteWithTermination} />);
+    rerender(<Harness state={terminatedState} />);
+
+    expect(screen.getByRole("status")).toBeTruthy(); // the hole still completed — the digest itself still fires
+    expect(screen.queryByText(/Stableford/)).toBeNull(); // but the terminated game's own line is gone
+  });
 });

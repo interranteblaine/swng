@@ -1,15 +1,22 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryOutboxStore } from "@swng/client";
 import { deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { GolferId, OpId, RoundEvent, RoundId } from "@swng/domain";
+import { AuthProvider } from "../auth/useAuth";
 import { credentialStore } from "../identity";
 import { createUseRoundSession } from "../session/useRoundSession";
 import type { ResolveSessionConfig } from "../session/useRoundSession";
 import { createScriptedTransport, stampSeq } from "../testSupport/scriptedTransport";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 import { createRoundPage } from "./RoundPage";
+
+// RoundPage now renders under an AuthProvider in the real app (SetupPanel's claim affordance
+// calls useAuth) — no tokens are ever saved in this file, so the provider stays signed out and
+// makes no fetches of its own; every existing call site keeps its shape via this shadowing.
+const render = (ui: ReactElement) => rtlRender(<AuthProvider>{ui}</AuthProvider>);
 
 const SERVER_DEVICE = deviceId("server");
 
@@ -221,6 +228,49 @@ describe("RoundPage", () => {
     expect(annHole1().textContent).toMatch("●");
   });
 
+  // M7 Task 6: terminated games drop out of the default active-game selection (brief) — the
+  // chip itself stays (with an "ended" badge, covered in StandingsHeader's own test suite),
+  // but the grid should never silently default onto a game that's stopped scoring.
+  it("the default active game skips a terminated one, falling through to the next live game", async () => {
+    const id = roundId("round-term-default");
+    const ann = golferId("ann");
+    const bo = golferId("bo");
+    credentialStore.save(id, { token: "tok-term-default", golferId: ann, name: "Ann", joinCode: "TERM01" });
+
+    // The singles-match is added first (buildTwoPlayerServerLog's own ordering) — the default
+    // WITHOUT this fix — but it's terminated here, so stroke-play should become the default.
+    const terminated: RoundEvent = {
+      kind: "game-terminated",
+      gameId: gameId("single-1"),
+      authorId: ann,
+      opId: opId("term-op"),
+      hlc: { wallMs: 9_000, counter: 0, deviceId: SERVER_DEVICE },
+    };
+    const transport = createScriptedTransport(stampSeq([...buildTwoPlayerServerLog(id, ann, bo), terminated]));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("TERM01")).toBeTruthy());
+
+    const strokeTab = screen.getByRole("tab", { name: /Stroke play \(gross\)/ });
+    expect(strokeTab.getAttribute("aria-selected")).toBe("true");
+    const singlesTab = screen.getByRole("tab", { name: /Singles match/ });
+    expect(singlesTab.getAttribute("aria-selected")).toBe("false");
+  });
+
   it("completing a hole fires the between-holes digest exactly once, dismissible by tap", async () => {
     const id = roundId("round-digest");
     const ann = golferId("ann");
@@ -352,5 +402,184 @@ describe("RoundPage", () => {
 
     await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
     expect(screen.queryByRole("button", { name: "Finalize round" })).toBeNull();
+  });
+
+  // M7 Task 6: the chip End-game flow, wired end to end — overflow → confirm → POST terminate
+  // → the game-terminated event folds back through the session → chip stays with an Ended badge.
+  it("chip End-game flow: overflow → confirm → POST terminate → chip stays with an Ended badge", async () => {
+    const id = roundId("round-terminate-flow");
+    const ann = golferId("ann");
+    const bo = golferId("bo");
+    credentialStore.save(id, { token: "tok-term", golferId: ann, name: "Ann", joinCode: "TRM002" });
+
+    const transport = createScriptedTransport(buildTwoPlayerServerLog(id, ann, bo));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    // Same stand-in idiom as the finalize test above: the fake endpoint appends the
+    // game-terminated event to the scripted transport's log, so this tab's own sync() (called
+    // by RoundPage right after the POST resolves) folds it like a real server append.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        expect(String(url)).toBe(`https://api.example.test/rounds/${id}/games/single-1/terminate`);
+        expect(init?.method).toBe("POST");
+        expect((init?.headers as Record<string, string>).authorization).toBe("Bearer tok-term");
+        const event: RoundEvent = {
+          kind: "game-terminated",
+          gameId: gameId("single-1"),
+          authorId: ann,
+          opId: opId("srv-term"),
+          hlc: { wallMs: 9_500, counter: 0, deviceId: SERVER_DEVICE },
+          seq: transport.log.length + 1,
+        };
+        (transport.log as RoundEvent[]).push(event);
+        return { ok: true, status: 200, json: async () => ({ events: [event] }) } as unknown as Response;
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("TRM002")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "End Singles match" }));
+    const dialog = screen.getByRole("dialog", { name: "End Singles match" });
+    expect(dialog.textContent).toMatch(/Singles match/); // the confirm names the game
+
+    fireEvent.click(screen.getByRole("button", { name: "End game" }));
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Singles match/ }).textContent).toMatch(/Ended/));
+    // The chip STAYS (an ended badge, not a removal), and its overflow control is gone.
+    expect(screen.getByRole("tab", { name: /Singles match/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "End Singles match" })).toBeNull();
+  });
+
+  // Papercut 1: the finalize dialog computes unresolved games from the LOCAL fold and offers
+  // ending them + finalizing as one action — terminates each, THEN finalizes (order asserted).
+  it("finalize dialog lists unresolved games and 'End unfinished games & finalize' terminates each THEN finalizes", async () => {
+    const id = roundId("round-end-and-finalize");
+    const ann = golferId("ann");
+    const bo = golferId("bo");
+    credentialStore.save(id, { token: "tok-eaf", golferId: ann, name: "Ann", joinCode: "EAF001" });
+
+    const transport = createScriptedTransport(buildTwoPlayerServerLog(id, ann, bo));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        const terminateMatch = /games\/([^/]+)\/terminate$/.exec(u);
+        if (terminateMatch) {
+          calls.push(`terminate:${terminateMatch[1]}`);
+          const event: RoundEvent = {
+            kind: "game-terminated",
+            gameId: gameId(terminateMatch[1]!),
+            authorId: ann,
+            opId: opId(`srv-term-${terminateMatch[1]}`),
+            hlc: { wallMs: 9_000 + calls.length, counter: 0, deviceId: SERVER_DEVICE },
+            seq: transport.log.length + 1,
+          };
+          (transport.log as RoundEvent[]).push(event);
+          return { ok: true, status: 200, json: async () => ({ events: [event] }) } as unknown as Response;
+        }
+        if (u.endsWith("/finalize")) {
+          calls.push("finalize");
+          (transport.log as RoundEvent[]).push({
+            kind: "round-finalized",
+            authorId: ann,
+            opId: opId("srv-finalize"),
+            hlc: { wallMs: 9_999, counter: 0, deviceId: SERVER_DEVICE },
+            seq: transport.log.length + 1,
+          });
+          return { ok: true, status: 200, json: async () => ({ results: [], handicapping: [] }) } as unknown as Response;
+        }
+        throw new Error(`unexpected fetch ${u}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("EAF001")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Finalize round" }));
+
+    // The dialog lists each unresolved game in the game chip's own naming, with what's missing
+    // — computed from the local fold, not a server response.
+    const dialog = screen.getByRole("dialog", { name: "Confirm finalize" });
+    expect(dialog.textContent).toMatch(/Singles match — holes 1–9 unscored for Ann, Bo/);
+    expect(dialog.textContent).toMatch(/Stroke play \(gross\) — holes 1–9 unscored for Ann, Bo/);
+    // The plain Finalize action is not offered while games are unresolved.
+    expect(screen.queryByRole("button", { name: "Finalize" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "End unfinished games & finalize" }));
+
+    await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
+    // Terminates each unresolved game (in state.games order) THEN finalizes — the exact order.
+    expect(calls).toEqual(["terminate:single-1", "terminate:gross-1", "finalize"]);
+  });
+
+  // Papercut 1's other half: the raw-uuid catch is gone — a finalize rejection renders a
+  // human line (and the dialog's own structured list), never caught.message verbatim.
+  it("a finalize rejection never renders the raw server message", async () => {
+    const id = roundId("round-finalize-409");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-409", golferId: ann, name: "Ann", joinCode: "ERR409" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ code: "game-unresolved", message: 'game "3f2b9c1d-raw-uuid" never resolved' }) }) as unknown as Response),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("ERR409")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Finalize round" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finalize" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(document.body.textContent).not.toMatch(/3f2b9c1d-raw-uuid/); // the uuid line never reaches the golfer
+    // The dialog stays open (retry stays one tap away) rather than closing on the error.
+    expect(screen.getByRole("dialog", { name: "Confirm finalize" })).toBeTruthy();
   });
 });

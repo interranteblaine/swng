@@ -6,9 +6,11 @@ import { createCourseRequestSchema } from "@swng/contracts";
 import type { CreateCourseRequest } from "@swng/contracts";
 
 // Faking the api.ts module boundary (M5's own idiom) — AddCoursePage only ever calls
-// createCourse.
+// createCourse; getMe is here because the AuthProvider wrapper below (auto-fill, M7 Task 6)
+// resolves the signed-in golfer through the same mocked module.
 vi.mock("../api", () => ({
   createCourse: vi.fn(),
+  getMe: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -21,10 +23,14 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, createCourse } from "../api";
+import { ApiError, createCourse, getMe } from "../api";
+import { AuthProvider } from "../auth/useAuth";
+import { tokenStore } from "../auth/tokenStore";
+import { createMemoryStorage } from "../testSupport/memoryStorage";
 import { AddCoursePage } from "./AddCoursePage";
 
 const mockedCreateCourse = vi.mocked(createCourse);
+const mockedGetMe = vi.mocked(getMe);
 
 // Reads back wherever CreateRoundPage would land, so a test can assert the router state
 // AddCoursePage's own success navigation hands it, without pulling the real CreateRoundPage
@@ -37,12 +43,14 @@ function CreateStub() {
 
 const renderAddCourse = (initialEntry: string | { pathname: string; state?: unknown } = "/courses/new") =>
   render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/courses/new" element={<AddCoursePage />} />
-        <Route path="/create" element={<CreateStub />} />
-      </Routes>
-    </MemoryRouter>,
+    <AuthProvider>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/courses/new" element={<AddCoursePage />} />
+          <Route path="/create" element={<CreateStub />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthProvider>,
   );
 
 // The paper-card values this suite types in — fixtureWhite18's own numbers (packages/domain's
@@ -81,9 +89,15 @@ const fillHole = (n: number, hole: { par: number; yardage: number; strokeIndex: 
 
 beforeEach(() => {
   mockedCreateCourse.mockReset();
+  mockedGetMe.mockReset();
+  vi.stubGlobal("localStorage", createMemoryStorage());
+  vi.stubGlobal("sessionStorage", createMemoryStorage());
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("AddCoursePage", () => {
   it("defaults to 18 holes, par 4, with the grid's DOM order running left-to-right top-to-bottom (the native tab order)", () => {
@@ -206,5 +220,24 @@ describe("AddCoursePage", () => {
   it("the submit button is disabled until every field is filled", () => {
     renderAddCourse();
     expect(screen.getByRole("button", { name: /add course/i }).hasAttribute("disabled")).toBe(true);
+  });
+
+  // M7 Task 6 auto-fill (M6 carry): "Your name" defaults to the signed-in golfer's name —
+  // still editable, wire unchanged.
+  it("defaults 'Your name' to the signed-in golfer's name, still editable", async () => {
+    tokenStore.save({ idToken: "header.payload.sig", refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: "g-ann" as never, name: "Ann Signed-In" } });
+
+    renderAddCourse();
+
+    await waitFor(() => expect((screen.getByLabelText(/your name/i) as HTMLInputElement).value).toBe("Ann Signed-In"));
+
+    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: "Someone Else" } });
+    expect((screen.getByLabelText(/your name/i) as HTMLInputElement).value).toBe("Someone Else");
+  });
+
+  it("leaves 'Your name' blank when signed out — no phantom default", () => {
+    renderAddCourse();
+    expect((screen.getByLabelText(/your name/i) as HTMLInputElement).value).toBe("");
   });
 });

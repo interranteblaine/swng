@@ -29,9 +29,11 @@ export function ResultsView({ state, games, response }: ResultsViewProps) {
   const handicapping = response?.handicapping ?? deriveHandicapping(state);
   // Task 5: the archive gets the same chip-selected active game as a live round (RoundPage's
   // LiveRound) instead of a fixed games[0] — StandingsHeader IS the per-game standings display
-  // here too (title+line per describeGame), so there's no separate static list beside it.
+  // here too (title+line per describeGame), so there's no separate static list beside it. M7
+  // Task 6: same terminated-game exclusion from the default as LiveRound's own fallback — a
+  // terminated game (kept in the archive for audit) never wins the silent default here either.
   const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
-  const activeGame = games.find((g) => g.id === activeGameId) ?? games[0];
+  const activeGame = games.find((g) => g.id === activeGameId) ?? games.find((g) => !state.terminatedGameIds.has(g.id));
 
   return (
     <section className="flex flex-col gap-6 p-4 text-slate-100">

@@ -8,12 +8,15 @@ import { credentialStore } from "../identity";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
 // Faking the api.ts module boundary (M5's own idiom) — CreateRoundPage (and the CourseSearch/
-// CourseSummaryCard it composes) only ever calls these four.
+// CourseSummaryCard it composes) only ever calls these four; getMe is here because the
+// AuthProvider wrapper below (CourseSummaryCard's verifier auto-fill, M7 Task 6) resolves
+// the signed-in golfer through the same mocked module.
 vi.mock("../api", () => ({
   createRound: vi.fn(),
   getCourse: vi.fn(),
   searchCourses: vi.fn(),
   verifyTeeSet: vi.fn(),
+  getMe: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -27,6 +30,7 @@ vi.mock("../api", () => ({
 }));
 
 import { createRound, getCourse, searchCourses } from "../api";
+import { AuthProvider } from "../auth/useAuth";
 import { CreateRoundPage } from "./CreateRoundPage";
 
 const mockedCreateRound = vi.mocked(createRound);
@@ -55,12 +59,14 @@ afterEach(() => {
 
 const renderCreate = (initialEntry: string | { pathname: string; state?: unknown } = "/create") =>
   render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/create" element={<CreateRoundPage />} />
-        <Route path="/round/:roundId" element={<div>round view</div>} />
-      </Routes>
-    </MemoryRouter>,
+    <AuthProvider>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/create" element={<CreateRoundPage />} />
+          <Route path="/round/:roundId" element={<div>round view</div>} />
+        </Routes>
+      </MemoryRouter>
+    </AuthProvider>,
   );
 
 describe("CreateRoundPage", () => {

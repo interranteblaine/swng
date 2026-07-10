@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CourseView } from "@swng/contracts";
 import { ApiError, getCourse, verifyTeeSet } from "../api";
+import { useAuth } from "../auth/useAuth";
 
 export interface CourseSummaryCardProps {
   readonly course: CourseView;
@@ -16,6 +17,7 @@ export interface CourseSummaryCardProps {
 // and reused as-is rather than duplicated: "shown after add and in the create-flow course
 // detail" (brief) is the SAME component, not two.
 export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCourse }: CourseSummaryCardProps) {
+  const auth = useAuth();
   // Seeded from the prop, then advanced locally from verify's own response (or a 409's
   // re-fetch) — the WHOLE CourseView, not just teeSets, because a revision a golfer didn't
   // cause can change the card's rating/slope shown in the tee picker too.
@@ -26,7 +28,9 @@ export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCo
     // A plain browser prompt, not a modal screen: verifying is a rare, low-stakes "I looked at
     // this and it's right" tap (brief: "name prompt → POST verify"), not a flow that earns its
     // own UI. A blank/cancelled prompt (returns "" or null) is a silent no-op, not an error.
-    const verifierName = window.prompt("Your name, to verify this card:");
+    // The default value is the signed-in golfer's name (M7 Task 6 auto-fill) — still editable,
+    // wire unchanged.
+    const verifierName = window.prompt("Your name, to verify this card:", auth.golfer?.name ?? "");
     if (!verifierName?.trim()) return;
 
     // The version of the tee set THIS card is currently DISPLAYING — a verify attests to

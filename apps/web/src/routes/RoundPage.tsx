@@ -3,9 +3,10 @@ import { Navigate, useParams } from "react-router";
 import type { FinalizeRoundResponse, GameConfigInput } from "@swng/contracts";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { GameId, GameState, GolferId, HoleResult, RoundId, RoundState } from "@swng/domain";
-import { addGame, finalizeRound } from "../api";
+import { addGame, finalizeRound, terminateGame } from "../api";
 import { credentialStore } from "../identity";
 import type { RoundCredential } from "../identity";
+import { unresolvedGames } from "../round/finalizeReadiness";
 import { HoleDigest, useHoleDigest } from "../round/HoleDigest";
 import { ResultsView } from "../round/ResultsView";
 import { ScorecardGrid } from "../round/ScorecardGrid";
@@ -18,18 +19,32 @@ import type { RoundSessionView } from "../session/useRoundSession";
 type UseRoundSession = (roundId: RoundId) => RoundSessionView;
 
 interface FinalizeControlProps {
+  readonly state: RoundState;
+  readonly games: readonly GameState[];
   readonly onFinalize: () => Promise<void>;
+  readonly onTerminate: (gameId: GameId) => Promise<void>;
 }
 
 // Any participant may finalize (brief) — the confirm dialog here is a SEPARATE affordance
 // from ScorePad's two-tap contract, not a third tap added to it: scoring itself stays exactly
 // two taps, this is a distinct, rarer action with its own (one-time, whole-round) confirm step.
-function FinalizeControl({ onFinalize }: FinalizeControlProps) {
+//
+// Papercut 1 (M7 Task 6): the dialog computes unresolved games from the LOCAL fold — the same
+// game-config × cells × terminatedGameIds math settleRound applies server-side — so a golfer
+// reads "Stableford — holes 2–18 unscored for Pat" BEFORE the server ever gets to 409, and
+// "End unfinished games & finalize" (terminate each, then the existing finalize — the plan's
+// fixed composition, not a new lifecycle state) resolves it in one tap.
+function FinalizeControl({ state, games, onFinalize, onTerminate }: FinalizeControlProps) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  const confirm = async () => {
+  // Recomputed from the fold on every render — a score or termination landing mid-dialog (via
+  // sync) updates the list live, and after a failed attempt this same recomputation IS the
+  // structured explanation the brief demands in place of the old raw caught.message.
+  const unresolved = unresolvedGames(state, games);
+
+  const finalizeNow = async () => {
     setBusy(true);
     setError(undefined);
     try {
@@ -38,10 +53,26 @@ function FinalizeControl({ onFinalize }: FinalizeControlProps) {
       // implementation below) is what flips session.state.status to "final", which swaps this
       // whole subtree for ResultsView in the parent — this component just stops rendering,
       // matching SetupPanel's own "no optimistic insert, let the fold do it" precedent.
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not finalize — try again.");
+    } catch {
+      // NEVER caught.message (papercut 1): the raw server line names games by uuid. The dialog
+      // stays open — its unresolved list, recomputed from the fold above, is the real
+      // explanation; this line only says the attempt itself failed.
+      setError("Could not finalize the round — try again.");
       setBusy(false);
-      setConfirming(false);
+    }
+  };
+
+  const endUnfinishedAndFinalize = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      // Terminate each unresolved game FIRST, then the ordinary finalize — strictly in this
+      // order, or the finalize still lands on an unresolved game and 409s.
+      for (const game of unresolved) await onTerminate(game.gameId);
+      await onFinalize();
+    } catch {
+      setError("Could not finalize the round — try again.");
+      setBusy(false);
     }
   };
 
@@ -49,7 +80,10 @@ function FinalizeControl({ onFinalize }: FinalizeControlProps) {
     <div className="p-3">
       <button
         type="button"
-        onClick={() => setConfirming(true)}
+        onClick={() => {
+          setError(undefined);
+          setConfirming(true);
+        }}
         className="min-h-14 w-full rounded-lg bg-red-900 px-4 text-base font-semibold text-slate-100 active:bg-red-800"
       >
         Finalize round
@@ -57,15 +91,39 @@ function FinalizeControl({ onFinalize }: FinalizeControlProps) {
 
       {confirming && (
         <div role="dialog" aria-label="Confirm finalize" className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 rounded-t-2xl bg-slate-900 p-4 shadow-2xl">
-          <p className="text-sm text-slate-300">Finalize the round? This locks in every score — no more edits.</p>
-          <button
-            type="button"
-            onClick={() => void confirm()}
-            disabled={busy}
-            className="min-h-14 rounded-lg bg-red-800 px-4 text-base font-semibold text-slate-100 disabled:opacity-50"
-          >
-            {busy ? "Finalizing…" : "Finalize"}
-          </button>
+          {unresolved.length === 0 ? (
+            <>
+              <p className="text-sm text-slate-300">Finalize the round? This locks in every score — no more edits.</p>
+              <button
+                type="button"
+                onClick={() => void finalizeNow()}
+                disabled={busy}
+                className="min-h-14 rounded-lg bg-red-800 px-4 text-base font-semibold text-slate-100 disabled:opacity-50"
+              >
+                {busy ? "Finalizing…" : "Finalize"}
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-slate-300">Some games aren&apos;t finished:</p>
+              <ul className="flex flex-col gap-1 text-sm text-slate-200">
+                {unresolved.map((game) => (
+                  <li key={game.gameId}>
+                    {game.title} — {game.missing}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-sm text-slate-400">Ending them stops their scoring — they won&apos;t appear in the final results.</p>
+              <button
+                type="button"
+                onClick={() => void endUnfinishedAndFinalize()}
+                disabled={busy}
+                className="min-h-14 rounded-lg bg-red-800 px-4 text-base font-semibold text-slate-100 disabled:opacity-50"
+              >
+                {busy ? "Finalizing…" : "End unfinished games & finalize"}
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={() => setConfirming(false)}
@@ -74,13 +132,12 @@ function FinalizeControl({ onFinalize }: FinalizeControlProps) {
           >
             Cancel
           </button>
+          {error && (
+            <p role="alert" className="text-red-400">
+              {error}
+            </p>
+          )}
         </div>
-      )}
-
-      {error && (
-        <p role="alert" className="mt-2 text-red-400">
-          {error}
-        </p>
       )}
     </div>
   );
@@ -91,8 +148,10 @@ interface LiveRoundProps {
   readonly games: readonly GameState[];
   readonly recordScore: (golferId: GolferId, hole: number, result: HoleResult) => void;
   readonly joinCode: string;
+  readonly myGolferId: GolferId;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
   readonly onFinalize: () => Promise<void>;
+  readonly onTerminate: (gameId: GameId) => Promise<void>;
 }
 
 // Everything that's only ever rendered pre-finalize, as its OWN component (not an inline
@@ -101,20 +160,23 @@ interface LiveRoundProps {
 // tolerate `state` swapping in and out across the live/final boundary, which useHoleDigest's
 // prev-snapshot ref isn't built to do (and doesn't need to — this component simply unmounts
 // once status flips to "final" and RoundPageContent renders ResultsView instead).
-function LiveRound({ state, games, recordScore, joinCode, onAddGame, onFinalize }: LiveRoundProps) {
+function LiveRound({ state, games, recordScore, joinCode, myGolferId, onAddGame, onFinalize, onTerminate }: LiveRoundProps) {
   const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
   // Falls back to the first game until a chip is tapped (Task 5's fixed default-first-game
-  // decision) — also the correct fallback if a previously-active id ever stopped matching.
-  const activeGame = games.find((g) => g.id === activeGameId) ?? games[0];
+  // decision) — also the correct fallback if a previously-active id ever stopped matching. A
+  // terminated game never wins the fallback (M7 Task 6 brief: "default active-game selection"
+  // is one of the downstream filters) — an explicit chip tap can still land on one (its chip
+  // stays, with an "ended" badge), just never the silent default.
+  const activeGame = games.find((g) => g.id === activeGameId) ?? games.find((g) => !state.terminatedGameIds.has(g.id));
   const { digest, dismiss } = useHoleDigest(state, games);
 
   return (
     <>
-      <StandingsHeader state={state} games={games} activeGameId={activeGame?.id} onSelect={setActiveGameId} />
+      <StandingsHeader state={state} games={games} activeGameId={activeGame?.id} onSelect={setActiveGameId} onTerminate={onTerminate} />
       <ScorecardGrid state={state} activeGame={activeGame} recordScore={recordScore} />
       {digest && <HoleDigest digest={digest} onDismiss={dismiss} />}
-      <FinalizeControl onFinalize={onFinalize} />
-      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} />
+      <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
+      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} myGolferId={myGolferId} />
     </>
   );
 }
@@ -153,6 +215,17 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
       // tick, so the live→ResultsView swap below follows almost immediately.
       await sync();
     }, [roundId, credential.token, sync]);
+
+    const onTerminate = useCallback(
+      async (targetGameId: GameId) => {
+        await terminateGame(roundId, credential.token, targetGameId);
+        // Same reasoning as onFinalize's sync() above: the game-terminated event arrives via
+        // this tab's own pull/WS — sync now so the chip's Ended badge and the dot/digest
+        // drop-outs follow immediately, not on the next natural tick.
+        await sync();
+      },
+      [roundId, credential.token, sync],
+    );
 
     // StatusChrome's "Sync now" button: connect() re-opens the socket if it dropped (a no-op
     // otherwise — session.ts's own idempotency), then sync() explicitly pushes+pulls once,
@@ -196,8 +269,10 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
             games={session.games}
             recordScore={session.recordScore}
             joinCode={credential.joinCode}
+            myGolferId={credential.golferId}
             onAddGame={onAddGame}
             onFinalize={onFinalize}
+            onTerminate={onTerminate}
           />
         )}
       </main>

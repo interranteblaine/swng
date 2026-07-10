@@ -110,8 +110,11 @@ export function ScorecardGrid({ state, activeGame, recordScore, readOnly = false
   // activeGame (GameState) only identifies WHICH game is active by id — the dots math needs
   // the frozen GameConfig, which lives in state.games; dots.ts's gameDots is the one place
   // that formula is allowed to live (reused verbatim, not re-derived — SetupPanel's own
-  // precedent).
-  const activeConfig = activeGame ? state.games.find((g) => g.id === activeGame.id) : undefined;
+  // precedent). A terminated game never contributes dots (M7 Task 6 brief) — StandingsHeader
+  // still lets its chip be selected (an "ended" badge, not a removal), but that chip's grid
+  // reads exactly like "no game selected" here: a terminated game has stopped consuming
+  // scores, so showing dots for it would misrepresent what's actually being allocated.
+  const activeConfig = activeGame && !state.terminatedGameIds.has(activeGame.id) ? state.games.find((g) => g.id === activeGame.id) : undefined;
   const dotsByGolfer = activeConfig ? gameDots(activeConfig, state.participants, state.card) : undefined;
 
   const selectedParticipant = selection && state.participants.find((p) => p.golferId === selection.golferId);

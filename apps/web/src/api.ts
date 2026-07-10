@@ -5,11 +5,15 @@ import {
   errorResponseSchema,
   finalizeRoundResponseSchema,
   getCourseResponseSchema,
+  getMeResponseSchema,
+  getMyRecordResponseSchema,
+  golferResponseSchema,
   joinRoundResponseSchema,
   parse,
   peekRoundResponseSchema,
   searchCoursesResponseSchema,
   startRoundResponseSchema,
+  terminateGameResponseSchema,
   verifyTeeSetResponseSchema,
 } from "@swng/contracts";
 import type {
@@ -17,20 +21,26 @@ import type {
   AddGameResponse,
   AddTeeSetRequest,
   AddTeeSetResponse,
+  ClaimGolferRequest,
   CreateCourseRequest,
   CreateCourseResponse,
   FinalizeRoundResponse,
   GetCourseResponse,
+  GetMeResponse,
+  GetMyRecordResponse,
+  GolferResponse,
   JoinRoundRequest,
   JoinRoundResponse,
   PeekRoundResponse,
   SearchCoursesResponse,
   StartRoundRequest,
   StartRoundResponse,
+  TerminateGameResponse,
+  UpdateMeRequest,
   VerifyTeeSetRequest,
   VerifyTeeSetResponse,
 } from "@swng/contracts";
-import type { CourseId, RoundId } from "@swng/domain";
+import type { CourseId, GameId, RoundId } from "@swng/domain";
 import { config } from "./config";
 
 export class ApiError extends Error {
@@ -144,4 +154,33 @@ export const peekRound = async (code: string): Promise<PeekRoundResponse> => {
   const params = new URLSearchParams({ code });
   const json = await requestJson(`/rounds/peek?${params.toString()}`, undefined);
   return parse(peekRoundResponseSchema, json);
+};
+
+// M7 Task 6: the golfer identity surface ("golfer"-gated on the wire — a signed-in Cognito
+// identity's bearer token, never a round-scoped participant token) + game termination
+// ("participant"-gated, same token as addGame/finalizeRound). Same requestJson + per-endpoint
+// idiom as every call above.
+export const getMe = async (token: string): Promise<GetMeResponse> => {
+  const json = await requestJson("/me", { token });
+  return parse(getMeResponseSchema, json);
+};
+
+export const updateMe = async (token: string, input: UpdateMeRequest): Promise<GolferResponse> => {
+  const json = await requestJson("/me", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
+  return parse(golferResponseSchema, json);
+};
+
+export const claimGolfer = async (token: string, input: ClaimGolferRequest): Promise<GolferResponse> => {
+  const json = await requestJson("/golfers/claim", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
+  return parse(golferResponseSchema, json);
+};
+
+export const getMyRecord = async (token: string): Promise<GetMyRecordResponse> => {
+  const json = await requestJson("/me/record", { token });
+  return parse(getMyRecordResponseSchema, json);
+};
+
+export const terminateGame = async (roundId: RoundId, token: string, gameId: GameId): Promise<TerminateGameResponse> => {
+  const json = await requestJson(`/rounds/${roundId}/games/${gameId}/terminate`, { method: "POST", token });
+  return parse(terminateGameResponseSchema, json);
 };

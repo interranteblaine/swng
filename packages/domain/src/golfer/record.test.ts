@@ -85,4 +85,16 @@ describe("archiveGolferLine", () => {
     expect(attempt).toThrowError(DomainError);
     expect(attempt).toThrowError(expect.objectContaining({ code: "unknown-participant" }));
   });
+
+  it("buckets an eagle (-2) as eagles and anything beyond a double (+3) still into doublePlus", () => {
+    const extremes: RoundArchive = {
+      ...baseArchive,
+      cells: {
+        [cellKey(G, 1)]: cell(1, 2), // par 4, eagle
+        [cellKey(G, 4)]: cell(4, 8), // par 5, triple bogey — same bucket as a double
+      },
+    };
+    const line = archiveGolferLine(extremes, G);
+    expect(line.distribution).toEqual({ eagles: 1, birdies: 0, pars: 0, bogeys: 0, doublePlus: 1 });
+  });
 });

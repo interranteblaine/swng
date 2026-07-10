@@ -140,6 +140,7 @@ export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
   z.object({ ...envelope, kind: z.literal("score-recorded"), golferId: golferIdSchema, hole: z.number(), result: holeResultSchema }),
   z.object({ ...envelope, kind: z.literal("round-finalized") }),
   z.object({ ...envelope, kind: z.literal("round-reopened") }),
+  z.object({ ...envelope, kind: z.literal("game-terminated"), gameId: gameIdSchema }),
 ]);
 export const roundEventSchema: z.ZodType<RoundEvent> = roundEventSchemaImpl;
 

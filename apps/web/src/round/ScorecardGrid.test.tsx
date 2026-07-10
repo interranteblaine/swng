@@ -27,6 +27,7 @@ const twoPlayerState = (overrides: Partial<RoundState> = {}): RoundState => ({
   participants: [participant(ANN, "Ann", "white", 8), participant(BO, "Bo", "white", 4)],
   games: [],
   cells: {},
+  terminatedGameIds: new Set(),
   ...overrides,
 });
 
@@ -104,7 +105,15 @@ describe("ScorecardGrid — dots", () => {
 
   it("renders the active fourball game's relative dots — Ann gets 1 dot on each of SI 1–5 of fixtureWhite18, none elsewhere", () => {
     const { players, fourball } = fieldDeck18;
-    const state: RoundState = { id: roundId("round-2"), status: "live", card: fixtureLinks18, participants: players, games: [fourball], cells: {} };
+    const state: RoundState = {
+      id: roundId("round-2"),
+      status: "live",
+      card: fixtureLinks18,
+      participants: players,
+      games: [fourball],
+      cells: {},
+      terminatedGameIds: new Set(),
+    };
     const activeGame: GameState = { kind: "fourball-match", id: fourball.id, up: 0, thru: 0, remaining: 18, dormie: false };
 
     render(<ScorecardGrid state={state} activeGame={activeGame} recordScore={vi.fn()} />);
@@ -135,6 +144,7 @@ describe("ScorecardGrid — dots", () => {
       participants: players,
       games: [fourball],
       cells: { [cellKey(players[0]!.golferId, 2)]: scoreCell({ kind: "strokes", strokes: 5 }, players[0]!.golferId) },
+      terminatedGameIds: new Set(),
     };
     const activeGame: GameState = { kind: "fourball-match", id: fourball.id, up: 0, thru: 0, remaining: 18, dormie: false };
 
@@ -153,7 +163,15 @@ describe("ScorecardGrid — dots", () => {
     const ann0 = participant(ANN, "Ann", "white", 0);
     const bo19 = participant(BO, "Bo", "white", 19);
     const singles: GameConfig = { kind: "singles-match", id: gameId("singles"), a: ANN, b: BO };
-    const state: RoundState = { id: roundId("round-4"), status: "live", card: fixtureLinks18, participants: [ann0, bo19], games: [singles], cells: {} };
+    const state: RoundState = {
+      id: roundId("round-4"),
+      status: "live",
+      card: fixtureLinks18,
+      participants: [ann0, bo19],
+      games: [singles],
+      cells: {},
+      terminatedGameIds: new Set(),
+    };
     const activeGame: GameState = { kind: "singles-match", id: singles.id, up: 0, thru: 0, remaining: 18, dormie: false };
 
     render(<ScorecardGrid state={state} activeGame={activeGame} recordScore={vi.fn()} />);

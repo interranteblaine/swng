@@ -30,6 +30,7 @@ const minimalArchive = (id: ReturnType<typeof roundId>): RoundArchive => ({
   cells: {},
   events: [],
   results: [],
+  terminatedGameIds: [],
   handicapping: [],
 });
 

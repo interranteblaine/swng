@@ -28,6 +28,7 @@ const stateWith = (cells: RoundState["cells"]): RoundState => ({
   participants,
   games: [config],
   cells,
+  terminatedGameIds: new Set(),
 });
 
 const gamesFor = (state: RoundState): readonly GameState[] => [scoreGame(config, state)];

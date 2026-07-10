@@ -18,6 +18,7 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
   participants: [participant(ANN, "Ann", "white", 8), participant(BO, "Bo", "white", 4), participant(CAL, "Cal", "white", 14), participant(DEE, "Dee", "white", 2)],
   games: [],
   cells: {},
+  terminatedGameIds: new Set(),
   ...overrides,
 });
 

@@ -21,6 +21,7 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
   participants,
   games: [strokePlayConfig, stablefordConfig],
   cells: {},
+  terminatedGameIds: new Set(),
   ...overrides,
 });
 

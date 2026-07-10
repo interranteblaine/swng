@@ -154,6 +154,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
       participants: [{ golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 }],
       games: [],
       cells: { [cellKey(ann, 1)]: cellValue },
+      terminatedGameIds: new Set(),
     };
 
     render(<ResultsView state={state} games={[]} response={undefined} />);

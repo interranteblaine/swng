@@ -32,8 +32,10 @@ export type ApplicationErrorCode =
   // not be joined-as by anyone in v1; join-as-self with a matching Bearer token is deferred
   // to M8. Distinct from golfer-already-claimed above (that's claimGolfer's OWN collision).
   | "golfer-claimed"
-  // Task 5b: the supplied golferId is already a participant in THIS round's fold — appending
-  // a second participant-joined for it would corrupt the roster (two rows, one golfer).
+  // Task 5b: the supplied golferId is already a participant in THIS round's fold — the check
+  // exists for a clean 409 (UX), not as a data-integrity backstop. The domain fold keys
+  // participants by golferId with last-write-wins, so a duplicate append collapses
+  // harmlessly. Enforced here to avoid surprising joiners with silent participation changes.
   | "golfer-already-in-round";
 
 export class ApplicationError extends Error {

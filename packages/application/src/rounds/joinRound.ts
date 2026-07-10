@@ -29,7 +29,16 @@ export const joinRound =
     let golfer: GolferId;
     if (command.golferId !== undefined) {
       const existing = await deps.golferStore.get(command.golferId);
+      // CHECK-THEN-ACT RACE (the golferStore read vs. the journal append below): a claim
+      // can land between this read and the participant-joined append at line 44, making
+      // the supplied golferId claimed moments after we green-lit it. Accepted for beta: the
+      // window is narrow, exploiting it requires knowing the golferId mid-claim, and it
+      // grants nothing beyond what an unclaimed ghost's participant token already carries
+      // (M4: ghost tokens have no auth). M8/M9 identity hardening revisits this. Deliberate,
+      // not an oversight.
       if (existing?.sub !== undefined) throw new ApplicationError("golfer-claimed", `golfer ${command.golferId} is claimed`);
+      // UX guard: a duplicate participant-joined is harmless at the domain layer (last-write-wins
+      // on golferId), but we reject it here to prevent surprising joiners with silent changes.
       if (state.participants.some((participant) => participant.golferId === command.golferId)) {
         throw new ApplicationError("golfer-already-in-round", `golfer ${command.golferId} is already a participant in this round`);
       }

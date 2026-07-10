@@ -107,9 +107,51 @@ callback, which `CreateRoundPage` uses to replace its held (frozen) `CourseView`
 revision can no longer freeze a stale card. Screenshots at `.superpowers/sdd/screenshots/
 edit-course-{375,desktop}.png`.
 
-### 4. Process note: gates verify contracts, not legibility
+### 4. Process note: gates verify contracts, not legibility — and not flows
 
 Papercut 2 passed every automated gate because Playwright specs drive the UI through
 aria-labels — precisely the layer that was fine. Human-legibility review (screenshot walks of
 new surfaces, via the Playwright MCP browser) joins milestone close alongside the behavior
 gates.
+
+**Extended after M7's close (2026-07-10):** the user's first real smoke found two claim-flow
+reachability bugs a fully green pipeline missed — the claim affordance was suppressed on the
+device's own roster row, and unreachable entirely on finalized rounds (fixed same evening,
+`342d2e5`). Root cause was structural: every pipeline layer verifies conformance to what the
+plan wrote, and the e2e's own convenience choices (claim mid-round, from a non-session row)
+routed around exactly the paths a person takes. Screenshot walks check pixels, not paths. So
+the standing discipline gains a second half: **before a milestone closes, the controller
+personally drives the milestone's primary user flows in a real browser as a first-time user**
+(not the plan's author-imagined scenario), and plan-time gates must include the unmodified
+primary path — API shortcuts are allowed only in steps that are not the thing being gated.
+
+### 5. Claiming a fresh ghost names the profile after the account, not the roster row
+
+Found in the M7 close flow-walk (2026-07-10): claim "Walker" on a roster and your profile
+comes back named after your email localpart (e.g. `flowwalk-m7`), because
+`POST /golfers/claim` carries only `{ golferId }` — the server has no round context to read
+the roster name from, so a first-claim's lazily-created golfer row falls back to the
+JWT-derived default. The name is editable on ProfilePage, so it's a wart, not a wall. Wanted
+shape: the client sends the roster row's name alongside the id (it has it on screen), or the
+claim use case resolves the name from the round the claim was made in. Fits naturally in
+M8's join-as-yourself identity work.
+
+### 6. App sign-out doesn't end the Cognito hosted-UI session
+
+Found in the M7 close flow-walk (2026-07-10): "Sign out" clears the app's local tokens but
+leaves Cognito's own hosted-UI session cookie alive, so the next "Sign in" can silently
+re-authenticate as the previous account without ever showing the login form. Confusing on a
+multi-account device and a real concern on a shared one. Fix shape: sign-out redirects
+through the pool's `/logout` endpoint (which clears the hosted session and returns to a
+registered logout URL). Belongs with M9's auth hardening (the logout URLs are already
+registered on the client).
+
+### 7. Rounds played before signing in strand their ghosts (one claim per account)
+
+Field evidence from the user's own account (2026-07-10): three rounds created while signed
+in = three distinct ghosts (the web mints a fresh golferId per round; being signed in links
+nothing — that's M8's join/create-as-yourself). An account can claim exactly ONE golfer in
+v1; `GolferMerged` was explicitly scoped out. So a real user's pre-claim history is mostly
+unclaimable — the no-merge cut bites the primary flow, not an edge. M8's identity work must
+pair join-as-yourself with an explicit decision about pre-existing rounds: bulk-claim,
+merge, or an accepted write-off stated to the user.

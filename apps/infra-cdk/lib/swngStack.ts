@@ -205,7 +205,15 @@ export class SwngStack extends Stack {
         // — there's no separate CDK flag for it.
         flows: { authorizationCodeGrant: true },
         scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
-        callbackUrls: webOrigins,
+        // Cognito requires an EXACT match against a registered callback URL — the web app
+        // (apps/web/src/auth/authConfig.ts's redirectUri) always sends
+        // `${origin}/auth/callback`, never the bare origin, so the bare origins alone here
+        // would make every real Hosted-UI sign-in fail with redirect_mismatch.
+        callbackUrls: webOrigins.map((origin) => `${origin}/auth/callback`),
+        // The app's signOut (apps/web/src/auth/useAuth.ts) only clears local token storage —
+        // it never redirects through Cognito's /logout endpoint, so there's no path string to
+        // match here the way callbackUrls needs one; the bare origins stay valid registered
+        // values for if/when a real Hosted-UI logout redirect is added.
         logoutUrls: webOrigins,
       },
     });

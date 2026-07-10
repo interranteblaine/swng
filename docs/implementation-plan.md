@@ -282,6 +282,14 @@ throw used to leave behind; the append itself takes an optional `expectedHeadSeq
 `RecordScore` landing in the settle-check's own read gap forces a bounded re-validate instead
 of a blind append.
 
+Post-gate amendment (final whole-branch review): `POST /courses/{courseId}/verify` now
+REQUIRES `version` in its body — a verification is an attestation of the exact numbers the
+verifier looked at, so it pins the tee-set version it attests and a revision landing in
+between returns 409 `tee-set-revised` (the web re-fetches and asks the golfer to review the
+revised card before verifying). Without the pin, a verify racing a revision silently
+transplanted onto numbers the verifier never saw, inverting the "a corrected card is
+unverified until someone re-verifies it" rule.
+
 `fieldTest.spec.ts` upkeep: `beforeAll` gains `ensureCourse("Fixture Links 18",
 fixtureLinks18)` (`e2e/support.ts`) — search the public API by exact name, create-if-absent —
 since `CreateRoundPage`'s fixture `<select>` is gone (M6 Task 5, commit `8d8d1ba`: search is

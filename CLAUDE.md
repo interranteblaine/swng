@@ -90,6 +90,9 @@ gone, delegating here instead). `contracts`+`application` gain the course use ca
 capability-scoped join-code preview: course name + tee summaries only, nothing else);
 `adapters-dynamodb` gets a course store on the `core` table's own search GSI (prefix match on
 one shared name normalization); `lambda` gains six `auth: "none"` routes (identity lands M7).
+Verification pins the tee-set version it attests (`version` required in the verify body; a
+revision racing a verify returns 409 `tee-set-revised` — never a silent transplant onto
+numbers the verifier didn't see).
 `@swng/web` drops bundled fixtures entirely — `CourseSearch`/`AddCoursePage`/
 `CourseSummaryCard` make search-first picking, keyboard-first single-screen entry (tab order
 alone fills an 18-hole grid), and "Verify this card" the only course path, with

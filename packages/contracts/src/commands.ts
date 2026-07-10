@@ -41,6 +41,10 @@ export const joinRoundRequestSchema = z.object({
   name: z.string().min(1),
   tee: z.string().min(1),
   courseHandicap: z.number().int(),
+  // Task 5b (ghost continuity): a joiner may present an existing GolferId so the SAME ghost
+  // recurs across rounds. application's joinRound.ts is the enforcement point (reuse allowed
+  // IFF the golfer is unclaimed) — this schema only shapes the wire, it doesn't authorize.
+  golferId: golferIdSchema.optional(),
 });
 export type JoinRoundRequest = z.infer<typeof joinRoundRequestSchema>;
 

@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { deviceId, fixtureLinks, gameId, opId } from "@swng/domain";
 import type { ParticipantClaims, TokenIssuer } from "../ports/tokenIssuer.js";
-import { createCapturingBroadcast, createFixedClock, createInMemoryJournal, createInMemoryRoundStore, createSequentialIds } from "../testing/fakes.js";
+import {
+  createCapturingBroadcast,
+  createFixedClock,
+  createInMemoryGolferStore,
+  createInMemoryJournal,
+  createInMemoryRoundStore,
+  createSequentialIds,
+} from "../testing/fakes.js";
 import { addGame } from "./addGame.js";
 import { finalizeRound } from "./finalizeRound.js";
 import { joinRound } from "./joinRound.js";
@@ -40,11 +47,12 @@ const setup = () => {
   const tokens = createTestTokenIssuer();
   const clock = createFixedClock(1_000);
   const ids = createSequentialIds("t");
+  const golferStore = createInMemoryGolferStore();
 
   return {
     broadcast,
     start: startRound({ journal, store, broadcast, tokens, clock, ids }),
-    join: joinRound({ journal, store, broadcast, tokens, clock, ids }),
+    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
     finalize: finalizeRound({ journal, store, broadcast, clock, ids }),

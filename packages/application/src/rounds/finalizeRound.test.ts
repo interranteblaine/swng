@@ -3,7 +3,14 @@ import type { OpId, RoundEvent } from "@swng/domain";
 import { deviceId, fixtureLinks, opId, reduceRound } from "@swng/domain";
 import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
 import type { ParticipantClaims, TokenIssuer } from "../ports/tokenIssuer.js";
-import { createCapturingBroadcast, createFixedClock, createInMemoryJournal, createInMemoryRoundStore, createSequentialIds } from "../testing/fakes.js";
+import {
+  createCapturingBroadcast,
+  createFixedClock,
+  createInMemoryGolferStore,
+  createInMemoryJournal,
+  createInMemoryRoundStore,
+  createSequentialIds,
+} from "../testing/fakes.js";
 import { addGame } from "./addGame.js";
 import { finalizeRound } from "./finalizeRound.js";
 import { joinRound } from "./joinRound.js";
@@ -42,12 +49,13 @@ const setup = (journal: EventJournal = createInMemoryJournal()) => {
   const tokens = createTestTokenIssuer();
   const clock = createFixedClock(1_000);
   const ids = createSequentialIds("t");
+  const golferStore = createInMemoryGolferStore();
 
   return {
     journal,
     broadcast,
     start: startRound({ journal, store, broadcast, tokens, clock, ids }),
-    join: joinRound({ journal, store, broadcast, tokens, clock, ids }),
+    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
     finalize: finalizeRound({ journal, store, broadcast, clock, ids }),

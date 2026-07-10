@@ -26,7 +26,15 @@ export type ApplicationErrorCode =
   // claimGolfer's one failure code for BOTH collision arms (golferStore.ts's port doc):
   // the target golferId already has a sub bound, OR the calling sub is already bound to a
   // DIFFERENT golferId (the "GolferMerged" case, explicitly out of v1 scope).
-  | "golfer-already-claimed";
+  | "golfer-already-claimed"
+  // Task 5b (ghost continuity, .superpowers/sdd/task-5b-brief.md): joinRound's supplied-
+  // golferId reuse — the target golfer's row carries a sub (claimed). A claimed identity may
+  // not be joined-as by anyone in v1; join-as-self with a matching Bearer token is deferred
+  // to M8. Distinct from golfer-already-claimed above (that's claimGolfer's OWN collision).
+  | "golfer-claimed"
+  // Task 5b: the supplied golferId is already a participant in THIS round's fold — appending
+  // a second participant-joined for it would corrupt the roster (two rows, one golfer).
+  | "golfer-already-in-round";
 
 export class ApplicationError extends Error {
   constructor(

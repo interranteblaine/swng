@@ -48,6 +48,20 @@ describe("joinRoundRequestSchema", () => {
     const request = { code: "ABC12", name: "Bo", tee: "white", courseHandicap: 2 };
     expect(() => parse(joinRoundRequestSchema, request)).toThrow(ContractError);
   });
+
+  // Task 5b (ghost continuity, .superpowers/sdd/task-5b-brief.md): a joiner may present an
+  // existing GolferId so the SAME ghost can recur across rounds. Round-tripping the whole
+  // object (not just checking golferId is present) pins that the optional field neither gets
+  // silently dropped nor mutates any of the other four.
+  it("accepts a valid join-round request that supplies an existing golferId", () => {
+    const request = { code: "ABC123", name: "Bo", tee: "white", courseHandicap: 2, golferId: "g-1" };
+    expect(parse(joinRoundRequestSchema, request)).toEqual(request);
+  });
+
+  it("rejects an empty golferId when one is supplied", () => {
+    const request = { code: "ABC123", name: "Bo", tee: "white", courseHandicap: 2, golferId: "" };
+    expect(() => parse(joinRoundRequestSchema, request)).toThrow(ContractError);
+  });
 });
 
 describe("recordScoreRequestSchema", () => {

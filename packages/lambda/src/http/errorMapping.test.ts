@@ -99,3 +99,27 @@ describe("toHttpError — M7 golfer/terminate ApplicationErrors", () => {
     expect(JSON.parse(result.body)).toEqual({ code: "golfer-conflict", message: "golfer g-1 revision mismatch (expected 2)" });
   });
 });
+
+// Task 5b (.superpowers/sdd/task-5b-brief.md): joinRound.ts's two new codes for supplied-
+// golferId reuse — constructed exactly as its real throw sites do (joinRound.ts), not
+// invented strings (M6 lesson).
+describe("toHttpError — Task 5b joinRound ApplicationErrors", () => {
+  const logger = createNullLogger();
+
+  // A claimed identity may not be joined-as by anyone in v1 (join-as-self with Bearer is
+  // deferred to M8) — a 403, distinct from the 409s above (this isn't a conflicting write,
+  // it's a forbidden actor).
+  it("maps golfer-claimed to 403", () => {
+    const result = toHttpError(new ApplicationError("golfer-claimed", "golfer g-1 is claimed"), logger);
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({ code: "golfer-claimed", message: "golfer g-1 is claimed" });
+  });
+
+  // A duplicate participant-joined would corrupt the roster — same "failed precondition" 409
+  // shape as golfer-conflict/course-conflict above.
+  it("maps golfer-already-in-round to 409", () => {
+    const result = toHttpError(new ApplicationError("golfer-already-in-round", "golfer g-1 is already a participant in this round"), logger);
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body)).toEqual({ code: "golfer-already-in-round", message: "golfer g-1 is already a participant in this round" });
+  });
+});

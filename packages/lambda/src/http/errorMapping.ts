@@ -37,6 +37,12 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "unknown-game": 404,
   "golfer-conflict": 409,
   "golfer-already-claimed": 409,
+  // Task 5b (.superpowers/sdd/task-5b-brief.md): joinRound's supplied-golferId reuse. A
+  // claimed identity is a forbidden ACTOR (not a conflicting write), the same shape as
+  // not-a-participant/token-round-mismatch above — 403. A golferId already seated in THIS
+  // round is a failed precondition on the roster, the same shape as golfer-conflict — 409.
+  "golfer-claimed": 403,
+  "golfer-already-in-round": 409,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`

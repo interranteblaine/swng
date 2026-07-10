@@ -7,6 +7,7 @@ import {
   createCapturingBroadcast,
   createFixedClock,
   createFrozenClock,
+  createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryRoundStore,
   createSequentialIds,
@@ -53,11 +54,14 @@ const setup = (clock: Clock = createFixedClock(1_000)) => {
   const broadcast = createCapturingBroadcast();
   const tokens = createTestTokenIssuer();
   const ids = createSequentialIds("t");
+  const golferStore = createInMemoryGolferStore();
 
   return {
     broadcast,
+    tokens,
+    golferStore,
     start: startRound({ journal, store, broadcast, tokens, clock, ids }),
-    join: joinRound({ journal, store, broadcast, tokens, clock, ids }),
+    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
     finalize: finalizeRound({ journal, store, broadcast, clock, ids }),
@@ -243,6 +247,61 @@ describe("round use cases — golden path over in-memory ports", () => {
   it("rejects peekRound with an unknown join code — bad-join-code, same shape as join's", async () => {
     const ctx = setup();
     await expect(ctx.peek("ZZZZZZ")).rejects.toMatchObject({ code: "bad-join-code" });
+  });
+});
+
+// Task 5b (ghost continuity, .superpowers/sdd/task-5b-brief.md): a joiner may present an
+// existing GolferId so the SAME ghost recurs across rounds — reuse is allowed IFF the golfer
+// is unclaimed. Absent-golferId behavior is pinned by the untouched suite above (setup()'s
+// join is the exact same function; these tests only exercise the NEW branch).
+describe("joinRound — supplied golferId (Task 5b)", () => {
+  it("uses the supplied golferId for the participant event, the response, and the issued token", async () => {
+    const ctx = setup();
+    const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
+    const ghost = golferId("ghost-1");
+
+    const joined = await ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2, golferId: ghost });
+    expect(joined.golferId).toBe(ghost);
+
+    const boJoinedEvent = (await ctx.events(host.roundId, 3)).events[0];
+    expect(boJoinedEvent).toMatchObject({ kind: "participant-joined", authorId: ghost, participant: { golferId: ghost } });
+
+    expect(ctx.tokens.verify(joined.token)).toEqual({ roundId: host.roundId, golferId: ghost });
+  });
+
+  it("reuses the SAME supplied golferId across two different rounds — continuity", async () => {
+    const ctx = setup();
+    const ghost = golferId("ghost-2");
+
+    const roundA = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
+    const joinedA = await ctx.join({ code: roundA.joinCode, name: "Bo", tee: "white", courseHandicap: 2, golferId: ghost });
+    expect(joinedA.golferId).toBe(ghost);
+
+    const roundB = await ctx.start({ card: fixtureLinks, host: { name: "Cal", tee: "white", courseHandicap: 5 } });
+    const joinedB = await ctx.join({ code: roundB.joinCode, name: "Bo", tee: "white", courseHandicap: 2, golferId: ghost });
+    expect(joinedB.golferId).toBe(ghost);
+    expect(joinedB.roundId).not.toBe(joinedA.roundId);
+  });
+
+  // golferStore.ts's port doc invariant: absence of a GOLFER row means unclaimed (rows are
+  // lazy) — only a row WITH sub blocks reuse. `.claim` is the fake's own real path to a
+  // sub-bound row (mirrors claimGolfer.ts's usage), not a hand-built object.
+  it("rejects a join with a claimed golferId — golfer-claimed", async () => {
+    const ctx = setup();
+    const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
+    const claimed = golferId("claimed-1");
+    await ctx.golferStore.claim(claimed, "sub-1", "Real Person");
+
+    await expect(
+      ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2, golferId: claimed }),
+    ).rejects.toMatchObject({ code: "golfer-claimed" });
+  });
+
+  it("rejects a join with a golferId that's already a participant in THIS round — golfer-already-in-round", async () => {
+    const round = await freshLiveRound(); // Ann (host) + Bo already joined with a freshly-minted golferId
+    await expect(
+      round.join({ code: round.host.joinCode, name: "Bo again", tee: "white", courseHandicap: 3, golferId: round.bo.golferId }),
+    ).rejects.toMatchObject({ code: "golfer-already-in-round" });
   });
 });
 

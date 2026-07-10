@@ -122,7 +122,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
 
   const useCases: UseCases = {
     startRound: startRound({ journal, store, broadcast, tokens, clock, ids }),
-    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids }),
+    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, store, broadcast, clock, ids }),

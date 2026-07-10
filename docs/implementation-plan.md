@@ -447,6 +447,84 @@ ledger and H2H records; creating Saturday's usual game is one tap from the crew 
 
 **Gate:** the four v1-bar bullets verified in the field, not in test.
 
+**M9 hardening ledger (carried forward from M7's own closing review):** every item below was
+accepted, deliberately, as beta-grade during M3–M7 — each has an in-code why-comment at the
+cited spot, this is just the one consolidated list Task 2 works from.
+
+- **`USER_PASSWORD_AUTH` removal** (`apps/infra-cdk/lib/swngStack.ts`'s `UserPoolClient`): the
+  real web app only ever drives authorization-code+PKCE; the password flow exists solely so
+  `pnpm e2e:beta`/`e2e:field` can mint a JWT via `InitiateAuth` without a browser. Narrow or
+  remove it once the e2e gates have another way to authenticate (a Hosted-UI-driving Playwright
+  flow, or a dedicated test-only token-mint endpoint gated off in prod).
+- **localStorage token storage** (`apps/web/src/auth/tokenStore.ts`): plaintext Cognito
+  tokens (id + refresh) in `localStorage`, no rotation beyond the one-shot 401-triggered
+  refresh `useAuth.ts` drives. An XSS on the web app reads them directly. Accepted for beta's
+  threat model (no third-party script surface); prod hardening is an httpOnly-cookie session or
+  short-lived-token-in-memory-only design.
+- **Claim capability = knowledge of the golferId, nothing more** (`claimGolfer.ts` /
+  `SetupPanel.tsx`'s `ClaimAffordance`): the only thing standing between "browsing a round" and
+  "claiming that ghost's whole history" is the golferId's own secrecy — there's no server-side
+  check that the claimant was ever actually IN that round, no OTP/email confirmation, no
+  time-boxing. M9 needs a real challenge (e.g. a code the round's other participants can see,
+  or a server-checked "was this sub ever a WS/HTTP participant on this round" test) before prod.
+  The honest copy this milestone shipped for the 409 arm (`SetupPanel.tsx`: "Your account
+  already has a profile — claiming another ghost isn't supported yet" vs. "Already claimed by
+  another account.") is a UX mitigation, not a security one — it stops the common accidental
+  case (a new user hasn't Saved their own profile yet) from reading as a hack attempt, but does
+  nothing about a deliberate golferId-guessing claim.
+- **Join-vs-claim race** (`joinRound.ts`, the `boundElsewhere`/`existing?.sub` check): a claim
+  can land between `joinRound`'s golferStore read and its `participant-joined` append, letting a
+  golferId get joined into a round moments after being claimed elsewhere. Narrow window, needs
+  advance knowledge of the golferId mid-claim, and grants nothing beyond what an unclaimed
+  ghost's participant token already carries (M4: ghost tokens carry no auth) — accepted, not
+  revisited until identity hardening needs the same claim-atomicity work anyway.
+- **`GolferStore.put` can silently drop a `sub`** (`createDynamoGolferStore.ts`): `put`'s `sub`
+  field is a plain overwrite, not conditional or merged — a caller that reconstructs a `Golfer`
+  without re-passing `found.sub` clears the claim on save. Every real call site today
+  (`updateMyGolfer.ts`) re-passes it correctly, so this is a discipline invariant, not a
+  structural one; M9 should either make `put` sub-preserving by default or add a lint/test that
+  pins every call site.
+- **gsi2 eventual-consistency duplicate-golfer window** (`getOrCreateGolfer`,
+  `getMyGolfer.ts`): sub-uniqueness is enforced by querying gsi2 (`getBySub`), and GSIs are
+  never strongly consistent — two near-simultaneous first-ever PUT /me calls for the same sub
+  can both read "no existing golfer" and each mint and `put` its own fresh golferId, landing
+  two separate golfer rows bound to one sub. Design note for M9: a base-table `SUB#<sub>`
+  pointer item (consistent-readable, created via a real conditional `put`) would make
+  sub-uniqueness a true invariant instead of a race that merely self-heals on the next GET /me
+  picking one winner.
+- **Projector staleness — per-shard, not per-golfer, serialization** (`projectArchive.ts`):
+  DynamoDB Streams order per shard, and shards partition by round, not golfer — two rounds
+  finalizing near-simultaneously that share a participant can land on different shards and race
+  `projectArchive`'s `listHistory` → `computeIndexDetail` → `putIndex` sequence, momentarily
+  storing an index short one differential. Self-heals on that golfer's next finalize or a
+  `rebuildProjections` pass.
+- **Rebuild-vs-live-finalize wipe window** (`rebuildProjections.ts`): the manual rebuild's
+  archive Scan (`createDynamoArchiveSource`) necessarily predates its own wipe step; a round
+  that finalizes (and runs the live stream-triggered `projectArchive`) after the Scan but before
+  the wipe has its fresh projection wiped and never restored by that same rebuild run. Operator
+  note: don't invoke `RebuildFunction` while rounds are actively finalizing, or just invoke it
+  again.
+- **Non-atomic `putHistoryLine` upsert** (`projectArchive.ts`'s `putHistoryLine` +
+  `listHistory` + `putIndex` sequence): three separate writes/reads per golfer per finalize, no
+  transaction across them. A crash or throw between them leaves a history line posted without
+  an updated index (the real race M7's own `identityRecord.spec.ts` gate first caught, fixed in
+  the test's poll condition, not the product). Acceptable for a projection (rebuild is the
+  general-purpose repair path); would need real atomicity if projections ever became a source
+  of truth.
+- **`RebuildFunction`'s global full-table replay** (`packages/lambda/src/entries/rebuild.ts`):
+  no pagination or partial-range replay — every invocation Scans and replays every archive in
+  the table, unconditionally. Fine at today's "a few thousand events across an afternoon" scale
+  (`architecture.md` §3); as the archive count grows this eventually blows the Lambda's memory
+  (materializing every archive in one array) and its 5-minute timeout before hardening does.
+  M9 should add either incremental/windowed rebuild or a streaming (non-materializing) pass.
+- **Throwaway e2e Cognito users/data accretion on beta**: `identityRecord.spec.ts`'s
+  `mintThrowawayUser` (`AdminCreateUser`/`AdminSetUserPassword`) and its own throwaway courses
+  (`Identity Record Course ${Date.now()}`) are never deleted after the run — every `e2e:beta`/
+  `e2e:field` invocation leaves permanent rows in the beta User Pool and courses table. Fine for
+  now (beta is disposable, not prod), but unbounded over the project's lifetime; M9 should add
+  teardown (`AdminDeleteUser` in an `afterAll`, or a periodic beta-only sweep) before beta data
+  volume itself becomes a hardening concern.
+
 ---
 
 ## Risks watched

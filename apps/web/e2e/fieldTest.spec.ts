@@ -50,6 +50,28 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
   // sugar, not the correctness path — architecture.md §3), a silent death would otherwise leave
   // B stuck with no way to notice. Forcing the close is what lets B's own UI detect it (the
   // offline banner) and recover via the same "Sync now" affordance Step 9's own fallback uses.
+  //
+  // digest-flake-diagnosis.md (.superpowers/sdd/) found the above mitigation is NOT enough: it
+  // reproduced, live, a RECONNECTED socket (opened after Step 6's "Sync now") that delivers zero
+  // further upstream->client frames for the rest of the run while never once firing server.onClose
+  // either — no close, no error, just silence. That rules out "onClose is wired once instead of
+  // per-connection" as the gap: Playwright re-invokes this routeWebSocket handler fresh for every
+  // new WebSocket (confirmed both by the SDK's own docs — "handler will be called for each
+  // WebSocket connection" — and by the diagnosis's own instrumentation, which logged a fresh
+  // "proxy socket opened" line for the reconnected connection, proving server.onClose WAS
+  // re-armed for it). The real gap is that a close-driven mitigation has nothing to hook when the
+  // upstream leg dies without ever emitting a close/error event at all. Closing that requires a
+  // delivery watchdog, not a close-wiring fix: reset a timer on every relayed upstream message
+  // (armed immediately on connect, too, in case the very first message never arrives), and treat
+  // WATCHDOG_MS of silence exactly like an observed upstream close. The real client only ever
+  // RECEIVES over this socket (scores are pushed via HTTP; WS is receive-only sugar per
+  // architecture.md §3), so watching the server->client direction alone is sufficient.
+  // WATCHDOG_MS is picked well above any legitimate gap in this suite (score broadcasts land
+  // within milliseconds of being posted; the whole 18-hole run completes in well under a minute)
+  // and well below the 10s-per-leg recovery race in waitForDigestOrRecover/waitForFinalOrRecover,
+  // so a real zombie flips the client to "disconnected" (Offline banner) with time to spare for
+  // that race to see it and fall back to "Sync now."
+  const WATCHDOG_MS = 6_000;
   let bWsRoute: WebSocketRoute | undefined;
 
   test.beforeAll(async ({ browser }) => {
@@ -63,10 +85,22 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     contextB = await browser.newContext();
     await contextB.routeWebSocket(/.*/, (ws) => {
       const server = ws.connectToServer();
-      server.onMessage((message) => ws.send(message));
-      server.onClose(() => {
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      const forceClose = () => {
+        clearTimeout(watchdog);
+        watchdog = undefined;
         void ws.close().catch(() => {});
+      };
+      const armWatchdog = () => {
+        clearTimeout(watchdog);
+        watchdog = setTimeout(forceClose, WATCHDOG_MS);
+      };
+      armWatchdog(); // covers a connection that never delivers a single upstream message
+      server.onMessage((message) => {
+        armWatchdog(); // any upstream traffic proves the leg is alive — push the deadline out
+        ws.send(message);
       });
+      server.onClose(forceClose); // the pre-existing (correctly re-armed) close-based mitigation
       bWsRoute = ws;
     });
     pageA = await contextA.newPage();

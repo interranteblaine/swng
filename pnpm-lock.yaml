@@ -114,6 +114,9 @@ importers:
         specifier: ^10.0.0
         version: 10.4.3
     devDependencies:
+      '@swng/adapters-dynamodb':
+        specifier: workspace:*
+        version: link:../../packages/adapters-dynamodb
       '@swng/lambda':
         specifier: workspace:*
         version: link:../../packages/lambda

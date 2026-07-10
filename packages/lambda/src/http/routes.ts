@@ -1,17 +1,21 @@
 import type { z } from "zod";
-import { courseId, roundId } from "@swng/domain";
-import type { CourseId, RoundId } from "@swng/domain";
+import { courseId, gameId, roundId } from "@swng/domain";
+import type { CourseId, GameId, RoundId } from "@swng/domain";
 import type { AccountClaims, ParticipantClaims } from "@swng/application";
 import type {
   AddGameRequest,
   AddGameResponse,
   AddTeeSetRequest,
   AddTeeSetResponse,
+  ClaimGolferRequest,
   CreateCourseRequest,
   CreateCourseResponse,
   EventsResponse,
   FinalizeRoundResponse,
   GetCourseResponse,
+  GetMeResponse,
+  GetMyRecordResponse,
+  GolferResponse,
   JoinRoundRequest,
   JoinRoundResponse,
   PeekRoundResponse,
@@ -20,6 +24,8 @@ import type {
   SearchCoursesResponse,
   StartRoundRequest,
   StartRoundResponse,
+  TerminateGameResponse,
+  UpdateMeRequest,
   VerifyTeeSetRequest,
   VerifyTeeSetResponse,
 } from "@swng/contracts";
@@ -27,10 +33,12 @@ import {
   ContractError,
   addGameRequestSchema,
   addTeeSetRequestSchema,
+  claimGolferRequestSchema,
   createCourseRequestSchema,
   joinRoundRequestSchema,
   recordScoreRequestSchema,
   startRoundRequestSchema,
+  updateMeRequestSchema,
   verifyTeeSetRequestSchema,
 } from "@swng/contracts";
 
@@ -51,6 +59,15 @@ export interface UseCases {
   verifyTeeSet: (id: CourseId, command: VerifyTeeSetRequest) => Promise<VerifyTeeSetResponse>;
   getCourse: (id: CourseId) => Promise<GetCourseResponse>;
   searchCourses: (query: string, limit?: number) => Promise<SearchCoursesResponse>;
+  // M7 Task 5: game/round termination + the golfer identity surface. terminateGame stays
+  // "participant"-gated (matches finalize — game management is a connected, online round act,
+  // not identity-scoped); the four /me* + /golfers/claim routes are "golfer"-gated, taking
+  // AccountClaims the same way the participant routes above take ParticipantClaims.
+  terminateGame: (claims: ParticipantClaims, targetGameId: GameId) => Promise<TerminateGameResponse>;
+  getMyGolfer: (claims: AccountClaims) => Promise<GetMeResponse>;
+  updateMyGolfer: (claims: AccountClaims, command: UpdateMeRequest) => Promise<GolferResponse>;
+  claimGolfer: (claims: AccountClaims, command: ClaimGolferRequest) => Promise<GolferResponse>;
+  getMyRecord: (claims: AccountClaims) => Promise<GetMyRecordResponse>;
 }
 
 // What a route handler sees once the dispatcher has matched the path, verified auth, and
@@ -70,7 +87,8 @@ export interface RouteContext {
 }
 
 export interface Route {
-  readonly method: "GET" | "POST";
+  // "PUT" only backs PUT /me (M7 Task 5) — every other route in this table is GET or POST.
+  readonly method: "GET" | "POST" | "PUT";
   readonly path: string; // template with `{name}` segments, e.g. "/rounds/{roundId}/games"
   readonly schema?: z.ZodType;
   // "participant" = a round-scoped token minted off a join code (no account required);
@@ -198,6 +216,13 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
   },
   {
     method: "POST",
+    path: "/rounds/{roundId}/games/{gameId}/terminate",
+    auth: "participant",
+    successStatus: 200, // idempotent no-op on a repeat terminate (terminateGame.ts), same status-code spirit as finalize.
+    handler: async (ctx) => useCases.terminateGame(ctx.claims!, gameId(ctx.pathParams.gameId!)),
+  },
+  {
+    method: "POST",
     path: "/courses",
     schema: createCourseRequestSchema,
     auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
@@ -233,5 +258,39 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
     successStatus: 200,
     handler: async (ctx) => useCases.searchCourses(parseSearchQuery(ctx.query.query), parseLimit(ctx.query.limit)),
+  },
+  // M7 Task 5: the golfer identity surface — every route below is "golfer"-gated (a signed-in
+  // Cognito identity, never a round-scoped participant token). GET /me NEVER creates (the
+  // plan's amendment, see getMyGolfer.ts's own doc comment); PUT /me is the one get-or-create
+  // path.
+  {
+    method: "GET",
+    path: "/me",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getMyGolfer(ctx.account!),
+  },
+  {
+    method: "PUT",
+    path: "/me",
+    schema: updateMeRequestSchema,
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx, body) => useCases.updateMyGolfer(ctx.account!, body as UpdateMeRequest),
+  },
+  {
+    method: "POST",
+    path: "/golfers/claim",
+    schema: claimGolferRequestSchema,
+    auth: "golfer",
+    successStatus: 200, // an act on an existing (ghost) resource, not minting a new one — matches finalize/terminate's 200, not a 201.
+    handler: async (ctx, body) => useCases.claimGolfer(ctx.account!, body as ClaimGolferRequest),
+  },
+  {
+    method: "GET",
+    path: "/me/record",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getMyRecord(ctx.account!),
   },
 ];

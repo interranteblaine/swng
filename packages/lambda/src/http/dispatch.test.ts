@@ -5,22 +5,29 @@ import type { AccountClaims, AccountVerifier } from "@swng/application";
 import {
   addGame,
   addTeeSet,
+  claimGolfer,
   createCapturingBroadcast,
   createCourse,
   createFixedClock,
   createInMemoryCourseStore,
+  createInMemoryGolferStore,
   createInMemoryJournal,
+  createInMemoryProjectionStore,
   createInMemoryRoundStore,
   createNullLogger,
   createSequentialIds,
   finalizeRound,
   getCourse,
+  getMyGolfer,
+  getMyRecord,
   joinRound,
   peekRound,
   readEvents,
   recordScore,
   searchCourses,
   startRound,
+  terminateGame,
+  updateMyGolfer,
   verifyTeeSet,
 } from "@swng/application";
 import {
@@ -30,11 +37,15 @@ import {
   errorResponseSchema,
   finalizeRoundResponseSchema,
   getCourseResponseSchema,
+  getMeResponseSchema,
+  getMyRecordResponseSchema,
+  golferResponseSchema,
   joinRoundResponseSchema,
   peekRoundResponseSchema,
   recordScoreResponseSchema,
   searchCoursesResponseSchema,
   startRoundResponseSchema,
+  terminateGameResponseSchema,
   verifyTeeSetResponseSchema,
 } from "@swng/contracts";
 import { createHmacTokenIssuer } from "../auth/hmacTokenIssuer.js";
@@ -81,21 +92,28 @@ const makeEvent = (opts: {
 const asStructured = (result: Awaited<ReturnType<ReturnType<typeof createDispatcher>>>): APIGatewayProxyStructuredResultV2 =>
   result as APIGatewayProxyStructuredResultV2;
 
-// No route in buildRoutes declares `auth: "golfer"` yet (M7 Task 4 adds the tier; the routes
-// that use it land in a later task) — this stub is never actually invoked by any test in this
-// file's golden-path/course-routes suites below, only wired so createDispatcher's signature is
-// satisfied. The golfer-tier behavior itself is exercised directly against a small ad-hoc
-// route table further down (`describe("createDispatcher — golfer auth tier")`).
+// No route in buildRoutes' golden-path/course-routes suites below ever dispatches through the
+// "golfer" auth tier — this stub is only wired so createDispatcher's signature is satisfied.
+// The tier's own auth mechanics (missing/garbage/valid token) are covered by the small ad-hoc
+// route table further down (`describe("createDispatcher — golfer auth tier")`); the REAL
+// golfer/terminate routes (M7 Task 5) get their own `setup`-alike further down too
+// (`describe("createDispatcher — golfer + terminate routes (M7 Task 5)")`), which passes a
+// real stubVerifier instead of this one.
 const neverCalledVerifier: AccountVerifier = {
   verify: async () => {
     throw new Error("neverCalledVerifier: no route in this suite uses the golfer auth tier");
   },
 };
 
-const setup = () => {
+// `verifier` defaults to neverCalledVerifier (this file's golden-path/course-routes suites
+// never dispatch a golfer-tier route) — the golfer/terminate describe block below passes its
+// own stubVerifier instead, sharing every other fake.
+const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
   const journal = createInMemoryJournal();
   const store = createInMemoryRoundStore();
   const courseStore = createInMemoryCourseStore();
+  const golferStore = createInMemoryGolferStore();
+  const projectionStore = createInMemoryProjectionStore();
   const broadcast = createCapturingBroadcast();
   const clock = createFixedClock(1_000);
   const ids = createSequentialIds("id");
@@ -115,9 +133,14 @@ const setup = () => {
     verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
     getCourse: getCourse({ courseStore }),
     searchCourses: searchCourses({ courseStore }),
+    terminateGame: terminateGame({ journal, broadcast, clock, ids }),
+    getMyGolfer: getMyGolfer({ golferStore }),
+    updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
+    claimGolfer: claimGolfer({ golferStore }),
+    getMyRecord: getMyRecord({ golferStore, projectionStore }),
   };
 
-  const dispatcher = createDispatcher(buildRoutes(useCases), tokens, neverCalledVerifier, logger);
+  const dispatcher = createDispatcher(buildRoutes(useCases), tokens, verifier, logger);
   return { dispatcher, tokens };
 };
 
@@ -476,10 +499,11 @@ describe("createDispatcher — course routes + peek (M6 Task 4)", () => {
   });
 });
 
-// M7 Task 4: the "golfer" auth tier itself — no real route declares it yet (that lands with
-// the golfer/record routes in a later task), so this exercises it against a tiny hand-built
-// route table rather than buildRoutes' real one, the same way TokenIssuer's own behavior
-// would be tested in isolation from any specific route.
+// M7 Task 4: the "golfer" auth tier's own mechanics (missing/garbage/valid token), exercised
+// against a tiny hand-built route table rather than buildRoutes' real one — the same way
+// TokenIssuer's own behavior is tested in isolation from any specific route. The REAL golfer
+// routes buildRoutes now declares (M7 Task 5) get their own suite further down
+// (`describe("createDispatcher — golfer + terminate routes (M7 Task 5)")`).
 describe("createDispatcher — golfer auth tier (M7 Task 4)", () => {
   const VALID_TOKEN = "valid-golfer-token";
   const account: AccountClaims = { sub: "cognito-sub-123", email: "ann@example.com" };
@@ -523,5 +547,193 @@ describe("createDispatcher — golfer auth tier (M7 Task 4)", () => {
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: VALID_TOKEN })));
     expect(resp.statusCode).toBe(200);
     expect(JSON.parse(resp.body!)).toEqual({ sub: account.sub, email: account.email });
+  });
+});
+
+// M7 Task 5: the real routes — POST .../terminate (participant-gated) and the four "golfer"
+// routes buildRoutes now declares. `golferBearer` stands in for a real Cognito ID token: any
+// string the caller chose to mint one of the three fixed accounts below; an unrecognized
+// bearer is what a participant round token (or plain garbage) looks like to this verifier,
+// driving the SAME 401 a real CognitoVerifier rejection would (dispatch.ts's catch collapses
+// every verifier failure to invalid-token) — the REAL error code, not an invented one (M6
+// lesson).
+describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
+  const ann: AccountClaims = { sub: "cognito-sub-ann", email: "ann@example.com" };
+  const bo: AccountClaims = { sub: "cognito-sub-bo", email: "bo@example.com" };
+  const cal: AccountClaims = { sub: "cognito-sub-cal", email: "cal@example.com" };
+  const golferBearer = (account: AccountClaims): string => `golfer-token-${account.sub}`;
+
+  const stubVerifier: AccountVerifier = {
+    verify: async (bearer: string) => {
+      const account = [ann, bo, cal].find((candidate) => golferBearer(candidate) === bearer);
+      if (!account) throw new Error("stubVerifier: unknown token");
+      return account;
+    },
+  };
+
+  const setupGolfer = () => setup(stubVerifier);
+
+  describe("terminate", () => {
+    it("terminates the sole unresolved game under participant auth, then finalize succeeds over HTTP", async () => {
+      const { dispatcher } = setupGolfer();
+
+      const started = startRoundResponseSchema.parse(
+        JSON.parse(
+          asStructured(
+            await dispatcher(
+              makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+            ),
+          ).body!,
+        ),
+      );
+
+      const addGameResp = asStructured(
+        await dispatcher(
+          makeEvent({
+            method: "POST",
+            path: `/rounds/${started.roundId}/games`,
+            token: started.token,
+            body: { game: { kind: "stableford", players: [started.golferId] } },
+          }),
+        ),
+      );
+      const added = addGameResponseSchema.parse(JSON.parse(addGameResp.body!));
+
+      // Nobody scores — finalize must fail until the game is terminated.
+      const blockedResp = asStructured(
+        await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })),
+      );
+      expect(blockedResp.statusCode).toBe(409);
+      expect(errorResponseSchema.parse(JSON.parse(blockedResp.body!))).toMatchObject({ code: "game-unresolved" });
+
+      const terminateResp = asStructured(
+        await dispatcher(
+          makeEvent({ method: "POST", path: `/rounds/${started.roundId}/games/${added.gameId}/terminate`, token: started.token }),
+        ),
+      );
+      expect(terminateResp.statusCode).toBe(200);
+      terminateGameResponseSchema.parse(JSON.parse(terminateResp.body!));
+
+      const finalizeResp = asStructured(
+        await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })),
+      );
+      expect(finalizeResp.statusCode).toBe(200);
+      const finalized = finalizeRoundResponseSchema.parse(JSON.parse(finalizeResp.body!));
+      expect(finalized.results).toHaveLength(0); // the terminated game never produced a result
+    });
+
+    it("404s terminate for a gameId never added to this round — unknown-game, the REAL error code", async () => {
+      const { dispatcher } = setupGolfer();
+
+      const started = startRoundResponseSchema.parse(
+        JSON.parse(
+          asStructured(
+            await dispatcher(
+              makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+            ),
+          ).body!,
+        ),
+      );
+
+      const resp = asStructured(
+        await dispatcher(
+          makeEvent({ method: "POST", path: `/rounds/${started.roundId}/games/never-added/terminate`, token: started.token }),
+        ),
+      );
+      expect(resp.statusCode).toBe(404);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "unknown-game" });
+    });
+  });
+
+  it("401s GET /me — a golfer-tier route — given a round-scoped participant token as the bearer", async () => {
+    const { dispatcher } = setupGolfer();
+
+    const started = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(
+            makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+          ),
+        ).body!,
+      ),
+    );
+
+    // started.token is a real, valid PARTICIPANT token — but the stub verifier (standing in
+    // for CognitoVerifier) doesn't recognize it as any of its own golfer bearers.
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: started.token })));
+    expect(resp.statusCode).toBe(401);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+  });
+
+  it("401s GET /me — a golfer-tier route — given a garbage bearer token", async () => {
+    const { dispatcher } = setupGolfer();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: "totally-not-a-real-token" })));
+    expect(resp.statusCode).toBe(401);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+  });
+
+  // The amended sequence (controller-adjudicated, supersedes the plan's original "GET /me
+  // get-or-creates"): GET /me NEVER creates — a fresh sub gets `{golfer: null}` TWICE (proving
+  // the first call didn't silently bind it), PUT /me is the one create path, and a claim on a
+  // still-unbound sub proceeds straight through (no "already bound elsewhere" collision).
+  it("GET /me (null, null) -> PUT /me (create) -> GET /me (same golferId) -> claim a ghost (200) -> re-claim as a third user (409)", async () => {
+    const { dispatcher } = setupGolfer();
+
+    const firstGet = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: golferBearer(ann) })));
+    expect(firstGet.statusCode).toBe(200);
+    expect(getMeResponseSchema.parse(JSON.parse(firstGet.body!))).toEqual({ golfer: null });
+
+    const secondGet = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: golferBearer(ann) })));
+    expect(secondGet.statusCode).toBe(200);
+    expect(getMeResponseSchema.parse(JSON.parse(secondGet.body!))).toEqual({ golfer: null }); // still null — GET never created a row
+
+    const putResp = asStructured(
+      await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann Golfer" } })),
+    );
+    expect(putResp.statusCode).toBe(200);
+    const created = golferResponseSchema.parse(JSON.parse(putResp.body!));
+    expect(created.golfer.name).toBe("Ann Golfer");
+
+    const thirdGet = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: golferBearer(ann) })));
+    expect(thirdGet.statusCode).toBe(200);
+    const fetched = getMeResponseSchema.parse(JSON.parse(thirdGet.body!));
+    expect(fetched.golfer?.golferId).toBe(created.golfer.golferId);
+
+    // A ghost — a golferId a round already knows a player by, but with no golfer item and no
+    // bound sub — created by Bo starting a throwaway round and never signing in as that
+    // player.
+    const throwaway = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(
+            makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ghost", tee: "white", courseHandicap: 5 } } }),
+          ),
+        ).body!,
+      ),
+    );
+    const ghostId = throwaway.golferId;
+
+    const claimResp = asStructured(
+      await dispatcher(makeEvent({ method: "POST", path: "/golfers/claim", token: golferBearer(bo), body: { golferId: ghostId } })),
+    );
+    expect(claimResp.statusCode).toBe(200);
+    const claimed = golferResponseSchema.parse(JSON.parse(claimResp.body!));
+    expect(claimed.golfer.golferId).toBe(ghostId);
+
+    // Cal, a third, unrelated user, tries to claim the SAME ghost Bo already has — the real
+    // golfer-already-claimed error code, mapped to a REAL 409 (M6 lesson: not an invented
+    // string).
+    const reclaimResp = asStructured(
+      await dispatcher(makeEvent({ method: "POST", path: "/golfers/claim", token: golferBearer(cal), body: { golferId: ghostId } })),
+    );
+    expect(reclaimResp.statusCode).toBe(409);
+    expect(errorResponseSchema.parse(JSON.parse(reclaimResp.body!))).toMatchObject({ code: "golfer-already-claimed" });
+  });
+
+  it("GET /me/record returns an empty history for a golfer who has never played a finalized round", async () => {
+    const { dispatcher } = setupGolfer();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/record", token: golferBearer(ann) })));
+    expect(resp.statusCode).toBe(200);
+    expect(getMyRecordResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ history: [] });
   });
 });

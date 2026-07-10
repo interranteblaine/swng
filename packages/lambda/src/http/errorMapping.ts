@@ -25,12 +25,16 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // round-not-found/bad-join-code.
   "course-conflict": 409,
   "course-not-found": 404,
-  // M7 Task 2 (application/src/errors.ts): the same exhaustiveness pressure as the pair
-  // above, ahead of M7 Task 5's actual golfer/terminate routes. unknown-game is a
-  // referenced-id-outside-this-context 400, same bucket as unknown-golfer-in-game;
+  // M7 Task 2 (application/src/errors.ts) forward-provisioned this ahead of M7 Task 5's
+  // actual golfer/terminate routes with a 400 (bucketed with unknown-golfer-in-game, a bad
+  // BODY field). Task 5's route table puts gameId in the PATH instead
+  // (POST /rounds/{roundId}/games/{gameId}/terminate) — a path-embedded resource reference
+  // that doesn't exist is the same "identified resource not found" shape as
+  // round-not-found/bad-join-code/course-not-found above, so the plan
+  // (docs/superpowers/plans/2026-07-10-m7-identity.md, Task 5) pins 404 here instead;
   // golfer-conflict/golfer-already-claimed are failed-precondition 409s, same bucket as
   // course-conflict.
-  "unknown-game": 400,
+  "unknown-game": 404,
   "golfer-conflict": 409,
   "golfer-already-claimed": 409,
 };

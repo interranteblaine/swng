@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, DynamoDBStreamEvent } from "aws-lambda";
 import type { RoundArchive } from "@swng/domain";
-import type { AccountVerifier, ArchiveSource, Clock, ConnectionRegistry, CourseStore, IdGenerator, Logger, TokenIssuer } from "@swng/application";
+import type { AccountVerifier, ArchiveSource, Clock, ConnectionRegistry, CourseStore, GolferStore, IdGenerator, Logger, ProjectionStore, TokenIssuer } from "@swng/application";
 import {
   addGame,
   addTeeSet,
+  claimGolfer,
   createCourse,
   finalizeRound,
   getCourse,
+  getMyGolfer,
+  getMyRecord,
   joinRound,
   peekRound,
   projectArchive,
@@ -16,6 +19,8 @@ import {
   recordScore,
   searchCourses,
   startRound,
+  terminateGame,
+  updateMyGolfer,
   verifyTeeSet,
 } from "@swng/application";
 import { createApiGatewayBroadcast, createManagementClient } from "@swng/adapters-apigateway";
@@ -26,6 +31,7 @@ import {
   createDynamoConnectionRegistry,
   createDynamoCourseStore,
   createDynamoEventJournal,
+  createDynamoGolferStore,
   createDynamoProjectionStore,
   createDynamoRoundStore,
   parseArchiveStreamImage,
@@ -96,6 +102,27 @@ const unavailableVerifier = (): AccountVerifier => ({
   },
 });
 
+// Same shape again, for TABLE_CORE (unavailableCourseStore's own reason: wsConnect/
+// wsDisconnect never dispatch a golfer/course route) — golferStore lives on the CORE table
+// (keys.ts's golferPk), not TABLE_PROJECTIONS, so it shares TABLE_CORE's optionality with
+// courseStore rather than getting its own env var.
+const unavailableGolferStore = (): GolferStore => {
+  const unavailable = (): never => {
+    throw new Error("buildApp: TABLE_CORE is not set for this entry — golfer routes are HTTP-only (see swngStack.ts)");
+  };
+  return { put: unavailable, get: unavailable, getBySub: unavailable, claim: unavailable };
+};
+
+// Same shape again, for TABLE_PROJECTIONS (M7 Task 5: granted + env'd onto httpFn since Task
+// 4, but unread by buildApp until now — only getMyRecord needs it; wsConnect/wsDisconnect
+// never do).
+const unavailableProjectionStore = (): ProjectionStore => {
+  const unavailable = (): never => {
+    throw new Error("buildApp: TABLE_PROJECTIONS is not set for this entry — the record route is HTTP-only (see swngStack.ts)");
+  };
+  return { putHistoryLine: unavailable, listHistory: unavailable, putIndex: unavailable, getIndex: unavailable, wipeGolfer: unavailable };
+};
+
 export interface App {
   readonly dispatcher: (event: APIGatewayProxyEventV2) => Promise<APIGatewayProxyResultV2>;
   readonly registry: ConnectionRegistry;
@@ -105,13 +132,15 @@ export interface App {
 // Built ONCE at module scope by each entry (cold start), never re-instantiated per
 // invocation (conventions §3) — every dependency this Lambda deployment needs, wired from
 // env: TABLE_ROUNDS, TABLE_CONNECTIONS, TOKEN_SECRET, WS_ENDPOINT (apps/infra-cdk, M3 Task 5),
-// plus TABLE_CORE (M6 Task 4) and USER_POOL_ID/USER_POOL_CLIENT_ID (M7 Task 4), both OPTIONAL
-// here — only httpFn's environment carries them (see unavailableCourseStore/
-// unavailableVerifier above / swngStack.ts).
+// plus TABLE_CORE (M6 Task 4), USER_POOL_ID/USER_POOL_CLIENT_ID, and TABLE_PROJECTIONS (M7
+// Task 4/5), all OPTIONAL here — only httpFn's environment carries them (see
+// unavailableCourseStore/unavailableVerifier/unavailableGolferStore/
+// unavailableProjectionStore above / swngStack.ts).
 export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const tableRounds = requireEnv(env, "TABLE_ROUNDS");
   const tableConnections = requireEnv(env, "TABLE_CONNECTIONS");
   const tableCore = env.TABLE_CORE; // optional — see unavailableCourseStore above
+  const tableProjections = env.TABLE_PROJECTIONS; // optional — see unavailableProjectionStore above
   const userPoolId = env.USER_POOL_ID; // optional — see unavailableVerifier above
   const userPoolClientId = env.USER_POOL_CLIENT_ID; // optional, same reason
   const tokenSecret = requireEnv(env, "TOKEN_SECRET");
@@ -126,6 +155,11 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const store = createDynamoRoundStore({ client: documentClient, tableName: tableRounds });
   const registry = createDynamoConnectionRegistry({ client: documentClient, tableName: tableConnections });
   const courseStore = tableCore !== undefined ? createDynamoCourseStore({ client: documentClient, tableName: tableCore }) : unavailableCourseStore();
+  // golferStore lives on the SAME table as courseStore (keys.ts's golferPk — the core
+  // table), so it shares tableCore's optionality rather than getting its own env var.
+  const golferStore = tableCore !== undefined ? createDynamoGolferStore({ client: documentClient, tableName: tableCore }) : unavailableGolferStore();
+  const projectionStore =
+    tableProjections !== undefined ? createDynamoProjectionStore({ client: documentClient, tableName: tableProjections }) : unavailableProjectionStore();
   const verifier =
     userPoolId !== undefined && userPoolClientId !== undefined
       ? createCognitoVerifier({ userPoolId, clientId: userPoolClientId })
@@ -149,6 +183,11 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
     getCourse: getCourse({ courseStore }),
     searchCourses: searchCourses({ courseStore }),
+    terminateGame: terminateGame({ journal, broadcast, clock, ids }),
+    getMyGolfer: getMyGolfer({ golferStore }),
+    updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
+    claimGolfer: claimGolfer({ golferStore }),
+    getMyRecord: getMyRecord({ golferStore, projectionStore }),
   };
 
   const dispatcher = createDispatcher(buildRoutes(useCases), tokens, verifier, logger);

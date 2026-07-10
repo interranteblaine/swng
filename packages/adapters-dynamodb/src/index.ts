@@ -1,7 +1,12 @@
 // The package's one public interface (conventions §2) — consumers (lambda, its tests)
 // import "@swng/adapters-dynamodb", never a deep path. `keys.ts` and `testing/local.ts` stay
-// internal: the former is table-layout plumbing, the latter is contract-test-only tooling
-// (it spawns Java, downloads a jar) with no place in a Lambda bundle.
+// internal (table-layout plumbing / contract-test-only tooling that spawns Java, downloads a
+// jar — no place in a Lambda bundle), EXCEPT `archiveSk` below: apps/infra-cdk's
+// ProjectorFunction event-source filter hand-duplicates this exact literal (swngStack.ts's
+// `ARCHIVE_SK`, M7 Task 4) with no compile-time link to keys.ts — exporting it here is what
+// lets routesParity.test.ts's sibling, the stack test's `ARCHIVE_SK === archiveSk` pin (M7
+// Task 5 rider), catch drift instead of a projector filter that silently never matches.
+export { archiveSk } from "./keys.js";
 export { createDynamoEventJournal } from "./createDynamoEventJournal.js";
 export { createDynamoRoundStore } from "./createDynamoRoundStore.js";
 export { createDynamoConnectionRegistry } from "./createDynamoConnectionRegistry.js";

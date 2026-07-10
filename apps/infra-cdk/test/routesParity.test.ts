@@ -43,6 +43,21 @@ const stubUseCases: UseCases = {
   searchCourses: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
+  terminateGame: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  getMyGolfer: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  updateMyGolfer: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  claimGolfer: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  getMyRecord: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
 };
 
 const sortKey = (route: { readonly method: string; readonly path: string }): string => `${route.method} ${route.path}`;

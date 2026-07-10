@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { App } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
-import { SwngStack } from "../lib/swngStack.js";
+import { archiveSk } from "@swng/adapters-dynamodb";
+import { ARCHIVE_SK, SwngStack } from "../lib/swngStack.js";
 
 // One stack, synthesized once, asserted against many times — synthesis (which bundles all
 // three Lambdas with esbuild) is the expensive part of this suite; sharing it across `it`
@@ -394,7 +395,7 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "$disconnect" });
     });
 
-    it("wires all twelve HTTP routes", () => {
+    it("wires all seventeen HTTP routes", () => {
       const expectedRouteKeys = [
         "POST /rounds",
         "POST /rounds/join",
@@ -408,6 +409,12 @@ describe("SwngStack", () => {
         "POST /courses/{courseId}/verify",
         "GET /courses/{courseId}",
         "GET /courses",
+        // M7 Task 5: game/round termination + the golfer identity surface.
+        "POST /rounds/{roundId}/games/{gameId}/terminate",
+        "GET /me",
+        "PUT /me",
+        "POST /golfers/claim",
+        "GET /me/record",
       ];
       const routes = template.findResources("AWS::ApiGatewayV2::Route");
       const routeKeys = Object.values(routes).map((route) => route.Properties.RouteKey);
@@ -416,11 +423,21 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (12 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (17 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 14 routes total (12 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 14);
+    it("has exactly 19 routes total (17 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 19);
+    });
+  });
+
+  // M7 Task 5 rider: closes the drift risk the file's own ARCHIVE_SK comment names — a
+  // future rename of keys.ts's `archiveSk` (the projector's event-source filter target) with
+  // no matching update here would silently starve the projector (its filter would never
+  // match a real archive item), and nothing would catch it without this pin.
+  describe("ARCHIVE_SK parity (M7 Task 5 rider)", () => {
+    it("ARCHIVE_SK matches adapters-dynamodb's own archiveSk constant exactly", () => {
+      expect(ARCHIVE_SK).toBe(archiveSk);
     });
   });
 

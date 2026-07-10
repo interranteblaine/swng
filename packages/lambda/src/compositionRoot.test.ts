@@ -131,6 +131,28 @@ describe("buildApp — USER_POOL_ID/USER_POOL_CLIENT_ID are optional (wsConnect/
   });
 });
 
+// M7 Task 5: TABLE_PROJECTIONS was granted + env'd onto httpFn back in Task 4 but unread by
+// buildApp until this task wired getMyRecord to a real ProjectionStore — same "shared
+// buildApp, entry-scoped env" story as TABLE_CORE/USER_POOL_ID above. wsConnect/wsDisconnect
+// never set it (swngStack.ts only puts it on httpFn/projectorFn/rebuildFn), so buildApp must
+// read it lazily/optionally, mirroring the TABLE_CORE idiom exactly.
+describe("buildApp — TABLE_PROJECTIONS is optional (wsConnect/wsDisconnect never set it)", () => {
+  const baseEnv = {
+    TABLE_ROUNDS: "rounds-table",
+    TABLE_CONNECTIONS: "connections-table",
+    TOKEN_SECRET: "test-secret",
+    WS_ENDPOINT: "https://example.execute-api.us-east-1.amazonaws.com/beta",
+  };
+
+  it("does not throw when TABLE_PROJECTIONS is absent — wsConnect/wsDisconnect's real env shape", () => {
+    expect(() => buildApp(baseEnv)).not.toThrow();
+  });
+
+  it("does not throw when TABLE_PROJECTIONS IS present — httpFn's real env shape", () => {
+    expect(() => buildApp({ ...baseEnv, TABLE_PROJECTIONS: "projections-table" })).not.toThrow();
+  });
+});
+
 describe("buildProjector / buildRebuild — required env vars", () => {
   it("buildProjector throws a clear error when TABLE_PROJECTIONS is missing", () => {
     expect(() => buildProjector({})).toThrow(/TABLE_PROJECTIONS/);

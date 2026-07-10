@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createNullLogger } from "@swng/application";
+import { ApplicationError, createNullLogger } from "@swng/application";
 import { DomainError } from "@swng/domain";
 import { toHttpError } from "./errorMapping.js";
 
@@ -58,5 +58,44 @@ describe("toHttpError — course validation DomainErrors map to coded 400s", () 
     const result = toHttpError(new DomainError("some-unmapped-code", "boom"), logger);
     expect(result.statusCode).toBe(500);
     expect(JSON.parse(result.body)).toEqual({ code: "internal-error", message: "an unexpected error occurred" });
+  });
+});
+
+// M7 Task 5: the three ApplicationErrorCodes forward-provisioned in the exhaustive map ahead
+// of this task's actual golfer/terminate routes (M7 Task 2's own errors.ts comment) — each
+// constructed exactly as its real throw site does (terminateGame.ts / createDynamoGolferStore's
+// put+claim), never an invented string (M6 lesson: a mapping test that invents its own error
+// strings proves nothing).
+describe("toHttpError — M7 golfer/terminate ApplicationErrors", () => {
+  const logger = createNullLogger();
+
+  // terminateGame.ts: `if (!state.games.some(...)) throw new ApplicationError("unknown-game")`
+  // — a gameId the route's OWN path segment names but the round never added. Unlike
+  // unknown-golfer-in-game (a body field), this is a path-embedded resource reference, the
+  // same "the identified resource doesn't exist" shape as round-not-found/course-not-found —
+  // 404, not 400 (plan: docs/superpowers/plans/2026-07-10-m7-identity.md, Task 5's route
+  // table).
+  it("maps unknown-game to 404", () => {
+    const result = toHttpError(new ApplicationError("unknown-game"), logger);
+    expect(result.statusCode).toBe(404);
+    expect(JSON.parse(result.body)).toEqual({ code: "unknown-game", message: "unknown-game" });
+  });
+
+  // createDynamoGolferStore.ts's `claim`: a ConditionalCheckFailedException on
+  // attribute_not_exists(#sub) — the target golferId already has a bound sub. Also
+  // claimGolfer.ts's own precheck (the calling sub already bound to a DIFFERENT golferId).
+  it("maps golfer-already-claimed to 409", () => {
+    const result = toHttpError(new ApplicationError("golfer-already-claimed", "golfer g-1 already claimed"), logger);
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body)).toEqual({ code: "golfer-already-claimed", message: "golfer g-1 already claimed" });
+  });
+
+  // createDynamoGolferStore.ts's `put`: a ConditionalCheckFailedException on the
+  // expectedRevision condition — a failed optimistic-concurrency write, same bucket as
+  // course-conflict.
+  it("maps golfer-conflict to 409", () => {
+    const result = toHttpError(new ApplicationError("golfer-conflict", "golfer g-1 revision mismatch (expected 2)"), logger);
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body)).toEqual({ code: "golfer-conflict", message: "golfer g-1 revision mismatch (expected 2)" });
   });
 });

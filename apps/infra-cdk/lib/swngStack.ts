@@ -46,20 +46,30 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.POST, path: "/courses/{courseId}/verify" },
   { method: HttpMethod.GET, path: "/courses/{courseId}" },
   { method: HttpMethod.GET, path: "/courses" },
+  // M7 Task 5: game/round termination + the golfer identity surface.
+  { method: HttpMethod.POST, path: "/rounds/{roundId}/games/{gameId}/terminate" },
+  { method: HttpMethod.GET, path: "/me" },
+  { method: HttpMethod.PUT, path: "/me" },
+  { method: HttpMethod.POST, path: "/golfers/claim" },
+  { method: HttpMethod.GET, path: "/me/record" },
 ];
 
 // packages/lambda/src/entries/*.ts — resolved relative to this file so bundling works
 // whether CDK is invoked from apps/infra-cdk or the repo root.
 const entryPath = (name: string): string => join(import.meta.dirname, "..", "..", "..", "packages", "lambda", "src", "entries", `${name}.ts`);
 
-// Mirrors adapters-dynamodb/src/keys.ts's `archiveSk` constant by hand (M7 Task 4) —
-// infra-cdk has no runtime dependency on that package (unlike HTTP_ROUTES' comment above
-// about routes.ts, which IS pinned at runtime by routesParity.test.ts). Every round's archive
-// item is written with sk fixed to this exact literal (createDynamoRoundStore.ts's
-// putArchive), so the ProjectorFunction's event-source filter criteria below, matching on
-// `dynamodb.Keys.sk.S`, restricts it to ARCHIVE images only — never a stray EVT#/META/OPID#
-// record from the same table's stream.
-const ARCHIVE_SK = "ARCHIVE";
+// Mirrors adapters-dynamodb/src/keys.ts's `archiveSk` constant by hand (M7 Task 4). Every
+// round's archive item is written with sk fixed to this exact literal
+// (createDynamoRoundStore.ts's putArchive), so the ProjectorFunction's event-source filter
+// criteria below, matching on `dynamodb.Keys.sk.S`, restricts it to ARCHIVE images only —
+// never a stray EVT#/META/OPID# record from the same table's stream. A hand-duplicated
+// literal with no parity check would let the two silently drift (the projector filter would
+// then never match anything, and nothing would ever be indexed) — closed the same way
+// routesParity.test.ts closes the equivalent risk for HTTP_ROUTES above: `archiveSk` is
+// exported from `@swng/adapters-dynamodb` (an infra-cdk devDependency, M7 Task 5 rider) and
+// `test/swngStack.test.ts` pins `ARCHIVE_SK === archiveSk`, so a future rename in keys.ts
+// fails CI here instead of silently starving the projector.
+export const ARCHIVE_SK = "ARCHIVE";
 
 export class SwngStack extends Stack {
   constructor(scope: Construct, id: string, props: SwngStackProps = {}) {

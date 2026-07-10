@@ -33,6 +33,7 @@ export interface LocalDynamo {
   readonly roundsTable: string;
   readonly connectionsTable: string;
   readonly coreTable: string;
+  readonly projectionsTable: string;
   readonly stop: () => Promise<void>;
 }
 
@@ -133,7 +134,13 @@ const waitUntilReachable = async (dynamo: DynamoDBClient, isAlive: () => boolean
   }
 };
 
-const createTables = async (dynamo: DynamoDBClient, roundsTable: string, connectionsTable: string, coreTable: string): Promise<void> => {
+const createTables = async (
+  dynamo: DynamoDBClient,
+  roundsTable: string,
+  connectionsTable: string,
+  coreTable: string,
+  projectionsTable: string,
+): Promise<void> => {
   // Rounds table (M3 plan, Global Constraints): pk `ROUND#<id>` / sk `EVT#<seq>` | META |
   // ARCHIVE | `OPID#<opId>`; gsi1 on `joinCode` (META items only).
   await dynamo.send(
@@ -176,6 +183,12 @@ const createTables = async (dynamo: DynamoDBClient, roundsTable: string, connect
   // (gsi1pk fixed to one constant, gsi1sk the normalized name — see keys.ts), projecting
   // only `name` so the contract suite can prove search never leaks the full course document
   // over the wire, not just that the adapter code happens not to read it.
+  // gsi2 (M7 Task 3) is the sub→golfer lookup getBySub queries: pk `GOLFER#<id>` / sk `GOLFER`
+  // golfer items (keys.ts's golferPk/golferSk) additionally carry gsi2pk/gsi2sk once claimed.
+  // ProjectionType ALL — golfer items are small (a name, a couple of handicap numbers), so
+  // there's no reason to pay INCLUDE's bookkeeping cost the way gsi1 does for the much larger
+  // course document. The real CDK gsi2 construct is Task 4's job (CLAUDE.md/the task brief);
+  // this is the local contract harness's own table definition only.
   await dynamo.send(
     new CreateTableCommand({
       TableName: coreTable,
@@ -185,6 +198,8 @@ const createTables = async (dynamo: DynamoDBClient, roundsTable: string, connect
         { AttributeName: "sk", AttributeType: "S" },
         { AttributeName: "gsi1pk", AttributeType: "S" },
         { AttributeName: "gsi1sk", AttributeType: "S" },
+        { AttributeName: "gsi2pk", AttributeType: "S" },
+        { AttributeName: "gsi2sk", AttributeType: "S" },
       ],
       KeySchema: [
         { AttributeName: "pk", KeyType: "HASH" },
@@ -199,6 +214,33 @@ const createTables = async (dynamo: DynamoDBClient, roundsTable: string, connect
           ],
           Projection: { ProjectionType: "INCLUDE", NonKeyAttributes: ["name"] },
         },
+        {
+          IndexName: "gsi2",
+          KeySchema: [
+            { AttributeName: "gsi2pk", KeyType: "HASH" },
+            { AttributeName: "gsi2sk", KeyType: "RANGE" },
+          ],
+          Projection: { ProjectionType: "ALL" },
+        },
+      ],
+    }),
+  );
+
+  // Projections table (M7 Task 3; architecture.md §3): one partition per golfer (pk
+  // `GOLFER#<id>`), holding `HISTORY#<finalizedAtMs>#<roundId>` lines and one `INDEX`
+  // snapshot (keys.ts). No GSI — every access pattern (upsert/list a golfer's own history,
+  // get/put/wipe their index) is a base-table op on this one partition key.
+  await dynamo.send(
+    new CreateTableCommand({
+      TableName: projectionsTable,
+      BillingMode: "PAY_PER_REQUEST",
+      AttributeDefinitions: [
+        { AttributeName: "pk", AttributeType: "S" },
+        { AttributeName: "sk", AttributeType: "S" },
+      ],
+      KeySchema: [
+        { AttributeName: "pk", KeyType: "HASH" },
+        { AttributeName: "sk", KeyType: "RANGE" },
       ],
     }),
   );
@@ -207,14 +249,15 @@ const createTables = async (dynamo: DynamoDBClient, roundsTable: string, connect
     waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: roundsTable }),
     waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: connectionsTable }),
     waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: coreTable }),
+    waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: projectionsTable }),
   ]);
 };
 
 // Downloads DynamoDB Local if absent, boots it in-memory on a free port, creates the
-// `rounds` + `connections` + `core` tables, and returns a ready-to-use document client plus
-// a `stop` that tears the JVM down. Any failure along the way (no java, download/extract
-// failure, the process never becoming reachable) throws — the contract suite must fail
-// loudly, never silently skip.
+// `rounds` + `connections` + `core` + `projections` tables, and returns a ready-to-use
+// document client plus a `stop` that tears the JVM down. Any failure along the way (no java,
+// download/extract failure, the process never becoming reachable) throws — the contract suite
+// must fail loudly, never silently skip.
 export const startLocalDynamo = async (): Promise<LocalDynamo> => {
   await ensureJar();
 
@@ -245,7 +288,8 @@ export const startLocalDynamo = async (): Promise<LocalDynamo> => {
     const roundsTable = "rounds";
     const connectionsTable = "connections";
     const coreTable = "core";
-    await createTables(dynamo, roundsTable, connectionsTable, coreTable);
+    const projectionsTable = "projections";
+    await createTables(dynamo, roundsTable, connectionsTable, coreTable, projectionsTable);
 
     const client = DynamoDBDocumentClient.from(dynamo);
 
@@ -268,7 +312,7 @@ export const startLocalDynamo = async (): Promise<LocalDynamo> => {
       });
     };
 
-    return { client, roundsTable, connectionsTable, coreTable, stop };
+    return { client, roundsTable, connectionsTable, coreTable, projectionsTable, stop };
   } catch (error) {
     proc.kill("SIGKILL");
     dynamo.destroy();

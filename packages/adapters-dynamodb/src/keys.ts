@@ -1,5 +1,5 @@
-import type { CourseId, OpId, RoundId } from "@swng/domain";
-import { courseId } from "@swng/domain";
+import type { CourseId, GolferId, OpId, RoundId } from "@swng/domain";
+import { courseId, golferId } from "@swng/domain";
 
 // The rounds table's key vocabulary (M3 plan, Global Constraints): one item collection per
 // round (`pk`), holding the event log (`EVT#<seq>`, sorted lexically in seq order because
@@ -48,3 +48,39 @@ export const courseIdFromPk = (pk: string): CourseId => courseId(pk.slice(COURSE
 // letter) is real future work only if beta telemetry ever shows this partition running hot —
 // not a v1 concern.
 export const courseGsi1pk = "COURSE";
+
+// The core table's golfer-item key vocabulary (M7 Task 3): a Golfer aggregate is a plain CRUD
+// document too (GolferStore's port comment, mirrors CourseStore) — one item, `pk` =
+// golferPk(id) / `sk` fixed to GOLFER. The SAME golferPk also names a golfer's partition on
+// the `projections` table below — one id, one pk format, shared across both tables.
+const GOLFER_PK_PREFIX = "GOLFER#";
+export const golferPk = (id: GolferId): string => `${GOLFER_PK_PREFIX}${id}`;
+export const golferSk = "GOLFER";
+
+// golferId parses back out of a gsi2-projected item's `pk`, same idiom as courseIdFromPk
+// above — the inverse of golferPk, so the prefix can never drift between the two.
+export const golferIdFromPk = (pk: string): GolferId => golferId(pk.slice(GOLFER_PK_PREFIX.length));
+
+// gsi2's key vocabulary (M7 Task 3; architecture.md §3's core-table GSI list: "join code,
+// cognito sub, golfer→crews") — the sub→golfer lookup getBySub queries. gsi2pk is set on a
+// golfer item ONLY once claimed (createDynamoGolferStore's put/claim) — an unclaimed ghost is
+// deliberately absent from gsi2, since no sub can look it up yet. gsi2sk is a fixed constant
+// (exactly one golfer item per sub) but still a real stored attribute, not folded into gsi2pk
+// alone: a GSI's sort key, like its partition key, must be present on an item for that item to
+// be projected into the index at all, so both are set (or omitted) together.
+export const golferGsi2pk = (sub: string): string => `SUB#${sub}`;
+export const golferGsi2sk = "GOLFER";
+
+// The `projections` table's key vocabulary (M7 Task 3; architecture.md §3): one partition per
+// golfer (golferPk — shared id format with the core table's golfer item, but a different
+// table), holding one HISTORY# line per finalized round the golfer played plus one INDEX
+// snapshot. finalizedAtMs is zero-padded to 15 digits so the sk's lexical order agrees with
+// its numeric time order (the same trick evtSk plays on seq) — listHistory's oldest-first read
+// then falls out of a plain ascending Query, no client-side sort needed. 15 digits is headroom
+// into the year ~33700 (10^15 ms past the epoch) — deliberately generous, same spirit as
+// evtSk's own 10-digit choice for a count that will never approach it.
+const HISTORY_SK_PREFIX = "HISTORY#";
+export const historySk = (finalizedAtMs: number, roundId: RoundId): string =>
+  `${HISTORY_SK_PREFIX}${String(finalizedAtMs).padStart(15, "0")}#${roundId}`;
+export const historySkPrefix = HISTORY_SK_PREFIX;
+export const projectionIndexSk = "INDEX";

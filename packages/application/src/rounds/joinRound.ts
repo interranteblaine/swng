@@ -30,7 +30,7 @@ export const joinRound =
     if (command.golferId !== undefined) {
       const existing = await deps.golferStore.get(command.golferId);
       // CHECK-THEN-ACT RACE (the golferStore read vs. the journal append below): a claim
-      // can land between this read and the participant-joined append at line 44, making
+      // can land between this read and the journal append below, making
       // the supplied golferId claimed moments after we green-lit it. Accepted for beta: the
       // window is narrow, exploiting it requires knowing the golferId mid-claim, and it
       // grants nothing beyond what an unclaimed ghost's participant token already carries

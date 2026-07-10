@@ -148,4 +148,38 @@ describe("ProfilePage — signed in", () => {
     // The re-fetch after save is a real GET /me, not just a locally-applied echo of the PUT response.
     expect(calls.filter((c) => c === "GET /me").length).toBeGreaterThanOrEqual(2);
   });
+
+  it("a failed save shows a fixed human message, never the raw server error text (e.g. a golfer revision-mismatch line naming the internal id)", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/me" && init?.method === "PUT") {
+          return {
+            ok: false,
+            status: 409,
+            json: async () => ({ code: "golfer-revision-mismatch", message: "golfer g-abc123 revision mismatch: expected 3, got 2" }),
+          } as unknown as Response;
+        }
+        if (path === "/me") return fakeResponse(200, { golfer: null });
+        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    render(
+      <AuthProvider>
+        <ProfilePage />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByText(/computes after 3 posted/i)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(screen.getByRole("alert").textContent).toBe("Could not save your profile — try again.");
+    expect(document.body.textContent).not.toMatch(/revision mismatch/);
+    expect(document.body.textContent).not.toMatch(/g-abc123/);
+  });
 });

@@ -3,20 +3,22 @@ import type { CourseId, GolferId, GolferRoundLine } from "@swng/domain";
 import { courseIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
 
 // The wire projection of a Golfer aggregate (application/src/golfers/golferView.ts builds
-// it): the three independently-settable handicap numbers (declared/official/computed) ride
-// alongside `effective` — domain's effectiveIndex precedence (official > computed >
-// declared), pre-resolved server-side so the UI never re-derives it.
+// it): the two independently-settable handicap numbers the client itself declares
+// (declared/official) — NOT `computed` or an `effective` precedence field. Those two used to
+// ride along here, but the server has no persisted computed index on the golfer item itself
+// (it lives in the separate index projection, application/src/golfers/getMyRecord.ts), so a
+// server-side `effectiveIndex(golfer.handicap)` call here was silently WRONG whenever a real
+// computed index existed elsewhere (e.g. declared 15 + a computed 7.2 the server didn't know
+// about → wire said effective 15/declared). The web composes the true effective index
+// client-side from GET /me (declared/official) + GET /me/record (computed), via domain's own
+// effectiveIndex — see apps/web/src/routes/ProfilePage.tsx.
 export interface GolferView {
   readonly golferId: GolferId;
   readonly name: string;
   readonly homeCourseId?: CourseId;
   readonly declared?: number;
   readonly official?: number;
-  readonly computed?: number;
-  readonly effective?: { readonly value: number; readonly source: "official" | "computed" | "declared" };
 }
-
-const effectiveSchema = z.object({ value: z.number(), source: z.enum(["official", "computed", "declared"]) });
 
 export const golferViewSchema: z.ZodType<GolferView> = z.object({
   golferId: golferIdSchema,
@@ -24,8 +26,6 @@ export const golferViewSchema: z.ZodType<GolferView> = z.object({
   homeCourseId: courseIdSchema.optional(),
   declared: z.number().optional(),
   official: z.number().optional(),
-  computed: z.number().optional(),
-  effective: effectiveSchema.optional(),
 });
 
 // golfer is null for an unbound sub — GET /me NEVER creates (plan amendment: the original

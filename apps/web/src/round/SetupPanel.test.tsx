@@ -242,7 +242,10 @@ describe("SetupPanel — claim a ghost", () => {
     expect(calls.filter((c) => c === "GET /me").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("a 409 shows 'already claimed'", async () => {
+  // The two collision arms in claimGolfer.ts both throw the SAME "golfer-already-claimed"
+  // code, so the client must disambiguate by auth.golfer to give honest copy — arm 1 (the row
+  // itself already claimed by someone else) only applies when THIS account has no golfer yet.
+  it("a 409 with auth.golfer null shows 'already claimed by another account' (collision arm 1: the row itself was claimed by someone else)", async () => {
     signIn();
     vi.stubGlobal(
       "fetch",
@@ -264,6 +267,35 @@ describe("SetupPanel — claim a ghost", () => {
     fireEvent.click(within(boRow).getByRole("button", { name: "This is me" }));
     fireEvent.click(within(boRow).getByRole("button", { name: "Confirm" }));
 
-    await waitFor(() => expect(within(boRow).getByText(/already claimed/i)).toBeTruthy());
+    await waitFor(() => expect(within(boRow).getByText("Already claimed by another account.")).toBeTruthy());
+  });
+
+  it("a 409 with auth.golfer already set shows the honest 'your account already has a profile' copy (collision arm 2: THIS account's sub is already bound elsewhere)", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/golfers/claim") return fakeResponse(409, { code: "golfer-already-claimed", message: "sub already bound to golfer g-cal" });
+        // Signed-in account already has ITS OWN golfer (Cal, not Bo) — the row it's trying to
+        // claim ("This is me" on Bo) is a second, different ghost.
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "cal", name: "Cal" } });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, myGolferId: ANN });
+
+    const boRow = await waitFor(() => {
+      const row = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
+      expect(row).toBeTruthy();
+      return row!;
+    });
+
+    fireEvent.click(within(boRow).getByRole("button", { name: "This is me" }));
+    fireEvent.click(within(boRow).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(within(boRow).getByText("Your account already has a profile — claiming another ghost isn't supported yet.")).toBeTruthy());
+    // Never the misleading arm-1 copy for this case.
+    expect(within(boRow).queryByText(/already claimed by another account/i)).toBeNull();
   });
 });

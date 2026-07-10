@@ -173,7 +173,8 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const useCases: UseCases = {
     startRound: startRound({ journal, store, broadcast, tokens, clock, ids }),
     // golferStore threaded through for Task 5b's supplied-golferId reuse check (joinRound.ts)
-    // — the SAME instance the golfer routes below already share (line 160).
+    // — the SAME instance the golfer routes below already share (the golferStore construct
+    // above).
     joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),

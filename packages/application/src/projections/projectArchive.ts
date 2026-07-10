@@ -25,6 +25,17 @@ export const finalizedAtMsOf = (archive: RoundArchive): number => {
 // AVERAGED, not how many were in the window (e.g. 3 available → uses the lowest 1). Sourced
 // straight from domain's computeIndexDetail (whs.ts), which owns the one small-sample table
 // — never re-derived here (conventions §4: scoring math exists exactly once, in domain).
+//
+// ACCEPTED RACE (per-shard, not per-golfer, serialization): DynamoDB Streams only guarantee
+// ordering per shard, and shards partition by the STREAM'S own key (the round, here) — not by
+// golfer. Two rounds that finalize at nearly the same moment and share a participant can land
+// on different shards and invoke this function concurrently for that golfer. Each call's
+// putHistoryLine (below) is independent and safe, but the immediately-following listHistory +
+// computeIndexDetail can race: one call's listHistory can run before the OTHER call's
+// putHistoryLine has landed, so the index it computes and stores is momentarily short one
+// differential. Self-heals the next time this golfer's projection is touched — either their
+// next finalize (a fresh listHistory sees everything written so far) or a rebuildProjections
+// pass (which replays every archive in finalizedAt order, deterministically, from scratch).
 export const projectArchive =
   (deps: { projectionStore: ProjectionStore; clock: Clock; logger: Logger }) =>
   async (archive: RoundArchive): Promise<void> => {

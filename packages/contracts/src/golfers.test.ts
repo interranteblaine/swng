@@ -16,7 +16,7 @@ describe("golferViewSchema (via getMeResponseSchema)", () => {
     roundTrips(getMeResponseSchema, { golfer: { golferId: golferId("g1"), name: "Ann" } });
   });
 
-  it("round-trips a fully-populated golfer, including the derived `effective` index", () => {
+  it("round-trips a fully-populated golfer — declared and official only; no computed/effective (the server never persists a computed index on the golfer item)", () => {
     roundTrips(getMeResponseSchema, {
       golfer: {
         golferId: golferId("g1"),
@@ -24,8 +24,6 @@ describe("golferViewSchema (via getMeResponseSchema)", () => {
         homeCourseId: courseId("course-1"),
         declared: 12.3,
         official: 8.1,
-        computed: 9.4,
-        effective: { value: 8.1, source: "official" },
       },
     });
   });

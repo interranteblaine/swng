@@ -72,15 +72,18 @@ describe("updateMyGolfer", () => {
     expect(golfer.name).toBe("Golfer");
   });
 
-  it("official wins effective-index precedence over both computed and declared, matching domain's effectiveIndex", async () => {
+  it("carries declared and official on the wire as independent fields — no derived effective/computed (the server has no persisted computed index to derive from; the web composes effectiveIndex itself from GET /me + GET /me/record)", async () => {
     const ctx = setup();
     await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
     const declaredOnly = await ctx.updateMe({ sub: "sub-1" }, { declared: 14.2 });
-    expect(declaredOnly.golfer.effective).toEqual({ value: 14.2, source: "declared" });
+    expect(declaredOnly.golfer.declared).toBe(14.2);
+    expect(declaredOnly.golfer).not.toHaveProperty("effective");
+    expect(declaredOnly.golfer).not.toHaveProperty("computed");
 
     const withOfficial = await ctx.updateMe({ sub: "sub-1" }, { official: 8.1 });
-    expect(withOfficial.golfer.effective).toEqual({ value: 8.1, source: "official" });
-    expect(withOfficial.golfer.declared).toBe(14.2); // still on record, just outranked
+    expect(withOfficial.golfer.official).toBe(8.1);
+    expect(withOfficial.golfer.declared).toBe(14.2); // still on record, unaffected by the official patch
+    expect(withOfficial.golfer).not.toHaveProperty("effective");
   });
 });
 

@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import type { GetMyRecordResponse } from "@swng/contracts";
 import type { CourseId, GolferRoundLine } from "@swng/domain";
 import { effectiveIndex } from "@swng/domain";
-import { ApiError, getCourse, getMyRecord, updateMe } from "../api";
+import { getCourse, getMyRecord, updateMe } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 
@@ -143,8 +143,11 @@ export function ProfilePage() {
       );
       await auth.refetch(); // the header chrome and this page both read auth.golfer — refresh it now, not on next remount
       setSaved(true);
-    } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "Could not save your profile — try again.");
+    } catch {
+      // Never the raw caught.message — a golfer revision-mismatch 409 names the golfer's raw
+      // internal id/revision, matching the never-raw-server-text pattern already applied to
+      // finalize (RoundPage.tsx) and game termination.
+      setError("Could not save your profile — try again.");
     } finally {
       setSaving(false);
     }

@@ -164,6 +164,29 @@ describe("settleRound — game termination", () => {
     expect(archive.results[0]).toMatchObject({ kind: "stroke-play", id: resolvedGame.id });
     expect(archive.games.map((g) => g.id)).toEqual([unresolvedGame.id, resolvedGame.id]);
   });
+
+  // The filter in archive.ts is `!state.terminatedGameIds.has(config.id)` — unconditional on
+  // whether the game WOULD have resolved. Every case above terminates a game that's stuck
+  // (unresolved) — this pins the other arm: a game whose cards are already complete, that
+  // would resolve cleanly on its own, gets excluded from `results` just the same once
+  // terminated. Termination is a game-management decision (e.g. voiding a side bet mid-round),
+  // never merely a rescue for data that can't otherwise settle.
+  it("excludes a game from results once terminated, even though it would have resolved cleanly on its own", () => {
+    const resolvableGame = { kind: "stroke-play", id: gameId("sp-resolvable"), scoring: "gross", players: [D, E] } as const;
+    const fullScores = { [D]: [4, 5, 3, 6, 4, 4, 5, 4, 4], [E]: [5, 5, 4, 6, 5, 3, 4, 5, 4] };
+    const resolvableLog = playGoldenRoundLog(fixtureLinks, partialPlayers, [resolvableGame], fullScores, [], false);
+    const terminateResolvable = { ...terminate, gameId: resolvableGame.id, opId: opId("terminate-resolvable") };
+
+    // Baseline: WITHOUT termination, this exact round settles fine and the game DOES resolve —
+    // proof termination isn't rescuing anything here.
+    const baseline = settleRound([...resolvableLog, finalize]);
+    expect(baseline.results).toHaveLength(1);
+    expect(baseline.results[0]).toMatchObject({ kind: "stroke-play", id: resolvableGame.id });
+
+    const archive = settleRound([...resolvableLog, terminateResolvable, finalize]);
+    expect(archive.terminatedGameIds).toEqual([resolvableGame.id]);
+    expect(archive.results).toHaveLength(0);
+  });
 });
 
 describe("settleRound — incomplete handicapping", () => {

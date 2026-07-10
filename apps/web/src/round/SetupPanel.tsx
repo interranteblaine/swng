@@ -61,9 +61,18 @@ function ClaimAffordance({ rowGolferId }: { readonly rowGolferId: GolferId }) {
       setClaimed(true);
       setConfirming(false);
     } catch (caught) {
-      // Never the raw caught.message — the 409 arm gets the brief's own wording, everything
-      // else a generic retry line.
-      setError(caught instanceof ApiError && caught.code === "golfer-already-claimed" ? "Already claimed by another account." : "Could not claim — try again.");
+      // Never the raw caught.message — the 409 arm gets honest wording. Both of
+      // claimGolfer.ts's collision arms throw the SAME "golfer-already-claimed" code, so the
+      // client disambiguates by auth.golfer instead: if this signed-in account already has a
+      // golfer (auth.golfer non-null), the 409 is arm 2 — THIS account's sub is already bound
+      // elsewhere, one profile-Save away for every new user, and claiming a second ghost isn't
+      // supported yet. Only when auth.golfer is null could the 409 mean arm 1 — the row itself
+      // already claimed by a different account.
+      if (caught instanceof ApiError && caught.code === "golfer-already-claimed") {
+        setError(auth.golfer ? "Your account already has a profile — claiming another ghost isn't supported yet." : "Already claimed by another account.");
+      } else {
+        setError("Could not claim — try again.");
+      }
     } finally {
       setBusy(false);
     }

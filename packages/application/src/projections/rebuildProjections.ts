@@ -16,6 +16,18 @@ export interface ArchiveSource {
 // belongs must never survive alongside the replay), THEN replays projectArchive over every
 // archive in finalizedAt order, so the replay reproduces the exact same incremental history
 // the live stream trigger built up one finalize at a time.
+//
+// ACCEPTED RACE (wipe-replay window): `archives` above is collected from a full-table Scan
+// (createDynamoArchiveSource) that necessarily takes some time to finish; the wipe loop only
+// runs once that enumeration is done. A round that finalizes — and lands its own live
+// projectArchive call via the stream trigger — AFTER the Scan has already passed (or started)
+// but BEFORE the wipe step touches that same golfer will have its freshly-written history
+// line/index wiped and then never restored, because that archive was never captured in
+// `archives` (the Scan predates it). The golfer's projection is then missing that round's
+// contribution until the NEXT rebuild re-scans and picks it up — a later, unrelated finalize
+// for a different round does not repair it (projectArchive only appends off of what
+// listHistory already returns). Operator note: don't run this rebuild while rounds are
+// actively finalizing; if one might have raced it, just re-run rebuild once more.
 export const rebuildProjections =
   (deps: { archiveSource: ArchiveSource; projectionStore: ProjectionStore; clock: Clock; logger: Logger }) =>
   async (): Promise<{ rounds: number; golfers: number }> => {

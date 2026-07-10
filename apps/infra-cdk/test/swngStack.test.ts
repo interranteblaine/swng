@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { App } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { archiveSk } from "@swng/adapters-dynamodb";
-import { ARCHIVE_SK, SwngStack } from "../lib/swngStack.js";
+import { ARCHIVE_SK, HTTP_ROUTES, SwngStack } from "../lib/swngStack.js";
 
 // One stack, synthesized once, asserted against many times — synthesis (which bundles all
 // three Lambdas with esbuild) is the expensive part of this suite; sharing it across `it`
@@ -428,6 +428,23 @@ describe("SwngStack", () => {
     // silently dropped) could pass both without this.
     it("has exactly 19 routes total (17 HTTP + $connect + $disconnect)", () => {
       template.resourceCountIs("AWS::ApiGatewayV2::Route", 19);
+    });
+
+    // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route
+    // method missing from the CORS allow-list is browser-dead (the preflight 204 carries NO
+    // access-control-allow-* headers, so the browser blocks the actual request) while still
+    // answering curl — the exact kind of gap no unit test caught. Pinned as a superset check
+    // against HTTP_ROUTES itself, not a hand-typed list, so the NEXT route bringing a new
+    // method fails here instead of in a browser against deployed beta.
+    it("the HTTP API's CORS allow-methods covers every method HTTP_ROUTES uses", () => {
+      const apis = template.findResources("AWS::ApiGatewayV2::Api");
+      const httpApi = Object.values(apis).find((api) => api.Properties.ProtocolType === "HTTP");
+      expect(httpApi).toBeDefined();
+      const allowMethods = httpApi!.Properties.CorsConfiguration.AllowMethods as string[];
+      const routeMethods = [...new Set(HTTP_ROUTES.map((route) => route.method as string))];
+      for (const method of routeMethods) {
+        expect(allowMethods).toContain(method);
+      }
     });
   });
 

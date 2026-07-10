@@ -336,7 +336,13 @@ export class SwngStack extends Stack {
       apiName: `swng-http-${stage}`,
       corsPreflight: {
         allowOrigins: ["*"],
-        allowMethods: [CorsHttpMethod.GET, CorsHttpMethod.POST],
+        // Every method HTTP_ROUTES uses must be allowed here too — a route whose method is
+        // missing still answers curl, but a browser's preflight gets a 204 with NO
+        // access-control-allow-* headers and the actual request is blocked (verified live
+        // against beta, M7 Task 5). PUT joined for PUT /me; the stack test pins this list as
+        // a superset of HTTP_ROUTES' own method set so the next new method can't ship
+        // browser-dead.
+        allowMethods: [CorsHttpMethod.GET, CorsHttpMethod.POST, CorsHttpMethod.PUT],
         allowHeaders: ["content-type", "authorization"],
       },
     });

@@ -20,10 +20,12 @@
   "dependencies": {
     "@swng/domain": "workspace:*",
     "@swng/application": "workspace:*",
-    "@swng/contracts": "workspace:*"
+    "@swng/contracts": "workspace:*",
+    "aws-jwt-verify": "catalog:"
   },
   "devDependencies": {
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@types/node": "catalog:"
   }
 }

@@ -1,9 +1,11 @@
 import { join } from "node:path";
 import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
-import { AttributeType, BillingMode, ProjectionType, Table } from "aws-cdk-lib/aws-dynamodb";
+import { AttributeType, BillingMode, ProjectionType, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
 import { CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration, WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
-import { Runtime } from "aws-cdk-lib/aws-lambda";
+import { OAuthScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
+import { FilterCriteria, FilterRule, Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
+import { DynamoEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import type { Construct } from "constructs";
@@ -50,6 +52,15 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
 // whether CDK is invoked from apps/infra-cdk or the repo root.
 const entryPath = (name: string): string => join(import.meta.dirname, "..", "..", "..", "packages", "lambda", "src", "entries", `${name}.ts`);
 
+// Mirrors adapters-dynamodb/src/keys.ts's `archiveSk` constant by hand (M7 Task 4) —
+// infra-cdk has no runtime dependency on that package (unlike HTTP_ROUTES' comment above
+// about routes.ts, which IS pinned at runtime by routesParity.test.ts). Every round's archive
+// item is written with sk fixed to this exact literal (createDynamoRoundStore.ts's
+// putArchive), so the ProjectorFunction's event-source filter criteria below, matching on
+// `dynamodb.Keys.sk.S`, restricts it to ARCHIVE images only — never a stray EVT#/META/OPID#
+// record from the same table's stream.
+const ARCHIVE_SK = "ARCHIVE";
+
 export class SwngStack extends Stack {
   constructor(scope: Construct, id: string, props: SwngStackProps = {}) {
     if (FORBIDDEN_ID.test(id)) {
@@ -72,6 +83,11 @@ export class SwngStack extends Stack {
       // The event log + archive are the source of truth for a round — never delete this
       // table out from under a stack teardown.
       removalPolicy: RemovalPolicy.RETAIN,
+      // M7 Task 4: NEW_IMAGE feeds the ProjectorFunction below (filtered to ARCHIVE items
+      // only) — an in-place update (adding a stream never changes the table's logical id or
+      // physical resource, unlike a GSI addition it doesn't even need CloudFormation to
+      // replace anything for).
+      stream: StreamViewType.NEW_IMAGE,
     });
     roundsTable.addGlobalSecondaryIndex({
       indexName: "gsi1",
@@ -102,13 +118,23 @@ export class SwngStack extends Stack {
       projectionType: ProjectionType.INCLUDE,
       nonKeyAttributes: ["name"],
     });
+    // M7 Task 3/4: the sub→golfer lookup GolferStore.getBySub queries (createDynamoGolferStore
+    // already queries this locally; this is the real CDK construct). gsi2pk/gsi2sk are set on
+    // a golfer item only once claimed (keys.ts's golferGsi2pk/golferGsi2sk doc comment) —
+    // ProjectionType.ALL because golfer items are small, unlike gsi1's course documents, so
+    // there's no reason to pay INCLUDE's bookkeeping cost here.
+    coreTable.addGlobalSecondaryIndex({
+      indexName: "gsi2",
+      partitionKey: { name: "gsi2pk", type: AttributeType.STRING },
+      sortKey: { name: "gsi2sk", type: AttributeType.STRING },
+      projectionType: ProjectionType.ALL,
+    });
 
-    // Projections land in a later milestone (docs/architecture.md §6) — the stack shape is
-    // fixed by an earlier task's brief, so it's provisioned now rather than added as a
-    // migration later. No construct is assigned to a variable: nothing in this file grants
-    // access to it yet, and a future milestone that adds a reader/writer will look it up by
-    // construct id at that point.
-    new Table(this, "ProjectionsTable", {
+    // Projections (docs/architecture.md §6) — one history line per finalized round a golfer
+    // played plus a running index snapshot (adapters-dynamodb/src/keys.ts). Provisioned since
+    // M6; M7 Task 4 is the first task to actually grant access to it (below) and wire the
+    // stream that feeds it (ProjectorFunction).
+    const projectionsTable = new Table(this, "ProjectionsTable", {
       tableName: `swng-projections-${stage}`,
       partitionKey: { name: "pk", type: AttributeType.STRING },
       sortKey: { name: "sk", type: AttributeType.STRING },
@@ -128,6 +154,55 @@ export class SwngStack extends Stack {
       indexName: "gsi1",
       partitionKey: { name: "roundId", type: AttributeType.STRING },
       projectionType: ProjectionType.ALL,
+    });
+
+    // --- Identity (M7 Task 4; docs/architecture.md §3: "Cognito stays a dumb credential box
+    // behind the IdentityProvider port") -------------------------------------------------
+
+    const userPool = new UserPool(this, "UserPool", {
+      userPoolName: `swng-${stage}`,
+      selfSignUpEnabled: true,
+      signInAliases: { email: true },
+      // Self-sign-up with no phone/SMS setup in v1 — email is the only channel that can
+      // actually prove account ownership here.
+      autoVerify: { email: true },
+      standardAttributes: { email: { required: true, mutable: true } },
+      // Holds real users the moment beta has its first signed-in golfer — never destroy this
+      // out from under a stack teardown (mirrors the rounds/core/projections tables above).
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
+    // The web app's origins, for both OAuth callback and logout redirects — a cdk context
+    // list (`-c WEB_ORIGINS='["https://..."]'` or cdk.json) so a real deployed web app URL can
+    // be added without a code change; defaults to just the local dev server so `cdk synth`
+    // and this stack's own tests never depend on that context being set.
+    const webOrigins = (this.node.tryGetContext("WEB_ORIGINS") as string[] | undefined) ?? ["http://localhost:5173"];
+
+    const userPoolClient = new UserPoolClient(this, "UserPoolClient", {
+      userPool,
+      userPoolClientName: `swng-web-${stage}`,
+      // SPA: the client runs entirely in the browser, so it can never keep a secret.
+      generateSecret: false,
+      authFlows: {
+        // The real web app only ever uses the authorization-code+PKCE flow below —
+        // USER_PASSWORD_AUTH exists solely so `pnpm e2e:beta` can mint a real ID token via
+        // InitiateAuth without driving a browser through the hosted UI. M9 hardening item:
+        // narrow or remove this once the e2e gate has another way to authenticate.
+        userPassword: true,
+      },
+      oAuth: {
+        // PKCE is implicit for a public client (no secret) using the authorization-code grant
+        // — there's no separate CDK flag for it.
+        flows: { authorizationCodeGrant: true },
+        scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+        callbackUrls: webOrigins,
+        logoutUrls: webOrigins,
+      },
+    });
+
+    const userPoolDomain = new UserPoolDomain(this, "UserPoolDomain", {
+      userPool,
+      cognitoDomain: { domainPrefix: `swng-${stage}-${this.account}` },
     });
 
     // --- Participant-token signing secret ---------------------------------------------
@@ -183,6 +258,48 @@ export class SwngStack extends Stack {
     // wsDisconnect never touch the core table, unlike TABLE_ROUNDS/TABLE_CONNECTIONS above
     // which every function needs (round broadcast / connection bookkeeping respectively).
     httpFn.addEnvironment("TABLE_CORE", coreTable.tableName);
+    // M7 Task 4: TABLE_PROJECTIONS + the Cognito identifiers httpFn's "golfer" auth tier
+    // (lambda/http/dispatch.ts) needs to build a real CognitoVerifier — wsConnect/
+    // wsDisconnect never dispatch a golfer-tier route, same reasoning as TABLE_CORE above.
+    // No golfer/record route reads projections yet (that lands in a later task), but the
+    // grant + env land now so that task is route-wiring only, not another CDK change.
+    httpFn.addEnvironment("TABLE_PROJECTIONS", projectionsTable.tableName);
+    httpFn.addEnvironment("USER_POOL_ID", userPool.userPoolId);
+    httpFn.addEnvironment("USER_POOL_CLIENT_ID", userPoolClient.userPoolClientId);
+
+    // ProjectorFunction (the rounds table's stream, filtered to ARCHIVE items) and
+    // RebuildFunction (manual invoke only — no event source) are their own minimal
+    // NodejsFunctions, not built via makeFunction above: neither needs TABLE_CONNECTIONS,
+    // TOKEN_SECRET, or WS_ENDPOINT (they never broadcast or touch a participant token), so
+    // giving them `sharedEnv` would leak table names/secrets into a Lambda console that has
+    // no reason to see them.
+    const projectorFn = new NodejsFunction(this, "ProjectorFunction", {
+      entry: entryPath("projector"),
+      handler: "handler",
+      runtime: Runtime.NODEJS_20_X,
+      environment: { TABLE_PROJECTIONS: projectionsTable.tableName },
+      timeout: Duration.seconds(15),
+      memorySize: 512,
+    });
+    const rebuildFn = new NodejsFunction(this, "RebuildFunction", {
+      entry: entryPath("rebuild"),
+      handler: "handler",
+      runtime: Runtime.NODEJS_20_X,
+      environment: { TABLE_PROJECTIONS: projectionsTable.tableName, TABLE_ROUNDS: roundsTable.tableName },
+      // Longer than the other functions' fixed 15s budget on purpose: this replays every
+      // archive in the rounds table in one invocation (a full Scan plus one projectArchive
+      // call per archive), not a single request — an operator-triggered job, not a hot path.
+      timeout: Duration.minutes(5),
+      memorySize: 512,
+    });
+
+    projectorFn.addEventSource(
+      new DynamoEventSource(roundsTable, {
+        startingPosition: StartingPosition.TRIM_HORIZON,
+        batchSize: 10,
+        filters: [FilterCriteria.filter({ dynamodb: { Keys: { sk: { S: FilterRule.isEqual(ARCHIVE_SK) } } } })],
+      }),
+    );
 
     // --- WebSocket API ($connect / $disconnect only — no $default route: every WS message
     // this system sends is server -> client broadcast, never client -> server) -----------
@@ -229,9 +346,22 @@ export class SwngStack extends Stack {
     // compositionRoot.ts) — wsConnect/wsDisconnect never call PostToConnection.
     webSocketApi.grantManageConnections(httpFn);
 
+    // M7 Task 4: the projections table's readers/writers. projectorFn's stream READ access
+    // (GetRecords/DescribeStream/etc. on the rounds table's stream) is granted automatically
+    // by addEventSource above (DynamoEventSource.bind calls table.grantStreamRead) — it needs
+    // no separate grant call here.
+    projectionsTable.grantReadWriteData(projectorFn);
+    projectionsTable.grantReadWriteData(rebuildFn);
+    projectionsTable.grantReadWriteData(httpFn);
+    // Read-only: rebuild only Scans for archives, never writes the rounds table.
+    roundsTable.grantReadData(rebuildFn);
+
     // --- Outputs ----------------------------------------------------------------------
 
     new CfnOutput(this, "HttpApiUrl", { value: `${httpApi.apiEndpoint}/` });
     new CfnOutput(this, "WsApiUrl", { value: webSocketStage.url });
+    new CfnOutput(this, "UserPoolId", { value: userPool.userPoolId });
+    new CfnOutput(this, "UserPoolClientId", { value: userPoolClient.userPoolClientId });
+    new CfnOutput(this, "HostedUiDomain", { value: userPoolDomain.baseUrl() });
   }
 }

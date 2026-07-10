@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
-import { fixtureWhite } from "@swng/domain";
-import { buildApp, createConsoleLogger } from "./compositionRoot.js";
+import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, DynamoDBStreamEvent } from "aws-lambda";
+import { deviceId, fixtureLinks18, fixtureWhite, golferId, opId, roundId } from "@swng/domain";
+import type { RoundArchive, RoundEvent } from "@swng/domain";
+import { createFixedClock, createInMemoryProjectionStore, createNullLogger, projectArchive } from "@swng/application";
+import { buildApp, buildProjector, buildRebuild, createConsoleLogger, createProjectorHandler } from "./compositionRoot.js";
 
 // Pin for the M3-deferred fix (task-6-brief.md item 5): consoleLogger used to spread `data`
 // AFTER `message` in the logged object, so a `data.message` key silently clobbered the
@@ -104,5 +106,146 @@ describe("buildApp — TABLE_CORE is optional (wsConnect/wsDisconnect never set 
 
     const result = (await app.dispatcher(event)) as APIGatewayProxyStructuredResultV2;
     expect(result.statusCode).toBe(500);
+  });
+});
+
+// M7 Task 4: same "shared buildApp, entry-scoped env" story as TABLE_CORE above — only httpFn
+// gets USER_POOL_ID/USER_POOL_CLIENT_ID (swngStack.ts); wsConnect/wsDisconnect never do. No
+// route declares `auth: "golfer"` yet (that lands with the golfer routes in a later task), so
+// unlike the TABLE_CORE block above there's no dispatched-route-500s test here — nothing
+// dispatches through the verifier yet for it to fail gracefully on.
+describe("buildApp — USER_POOL_ID/USER_POOL_CLIENT_ID are optional (wsConnect/wsDisconnect never set them)", () => {
+  const baseEnv = {
+    TABLE_ROUNDS: "rounds-table",
+    TABLE_CONNECTIONS: "connections-table",
+    TOKEN_SECRET: "test-secret",
+    WS_ENDPOINT: "https://example.execute-api.us-east-1.amazonaws.com/beta",
+  };
+
+  it("does not throw when USER_POOL_ID/USER_POOL_CLIENT_ID are absent — wsConnect/wsDisconnect's real env shape", () => {
+    expect(() => buildApp(baseEnv)).not.toThrow();
+  });
+
+  it("does not throw when USER_POOL_ID/USER_POOL_CLIENT_ID ARE present — httpFn's real env shape", () => {
+    expect(() => buildApp({ ...baseEnv, USER_POOL_ID: "us-east-1_Test123", USER_POOL_CLIENT_ID: "test-client-id" })).not.toThrow();
+  });
+});
+
+describe("buildProjector / buildRebuild — required env vars", () => {
+  it("buildProjector throws a clear error when TABLE_PROJECTIONS is missing", () => {
+    expect(() => buildProjector({})).toThrow(/TABLE_PROJECTIONS/);
+  });
+
+  it("buildProjector does not throw when TABLE_PROJECTIONS is present", () => {
+    expect(() => buildProjector({ TABLE_PROJECTIONS: "projections-table" })).not.toThrow();
+  });
+
+  it("buildRebuild throws a clear error when TABLE_ROUNDS is missing", () => {
+    expect(() => buildRebuild({ TABLE_PROJECTIONS: "projections-table" })).toThrow(/TABLE_ROUNDS/);
+  });
+
+  it("buildRebuild throws a clear error when TABLE_PROJECTIONS is missing", () => {
+    expect(() => buildRebuild({ TABLE_ROUNDS: "rounds-table" })).toThrow(/TABLE_PROJECTIONS/);
+  });
+
+  it("buildRebuild does not throw when both required vars are present", () => {
+    expect(() => buildRebuild({ TABLE_ROUNDS: "rounds-table", TABLE_PROJECTIONS: "projections-table" })).not.toThrow();
+  });
+});
+
+// createProjectorHandler's stream-record loop, over fakes (M7 Task 4 brief: "entry tests over
+// fakes") — `project` here is the REAL projectArchive bound to an in-memory ProjectionStore
+// (@swng/application's own testing fake), so this proves the loop's control flow (multi-record
+// batches, poison-record log-and-rethrow) with zero AWS calls, not just that some mock got
+// called.
+describe("createProjectorHandler", () => {
+  const ann = golferId("ann");
+  const bo = golferId("bo");
+
+  const finalizedEvent = (wallMs: number, roundKey: string): RoundEvent => ({
+    kind: "round-finalized",
+    opId: opId(`finalize-${roundKey}`),
+    hlc: { wallMs, counter: 0, deviceId: deviceId("server") },
+    authorId: ann,
+  });
+
+  const archiveFor = (roundKey: string, wallMs: number, participantId = ann): RoundArchive => ({
+    roundId: roundId(roundKey),
+    card: fixtureLinks18,
+    participants: [{ golferId: participantId, name: participantId, tee: "white", courseHandicap: 8 }],
+    games: [],
+    cells: {},
+    events: [finalizedEvent(wallMs, roundKey)],
+    results: [],
+    terminatedGameIds: [],
+    handicapping: [{ golferId: participantId, kind: "complete", ags: 90, differential: 9.0 }],
+  });
+
+  // The "image" the fake parseArchive below reads back is the archive itself, unwrapped —
+  // never real DynamoDB-JSON-shaped AttributeValues (that's parseArchiveStreamImage's own
+  // concern, unit-tested in adapters-dynamodb), so NewImage's real type is cast away here.
+  const streamEventFor = (records: readonly { eventId: string; image: RoundArchive | undefined }[]): DynamoDBStreamEvent => ({
+    Records: records.map(
+      (r) => ({ eventID: r.eventId, eventName: "INSERT", dynamodb: { NewImage: r.image } }) as unknown as DynamoDBStreamEvent["Records"][number],
+    ),
+  });
+
+  // A fake parseArchive standing in for adapters-dynamodb's real parseArchiveStreamImage
+  // (which needs an actually-marshalled DynamoDB image) — here the "image" IS the archive
+  // itself, unwrapped, so this loop's own control flow is what's under test, not marshalling.
+  const fakeParseArchive = (image: Record<string, unknown> | undefined): RoundArchive => {
+    if (!image) throw new Error("fakeParseArchive: no image (simulated poison record)");
+    return image as unknown as RoundArchive;
+  };
+
+  const setup = () => {
+    const projectionStore = createInMemoryProjectionStore();
+    const project = projectArchive({ projectionStore, clock: createFixedClock(9_000), logger: createNullLogger() });
+    return { projectionStore, project, logger: createNullLogger() };
+  };
+
+  it("projects every record in a batch", async () => {
+    const ctx = setup();
+    const handler = createProjectorHandler({ parseArchive: fakeParseArchive, project: ctx.project, logger: ctx.logger });
+
+    await handler(
+      streamEventFor([
+        { eventId: "evt-1", image: archiveFor("r1", 1_000) },
+        { eventId: "evt-2", image: archiveFor("r2", 2_000, bo) },
+      ]),
+    );
+
+    expect(await ctx.projectionStore.listHistory(ann)).toHaveLength(1);
+    expect(await ctx.projectionStore.listHistory(bo)).toHaveLength(1);
+  });
+
+  it("a poison record (unparseable NEW_IMAGE) logs and rethrows — never silently skipped", async () => {
+    const ctx = setup();
+    const errorSpy = vi.fn();
+    const handler = createProjectorHandler({ parseArchive: fakeParseArchive, project: ctx.project, logger: { ...ctx.logger, error: errorSpy } });
+
+    await expect(handler(streamEventFor([{ eventId: "evt-poison", image: undefined }]))).rejects.toThrow(/poison record/);
+    expect(errorSpy).toHaveBeenCalledOnce();
+    expect(errorSpy.mock.calls[0]![1]).toMatchObject({ eventId: "evt-poison" });
+  });
+
+  it("a poison record partway through a batch stops the batch — never proceeds past the failure", async () => {
+    const ctx = setup();
+    const handler = createProjectorHandler({ parseArchive: fakeParseArchive, project: ctx.project, logger: ctx.logger });
+
+    await expect(
+      handler(
+        streamEventFor([
+          { eventId: "evt-1", image: archiveFor("r1", 1_000) },
+          { eventId: "evt-poison", image: undefined },
+          { eventId: "evt-3", image: archiveFor("r3", 3_000, bo) },
+        ]),
+      ),
+    ).rejects.toThrow();
+
+    // The first record's write lands (already awaited before the poison record throws), but
+    // the third — after the poison record in this batch — never runs.
+    expect(await ctx.projectionStore.listHistory(ann)).toHaveLength(1);
+    expect(await ctx.projectionStore.listHistory(bo)).toHaveLength(0);
   });
 });

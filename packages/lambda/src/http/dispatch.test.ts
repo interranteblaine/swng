@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { deviceId, fixtureLinks, fixtureWhite, opId } from "@swng/domain";
+import type { AccountClaims, AccountVerifier } from "@swng/application";
 import {
   addGame,
   addTeeSet,
@@ -80,6 +81,17 @@ const makeEvent = (opts: {
 const asStructured = (result: Awaited<ReturnType<ReturnType<typeof createDispatcher>>>): APIGatewayProxyStructuredResultV2 =>
   result as APIGatewayProxyStructuredResultV2;
 
+// No route in buildRoutes declares `auth: "golfer"` yet (M7 Task 4 adds the tier; the routes
+// that use it land in a later task) — this stub is never actually invoked by any test in this
+// file's golden-path/course-routes suites below, only wired so createDispatcher's signature is
+// satisfied. The golfer-tier behavior itself is exercised directly against a small ad-hoc
+// route table further down (`describe("createDispatcher — golfer auth tier")`).
+const neverCalledVerifier: AccountVerifier = {
+  verify: async () => {
+    throw new Error("neverCalledVerifier: no route in this suite uses the golfer auth tier");
+  },
+};
+
 const setup = () => {
   const journal = createInMemoryJournal();
   const store = createInMemoryRoundStore();
@@ -105,7 +117,7 @@ const setup = () => {
     searchCourses: searchCourses({ courseStore }),
   };
 
-  const dispatcher = createDispatcher(buildRoutes(useCases), tokens, logger);
+  const dispatcher = createDispatcher(buildRoutes(useCases), tokens, neverCalledVerifier, logger);
   return { dispatcher, tokens };
 };
 
@@ -461,5 +473,55 @@ describe("createDispatcher — course routes + peek (M6 Task 4)", () => {
     expect(resp.statusCode).toBe(200);
     const peeked = peekRoundResponseSchema.parse(JSON.parse(resp.body!));
     expect(Object.keys(peeked).sort()).toEqual(["courseName", "teeSets"]);
+  });
+});
+
+// M7 Task 4: the "golfer" auth tier itself — no real route declares it yet (that lands with
+// the golfer/record routes in a later task), so this exercises it against a tiny hand-built
+// route table rather than buildRoutes' real one, the same way TokenIssuer's own behavior
+// would be tested in isolation from any specific route.
+describe("createDispatcher — golfer auth tier (M7 Task 4)", () => {
+  const VALID_TOKEN = "valid-golfer-token";
+  const account: AccountClaims = { sub: "cognito-sub-123", email: "ann@example.com" };
+
+  const stubVerifier: AccountVerifier = {
+    verify: async (bearer: string) => {
+      if (bearer !== VALID_TOKEN) throw new Error("stubVerifier: unknown token");
+      return account;
+    },
+  };
+
+  const golferRoute = {
+    method: "GET" as const,
+    path: "/me",
+    auth: "golfer" as const,
+    successStatus: 200 as const,
+    handler: async (ctx: { account?: AccountClaims }) => ({ sub: ctx.account?.sub, email: ctx.account?.email }),
+  };
+
+  const setupGolferTier = () => {
+    const tokens = createHmacTokenIssuer({ secret: "unused-for-golfer-tier", clock: createFixedClock(1_000) });
+    return createDispatcher([golferRoute], tokens, stubVerifier, createNullLogger());
+  };
+
+  it("401s a golfer-tier route with no bearer token at all", async () => {
+    const dispatcher = setupGolferTier();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me" })));
+    expect(resp.statusCode).toBe(401);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+  });
+
+  it("401s a golfer-tier route with a garbage bearer token the verifier rejects", async () => {
+    const dispatcher = setupGolferTier();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: "not-a-real-token" })));
+    expect(resp.statusCode).toBe(401);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+  });
+
+  it("hands {sub, email} to the handler for a token the verifier accepts", async () => {
+    const dispatcher = setupGolferTier();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: VALID_TOKEN })));
+    expect(resp.statusCode).toBe(200);
+    expect(JSON.parse(resp.body!)).toEqual({ sub: account.sub, email: account.email });
   });
 });

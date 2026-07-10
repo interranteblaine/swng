@@ -33,7 +33,7 @@ describe("SwngStack", () => {
       template.resourceCountIs("AWS::DynamoDB::Table", 4);
     });
 
-    it("swng-rounds-beta: pk/sk + gsi1 on joinCode, RETAIN", () => {
+    it("swng-rounds-beta: pk/sk + gsi1 on joinCode, RETAIN, stream NEW_IMAGE", () => {
       template.hasResourceProperties("AWS::DynamoDB::Table", {
         TableName: "swng-rounds-beta",
         BillingMode: "PAY_PER_REQUEST",
@@ -47,11 +47,24 @@ describe("SwngStack", () => {
           { AttributeName: "joinCode", AttributeType: "S" },
         ]),
         GlobalSecondaryIndexes: [Match.objectLike({ IndexName: "gsi1", KeySchema: [{ AttributeName: "joinCode", KeyType: "HASH" }] })],
+        // M7 Task 4: feeds ProjectorFunction (below).
+        StreamSpecification: { StreamViewType: "NEW_IMAGE" },
       });
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-rounds-beta" }) });
     });
 
-    it("swng-core-beta: pk/sk + gsi1 on gsi1pk/gsi1sk (INCLUDE name), RETAIN", () => {
+    // M7 Task 4 brief: adding a stream to an already-provisioned table must be an in-place
+    // update, never a replacement — same regression class, and same guard idiom, as the core
+    // table's own logical-id pin below (M6 Task 3's lesson, applied here for the first time
+    // the rounds table itself changes since its creation).
+    it("the rounds table's logical id is unchanged (still derived from construct id \"RoundsTable\") — no table replacement", () => {
+      const tables = template.findResources("AWS::DynamoDB::Table");
+      const roundsTableLogicalId = Object.keys(tables).find((id) => id.startsWith("RoundsTable"));
+      expect(roundsTableLogicalId).toBeDefined();
+      expect(tables[roundsTableLogicalId!]?.Properties.TableName).toBe("swng-rounds-beta");
+    });
+
+    it("swng-core-beta: pk/sk + gsi1 on gsi1pk/gsi1sk (INCLUDE name) + gsi2 on gsi2pk/gsi2sk (ALL), RETAIN", () => {
       template.hasResourceProperties("AWS::DynamoDB::Table", {
         TableName: "swng-core-beta",
         BillingMode: "PAY_PER_REQUEST",
@@ -64,8 +77,10 @@ describe("SwngStack", () => {
           { AttributeName: "sk", AttributeType: "S" },
           { AttributeName: "gsi1pk", AttributeType: "S" },
           { AttributeName: "gsi1sk", AttributeType: "S" },
+          { AttributeName: "gsi2pk", AttributeType: "S" },
+          { AttributeName: "gsi2sk", AttributeType: "S" },
         ]),
-        GlobalSecondaryIndexes: [
+        GlobalSecondaryIndexes: Match.arrayWith([
           Match.objectLike({
             IndexName: "gsi1",
             KeySchema: [
@@ -74,7 +89,16 @@ describe("SwngStack", () => {
             ],
             Projection: { ProjectionType: "INCLUDE", NonKeyAttributes: ["name"] },
           }),
-        ],
+          // M7 Task 4: the sub→golfer lookup GolferStore.getBySub queries.
+          Match.objectLike({
+            IndexName: "gsi2",
+            KeySchema: [
+              { AttributeName: "gsi2pk", KeyType: "HASH" },
+              { AttributeName: "gsi2sk", KeyType: "RANGE" },
+            ],
+            Projection: { ProjectionType: "ALL" },
+          }),
+        ]),
       });
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-core-beta" }) });
     });
@@ -127,16 +151,35 @@ describe("SwngStack", () => {
   });
 
   describe("functions", () => {
-    it("has exactly 3 Lambda functions", () => {
-      template.resourceCountIs("AWS::Lambda::Function", 3);
+    // findResources keys every result by its synthesized logical id (a construct-id-derived
+    // hash) — this resolves the ORIGINAL three functions (http/wsConnect/wsDisconnect) by
+    // their pinned construct-id prefixes, same idiom as the core/rounds table logical-id
+    // pins above, so the two tests below that used to iterate "every function" can still mean
+    // exactly that trio now that ProjectorFunction/RebuildFunction exist alongside them with a
+    // deliberately different env/timeout shape.
+    const ORIGINAL_FUNCTION_PREFIXES = ["HttpFunction", "WsConnectFunction", "WsDisconnectFunction"];
+    const originalFunctions = () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      return Object.entries(functions).filter(([id]) => ORIGINAL_FUNCTION_PREFIXES.some((prefix) => id.startsWith(prefix)));
+    };
+
+    it("has exactly 5 Lambda functions (http, wsConnect, wsDisconnect, projector, rebuild)", () => {
+      template.resourceCountIs("AWS::Lambda::Function", 5);
     });
 
-    it("every function is Node 20 with the four required env keys", () => {
+    it("every function is Node 20", () => {
       const functions = template.findResources("AWS::Lambda::Function");
       const entries = Object.values(functions);
-      expect(entries.length).toBe(3);
+      expect(entries.length).toBe(5);
       for (const fn of entries) {
         expect(fn.Properties.Runtime).toBe("nodejs20.x");
+      }
+    });
+
+    it("http/wsConnect/wsDisconnect each carry the four required env keys", () => {
+      const entries = originalFunctions();
+      expect(entries.length).toBe(3);
+      for (const [, fn] of entries) {
         const variables = fn.Properties.Environment.Variables;
         for (const key of ENV_KEYS) {
           expect(Object.keys(variables)).toContain(key);
@@ -144,11 +187,10 @@ describe("SwngStack", () => {
       }
     });
 
-    it("every function has an explicit 15s timeout and 512MB memory (not CDK's 3s/128MB defaults)", () => {
-      const functions = template.findResources("AWS::Lambda::Function");
-      const entries = Object.values(functions);
+    it("http/wsConnect/wsDisconnect each have an explicit 15s timeout and 512MB memory (not CDK's 3s/128MB defaults)", () => {
+      const entries = originalFunctions();
       expect(entries.length).toBe(3);
-      for (const fn of entries) {
+      for (const [, fn] of entries) {
         expect(fn.Properties.Timeout).toBe(15);
         expect(fn.Properties.MemorySize).toBe(512);
       }
@@ -156,11 +198,78 @@ describe("SwngStack", () => {
 
     // M6 Task 3: course routes are HTTP-only (no WS entry point ever touches the core
     // table), unlike TABLE_ROUNDS/TABLE_CONNECTIONS/WS_ENDPOINT above which every function
-    // needs — so exactly one of the three functions (httpFn) should carry TABLE_CORE.
+    // needs — so exactly one of the five functions (httpFn) should carry TABLE_CORE.
     it("exactly one function (http) carries TABLE_CORE", () => {
       const functions = template.findResources("AWS::Lambda::Function");
       const withTableCore = Object.values(functions).filter((fn) => "TABLE_CORE" in (fn.Properties.Environment.Variables as Record<string, unknown>));
       expect(withTableCore).toHaveLength(1);
+    });
+
+    // M7 Task 4: httpFn (forward-provisioned ahead of the golfer/record routes), projectorFn,
+    // and rebuildFn all need it — wsConnect/wsDisconnect never do (same TABLE_CORE-shaped
+    // story as above).
+    it("exactly three functions (http, projector, rebuild) carry TABLE_PROJECTIONS", () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      const withTableProjections = Object.values(functions).filter(
+        (fn) => "TABLE_PROJECTIONS" in (fn.Properties.Environment.Variables as Record<string, unknown>),
+      );
+      expect(withTableProjections).toHaveLength(3);
+    });
+
+    it("exactly one function (http) carries USER_POOL_ID/USER_POOL_CLIENT_ID", () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      const withUserPool = Object.values(functions).filter((fn) => {
+        const variables = fn.Properties.Environment.Variables as Record<string, unknown>;
+        return "USER_POOL_ID" in variables && "USER_POOL_CLIENT_ID" in variables;
+      });
+      expect(withUserPool).toHaveLength(1);
+    });
+
+    it("ProjectorFunction: 15s/512MB, TABLE_PROJECTIONS only (no TOKEN_SECRET/WS_ENDPOINT it has no use for)", () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      const id = Object.keys(functions).find((key) => key.startsWith("ProjectorFunction"));
+      expect(id).toBeDefined();
+      const fn = functions[id!]!;
+      expect(fn.Properties.Timeout).toBe(15);
+      expect(fn.Properties.MemorySize).toBe(512);
+      expect(Object.keys(fn.Properties.Environment.Variables)).toEqual(["TABLE_PROJECTIONS"]);
+    });
+
+    it("RebuildFunction: a longer timeout than the request-shaped functions (a full-table replay, not a single request), TABLE_PROJECTIONS + TABLE_ROUNDS only", () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      const id = Object.keys(functions).find((key) => key.startsWith("RebuildFunction"));
+      expect(id).toBeDefined();
+      const fn = functions[id!]!;
+      expect(fn.Properties.Timeout).toBe(300);
+      expect(fn.Properties.MemorySize).toBe(512);
+      expect(Object.keys(fn.Properties.Environment.Variables).sort()).toEqual(["TABLE_PROJECTIONS", "TABLE_ROUNDS"]);
+    });
+  });
+
+  describe("event sources", () => {
+    it("has exactly one EventSourceMapping (ProjectorFunction — RebuildFunction is manual-invoke only)", () => {
+      template.resourceCountIs("AWS::Lambda::EventSourceMapping", 1);
+    });
+
+    it("ProjectorFunction's event source: the rounds table's stream, batch 10, TRIM_HORIZON, filtered to ARCHIVE items", () => {
+      const tables = template.findResources("AWS::DynamoDB::Table");
+      const roundsTableLogicalId = Object.keys(tables).find((id) => id.startsWith("RoundsTable"));
+      expect(roundsTableLogicalId).toBeDefined();
+
+      template.hasResourceProperties("AWS::Lambda::EventSourceMapping", {
+        EventSourceArn: { "Fn::GetAtt": [roundsTableLogicalId, "StreamArn"] },
+        BatchSize: 10,
+        StartingPosition: "TRIM_HORIZON",
+        FilterCriteria: { Filters: [{ Pattern: JSON.stringify({ dynamodb: { Keys: { sk: { S: ["ARCHIVE"] } } } }) }] },
+      });
+    });
+
+    it("the event source mapping targets ProjectorFunction, never RebuildFunction", () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      const projectorId = Object.keys(functions).find((id) => id.startsWith("ProjectorFunction"));
+      expect(projectorId).toBeDefined();
+
+      template.hasResourceProperties("AWS::Lambda::EventSourceMapping", { FunctionName: { Ref: projectorId } });
     });
   });
 
@@ -184,6 +293,85 @@ describe("SwngStack", () => {
             }),
           ]),
         }),
+      });
+    });
+
+    // M7 Task 4: projectorFn/rebuildFn/httpFn's projections-table access — same resolve-the-
+    // real-logical-id idiom as the core table test above.
+    it("projectorFn's role has a policy statement covering the projections table (read+write actions)", () => {
+      const tables = template.findResources("AWS::DynamoDB::Table");
+      const projectionsTableLogicalId = Object.entries(tables).find(([, table]) => table.Properties.TableName === "swng-projections-beta")?.[0];
+      expect(projectionsTableLogicalId).toBeDefined();
+
+      // Unlike the core table (which has GSIs, so grantReadWriteData's Resource is an array
+      // of [tableArn, indexArns]), the projections table has none — CDK's Resource here is a
+      // single Fn::GetAtt, not wrapped in an array, so this can't reuse the core table test's
+      // `Match.arrayWith` shape for Resource.
+      template.hasResourceProperties("AWS::IAM::Policy", {
+        PolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: Match.arrayWith(["dynamodb:GetItem", "dynamodb:PutItem"]),
+              Resource: Match.objectLike({ "Fn::GetAtt": [projectionsTableLogicalId, "Arn"] }),
+            }),
+          ]),
+        }),
+      });
+    });
+
+    // Read-only: rebuild only Scans for archives (createDynamoArchiveSource), never writes
+    // the rounds table — so its policy should carry a read action (Scan) but not a write one
+    // (PutItem would mean grantReadWriteData was used here by mistake).
+    it("rebuildFn's role has a read-only policy statement covering the rounds table (no write actions)", () => {
+      const tables = template.findResources("AWS::DynamoDB::Table");
+      const roundsTableLogicalId = Object.keys(tables).find((id) => id.startsWith("RoundsTable"));
+      expect(roundsTableLogicalId).toBeDefined();
+
+      template.hasResourceProperties("AWS::IAM::Policy", {
+        PolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: Match.arrayWith(["dynamodb:Scan"]),
+              Resource: Match.arrayWith([Match.objectLike({ "Fn::GetAtt": Match.arrayWith([roundsTableLogicalId]) })]),
+            }),
+          ]),
+        }),
+      });
+    });
+  });
+
+  describe("identity (Cognito, M7 Task 4)", () => {
+    it("has exactly one User Pool: email sign-in, self-sign-up on, RETAIN", () => {
+      template.resourceCountIs("AWS::Cognito::UserPool", 1);
+      template.hasResourceProperties("AWS::Cognito::UserPool", {
+        UserPoolName: "swng-beta",
+        // CDK's own translation of signInAliases: { email: true } — email IS the username.
+        UsernameAttributes: ["email"],
+        AutoVerifiedAttributes: ["email"],
+        AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: false }), // self-sign-up on
+      });
+      template.hasResource("AWS::Cognito::UserPool", { DeletionPolicy: "Retain" });
+    });
+
+    it("has exactly one User Pool Client: no secret, authorization-code OAuth flow, USER_PASSWORD_AUTH enabled, callback/logout URLs include localhost:5173", () => {
+      template.resourceCountIs("AWS::Cognito::UserPoolClient", 1);
+      template.hasResourceProperties("AWS::Cognito::UserPoolClient", {
+        GenerateSecret: false,
+        AllowedOAuthFlows: ["code"],
+        AllowedOAuthFlowsUserPoolClient: true,
+        AllowedOAuthScopes: Match.arrayWith(["openid", "email", "profile"]),
+        CallbackURLs: Match.arrayWith(["http://localhost:5173"]),
+        LogoutURLs: Match.arrayWith(["http://localhost:5173"]),
+        // M9 hardening item (why-comment in swngStack.ts): e2e-gate JWT minting via
+        // InitiateAuth, alongside the real web app's authorization-code+PKCE flow above.
+        ExplicitAuthFlows: Match.arrayWith(["ALLOW_USER_PASSWORD_AUTH"]),
+      });
+    });
+
+    it("has exactly one User Pool Domain: Cognito prefix domain swng-<stage>-<account>", () => {
+      template.resourceCountIs("AWS::Cognito::UserPoolDomain", 1);
+      template.hasResourceProperties("AWS::Cognito::UserPoolDomain", {
+        Domain: { "Fn::Join": ["", ["swng-beta-", { Ref: "AWS::AccountId" }]] },
       });
     });
   });
@@ -240,6 +428,12 @@ describe("SwngStack", () => {
     it("outputs HttpApiUrl and WsApiUrl", () => {
       template.hasOutput("HttpApiUrl", {});
       template.hasOutput("WsApiUrl", {});
+    });
+
+    it("outputs UserPoolId, UserPoolClientId, and HostedUiDomain", () => {
+      template.hasOutput("UserPoolId", {});
+      template.hasOutput("UserPoolClientId", {});
+      template.hasOutput("HostedUiDomain", {});
     });
   });
 });

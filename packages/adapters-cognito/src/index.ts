@@ -1,2 +1,3 @@
-// Bootstrap barrel — replaced by real exports from M1 on.
-export const packageName = "@swng/adapters-cognito";
+// The package's one public interface (conventions §2) — consumers (lambda, its tests)
+// import "@swng/adapters-cognito", never a deep path.
+export { createCognitoVerifier } from "./createCognitoVerifier.js";

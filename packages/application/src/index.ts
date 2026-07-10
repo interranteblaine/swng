@@ -9,6 +9,7 @@ export type { ProjectionStore } from "./ports/projectionStore.js";
 export type { Broadcast } from "./ports/broadcast.js";
 export type { ParticipantClaims, TokenIssuer } from "./ports/tokenIssuer.js";
 export type { AccountClaims } from "./ports/accountClaims.js";
+export type { AccountVerifier } from "./ports/accountVerifier.js";
 export type { Clock } from "./ports/clock.js";
 export type { IdGenerator } from "./ports/idGenerator.js";
 export type { Logger } from "./ports/logger.js";

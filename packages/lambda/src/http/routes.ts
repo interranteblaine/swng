@@ -1,7 +1,7 @@
 import type { z } from "zod";
 import { courseId, roundId } from "@swng/domain";
 import type { CourseId, RoundId } from "@swng/domain";
-import type { ParticipantClaims } from "@swng/application";
+import type { AccountClaims, ParticipantClaims } from "@swng/application";
 import type {
   AddGameRequest,
   AddGameResponse,
@@ -57,8 +57,14 @@ export interface UseCases {
 // parsed the body. `query` is additive to the brief's sketch — GET /rounds/{id}/events is
 // the one route whose command shape isn't a JSON body, so its `since` cursor rides here
 // instead (the dispatcher always populates it, `{}` when the request carried no query string).
+// `account` is the "golfer" auth tier's counterpart to `claims` (M7 Task 4): a route
+// declaring `auth: "golfer"` gets a verified Cognito identity here instead of a
+// round-scoped participant token — the two tiers are mutually exclusive per route (routes.ts,
+// by construction: no route declares both), so a handler only ever reads the one its own
+// route's `auth` promises.
 export interface RouteContext {
   readonly claims?: ParticipantClaims;
+  readonly account?: AccountClaims;
   readonly pathParams: Record<string, string>;
   readonly query: Record<string, string>;
 }
@@ -67,7 +73,10 @@ export interface Route {
   readonly method: "GET" | "POST";
   readonly path: string; // template with `{name}` segments, e.g. "/rounds/{roundId}/games"
   readonly schema?: z.ZodType;
-  readonly auth: "none" | "participant";
+  // "participant" = a round-scoped token minted off a join code (no account required);
+  // "golfer" = a signed-in Cognito identity (M7 Task 4) — verified by the dispatcher's
+  // injected AccountVerifier, never by a route handler itself.
+  readonly auth: "none" | "participant" | "golfer";
   // 201 for routes that mint a new resource (round/participant/game); 200 for actions
   // that read or that may be an idempotent no-op (score, finalize, events).
   readonly successStatus: 200 | 201;

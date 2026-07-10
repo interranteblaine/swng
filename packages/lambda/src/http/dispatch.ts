@@ -1,5 +1,5 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
-import type { Logger, ParticipantClaims, TokenIssuer } from "@swng/application";
+import type { AccountClaims, AccountVerifier, Logger, ParticipantClaims, TokenIssuer } from "@swng/application";
 import { ApplicationError } from "@swng/application";
 import { ContractError, parse } from "@swng/contracts";
 import type { Route, RouteContext } from "./routes.js";
@@ -62,7 +62,7 @@ const readJsonBody = (event: APIGatewayProxyEventV2): unknown => {
 // One generic dispatcher over the declarative route table (conventions §3): routing,
 // auth, parsing, and error-mapping all happen exactly once, here, never per-route.
 export const createDispatcher =
-  (routes: readonly Route[], tokens: TokenIssuer, logger: Logger) =>
+  (routes: readonly Route[], tokens: TokenIssuer, verifier: AccountVerifier, logger: Logger) =>
   async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
     const method = event.requestContext.http.method.toUpperCase();
     const path = event.rawPath;
@@ -103,12 +103,25 @@ export const createDispatcher =
         claims = verified;
       }
 
+      let account: AccountClaims | undefined;
+      if (route.auth === "golfer") {
+        const token = bearerToken(event);
+        if (!token) throw new ApplicationError("invalid-token");
+        // The injected AccountVerifier rejects on a bad signature, expiry, or wrong
+        // issuer/audience (createCognitoVerifier's own doc comment) — every one of those
+        // collapses to the same 401 a missing/garbage bearer token already produces above,
+        // never a distinct error code a client could use to enumerate WHY a token failed.
+        account = await verifier.verify(token).catch(() => {
+          throw new ApplicationError("invalid-token");
+        });
+      }
+
       const body = route.schema ? parse(route.schema, readJsonBody(event)) : undefined;
       const query: Record<string, string> = {};
       for (const [key, value] of Object.entries(event.queryStringParameters ?? {})) {
         if (value !== undefined) query[key] = value;
       }
-      const ctx: RouteContext = { claims, pathParams, query };
+      const ctx: RouteContext = { claims, account, pathParams, query };
 
       const result = await route.handler(ctx, body);
       return { statusCode: route.successStatus, headers: { "content-type": "application/json" }, body: JSON.stringify(result) };

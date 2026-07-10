@@ -8,4 +8,6 @@ export { createDynamoConnectionRegistry } from "./createDynamoConnectionRegistry
 export { createDynamoCourseStore } from "./createDynamoCourseStore.js";
 export { createDynamoGolferStore } from "./createDynamoGolferStore.js";
 export { createDynamoProjectionStore } from "./createDynamoProjectionStore.js";
+export { createDynamoArchiveSource } from "./createDynamoArchiveSource.js";
+export { parseArchiveStreamImage } from "./parseArchiveStreamImage.js";
 export { createDocumentClient } from "./createDocumentClient.js";

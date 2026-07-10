@@ -2,8 +2,8 @@
 // (indirectly) apps/infra-cdk, which points NodejsFunction at the files under src/entries/
 // directly rather than through this barrel — those are the actual Lambda entry points, each
 // building its own `App` at module scope (compositionRoot.ts).
-export { buildApp } from "./compositionRoot.js";
-export type { App } from "./compositionRoot.js";
+export { buildApp, buildProjector, buildRebuild, createProjectorHandler } from "./compositionRoot.js";
+export type { App, ProjectorApp, RebuildApp } from "./compositionRoot.js";
 
 export { createHmacTokenIssuer } from "./auth/hmacTokenIssuer.js";
 

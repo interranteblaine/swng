@@ -13,43 +13,43 @@ const setup = (golferStore: GolferStore = createInMemoryGolferStore()) => {
   return {
     golferStore,
     projectionStore,
-    getMe: getMyGolfer({ golferStore, idGenerator }),
+    getMe: getMyGolfer({ golferStore }),
     updateMe: updateMyGolfer({ golferStore, idGenerator }),
     claim: claimGolfer({ golferStore }),
     record: getMyRecord({ golferStore, projectionStore }),
   };
 };
 
-describe("getMyGolfer — get-or-create", () => {
-  it("a fresh sub gets a newly-minted golfer, named from the JWT's email local-part", async () => {
-    const ctx = setup();
-    const { golfer } = await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
-
-    expect(golfer.name).toBe("ann");
-    expect(golfer.golferId).toBeDefined();
-    expect(golfer.declared).toBeUndefined();
-    expect(golfer.effective).toBeUndefined();
-  });
-
-  it("a second GET /me for the same sub returns the SAME golferId, not a second create", async () => {
+// GET /me plan amendment (controller-decided): the plan's original "get-or-create" deadlocked
+// claiming — the auto-created golfer binds the sub before any later claimGolfer call, so
+// every claim would hit "sub already bound elsewhere". getMyGolfer.ts is now read-only;
+// updateMyGolfer (PUT /me) is the one create path.
+describe("getMyGolfer — never creates", () => {
+  it("a fresh sub gets golfer: null, twice, without ever creating a row", async () => {
     const ctx = setup();
     const first = await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
-    const second = await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
+    expect(first.golfer).toBeNull();
 
-    expect(second.golfer.golferId).toBe(first.golfer.golferId);
+    const second = await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
+    expect(second.golfer).toBeNull();
+
+    expect(await ctx.golferStore.getBySub("sub-1")).toBeUndefined();
   });
 
-  it("falls back to a bare default name when the JWT carries no email", async () => {
+  it("PUT /me then GET /me returns the same golferId", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.getMe({ sub: "sub-1" });
-    expect(golfer.name).toBe("Golfer");
+    const created = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+
+    const found = await ctx.getMe({ sub: "sub-1" });
+
+    expect(found.golfer?.golferId).toBe(created.golfer.golferId);
   });
 });
 
 describe("updateMyGolfer", () => {
   it("patches only the provided fields, leaving the rest as-is", async () => {
     const ctx = setup();
-    await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
+    await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
 
     const updated = await ctx.updateMe({ sub: "sub-1" }, { declared: 14.2 });
     expect(updated.golfer.name).toBe("ann"); // untouched
@@ -60,15 +60,21 @@ describe("updateMyGolfer", () => {
     expect(renamed.golfer.declared).toBe(14.2); // untouched by the second patch
   });
 
-  it("get-or-creates when called before any GET /me (defensive — real UI always GETs first)", async () => {
+  it("get-or-creates on the first PUT /me — the only create path now GET /me never creates", async () => {
     const ctx = setup();
     const updated = await ctx.updateMe({ sub: "sub-1", email: "bo@example.com" }, { declared: 9.1 });
     expect(updated.golfer.declared).toBe(9.1);
   });
 
+  it("falls back to a bare default name when the JWT carries no email", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
+    expect(golfer.name).toBe("Golfer");
+  });
+
   it("official wins effective-index precedence over both computed and declared, matching domain's effectiveIndex", async () => {
     const ctx = setup();
-    await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
+    await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
     const declaredOnly = await ctx.updateMe({ sub: "sub-1" }, { declared: 14.2 });
     expect(declaredOnly.golfer.effective).toEqual({ value: 14.2, source: "declared" });
 
@@ -79,7 +85,7 @@ describe("updateMyGolfer", () => {
 });
 
 describe("claimGolfer — happy path", () => {
-  it("binds the calling sub to an unclaimed ghost golferId, seeding a name from the claims", async () => {
+  it("binds an unbound sub (no prior GET/PUT /me) to an unclaimed ghost golferId, seeding a name from the claims", async () => {
     const ctx = setup();
     const ghost = golferId("ghost-1");
 
@@ -107,9 +113,9 @@ describe("claimGolfer — collision arm 1: golfer already claimed", () => {
 });
 
 describe("claimGolfer — collision arm 2: sub already bound to another golfer", () => {
-  it("a sub already bound elsewhere is rejected BEFORE the target golferId is ever touched", async () => {
+  it("a sub already bound via a prior PUT /me is rejected BEFORE the target golferId is ever touched", async () => {
     const ctx = setup();
-    const alreadyMine = (await ctx.getMe({ sub: "sub-1", email: "ann@example.com" })).golfer.golferId;
+    const alreadyMine = (await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {})).golfer.golferId;
     const otherGhost = golferId("ghost-2");
 
     await expect(ctx.claim({ sub: "sub-1" }, { golferId: otherGhost })).rejects.toMatchObject({ code: "golfer-already-claimed" });
@@ -131,7 +137,7 @@ describe("getMyRecord", () => {
 
   it("bootstrap not met: history present, index absent below 3 differentials", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
     await ctx.projectionStore.putHistoryLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
@@ -150,7 +156,7 @@ describe("getMyRecord", () => {
 
   it("assembles index + history newest-first once the projection store has them", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
     await ctx.projectionStore.putHistoryLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",

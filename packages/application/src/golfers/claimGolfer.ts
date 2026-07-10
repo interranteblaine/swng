@@ -1,4 +1,4 @@
-import type { ClaimGolferRequest, GetMeResponse } from "@swng/contracts";
+import type { ClaimGolferRequest, GolferResponse } from "@swng/contracts";
 import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { GolferStore } from "../ports/golferStore.js";
@@ -10,9 +10,15 @@ import { toGolferView } from "./golferView.js";
 // rejects it with the same code a genuine double-claim gets, rather than attempting any
 // merge. The precheck runs BEFORE golferStore.claim is ever called, so a rejected attempt
 // never touches (or creates) an item under the target golferId.
+//
+// This precheck's normal-flow case is now genuinely unbound (getMyGolfer.ts's GET /me
+// plan amendment): a sub that's only ever GET-ed (never PUT or claimed) has no golfer row,
+// so boundElsewhere is undefined and the first claim proceeds straight through — the
+// "GolferMerged" arm above only fires for a sub that's already PUT its own profile or
+// claimed a different ghost.
 export const claimGolfer =
   (deps: { golferStore: GolferStore }) =>
-  async (claims: AccountClaims, command: ClaimGolferRequest): Promise<GetMeResponse> => {
+  async (claims: AccountClaims, command: ClaimGolferRequest): Promise<GolferResponse> => {
     const boundElsewhere = await deps.golferStore.getBySub(claims.sub);
     if (boundElsewhere && boundElsewhere.golfer.id !== command.golferId) {
       throw new ApplicationError("golfer-already-claimed", `sub already bound to golfer ${boundElsewhere.golfer.id}`);

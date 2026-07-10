@@ -4,7 +4,7 @@ import { DomainError } from "../errors.js";
 import type { HoleResult } from "../round/holeResult.js";
 import { fixtureWhite } from "../scoring/golden/fixtureCourse.js";
 import { roundHalfUp } from "../scoring/strokes.js";
-import { adjustedGrossScore, combineNineHoleDifferentials, computeIndex, courseHandicapFor, scoreDifferential } from "./whs.js";
+import { adjustedGrossScore, combineNineHoleDifferentials, computeIndex, computeIndexDetail, courseHandicapFor, scoreDifferential } from "./whs.js";
 
 // Every conformance case below is pinned to a published USGA/R&A source, per the
 // task's source-verification step — the cited documents are the spec, not memory.
@@ -130,6 +130,30 @@ describe("computeIndex — published worked examples", () => {
     const record = [0, ...Array.from({ length: 19 }, () => 10)];
     expect(computeIndex(record)).toBe(8.8); // best 8 = {0, 10×7} → 70/8
     expect(computeIndex([...record, 20])).toBe(10.0); // 0 slid out; best 8 = 10×8
+  });
+});
+
+describe("computeIndexDetail — differentialsUsed is Rule 5.2a's `use` count, not the window size", () => {
+  // Same clarification 5.2a/1 as above (3 scores → use the lowest 1): differentialsUsed
+  // must read 1, not 3 — this is the exact case a naive "differentials considered" count
+  // gets wrong.
+  it("3 differentials available → uses the lowest 1", () => {
+    expect(computeIndexDetail([15.3, 15.2, 16.6])).toEqual({ value: 13.2, differentialsUsed: 1 });
+  });
+
+  // Rule 5.2a table, 20-score row: use the best 8.
+  it("a full 20-score window → uses the best 8", () => {
+    const differentials = Array.from({ length: 20 }, (_, i) => i + 1);
+    expect(computeIndexDetail(differentials)).toEqual({ value: 4.5, differentialsUsed: 8 });
+  });
+
+  it("is undefined under three scores, matching computeIndex", () => {
+    expect(computeIndexDetail([12.3, 14.1])).toBeUndefined();
+  });
+
+  it("computeIndex is exactly computeIndexDetail's value projection", () => {
+    const differentials = [40.7, 42.4, 36.1, 45.9, 43.6, 45.0];
+    expect(computeIndex(differentials)).toBe(computeIndexDetail(differentials)?.value);
   });
 });
 

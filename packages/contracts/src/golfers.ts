@@ -28,10 +28,22 @@ export const golferViewSchema: z.ZodType<GolferView> = z.object({
   effective: effectiveSchema.optional(),
 });
 
+// golfer is null for an unbound sub — GET /me NEVER creates (plan amendment: the original
+// "get-or-create" deadlocked claiming, since the auto-created golfer binds the sub before a
+// later claimGolfer call ever runs, so every claim hit the sub-already-bound collision arm).
+// updateMyGolfer (PUT /me) is the one create path now.
 export interface GetMeResponse {
+  readonly golfer: GolferView | null;
+}
+export const getMeResponseSchema: z.ZodType<GetMeResponse> = z.object({ golfer: golferViewSchema.nullable() });
+
+// PUT /me and POST /golfers/claim always resolve to a real golfer (both are create-or-act
+// paths, never a "does this exist" read) — a distinct, non-nullable response shape from
+// GetMeResponse so callers of updateMyGolfer/claimGolfer don't inherit GET /me's null case.
+export interface GolferResponse {
   readonly golfer: GolferView;
 }
-export const getMeResponseSchema: z.ZodType<GetMeResponse> = z.object({ golfer: golferViewSchema });
+export const golferResponseSchema: z.ZodType<GolferResponse> = z.object({ golfer: golferViewSchema });
 
 // Every field optional — a partial patch (PATCH-like semantics: an absent key leaves the
 // stored value untouched; there is no way to CLEAR a set field in v1). `.strict()` like
@@ -71,6 +83,8 @@ const golferRoundLineSchema: z.ZodType<GolferRoundLine> = z.object({
 });
 
 export interface GetMyRecordResponse {
+  // differentialsUsed: WHS Rule 5.2a's `use` count (domain's computeIndexDetail, whs.ts) —
+  // how many differentials were actually averaged, not how many were in the window.
   readonly index?: { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number };
   readonly history: readonly GolferRoundLine[]; // newest first (application/src/golfers/getMyRecord.ts)
 }

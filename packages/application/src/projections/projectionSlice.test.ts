@@ -68,7 +68,7 @@ describe("projectArchive", () => {
     expect(await ctx.projectionStore.getIndex(ann)).toBeUndefined();
   });
 
-  it("crosses the bootstrap on the 3rd differential; differentialsUsed reflects the differentials considered", async () => {
+  it("crosses the bootstrap on the 3rd differential; differentialsUsed is the WHS use-count, not the window size", async () => {
     const ctx = setup();
     const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
 
@@ -80,7 +80,9 @@ describe("projectArchive", () => {
 
     await project(archiveAt("r3", 3_000, [{ golferId: ann, differential: 11.0 }]));
     const index = await ctx.projectionStore.getIndex(ann);
-    expect(index).toEqual({ value: computeIndex([9.0, 10.0, 11.0]), computedAtMs: 5_000, differentialsUsed: 3 });
+    // 3 differentials available → Rule 5.2a uses only the lowest 1 (whs.test.ts's
+    // computeIndexDetail pin), not 3.
+    expect(index).toEqual({ value: computeIndex([9.0, 10.0, 11.0]), computedAtMs: 5_000, differentialsUsed: 1 });
   });
 
   it("is idempotent: re-putting the same history line doesn't duplicate it", async () => {

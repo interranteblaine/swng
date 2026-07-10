@@ -29,6 +29,11 @@ describe("golferViewSchema (via getMeResponseSchema)", () => {
       },
     });
   });
+
+  // GET /me never creates (plan amendment) — an unbound sub's response carries golfer: null.
+  it("round-trips an unbound sub: golfer null", () => {
+    roundTrips(getMeResponseSchema, { golfer: null });
+  });
 });
 
 describe("updateMeRequestSchema", () => {

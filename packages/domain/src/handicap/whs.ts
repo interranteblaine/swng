@@ -53,7 +53,20 @@ const smallSampleTable: ReadonlyArray<{ readonly maxCount: number; readonly use:
   { maxCount: 20, use: 8, adjustment: 0 },
 ];
 
-export const computeIndex = (differentials: readonly number[]): number | undefined => {
+// differentialsUsed is Rule 5.2a's `use` column — how many of the window's differentials
+// were actually AVERAGED, not how many were in the window (e.g. a 3-differential window
+// uses only the lowest 1). computeIndex (below) is by far the more common caller need — a
+// bare number — so this stays a private detail type with computeIndex as a thin projection
+// of it, rather than changing computeIndex's own return shape and rippling every existing
+// call site (including this file's own published-example pins). Callers that need the count
+// too (application's index projector, projectArchive.ts) use computeIndexDetail directly —
+// the ONE table (smallSampleTable, above) is never re-derived outside domain.
+export interface IndexComputation {
+  readonly value: number;
+  readonly differentialsUsed: number;
+}
+
+export const computeIndexDetail = (differentials: readonly number[]): IndexComputation | undefined => {
   // Input order is oldest → newest, so "the most recent 20" = the LAST 20.
   const window = differentials.slice(-20);
   if (window.length < 3) return undefined;
@@ -63,8 +76,11 @@ export const computeIndex = (differentials: readonly number[]): number | undefin
   // Tenth-rounding via roundHalfUp matches both published edges: .05 rounds up
   // (Rule 5.1a "with .5 rounded upwards") and minus values round toward zero at
   // .5 (Rule 5.1c: −1.55 → −1.5), because floor(x + 0.5) is direction-uniform.
-  return roundHalfUp((average + adjustment) * 10) / 10;
+  const value = roundHalfUp((average + adjustment) * 10) / 10;
+  return { value, differentialsUsed: use };
 };
+
+export const computeIndex = (differentials: readonly number[]): number | undefined => computeIndexDetail(differentials)?.value;
 
 // Rule 6.1a: Course Handicap = Handicap Index × (Slope Rating ÷ 113) +
 // (Course Rating − par), rounded to the nearest whole number as the final step.

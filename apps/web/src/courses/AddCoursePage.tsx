@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { ApiError, createCourse } from "../api";
 
 type HoleCount = 9 | 18;
@@ -38,10 +38,6 @@ const FIELD_FOR_CODE: Readonly<Record<string, Field>> = {
   "duplicate-tee-name": "teeName",
 };
 
-interface LocationState {
-  readonly enteredBy?: string;
-}
-
 // The keyboard-first, single-screen course entry flow (M6 Task 5, built to the product's
 // 10-minute gate): course name, tee name, rating, slope, a 9/18 toggle, then a hole grid whose
 // tab order runs left-to-right top-to-bottom (par, yardage, SI per row) purely from DOM order —
@@ -49,14 +45,9 @@ interface LocationState {
 // free.
 export function AddCoursePage() {
   const navigate = useNavigate();
-  const location = useLocation();
-  // A name already typed into CreateRoundPage before bouncing here via CourseSearch's
-  // empty-state link rides as router state — a one-time hint for this navigation, never a
-  // bookmarkable value.
-  const prefillEnteredBy = (location.state as LocationState | null)?.enteredBy ?? "";
 
   const [name, setName] = useState("");
-  const [enteredBy, setEnteredBy] = useState(prefillEnteredBy);
+  const [enteredBy, setEnteredBy] = useState("");
   const [teeName, setTeeName] = useState("");
   const [rating, setRating] = useState("");
   const [slope, setSlope] = useState("");

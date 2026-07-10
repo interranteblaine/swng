@@ -6,10 +6,11 @@ const DEFAULT_LIMIT = 10;
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 25;
 
-// Empty-after-trim queries are rejected at the route layer (ContractError, via the wire
-// query schema's min(1) — M6 Task 4) before this ever runs, so this only has to normalize
-// (the ONE nameKey normalization, courseNameKey — same one createCourse/addTeeSet's store
-// write uses) and clamp, not re-validate presence.
+// Empty-after-trim queries are rejected at the route layer (ContractError, via routes.ts's
+// hand-parsed parseSearchQuery — there is no wire query schema for GET /courses; query rides
+// the URL, not a JSON body) before this ever runs, so this only has to normalize (the ONE
+// nameKey normalization, courseNameKey — same one createCourse/addTeeSet's store write uses)
+// and clamp, not re-validate presence.
 export const searchCourses =
   (deps: { courseStore: CourseStore }) =>
   async (query: string, limit: number = DEFAULT_LIMIT): Promise<SearchCoursesResponse> => {

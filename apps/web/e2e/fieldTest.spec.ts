@@ -102,7 +102,17 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await pageB.goto("/join");
     await pageB.getByLabel("Code").fill(joinCode);
     await pageB.getByLabel("Your name").fill("Bo");
-    await pageB.getByLabel("Tee").fill("white");
+
+    // M6 (M-a fix): JoinRoundPage fires a debounced (250ms) peek once the 6-char code is
+    // complete and, on success, swaps the free-text Tee <input> for a <select> pre-populated
+    // from the round's frozen card, alongside a "Joining <courseName>" line. Waiting for that
+    // line (rather than racing the debounce with a free-text fill()) makes this deterministic
+    // AND actually exercises the M6 peek tee picker end-to-end for the first time — it was
+    // previously component-tested only. The free-text fallback path (peek failure) stays
+    // covered there, not here.
+    await expect(pageB.getByText(`Joining ${fixtureLinks18.courseName}`)).toBeVisible();
+    await pageB.getByLabel("Tee").selectOption("white");
+
     await pageB.getByLabel("Course handicap").fill("2");
     await pageB.getByRole("button", { name: "Join round" }).click();
     await expect(pageB).toHaveURL(/\/round\//);

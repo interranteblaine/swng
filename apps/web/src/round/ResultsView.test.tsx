@@ -1,5 +1,6 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import type { ReactElement } from "react";
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cellKey,
   deviceId,
@@ -17,8 +18,17 @@ import {
 } from "@swng/domain";
 import type { GameConfig, RoundState, ScoreCell } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
+import { AuthProvider } from "../auth/useAuth";
+import { tokenStore } from "../auth/tokenStore";
 import { describeGame } from "../games/describeGame";
+import { createMemoryStorage } from "../testSupport/memoryStorage";
 import { ResultsView } from "./ResultsView";
+
+// ResultsView now renders a roster with ClaimAffordance too (M7 Task 6 gap 2 — claim survives
+// finalize), which calls useAuth() — every render needs an AuthProvider ancestor, same idiom as
+// RoundPage.test.tsx and SetupPanel.test.tsx. This shadowing is the only plumbing change; every
+// existing call site below keeps its exact shape and assertions.
+const render = (ui: ReactElement) => rtlRender(<AuthProvider>{ui}</AuthProvider>);
 
 afterEach(() => cleanup());
 
@@ -188,5 +198,98 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
 
     render(<ResultsView state={state} games={[]} response={undefined} />);
     expect(screen.getByText("Ann — incomplete")).toBeTruthy();
+  });
+});
+
+// M7 Task 6, gap 2: a round could previously never be claimed once it finalized (the roster,
+// ClaimAffordance's only home, stopped rendering when RoundPage swapped in ResultsView) — which
+// killed the "sign in that evening and claim your round" story. ResultsView now renders its own
+// roster, additively, alongside the results it already rendered — none of the describe blocks
+// above changed behavior or assertions.
+describe("ResultsView — claim a ghost after finalize (gap 2)", () => {
+  const ann = golferId("ann");
+  const bo = golferId("bo");
+
+  const finalState = (): RoundState => ({
+    id: roundId("r-claim"),
+    status: "final",
+    card: fixtureLinks18,
+    participants: [
+      { golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 },
+      { golferId: bo, name: "Bo", tee: "white", courseHandicap: 2 },
+    ],
+    games: [],
+    cells: {},
+    terminatedGameIds: new Set(),
+  });
+
+  const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
+
+  const base64url = (obj: unknown): string =>
+    btoa(JSON.stringify(obj))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+
+  const signIn = () => {
+    const idToken = `${base64url({ alg: "none" })}.${base64url({ sub: "sub-1", email: "signed-in@example.com" })}.sig`;
+    tokenStore.save({ idToken, refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal("localStorage", createMemoryStorage());
+    vi.stubGlobal("sessionStorage", createMemoryStorage());
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("not signed in: the finalized roster still renders (name only), with no claim affordances at all", () => {
+    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    expect(annRow).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "This is me" })).toBeNull();
+  });
+
+  it("signed in + unlinked: every finalized-roster row is claimable", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => fakeResponse(200, { golfer: null })),
+    );
+
+    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "This is me" })).toHaveLength(2)); // Ann, Bo
+  });
+
+  it("This is me -> confirm -> POST /golfers/claim -> success re-fetches /me, even after finalize", async () => {
+    signIn();
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        calls.push(`${init?.method ?? "GET"} ${path}`);
+        if (path === "/golfers/claim") return fakeResponse(200, { golfer: { golferId: "bo", name: "Bo" } });
+        if (path === "/me") return fakeResponse(200, { golfer: calls.includes("POST /golfers/claim") ? { golferId: "bo", name: "Bo" } : null });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
+
+    const boRow = await waitFor(() => {
+      const row = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
+      expect(row).toBeTruthy();
+      return row!;
+    });
+
+    fireEvent.click(within(boRow).getByRole("button", { name: "This is me" }));
+    expect(within(boRow).getByRole("dialog")).toBeTruthy();
+    fireEvent.click(within(boRow).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(within(boRow).getByRole("status")).toBeTruthy());
+    expect(calls).toContain("POST /golfers/claim");
+    expect(calls.filter((c) => c === "GET /me").length).toBeGreaterThanOrEqual(2);
   });
 });

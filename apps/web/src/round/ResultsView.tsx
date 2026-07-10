@@ -2,6 +2,7 @@ import { useState } from "react";
 import { handicappingFor } from "@swng/domain";
 import type { GameId, GameState, RoundState } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
+import { ClaimAffordance } from "./ClaimAffordance";
 import { ScorecardGrid } from "./ScorecardGrid";
 import { StandingsHeader } from "./StandingsHeader";
 
@@ -38,6 +39,23 @@ export function ResultsView({ state, games, response }: ResultsViewProps) {
   return (
     <section className="flex flex-col gap-6 p-4 text-slate-100">
       <h1 className="text-xl font-bold">Final results</h1>
+
+      <div>
+        {/* The claim path survives finalize (M7 Task 6, gap 2 — a round could previously never
+            be claimed once it ended, killing the "sign in that evening and claim your round"
+            story): the roster is the only home of ClaimAffordance, live or archived, so it
+            renders here too, additively — nothing about the results/domain-fold rendering below
+            changes. */}
+        <h2 className="text-lg font-semibold">Roster</h2>
+        <ul className="flex flex-col gap-2">
+          {state.participants.map((p) => (
+            <li key={p.golferId} className="flex items-center gap-2">
+              <span>{p.name}</span>
+              <ClaimAffordance rowGolferId={p.golferId} />
+            </li>
+          ))}
+        </ul>
+      </div>
 
       <div>
         <h2 className="text-lg font-semibold">Handicap differentials</h2>

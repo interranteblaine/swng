@@ -148,7 +148,6 @@ interface LiveRoundProps {
   readonly games: readonly GameState[];
   readonly recordScore: (golferId: GolferId, hole: number, result: HoleResult) => void;
   readonly joinCode: string;
-  readonly myGolferId: GolferId;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
   readonly onFinalize: () => Promise<void>;
   readonly onTerminate: (gameId: GameId) => Promise<void>;
@@ -160,7 +159,7 @@ interface LiveRoundProps {
 // tolerate `state` swapping in and out across the live/final boundary, which useHoleDigest's
 // prev-snapshot ref isn't built to do (and doesn't need to — this component simply unmounts
 // once status flips to "final" and RoundPageContent renders ResultsView instead).
-function LiveRound({ state, games, recordScore, joinCode, myGolferId, onAddGame, onFinalize, onTerminate }: LiveRoundProps) {
+function LiveRound({ state, games, recordScore, joinCode, onAddGame, onFinalize, onTerminate }: LiveRoundProps) {
   const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
   // Falls back to the first game until a chip is tapped (Task 5's fixed default-first-game
   // decision) — also the correct fallback if a previously-active id ever stopped matching. A
@@ -176,7 +175,7 @@ function LiveRound({ state, games, recordScore, joinCode, myGolferId, onAddGame,
       <ScorecardGrid state={state} activeGame={activeGame} recordScore={recordScore} />
       {digest && <HoleDigest digest={digest} onDismiss={dismiss} />}
       <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
-      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} myGolferId={myGolferId} />
+      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} />
     </>
   );
 }
@@ -269,7 +268,6 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
             games={session.games}
             recordScore={session.recordScore}
             joinCode={credential.joinCode}
-            myGolferId={credential.golferId}
             onAddGame={onAddGame}
             onFinalize={onFinalize}
             onTerminate={onTerminate}

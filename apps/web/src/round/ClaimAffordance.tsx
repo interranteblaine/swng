@@ -1,0 +1,104 @@
+import { useState } from "react";
+import type { GolferId } from "@swng/domain";
+import { ApiError, claimGolfer } from "../api";
+import { useAuth } from "../auth/useAuth";
+
+export interface ClaimAffordanceProps {
+  readonly rowGolferId: GolferId;
+}
+
+// The ghost-claim affordance on one roster row (M7 Task 6; model corrected after a field smoke
+// caught the original over-restriction): signed in + this row not already linked to THIS
+// account → "This is me" → confirm → POST /golfers/claim → success re-fetches /me (the claim
+// bound this account's sub to the EXISTING GolferId — the header chrome updates to the claimed
+// name; the record is unbroken because nothing else moved).
+//
+// Renders for ANY signed-in user on ANY row not already linked to their account — including the
+// row belonging to THIS DEVICE's own round session. Device round-identity (which participant
+// this browser tab is scoring as) is not account identity (who is signed in): the most common
+// case is the very person who created the round signing in afterward to claim the row they've
+// been playing as all along. Collisions (the row already claimed by someone else, or this
+// account already bound to a different golfer) are the claim endpoint's own 409 arms to
+// disambiguate, not a client-side guess at who "should" be allowed to try.
+//
+// Two views render this component: SetupPanel (the live roster) and ResultsView (the finalized
+// roster) — claiming stays reachable after a round ends too ("sign in that evening and claim
+// your round" is part of the M7 promise, not just a mid-round affordance).
+// Round-membership-as-claim-capability is beta-grade by design (M9 hardens with a
+// challenge/confirmation).
+export function ClaimAffordance({ rowGolferId }: ClaimAffordanceProps) {
+  const auth = useAuth();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [claimed, setClaimed] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  if (!auth.signedIn) return null;
+
+  // Checked BEFORE the already-mine guard below: a claim made in THIS session flips
+  // auth.golfer to this very row on refetch, and the success confirmation must survive that.
+  if (claimed) {
+    return (
+      <span role="status" className="text-xs text-emerald-400">
+        Linked to your account
+      </span>
+    );
+  }
+
+  // Hidden once this signed-in account already IS this golfer (claimed in an earlier session,
+  // or the account's own golfer joined this round) — nothing left to claim.
+  if (auth.golfer?.golferId === rowGolferId) return null;
+
+  const confirm = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await auth.withAuth((token) => claimGolfer(token, { golferId: rowGolferId }));
+      // Re-fetch /me (brief): the claim is what binds a fresh account to its season ghost, so
+      // the app's identity chrome must reflect the claimed golfer now, not on the next reload.
+      await auth.refetch();
+      setClaimed(true);
+      setConfirming(false);
+    } catch (caught) {
+      // Never the raw caught.message — the 409 arm gets honest wording. Both of
+      // claimGolfer.ts's collision arms throw the SAME "golfer-already-claimed" code, so the
+      // client disambiguates by auth.golfer instead: if this signed-in account already has a
+      // golfer (auth.golfer non-null), the 409 is arm 2 — THIS account's sub is already bound
+      // elsewhere, one profile-Save away for every new user, and claiming a second ghost isn't
+      // supported yet. Only when auth.golfer is null could the 409 mean arm 1 — the row itself
+      // already claimed by a different account.
+      if (caught instanceof ApiError && caught.code === "golfer-already-claimed") {
+        setError(auth.golfer ? "Your account already has a profile — claiming another ghost isn't supported yet." : "Already claimed by another account.");
+      } else {
+        setError("Could not claim — try again.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span className="flex flex-col gap-1">
+      {!confirming ? (
+        <button type="button" onClick={() => setConfirming(true)} className="self-start rounded-md bg-slate-800 px-2 py-1 text-xs font-medium text-emerald-400">
+          This is me
+        </button>
+      ) : (
+        <span role="dialog" aria-label="Confirm claim" className="flex items-center gap-2 text-xs">
+          <span className="text-slate-300">Claim this golfer&apos;s history as yours?</span>
+          <button type="button" onClick={() => void confirm()} disabled={busy} className="rounded-md bg-emerald-700 px-2 py-1 font-medium text-slate-100 disabled:opacity-50">
+            Confirm
+          </button>
+          <button type="button" onClick={() => setConfirming(false)} disabled={busy} className="rounded-md bg-slate-800 px-2 py-1 text-slate-300 disabled:opacity-50">
+            Cancel
+          </button>
+        </span>
+      )}
+      {error && (
+        <span role="alert" className="text-xs text-red-400">
+          {error}
+        </span>
+      )}
+    </span>
+  );
+}

@@ -28,15 +28,13 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
 
 const noopAddGame = vi.fn().mockResolvedValue(undefined);
 
-// Every SetupPanel render now needs an AuthProvider ancestor (RosterRow's own "This is me"
-// affordance calls useAuth()) — this is the one place that wrapping lives, so the other ~10
-// tests in this file that don't care about auth stay untouched otherwise. `myGolferId`
-// defaults to ANN (the device's own row, per RoundPage's credential.golferId) unless a test
-// overrides it.
-const renderPanel = (props: Omit<SetupPanelProps, "myGolferId"> & { myGolferId?: SetupPanelProps["myGolferId"] }) =>
+// Every SetupPanel render now needs an AuthProvider ancestor (ClaimAffordance calls useAuth())
+// — this is the one place that wrapping lives, so the other ~10 tests in this file that don't
+// care about auth stay untouched otherwise.
+const renderPanel = (props: SetupPanelProps) =>
   render(
     <AuthProvider>
-      <SetupPanel myGolferId={ANN} {...props} />
+      <SetupPanel {...props} />
     </AuthProvider>,
   );
 
@@ -187,27 +185,46 @@ describe("SetupPanel", () => {
   });
 });
 
-// M7 Task 6: claim a ghost from the round roster — "This is me" on a row that isn't your own
-// device's row, only once signed in.
+// M7 Task 6: claim a ghost from the round roster — "This is me" on any row not already linked
+// to the signed-in account, only once signed in. Corrected post-launch (a field smoke caught
+// the original over-restriction): device round-identity (which row this browser tab scores as)
+// is not account identity, so the affordance is NOT suppressed on "your own device's row" —
+// the most common case is the round's creator signing in and claiming exactly that row.
 describe("SetupPanel — claim a ghost", () => {
   it("shows no claim affordance at all when signed out", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, myGolferId: ANN });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
     expect(screen.queryByRole("button", { name: "This is me" })).toBeNull();
   });
 
-  it("shows no claim affordance on your own device's row, even when signed in", async () => {
+  it("shows 'This is me' on the signed-in user's OWN device row too, when unlinked — the exact gap a field smoke caught", async () => {
     signIn();
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => fakeResponse(200, { golfer: null })),
     );
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, myGolferId: ANN });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "This is me" })).toHaveLength(3)); // Bo, Cal, Dee — not Ann
+    // Ann, Bo, Cal, Dee — no row is special-cased just because it happens to be the device's
+    // own round-session participant; every row is a candidate until the account is linked.
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "This is me" })).toHaveLength(4));
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
-    expect(within(annRow!).queryByRole("button", { name: "This is me" })).toBeNull();
+    expect(within(annRow!).getByRole("button", { name: "This is me" })).toBeTruthy();
+  });
+
+  it("still hides the affordance on the row already linked to the signed-in account (ClaimAffordance's internal guard, unweakened)", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => fakeResponse(200, { golfer: { golferId: "cal", name: "Cal" } })),
+    );
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "This is me" })).toHaveLength(3)); // Ann, Bo, Dee — not Cal
+
+    const calRow = screen.getAllByRole("listitem").find((li) => /Cal/.test(li.textContent ?? ""));
+    expect(within(calRow!).queryByRole("button", { name: "This is me" })).toBeNull();
   });
 
   it("This is me -> confirm -> POST /golfers/claim -> success re-fetches /me", async () => {
@@ -223,7 +240,7 @@ describe("SetupPanel — claim a ghost", () => {
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, myGolferId: ANN });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
     const boRow = await waitFor(() => {
       const row = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
@@ -256,7 +273,7 @@ describe("SetupPanel — claim a ghost", () => {
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, myGolferId: ANN });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
     const boRow = await waitFor(() => {
       const row = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
@@ -283,7 +300,7 @@ describe("SetupPanel — claim a ghost", () => {
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, myGolferId: ANN });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
     const boRow = await waitFor(() => {
       const row = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));

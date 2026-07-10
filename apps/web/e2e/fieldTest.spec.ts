@@ -10,6 +10,8 @@ import {
   describeSkinsAt,
   ensureCourse,
   enterScore,
+  expectOrRecover,
+  installWatchdogProxy,
   joinRoundDirect,
   loadWebEnv,
   PLAYER_NAMES,
@@ -34,44 +36,18 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
   let pageA: Page;
   let pageB: Page;
   let joinCode = "";
-  // context.setOffline(true) alone does NOT close an already-open WebSocket in Chromium (CDP's
-  // offline emulation blocks NEW network activity — including new WebSocket upgrades — but
-  // doesn't tear down a connection that's already established, verified against the real beta
-  // WS endpoint before wiring this in). It DOES reliably block fetch/XHR, so it's still what
-  // makes B's push/pull fail while dark. To also get the client-visible "disconnected" state
-  // (offline banner, the reconnect affordance) — which real network loss WOULD produce, by
-  // actually severing the TCP connection — B's WebSocket traffic is routed through
-  // routeWebSocket so the socket can be closed on demand, exactly like a dropped connection:
-  // the client's own onclose fires for real, flipping connected() false. The handler re-arms on
-  // every new WebSocket (needed for Step 6's reconnect), always passing through to the real
-  // server by default. server.onClose also force-closes the client side: the proxied upstream
-  // connection was observed (debugging this suite) to occasionally die silently late in a run
-  // without ever raising the page's own onclose — with no periodic pull in this client (WS is
-  // sugar, not the correctness path — architecture.md §3), a silent death would otherwise leave
-  // B stuck with no way to notice. Forcing the close is what lets B's own UI detect it (the
-  // offline banner) and recover via the same "Sync now" affordance Step 9's own fallback uses.
-  //
-  // digest-flake-diagnosis.md (.superpowers/sdd/) found the above mitigation is NOT enough: it
-  // reproduced, live, a RECONNECTED socket (opened after Step 6's "Sync now") that delivers zero
-  // further upstream->client frames for the rest of the run while never once firing server.onClose
-  // either — no close, no error, just silence. That rules out "onClose is wired once instead of
-  // per-connection" as the gap: Playwright re-invokes this routeWebSocket handler fresh for every
-  // new WebSocket (confirmed both by the SDK's own docs — "handler will be called for each
-  // WebSocket connection" — and by the diagnosis's own instrumentation, which logged a fresh
-  // "proxy socket opened" line for the reconnected connection, proving server.onClose WAS
-  // re-armed for it). The real gap is that a close-driven mitigation has nothing to hook when the
-  // upstream leg dies without ever emitting a close/error event at all. Closing that requires a
-  // delivery watchdog, not a close-wiring fix: reset a timer on every relayed upstream message
-  // (armed immediately on connect, too, in case the very first message never arrives), and treat
-  // WATCHDOG_MS of silence exactly like an observed upstream close. The real client only ever
-  // RECEIVES over this socket (scores are pushed via HTTP; WS is receive-only sugar per
-  // architecture.md §3), so watching the server->client direction alone is sufficient.
-  // WATCHDOG_MS is picked well above any legitimate gap in this suite (score broadcasts land
-  // within milliseconds of being posted; the whole 18-hole run completes in well under a minute)
-  // and well below the 10s-per-leg recovery race in waitForDigestOrRecover/waitForFinalOrRecover,
-  // so a real zombie flips the client to "disconnected" (Offline banner) with time to spare for
-  // that race to see it and fall back to "Sync now."
-  const WATCHDOG_MS = 6_000;
+  // Both contexts' WebSocket traffic is routed through support.ts's installWatchdogProxy (see
+  // its own doc comment for the full mechanism: CDP's offline emulation doesn't tear down an
+  // already-open socket, so routeWebSocket + a force-close is what makes context.setOffline
+  // produce the client-visible "disconnected" state a real network loss would; a debounced
+  // inactivity watchdog additionally force-closes a socket that goes silently dead without ever
+  // firing its own close/error event — digest-flake-diagnosis.md's reproduced failure mode).
+  // Originally wired on context B only, on the premise that the silent-death mode was an
+  // artifact of the CDP proxy itself; m6-gate-field-2.log's step-6 failure (pageA, the then-
+  // UNPROXIED real browser socket, never received B's drained holes 10-12) broke that premise —
+  // the same class hits a genuinely unproxied socket too. Both contexts now get identical
+  // wiring; the watchdog is exactly what neutralizes the extra CDP-proxy race that proxying A
+  // introduces (a healthy socket just keeps resetting its own deadline).
   let bWsRoute: WebSocketRoute | undefined;
 
   test.beforeAll(async ({ browser }) => {
@@ -83,25 +59,11 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
     contextA = await browser.newContext();
     contextB = await browser.newContext();
-    await contextB.routeWebSocket(/.*/, (ws) => {
-      const server = ws.connectToServer();
-      let watchdog: ReturnType<typeof setTimeout> | undefined;
-      const forceClose = () => {
-        clearTimeout(watchdog);
-        watchdog = undefined;
-        void ws.close().catch(() => {});
-      };
-      const armWatchdog = () => {
-        clearTimeout(watchdog);
-        watchdog = setTimeout(forceClose, WATCHDOG_MS);
-      };
-      armWatchdog(); // covers a connection that never delivers a single upstream message
-      server.onMessage((message) => {
-        armWatchdog(); // any upstream traffic proves the leg is alive — push the deadline out
-        ws.send(message);
-      });
-      server.onClose(forceClose); // the pre-existing (correctly re-armed) close-based mitigation
-      bWsRoute = ws;
+    await installWatchdogProxy(contextA);
+    await installWatchdogProxy(contextB, {
+      onConnection: (ws) => {
+        bWsRoute = ws; // step 5 needs this to force B's socket closed on demand
+      },
     });
     pageA = await contextA.newPage();
     pageB = await contextB.newPage();
@@ -185,9 +147,11 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     }
 
     // The deck's pinned pre-correction snapshot: Cal 5 thru 9 (his as-entered h9 4 nets 3 on
-    // his SI-4 dot, taking the pot h5-h9 carried).
+    // his SI-4 dot, taking the pot h5-h9 carried). B only ever learns holes 1-9 via WS
+    // broadcast from A — cross-context, WS-dependent — so this is wrapped for announced
+    // recovery.
     const expectedThru9 = describeSkinsAt(9, false);
-    await expect(chip(pageB, "Skins")).toContainText(expectedThru9);
+    await expectOrRecover(pageB, "B's pre-correction Skins snapshot (step 4)", () => expect(chip(pageB, "Skins")).toContainText(expectedThru9));
   });
 
   test("5: B goes offline; A corrects Cal's h9 to 5; B scores holes 10-12 for all four while dark", async () => {
@@ -220,13 +184,20 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
     await expect(pageB.getByText(/scores? syncing/)).not.toBeVisible();
 
-    // The correction moved the pot: Cal's skins go to 0, Dee's h10 pot swells to 6 (2 -> 8).
+    // The correction moved the pot: Cal's skins go to 0, Dee's h10 pot swells to 6 (2 -> 8). B's
+    // own refold is from ITS OWN Sync-now pull just above (HTTP, not WS) — not cross-context
+    // WS-dependent, so this one stays bare.
     const refoldedSkins = describeSkinsAt(12, true);
     await expect(chip(pageB, "Skins")).toContainText(refoldedSkins);
-    await expect(chip(pageA, "Skins")).toContainText(refoldedSkins);
 
-    // A (never offline) sees B's holes 10-12 land — Dee's hole 11 cell, entered by B while dark.
-    await expect(pageA.getByRole("button", { name: "Dee hole 11", exact: true })).toHaveText(new RegExp(`^\\D*${scoreFor("Dee", 11)}`));
+    // A (never offline) must receive B's drained holes 10-12 — and the h9 correction's
+    // downstream refold — purely over its own WS push from the server. This is exactly the
+    // cross-context WS-dependent pair m6-gate-field-2.log caught pageA's real socket silently
+    // failing on, so both are wrapped for announced recovery.
+    await expectOrRecover(pageA, "A's Skins refold after B's Sync now (step 6)", () => expect(chip(pageA, "Skins")).toContainText(refoldedSkins));
+    await expectOrRecover(pageA, "A sees Dee's hole 11 from B (step 6)", () =>
+      expect(pageA.getByRole("button", { name: "Dee hole 11", exact: true })).toHaveText(new RegExp(`^\\D*${scoreFor("Dee", 11)}`)),
+    );
   });
 
   test("7: A scores holes 13-16 (two-tap proven structurally on one entry); the h16 digest fires on both contexts", async () => {
@@ -287,13 +258,18 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
     const expectedFourballFinal = describeFourballAt(18, true); // "Ann & Bo win 2&1"
     const expectedSkinsFinal = describeSkinsAt(18, true); // "Bo 7 · Dee 8 · 3 carried out"
-    for (const page of [pageA, pageB]) {
-      await expect(chip(page, "Fourball match")).toContainText(expectedFourballFinal);
-      // Skins (unlike fourball) only settles once hole 18 itself is decided — asserting it
-      // here on BOTH contexts proves B actually received every one of hole 18's four scores,
-      // not just enough of them for fourball's already-closed 2&1 to read correctly.
-      await expect(chip(page, "Skins")).toContainText(expectedSkinsFinal);
-    }
+
+    // A scored holes 17-18 itself — same-page local state (its own optimistic fold), not
+    // WS-dependent, so these stay bare.
+    await expect(chip(pageA, "Fourball match")).toContainText(expectedFourballFinal);
+    await expect(chip(pageA, "Skins")).toContainText(expectedSkinsFinal);
+
+    // B only ever learns holes 17-18 via WS broadcast from A — cross-context, WS-dependent.
+    // Skins (unlike fourball) only settles once hole 18 itself is decided — asserting it here
+    // proves B actually received every one of hole 18's four scores, not just enough of them
+    // for fourball's already-closed 2&1 to read correctly.
+    await expectOrRecover(pageB, "B's Fourball final (step 8)", () => expect(chip(pageB, "Fourball match")).toContainText(expectedFourballFinal));
+    await expectOrRecover(pageB, "B's Skins final (step 8)", () => expect(chip(pageB, "Skins")).toContainText(expectedSkinsFinal));
   });
 
   test("9: A finalizes; both contexts render matching ResultsView with the deck-correct final numbers", async () => {

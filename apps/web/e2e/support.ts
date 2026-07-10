@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Page, WebSocketRoute } from "@playwright/test";
 import {
   createCourseRequestSchema,
   createCourseResponseSchema,
@@ -221,61 +221,135 @@ export const waitForParticipant = async (page: Page, name: string): Promise<void
   await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
 };
 
+// --- WS proxy + inactivity watchdog (shared by both browser contexts) ----------------------
+
+// context.setOffline(true) alone does NOT close an already-open WebSocket in Chromium (CDP's
+// offline emulation blocks NEW network activity — including new WebSocket upgrades — but
+// doesn't tear down a connection that's already established, verified against the real beta WS
+// endpoint before wiring this in). It DOES reliably block fetch/XHR, so it's still what makes a
+// dark context's push/pull fail. To also get the client-visible "disconnected" state (offline
+// banner, the reconnect affordance) — which real network loss WOULD produce, by actually
+// severing the TCP connection — WS traffic is routed through routeWebSocket so the socket can be
+// closed on demand, exactly like a dropped connection: the client's own onclose fires for real,
+// flipping connected() false.
+//
+// digest-flake-diagnosis.md (.superpowers/sdd/) found a plain close-on-upstream-close mitigation
+// is NOT enough: it reproduced, live, a RECONNECTED socket that delivers zero further
+// upstream->client frames for the rest of the run while never once firing server.onClose either
+// — no close, no error, just silence. Playwright re-invokes the routeWebSocket handler fresh for
+// every new WebSocket connection (confirmed both by the SDK's own docs and by the diagnosis's own
+// instrumentation), so a close-driven mitigation IS correctly re-armed per connection — the real
+// gap is that it has nothing to hook when the upstream leg dies without ever emitting a
+// close/error event at all. Closing that requires a delivery watchdog, not a close-wiring fix:
+// reset a timer on every relayed upstream message (armed immediately on connect too, in case the
+// very first message never arrives), and treat watchdogMs of silence exactly like an observed
+// upstream close. The real client only ever RECEIVES over this socket (scores are pushed via
+// HTTP; WS is receive-only sugar per architecture.md §3), so watching the server->client
+// direction alone is sufficient.
+//
+// A later field-test run (m6-gate-field-2.log, step 6: pageA never received B's drained holes
+// 10-12) caught the SAME class on context A — the real, unproxied browser socket, not the CDP
+// proxy — going silently dead too. That broke the earlier assumption that only the proxy needed
+// this hardening, so BOTH contexts now get identical wiring via this one helper: the
+// debounced-inactivity design is exactly what neutralizes the extra CDP-proxy race that proxying
+// A would otherwise add (a genuinely healthy socket just keeps resetting its own deadline on
+// every relayed message).
+export const WS_WATCHDOG_MS = 6_000;
+
+// Wires `context`'s WebSocket traffic through a routeWebSocket proxy with the watchdog described
+// above. `onConnection`, if given, is invoked with the live `WebSocketRoute` on every connection
+// (including reconnects) — fieldTest.spec.ts's step 5 needs this for context B, to force-close
+// the socket on demand and simulate a dropped connection.
+export const installWatchdogProxy = async (
+  context: BrowserContext,
+  options?: { readonly watchdogMs?: number; readonly onConnection?: (route: WebSocketRoute) => void },
+): Promise<void> => {
+  const watchdogMs = options?.watchdogMs ?? WS_WATCHDOG_MS;
+  await context.routeWebSocket(/.*/, (ws) => {
+    const server = ws.connectToServer();
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    const forceClose = () => {
+      clearTimeout(watchdog);
+      watchdog = undefined;
+      void ws.close().catch(() => {});
+    };
+    const armWatchdog = () => {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(forceClose, watchdogMs);
+    };
+    armWatchdog(); // covers a connection that never delivers a single upstream message
+    server.onMessage((message) => {
+      armWatchdog(); // any upstream traffic proves the leg is alive — push the deadline out
+      ws.send(message);
+    });
+    server.onClose(forceClose); // the pre-existing, correctly per-connection close-based mitigation
+    options?.onConnection?.(ws);
+  });
+};
+
+// --- General announced-recovery wrapper for cross-context WS-dependent assertions ----------
+
+// Any assertion that depends on ONE context receiving events pushed by the OTHER over WS is
+// exposed to the same silent-delivery-loss class the watchdog above exists to convert into a
+// visible signal (the Offline banner) — but the banner only appears once the client's own socket
+// actually flips to disconnected, which can take up to WS_WATCHDOG_MS on a zombied connection.
+// This wraps a single assertion (the caller builds the SAME `expect(...)` call it would have
+// written bare — same locator, same expected value; nothing about the assertion's strength
+// changes) with exactly one announced recovery attempt:
+//   1. try `assert()` at whatever timeout the caller's own `expect(...)` call carries;
+//   2. on timeout, do a short race-check for `page`'s own Offline banner;
+//   3. if the banner is visible, announce the fallback (console.log + a "ws-fallback"
+//      annotation, BEFORE clicking — matching waitForFinalOrRecover's existing ordering), click
+//      `page`'s "Sync now" (the same affordance a real golfer has), then re-run the IDENTICAL
+//      assertion at full strength;
+//   4. if the banner is NOT visible, this is the unrecoverable case: rethrow a labeled error so
+//      the failure self-diagnoses as this specific class instead of reporting a bare,
+//      unrelated-looking locator timeout (closes the earlier reviewer Minor re: a confusing
+//      double-timeout failure line — see task-6-report.md's f361eaf re-review).
+export const expectOrRecover = async (page: Page, label: string, assert: () => Promise<void>): Promise<void> => {
+  try {
+    await assert();
+    return;
+  } catch (err) {
+    const offlineBanner = page.getByRole("status").filter({ hasText: "Offline" });
+    const bannerVisible = await offlineBanner
+      .waitFor({ state: "visible", timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!bannerVisible) {
+      throw new Error(`${label}: assertion never arrived and no Offline banner appeared — silent WS zombie — see .superpowers/sdd/digest-flake-diagnosis.md`, {
+        cause: err,
+      });
+    }
+
+    console.log(`[fieldTest] ${label}: WS push did not arrive — recovering via Sync now`);
+    test.info().annotations.push({ type: "ws-fallback", description: `${label} arrived via Sync-now recovery, not WS push` });
+    await page.getByRole("button", { name: "Sync now" }).click();
+    await assert(); // full strength: the identical assertion, re-run after the recovery pull
+  }
+};
+
 // WS is delivery sugar, not the correctness path (architecture.md §3) — this session has no
 // periodic pull, so if a push is ever silently lost, the ONLY thing that recovers a live tab is
 // the same user-visible "Sync now" affordance StatusChrome ships (session/useRoundSession.ts's
-// own connect()+sync()). Races the awaited heading against the offline banner appearing first;
-// if the banner wins, taps Sync now (exactly what a real golfer would do) and then waits for the
-// heading normally. Used for the round's finalize — the one WS-arrival wait in this spec with
-// enough elapsed real time and backend work (settleRound + the archive write) for a rare
+// own connect()+sync()). Used for the round's finalize — the one WS-arrival wait in this spec
+// with enough elapsed real time and backend work (settleRound + the archive write) for a rare
 // delivery hiccup to matter.
 export const waitForFinalOrRecover = async (page: Page): Promise<void> => {
   const finalHeading = page.getByRole("heading", { name: "Final results" });
-  const offlineBanner = page.getByRole("status").filter({ hasText: "Offline" });
-
-  const bannerFirst = await Promise.race([
-    finalHeading.waitFor({ state: "visible", timeout: 45_000 }).then(() => false),
-    offlineBanner.waitFor({ state: "visible", timeout: 45_000 }).then(() => true),
-  ]);
-
-  if (bannerFirst) {
-    // WS finalize push failed to arrive — recover via the user-visible "Sync now" button.
-    // This fallback masks a WS-push regression unless it announces itself; gate logs are
-    // the forensic record.
-    console.log("[fieldTest] WS finalize push did not arrive — recovering via Sync now");
-    test.info().annotations.push({ type: "ws-fallback", description: "finalize arrived via Sync-now recovery, not WS push" });
-    await page.getByRole("button", { name: "Sync now" }).click();
-  }
-  await expect(finalHeading).toBeVisible({ timeout: 15_000 });
+  await expectOrRecover(page, "Final results", () => expect(finalHeading).toBeVisible({ timeout: 45_000 }));
 };
 
 // Same recovery pattern as waitForFinalOrRecover just above, for a mid-round hole-complete
-// digest instead of the finalize heading — the SAME connection-#2-goes-silent risk
-// (beforeAll's own note in fieldTest.spec.ts) can just as easily strand a digest push as a
-// finalize push; step 7's hole-16 digest wait had no fallback until this was added, unlike
-// steps 6/9. `digestName` is a substring match against the digest's own accessible name (e.g.
-// "After hole 16"), same as the bare locator step 7 used before this helper existed. The
-// initial race uses a 10s bound per side (matching this suite's own `expect.timeout` default,
-// i.e. no slower than the un-recovered wait it replaces on the happy path); the post-recovery
-// assertion gets 15s, same as waitForFinalOrRecover's, for the sync-now round trip.
+// digest instead of the finalize heading — the SAME silent-delivery-loss risk (installWatchdogProxy's
+// own note above) can just as easily strand a digest push as a finalize push; step 7's hole-16
+// digest wait had no fallback until this was added, unlike steps 6/9. `digestName` is a
+// substring match against the digest's own accessible name (e.g. "After hole 16"), same as the
+// bare locator step 7 used before this helper existed.
 export const waitForDigestOrRecover = async (page: Page, digestName: string): Promise<void> => {
   const digest = page.getByRole("status", { name: digestName });
-  const offlineBanner = page.getByRole("status").filter({ hasText: "Offline" });
-
-  const bannerFirst = await Promise.race([
-    digest.waitFor({ state: "visible", timeout: 10_000 }).then(() => false),
-    offlineBanner.waitFor({ state: "visible", timeout: 10_000 }).then(() => true),
-  ]);
-
-  if (bannerFirst) {
-    // WS digest push failed to arrive — recover via the user-visible "Sync now" button. Same
-    // masking trade-off already accepted for step 9's finalize wait; the annotation below is
-    // the forensic record of how often this actually fires.
-    console.log(`[fieldTest] WS digest push ("${digestName}") did not arrive — recovering via Sync now`);
-    test.info().annotations.push({ type: "ws-fallback", description: `"${digestName}" digest arrived via Sync-now recovery, not WS push` });
-    await page.getByRole("button", { name: "Sync now" }).click();
-  }
-  await expect(digest).toBeVisible({ timeout: 15_000 });
+  await expectOrRecover(page, `"${digestName}" digest`, () => expect(digest).toBeVisible({ timeout: 10_000 }));
 };
 
 // <select>s only, never getByLabel — Playwright's getByLabel match text for a <label> wrapping

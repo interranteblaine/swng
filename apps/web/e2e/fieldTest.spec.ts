@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import type { BrowserContext, Page, WebSocketRoute } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 import { fixtureLinks18 } from "@swng/domain";
 import {
   addFourballGame,
@@ -11,7 +11,7 @@ import {
   ensureCourse,
   enterScore,
   expectOrRecover,
-  installWatchdogProxy,
+  installWsProxy,
   joinRoundDirect,
   loadWebEnv,
   PLAYER_NAMES,
@@ -20,6 +20,7 @@ import {
   waitForFinalOrRecover,
   waitForParticipant,
 } from "./support.js";
+import type { WsRouteHandle } from "./support.js";
 
 // The M5 gate (docs/implementation-plan.md M5 Task 7): a full 18-hole round of fourball match
 // + skins, played through the REAL UI in two Chromium contexts against the deployed swng-beta
@@ -36,19 +37,19 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
   let pageA: Page;
   let pageB: Page;
   let joinCode = "";
-  // Both contexts' WebSocket traffic is routed through support.ts's installWatchdogProxy (see
-  // its own doc comment for the full mechanism: CDP's offline emulation doesn't tear down an
-  // already-open socket, so routeWebSocket + a force-close is what makes context.setOffline
-  // produce the client-visible "disconnected" state a real network loss would; a debounced
-  // inactivity watchdog additionally force-closes a socket that goes silently dead without ever
-  // firing its own close/error event — digest-flake-diagnosis.md's reproduced failure mode).
-  // Originally wired on context B only, on the premise that the silent-death mode was an
-  // artifact of the CDP proxy itself; m6-gate-field-2.log's step-6 failure (pageA, the then-
-  // UNPROXIED real browser socket, never received B's drained holes 10-12) broke that premise —
-  // the same class hits a genuinely unproxied socket too. Both contexts now get identical
-  // wiring; the watchdog is exactly what neutralizes the extra CDP-proxy race that proxying A
-  // introduces (a healthy socket just keeps resetting its own deadline).
-  let bWsRoute: WebSocketRoute | undefined;
+  // Both contexts' WebSocket traffic is routed through support.ts's installWsProxy (see its own
+  // doc comment for the full mechanism: CDP's offline emulation doesn't tear down an already-open
+  // socket, so routeWebSocket + a force-close is what makes context.setOffline produce the
+  // client-visible "disconnected" state a real network loss would). Each handle's `.current`
+  // always points at that context's LATEST connection (mind reconnects) — step 5 uses `bRoute` to
+  // force B's socket closed on demand to simulate a dropped connection; `expectOrRecover` (used
+  // throughout steps 4/6/7/8/9 below) uses whichever handle matches the page it's asserting on to
+  // force-close THAT socket deterministically on an assertion timeout, rather than inferring
+  // death from receive silence (a watchdog design tried and removed — see support.ts's own note:
+  // a receive-only socket has legitimate multi-second silence, including during a recovery wait
+  // itself, so inactivity can't distinguish dead from quiet without an application heartbeat).
+  const aRoute: WsRouteHandle = { current: undefined };
+  const bRoute: WsRouteHandle = { current: undefined };
 
   test.beforeAll(async ({ browser }) => {
     // M6: the web app's create flow dropped bundled fixtures entirely (search is the only
@@ -59,12 +60,8 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
     contextA = await browser.newContext();
     contextB = await browser.newContext();
-    await installWatchdogProxy(contextA);
-    await installWatchdogProxy(contextB, {
-      onConnection: (ws) => {
-        bWsRoute = ws; // step 5 needs this to force B's socket closed on demand
-      },
-    });
+    await installWsProxy(contextA, aRoute);
+    await installWsProxy(contextB, bRoute);
     pageA = await contextA.newPage();
     pageB = await contextB.newPage();
   });
@@ -151,13 +148,13 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // broadcast from A — cross-context, WS-dependent — so this is wrapped for announced
     // recovery.
     const expectedThru9 = describeSkinsAt(9, false);
-    await expectOrRecover(pageB, "B's pre-correction Skins snapshot (step 4)", () => expect(chip(pageB, "Skins")).toContainText(expectedThru9));
+    await expectOrRecover(pageB, "B's pre-correction Skins snapshot (step 4)", () => expect(chip(pageB, "Skins")).toContainText(expectedThru9), bRoute);
   });
 
   test("5: B goes offline; A corrects Cal's h9 to 5; B scores holes 10-12 for all four while dark", async () => {
     test.setTimeout(120_000);
     await contextB.setOffline(true); // blocks B's future push/pull fetches
-    await bWsRoute?.close(); // actually severs B's socket — see beforeAll's own note
+    await bRoute.current?.close().catch(() => {}); // actually severs B's socket — see beforeAll's own note
     await expect(pageB.getByRole("status").filter({ hasText: "Offline" })).toBeVisible();
 
     await enterScore(pageA, "Cal", 9, correctedScore("Cal", 9));
@@ -194,9 +191,12 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // downstream refold — purely over its own WS push from the server. This is exactly the
     // cross-context WS-dependent pair m6-gate-field-2.log caught pageA's real socket silently
     // failing on, so both are wrapped for announced recovery.
-    await expectOrRecover(pageA, "A's Skins refold after B's Sync now (step 6)", () => expect(chip(pageA, "Skins")).toContainText(refoldedSkins));
-    await expectOrRecover(pageA, "A sees Dee's hole 11 from B (step 6)", () =>
-      expect(pageA.getByRole("button", { name: "Dee hole 11", exact: true })).toHaveText(new RegExp(`^\\D*${scoreFor("Dee", 11)}`)),
+    await expectOrRecover(pageA, "A's Skins refold after B's Sync now (step 6)", () => expect(chip(pageA, "Skins")).toContainText(refoldedSkins), aRoute);
+    await expectOrRecover(
+      pageA,
+      "A sees Dee's hole 11 from B (step 6)",
+      () => expect(pageA.getByRole("button", { name: "Dee hole 11", exact: true })).toHaveText(new RegExp(`^\\D*${scoreFor("Dee", 11)}`)),
+      aRoute,
     );
   });
 
@@ -231,13 +231,15 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     const expectedFourball = describeFourballAt(16, true);
     const expectedSkins = describeSkinsAt(16, true);
 
-    for (const page of [pageA, pageB]) {
-      // waitForDigestOrRecover races the digest against the offline banner and falls back to
-      // "Sync now" (announced via console.log + a "ws-fallback" annotation) exactly like step
-      // 9's waitForFinalOrRecover — the digest-flake diagnosis (`.superpowers/sdd/`) found B's
-      // reconnected-in-step-6 socket can silently die with no onclose, stranding this exact
-      // wait with no recovery path before this helper existed.
-      await waitForDigestOrRecover(page, "After hole 16");
+    for (const { page, route } of [
+      { page: pageA, route: aRoute },
+      { page: pageB, route: bRoute },
+    ]) {
+      // waitForDigestOrRecover force-closes THIS page's own proxied socket on an assertion
+      // timeout (announced via console.log + a "ws-fallback" annotation) exactly like step 9's
+      // waitForFinalOrRecover — deterministic, not inferred: a delivery hiccup on either page's
+      // WS strands this digest wait with nothing to recover from otherwise.
+      await waitForDigestOrRecover(page, "After hole 16", route);
       const digest = page.getByRole("status", { name: "After hole 16" });
       await expect(digest).toContainText(expectedFourball);
       await expect(digest).toContainText(expectedSkins);
@@ -268,8 +270,8 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // Skins (unlike fourball) only settles once hole 18 itself is decided — asserting it here
     // proves B actually received every one of hole 18's four scores, not just enough of them
     // for fourball's already-closed 2&1 to read correctly.
-    await expectOrRecover(pageB, "B's Fourball final (step 8)", () => expect(chip(pageB, "Fourball match")).toContainText(expectedFourballFinal));
-    await expectOrRecover(pageB, "B's Skins final (step 8)", () => expect(chip(pageB, "Skins")).toContainText(expectedSkinsFinal));
+    await expectOrRecover(pageB, "B's Fourball final (step 8)", () => expect(chip(pageB, "Fourball match")).toContainText(expectedFourballFinal), bRoute);
+    await expectOrRecover(pageB, "B's Skins final (step 8)", () => expect(chip(pageB, "Skins")).toContainText(expectedSkinsFinal), bRoute);
   });
 
   test("9: A finalizes; both contexts render matching ResultsView with the deck-correct final numbers", async () => {
@@ -280,10 +282,10 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await expect(pageA.getByRole("heading", { name: "Final results" })).toBeVisible();
     // finalize's WS broadcast fires after settleRound + the archive write (finalizeRound.ts) —
     // strictly more backend work, and more elapsed real time, than a plain score's broadcast.
-    // waitForFinalOrRecover taps B's own "Sync now" affordance if the offline banner appears
-    // first (a delivery hiccup on a WS this suite has already forced closed/reopened once) —
-    // the same recovery a real golfer has, not a hidden retry of the assertion itself.
-    await waitForFinalOrRecover(pageB);
+    // waitForFinalOrRecover force-closes B's own proxied socket on a timeout (deterministic, not
+    // banner-gated) and taps B's own "Sync now" affordance — the same recovery a real golfer has,
+    // not a hidden retry of the assertion itself.
+    await waitForFinalOrRecover(pageB, bRoute);
 
     const expectedFourballFinal = describeFourballAt(18, true); // "Ann & Bo win 2&1"
     const expectedSkinsFinal = describeSkinsAt(18, true); // "Bo 7 · Dee 8 · 3 carried out"

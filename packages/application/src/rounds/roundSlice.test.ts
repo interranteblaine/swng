@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { HoleResult } from "@swng/domain";
 import { addMember, compareHlc, crewId, deviceId, fixtureLinks, golferId, opId, reduceRound } from "@swng/domain";
 import type { Clock } from "../ports/clock.js";
-import type { ParticipantClaims, TokenIssuer } from "../ports/tokenIssuer.js";
+import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
   createFixedClock,
@@ -27,7 +27,7 @@ import { startRound } from "./startRound.js";
 // `tokens.issue` without erroring. Tests build ParticipantClaims directly, as a real
 // dispatcher would after `tokens.verify`.
 const createTestTokenIssuer = (): TokenIssuer => {
-  const claimsByToken = new Map<string, ParticipantClaims>();
+  const claimsByToken = new Map<string, TokenClaims>();
   let counter = 0;
   return {
     issue: (claims) => {
@@ -270,7 +270,7 @@ describe("joinRound — supplied golferId (Task 5b)", () => {
     const boJoinedEvent = (await ctx.events(host.roundId, 3)).events[0];
     expect(boJoinedEvent).toMatchObject({ kind: "participant-joined", authorId: ghost, participant: { golferId: ghost } });
 
-    expect(ctx.tokens.verify(joined.token)).toEqual({ roundId: host.roundId, golferId: ghost });
+    expect(ctx.tokens.verify(joined.token)).toEqual({ scope: "participant", roundId: host.roundId, golferId: ghost });
   });
 
   it("reuses the SAME supplied golferId across two different rounds — continuity", async () => {

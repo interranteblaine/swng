@@ -28,6 +28,9 @@ const stubUseCases: UseCases = {
   peekRound: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
+  getShareLink: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
   createCourse: () => {
     throw new Error("not implemented: parity test never dispatches");
   },

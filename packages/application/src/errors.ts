@@ -71,7 +71,12 @@ export type ApplicationErrorCode =
   // golfer-claimed/not-a-member above, so 403. Checked BEFORE golfer-already-claimed/
   // golfer-conflict below so a wrong code can never be used to probe whether a golferId is
   // already claimed.
-  | "claim-proof-required";
+  | "claim-proof-required"
+  // M9 Task 3 (share): a spectator token presented to a WRITE route (dispatch.ts's own
+  // "participant" tier check) — a forbidden actor, same shape as claim-proof-required/
+  // not-a-participant above (403, not 401: the bearer verified fine, it just isn't allowed to
+  // do this).
+  | "read-only-token";
 
 export class ApplicationError extends Error {
   constructor(

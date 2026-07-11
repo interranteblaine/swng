@@ -192,3 +192,16 @@ export interface TerminateGameResponse {
 export const terminateGameResponseSchema: z.ZodType<TerminateGameResponse> = z.object({
   events: z.array(roundEventSchema).readonly(),
 });
+
+// POST /rounds/{roundId}/share (M9 Task 3): `url` is deterministic (same round -> the same
+// byte-identical spectator token, hence the same url) and is a PATH+FRAGMENT, not an absolute
+// URL — getShareLink.ts has no web-origin config seam to build one from, so the web app
+// prefixes its own origin (ShareButton.tsx) rather than the server guessing at a deployment's
+// public hostname.
+export interface ShareLinkResponse {
+  readonly url: string;
+}
+
+export const shareLinkResponseSchema: z.ZodType<ShareLinkResponse> = z.object({
+  url: z.string(),
+});

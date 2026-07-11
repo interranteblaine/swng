@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addMember, crewId, fixtureLinks, golferId } from "@swng/domain";
-import type { ParticipantClaims, TokenIssuer } from "../ports/tokenIssuer.js";
+import type { TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import { joinRound } from "../rounds/joinRound.js";
 import { startRound } from "../rounds/startRound.js";
 import {
@@ -18,7 +18,7 @@ import { claimGolfer } from "./claimGolfer.js";
 // createTestTokenIssuer (a real TokenIssuer adapter isn't needed here; startRound/joinRound
 // just need SOMETHING that satisfies the port).
 const createTestTokenIssuer = (): TokenIssuer => {
-  const claimsByToken = new Map<string, ParticipantClaims>();
+  const claimsByToken = new Map<string, TokenClaims>();
   let counter = 0;
   return {
     issue: (claims) => {

@@ -68,7 +68,7 @@ export const joinRound =
     const result = await deps.journal.append(id, [{ kind: "participant-joined", participant, ...serverEnvelope({ hlc, ids: deps.ids }, golfer) }]);
     await deps.broadcast.publish(id, result.appended);
 
-    const token = deps.tokens.issue({ roundId: id, golferId: golfer });
+    const token = deps.tokens.issue({ scope: "participant", roundId: id, golferId: golfer });
 
     return { roundId: id, token, golferId: golfer };
   };

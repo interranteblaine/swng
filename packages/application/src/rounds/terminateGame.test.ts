@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deviceId, fixtureLinks, gameId, opId } from "@swng/domain";
-import type { ParticipantClaims, TokenIssuer } from "../ports/tokenIssuer.js";
+import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
   createFixedClock,
@@ -21,7 +21,7 @@ import { terminateGame } from "./terminateGame.js";
 // Not part of the shared fakes (testing/fakes.ts) — same local idiom as roundSlice.test.ts's
 // own createTestTokenIssuer.
 const createTestTokenIssuer = (): TokenIssuer => {
-  const claimsByToken = new Map<string, ParticipantClaims>();
+  const claimsByToken = new Map<string, TokenClaims>();
   let counter = 0;
   return {
     issue: (claims) => {

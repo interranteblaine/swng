@@ -3,7 +3,7 @@ import type { OpId, RoundEvent } from "@swng/domain";
 import { deviceId, fixtureLinks, opId, reduceRound } from "@swng/domain";
 import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
 import type { RoundStore } from "../ports/roundStore.js";
-import type { ParticipantClaims, TokenIssuer } from "../ports/tokenIssuer.js";
+import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
   createFixedClock,
@@ -24,7 +24,7 @@ import { startRound } from "./startRound.js";
 // own createTestTokenIssuer: just enough of TokenIssuer for startRound/joinRound to call
 // `tokens.issue` without erroring.
 const createTestTokenIssuer = (): TokenIssuer => {
-  const claimsByToken = new Map<string, ParticipantClaims>();
+  const claimsByToken = new Map<string, TokenClaims>();
   let counter = 0;
   return {
     issue: (claims) => {

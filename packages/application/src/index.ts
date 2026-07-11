@@ -8,7 +8,7 @@ export type { CrewStore } from "./ports/crewStore.js";
 export type { GolferStore } from "./ports/golferStore.js";
 export type { CrewSeasonRecords, ProjectionStore } from "./ports/projectionStore.js";
 export type { Broadcast } from "./ports/broadcast.js";
-export type { ParticipantClaims, TokenIssuer } from "./ports/tokenIssuer.js";
+export type { ParticipantClaims, SpectatorClaims, TokenClaims, TokenIssuer } from "./ports/tokenIssuer.js";
 export type { AccountClaims } from "./ports/accountClaims.js";
 export type { AccountVerifier } from "./ports/accountVerifier.js";
 export type { Clock } from "./ports/clock.js";
@@ -31,6 +31,7 @@ export { finalizeRound } from "./rounds/finalizeRound.js";
 export { terminateGame } from "./rounds/terminateGame.js";
 export { readEvents } from "./rounds/readEvents.js";
 export { peekRound } from "./rounds/peekRound.js";
+export { getShareLink } from "./rounds/getShareLink.js";
 export { resolveSuppliedGolfer } from "./rounds/golferIdentity.js";
 export type { GolferIdentityContext } from "./rounds/golferIdentity.js";
 

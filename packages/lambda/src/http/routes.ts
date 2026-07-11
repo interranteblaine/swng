@@ -35,6 +35,7 @@ import type {
   SaveStandingGameRequest,
   SaveStandingGameResponse,
   SearchCoursesResponse,
+  ShareLinkResponse,
   StartRoundRequest,
   StartRoundResponse,
   TerminateGameResponse,
@@ -77,6 +78,9 @@ export interface UseCases {
   finalizeRound: (claims: ParticipantClaims) => Promise<FinalizeRoundResponse>;
   readEvents: (id: RoundId, sinceSeq: number) => Promise<EventsResponse>;
   peekRound: (code: string) => Promise<PeekRoundResponse>;
+  // M9 Task 3 (share): mints (deterministically) this round's own spectator link — participant-
+  // gated, same claims shape addGame/recordScore/finalizeRound already take.
+  getShareLink: (claims: ParticipantClaims) => Promise<ShareLinkResponse>;
   // M8 Task 4: POST /rounds/{roundId}/players — an already-seated participant adds someone
   // else to the roster, the crew one-tap flow's mid-round counterpart to StartRound's own
   // `players` array. "participant"-gated, same tier as addGame/recordScore/finalizeRound.
@@ -135,7 +139,10 @@ export interface Route {
   // simply unset) — a token that IS presented but fails verification still 401s (fail loud:
   // a client that sent a token meant it, dispatch.ts's own comment). Every one of these is
   // verified by the dispatcher's injected AccountVerifier, never by a route handler itself.
-  readonly auth: "none" | "participant" | "golfer" | "optional-golfer";
+  // "round-read" (M9 Task 3, share): a read-only route that accepts EITHER a participant OR a
+  // spectator token, both still round-scoped (dispatch.ts's own token-round-mismatch check
+  // applies to both) — the tier a share link's GET requests use.
+  readonly auth: "none" | "participant" | "golfer" | "optional-golfer" | "round-read";
   // 201 for routes that mint a new resource (round/participant/game); 200 for actions
   // that read or that may be an idempotent no-op (score, finalize, events).
   readonly successStatus: 200 | 201;
@@ -275,11 +282,23 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
   {
     method: "GET",
     path: "/rounds/{roundId}/events",
-    auth: "participant",
+    // M9 Task 3 (share): the one read a spectator's share link needs — a participant OR
+    // spectator token both authorize this route now (was "participant"-only pre-M9). Every
+    // "round-read" route's path template declares {roundId} (this table, by construction), so
+    // the dispatcher's path match always populates it.
+    auth: "round-read",
     successStatus: 200,
-    // Every "participant" route's path template declares {roundId} (this table, by
-    // construction), so the dispatcher's path match always populates it.
     handler: async (ctx) => useCases.readEvents(roundId(ctx.pathParams.roundId!), parseSinceSeq(ctx.query.since)),
+  },
+  {
+    method: "POST",
+    path: "/rounds/{roundId}/share",
+    // Minting a share link is itself participant-gated (a spectator can't mint a NEW link —
+    // there's nothing more capable to escalate to anyway, but this keeps the surface simple:
+    // only someone already in the round can hand out its read-only link).
+    auth: "participant",
+    successStatus: 200, // deterministic + idempotent (same round -> same link) — an act on an existing resource, not a mint, same status-code spirit as finalize/terminate.
+    handler: async (ctx) => useCases.getShareLink(ctx.claims!),
   },
   {
     method: "POST",

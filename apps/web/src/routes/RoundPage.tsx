@@ -10,6 +10,7 @@ import { unresolvedGames } from "../round/finalizeReadiness";
 import { HoleDigest, useHoleDigest } from "../round/HoleDigest";
 import { ResultsView } from "../round/ResultsView";
 import { ScorecardGrid } from "../round/ScorecardGrid";
+import { ShareButton } from "../round/ShareButton";
 import { SetupPanel } from "../round/SetupPanel";
 import { StandingsHeader } from "../round/StandingsHeader";
 import { StatusChrome } from "../round/StatusChrome";
@@ -195,6 +196,9 @@ interface LiveRoundProps {
   readonly games: readonly GameState[];
   readonly recordScore: (golferId: GolferId, hole: number, result: HoleResult) => void;
   readonly joinCode: string;
+  // M9 Task 3 (share): the caller's own participant token — ShareButton's only other input
+  // beyond state.id, same "credential.token" this page already threads to every write call.
+  readonly token: string;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
   readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
   readonly onFinalize: () => Promise<void>;
@@ -207,7 +211,7 @@ interface LiveRoundProps {
 // tolerate `state` swapping in and out across the live/final boundary, which useHoleDigest's
 // prev-snapshot ref isn't built to do (and doesn't need to — this component simply unmounts
 // once status flips to "final" and RoundPageContent renders ResultsView instead).
-function LiveRound({ state, games, recordScore, joinCode, onAddGame, onAddParticipant, onFinalize, onTerminate }: LiveRoundProps) {
+function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onAddParticipant, onFinalize, onTerminate }: LiveRoundProps) {
   const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
   // Falls back to the first game until a chip is tapped (Task 5's fixed default-first-game
   // decision) — also the correct fallback if a previously-active id ever stopped matching. A
@@ -219,6 +223,7 @@ function LiveRound({ state, games, recordScore, joinCode, onAddGame, onAddPartic
 
   return (
     <>
+      <ShareButton roundId={state.id} token={token} />
       <StandingsHeader state={state} games={games} activeGameId={activeGame?.id} onSelect={setActiveGameId} onTerminate={onTerminate} />
       <ScorecardGrid state={state} activeGame={activeGame} recordScore={recordScore} />
       {digest && <HoleDigest digest={digest} onDismiss={dismiss} />}
@@ -334,13 +339,20 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
           <SeedFailureNotice seedFailures={seedFailures} onDismiss={() => setSeedNoticeDismissed(true)} />
         )}
         {isFinal ? (
-          <ResultsView state={session.state} games={session.games} response={finalizeResponse} joinCode={credential.joinCode} />
+          <ResultsView
+            state={session.state}
+            games={session.games}
+            response={finalizeResponse}
+            joinCode={credential.joinCode}
+            shareToken={credential.token}
+          />
         ) : (
           <LiveRound
             state={session.state}
             games={session.games}
             recordScore={session.recordScore}
             joinCode={credential.joinCode}
+            token={credential.token}
             onAddGame={onAddGame}
             onAddParticipant={onAddParticipant}
             onFinalize={onFinalize}

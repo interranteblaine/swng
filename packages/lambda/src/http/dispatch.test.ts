@@ -26,6 +26,7 @@ import {
   getCrewRecords,
   getMyGolfer,
   getMyRecord,
+  getShareLink,
   joinCrewByCode,
   joinRound,
   listMyCrews,
@@ -61,6 +62,7 @@ import {
   recordScoreResponseSchema,
   saveStandingGameResponseSchema,
   searchCoursesResponseSchema,
+  shareLinkResponseSchema,
   startRoundResponseSchema,
   terminateGameResponseSchema,
   verifyTeeSetResponseSchema,
@@ -146,6 +148,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     finalizeRound: finalizeRound({ journal, store, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
+    getShareLink: getShareLink({ tokens }),
     addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore }),
     createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
     addTeeSet: addTeeSet({ courseStore, clock, logger }),
@@ -1131,5 +1134,210 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     );
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
+  });
+});
+
+// M9 Task 3 (share): POST /rounds/{roundId}/share (participant-gated) + the "round-read" tier
+// GET /rounds/{roundId}/events now accepts (participant OR spectator, both round-scoped) + the
+// "participant" tier's own new write-rejection of a spectator token. Every write route class
+// buildRoutes declares gets its own case here, per the brief's own test list.
+describe("createDispatcher — share: spectator tokens + the round-read tier (M9 Task 3)", () => {
+  const startAndShare = async (dispatcher: ReturnType<typeof createDispatcher>) => {
+    const started = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } })),
+        ).body!,
+      ),
+    );
+    const shareResp = asStructured(
+      await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/share`, token: started.token })),
+    );
+    expect(shareResp.statusCode).toBe(200);
+    const { url } = shareLinkResponseSchema.parse(JSON.parse(shareResp.body!));
+    expect(url).toBe(`/watch/${started.roundId}#${url.split("#")[1]}`); // sanity: the expected /watch/{roundId}#token shape
+    const spectatorToken = url.split("#")[1]!;
+    return { started, spectatorToken };
+  };
+
+  it("POST /rounds/{roundId}/share is deterministic — the same round returns the SAME url on a repeat call", async () => {
+    const { dispatcher } = setup();
+    const { started, spectatorToken } = await startAndShare(dispatcher);
+
+    const secondResp = asStructured(
+      await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/share`, token: started.token })),
+    );
+    expect(secondResp.statusCode).toBe(200);
+    const second = shareLinkResponseSchema.parse(JSON.parse(secondResp.body!));
+    expect(second.url.split("#")[1]).toBe(spectatorToken);
+  });
+
+  it("GET /rounds/{roundId}/events — round-read arm 1: a PARTICIPANT token is still accepted (unchanged)", async () => {
+    const { dispatcher } = setup();
+    const { started } = await startAndShare(dispatcher);
+
+    const resp = asStructured(
+      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
+    );
+    expect(resp.statusCode).toBe(200);
+  });
+
+  it("GET /rounds/{roundId}/events — round-read arm 2: a SPECTATOR token is accepted", async () => {
+    const { dispatcher } = setup();
+    const { started, spectatorToken } = await startAndShare(dispatcher);
+
+    const resp = asStructured(
+      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: spectatorToken, query: { since: "0" } })),
+    );
+    expect(resp.statusCode).toBe(200);
+    const events = JSON.parse(resp.body!) as { events: readonly unknown[] };
+    expect(events.events.length).toBeGreaterThan(0); // the spectator actually sees the log, not an empty stub
+  });
+
+  it("GET /rounds/{roundId}/events — round-read: a spectator token minted for a DIFFERENT round — 403 token-round-mismatch", async () => {
+    const { dispatcher } = setup();
+    const { spectatorToken } = await startAndShare(dispatcher);
+    const otherRound = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Cal", tee: "white", courseHandicap: 12 } } })),
+        ).body!,
+      ),
+    );
+
+    const resp = asStructured(
+      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${otherRound.roundId}/events`, token: spectatorToken, query: { since: "0" } })),
+    );
+    expect(resp.statusCode).toBe(403);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "token-round-mismatch" });
+  });
+
+  it("GET /rounds/{roundId}/events — round-read: no bearer token at all — 401 invalid-token", async () => {
+    const { dispatcher } = setup();
+    const { started } = await startAndShare(dispatcher);
+    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, query: { since: "0" } })));
+    expect(resp.statusCode).toBe(401);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+  });
+
+  it("GET /rounds/{roundId}/events — round-read: a garbage bearer token — 401 invalid-token", async () => {
+    const { dispatcher } = setup();
+    const { started } = await startAndShare(dispatcher);
+    const resp = asStructured(
+      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: "not-a-real-token", query: { since: "0" } })),
+    );
+    expect(resp.statusCode).toBe(401);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+  });
+
+  // Every WRITE route class buildRoutes declares — a verified spectator token 403s
+  // read-only-token, never 401 (the token itself is fine, it's just read-only) and never a
+  // silent success. Table-driven over every write route so a future write route added to
+  // buildRoutes without an entry here is a visible gap, not a silent hole.
+  describe("a spectator token 403s read-only-token on every write route class", () => {
+    it("POST /rounds/{roundId}/games", async () => {
+      const { dispatcher } = setup();
+      const { started, spectatorToken } = await startAndShare(dispatcher);
+      const resp = asStructured(
+        await dispatcher(
+          makeEvent({
+            method: "POST",
+            path: `/rounds/${started.roundId}/games`,
+            token: spectatorToken,
+            body: { game: { kind: "stableford", players: [started.golferId] } },
+          }),
+        ),
+      );
+      expect(resp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
+    });
+
+    it("POST /rounds/{roundId}/scores", async () => {
+      const { dispatcher } = setup();
+      const { started, spectatorToken } = await startAndShare(dispatcher);
+      const resp = asStructured(
+        await dispatcher(
+          makeEvent({
+            method: "POST",
+            path: `/rounds/${started.roundId}/scores`,
+            token: spectatorToken,
+            body: {
+              golferId: started.golferId,
+              hole: 1,
+              result: { kind: "strokes", strokes: 4 },
+              opId: opId("spectator-op-1"),
+              hlc: { wallMs: 1, counter: 0, deviceId: deviceId("spectator-device") },
+            },
+          }),
+        ),
+      );
+      expect(resp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
+    });
+
+    it("POST /rounds/{roundId}/finalize", async () => {
+      const { dispatcher } = setup();
+      const { started, spectatorToken } = await startAndShare(dispatcher);
+      const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: spectatorToken })));
+      expect(resp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
+    });
+
+    it("POST /rounds/{roundId}/players", async () => {
+      const { dispatcher } = setup();
+      const { started, spectatorToken } = await startAndShare(dispatcher);
+      const resp = asStructured(
+        await dispatcher(
+          makeEvent({
+            method: "POST",
+            path: `/rounds/${started.roundId}/players`,
+            token: spectatorToken,
+            body: { name: "Interloper", tee: "white", courseHandicap: 10 },
+          }),
+        ),
+      );
+      expect(resp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
+    });
+
+    it("POST /rounds/{roundId}/games/{gameId}/terminate", async () => {
+      const { dispatcher } = setup();
+      const { started, spectatorToken } = await startAndShare(dispatcher);
+      const resp = asStructured(
+        await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/games/some-game/terminate`, token: spectatorToken })),
+      );
+      expect(resp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
+    });
+
+    it("POST /rounds/{roundId}/share itself — minting a NEW share link is participant-only", async () => {
+      const { dispatcher } = setup();
+      const { started, spectatorToken } = await startAndShare(dispatcher);
+      const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/share`, token: spectatorToken })));
+      expect(resp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
+    });
+  });
+
+  // token-round-mismatch is checked BEFORE the scope check on the "participant" tier (dispatch.ts)
+  // — a spectator token for a DIFFERENT round on a write route reports the more specific
+  // mismatch, not read-only-token, same precedence the brief's own error-shape discipline
+  // (M6 lesson: never mask a more specific failure behind a generic one).
+  it("a spectator token for a DIFFERENT round on a write route — 403 token-round-mismatch, not read-only-token", async () => {
+    const { dispatcher } = setup();
+    const { spectatorToken } = await startAndShare(dispatcher);
+    const otherRound = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Cal", tee: "white", courseHandicap: 12 } } })),
+        ).body!,
+      ),
+    );
+
+    const resp = asStructured(
+      await dispatcher(makeEvent({ method: "POST", path: `/rounds/${otherRound.roundId}/finalize`, token: spectatorToken })),
+    );
+    expect(resp.statusCode).toBe(403);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "token-round-mismatch" });
   });
 });

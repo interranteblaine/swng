@@ -100,7 +100,25 @@ export const createDispatcher =
         // Every "participant" route declares a {roundId} path segment (routes.ts) — a
         // token minted for a different round must never authorize this path.
         if (verified.roundId !== pathParams.roundId) throw new ApplicationError("token-round-mismatch");
-        claims = verified;
+        // M9 Task 3 (share): a verified SPECTATOR token is a real bearer, just not one this
+        // WRITE route accepts — read-only-token (403), never invalid-token (401): the token
+        // itself is fine, it's just scoped to reads. Checked AFTER the roundId match above so
+        // a wrong-round spectator token still reports the more specific token-round-mismatch.
+        if (verified.scope === "spectator") throw new ApplicationError("read-only-token");
+        claims = verified; // narrowed to {scope: "participant", roundId, golferId} — assignable to ParticipantClaims as-is
+      }
+
+      if (route.auth === "round-read") {
+        // Read-only routes (currently: GET /rounds/{roundId}/events) accept EITHER token
+        // scope — a participant reading their own round, or a spectator reading via a share
+        // link. Deliberately does NOT populate ctx.claims: no round-read handler needs a
+        // golferId (readEvents only needs the roundId already in pathParams), and leaving
+        // claims unset here is what keeps a future write handler from being tempted to reuse
+        // this tier by mistake instead of declaring "participant".
+        const token = bearerToken(event);
+        const verified = token ? tokens.verify(token) : undefined;
+        if (!verified) throw new ApplicationError("invalid-token");
+        if (verified.roundId !== pathParams.roundId) throw new ApplicationError("token-round-mismatch");
       }
 
       let account: AccountClaims | undefined;

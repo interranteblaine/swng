@@ -97,7 +97,7 @@ export const startRound =
     const result = await deps.journal.append(id, events);
     await deps.broadcast.publish(id, result.appended);
 
-    const token = deps.tokens.issue({ roundId: id, golferId: host });
+    const token = deps.tokens.issue({ scope: "participant", roundId: id, golferId: host });
 
     return { roundId: id, joinCode, token, golferId: host };
   };

@@ -180,3 +180,15 @@ describe("toHttpError — M9 Task 2 claim-proof-required", () => {
     expect(JSON.parse(result.body)).toEqual({ code: "claim-proof-required", message: 'code "NOPE99" does not prove membership for golfer g-1' });
   });
 });
+
+// M9 Task 3 (share): dispatch.ts's own "participant" tier throws this when a verified
+// SPECTATOR token is presented to a write route — constructed exactly as that throw site does.
+describe("toHttpError — M9 Task 3 read-only-token", () => {
+  const logger = createNullLogger();
+
+  it("maps read-only-token to 403", () => {
+    const result = toHttpError(new ApplicationError("read-only-token"), logger);
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({ code: "read-only-token", message: "read-only-token" });
+  });
+});

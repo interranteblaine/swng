@@ -67,6 +67,10 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // 403, not a 409 (this isn't a conflicting write, and it's checked before either 409 arm so
   // it never leaks claim status).
   "claim-proof-required": 403,
+  // M9 Task 3 (share): a spectator token is a verified, real bearer — just not one this WRITE
+  // route accepts — same "forbidden actor" 403 bucket as claim-proof-required/not-a-participant
+  // above, never a 401 (401 means "no usable identity at all", which a spectator token isn't).
+  "read-only-token": 403,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`

@@ -4,6 +4,7 @@ import type { GameId, GameState, RoundState } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
 import { ClaimAffordance } from "./ClaimAffordance";
 import { ScorecardGrid } from "./ScorecardGrid";
+import { ShareButton } from "./ShareButton";
 import { StandingsHeader } from "./StandingsHeader";
 
 export interface ResultsViewProps {
@@ -18,6 +19,13 @@ export interface ResultsViewProps {
   // this for every round session, live or archived — same source SetupPanel's joinCode prop
   // already reads from.
   readonly joinCode: string;
+  // M9 Task 3 (share): the caller's OWN participant token, threaded through only so ShareButton
+  // can mint a link — OPTIONAL and OMITTED by WatchPage's own reuse of this exact component for
+  // a spectator's archived-card view. A spectator holds no participant token (POST .../share is
+  // participant-gated) and minting a NEW link isn't something a read-only view offers anyway —
+  // leaving this unset is what keeps that reuse edit-affordance-free without a second,
+  // spectator-flavored ResultsView.
+  readonly shareToken?: string;
 }
 
 type HandicappingRow = FinalizeRoundResponse["handicapping"][number];
@@ -31,7 +39,7 @@ type HandicappingRow = FinalizeRoundResponse["handicapping"][number];
 const deriveHandicapping = (state: RoundState): readonly HandicappingRow[] =>
   state.participants.map((participant) => handicappingFor(participant, state.card, state.cells));
 
-export function ResultsView({ state, games, response, joinCode }: ResultsViewProps) {
+export function ResultsView({ state, games, response, joinCode, shareToken }: ResultsViewProps) {
   const handicapping = response?.handicapping ?? deriveHandicapping(state);
   // Task 5: the archive gets the same chip-selected active game as a live round (RoundPage's
   // LiveRound) instead of a fixed games[0] — StandingsHeader IS the per-game standings display
@@ -44,6 +52,8 @@ export function ResultsView({ state, games, response, joinCode }: ResultsViewPro
   return (
     <section className="flex flex-col gap-6 p-4 text-slate-100">
       <h1 className="text-xl font-bold">Final results</h1>
+
+      {shareToken && <ShareButton roundId={state.id} token={shareToken} />}
 
       <div>
         {/* The claim path survives finalize (M7 Task 6, gap 2 — a round could previously never

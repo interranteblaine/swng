@@ -39,6 +39,9 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.POST, path: "/rounds/{roundId}/scores" },
   { method: HttpMethod.POST, path: "/rounds/{roundId}/finalize" },
   { method: HttpMethod.GET, path: "/rounds/{roundId}/events" },
+  // M9 Task 3 (share): mints this round's immortal spectator link — participant-gated, same
+  // tier as finalize/terminate above.
+  { method: HttpMethod.POST, path: "/rounds/{roundId}/share" },
   // M6 Task 4: peek + the course CRUD/search surface.
   { method: HttpMethod.GET, path: "/rounds/peek" },
   { method: HttpMethod.POST, path: "/courses" },

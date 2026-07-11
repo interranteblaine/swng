@@ -115,6 +115,9 @@ describe("RoundPage", () => {
     // "Ann" alone is ambiguous (also a checkbox label in the Add Game form's players list) —
     // the roster line's fuller text disambiguates.
     expect(screen.getByText(/Ann.*white.*CH 8/)).toBeTruthy();
+    // M9 Task 3 (share): the live view carries its own "Share round" affordance, wired to
+    // THIS device's own participant token (credentialStore.save above).
+    expect(screen.getByRole("button", { name: "Share round" })).toBeTruthy();
   });
 
   it("remounts the session (keyed by the route's roundId) when navigating from one round to another", async () => {

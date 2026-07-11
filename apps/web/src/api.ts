@@ -20,6 +20,7 @@ import {
   peekRoundResponseSchema,
   saveStandingGameResponseSchema,
   searchCoursesResponseSchema,
+  shareLinkResponseSchema,
   startRoundResponseSchema,
   terminateGameResponseSchema,
   verifyTeeSetResponseSchema,
@@ -54,6 +55,7 @@ import type {
   SaveStandingGameRequest,
   SaveStandingGameResponse,
   SearchCoursesResponse,
+  ShareLinkResponse,
   StartRoundRequest,
   StartRoundResponse,
   TerminateGameResponse,
@@ -149,6 +151,14 @@ export const addParticipant = async (roundId: RoundId, token: string, input: Add
 export const finalizeRound = async (roundId: RoundId, token: string): Promise<FinalizeRoundResponse> => {
   const json = await requestJson(`/rounds/${roundId}/finalize`, { method: "POST", token });
   return parse(finalizeRoundResponseSchema, json);
+};
+
+// M9 Task 3 (share): mints this round's own immortal spectator link. `url` is a path+fragment
+// (the server has no web-origin config seam — getShareLink.ts's own doc comment) — ShareButton
+// resolves it against this device's own window.location.origin before copying/displaying it.
+export const shareRound = async (roundId: RoundId, token: string): Promise<ShareLinkResponse> => {
+  const json = await requestJson(`/rounds/${roundId}/share`, { method: "POST", token });
+  return parse(shareLinkResponseSchema, json);
 };
 
 // M6 Task 5: the six course-surface calls, same requestJson + per-endpoint idiom as the five

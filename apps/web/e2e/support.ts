@@ -38,6 +38,7 @@ import {
   saveStandingGameRequestSchema,
   saveStandingGameResponseSchema,
   searchCoursesResponseSchema,
+  shareLinkResponseSchema,
   startRoundRequestSchema,
   startRoundResponseSchema,
   updateMeRequestSchema,
@@ -54,6 +55,7 @@ import type {
   GolferResponse,
   JoinRoundResponse,
   SaveStandingGameResponse,
+  ShareLinkResponse,
   StandingGameView,
   StartRoundRequest,
   StartRoundResponse,
@@ -223,6 +225,20 @@ export const getMyRecordDirect = async (httpUrl: string, token: string): Promise
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`GET /me/record -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(getMyRecordResponseSchema, json);
+};
+
+// M9 Task 3 (share), out-of-browser: mints the round's own immortal spectator link. Same
+// *Direct idiom as every other helper in this section — api.ts's own shareRound can't be
+// imported here either (this file's header comment's config.ts module-load crash). Returns
+// the raw `{ url }` (a path+fragment, e.g. "/watch/<roundId>#<token>") — shareLink.spec.ts
+// hands it straight to page.goto(), which resolves it against playwright.config.ts's own
+// baseURL, the same "the web supplies the origin" seam getShareLink.ts's own doc comment
+// anticipates.
+export const shareRoundDirect = async (httpUrl: string, id: RoundId, token: string): Promise<ShareLinkResponse> => {
+  const response = await fetch(`${httpUrl}/rounds/${id}/share`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /rounds/${id}/share -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(shareLinkResponseSchema, json);
 };
 
 // --- Crews + as-self identity, entirely out-of-browser (M8 Task 7 — the golden season gate) -

@@ -37,6 +37,7 @@ import {
   peekRound,
   saveStandingGame,
   searchCourses,
+  shareRound,
   terminateGame,
   updateMe,
   verifyTeeSet,
@@ -399,6 +400,37 @@ describe("finalizeRound", () => {
     });
 
     const error: unknown = await finalizeRound(roundId("round-1"), "tok-4").catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("network");
+  });
+});
+
+// M9 Task 3 (share): same POST + bearer-token idiom as finalizeRound above.
+describe("shareRound", () => {
+  it("POSTs to /rounds/{roundId}/share with the bearer token and parses the response", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { url: "/watch/round-1#spectator-token" });
+    });
+
+    const result = await shareRound(roundId("round-1"), "tok-4");
+
+    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/share`);
+    expect(seenInit?.method).toBe("POST");
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-4");
+    expect(result).toEqual({ url: "/watch/round-1#spectator-token" });
+  });
+
+  it("surfaces a fetch rejection as ApiError('network')", async () => {
+    stubFetch(async () => {
+      throw new Error("offline");
+    });
+
+    const error: unknown = await shareRound(roundId("round-1"), "tok-4").catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("network");

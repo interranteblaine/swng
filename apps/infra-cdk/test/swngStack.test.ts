@@ -402,7 +402,7 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "$disconnect" });
     });
 
-    it("wires all twenty-five HTTP routes", () => {
+    it("wires all twenty-six HTTP routes", () => {
       const expectedRouteKeys = [
         "POST /rounds",
         "POST /rounds/join",
@@ -410,6 +410,8 @@ describe("SwngStack", () => {
         "POST /rounds/{roundId}/scores",
         "POST /rounds/{roundId}/finalize",
         "GET /rounds/{roundId}/events",
+        // M9 Task 3 (share): mints this round's immortal spectator link.
+        "POST /rounds/{roundId}/share",
         "GET /rounds/peek",
         "POST /courses",
         "POST /courses/{courseId}/tees",
@@ -440,11 +442,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (25 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (26 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 27 routes total (25 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 27);
+    it("has exactly 28 routes total (26 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 28);
     });
 
     // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route

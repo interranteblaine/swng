@@ -1,0 +1,88 @@
+import { useState } from "react";
+import { useLocation, useParams } from "react-router";
+import { roundId as makeRoundId } from "@swng/domain";
+import type { GameId, RoundId } from "@swng/domain";
+import { ResultsView } from "../round/ResultsView";
+import { ScorecardGrid } from "../round/ScorecardGrid";
+import { StandingsHeader } from "../round/StandingsHeader";
+import { useWatchRound as defaultUseWatchRound } from "./useWatchRound";
+import type { WatchRoundView } from "./useWatchRound";
+
+type UseWatchRound = (roundId: RoundId, token: string) => WatchRoundView;
+
+// Everything that's only ever rendered pre-finalize, its own component for the same reason
+// RoundPage's own LiveRound is one (chip-selection state shouldn't have to survive the
+// live -> final swap). Deliberately NOT RoundPage's LiveRound reused wholesale: that component
+// wires SetupPanel/FinalizeControl/HoleDigest/recordScore — every one of those IS an edit
+// affordance (add a game, add a player, finalize, score) — so this is its own, narrower
+// composition of just the two READ-ONLY presentational pieces a spectator needs:
+// StandingsHeader (no onTerminate — omitting it is what hides the "End game…" overflow, same
+// contract ResultsView's own reuse of StandingsHeader already relies on) and ScorecardGrid in
+// `readOnly` mode (every cell renders `disabled` — no tap ever opens ScorePad, so the two-tap
+// score entry UI structurally never appears; ResultsView's own archived-card precedent for
+// this exact readOnly reuse).
+function LiveWatch({ view }: { view: WatchRoundView }) {
+  const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
+  const state = view.state!; // caller's own contract: only rendered once view.state is defined
+  const activeGame = view.games.find((g) => g.id === activeGameId) ?? view.games.find((g) => !state.terminatedGameIds.has(g.id));
+
+  return (
+    <>
+      <StandingsHeader state={state} games={view.games} activeGameId={activeGame?.id} onSelect={setActiveGameId} />
+      <ScorecardGrid state={state} activeGame={activeGame} recordScore={() => {}} readOnly />
+    </>
+  );
+}
+
+// /watch/{roundId}#{token} (M9 Task 3 brief): the immortal, read-only spectator view. Reads
+// its token from the URL FRAGMENT, never a query param — fragments never leave the browser
+// (they're stripped before a request line is built and never appear in server/proxy access
+// logs), which is exactly the property a non-expiring capability token needs. No sign-in, no
+// session/outbox (useWatchRound's own doc comment), no edit affordances anywhere in this file
+// — WatchPageTest structurally asserts no score buttons render.
+export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRound) => {
+  function WatchPageContent({ roundId, token }: { roundId: RoundId; token: string }) {
+    const view = useWatchRound(roundId, token);
+
+    if (!view.hydrated || !view.state) {
+      return (
+        <div role="status" aria-label="Loading round" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+          Loading round…
+        </div>
+      );
+    }
+
+    const isFinal = view.state.status === "final";
+
+    return (
+      <main className="min-h-screen bg-slate-950">
+        {/* joinCode="" + no shareToken: a spectator holds neither a round join code (that's a
+            participant-only secret) nor a participant token to mint a NEW share link with —
+            ResultsView.tsx's own doc comment explains why shareToken is optional and omitted
+            here. An empty joinCode still can't be abused: claimGolfer.ts's own proof-of-context
+            check (M9 hardening) rejects an empty/wrong code with claim-proof-required. */}
+        {isFinal ? <ResultsView state={view.state} games={view.games} response={undefined} joinCode="" /> : <LiveWatch view={view} />}
+      </main>
+    );
+  }
+
+  return function WatchPage() {
+    const { roundId: param } = useParams<{ roundId: string }>();
+    const location = useLocation();
+    // location.hash carries the leading "#" (matches window.location.hash) — stripped once,
+    // here, so every downstream consumer gets a bare token.
+    const token = location.hash.startsWith("#") ? location.hash.slice(1) : location.hash;
+
+    if (!param || !token) {
+      return (
+        <div role="status" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+          This share link looks incomplete — ask for a fresh one.
+        </div>
+      );
+    }
+
+    return <WatchPageContent roundId={makeRoundId(param)} token={token} />;
+  };
+};
+
+export const WatchPage = createWatchPage();

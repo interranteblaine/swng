@@ -11,6 +11,7 @@ import { HomePage } from "./routes/HomePage";
 import { JoinRoundPage } from "./routes/JoinRoundPage";
 import { ProfilePage } from "./routes/ProfilePage";
 import { RoundPage } from "./routes/RoundPage";
+import { WatchPage } from "./watch/WatchPage";
 
 // The signed-in half of the header's identity chrome (brief: "Signed-in chrome: name in the
 // header, links to /profile") — SignInButton.tsx is exactly the OTHER (signed-out) half; this
@@ -71,6 +72,11 @@ export function App() {
               screen (a centered "Signing you in..."/error state), not a page that needs the
               app chrome — and there's no signed-in identity to show in a header yet anyway. */}
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          {/* Outside Layout too (M9 Task 3, share): "No sign-in, no chrome that invites edits"
+              (the brief) — AuthChrome's sign-in/sign-out links have no place on a read-only
+              spectator page, and there's nothing here for them to act on anyway (WatchPage
+              never touches auth at all). */}
+          <Route path="/watch/:roundId" element={<WatchPage />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

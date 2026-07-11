@@ -120,6 +120,27 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   });
 });
 
+// M9 Task 3 (share): shareToken is OPTIONAL and additive — absent by default (every describe
+// block above never passes it and still passes unchanged), present only when the caller (i.e.
+// RoundPage, never WatchPage's own spectator reuse of this component) has a real participant
+// token to mint a link with.
+describe("ResultsView — share affordance (M9 Task 3)", () => {
+  const { players, fourball, skins, scores, corrections } = fieldDeck18;
+  const events = playGoldenRoundLog(fixtureLinks18, players, [fourball, skins], scores, corrections, true);
+  const state = reduceRound(events);
+  const localGames = state.games.map((config) => scoreGame(config, state));
+
+  it("renders no 'Share round' button when shareToken is omitted (the WatchPage/spectator shape)", () => {
+    render(<ResultsView state={state} games={localGames} response={undefined} joinCode="TESTJC" />);
+    expect(screen.queryByRole("button", { name: "Share round" })).toBeNull();
+  });
+
+  it("renders 'Share round' when shareToken is provided (RoundPage's own archived-card shape)", () => {
+    render(<ResultsView state={state} games={localGames} response={undefined} joinCode="TESTJC" shareToken="participant-token" />);
+    expect(screen.getByRole("button", { name: "Share round" })).toBeTruthy();
+  });
+});
+
 describe("ResultsView — no response (WS-pushed final, brief's other tab)", () => {
   it("derives handicapping locally, matching settleRound's own numbers for the identical log", () => {
     const { players, fourball, skins, scores, corrections } = fieldDeck18;

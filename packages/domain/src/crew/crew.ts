@@ -33,6 +33,21 @@ export interface Crew {
 }
 
 const MIN_MEMBER_NAME_LENGTH = 1;
+// M9 hardening (papercut 9): mirrors course.ts's validateCourseName exactly (trimmed,
+// 1-N characters) — domain is the honest layer, so THIS is where a crew's name is actually
+// held to a bound, not just the wire's own `.min(1)` (which never trims and has no upper
+// bound at all).
+const MAX_CREW_NAME_LENGTH = 60;
+
+// Called by createCrew.ts (application) before a Crew is ever constructed — there is no
+// domain-level `createCrew` factory the way course.ts has `createCourse` (a crew is built by
+// addMember calls directly, application/src/crews/createCrew.ts's own doc comment), so this
+// validator is exported for that call site rather than invoked internally here.
+export const validateCrewName = (name: string): void => {
+  if (name.trim().length === 0 || name.length > MAX_CREW_NAME_LENGTH) {
+    throw new DomainError("invalid-crew-name", `crew name must be 1-${MAX_CREW_NAME_LENGTH} characters: "${name}"`);
+  }
+};
 
 // Membership is a roster, not a set of accounts — a golferId can be a claimed account or an
 // unclaimed ghost (product.md's "even the holdout"); addMember doesn't care which.
@@ -49,7 +64,10 @@ export const addMember = (crew: Crew, member: CrewMember): Crew => {
 // Mirrors game.ts's scoreGame dispatch: one entry per GameConfig kind, kept in sync with
 // that union by the same exhaustiveness discipline (a runtime DomainError, not just a
 // compile-time check, guards inputs that bypass the type system).
-const referencedGolferIds = (game: GameConfigDraft): readonly GolferId[] => {
+// Exported (M9 hardening, papercut 8): saveStandingGame.ts (application) reuses this SAME
+// per-game extraction to validate a preset's golferIds against the crew's roster before
+// saving — never a second, hand-rolled copy of this switch.
+export const referencedGolferIds = (game: GameConfigDraft): readonly GolferId[] => {
   switch (game.kind) {
     case "stroke-play":
     case "stableford":

@@ -149,20 +149,32 @@ export interface Route {
   readonly handler: (ctx: RouteContext, body: unknown) => Promise<unknown>;
 }
 
+// M9 hardening (papercut 2): the shared idiom behind parseSinceSeq/parseLimit/parseSeason
+// below — an ABSENT query param (never sent) and an EMPTY one (a client-built URL with
+// `?since=` — e.g. a template that stringifies an unset value as "") both mean "the caller
+// supplied nothing," not an explicit "0". `Number("")` is 0 (a JS quirk, not NaN), so without
+// this the empty-string form silently passed each parser's own integer check and coerced into
+// a real value — wrong for all three call sites (parseSinceSeq: "" became 0, which happened to
+// be harmless only because 0 is ALSO the absent-default; parseLimit: "" became 0, an invalid
+// limit searchCourses was never meant to see; parseSeason: "" became 0, a nonsense year that
+// bypassed the current-UTC-year default entirely). Fixed in this ONE place so all three parsers
+// share the identical "absent-or-empty -> undefined" rule rather than three copies of it.
+const parseOptionalInt = (raw: string | undefined, fieldName: string): number | undefined => {
+  if (raw === undefined || raw === "") return undefined;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) {
+    throw new ContractError("invalid-request", [`${fieldName}: must be an integer, got "${raw}"`]);
+  }
+  return parsed;
+};
+
 // `since` defaults to "read from the start" and otherwise must be an integer seq — a
 // non-integer (e.g. "abc", or Number's own parse of it: NaN) must be rejected here, as a
 // ContractError, rather than reach adapters-dynamodb's evtSk(NaN + 1). Non-integer since
 // feeds evtSk(NaN) = "EVT#0000000NaN"; under lexicographic BETWEEN, this drops seq ≤ 999
 // but still returns seq ≥ 1000, silently amputating the head of the log a client folds
 // over — strictly worse than an empty page. Reject with 400 instead.
-const parseSinceSeq = (raw: string | undefined): number => {
-  if (raw === undefined) return 0;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed)) {
-    throw new ContractError("invalid-request", [`since: must be an integer, got "${raw}"`]);
-  }
-  return parsed;
-};
+const parseSinceSeq = (raw: string | undefined): number => parseOptionalInt(raw, "since") ?? 0;
 
 // GET /courses?query=&limit= (M6 Task 4): searchCourses.ts's own doc comment anticipates
 // this exact rejection ("empty-after-trim queries are rejected at the route layer... before
@@ -178,14 +190,7 @@ const parseSearchQuery = (raw: string | undefined): string => {
 // `limit` is optional (searchCourses.ts defaults and clamps it) — only its SHAPE is this
 // layer's job, same split as `since` above: reject a non-integer here rather than let
 // searchCourses' Math.trunc silently coerce "abc" into NaN and clamp that into MIN_LIMIT.
-const parseLimit = (raw: string | undefined): number | undefined => {
-  if (raw === undefined) return undefined;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed)) {
-    throw new ContractError("invalid-request", [`limit: must be an integer, got "${raw}"`]);
-  }
-  return parsed;
-};
+const parseLimit = (raw: string | undefined): number | undefined => parseOptionalInt(raw, "limit");
 
 // GET /rounds/peek?code= — same "missing/blank is a 400, not an empty-string lookup" shape
 // as parseSearchQuery above.
@@ -198,18 +203,11 @@ const parseJoinCode = (raw: string | undefined): string => {
 
 // GET /crews/{crewId}/records?season= (M8 Task 4): the clock stays at THIS edge, never
 // application — getCrewRecords.ts's own signature takes a required `season: number` and
-// never reads a Clock itself, so a missing ?season= resolves to "now" right here, once, and
-// the use case always receives an explicit value. A supplied season that isn't an integer
-// is the same "reject the malformed shape at the boundary" discipline as parseSinceSeq/
-// parseLimit above, not a silent coercion.
-const parseSeason = (raw: string | undefined): number => {
-  if (raw === undefined) return new Date().getUTCFullYear();
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed)) {
-    throw new ContractError("invalid-request", [`season: must be an integer, got "${raw}"`]);
-  }
-  return parsed;
-};
+// never reads a Clock itself, so a missing (or empty, papercut 2) ?season= resolves to "now"
+// right here, once, and the use case always receives an explicit value. A supplied season
+// that isn't an integer is the same "reject the malformed shape at the boundary" discipline
+// as parseSinceSeq/parseLimit above, not a silent coercion.
+const parseSeason = (raw: string | undefined): number => parseOptionalInt(raw, "season") ?? new Date().getUTCFullYear();
 
 export const buildRoutes = (useCases: UseCases): readonly Route[] => [
   {

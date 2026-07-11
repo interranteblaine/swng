@@ -252,20 +252,26 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     const seedFailures = (location.state as LocationState | null)?.seedFailures;
     const [seedNoticeDismissed, setSeedNoticeDismissed] = useState(false);
 
+    // Destructured so useCallback's deps list a stable function reference (sync's own
+    // useCallback([]) in useRoundSession.ts) rather than the whole `session` object, which is
+    // a fresh literal every render (snapshot spread) and would defeat memoization entirely.
+    const { sync, connect } = session;
+
     const onAddGame = useCallback(
       async (game: GameConfigInput) => {
         await addGame(roundId, credential.token, game);
         // No optimistic insert: the game-added event flows back through the session
         // (pull/WS) and SetupPanel renders it from state.games — game setup is rare and
-        // server-authored.
+        // server-authored. Papercut 4 (M9 hardening): sync() explicitly, matching every OTHER
+        // mutation on this page (onAddParticipant/onFinalize/onTerminate below) — without it,
+        // this device only sees its own new game once the NEXT unrelated sync happens to fire
+        // (there is no periodic poll timer; @swng/client's session only pulls on an explicit
+        // sync() or a WS push), which could be a long, confusing wait for the host who just
+        // added the game.
+        await sync();
       },
-      [roundId, credential.token],
+      [roundId, credential.token, sync],
     );
-
-    // Destructured so useCallback's deps list a stable function reference (sync's own
-    // useCallback([]) in useRoundSession.ts) rather than the whole `session` object, which is
-    // a fresh literal every render (snapshot spread) and would defeat memoization entirely.
-    const { sync, connect } = session;
 
     const onAddParticipant = useCallback(
       async (input: AddParticipantRequest) => {
@@ -335,7 +341,11 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
           participants={session.state.participants}
           onReconnect={reconnect}
         />
-        {seedFailures && seedFailures.failedLabels.length > 0 && !seedNoticeDismissed && (
+        {/* Papercut 7 (M9 hardening): suppressed once the round is already final on landing —
+            "add them under Setup" is meaningless advice once Setup no longer renders at all
+            (the ternary below swaps to ResultsView), and a multi-device "play the usual" could
+            plausibly land here already-finalized by another participant. */}
+        {!isFinal && seedFailures && seedFailures.failedLabels.length > 0 && !seedNoticeDismissed && (
           <SeedFailureNotice seedFailures={seedFailures} onDismiss={() => setSeedNoticeDismissed(true)} />
         )}
         {isFinal ? (

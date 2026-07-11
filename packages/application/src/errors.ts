@@ -76,7 +76,12 @@ export type ApplicationErrorCode =
   // "participant" tier check) — a forbidden actor, same shape as claim-proof-required/
   // not-a-participant above (403, not 401: the bearer verified fine, it just isn't allowed to
   // do this).
-  | "read-only-token";
+  | "read-only-token"
+  // M9 hardening (papercut 8): saveStandingGame.ts's preset names a golferId that isn't (or is
+  // no longer) on the crew's own roster — a bad-body precondition the caller can correct (drop
+  // or re-add the player), same bucket as unknown-golfer-in-game/duplicate-tee-name, not a
+  // genuine-bug 500.
+  | "unknown-preset-player";
 
 export class ApplicationError extends Error {
   constructor(

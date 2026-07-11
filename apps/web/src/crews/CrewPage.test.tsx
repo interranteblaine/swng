@@ -181,7 +181,9 @@ describe("CrewPage", () => {
     expect(within(rows[0]!).getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["Bo", "10", "6–3–1", "180", "7"]);
   });
 
-  it("a ledger line whose golferId is not in members renders the raw id truncated — never crashes", async () => {
+  // Papercut 11 (M9 hardening): the ledger row now reads "Former member" + the truncated id as
+  // an honest secondary line, never the bare truncated id alone.
+  it("a ledger line whose golferId is not in members renders 'Former member' + the truncated id — never crashes (papercut 11)", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
@@ -196,6 +198,7 @@ describe("CrewPage", () => {
     await screen.findByText("CRW123");
 
     const table = await screen.findByRole("table");
+    expect(within(table).getByText("Former member")).toBeTruthy();
     // Truncated raw id: starts with the id's own prefix, never the full 18-char string.
     expect(within(table).getByText(/^dropped-/)).toBeTruthy();
     expect(within(table).queryByText("dropped-member-0001")).toBeNull();
@@ -230,6 +233,45 @@ describe("CrewPage", () => {
 
     expect(await screen.findByText(/records build as crew rounds finalize/i)).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  // Papercut 5 (M9 hardening): a crew with no saved preset still shows the affordance, but
+  // disabled with an honest explainer instead of vanishing outright.
+  it("'Play the usual' renders disabled with an explainer when the crew has no standing game", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
+    const noPreset: CrewView = { ...crew, standingGame: undefined };
+    mockedGetCrew.mockResolvedValue({ crew: noPreset });
+    mockedGetCrewRecords.mockResolvedValue(emptyRecords);
+
+    renderPage();
+    await screen.findByText("CRW123");
+
+    const button = screen.getByRole("button", { name: /play the usual/i });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/save a standing game first/i)).toBeTruthy();
+
+    fireEvent.click(button);
+    // Never navigates — router state probe never mounts.
+    expect(screen.queryByTestId("create-probe")).toBeNull();
+  });
+
+  // Papercut 12 (M9 hardening): a records fetch failure previously left the "Season records"
+  // heading with nothing underneath it — now it shows one quiet, honest line instead.
+  it("a records fetch failure shows a quiet line under the heading, not a bare heading with nothing below", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetCrew.mockResolvedValue({ crew });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+    mockedGetCrewRecords.mockRejectedValue(new Error("network down"));
+
+    renderPage();
+    await screen.findByText("CRW123");
+
+    expect(await screen.findByText("Could not load records right now.")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByText(/records build as crew rounds finalize/i)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/network down/);
   });
 
   it("'Play the usual' hands the crew's id + members + preset to /create via router state", async () => {

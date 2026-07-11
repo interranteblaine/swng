@@ -71,6 +71,10 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // route accepts — same "forbidden actor" 403 bucket as claim-proof-required/not-a-participant
   // above, never a 401 (401 means "no usable identity at all", which a spectator token isn't).
   "read-only-token": 403,
+  // M9 hardening (papercut 8): a bad-body precondition (the preset names someone off the
+  // roster) the caller can correct, same bucket as unknown-golfer-in-game/golfer-required
+  // above.
+  "unknown-preset-player": 400,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`
@@ -107,6 +111,9 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   // whitespace-only name reaches this. A bad-body precondition, same shape as
   // duplicate-tee-name/unknown-golfer-in-game above — client-correctable, not a genuine bug.
   "invalid-member-name": 400,
+  // M9 hardening (papercut 9): crew.ts's validateCrewName — same bucket as invalid-course-name/
+  // invalid-member-name above.
+  "invalid-crew-name": 400,
 };
 
 // Exported so every error-shaped response — including dispatch.ts's route-not-found 404,

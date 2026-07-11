@@ -138,6 +138,15 @@ export function CreateRoundPage() {
   const selfGolferId = auth.golfer?.golferId;
   const otherRows = crewRows.filter((row) => row.golferId !== selfGolferId);
 
+  // Papercut 1 (M9 hardening): the SAME golferId seated twice — either two crewRows entries
+  // sharing an id, or a non-self row that happens to carry the host's own golferId — would try
+  // to occupy two roster seats with one GolferId. startRound.ts rejects this server-side too
+  // (golfer-already-in-round), but the normal "remove a player" UI can never actually produce
+  // it (crewRows seeds 1:1 from crew.members, itself already deduped by addMember's own
+  // duplicate-member guard) — this is a defensive check against a corrupted preset, checked
+  // before the tap ever reaches the network.
+  const duplicatePlayers = new Set(crewRows.map((row) => row.golferId)).size !== crewRows.length;
+
   // The domain export is the ONE implementation of the survival rule (a game survives iff
   // EVERY golferId it references is present, preset order kept) — recomputed against the
   // CURRENT roster selection on every render, so removing a player reactively drops the games
@@ -165,7 +174,7 @@ export function CreateRoundPage() {
     // one typed. Everything else (course/tee/handicap) is required either way. isIdentityLoading
     // blocks submission outright — the button is already disabled during this window, but this
     // guard covers any other way the form could submit (e.g. Enter in a text field).
-    if (!courseView || !tee || !Number.isInteger(parsedHandicap) || isIdentityLoading || (!asSelf && !name.trim())) return;
+    if (!courseView || !tee || !Number.isInteger(parsedHandicap) || isIdentityLoading || duplicatePlayers || (!asSelf && !name.trim())) return;
 
     // The crew rows (play-the-usual): every OTHER member rides StartRound's players[] with
     // their stable golferId — same per-row requirements as the host's own fields (a blank tee
@@ -379,6 +388,12 @@ export function CreateRoundPage() {
           </section>
         )}
 
+        {duplicatePlayers && (
+          <p role="alert" className="text-red-400">
+            The same player appears twice — remove the duplicate before creating.
+          </p>
+        )}
+
         {error && (
           <p role="alert" className="text-red-400">
             {error}
@@ -387,7 +402,7 @@ export function CreateRoundPage() {
 
         <button
           type="submit"
-          disabled={submitting || !courseView || isIdentityLoading}
+          disabled={submitting || !courseView || isIdentityLoading || duplicatePlayers}
           className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50"
         >
           Create round

@@ -186,6 +186,21 @@ describe("SetupPanel", () => {
     const sent = noopAddGame.mock.calls[0]![0];
     expect(sent).toMatchObject({ kind: "stableford", players: [ANN], allowance: 0.5 });
   });
+
+  // Papercut 12 (M9 hardening, the never-raw-caught.message sweep): same fix as AddPlayerForm's
+  // own sibling test — this form also used to catch `instanceof Error` too broadly.
+  it("never renders a raw generic Error's message from a failed Add game — only an honest fallback (papercut 12)", async () => {
+    const rejecting = vi.fn().mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'bar')"));
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: rejecting });
+
+    fireEvent.change(screen.getByLabelText(/^kind$/i), { target: { value: "stableford" } });
+    fireEvent.click(within(screen.getByRole("group", { name: /players/i })).getByLabelText("Ann"));
+    fireEvent.click(screen.getByRole("button", { name: /add game/i }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(screen.getByRole("alert").textContent).toBe("Could not add the game — try again.");
+    expect(document.body.textContent).not.toMatch(/Cannot read properties/);
+  });
 });
 
 // M7 Task 6: claim a ghost from the round roster — "This is me" on any row not already linked
@@ -391,6 +406,47 @@ describe("SetupPanel — Add player", () => {
     const withDave = baseState({ participants: [...baseState().participants, participant(golferId("dave-ghost"), "Dave", "white", 9)] });
     renderPanel({ state: withDave, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
     expect(screen.getByText(/Dave.*white.*CH 9/)).toBeTruthy();
+  });
+
+  // Papercut 3 (M9 hardening): a Saturday roster is almost always the same tee — retyping it
+  // for every player added in a row is the papercut. Only the identity fields (name/selection)
+  // reset after a successful add; tee/courseHandicap survive.
+  it("keeps tee/courseHandicap after a successful add — only name/selection reset (papercut 3)", async () => {
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
+
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Dave" } });
+    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add player$/i }));
+
+    await waitFor(() => expect(noopAddParticipant).toHaveBeenCalledTimes(1));
+
+    expect((screen.getByLabelText(/^name$/i) as HTMLInputElement).value).toBe(""); // identity resets
+    expect((screen.getByLabelText(/^tee$/i) as HTMLInputElement).value).toBe("white"); // tee SURVIVES
+    expect((screen.getByLabelText(/course handicap/i) as HTMLInputElement).value).toBe("9"); // CH SURVIVES
+
+    // A second player only needs a name typed — tee/CH are already right from the last add.
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Erin" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add player$/i }));
+    await waitFor(() => expect(noopAddParticipant).toHaveBeenCalledTimes(2));
+    expect(noopAddParticipant.mock.calls[1]![0]).toEqual({ name: "Erin", tee: "white", courseHandicap: 9 });
+  });
+
+  // Papercut 12 (M9 hardening, the never-raw-caught.message sweep): this form used to catch
+  // `instanceof Error`, which also matches a generic runtime exception (a bug, a network
+  // TypeError) — not just the wire-honest ApiError the rest of the app disciplines itself to.
+  it("never renders a raw generic Error's message — only an honest fallback (papercut 12)", async () => {
+    const rejecting = vi.fn().mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'foo')"));
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: rejecting });
+
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Dave" } });
+    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add player$/i }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(screen.getByRole("alert").textContent).toBe("Could not add the player — try again.");
+    expect(document.body.textContent).not.toMatch(/Cannot read properties/);
   });
 
   it("no crewId on the round: no 'From your crew' quick-add section renders, even when signed in", async () => {

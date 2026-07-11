@@ -15,6 +15,16 @@ const KNOWN_GAME_KINDS: ReadonlySet<GameConfig["kind"]> = new Set(["stroke-play"
 
 export interface WatchRoundView {
   readonly hydrated: boolean;
+  // Papercut 14 (M9 hardening): true once a pull has failed and this round has NEVER
+  // successfully hydrated — the signal WatchPage needs to stop spinning "Loading round…"
+  // forever on a mistyped/dead link (every pull 403s/404s/network-fails identically to a
+  // transient blip at this layer, so "still loading" and "this link is broken" were
+  // previously indistinguishable). Cleared the instant a LATER pull succeeds — a genuinely
+  // transient first-load blip self-heals on the very next poll tick, the same one the hook
+  // already runs regardless — and never set once this round HAS hydrated at least once (a
+  // spectator watching a live round shouldn't see an alarming banner over data it already has
+  // just because one later poll happened to fail; that failure still warns-and-drops as before).
+  readonly error: boolean;
   readonly state: RoundState | undefined;
   readonly games: readonly GameState[];
 }
@@ -50,6 +60,7 @@ export const createUseWatchRound = (
   return function useWatchRound(roundId: RoundId, token: string): WatchRoundView {
     const [events, setEvents] = useState<readonly RoundEvent[]>([]);
     const [pulledOnce, setPulledOnce] = useState(false);
+    const [pullError, setPullError] = useState(false); // papercut 14 — see WatchRoundView.error's own doc comment
 
     // Refs, not state: these are read-modify-write bookkeeping for the poll/socket loop, not
     // values a render needs to react to — only `events`/`pulledOnce` above drive re-renders.
@@ -64,6 +75,7 @@ export const createUseWatchRound = (
       lastSeqRef.current = 0;
       setEvents([]);
       setPulledOnce(false);
+      setPullError(false);
 
       const transport = createTransport(roundId, token);
 
@@ -80,11 +92,18 @@ export const createUseWatchRound = (
           const { events: pulled, nextSeq } = await transport.pull(lastSeqRef.current);
           lastSeqRef.current = nextSeq;
           ingest(pulled);
+          // A later successful pull clears any earlier error — see WatchRoundView.error's own
+          // doc comment (a transient first-load blip self-heals on the very next tick).
+          if (!cancelled) setPullError(false);
         } catch {
           // Network hiccup: warn-and-drop, matching @swng/client's own background-failure
           // precedent (session.ts's requestSyncInBackground) — the next poll tick (or the next
           // WS message) tries again. There is no queue to preserve here (a spectator authors
-          // nothing), so there is nothing "offline" could lose.
+          // nothing), so there is nothing "offline" could lose. Papercut 14 (M9 hardening):
+          // UNLESS this round has never hydrated at all (eventsRef still empty) — that's the
+          // "still loading forever" bug this fixes, so it surfaces as an honest error instead
+          // of silently retrying forever with nothing ever shown.
+          if (!cancelled && eventsRef.current.length === 0) setPullError(true);
         } finally {
           if (!cancelled) setPulledOnce(true);
         }
@@ -123,7 +142,7 @@ export const createUseWatchRound = (
     const state = events.length > 0 ? reduceRound(events) : undefined;
     const games = state ? state.games.filter((gameConfig) => KNOWN_GAME_KINDS.has(gameConfig.kind)).map((gameConfig) => scoreGame(gameConfig, state)) : EMPTY_GAMES;
 
-    return { hydrated: pulledOnce && state !== undefined, state, games };
+    return { hydrated: pulledOnce && state !== undefined, error: pullError, state, games };
   };
 };
 

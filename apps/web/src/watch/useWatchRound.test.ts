@@ -102,6 +102,50 @@ describe("useWatchRound", () => {
     await waitFor(() => expect(result.current.state?.cells[`${ANN_ID}#1`]).toBeDefined());
   });
 
+  // Papercut 14 (M9 hardening): a mistyped/dead link's every pull fails identically to a
+  // transient blip — before this fix, error was indistinguishable from "still loading," so
+  // WatchPage spun forever. `transport.offline` (createScriptedTransport's own doc comment)
+  // makes every pull/push throw a TransportError, exactly as a real dead round/token would.
+  it("surfaces error=true once a pull fails and this round has NEVER hydrated — not perpetual loading", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    transport.offline = true;
+    const useWatchRound = createUseWatchRound(() => transport, 20);
+
+    const { result } = renderHook(() => useWatchRound(ROUND_ID, "dead-token"));
+
+    expect(result.current.error).toBe(false); // not yet — the first pull hasn't landed
+    await waitFor(() => expect(result.current.error).toBe(true));
+    expect(result.current.hydrated).toBe(false);
+    expect(result.current.state).toBeUndefined();
+  });
+
+  it("a later successful pull clears the error and hydrates normally — a transient blip self-heals", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    transport.offline = true;
+    const useWatchRound = createUseWatchRound(() => transport, 20);
+
+    const { result } = renderHook(() => useWatchRound(ROUND_ID, "spectator-token"));
+    await waitFor(() => expect(result.current.error).toBe(true));
+
+    transport.offline = false;
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.error).toBe(false);
+  });
+
+  it("never surfaces error once a round HAS hydrated — a later failed pull still just warns-and-drops", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const useWatchRound = createUseWatchRound(() => transport, 20);
+
+    const { result } = renderHook(() => useWatchRound(ROUND_ID, "spectator-token"));
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+
+    transport.offline = true; // every poll from here on fails
+    await new Promise((resolve) => setTimeout(resolve, 60)); // let a couple of poll ticks run
+
+    expect(result.current.error).toBe(false);
+    expect(result.current.hydrated).toBe(true); // the already-hydrated view is undisturbed
+  });
+
   it("polls transport.pull on an interval and folds newly-arrived events in", async () => {
     const transport = createScriptedTransport(buildServerLog());
     // A short poll interval (the hook's own second DI seam) — the assertion is "eventually

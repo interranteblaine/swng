@@ -485,6 +485,41 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
     expect(genesis.events.map((event) => event.seq)).toEqual([1, 2, 3, 4, 5]);
   });
 
+  // Papercut 1 (M9 hardening): the SAME golferId can't hold two roster seats in one batch.
+  it("players[] with the SAME golferId twice is rejected — golfer-already-in-round, round never created", async () => {
+    const ctx = setup();
+    const dup = golferId("dup-player");
+
+    await expect(
+      ctx.start({
+        card: fixtureLinks,
+        host: { name: "Ann", tee: "white", courseHandicap: 8 },
+        players: [
+          { name: "Bo", tee: "white", courseHandicap: 2, golferId: dup },
+          { name: "Bo again", tee: "white", courseHandicap: 4, golferId: dup },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "golfer-already-in-round" });
+  });
+
+  it("a player golferId matching the host's own supplied golferId is rejected — golfer-already-in-round", async () => {
+    const ctx = setup();
+    const annId = golferId("ann-account");
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
+
+    await expect(
+      ctx.start(
+        {
+          card: fixtureLinks,
+          host: { name: "Ann", tee: "white", courseHandicap: 8 },
+          golferId: annId,
+          players: [{ name: "Ann again", tee: "white", courseHandicap: 8, golferId: annId }],
+        },
+        { sub: "sub-ann" },
+      ),
+    ).rejects.toMatchObject({ code: "golfer-already-in-round" });
+  });
+
   it("players entries reuse an UNCLAIMED existing golferId as-is (same T5b rule as JoinRound), never minting a fresh one for it", async () => {
     const ctx = setup();
     const ghost = golferId("ghost-recurring");

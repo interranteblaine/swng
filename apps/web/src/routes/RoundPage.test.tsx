@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryOutboxStore } from "@swng/client";
@@ -528,6 +528,62 @@ describe("RoundPage", () => {
     await waitFor(() => expect(screen.getByText(/Dave.*white.*CH 10/)).toBeTruthy());
   });
 
+  // Papercut 4 (M9 hardening): onAddGame used to be the ONE mutation on this page with no
+  // sync() call — @swng/client's session has no periodic poll timer (only an explicit sync()
+  // or a WS push moves the pull cursor), so without this fix the new game would only appear
+  // once some LATER, unrelated action happened to sync — a confusing wait for the host who
+  // just added it. This test's own waitFor would time out pre-fix; the scripted transport is
+  // fully synchronous, so post-fix it resolves promptly.
+  it("Add game flow: form submit → POST /rounds/{roundId}/games → the new game's chip appears via sync(), not a later unrelated trigger", async () => {
+    const id = roundId("round-add-game");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-addgame", golferId: ann, name: "Ann", joinCode: "GAME01" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        expect(String(url)).toBe(`https://api.example.test/rounds/${id}/games`);
+        expect(init?.method).toBe("POST");
+        const event: RoundEvent = {
+          kind: "game-added",
+          config: { kind: "stableford", id: gameId("game-added-1"), players: [ann] },
+          authorId: ann,
+          opId: opId("srv-add-game"),
+          hlc: { wallMs: 9_700, counter: 0, deviceId: SERVER_DEVICE },
+          seq: transport.log.length + 1,
+        };
+        (transport.log as RoundEvent[]).push(event);
+        return { ok: true, status: 201, json: async () => ({ gameId: gameId("game-added-1"), seq: event.seq }) } as unknown as Response;
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("GAME01")).toBeTruthy());
+    expect(screen.queryByRole("tab", { name: /Stableford/ })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/^kind$/i), { target: { value: "stableford" } });
+    fireEvent.click(within(screen.getByRole("group", { name: /players/i })).getByLabelText("Ann"));
+    fireEvent.click(screen.getByRole("button", { name: /add game/i }));
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Stableford/ })).toBeTruthy());
+  });
+
   // Papercut 1: the finalize dialog computes unresolved games from the LOCAL fold and offers
   // ending them + finalizing as one action — terminates each, THEN finalizes (order asserted).
   it("finalize dialog lists unresolved games and 'End unfinished games & finalize' terminates each THEN finalizes", async () => {
@@ -682,6 +738,38 @@ describe("RoundPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
     expect(screen.queryByText(/couldn.t be added/i)).toBeNull();
+  });
+
+  // Papercut 7 (M9 hardening): "add them under Setup" is meaningless once Setup no longer
+  // renders at all (a round that's already final on landing swaps straight to ResultsView) — a
+  // multi-device "play the usual" could plausibly land here already-finalized by someone else.
+  it("a seedFailures hand-off on an ALREADY-FINAL round suppresses the notice entirely (papercut 7)", async () => {
+    const id = roundId("round-seed-final");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-seed-final", golferId: ann, name: "Ann", joinCode: "SEEDFN1" });
+
+    const finalized: RoundEvent = { kind: "round-finalized", authorId: ann, opId: opId("final-op-seed"), hlc: { wallMs: 9_999, counter: 0, deviceId: SERVER_DEVICE } };
+    const transport = createScriptedTransport(stampSeq([...buildServerLog(id, ann, "Ann"), finalized]));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: `/round/${id}`, state: { seedFailures: { total: 2, failedLabels: ["Stableford — Ann, Cy"] } } }]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
+    expect(screen.queryByText(/couldn.t be added/i)).toBeNull();
+    expect(screen.queryByText("Stableford — Ann, Cy")).toBeNull();
   });
 
   it("no seedFailures in router state: no notice renders (a direct/refreshed visit, or every preset game seeded cleanly)", async () => {

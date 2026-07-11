@@ -3,7 +3,7 @@ import { DomainError } from "../errors.js";
 import { crewId, golferId } from "../ids.js";
 import type { GolferId } from "../ids.js";
 import type { GameConfigDraft } from "../scoring/game.js";
-import { addMember, applyStandingGame } from "./crew.js";
+import { addMember, applyStandingGame, referencedGolferIds, validateCrewName } from "./crew.js";
 import type { Crew, CrewMember, StandingGame } from "./crew.js";
 
 const CREW = crewId("saturday-boys");
@@ -102,4 +102,52 @@ describe("applyStandingGame — survival rule: a game survives iff every referen
     expect(applyStandingGame({ games: [fourball] }, new Set([A, B, C, D]))).toEqual([fourball]);
   });
 
+});
+
+// Papercut 8's own dependency: saveStandingGame.ts (application) needs to extract a game's
+// referenced golferIds directly (not just filter a preset), so this is exported from crew.ts
+// rather than kept module-private — pinned here as its own contract, not just indirectly
+// through applyStandingGame's own tests above.
+describe("referencedGolferIds (exported for saveStandingGame's roster validation)", () => {
+  it("singles-match: [a, b]", () => {
+    expect(referencedGolferIds({ kind: "singles-match", a: A, b: B })).toEqual([A, B]);
+  });
+
+  it("fourball-match: both sides, in order", () => {
+    expect(referencedGolferIds({ kind: "fourball-match", a: [A, B], b: [C, D] })).toEqual([A, B, C, D]);
+  });
+
+  it("stableford/stroke-play/skins: players[] verbatim", () => {
+    expect(referencedGolferIds({ kind: "stableford", players: [A, C] })).toEqual([A, C]);
+    expect(referencedGolferIds({ kind: "skins", players: [B, D] })).toEqual([B, D]);
+  });
+});
+
+// Papercut 9 (M9 hardening): mirrors course.ts's validateCourseName exactly — trimmed,
+// 1-60 characters. The wire's own `.min(1)` (contracts/crews.ts) never trims and has no upper
+// bound; this is where the real invariant lives (domain is the honest layer).
+describe("validateCrewName", () => {
+  it("accepts an ordinary name", () => {
+    expect(() => validateCrewName("Saturday Boys")).not.toThrow();
+  });
+
+  it("rejects an empty name", () => {
+    const attempt = () => validateCrewName("");
+    expect(attempt).toThrowError(DomainError);
+    expect(attempt).toThrowError(expect.objectContaining({ code: "invalid-crew-name" }));
+  });
+
+  it("rejects a whitespace-only name (the wire's .min(1) doesn't trim; this does)", () => {
+    const attempt = () => validateCrewName("   ");
+    expect(attempt).toThrowError(expect.objectContaining({ code: "invalid-crew-name" }));
+  });
+
+  it("accepts a name at exactly the 60-character bound", () => {
+    expect(() => validateCrewName("A".repeat(60))).not.toThrow();
+  });
+
+  it("rejects a name over the 60-character bound", () => {
+    const attempt = () => validateCrewName("A".repeat(61));
+    expect(attempt).toThrowError(expect.objectContaining({ code: "invalid-crew-name" }));
+  });
 });

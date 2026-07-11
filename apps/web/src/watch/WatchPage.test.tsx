@@ -63,7 +63,7 @@ const renderWatchPage = (path: string, useWatchRound: (roundId: RoundId, token: 
 
 describe("WatchPage", () => {
   it("shows a loading skeleton before hydration, using the token from the URL FRAGMENT (not a query param)", () => {
-    const idle: WatchRoundView = { hydrated: false, state: undefined, games: [] };
+    const idle: WatchRoundView = { hydrated: false, error: false, state: undefined, games: [] };
     let seenToken: string | undefined;
     renderWatchPage(`/watch/${ROUND_ID}#spectator-tok-1`, (_roundId, token) => {
       seenToken = token;
@@ -72,6 +72,16 @@ describe("WatchPage", () => {
 
     expect(screen.getByRole("status", { name: "Loading round" })).toBeTruthy();
     expect(seenToken).toBe("spectator-tok-1"); // the leading "#" is stripped
+  });
+
+  // Papercut 14 (M9 hardening): a mistyped/dead link surfaces an honest message instead of
+  // spinning "Loading round…" forever — never the raw error/exception text.
+  it("shows an honest 'not valid' message (not perpetual loading) when useWatchRound surfaces a terminal error", () => {
+    const errored: WatchRoundView = { hydrated: false, error: true, state: undefined, games: [] };
+    renderWatchPage(`/watch/${ROUND_ID}#dead-token`, () => errored);
+
+    expect(screen.getByText(/isn.t valid/i)).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "Loading round" })).toBeNull();
   });
 
   it("renders an incomplete-link message when the fragment carries no token", () => {
@@ -87,7 +97,7 @@ describe("WatchPage", () => {
     const events = buildLiveLog();
     const state = reduceRound(events);
     const games = state.games.map((g) => scoreGame(g, state));
-    const view: WatchRoundView = { hydrated: true, state, games };
+    const view: WatchRoundView = { hydrated: true, error: false, state, games };
 
     renderWatchPage(`/watch/${ROUND_ID}#spectator-tok-2`, fixedUseWatchRound(view));
 
@@ -120,7 +130,7 @@ describe("WatchPage", () => {
     const events = buildFinalLog();
     const state = reduceRound(events);
     const games = state.games.map((g) => scoreGame(g, state));
-    const view: WatchRoundView = { hydrated: true, state, games };
+    const view: WatchRoundView = { hydrated: true, error: false, state, games };
 
     renderWatchPage(`/watch/${ROUND_ID}#spectator-tok-3`, fixedUseWatchRound(view));
 

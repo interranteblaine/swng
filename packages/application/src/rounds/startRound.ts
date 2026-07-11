@@ -38,6 +38,20 @@ export const startRound =
     findTeeSet(command.card, command.host.tee); // unknown-tee-set (DomainError) propagates
     for (const player of command.players ?? []) findTeeSet(command.card, player.tee);
 
+    // M9 hardening (papercut 1): a request naming the SAME golferId twice — either two
+    // players[] entries, or a player matching the host's own supplied golferId — would resolve
+    // to one GolferId doing double duty as two roster seats. Checked before anything is
+    // minted/written (same "reject before touching state" discipline as the tee-set checks
+    // above); an unsupplied (mint-fresh) golferId never collides with anything, so only
+    // explicitly-supplied ids are compared. Reuses joinRound's own "already a participant" code
+    // (golfer-already-in-round) — same shape, one golferId can't hold two seats.
+    const suppliedGolferIds = [command.golferId, ...(command.players ?? []).map((player) => player.golferId)].filter(
+      (candidate): candidate is GolferId => candidate !== undefined,
+    );
+    if (new Set(suppliedGolferIds).size !== suppliedGolferIds.length) {
+      throw new ApplicationError("golfer-already-in-round");
+    }
+
     // A crew-tagged round requires the caller's OWN golfer to be a member of that crew —
     // checked before anything is minted or written, same "validate before touching state"
     // discipline as the tee-set checks above. Anonymous crewId (no claims at all) can never

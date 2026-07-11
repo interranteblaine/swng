@@ -43,7 +43,21 @@ export function ClaimAffordance({ rowGolferId, rowName, code }: ClaimAffordanceP
   const [claimed, setClaimed] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
+  // Papercut 13 (M9 hardening): WatchPage's own spectator reuse of SetupPanel/ResultsView's
+  // roster (ResultsView with joinCode="") has no round/crew code to prove membership with — an
+  // empty code always 403s claim-proof-required server-side anyway, so this is harmless, but it
+  // contradicts "no edit affordances on a spectator page." Every REAL call site (SetupPanel,
+  // ResultsView on a live/finalized round) always has its own round's real join code.
+  if (!code) return null;
+
   if (!auth.signedIn) return null;
+
+  // Papercut 6 (M9 hardening): while GET /me is still loading (signed in, auth.golfer not yet
+  // resolved — the SAME isIdentityLoading window CreateRoundPage/JoinRoundPage already guard),
+  // no row can honestly be shown as either "This is me" or "You" — the own-row check below reads
+  // auth.golfer, which doesn't exist yet. Rendering the claim button here risks a flash of "This
+  // is me" on what may turn out to BE this account's own row a moment later.
+  if (auth.golfer === undefined) return null;
 
   // Checked BEFORE the already-mine guard below: a claim made in THIS session flips
   // auth.golfer to this very row on refetch, and the success confirmation must survive that.

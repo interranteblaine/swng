@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import { defaultAllowance, golferId } from "@swng/domain";
 import type { CrewId, GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 import type { AddParticipantRequest, CrewMemberView, GameConfigInput } from "@swng/contracts";
-import { getCrew } from "../api";
+import { ApiError, getCrew } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { ClaimAffordance } from "./ClaimAffordance";
 import { gameDots, gamePlayers, totalDots } from "./dots";
@@ -160,12 +160,14 @@ function AddPlayerForm({ crewId, existingGolferIds, onAddParticipant }: AddPlaye
       });
       // No optimistic insert (SetupPanel's own precedent, same as AddGameForm below): the new
       // roster row appears once participant-joined round-trips through the session's fold.
+      // Papercut 3 (M9 hardening): tee/courseHandicap deliberately survive a successful add —
+      // a Saturday roster is almost always the same tee, so retyping it for every player added
+      // in a row is exactly the papercut this fixes. Only the identity fields (name/selection)
+      // reset, since the NEXT player is a different person by definition.
       setSelected(undefined);
       setName("");
-      setTee("");
-      setCourseHandicap("0");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not add the player — try again.");
+      setError(caught instanceof ApiError ? caught.message : "Could not add the player — try again.");
     } finally {
       setSubmitting(false);
     }
@@ -313,7 +315,7 @@ export function AddGameForm({ participants, onAddGame }: AddGameFormProps) {
       // meantime beyond resetting the form for the next game.
       changeKind(kind);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not add the game — try again.");
+      setError(caught instanceof ApiError ? caught.message : "Could not add the game — try again.");
     } finally {
       setSubmitting(false);
     }

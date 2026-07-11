@@ -575,6 +575,25 @@ describe("CreateRoundPage — play the usual (crew preset)", () => {
     expect(screen.queryByText(/raw db failure/i)).toBeNull();
   });
 
+  // Papercut 1 (M9 hardening): a corrupted preset naming the SAME golferId twice (defensive —
+  // the normal "remove a player" UI can never actually produce this) must never reach the
+  // network; the tap stays disabled with an honest inline reason.
+  it("a preset naming the SAME golferId twice: submit stays disabled with inline copy, never reaches the network", async () => {
+    arrange();
+    const dupedMembers: readonly CrewMemberView[] = [...members, { golferId: golferId("bo-g"), name: "Bo (duplicate)", role: "member", claimed: false }];
+
+    renderCreate({ pathname: "/create", state: { crewPreset: { ...crewPreset, members: dupedMembers } } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    expect(screen.getByRole("alert").textContent).toMatch(/appears twice/i);
+    const submitButton = screen.getByRole("button", { name: /create round/i });
+    expect(submitButton.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(submitButton);
+    expect(mockedCreateRound).not.toHaveBeenCalled();
+  });
+
   it("no addGame failures: no seed-failure router state is sent at all", async () => {
     arrange();
 

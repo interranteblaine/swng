@@ -60,6 +60,17 @@ describe("createCrew", () => {
     const ctx = setup();
     await expect(ctx.create({ sub: "sub-nobody" }, { name: "Sunday Skins" })).rejects.toMatchObject({ code: "golfer-required" });
   });
+
+  // Papercut 9 (M9 hardening): domain's validateCrewName (crew/crew.ts) — the wire's own
+  // `.min(1)` doesn't trim, so a whitespace-only name would otherwise mint a blank-looking
+  // crew. Checked before anything is minted/written: no join code drawn, no crew put.
+  it("a whitespace-only name is rejected — invalid-crew-name, nothing minted", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+
+    await expect(ctx.create({ sub: "sub-ann" }, { name: "   " })).rejects.toMatchObject({ code: "invalid-crew-name" });
+    await expect(ctx.list({ sub: "sub-ann" })).resolves.toEqual({ crews: [] });
+  });
 });
 
 // M9 hardening: the join-code mint loop (crews/createCrew.ts) skips codes an existing crew
@@ -264,6 +275,36 @@ describe("saveStandingGame", () => {
 
     await expect(ctx.saveStanding({ sub: "sub-stranger" }, created.crew.crewId, { standingGame: { games: [] } })).rejects.toMatchObject({
       code: "not-a-member",
+    });
+  });
+
+  // Papercut 8 (M9 hardening): a preset naming a golfer who isn't on the crew's own roster —
+  // rejected before anything is written (never a silently-seeded "play the usual" round with a
+  // stray, unresolvable player).
+  it("a preset naming a golferId off the roster is rejected — unknown-preset-player, nothing saved", async () => {
+    const ctx = setup();
+    const annId = await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    const stranger = golferId("never-a-member");
+
+    await expect(
+      ctx.saveStanding({ sub: "sub-ann" }, created.crew.crewId, { standingGame: { games: [{ kind: "singles-match", a: annId, b: stranger }] } }),
+    ).rejects.toMatchObject({ code: "unknown-preset-player" });
+
+    const fetched = await ctx.get({ sub: "sub-ann" }, created.crew.crewId);
+    expect(fetched.crew.standingGame).toBeUndefined(); // never saved
+  });
+
+  it("a preset whose every referenced golfer IS on the roster saves cleanly", async () => {
+    const ctx = setup();
+    const annId = await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const boId = await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    await ctx.join({ sub: "sub-bo" }, { code: created.crew.joinCode });
+
+    const standingGame = { games: [{ kind: "singles-match" as const, a: annId, b: boId }] };
+    await expect(ctx.saveStanding({ sub: "sub-ann" }, created.crew.crewId, { standingGame })).resolves.toMatchObject({
+      crew: { standingGame },
     });
   });
 });

@@ -398,6 +398,29 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
+
+  // Papercut 2 (M9 hardening): an EMPTY ?since= (a client-built URL that stringifies an unset
+  // value as "") must parse as absent (read from the start), not as an explicit "0" that a
+  // stricter check might reject or mishandle differently from a truly-absent param.
+  it("treats an empty ?since= the same as an absent one — reads from the start, not a 400", async () => {
+    const { dispatcher } = setup();
+    const started = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(
+            makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+          ),
+        ).body!,
+      ),
+    );
+
+    const emptyResp = asStructured(
+      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "" } })),
+    );
+    const absentResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token })));
+    expect(emptyResp.statusCode).toBe(200);
+    expect(JSON.parse(emptyResp.body!)).toEqual(JSON.parse(absentResp.body!));
+  });
 });
 
 // M6 Task 4: the course CRUD/search surface + the pre-join peek — all `auth: "none"`
@@ -465,6 +488,24 @@ describe("createDispatcher — course routes + peek (M6 Task 4)", () => {
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses" })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
+  });
+
+  // Papercut 2 (M9 hardening): an EMPTY ?limit= must parse as absent (searchCourses' own
+  // DEFAULT_LIMIT of 10), not as an explicit "0" — which Number("") coerces to, clamping down
+  // to MIN_LIMIT (1) and silently truncating the result set before this fix.
+  it("treats an empty ?limit= as absent — the default limit, not a clamped-to-1 result set", async () => {
+    const { dispatcher } = setup();
+    for (const name of ["Fixture Alpha", "Fixture Beta", "Fixture Gamma"]) {
+      const created = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", body: { name, tee: fixtureWhite, enteredBy: "Ann" } })));
+      expect(created.statusCode).toBe(201);
+    }
+
+    const emptyLimitResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses", query: { query: "Fixture", limit: "" } })));
+    expect(emptyLimitResp.statusCode).toBe(200);
+    const searched = searchCoursesResponseSchema.parse(JSON.parse(emptyLimitResp.body!));
+    // Before the fix, limit="" parsed as 0 -> clamped to MIN_LIMIT (1) — only one of the three
+    // fixtures would come back.
+    expect(searched.courses).toHaveLength(3);
   });
 
   it("400s a zod-invalid POST /courses body — invalid-request", async () => {
@@ -1134,6 +1175,25 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     );
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
+  });
+
+  // Papercut 2 (M9 hardening): an EMPTY ?season= must default to the current UTC year, the
+  // SAME as an absent one — before the fix, "" parsed as 0 (Number("") === 0), a nonsense year
+  // that bypassed the default entirely.
+  it("treats an empty ?season= the same as an absent one — defaults to the current UTC year, not season 0", async () => {
+    const { dispatcher } = setupCrews();
+    await putMe(dispatcher, ann, "Ann");
+    const createResp = asStructured(
+      await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
+    );
+    const created = createCrewResponseSchema.parse(JSON.parse(createResp.body!));
+
+    const resp = asStructured(
+      await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/records`, token: golferBearer(ann), query: { season: "" } })),
+    );
+    expect(resp.statusCode).toBe(200);
+    const records = getCrewRecordsResponseSchema.parse(JSON.parse(resp.body!));
+    expect(records.season).toBe(new Date().getUTCFullYear());
   });
 });
 

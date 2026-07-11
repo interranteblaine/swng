@@ -32,6 +32,12 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
 
   const [crew, setCrew] = useState<CrewView | undefined>(undefined);
   const [records, setRecords] = useState<GetCrewRecordsResponse | undefined>(undefined);
+  // Papercut 12 (M9 hardening): a failed records fetch previously left `records` undefined
+  // forever, which rendered the "Season records" heading with NOTHING underneath it — a bare
+  // heading, not an honest empty/error surface. This distinguishes "still loading" (records
+  // undefined, recordsError false) from "tried and failed" (recordsError true) so the section
+  // can say so quietly instead.
+  const [recordsError, setRecordsError] = useState(false);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const [memberName, setMemberName] = useState("");
   const [addingMember, setAddingMember] = useState(false);
@@ -44,10 +50,14 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
       .catch((caught: unknown) => setLoadError(humanizeCrewLoadError(caught)));
     // Records are a nicety layered on the page, not a gate on it: a failed records fetch
     // leaves the roster/join-code/preset fully usable (the JoinRoundPage peek-fallback
-    // spirit), so this arm degrades silently instead of compounding onto loadError.
+    // spirit), so this arm degrades to its own quiet line (below) instead of compounding onto
+    // loadError.
     void withAuth((token) => getCrewRecords(token, id))
-      .then(setRecords)
-      .catch(() => {});
+      .then((response) => {
+        setRecords(response);
+        setRecordsError(false);
+      })
+      .catch(() => setRecordsError(true));
   }, [signedIn, withAuth, id]);
 
   if (!signedIn) {
@@ -111,10 +121,13 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
     navigate("/create", { state: { crewPreset: { crewId: crew.crewId, members: crew.members, standingGame: crew.standingGame } } });
   };
 
-  const nameOf = (golferId: GolferId): string =>
-    // A ledger line can outlive its member row (projections keep history; rosters are edited)
-    // — an unknown golferId renders truncated raw, never a crash and never the full internal id.
-    crew.members.find((member) => member.golferId === golferId)?.name ?? `${golferId.slice(0, 8)}…`;
+  // A ledger line can outlive its member row (projections keep history; rosters are edited) —
+  // this returns undefined for a golferId with no current roster row, rather than guessing.
+  const memberNameOf = (golferId: GolferId): string | undefined => crew.members.find((member) => member.golferId === golferId)?.name;
+
+  // Head-to-head's inline prose ("Ann 5–5–2 vs Bo") has no room for a two-line breakdown —
+  // "Former member" alone (never the full internal id bare) reads honestly there.
+  const nameOf = (golferId: GolferId): string => memberNameOf(golferId) ?? "Former member";
 
   // Wins first, then points, both descending (resolution 3) — the wire's own order is the
   // store's (golferId-sorted, ledger.ts), which is not a standings order.
@@ -125,11 +138,20 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-slate-950 p-6 text-slate-100">
       <h1 className="text-2xl font-bold">{crew.name}</h1>
 
-      {crew.standingGame && (
-        <button type="button" onClick={playTheUsual} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold">
+      {/* Papercut 5 (M9 hardening): always rendered now — disabled with an explainer when the
+          crew has no preset yet, instead of vanishing outright, so a first-time visitor sees
+          the affordance exists and knows exactly what unlocks it. */}
+      <div className="flex flex-col gap-1">
+        <button
+          type="button"
+          onClick={playTheUsual}
+          disabled={!crew.standingGame}
+          className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50"
+        >
           Play the usual
         </button>
-      )}
+        {!crew.standingGame && <p className="text-xs text-slate-500">Save a standing game first.</p>}
+      </div>
 
       {/* The round-page join-code idiom (SetupPanel's own card) — this is how account-holding
           friends get into the crew. */}
@@ -173,7 +195,9 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">Season records{records ? ` — ${records.season}` : ""}</h2>
-        {records === undefined ? null : !hasRecords ? (
+        {recordsError ? (
+          <p className="text-slate-400">Could not load records right now.</p>
+        ) : records === undefined ? null : !hasRecords ? (
           <p className="text-slate-400">Records build as crew rounds finalize.</p>
         ) : (
           <>
@@ -192,7 +216,18 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                   <tbody>
                     {sortedLedger.map((line) => (
                       <tr key={line.golferId} className="border-t border-slate-800">
-                        <td className="py-2 pr-2">{nameOf(line.golferId)}</td>
+                        <td className="py-2 pr-2">
+                          {/* Papercut 11 (M9 hardening): a departed member's ledger line reads
+                              "Former member" + the truncated id as an honest secondary line,
+                              never the bare truncated id alone (which looked like a rendering
+                              bug, not a deliberate "this person left the roster" signal). */}
+                          {memberNameOf(line.golferId) ?? (
+                            <span className="flex flex-col">
+                              <span>Former member</span>
+                              <span className="text-xs text-slate-500">{line.golferId.slice(0, 8)}…</span>
+                            </span>
+                          )}
+                        </td>
                         <td className="py-2 pr-2">{line.rounds}</td>
                         <td className="py-2 pr-2">{`${line.wins}–${line.losses}–${line.halves}`}</td>
                         <td className="py-2 pr-2">{line.points}</td>

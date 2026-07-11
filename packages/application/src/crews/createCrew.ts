@@ -1,4 +1,4 @@
-import { addMember, crewId as toCrewId } from "@swng/domain";
+import { addMember, crewId as toCrewId, validateCrewName } from "@swng/domain";
 import type { Crew } from "@swng/domain";
 import type { CreateCrewRequest, CreateCrewResponse } from "@swng/contracts";
 import { ApplicationError } from "../errors.js";
@@ -32,6 +32,12 @@ export const createCrew =
     // golfer-required propagates if the caller has no account golfer yet (wire honesty, not
     // a flow — the web PUTs /me first).
     const golfer = await requireAccountGolfer(deps, claims);
+
+    // M9 hardening (papercut 9): domain is the honest layer — the wire's own `.min(1)`
+    // (contracts/crews.ts) never trims and has no upper bound; this is the real invariant,
+    // checked before anything is minted or written (same "reject before touching state"
+    // discipline as startRound.ts's own tee-set checks).
+    validateCrewName(command.name);
 
     const id = toCrewId(deps.ids.newId());
     // Mints with the SAME machinery a round's own join code uses (IdGenerator.newJoinCode) —

@@ -45,6 +45,19 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
     const view = useWatchRound(roundId, token);
 
     if (!view.hydrated || !view.state) {
+      // Papercut 14 (M9 hardening): a mistyped/dead link's every pull fails identically to a
+      // transient blip at the hook layer — view.error is the one signal that distinguishes
+      // "still loading" from "this link is broken," so a golfer stops staring at a spinner
+      // that will never resolve. Kept honest (never a raw error/exception string) and quiet
+      // (role="status", the same tone as the fragment-missing message below — not an alarming
+      // role="alert").
+      if (view.error) {
+        return (
+          <div role="status" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+            This share link isn&apos;t valid — ask for a fresh one.
+          </div>
+        );
+      }
       return (
         <div role="status" aria-label="Loading round" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
           Loading round…

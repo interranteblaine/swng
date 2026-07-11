@@ -1,33 +1,38 @@
-# M9 — Finish Line: Share, Harden, Ship — Implementation Plan
+# M9 — Share & Harden Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** the v1 bar (`roadmap.md`) met on prod — spectator/share links, the hardening ledger triaged and burned down, `swng-prod` live with hosted web, and the four v1-bar bullets verified on a real Saturday with a real crew.
+> **Scope amendment (2026-07-11, user decision):** prod is OUT of M9 — no new stack is
+> deployed, period. The application is explicitly still rough; M9's job is to make it less
+> rough. The prod stack, web publish to prod, prod smoke, and the v1-bar field Saturday all
+> move to a future, **user-triggered** ship milestone (M10 in `implementation-plan.md`),
+> which happens when the owner says the app has stopped being a toy — not before.
 
-**Architecture:** share links are read-only spectator tokens over the existing round channel (`architecture.md` §"Identity & access" — same HMAC mechanism as participant tokens, narrower capability). Hardening follows the consolidated M9 ledger (`implementation-plan.md` §M9) — each item lands, or is explicitly re-accepted with its ledger entry updated; nothing silently drops. Prod is a second `SwngStack` stage plus S3+CloudFront web hosting in the same stack (both stages get hosting — the field test needs phones on a course, not a laptop dev server).
+**Goal:** share links exist, the hardening ledger is burned down or explicitly re-accepted, and the app runs from a phone without a laptop — all on the existing beta stack.
 
-**Tech stack:** unchanged, plus `aws-cdk-lib` constructs already in use (CloudFront/S3 are new *resources*, not new tools).
+**Architecture:** share links are read-only spectator tokens over the existing round channel (`architecture.md` §"Identity & access" — same HMAC mechanism as participant tokens, narrower capability). Hardening follows the consolidated M9 ledger (`implementation-plan.md` §M9) — each item lands, or is explicitly re-accepted with its ledger entry updated; nothing silently drops. Web hosting (S3+CloudFront) is added to the EXISTING `swng-beta` stack — a resource addition, not a new stack.
+
+**Tech stack:** unchanged, plus CloudFront/S3 constructs from the `aws-cdk-lib` already in use (new *resources* on the existing stack, not new tools).
 
 ## Global Constraints
 
 - Work on `main`; `pnpm validate` green at every commit (hermetic — no network/AWS); TDD; comments why-only; conventions per `docs/engineering-conventions.md`; every commit ends with:
   `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
 - Layer law (lint-enforced): web imports `client|contracts|domain` only; domain pure/zero-deps; `aws-jwt-verify` in `adapters-cognito` ONLY; ONE dispatcher, ONE error-mapping module, ONE projector implementation.
-- **Deploy policy:** beta deploys are per-task as planned below (each ends `pnpm deploy:beta` + `pnpm e2e:beta` 16/16 ×2 — M9 is a hardening milestone; multiple beta deploys are the point, each gated). The **prod stack (`swng-prod`) is created only in Task 6** via a new `deploy:prod` script (profile `swng`, us-east-1). POC stacks `InfraCdkStack-*` are NEVER touched (constructor guard stays). `cdk destroy` is never run against anything.
-- **Prod data policy ⚑:** prod smoke tests are anonymous-flow only (round lifecycle, course read, share link) and leave at most one clearly-named smoke round; NO Cognito automation against the prod pool ever (no admin-create, no USER_PASSWORD_AUTH — it isn't enabled there). The first real prod account is the project owner's own sign-up.
+- **Deploy policy:** `pnpm deploy:beta` ONLY, targeting the existing `swng-beta` stack — beta deploys are per-task as planned below (each ends `pnpm deploy:beta` + `pnpm e2e:beta` 16/16 ×2). **NO new stack of any name is created, deployed, or synthesized against a real account.** POC stacks `InfraCdkStack-*` are NEVER touched (constructor guard stays). `cdk destroy` is never run against anything.
 - **Process law (papercuts §4):** gates include the unmodified primary path in a real browser; the controller personally flow-walks before close; gate runs capture full output to a file (never piped through head/tail).
 - **Design decisions fixed by this plan** (⚑ = flagged for user veto at plan review; silence = consent):
-  - **⚑ Claim challenge = proof of context.** `ClaimGolferRequest` gains a required `code` — a round join code whose round contains the golfer, or a crew join code whose crew has the golfer as a member. The server verifies membership; a bare golferId no longer claims anything (403 `claim-proof-required`). The web supplies the code automatically (claiming from a round page sends that round's join code; from a crew page, the crew's) — zero added friction in every real flow. This closes the ledger's "claim capability = golferId secrecy" item without OTP/email machinery.
-  - **⚑ localStorage tokens are RE-ACCEPTED for v1 ship**, with a strict CSP added at the CloudFront layer as mitigation (no third-party script surface exists). The httpOnly-cookie session redesign is post-v1; the ledger entry is updated to say so dated, not deleted.
-  - **⚑ USER_PASSWORD_AUTH exists on the beta pool only, forever.** The prod pool never enables it; e2e suites keep running against beta unchanged. Prod verification of the signed-in path is the owner's manual smoke (prod data policy above).
-  - **⚑ Share link semantics:** one capability URL per round — `/watch/{roundId}#<spectatorToken>` (token in the URL fragment so it never hits server logs). Deterministically derived (HMAC over `roundId` + scope `"spectator"`, same signing machinery as participant tokens) so every participant shares the SAME link; no storage, no revocation in v1 (revocation = the ledger gets a post-v1 line). The link shows the live round while live and the archived card after finalize — it never dies.
-  - **⚑ Web is served from the CloudFront default domain for v1** (`https://dxxxx.cloudfront.net`). A custom domain is a one-line follow-up iff the user provides one; nothing in v1 waits for it.
+  - **⚑ Claim challenge = proof of context.** `ClaimGolferRequest` gains a required `code` — a round join code whose round contains the golfer, or a crew join code whose crew has the golfer as a member. The server verifies membership; a bare golferId no longer claims anything (403 `claim-proof-required`). The web supplies the code automatically (claiming from a round page sends that round's join code; from a crew page, the crew's) — zero added friction in every real flow. This closes the ledger's "claim capability = golferId secrecy" item.
+  - **⚑ localStorage tokens are RE-ACCEPTED for now**, with a strict CSP added at the CloudFront layer as mitigation (no third-party script surface exists). The httpOnly-cookie session redesign belongs to the ship milestone; the ledger entry is updated to say so dated, not deleted.
+  - **USER_PASSWORD_AUTH stays beta-only, unchanged** — it exists solely so e2e can mint JWTs; there is no prod pool in this plan for it to be absent from. The ledger entry gets the dated note.
+  - **⚑ Share link semantics:** one capability URL per round — `/watch/{roundId}#<spectatorToken>` (token in the URL fragment so it never hits server logs). Deterministically derived (HMAC over `roundId` + scope `"spectator"`, same signing machinery as participant tokens) so every participant shares the SAME link; no storage, no revocation for now (revocation = a ledger line for the ship milestone). The link shows the live round while live and the archived card after finalize — it never dies.
+  - **⚑ Hosted beta web on the CloudFront default domain** (`https://dxxxx.cloudfront.net`). This is a modification of the existing `swng-beta` stack (bucket + distribution + the Cognito client learning the new origin), NOT a new stack — flagged in case even that is unwanted, in which case Task 6 is dropped entirely and the app remains dev-server-only.
   - **⚑ Alarm notifications** go to an SNS topic subscribed by `interrante.blaine@gmail.com` (confirm-or-veto the address).
   - **Finalize false-200 fix = repair-on-replay**, not a mega-transaction: the idempotent `status === "final"` branch in `finalizeRound.ts` checks the archive exists and re-attempts `putArchive` when missing. Retrying a wedged finalize now heals it. (The two wedged M8 throwaway rounds on beta stay as-is — throwaway.)
   - **Sub-uniqueness becomes a real invariant:** a base-table `SUB#<sub>` pointer item on `core` (pk `SUB#<sub>`, sk `"SUB"`, attrs `{golferId}`), written with `attribute_not_exists(pk)` at first bind (PUT /me lazy-create AND claim); `getBySub` reads the pointer with a consistent read then the golfer row. gsi2 `SUB#` entries keep being written (rollback safety) but nothing reads them anymore. `GolferStore.put` becomes sub-preserving: it refuses to clear an existing bound sub (throws `sub-drop-forbidden` — a programmer-error guard, mapped 500 deliberately).
   - **Crew join codes get a uniqueness condition at mint:** `createCrew` retries `newJoinCode()` while `findByJoinCode` hits (bounded, 5 attempts → `join-code-exhausted` 500); the ledger entry closes.
   - **Deferred-with-record ⚑ (re-accepted, ledger entries updated in place, NOT silently):** projector per-shard staleness + crew RECORDS LWW (self-heal + rebuild path stands); join-vs-claim race; rebuild-vs-live-finalize wipe window (operator note stands); non-atomic putHistoryLine; cross-season re-finalize stranding (unreachable in v1); rebuild global replay — deferred but ALARMED (Task 5 adds a duration/error alarm on `RebuildFunction` so "eventually blows up" becomes a page, not a surprise).
-  - **The field test (Task 7) is user-run and the milestone stays open across it.** The gate is the roadmap's four v1-bar bullets observed on a real Saturday; the controller cannot close M9 alone. The plan structures the checklist, the findings ledger, and the burn-down loop; the user schedules the Saturday.
+  - **The v1-bar field test is NOT in this milestone.** `docs/field-test.md` (the checklist kit) still gets written in Task 7 so it exists when wanted, but no Saturday is scheduled, no crew is recruited, and M9's gate does not depend on one. Casual dogfooding on the hosted beta URL is available the moment Task 6 lands, entirely at the user's option.
 
 ## File Structure
 
@@ -36,13 +41,13 @@ packages/application/src/rounds/finalizeRound.ts                 # T1: repair-on
 packages/application/src/ports/golferStore.ts + adapters-dynamodb # T1: SUB# pointer, sub-preserving put
 packages/application/src/crews/createCrew.ts                     # T1: join-code uniqueness retry
 packages/contracts/src/golfers.ts + application/golfers/claimGolfer.ts  # T2: claim proof-of-context
-packages/lambda (routes: logout URLs are CDK), apps/web/src/auth  # T2: /logout redirect sign-out
+packages/lambda (routes), apps/web/src/auth, infra logoutUrls     # T2: /logout redirect sign-out
 packages/{contracts,application,lambda}/... spectator token + round-read tier  # T3
 apps/web/src/watch/WatchPage.tsx + share affordance               # T3
 apps/web/src/... (papercut batch)                                 # T4
 apps/infra-cdk (throttling, alarms, SNS) + e2e teardown           # T5
-apps/infra-cdk (prod stage, S3+CloudFront both stages, CSP) + scripts/publishWeb.mjs  # T6
-apps/web/e2e/prodSmoke.spec.ts (anon-only) + field-test checklist + docs  # T7
+apps/infra-cdk (S3+CloudFront on swng-beta, CSP) + scripts/publishWeb.mjs  # T6
+docs/field-test.md (kit only) + docs as-executed + master-plan M10 amendment  # T7
 ```
 
 ---
@@ -181,33 +186,28 @@ The batch (each gets its own test; one commit for the batch is fine):
 
 ---
 
-### Task 6: Prod — the second stage, hosted web on both stages, CSP (prod deploy #1)
+### Task 6: Hosted beta web — S3+CloudFront on the EXISTING stack, CSP (beta deploy #5)
 
-**Files:** `apps/infra-cdk/{bin,lib}` (stage-parameterized: `swng-beta` + `swng-prod`), S3+CloudFront (OAC, SPA fallback 403/404→`/index.html`, ResponseHeadersPolicy with strict CSP ⚑ per the localStorage acceptance), `scripts/publishWeb.mjs` (builds `apps/web` with the stage's env from stack outputs, `aws s3 sync`, CloudFront invalidation), root `package.json` (`publish:web:beta`, `deploy:prod`, `publish:web:prod`), Cognito callback/logout URLs per stage origin (localhost STAYS on beta's client for dev; prod's client gets ONLY the prod CloudFront origin), `apps/web/e2e` config pointing at hosted beta where useful.
+**Files:** `apps/infra-cdk/lib/swngStack.ts` (bucket + CloudFront distribution with OAC, SPA fallback 403/404→`/index.html`, ResponseHeadersPolicy with strict CSP), `scripts/publishWeb.mjs` (builds `apps/web` with beta env from stack outputs, `aws s3 sync`, CloudFront invalidation), root `package.json` (`publish:web:beta`), Cognito client callback/logout URLs gain the CloudFront origin (localhost entries STAY — dev keeps working).
 
-- **Constraints:** `SwngStack` prod stage: same shape as beta; prod pool has NO `USER_PASSWORD_AUTH`; RemovalPolicy RETAIN on stateful resources (pool + tables) both stages (verify beta already does; pin with a CDK assertion). The `InfraCdkStack-*` constructor guard stays and gains a test if it lacks one.
+**This modifies `swng-beta` only. No new stack. If the ⚑ flag on hosted beta web is vetoed, this task is DROPPED and Task 7's flow-walk runs against the dev server as before.**
+
 - **CSP (why-commented in the stack):** `default-src 'self'; connect-src 'self' <http-api> <ws-api> <cognito-domain>; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:` — Tailwind needs style inline; NO third-party script origin exists, which is the localStorage acceptance's load-bearing fact.
-- [ ] **Step 1:** CDK refactor to two stages + hosting constructs, assertion tests (stage names, no USER_PASSWORD_AUTH on prod client, CSP header present, SPA fallback, RETAIN policies); `pnpm validate`.
-- [ ] **Step 2:** `pnpm deploy:beta` (adds hosting to beta) + `publish:web:beta` → hosted beta web live; run `pnpm e2e:field` ×1 against LOCAL dev server (unchanged default) AND one manual controller browser pass against the hosted beta URL (sign-in loop must work → beta callback URLs updated to include the CloudFront origin).
-- [ ] **Step 3:** `pnpm deploy:prod` (creates `swng-prod` — expect CREATE_COMPLETE, paste the resource summary) + `publish:web:prod`.
-- [ ] **Step 4:** commit `feat(infra,web): swng ships — prod stage, hosted web on both stages, CSP`.
+- [ ] **Step 1:** CDK constructs + assertion tests (CSP header present, SPA fallback, OAC, RETAIN on stateful resources pinned, `InfraCdkStack-*` guard gains a test if it lacks one); `pnpm validate`.
+- [ ] **Step 2 (deploy #5):** cdk diff (bucket/distribution/client-URL additions ONLY — no table/pool replacement), `pnpm deploy:beta`, `publish:web:beta` → hosted beta web live; `pnpm e2e:beta` ×2; `pnpm e2e:field` ×1 against the LOCAL dev server (unchanged default). Manual controller pass on the hosted URL: sign-in loop (PKCE round-trip on the CloudFront origin), one round create/score, share link on a phone-sized viewport.
+- [ ] **Step 3:** commit `feat(infra,web): the app runs from a phone — hosted beta web behind a strict CSP`.
 
 ---
 
-### Task 7: Prod smoke, the field-test kit, docs — and the user's Saturday
+### Task 7: Close-out — the field-test kit (shelf-ready, unscheduled), docs, the master-plan amendment
 
-**Files:** `apps/web/e2e/prodSmoke.spec.ts` (new, anon-only, runs via a new `pnpm e2e:prod` — NEVER in validate/CI); `docs/field-test.md` (new: the checklist + findings ledger template); docs updates (`implementation-plan.md` M9 as-executed, `CLAUDE.md`, `papercuts.md` item 6 closed, ledger entries updated per the deferred-with-record list).
+**Files:** `docs/field-test.md` (new: the v1-bar checklist + findings-ledger template — written so it's ready WHEN the user wants it; nothing in M9 schedules it); docs updates (`implementation-plan.md`: M9 as-executed + the M9→M10 split recording the user's no-prod decision; `CLAUDE.md` current-state; `papercuts.md` item 6 closed; every deferred-with-record ledger entry updated in place with its dated re-acceptance).
 
-- **prodSmoke.spec.ts (anon-only, per the prod data policy):** create round via UI on the prod web URL → score 3 holes → share link opens read-only in a second context → finalize → archived card on the share link; course search returns the seeded course (the spec seeds ONE course named "swng smoke course" once, idempotently — the single permitted prod artifact besides the smoke rounds). No Cognito anywhere.
-- **Controller close-out (code-side):** `pnpm validate`; `pnpm e2e:beta` ×2; `pnpm e2e:field` ×3 consecutive (full output captured); `pnpm e2e:prod` ×2; controller flow-walk on the HOSTED beta web (primary path, play-the-usual, share link on a phone-sized viewport, claim-with-proof) and an anon walk on prod.
-- **The user's part (the milestone gate — cannot be closed by the controller):**
-  1. Prod sign-up smoke: fresh Hosted-UI account on the prod URL, play as yourself, record updates. (First real prod account.)
-  2. **The Saturday:** real crew, real course, standing game, phones only. `docs/field-test.md`'s checklist rides along: zero paper? ≤20s/hole (time three holes)? handicaps trusted (did the first-tee negotiation end)? ghost fully represented (the non-app member sees their name in the card and ledger)?
-  3. Findings land in `docs/field-test.md`'s ledger table; the controller runs a burn-down wave (subagent-driven, same review discipline); bar re-run the following Saturday if any bullet failed.
-- [ ] **Step 1:** prodSmoke spec + field-test kit + docs; `pnpm validate`; commit `feat(e2e,docs): prod smoke and the field-test kit — the v1 bar goes outdoors`.
-- [ ] **Step 2:** controller close-out runs (above) — all green, outputs captured.
-- [ ] **Step 3:** hand the Saturday to the user. M9 (and v1) closes when the four bullets hold in the field, findings burned down.
+- **Controller close-out:** `pnpm validate`; `pnpm e2e:beta` ×2; `pnpm e2e:field` ×3 consecutive (full output captured to files); controller flow-walk in a real browser — on the hosted beta URL if Task 6 landed, else the dev server: primary path, play-the-usual, add-a-player, claim-with-proof (round code + crew code arms), share link followed from a second signed-out context, sign-out actually signs out (fresh login form on next sign-in — papercut 6 dead).
+- **The user's part (optional, unscheduled):** casual dogfooding on the hosted beta URL whenever desired — solo rounds, a friend, whatever. `docs/field-test.md` sits ready for the day the v1-bar Saturday feels worth running. Neither gates M9.
+- [ ] **Step 1:** field-test kit + all docs; `pnpm validate`; commit `docs: M9 as-executed — share and harden; prod and the field Saturday move to a user-triggered M10`.
+- [ ] **Step 2:** controller close-out runs (above), all green, outputs captured; report to the user with the hosted URL (if any) and the milestone summary.
 
 ---
 
-**M9 gate (from `docs/implementation-plan.md`):** "the four v1-bar bullets verified in the field, not in test." As specified: Tasks 1–6 land the machinery with per-task beta gates; Task 7 stages the field test; the USER's real Saturday is the gate; findings → burn-down → re-run until the bullets hold.
+**M9 gate (amended):** all suites green ×3 at close; every hardening-ledger item either landed or re-accepted-with-dated-record; share links proven end-to-end by a no-auth browser; the controller's flow-walk clean on the six flows above. Prod deployment and the v1-bar field verification are explicitly OUT — they form M10, which only the user triggers.

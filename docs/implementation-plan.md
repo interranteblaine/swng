@@ -578,16 +578,42 @@ calling `auth.refetch()` — the exact re-fetch-on-success seam `ClaimAffordance
 success already uses, not a parallel one — right after `updateMe` succeeds in both pages'
 submit paths, before navigating to the round.
 
-### M9 — Finish line: share, harden, ship
+### M9 — Share & harden
 
-**Goal:** the v1 bar (`roadmap.md`) met on prod.
+> **Amended 2026-07-11 (owner decision):** prod is out of M9. The app is still rough —
+> hardening comes before any new stack exists. Prod deploy, web publish to prod, and the
+> v1-bar field Saturday moved to M10 below, which is **user-triggered only**.
+
+**Goal:** share links exist, the hardening ledger below is burned down or explicitly
+re-accepted with a dated record, and the app runs from a phone (hosted beta web) — all on
+the existing `swng-beta` stack. No new stack is deployed.
 
 **Tasks:**
-1. Spectator/share tokens + read-only live round view; shareable archived-card link.
-2. Hardening: error surfaces, empty states, reconnect edge QA, basic rate limiting,
-   monitoring/alarms on the beta stack.
-3. Prod stack deploy + web publish; smoke E2E on prod.
-4. **Field test against the v1 bar:** a real crew, real course, a real Saturday — zero paper,
+1. Spectator/share tokens + read-only live round view; shareable archived-card link
+   (one URL, live → archived).
+2. Backend correctness hardening: finalize archive repair-on-replay, real sub-uniqueness
+   (SUB# pointer), claim proof-of-context, crew join-code uniqueness, hosted-session
+   sign-out (papercut 6).
+3. Hardening: error surfaces, empty states, reconnect edge QA, the web papercut batch,
+   basic rate limiting, monitoring/alarms on the beta stack, e2e user teardown.
+4. Hosted beta web: S3+CloudFront added to the existing `swng-beta` stack, strict CSP.
+
+**Gate:** all suites green ×3 at close; every ledger item below landed or
+re-accepted-with-dated-record; a share link proven by a no-auth browser; controller
+flow-walk clean. No field test — casual dogfooding on hosted beta is available but gates
+nothing.
+
+### M10 — Ship (user-triggered; not scheduled)
+
+**Goal:** the v1 bar (`roadmap.md`) met on prod. This milestone begins only when the owner
+says the app has stopped being a toy — it is never entered by default.
+
+**Tasks:**
+1. Prod stack (`swng-prod`) + web publish; prod pool without `USER_PASSWORD_AUTH`;
+   anonymous-only prod smoke.
+2. Remaining security hardening judged prod-blocking at that time (token-storage redesign,
+   share-link revocation, whatever the M9 re-acceptance records say).
+3. **Field test against the v1 bar:** a real crew, real course, a real Saturday — zero paper,
    ≤20s/hole, handicaps trusted, ghost fully represented. Fix list burned down; bar re-run.
 
 **Gate:** the four v1-bar bullets verified in the field, not in test.

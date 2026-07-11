@@ -88,7 +88,7 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     await expectOrRecover(pageA, "A sees Bo's hole 1 (baseline)", () => expect(pageA.getByRole("button", { name: "Bo hole 1", exact: true })).toHaveText(/^\D*5/), aRoute);
   });
 
-  test("2: B's socket is force-closed (network otherwise fine) — StatusChrome flips Offline; B's OWN new score still posts immediately over HTTP", async () => {
+  test("2: B's socket is force-closed (network otherwise fine) — StatusChrome flips Offline; B's OWN new score renders locally and QUEUES (no reconnect timer — nothing pushes it until Sync now)", async () => {
     await bRoute.current?.close().catch(() => {}); // sever ONLY the socket — contextB.setOffline is never called in this arm
     await expect(pageB.getByRole("status").filter({ hasText: "Offline" })).toBeVisible();
 
@@ -98,26 +98,33 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     await enterScore(pageA, "Ann", 2, 3);
     await expect(pageB.getByRole("button", { name: "Ann hole 2", exact: true })).not.toHaveText(/^\D*3/);
 
-    // B's OWN write still succeeds immediately: pushes are HTTP POSTs, never WS (the socket
-    // being dead only blocks RECEIVING), and the local optimistic fold renders it without
-    // waiting on any server round-trip — no "syncing" queue involved, unlike arm 2's full
-    // offline case below.
+    // B's OWN write still renders instantly (the optimistic local fold — recordScore() always
+    // appends to the outbox and folds it in synchronously, session.ts) but the PUSH itself does
+    // NOT happen automatically here: recordScore() only opportunistically triggers a push
+    // `if (connectedFlag)` (session.ts) — the socket is dead, so connectedFlag is false, and
+    // there is no reconnect/retry timer in the SDK at all (session.ts's own doc comment: "a
+    // caller that wants to reconnect calls connect() again"). So this queues in the outbox
+    // exactly like arm 2's full offline case below, even though HTTP itself is perfectly
+    // reachable — the gate is the socket flag, not the network.
     await enterScore(pageB, "Bo", 2, 6);
-    await expect(pageB.getByText(/scores? syncing/)).not.toBeVisible();
+    await expect(pageB.getByText(/^1 score syncing/)).toBeVisible();
   });
 
-  test("3: B reconnects via Sync now — receives Ann's missed hole 2 exactly once (no dupes), and A receives Bo's hole 2 over its own live WS", async () => {
+  test("3: B reconnects via Sync now — pushes its own queued hole 2 and receives Ann's missed hole 2, exactly once each (no dupes); A receives Bo's hole 2 over its own live WS", async () => {
     await pageB.getByRole("button", { name: "Sync now" }).click();
     await expect(pageB.getByRole("status").filter({ hasText: "Offline" })).not.toBeVisible();
+    await expect(pageB.getByText(/scores? syncing/)).not.toBeVisible(); // the queue drains: Bo's hole 2 is finally pushed
 
     // The missed push (Ann's hole 2) arrives via Sync now's own HTTP pull.
     await expect(pageB.getByRole("button", { name: "Ann hole 2", exact: true })).toHaveText(/^\D*3/);
 
-    // The "no dupes" pin: B's OWN hole 2 (already applied optimistically in step 2, BEFORE the
-    // socket died) is pulled again by the very same Sync-now HTTP fetch — the client's
-    // confirmed-vs-outbox/opId reconciliation (session.ts) must fold that as the SAME event,
-    // not a second application. A concatenated/duplicated cell (e.g. "66" instead of "6") is
-    // exactly what a broken dedup would render here.
+    // The "no dupes" pin: B's OWN hole 2 (queued since step 2, never pushed while the socket
+    // was dead) is pushed for the first time by Sync-now's own push phase, then immediately
+    // pulled back by that SAME Sync-now HTTP fetch (push-then-pull, both inside one doSync()
+    // pass — session.ts) — the client's confirmed-vs-outbox/opId reconciliation must fold the
+    // pulled-back copy as the SAME event as the still-pending local one, not a second
+    // application. A concatenated/duplicated cell (e.g. "66" instead of "6") is exactly what a
+    // broken dedup would render here.
     await expect(pageB.getByRole("button", { name: "Bo hole 2", exact: true })).toHaveText(/^\D*6$/);
     await expect(pageB.getByRole("status", { name: /couldn.t be saved/i })).not.toBeVisible(); // no rejected-op toast either
 
@@ -155,6 +162,18 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     await expect(page).toHaveURL(/\/round\//);
 
     await enterScore(page, "Ann", 1, 4);
+
+    // Wait for this baseline score to actually DRAIN (recordScore's own opportunistic
+    // push+pull, session.ts) before test 2 forces the connection offline — enterScore only
+    // waits for the optimistic local render, not for the server round-trip that prunes it out
+    // of the outbox. Skipping this wait is a genuine test race, observed live: going offline
+    // before hole 1's push+pull settles leaves it stuck in the outbox forever (a `network`-kind
+    // push failure is transient, session.ts's own isTransientPushFailure — it just stays
+    // queued), so test 2's "one queued score" premise would actually see TWO. This page never
+    // had a chance to race a cross-context write (unlike fieldTest.spec.ts's pageB, which goes
+    // offline having never written anything itself), so quiescing here is what fieldTest gets
+    // for free from its own scenario shape.
+    await expect(page.getByText(/scores? syncing/)).not.toBeVisible();
   });
 
   test("2: goes offline; a second score QUEUES honestly (pending count, not silently dropped or double-posted)", async () => {

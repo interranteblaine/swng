@@ -6,6 +6,7 @@ import { adjustedGrossScore, scoreDifferential } from "../handicap/whs.js";
 import { playGoldenRoundLog } from "../scoring/golden/deck.js";
 import { fixtureLinks, fixtureWhite } from "../scoring/golden/fixtureCourse.js";
 import { settleRound } from "./archive.js";
+import { reduceRound } from "./state.js";
 import type { RoundEvent } from "./events.js";
 
 // The milestone's headline concurrency deck (scoring/concurrent.test.ts): one log, two
@@ -307,5 +308,22 @@ describe("crewId — create -> fold -> settle", () => {
   it("leaves crewId undefined when round-created never carried one (existing rounds, unaffected)", () => {
     const archive = settleRound(finalLog);
     expect(archive.crewId).toBeUndefined();
+  });
+
+  // The M8 Task 4 live defect, pinned at its source: a non-crew archive must have NO crewId
+  // KEY at all — `crewId: state.crewId` as a bare literal left an explicit `undefined`
+  // property that crashed DynamoDB's marshall() in putArchive on beta (every non-crew
+  // round's first finalize 500'd, and the retry false-200'd without ever persisting the
+  // archive). `toBeUndefined()` above can't catch this (an explicit-undefined key passes it,
+  // and vitest's toEqual ignores undefined-valued keys entirely), so this uses the `in`
+  // operator — the distinction JSON.stringify hides but DynamoDB's marshall() enforces.
+  it("a non-crew archive has NO crewId key at all — never an explicit undefined property", () => {
+    const archive = settleRound(finalLog);
+    expect("crewId" in archive).toBe(false);
+  });
+
+  it("a non-crew folded RoundState has NO crewId key at all — the archive inherits its shape from here", () => {
+    const state = reduceRound(finalLog);
+    expect("crewId" in state).toBe(false);
   });
 });

@@ -70,9 +70,15 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   // One literal object shape, fields in a fixed order, every time this runs — the mechanism
   // that makes JSON.stringify(settleRound(log)) order-stable is this literal's key order
   // never varying, on top of every field above already being independent of input order.
+  // (An absent optional field is deterministic too: for a given log, crewId is either present
+  // on every settle or absent on every settle — the conditional spread never varies across
+  // runs. It must BE a conditional spread, not `crewId: state.crewId`: an explicit-undefined
+  // key on this archive — the canonical stream/projector payload — crashed DynamoDB's
+  // marshall() in putArchive for every non-crew round's finalize, observed live on beta in
+  // M8 Task 4.)
   return {
     roundId: state.id,
-    crewId: state.crewId,
+    ...(state.crewId !== undefined ? { crewId: state.crewId } : {}),
     card: state.card,
     participants: state.participants,
     games: state.games,

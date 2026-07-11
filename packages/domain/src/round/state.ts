@@ -194,7 +194,13 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
     id: genesis.roundId,
     status,
     card: genesis.card,
-    crewId: genesis.crewId,
+    // Conditional spread, never `crewId: genesis.crewId` as a bare literal: an untagged
+    // round's state must have NO crewId key at all, not an explicit `undefined` — this
+    // state flows into settleRound's archive (the canonical stream/projector payload), and
+    // an explicit-undefined property crashes DynamoDB's marshall() in putArchive (observed
+    // live on beta, M8 Task 4: every non-crew round's first finalize 500'd). Same idiom as
+    // startRound.ts's own round-created construction.
+    ...(genesis.crewId !== undefined ? { crewId: genesis.crewId } : {}),
     participants,
     games,
     cells,

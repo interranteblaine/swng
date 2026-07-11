@@ -61,7 +61,12 @@ export const updateMeRequestSchema = z
   .strict();
 export type UpdateMeRequest = z.infer<typeof updateMeRequestSchema>;
 
-export const claimGolferRequestSchema = z.object({ golferId: golferIdSchema }).strict();
+// name (papercut 5, M8 plan) is used ONLY when the claim lazily CREATES the golfer row
+// (application/src/golfers/claimGolfer.ts) — a claim binding an EXISTING row never renames,
+// same "name only seeds a fresh item" invariant golferStore.ts's port doc already states for
+// `claim`. Optional: absent falls back to defaultGolferName(claims), unchanged from before
+// this field existed.
+export const claimGolferRequestSchema = z.object({ golferId: golferIdSchema, name: z.string().min(1).optional() }).strict();
 export type ClaimGolferRequest = z.infer<typeof claimGolferRequestSchema>;
 
 // The wire mirror of domain's GolferRoundLine (golfer/record.ts) — structurally identical,

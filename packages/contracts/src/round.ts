@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { CourseCard, GameConfig, GameResult, HoleResult, Participant, RoundEvent } from "@swng/domain";
-import { gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
+import { crewIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
 
 // Wire mirrors of domain types. These stay structural (loose numeric bounds where the
 // domain type itself doesn't declare one) — the source of truth for "is this score
@@ -133,7 +133,9 @@ const envelope = {
 // reason: round.test.ts's parity check needs this impl's own inferred Output type, not one
 // steered to RoundEvent by an annotation on this const itself.
 export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
-  z.object({ ...envelope, kind: z.literal("round-created"), roundId: roundIdSchema, card: courseCardSchema }),
+  // crewId mirrors domain's optional tag (round/events.ts): stamped once at genesis, never
+  // revised — M8's crew round tag.
+  z.object({ ...envelope, kind: z.literal("round-created"), roundId: roundIdSchema, card: courseCardSchema, crewId: crewIdSchema.optional() }),
   z.object({ ...envelope, kind: z.literal("participant-joined"), participant: participantSchema }),
   z.object({ ...envelope, kind: z.literal("game-added"), config: gameConfigSchemaImpl }),
   z.object({ ...envelope, kind: z.literal("round-started") }),

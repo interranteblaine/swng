@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { computeIndex, deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
-import type { GolferId, Participant, RoundArchive, RoundEvent } from "@swng/domain";
+import { computeIndex, crewId, deviceId, fixtureLinks18, gameId, golferId, opId, roundId } from "@swng/domain";
+import type { CrewId, GolferId, Participant, RoundArchive, RoundEvent } from "@swng/domain";
 import { createFrozenClock, createInMemoryProjectionStore, createNullLogger } from "../testing/fakes.js";
-import { finalizedAtMsOf, projectArchive } from "./projectArchive.js";
+import { finalizedAtMsOf, projectArchive, seasonOf } from "./projectArchive.js";
 import type { ArchiveSource } from "./rebuildProjections.js";
 import { rebuildProjections } from "./rebuildProjections.js";
 
 const ann = golferId("ann");
 const bo = golferId("bo");
+const cal = golferId("cal");
 
 const finalizedEvent = (wallMs: number): RoundEvent => ({
   kind: "round-finalized",
@@ -41,6 +42,26 @@ const setup = () => ({
   projectionStore: createInMemoryProjectionStore(),
   logger: createNullLogger(),
 });
+
+// A crew-tagged, singles-match-decided archive — the smallest game shape crewContribution
+// (domain/crew/ledger.ts) actually produces a ledger line + a head-to-head entry from, so
+// the projector's crew arm has something non-empty to upsert/recompute. `winner` must be
+// one of `a`/`b`.
+const crewArchiveAt = (id: string, wallMs: number, crew: CrewId, a: GolferId, b: GolferId, winner: GolferId): RoundArchive => {
+  const singlesId = gameId(`singles-${id}`);
+  return {
+    roundId: roundId(id),
+    crewId: crew,
+    card: fixtureLinks18,
+    participants: [a, b].map((g): Participant => ({ golferId: g, name: g, tee: "white", courseHandicap: 8 })),
+    games: [{ kind: "singles-match", id: singlesId, a, b }],
+    cells: {},
+    events: [finalizedEvent(wallMs)],
+    results: [{ kind: "singles-match", id: singlesId, outcome: { winner, closing: "3&2" }, thru: 16 }],
+    terminatedGameIds: [],
+    handicapping: [],
+  };
+};
 
 describe("finalizedAtMsOf", () => {
   it("reads the round-finalized event's hlc.wallMs", () => {
@@ -195,5 +216,144 @@ describe("rebuildProjections", () => {
     expect(summary).toEqual({ rounds: 1, golfers: 2 });
     expect(await store.listHistory(ann)).toHaveLength(1);
     expect(await store.listHistory(bo)).toHaveLength(1);
+  });
+});
+
+// M8: the season ledger projector extension — a crew-tagged archive additionally feeds
+// putCrewRound → listCrewRounds → aggregateSeason → putSeasonRecords (projectArchive.ts).
+describe("projectArchive — the crew season ledger extension (M8)", () => {
+  it("an UNTAGGED archive (no crewId) never touches the crew projections", async () => {
+    const ctx = setup();
+    const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
+    await project(archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]));
+
+    expect(await ctx.projectionStore.getSeasonRecords(crewId("crew-1"), seasonOf(1_000))).toBeUndefined();
+  });
+
+  it("a crew-tagged archive upserts the round's contribution and recomputes the whole season's ledger + head-to-head", async () => {
+    const ctx = setup();
+    const crew = crewId("crew-1");
+    const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
+
+    await project(crewArchiveAt("r1", 1_000, crew, ann, bo, ann)); // Ann beats Bo
+    const season = seasonOf(1_000);
+
+    const records = await ctx.projectionStore.getSeasonRecords(crew, season);
+    expect(records?.ledger).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ golferId: ann, wins: 1, losses: 0 }),
+        expect.objectContaining({ golferId: bo, wins: 0, losses: 1 }),
+      ]),
+    );
+    expect(records?.headToHead).toHaveLength(1);
+  });
+
+  it("is idempotent by construction: projecting the SAME crew archive twice reproduces identical season records (upsert-then-recompute, never `+=`)", async () => {
+    const ctx = setup();
+    const crew = crewId("crew-1");
+    const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
+    const archive = crewArchiveAt("r1", 1_000, crew, ann, bo, ann);
+
+    await project(archive);
+    const once = await ctx.projectionStore.getSeasonRecords(crew, seasonOf(1_000));
+    await project(archive); // the exact same archive, again
+    const twice = await ctx.projectionStore.getSeasonRecords(crew, seasonOf(1_000));
+
+    expect(twice).toEqual(once);
+    // Not doubled — the win count from a SECOND projection of the SAME round is still 1, not 2.
+    expect(twice?.ledger.find((line) => line.golferId === ann)?.wins).toBe(1);
+  });
+
+  it("accumulates correctly across TWO DIFFERENT rounds in the same season — ledger sums, not overwrites", async () => {
+    const ctx = setup();
+    const crew = crewId("crew-1");
+    const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
+
+    await project(crewArchiveAt("r1", 1_000, crew, ann, bo, ann)); // Ann beats Bo
+    await project(crewArchiveAt("r2", 2_000, crew, ann, bo, bo)); // Bo beats Ann
+
+    const records = await ctx.projectionStore.getSeasonRecords(crew, seasonOf(1_000));
+    expect(records?.ledger).toEqual(
+      expect.arrayContaining([expect.objectContaining({ golferId: ann, wins: 1, losses: 1 }), expect.objectContaining({ golferId: bo, wins: 1, losses: 1 })]),
+    );
+    expect(records?.headToHead).toEqual([expect.objectContaining({ aWins: 1, bWins: 1, halves: 0 })]);
+  });
+
+  it("keeps two different crews' season records independent", async () => {
+    const ctx = setup();
+    const crewA = crewId("crew-a");
+    const crewB = crewId("crew-b");
+    const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
+
+    await project(crewArchiveAt("r1", 1_000, crewA, ann, bo, ann));
+    await project(crewArchiveAt("r2", 2_000, crewB, ann, cal, cal));
+
+    const recordsA = await ctx.projectionStore.getSeasonRecords(crewA, seasonOf(1_000));
+    const recordsB = await ctx.projectionStore.getSeasonRecords(crewB, seasonOf(2_000));
+    expect(recordsA?.ledger.map((l) => l.golferId).sort()).toEqual([ann, bo].sort());
+    expect(recordsB?.ledger.map((l) => l.golferId).sort()).toEqual([ann, cal].sort());
+  });
+});
+
+describe("rebuildProjections — the crew season ledger extension (M8)", () => {
+  it("rebuild-equals-incremental for a crew's season ledger, and wipes a stale season's records first (mirrors the golfer-history test construction above)", async () => {
+    const crew = crewId("crew-1");
+    const archives = [crewArchiveAt("r1", 1_000, crew, ann, bo, ann), crewArchiveAt("r2", 2_000, crew, ann, bo, bo)];
+    const season = seasonOf(1_000);
+
+    // Path A: the "live" incremental build.
+    const incrementalStore = createInMemoryProjectionStore();
+    const incrementalProject = projectArchive({ projectionStore: incrementalStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
+    for (const archive of archives) await incrementalProject(archive);
+
+    // Path B: rebuildProjections, unsorted input, pre-seeded with a stray ROUND CONTRIBUTION
+    // (not just a stale season record — putSeasonRecords is already a full replace every
+    // projectArchive call, so seeding one there proves nothing about wipeCrew specifically;
+    // putCrewRound's map is what actually needs wiping, since listCrewRounds would otherwise
+    // keep returning this stale entry forever, folded into every future recompute) from a
+    // round that no longer belongs to this replay — proving the wipe-first step, not just an
+    // upsert-over (same construction as the golfer-history rebuild test above, which seeds a
+    // stale putHistoryLine for the identical reason).
+    const rebuiltStore = createInMemoryProjectionStore();
+    await rebuiltStore.putCrewRound(crew, season, {
+      roundId: roundId("stale-round"),
+      lines: [{ golferId: golferId("ghost-of-a-stale-round"), wins: 1, losses: 0, halves: 0, points: 0, skins: 0 }],
+      headToHead: [],
+      finalizedAtMs: 500,
+    });
+
+    const rebuild = rebuildProjections({
+      archiveSource: createArchiveSource([archives[1]!, archives[0]!]),
+      projectionStore: rebuiltStore,
+      clock: createFrozenClock(9_000),
+      logger: createNullLogger(),
+    });
+    await rebuild();
+
+    expect(await rebuiltStore.getSeasonRecords(crew, season)).toEqual(await incrementalStore.getSeasonRecords(crew, season));
+    // The stale contribution is gone, not merely joined by the 2 real ones.
+    const rebuiltLedger = await rebuiltStore.getSeasonRecords(crew, season);
+    expect(rebuiltLedger?.ledger.some((line) => line.golferId === golferId("ghost-of-a-stale-round"))).toBe(false);
+    expect((await rebuiltStore.listCrewRounds(crew, season)).some((round) => round.roundId === roundId("stale-round"))).toBe(false);
+  });
+
+  it("wipes and replays every (crew, season) touched across the archive set, independently — including two seasons for the SAME crew", async () => {
+    const crew = crewId("crew-1");
+    // wallMs values chosen to land in different UTC years, so this exercises TWO separate
+    // season buckets for one crew, not just two crews.
+    const earlySeasonMs = Date.UTC(2024, 0, 1);
+    const laterSeasonMs = Date.UTC(2025, 0, 1);
+    const archives = [crewArchiveAt("r1", earlySeasonMs, crew, ann, bo, ann), crewArchiveAt("r2", laterSeasonMs, crew, ann, bo, bo)];
+    const store = createInMemoryProjectionStore();
+
+    const rebuild = rebuildProjections({ archiveSource: createArchiveSource(archives), projectionStore: store, clock: createFrozenClock(9_000), logger: createNullLogger() });
+    await rebuild();
+
+    const early = await store.getSeasonRecords(crew, seasonOf(earlySeasonMs));
+    const later = await store.getSeasonRecords(crew, seasonOf(laterSeasonMs));
+    expect(early?.ledger.find((l) => l.golferId === ann)?.wins).toBe(1);
+    expect(early?.ledger.find((l) => l.golferId === ann)?.losses).toBe(0);
+    expect(later?.ledger.find((l) => l.golferId === ann)?.wins).toBe(0);
+    expect(later?.ledger.find((l) => l.golferId === ann)?.losses).toBe(1);
   });
 });

@@ -1,8 +1,8 @@
-import type { GolferId, RoundArchive } from "@swng/domain";
+import type { CrewId, GolferId, RoundArchive } from "@swng/domain";
 import type { Clock } from "../ports/clock.js";
 import type { Logger } from "../ports/logger.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
-import { finalizedAtMsOf, projectArchive } from "./projectArchive.js";
+import { finalizedAtMsOf, projectArchive, seasonOf } from "./projectArchive.js";
 
 // A source of every finalized archive to replay — the real adapter (M7 Task 3/4) scans the
 // rounds table for ARCHIVE items; kept as this narrow, inline-shaped interface (rather than
@@ -33,13 +33,26 @@ export const rebuildProjections =
   async (): Promise<{ rounds: number; golfers: number }> => {
     const archives: RoundArchive[] = [];
     const touchedGolfers = new Set<GolferId>();
+    // Which (crew, season) buckets this replay is about to touch — collected from the
+    // archives themselves (crewId + finalizedAtMs's season), same "the store never
+    // discovers its own keyspace" reasoning as touchedGolfers above: the caller always knows
+    // what it's about to replay before it wipes anything.
+    const touchedCrewSeasons = new Map<CrewId, Set<number>>();
     for await (const archive of deps.archiveSource.listArchives()) {
       archives.push(archive);
       for (const participant of archive.participants) touchedGolfers.add(participant.golferId);
+      if (archive.crewId !== undefined) {
+        const seasons = touchedCrewSeasons.get(archive.crewId) ?? new Set<number>();
+        seasons.add(seasonOf(finalizedAtMsOf(archive)));
+        touchedCrewSeasons.set(archive.crewId, seasons);
+      }
     }
 
     for (const golferId of touchedGolfers) {
       await deps.projectionStore.wipeGolfer(golferId);
+    }
+    for (const [crewId, seasons] of touchedCrewSeasons) {
+      await deps.projectionStore.wipeCrew(crewId, [...seasons]);
     }
 
     const ordered = [...archives].sort((a, b) => finalizedAtMsOf(a) - finalizedAtMsOf(b));
@@ -48,6 +61,6 @@ export const rebuildProjections =
       await project(archive);
     }
 
-    deps.logger.info("projections-rebuilt", { rounds: ordered.length, golfers: touchedGolfers.size });
+    deps.logger.info("projections-rebuilt", { rounds: ordered.length, golfers: touchedGolfers.size, crews: touchedCrewSeasons.size });
     return { rounds: ordered.length, golfers: touchedGolfers.size };
   };

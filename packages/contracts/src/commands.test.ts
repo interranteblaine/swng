@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { CourseCard } from "@swng/domain";
+import { crewId, golferId } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
 import {
   addGameRequestSchema,
+  addParticipantRequestSchema,
   gameConfigInputSchema,
   joinRoundRequestSchema,
   recordScoreRequestSchema,
@@ -30,6 +32,23 @@ describe("startRoundRequestSchema", () => {
   it("rejects a non-integer courseHandicap", () => {
     const request = { card, host: { name: "Ann", tee: "white", courseHandicap: 8.5 } };
     expect(() => parse(startRoundRequestSchema, request)).toThrow(ContractError);
+  });
+
+  // M8: as-self create (golferId), a crew tag (crewId), and an initial roster beyond the
+  // host (players) — every field optional, round-tripped together to pin none of the three
+  // gets silently dropped nor disturbs the other two.
+  it("round-trips the M8 fields: golferId, crewId, and an initial players roster", () => {
+    const request = {
+      card,
+      host: { name: "Ann", tee: "white", courseHandicap: 8 },
+      golferId: golferId("ann-1"),
+      crewId: crewId("crew-1"),
+      players: [
+        { name: "Bo", tee: "white", courseHandicap: 2, golferId: golferId("bo-1") },
+        { name: "Cal", tee: "white", courseHandicap: 10 },
+      ],
+    };
+    expect(parse(startRoundRequestSchema, request)).toEqual(request);
   });
 });
 
@@ -61,6 +80,23 @@ describe("joinRoundRequestSchema", () => {
   it("rejects an empty golferId when one is supplied", () => {
     const request = { code: "ABC123", name: "Bo", tee: "white", courseHandicap: 2, golferId: "" };
     expect(() => parse(joinRoundRequestSchema, request)).toThrow(ContractError);
+  });
+});
+
+describe("addParticipantRequestSchema", () => {
+  it("accepts a valid add-participant request with no golferId", () => {
+    const request = { name: "Cal", tee: "white", courseHandicap: 10 };
+    expect(parse(addParticipantRequestSchema, request)).toEqual(request);
+  });
+
+  it("round-trips a request supplying an existing golferId", () => {
+    const request = { name: "Cal", tee: "white", courseHandicap: 10, golferId: golferId("ghost-1") };
+    expect(parse(addParticipantRequestSchema, request)).toEqual(request);
+  });
+
+  it("rejects an empty name", () => {
+    const request = { name: "", tee: "white", courseHandicap: 10 };
+    expect(() => parse(addParticipantRequestSchema, request)).toThrow(ContractError);
   });
 });
 

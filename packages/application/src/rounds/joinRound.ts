@@ -2,19 +2,35 @@ import type { GolferId, Participant } from "@swng/domain";
 import { findTeeSet, golferId } from "@swng/domain";
 import type { JoinRoundRequest, JoinRoundResponse } from "@swng/contracts";
 import { ApplicationError } from "../errors.js";
+import type { AccountClaims } from "../ports/accountClaims.js";
 import type { Broadcast } from "../ports/broadcast.js";
 import type { Clock } from "../ports/clock.js";
+import type { CrewStore } from "../ports/crewStore.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { TokenIssuer } from "../ports/tokenIssuer.js";
+import { resolveSuppliedGolfer } from "./golferIdentity.js";
 import { loadRoundState } from "./loadRoundState.js";
 import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 
 export const joinRound =
-  (deps: { journal: EventJournal; store: RoundStore; broadcast: Broadcast; tokens: TokenIssuer; clock: Clock; ids: IdGenerator; golferStore: GolferStore }) =>
-  async (command: JoinRoundRequest): Promise<JoinRoundResponse> => {
+  (deps: {
+    journal: EventJournal;
+    store: RoundStore;
+    broadcast: Broadcast;
+    tokens: TokenIssuer;
+    clock: Clock;
+    ids: IdGenerator;
+    golferStore: GolferStore;
+    crewStore: CrewStore;
+  }) =>
+  // claims is optional: JoinRound's route has never required an account (a join code is
+  // enough — M3's whole point). It's threaded through so a SIGNED-IN caller supplying an
+  // already-claimed golferId can still pass the shared resolver's as-self arm
+  // (golferIdentity.ts); an anonymous join behaves exactly as before this parameter existed.
+  async (command: JoinRoundRequest, claims?: AccountClaims): Promise<JoinRoundResponse> => {
     const id = await deps.store.findByJoinCode(command.code);
     if (!id) throw new ApplicationError("bad-join-code");
 
@@ -22,27 +38,26 @@ export const joinRound =
     if (state.status === "final") throw new ApplicationError("round-final");
     findTeeSet(state.card, command.tee); // unknown-tee-set (DomainError) propagates
 
-    // Task 5b (ghost continuity): a supplied golferId is reused as-is IFF unclaimed — absence
-    // of a GOLFER row means unclaimed (rows are lazy — a ghost from another round has no row
-    // at all), only a row WITH a sub blocks reuse. When absent, behavior is byte-identical to
-    // before this task: mint a fresh id.
+    // Task 5b (ghost continuity) / M8 (the shared resolver): a supplied golferId reuses the
+    // SAME claimed-golferId rule as startRound/addParticipant (golferIdentity.ts). When
+    // absent, behavior is byte-identical to before either task: mint a fresh id.
     let golfer: GolferId;
     if (command.golferId !== undefined) {
-      const existing = await deps.golferStore.get(command.golferId);
-      // CHECK-THEN-ACT RACE (the golferStore read vs. the journal append below): a claim
-      // can land between this read and the journal append below, making
-      // the supplied golferId claimed moments after we green-lit it. Accepted for beta: the
-      // window is narrow, exploiting it requires knowing the golferId mid-claim, and it
-      // grants nothing beyond what an unclaimed ghost's participant token already carries
-      // (M4: ghost tokens have no auth). M8/M9 identity hardening revisits this. Deliberate,
-      // not an oversight.
-      if (existing?.sub !== undefined) throw new ApplicationError("golfer-claimed", `golfer ${command.golferId} is claimed`);
+      // CHECK-THEN-ACT RACE (the golferStore read inside the resolver vs. the journal append
+      // below): a claim can land between that read and the append, making the supplied
+      // golferId claimed moments after we green-lit it. Accepted for beta: the window is
+      // narrow, exploiting it requires knowing the golferId mid-claim, and it grants nothing
+      // beyond what an unclaimed ghost's participant token already carries (M4: ghost tokens
+      // have no auth). M8/M9 identity hardening revisits this. Deliberate, not an oversight.
+      golfer = await resolveSuppliedGolfer({ golferStore: deps.golferStore, crewStore: deps.crewStore })(command.golferId, {
+        sub: claims?.sub,
+        crewId: state.crewId,
+      });
       // UX guard: a duplicate participant-joined is harmless at the domain layer (last-write-wins
       // on golferId), but we reject it here to prevent surprising joiners with silent changes.
       if (state.participants.some((participant) => participant.golferId === command.golferId)) {
         throw new ApplicationError("golfer-already-in-round", `golfer ${command.golferId} is already a participant in this round`);
       }
-      golfer = command.golferId;
     } else {
       golfer = golferId(deps.ids.newId());
     }

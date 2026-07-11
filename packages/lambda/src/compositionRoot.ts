@@ -1,7 +1,19 @@
 import { randomUUID } from "node:crypto";
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, DynamoDBStreamEvent } from "aws-lambda";
 import type { RoundArchive } from "@swng/domain";
-import type { AccountVerifier, ArchiveSource, Clock, ConnectionRegistry, CourseStore, GolferStore, IdGenerator, Logger, ProjectionStore, TokenIssuer } from "@swng/application";
+import type {
+  AccountVerifier,
+  ArchiveSource,
+  Clock,
+  ConnectionRegistry,
+  CourseStore,
+  CrewStore,
+  GolferStore,
+  IdGenerator,
+  Logger,
+  ProjectionStore,
+  TokenIssuer,
+} from "@swng/application";
 import {
   addGame,
   addTeeSet,
@@ -113,6 +125,21 @@ const unavailableGolferStore = (): GolferStore => {
   return { put: unavailable, get: unavailable, getBySub: unavailable, claim: unavailable };
 };
 
+// M8 Task 2 STOPGAP: no createDynamoCrewStore exists yet (M8 Task 3 builds it on TABLE_CORE,
+// same table as courseStore/golferStore above). startRound/joinRound's shared claimed-
+// golferId resolver (golferIdentity.ts) now takes a CrewStore dependency unconditionally, so
+// something has to satisfy the type until Task 3 lands — this throws only if a call actually
+// reaches the standing-consent arm (a supplied golferId that's claimed AND the command
+// carries a crewId), which nothing in the deployed beta wiring can trigger yet (crews aren't
+// routed until M8 Task 4). Replace with `createDynamoCrewStore` the moment it exists; this
+// whole block (and unavailableCrewStore itself) should NOT survive Task 3/4.
+const unavailableCrewStore = (): CrewStore => {
+  const unavailable = (): never => {
+    throw new Error("buildApp: no CrewStore adapter is wired yet (M8 Task 3) — crew routes/crew-tagged rounds are not reachable in this deploy");
+  };
+  return { put: unavailable, get: unavailable, findByJoinCode: unavailable, listByGolfer: unavailable };
+};
+
 // Same shape again, for TABLE_PROJECTIONS (M7 Task 5: granted + env'd onto httpFn since Task
 // 4, but unread by buildApp until now — only getMyRecord needs it; wsConnect/wsDisconnect
 // never do).
@@ -120,7 +147,20 @@ const unavailableProjectionStore = (): ProjectionStore => {
   const unavailable = (): never => {
     throw new Error("buildApp: TABLE_PROJECTIONS is not set for this entry — the record route is HTTP-only (see swngStack.ts)");
   };
-  return { putHistoryLine: unavailable, listHistory: unavailable, putIndex: unavailable, getIndex: unavailable, wipeGolfer: unavailable };
+  return {
+    putHistoryLine: unavailable,
+    listHistory: unavailable,
+    putIndex: unavailable,
+    getIndex: unavailable,
+    wipeGolfer: unavailable,
+    // M8: the season ledger projections (ProjectionStore grew these — ports/projectionStore.ts)
+    // share the same optionality as the golfer projections above.
+    putCrewRound: unavailable,
+    listCrewRounds: unavailable,
+    putSeasonRecords: unavailable,
+    getSeasonRecords: unavailable,
+    wipeCrew: unavailable,
+  };
 };
 
 export interface App {
@@ -158,6 +198,8 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   // golferStore lives on the SAME table as courseStore (keys.ts's golferPk — the core
   // table), so it shares tableCore's optionality rather than getting its own env var.
   const golferStore = tableCore !== undefined ? createDynamoGolferStore({ client: documentClient, tableName: tableCore }) : unavailableGolferStore();
+  // M8 Task 2 stopgap — see unavailableCrewStore's own doc comment above.
+  const crewStore = unavailableCrewStore();
   const projectionStore =
     tableProjections !== undefined ? createDynamoProjectionStore({ client: documentClient, tableName: tableProjections }) : unavailableProjectionStore();
   const verifier =
@@ -171,11 +213,11 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const tokens = createHmacTokenIssuer({ secret: tokenSecret, clock });
 
   const useCases: UseCases = {
-    startRound: startRound({ journal, store, broadcast, tokens, clock, ids }),
-    // golferStore threaded through for Task 5b's supplied-golferId reuse check (joinRound.ts)
-    // — the SAME instance the golfer routes below already share (the golferStore construct
-    // above).
-    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore }),
+    // golferStore/crewStore threaded through for the shared claimed-golferId resolver
+    // (rounds/golferIdentity.ts, M8) — the SAME golferStore instance the golfer routes below
+    // already share; crewStore is the stopgap above until M8 Task 3.
+    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
+    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, store, broadcast, clock, ids }),

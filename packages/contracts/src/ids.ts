@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { courseId, deviceId, gameId, golferId, opId, roundId } from "@swng/domain";
-import type { CourseId, DeviceId, GameId, GolferId, Hlc, OpId, RoundId } from "@swng/domain";
+import { courseId, crewId, deviceId, gameId, golferId, opId, roundId } from "@swng/domain";
+import type { CourseId, CrewId, DeviceId, GameId, GolferId, Hlc, OpId, RoundId } from "@swng/domain";
 
 // Branded-at-parse id schemas: the wire carries plain strings, brands are applied the
 // instant they cross into typed territory so nothing downstream re-validates them.
@@ -12,6 +12,8 @@ export const deviceIdSchema: z.ZodType<DeviceId> = z.string().min(1).transform(d
 // Mirrors RoundId's brand-at-parse shape (M6): courses are their own CRUD aggregate, not
 // event-sourced, but the id still crosses the wire as a plain string like every other id.
 export const courseIdSchema: z.ZodType<CourseId> = z.string().min(1).transform(courseId);
+// M8: crews are a plain entity too (crew/crew.ts), same brand-at-parse shape.
+export const crewIdSchema: z.ZodType<CrewId> = z.string().min(1).transform(crewId);
 
 export const hlcSchema: z.ZodType<Hlc> = z.object({
   wallMs: z.number().int().min(0),

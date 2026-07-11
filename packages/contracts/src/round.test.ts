@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { deviceId, gameId, golferId, opId } from "@swng/domain";
-import type { GameConfig, GameResult, RoundEvent } from "@swng/domain";
+import { crewId, deviceId, gameId, golferId, opId, roundId } from "@swng/domain";
+import type { CourseCard, GameConfig, GameResult, RoundEvent } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
 import { gameConfigSchemaImpl, gameResultSchemaImpl, roundEventSchema, roundEventSchemaImpl, terminateGameResponseSchema } from "./round.js";
 
@@ -53,6 +53,40 @@ describe("roundEventSchema", () => {
 
   it("parses a valid game-terminated event and round-trips through JSON unchanged (M7 Task 1's union member)", () => {
     const event: RoundEvent = { kind: "game-terminated", gameId: gameId("g1"), opId: opId("op-terminate"), hlc: baseHlc, authorId: golferId("author") };
+    const roundTripped = parse(roundEventSchema, JSON.parse(JSON.stringify(event)) as unknown);
+    expect(roundTripped).toEqual(event);
+  });
+
+  const card: CourseCard = {
+    courseName: "Test Links",
+    teeSets: [
+      {
+        name: "white",
+        rating: 71.2,
+        slope: 128,
+        holes: Array.from({ length: 9 }, (_, index) => ({ number: index + 1, par: 4, yardage: 380, strokeIndex: index + 1 })),
+      },
+    ],
+  };
+
+  it("parses a round-created event with no crewId (the untagged case) and round-trips through JSON unchanged", () => {
+    const event: RoundEvent = { kind: "round-created", roundId: roundId("r1"), card, opId: opId("op-create"), hlc: baseHlc, authorId: golferId("author") };
+    const roundTripped = parse(roundEventSchema, JSON.parse(JSON.stringify(event)) as unknown);
+    expect(roundTripped).toEqual(event);
+    expect(roundTripped).not.toHaveProperty("crewId");
+  });
+
+  // M8: round-created's optional crewId tag (round/events.ts) — stamped once at genesis.
+  it("parses a round-created event carrying a crewId and round-trips through JSON unchanged", () => {
+    const event: RoundEvent = {
+      kind: "round-created",
+      roundId: roundId("r1"),
+      card,
+      crewId: crewId("crew-1"),
+      opId: opId("op-create"),
+      hlc: baseHlc,
+      authorId: golferId("author"),
+    };
     const roundTripped = parse(roundEventSchema, JSON.parse(JSON.stringify(event)) as unknown);
     expect(roundTripped).toEqual(event);
   });

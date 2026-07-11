@@ -1,14 +1,15 @@
-import type { Course, CourseId, Golfer, GolferId, GolferRoundLine, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import type { Course, CourseId, Crew, CrewId, CrewRoundContribution, Golfer, GolferId, GolferRoundLine, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
 import { courseNameKey } from "@swng/domain";
 import { ApplicationError } from "../errors.js";
 import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
 import type { Broadcast } from "../ports/broadcast.js";
 import type { Clock } from "../ports/clock.js";
 import type { CourseStore } from "../ports/courseStore.js";
+import type { CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
-import type { ProjectionStore } from "../ports/projectionStore.js";
+import type { CrewSeasonRecords, ProjectionStore } from "../ports/projectionStore.js";
 import type { RoundStore } from "../ports/roundStore.js";
 
 // In-memory ports for application's own tests AND exported product surface for lambda/E2E
@@ -162,13 +163,55 @@ export const createInMemoryGolferStore = (): GolferStore => {
   };
 };
 
-// ProjectionStore's real adapter (M7 Task 3) lives on the `projections` table, sk-ordered
-// so listHistory's oldest-first read is free (architecture.md §3); this fake reproduces
-// that ordering explicitly via a sort, since a Map's insertion order isn't a promise this
-// port doc makes.
+// CrewStore's real adapter (M8 Task 3) lives on the `core` table plus a join-code GSI and a
+// golfer→crews GSI (architecture.md's persistence sketch); this fake reproduces both without
+// Dynamo — a Map keyed by crewId for get/put's optimistic concurrency (same expectedRevision
+// contract as courseStore's/golferStore's fakes), a second Map for the join-code index, and
+// a linear scan for listByGolfer (fine at fake/test scale; the real GSI is what makes this
+// cheap in adapters-dynamodb).
+export const createInMemoryCrewStore = (): CrewStore => {
+  const byId = new Map<CrewId, { crew: Crew; joinCode: string; revision: number }>();
+  const idByJoinCode = new Map<string, CrewId>();
+
+  return {
+    put: async (crew, joinCode, expectedRevision) => {
+      const existing = byId.get(crew.id);
+      if (expectedRevision === undefined) {
+        if (existing) throw new ApplicationError("crew-conflict", `crew ${crew.id} already exists`);
+        byId.set(crew.id, { crew, joinCode, revision: 1 });
+        idByJoinCode.set(joinCode, crew.id);
+        return;
+      }
+      if (!existing || existing.revision !== expectedRevision) {
+        throw new ApplicationError("crew-conflict", `crew ${crew.id} revision mismatch (expected ${expectedRevision})`);
+      }
+      byId.set(crew.id, { crew, joinCode: existing.joinCode, revision: existing.revision + 1 });
+    },
+    get: async (crewId) => {
+      const found = byId.get(crewId);
+      return found ? { crew: found.crew, joinCode: found.joinCode, revision: found.revision } : undefined;
+    },
+    findByJoinCode: async (joinCode) => idByJoinCode.get(joinCode),
+    listByGolfer: async (golferId) =>
+      [...byId.values()]
+        .filter(({ crew }) => crew.members.some((member) => member.golferId === golferId))
+        .map(({ crew }) => ({ crewId: crew.id, name: crew.name, memberCount: crew.members.length })),
+  };
+};
+
+// ProjectionStore's real adapter (M7 Task 3, extended M8) lives on the `projections` table,
+// sk-ordered so listHistory's oldest-first read is free (architecture.md §3); this fake
+// reproduces that ordering explicitly via a sort, since a Map's insertion order isn't a
+// promise this port doc makes.
 export const createInMemoryProjectionStore = (): ProjectionStore => {
   const historyByGolfer = new Map<GolferId, Map<RoundId, GolferRoundLine & { finalizedAtMs: number }>>();
   const indexByGolfer = new Map<GolferId, { value: number; computedAtMs: number; differentialsUsed: number }>();
+  // Keyed by "crewId#season" — mirrors the real adapter's LEDGER#crew#season sort-key shape
+  // (architecture.md) closely enough for a fake without actually building a composite-key
+  // Map type.
+  const crewRoundsByKey = new Map<string, Map<RoundId, CrewRoundContribution & { finalizedAtMs: number }>>();
+  const seasonRecordsByKey = new Map<string, CrewSeasonRecords>();
+  const crewSeasonKey = (crewId: CrewId, season: number): string => `${crewId}#${season}`;
 
   return {
     putHistoryLine: async (golferId, line) => {
@@ -184,6 +227,24 @@ export const createInMemoryProjectionStore = (): ProjectionStore => {
     wipeGolfer: async (golferId) => {
       historyByGolfer.delete(golferId);
       indexByGolfer.delete(golferId);
+    },
+    putCrewRound: async (crewId, season, entry) => {
+      const key = crewSeasonKey(crewId, season);
+      const rounds = crewRoundsByKey.get(key) ?? new Map<RoundId, CrewRoundContribution & { finalizedAtMs: number }>();
+      rounds.set(entry.roundId, entry); // upsert by roundId — never accumulated
+      crewRoundsByKey.set(key, rounds);
+    },
+    listCrewRounds: async (crewId, season) => [...(crewRoundsByKey.get(crewSeasonKey(crewId, season))?.values() ?? [])],
+    putSeasonRecords: async (crewId, season, records) => {
+      seasonRecordsByKey.set(crewSeasonKey(crewId, season), records);
+    },
+    getSeasonRecords: async (crewId, season) => seasonRecordsByKey.get(crewSeasonKey(crewId, season)),
+    wipeCrew: async (crewId, seasons) => {
+      for (const season of seasons) {
+        const key = crewSeasonKey(crewId, season);
+        crewRoundsByKey.delete(key);
+        seasonRecordsByKey.delete(key);
+      }
     },
   };
 };

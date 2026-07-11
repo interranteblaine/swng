@@ -4,6 +4,7 @@ import type { ParticipantClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
   createFixedClock,
+  createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryRoundStore,
@@ -48,11 +49,12 @@ const setup = () => {
   const clock = createFixedClock(1_000);
   const ids = createSequentialIds("t");
   const golferStore = createInMemoryGolferStore();
+  const crewStore = createInMemoryCrewStore();
 
   return {
     broadcast,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids }),
-    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore }),
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
+    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
     finalize: finalizeRound({ journal, store, broadcast, clock, ids }),

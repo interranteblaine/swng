@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { GameId, GameResult, GolferId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
-import { gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
+import { crewIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
 import { courseCardSchema, gameConfigFields, gameResultSchema, holeResultSchema, roundEventSchema } from "./round.js";
 
 // gameConfigFields' five field sets, minus `id` (they never had one — id-ness is
@@ -26,6 +26,16 @@ export const gameConfigInputSchema = z.discriminatedUnion("kind", [
 ]);
 export type GameConfigInput = z.infer<typeof gameConfigInputSchema>;
 
+// M8: an initial roster entry beyond the host — StartRound's `players` field appends these
+// as participant-joined events, in order, right after the host's own join (the crew
+// one-tap flow: seed a round with the whole crew in one call instead of N separate joins).
+const startRoundPlayerSchema = z.object({
+  name: z.string().min(1),
+  tee: z.string().min(1),
+  courseHandicap: z.number().int(),
+  golferId: golferIdSchema.optional(),
+});
+
 export const startRoundRequestSchema = z.object({
   card: courseCardSchema,
   host: z.object({
@@ -33,6 +43,16 @@ export const startRoundRequestSchema = z.object({
     tee: z.string().min(1),
     courseHandicap: z.number().int(), // may be negative (plus handicap)
   }),
+  // M8 "as-self create": the host's own existing golferId, subject to the SAME claimed-
+  // golferId rule as JoinRound's golferId (application/src/rounds/golferIdentity.ts) — a
+  // signed-in golfer can start a round playing as themselves instead of a fresh ghost.
+  golferId: golferIdSchema.optional(),
+  // Tags the round as a crew round (round-created's own optional crewId, domain/round/events.ts)
+  // — requires the caller's own golfer to be a member of this crew (application enforces,
+  // "not-a-member" otherwise) and unlocks the claimed-golferId resolver's standing-consent
+  // arm for every golferId this request supplies (host's own + every player's).
+  crewId: crewIdSchema.optional(),
+  players: z.array(startRoundPlayerSchema).optional(),
 });
 export type StartRoundRequest = z.infer<typeof startRoundRequestSchema>;
 
@@ -47,6 +67,19 @@ export const joinRoundRequestSchema = z.object({
   golferId: golferIdSchema.optional(),
 });
 export type JoinRoundRequest = z.infer<typeof joinRoundRequestSchema>;
+
+// POST /rounds/{roundId}/players (participant auth, M8): an already-seated participant adds
+// someone else to the roster — the crew one-tap flow's mid-round counterpart to StartRound's
+// own `players` array. Same shape as JoinRound's own fields (minus `code`: the round is
+// already known from the participant token) plus the same optional golferId, resolved by
+// the SAME shared resolver (golferIdentity.ts).
+export const addParticipantRequestSchema = z.object({
+  name: z.string().min(1),
+  tee: z.string().min(1),
+  courseHandicap: z.number().int(),
+  golferId: golferIdSchema.optional(),
+});
+export type AddParticipantRequest = z.infer<typeof addParticipantRequestSchema>;
 
 export const addGameRequestSchema = z.object({
   game: gameConfigInputSchema,
@@ -73,6 +106,12 @@ export interface JoinRoundResponse {
   readonly roundId: RoundId;
   readonly token: string;
   readonly golferId: GolferId;
+}
+
+// Mirrors round.ts' terminateGameResponseSchema: only the events THIS call actually
+// appended, seq-stamped — never a synthesized "as if" event.
+export interface AddParticipantResponse {
+  readonly events: readonly RoundEvent[];
 }
 
 export interface AddGameResponse {
@@ -107,6 +146,10 @@ export const joinRoundResponseSchema: z.ZodType<JoinRoundResponse> = z.object({
   roundId: roundIdSchema,
   token: z.string(),
   golferId: golferIdSchema,
+});
+
+export const addParticipantResponseSchema: z.ZodType<AddParticipantResponse> = z.object({
+  events: z.array(roundEventSchema).readonly(),
 });
 
 export const addGameResponseSchema: z.ZodType<AddGameResponse> = z.object({

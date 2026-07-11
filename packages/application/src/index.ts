@@ -4,8 +4,9 @@
 export type { AppendOptions, AppendResult, EventJournal } from "./ports/eventJournal.js";
 export type { RoundStore } from "./ports/roundStore.js";
 export type { CourseStore } from "./ports/courseStore.js";
+export type { CrewStore } from "./ports/crewStore.js";
 export type { GolferStore } from "./ports/golferStore.js";
-export type { ProjectionStore } from "./ports/projectionStore.js";
+export type { CrewSeasonRecords, ProjectionStore } from "./ports/projectionStore.js";
 export type { Broadcast } from "./ports/broadcast.js";
 export type { ParticipantClaims, TokenIssuer } from "./ports/tokenIssuer.js";
 export type { AccountClaims } from "./ports/accountClaims.js";
@@ -23,12 +24,15 @@ export type { ScoringPolicy } from "./scoringPolicy.js";
 
 export { startRound } from "./rounds/startRound.js";
 export { joinRound } from "./rounds/joinRound.js";
+export { addParticipant } from "./rounds/addParticipant.js";
 export { addGame } from "./rounds/addGame.js";
 export { recordScore } from "./rounds/recordScore.js";
 export { finalizeRound } from "./rounds/finalizeRound.js";
 export { terminateGame } from "./rounds/terminateGame.js";
 export { readEvents } from "./rounds/readEvents.js";
 export { peekRound } from "./rounds/peekRound.js";
+export { resolveSuppliedGolfer } from "./rounds/golferIdentity.js";
+export type { GolferIdentityContext } from "./rounds/golferIdentity.js";
 
 export { createCourse } from "./courses/createCourse.js";
 export { addTeeSet } from "./courses/addTeeSet.js";
@@ -41,7 +45,14 @@ export { updateMyGolfer } from "./golfers/updateMyGolfer.js";
 export { claimGolfer } from "./golfers/claimGolfer.js";
 export { getMyRecord } from "./golfers/getMyRecord.js";
 
-export { projectArchive, finalizedAtMsOf } from "./projections/projectArchive.js";
+export { createCrew } from "./crews/createCrew.js";
+export { getCrew } from "./crews/getCrew.js";
+export { listMyCrews } from "./crews/listMyCrews.js";
+export { addCrewMember } from "./crews/addCrewMember.js";
+export { joinCrewByCode } from "./crews/joinCrewByCode.js";
+export { saveStandingGame } from "./crews/saveStandingGame.js";
+
+export { projectArchive, finalizedAtMsOf, seasonOf } from "./projections/projectArchive.js";
 export { rebuildProjections } from "./projections/rebuildProjections.js";
 export type { ArchiveSource } from "./projections/rebuildProjections.js";
 
@@ -51,6 +62,7 @@ export {
   createCapturingBroadcast,
   createFixedClock,
   createInMemoryCourseStore,
+  createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryProjectionStore,

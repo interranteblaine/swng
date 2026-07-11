@@ -101,6 +101,40 @@ describe("claimGolfer — happy path", () => {
   });
 });
 
+// Papercut 5 (M8 plan): ClaimGolferRequest.name is used ONLY when the claim lazily CREATES
+// the golfer row — a claim binding an EXISTING (already-ghosted) row never renames it, no
+// matter what name is supplied. Both arms pinned directly (golferStore.ts's port doc already
+// states the invariant; this is application's own behavioral proof of it).
+describe("claimGolfer — the optional `name` field (papercut 5)", () => {
+  it("seeds a FRESH row's name from the request when the claim creates it", async () => {
+    const ctx = setup();
+    const ghost = golferId("ghost-1");
+
+    const claimed = await ctx.claim({ sub: "sub-1", email: "cal@example.com" }, { golferId: ghost, name: "Cal Custom" });
+    expect(claimed.golfer.name).toBe("Cal Custom"); // NOT the claims-derived default ("cal")
+  });
+
+  it("falls back to the claims-derived default name when the create branch gets no name", async () => {
+    const ctx = setup();
+    const ghost = golferId("ghost-1");
+
+    const claimed = await ctx.claim({ sub: "sub-1", email: "cal@example.com" }, { golferId: ghost });
+    expect(claimed.golfer.name).toBe("cal");
+  });
+
+  it("NEVER renames an EXISTING (already-ghosted, unclaimed) row, even when a name is supplied", async () => {
+    const ctx = setup();
+    const ghost = golferId("ghost-1");
+    // A ghost with an established name from prior round play (participant-joined's own
+    // name), simulated directly on the store — the row exists, unclaimed, before any claim.
+    await ctx.golferStore.put({ id: ghost, name: "Cal From The Round", handicap: {} }, undefined);
+
+    const claimed = await ctx.claim({ sub: "sub-1", email: "cal@example.com" }, { golferId: ghost, name: "A Totally Different Name" });
+
+    expect(claimed.golfer.name).toBe("Cal From The Round"); // unchanged — never renamed
+  });
+});
+
 describe("claimGolfer — collision arm 1: golfer already claimed", () => {
   it("a second claimant on the same golferId is rejected", async () => {
     const ctx = setup();

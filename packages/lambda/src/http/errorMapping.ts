@@ -43,6 +43,18 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // round is a failed precondition on the roster, the same shape as golfer-conflict — 409.
   "golfer-claimed": 403,
   "golfer-already-in-round": 409,
+  // M8 Task 2 (application/src/errors.ts) forward-provisions these ahead of M8 Task 4's
+  // actual crew routes — same "the map is exhaustive by construction, so a code lands here
+  // the instant the union grows" precedent as course-conflict/course-not-found above.
+  // crew-conflict is a failed optimistic-concurrency write, same bucket as course-conflict/
+  // golfer-conflict; unknown-crew is an unresolvable crewId or join code, same bucket as
+  // round-not-found/bad-join-code/course-not-found; not-a-member is a forbidden ACTOR, same
+  // bucket as not-a-participant/golfer-claimed; golfer-required is a bad-body precondition
+  // (the caller has no account golfer yet), same bucket as unknown-golfer-in-game.
+  "crew-conflict": 409,
+  "unknown-crew": 404,
+  "not-a-member": 403,
+  "golfer-required": 400,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`

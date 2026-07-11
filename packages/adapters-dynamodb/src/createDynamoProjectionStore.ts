@@ -88,5 +88,28 @@ export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentCl
       );
       await Promise.all(sks.map((sk) => client.send(new DeleteCommand({ TableName: tableName, Key: { pk, sk } }))));
     },
+
+    // M8 Task 2 STOPGAP: ProjectionStore grew the season-ledger methods
+    // (ports/projectionStore.ts) so application's projector could be written and tested
+    // against the port; the real `projections` table layout for LEDGER#crew#season /
+    // H2H#crew#a#b (architecture.md's persistence sketch) is M8 Task 3's job, not built
+    // here. These throw rather than silently no-op so a crew-tagged archive landing on a
+    // live stack before Task 3 fails loudly (retries via the stream trigger's no-DLQ policy)
+    // instead of quietly losing its ledger contribution forever.
+    putCrewRound: (): Promise<void> => {
+      throw new Error("createDynamoProjectionStore.putCrewRound: not implemented yet (M8 Task 3)");
+    },
+    listCrewRounds: () => {
+      throw new Error("createDynamoProjectionStore.listCrewRounds: not implemented yet (M8 Task 3)");
+    },
+    putSeasonRecords: (): Promise<void> => {
+      throw new Error("createDynamoProjectionStore.putSeasonRecords: not implemented yet (M8 Task 3)");
+    },
+    getSeasonRecords: () => {
+      throw new Error("createDynamoProjectionStore.getSeasonRecords: not implemented yet (M8 Task 3)");
+    },
+    wipeCrew: (): Promise<void> => {
+      throw new Error("createDynamoProjectionStore.wipeCrew: not implemented yet (M8 Task 3)");
+    },
   };
 };

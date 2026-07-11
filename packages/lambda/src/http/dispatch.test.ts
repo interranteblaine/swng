@@ -10,6 +10,7 @@ import {
   createCourse,
   createFixedClock,
   createInMemoryCourseStore,
+  createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryProjectionStore,
@@ -113,6 +114,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
   const store = createInMemoryRoundStore();
   const courseStore = createInMemoryCourseStore();
   const golferStore = createInMemoryGolferStore();
+  const crewStore = createInMemoryCrewStore();
   const projectionStore = createInMemoryProjectionStore();
   const broadcast = createCapturingBroadcast();
   const clock = createFixedClock(1_000);
@@ -121,8 +123,8 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
   const logger = createNullLogger();
 
   const useCases: UseCases = {
-    startRound: startRound({ journal, store, broadcast, tokens, clock, ids }),
-    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore }),
+    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
+    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, store, broadcast, clock, ids }),

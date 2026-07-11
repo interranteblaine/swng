@@ -26,10 +26,12 @@ export const claimGolfer =
 
     // A ghost claimed for the first time has no golfer item yet (golfer items are lazy) —
     // golferStore.claim creates one under the SAME golferId the round already knows the
-    // player by. The name seeds from THIS account's own claims (getMyGolfer's same
-    // derivation): each round's own history keeps whatever name was recorded there at the
-    // time; this is the unified identity's name going forward, editable via updateMyGolfer.
-    await deps.golferStore.claim(command.golferId, claims.sub, defaultGolferName(claims));
+    // player by. Papercut 5 (M8 plan): command.name, when supplied, seeds that fresh row
+    // instead of the claims-derived default — but ONLY on the create branch (golferStore.ts's
+    // own port doc: "name... only apply on the create branch"), so a claim binding an
+    // EXISTING (already-ghosted, unclaimed) row never renames it, no matter what name is
+    // passed here.
+    await deps.golferStore.claim(command.golferId, claims.sub, command.name ?? defaultGolferName(claims));
 
     const found = await deps.golferStore.get(command.golferId);
     // claim() just succeeded without throwing, so the item is guaranteed to exist now.

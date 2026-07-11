@@ -57,6 +57,13 @@ describe("claimGolferRequestSchema", () => {
     roundTrips(claimGolferRequestSchema, { golferId: golferId("ghost-1") });
   });
 
+  // Papercut 5 (M8 plan): an optional name, used only when the claim lazily CREATES the
+  // golfer row (application/src/golfers/claimGolfer.ts) — pinned at the wire level here,
+  // the claim-vs-never-rename behavior itself is application's test.
+  it("round-trips a claim request carrying an optional name", () => {
+    roundTrips(claimGolferRequestSchema, { golferId: golferId("ghost-1"), name: "Cal" });
+  });
+
   it("rejects an extra field (.strict())", () => {
     expect(() => parse(claimGolferRequestSchema, { golferId: "ghost-1", sub: "sneaky" })).toThrow(ContractError);
   });

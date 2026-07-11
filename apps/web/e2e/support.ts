@@ -17,22 +17,50 @@ import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page, WebSocketRoute } from "@playwright/test";
 import {
+  addCrewMemberRequestSchema,
+  addCrewMemberResponseSchema,
+  addGameRequestSchema,
+  addGameResponseSchema,
+  claimGolferRequestSchema,
   createCourseRequestSchema,
   createCourseResponseSchema,
+  createCrewRequestSchema,
+  createCrewResponseSchema,
   finalizeRoundResponseSchema,
+  getCrewRecordsResponseSchema,
   getMyRecordResponseSchema,
+  golferResponseSchema,
   joinRoundRequestSchema,
   joinRoundResponseSchema,
   parse,
   recordScoreRequestSchema,
   recordScoreResponseSchema,
+  saveStandingGameRequestSchema,
+  saveStandingGameResponseSchema,
   searchCoursesResponseSchema,
   startRoundRequestSchema,
   startRoundResponseSchema,
+  updateMeRequestSchema,
 } from "@swng/contracts";
-import type { FinalizeRoundResponse, GetMyRecordResponse, JoinRoundResponse, StartRoundResponse } from "@swng/contracts";
+import type {
+  AddCrewMemberResponse,
+  AddGameResponse,
+  ClaimGolferRequest,
+  CreateCrewResponse,
+  FinalizeRoundResponse,
+  GameConfigInput,
+  GetCrewRecordsResponse,
+  GetMyRecordResponse,
+  GolferResponse,
+  JoinRoundResponse,
+  SaveStandingGameResponse,
+  StandingGameView,
+  StartRoundRequest,
+  StartRoundResponse,
+  UpdateMeRequest,
+} from "@swng/contracts";
 import { deviceId as toDeviceId, fieldDeck18, fixtureLinks18, opId as toOpId, playGoldenRoundLog, reduceRound, scoreGame } from "@swng/domain";
-import type { CourseCard, DeviceId, FixtureScores, GolferId, Hlc, OpId, RoundId, RoundState } from "@swng/domain";
+import type { CourseCard, CourseId, CrewId, DeviceId, FixtureScores, GolferId, Hlc, OpId, RoundId, RoundState } from "@swng/domain";
 import type { AuthTokens } from "../src/auth/tokenStore.js";
 import { describeGame } from "../src/games/describeGame.js";
 
@@ -88,7 +116,11 @@ export const loadWebEnv = (): WebEnv => {
 // (courseNameKey's prefix-match GSI — createDynamoCourseStore.ts's own normalization, the same
 // one createCourse's write uses), and only creates when no exact match comes back, so the
 // gate's three consecutive `pnpm e2e:field` runs (brief) seed the course once, not three times.
-export const ensureCourse = async (name: string, card: CourseCard): Promise<void> => {
+// Returns the seeded course's own CourseId (M8 Task 7: crewSeason.spec.ts's standing game
+// wants a real courseId/tee to pin, not just a name the UI can search for) — every prior
+// caller (courseEntry/fieldTest/identityRecord) already only used this for its side effect and
+// never read a return value, so widening void -> Promise<CourseId> is additive, not breaking.
+export const ensureCourse = async (name: string, card: CourseCard): Promise<CourseId> => {
   const { httpUrl } = loadWebEnv();
   const teeSet = card.teeSets[0];
   if (!teeSet) throw new Error(`course card "${name}" has no tee sets to seed with`);
@@ -98,13 +130,14 @@ export const ensureCourse = async (name: string, card: CourseCard): Promise<void
   const searchJson: unknown = await searchResponse.json();
   if (!searchResponse.ok) throw new Error(`GET /courses -> ${searchResponse.status}: ${JSON.stringify(searchJson)}`);
   const { courses } = parse(searchCoursesResponseSchema, searchJson);
-  if (courses.some((c) => c.name === name)) return; // already seeded by a prior run
+  const existing = courses.find((c) => c.name === name);
+  if (existing) return existing.courseId; // already seeded by a prior run
 
   const body = parse(createCourseRequestSchema, { name, tee: teeSet, enteredBy: "field-test-setup" });
   const createResponse = await fetch(`${httpUrl}/courses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const createJson: unknown = await createResponse.json();
   if (!createResponse.ok) throw new Error(`POST /courses -> ${createResponse.status}: ${JSON.stringify(createJson)}`);
-  parse(createCourseResponseSchema, createJson); // shape-check only — step 1's own search UI is what finds it
+  return parse(createCourseResponseSchema, createJson).course.courseId;
 };
 
 // --- Cal/Dee's out-of-browser joins ---------------------------------------------------------
@@ -137,15 +170,45 @@ export const joinRoundDirect = async (
 // This is exactly why joinRoundDirect above already hand-rolls its own fetch instead of
 // calling api.ts's joinRound — these three follow the identical *Direct idiom for the same
 // reason, not out of not knowing api.ts exists.
+// `token` (M8 Task 7): StartRound is "optional-golfer" auth (routes.ts) — a Bearer ID token is
+// what enables the as-self (`golferId`) and crew-tag (`crewId`) fields below; every prior
+// caller (identityRecord.spec.ts's anonymous ghost-hosted rounds) omits it and gets the exact
+// same anonymous-start behavior as before this parameter existed.
 export const startRoundDirect = async (
   httpUrl: string,
-  input: { readonly card: CourseCard; readonly host: { readonly name: string; readonly tee: string; readonly courseHandicap: number } },
+  input: {
+    readonly card: CourseCard;
+    readonly host: { readonly name: string; readonly tee: string; readonly courseHandicap: number };
+    readonly golferId?: GolferId;
+    readonly crewId?: CrewId;
+    readonly players?: StartRoundRequest["players"];
+  },
+  token?: string,
 ): Promise<StartRoundResponse> => {
   const body = parse(startRoundRequestSchema, input);
-  const response = await fetch(`${httpUrl}/rounds`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const response = await fetch(`${httpUrl}/rounds`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  });
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`POST /rounds -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(startRoundResponseSchema, json);
+};
+
+// POST /rounds/{roundId}/games, out-of-browser — same *Direct idiom as every other helper in
+// this section (api.ts's addGame can't be imported here either, same config.ts module-load
+// crash this file's own header comment already explains for createRound/finalizeRound/etc.).
+export const addGameDirect = async (httpUrl: string, id: RoundId, token: string, game: GameConfigInput): Promise<AddGameResponse> => {
+  const body = parse(addGameRequestSchema, { game });
+  const response = await fetch(`${httpUrl}/rounds/${id}/games`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /rounds/${id}/games -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(addGameResponseSchema, json);
 };
 
 export const finalizeRoundDirect = async (httpUrl: string, id: RoundId, token: string): Promise<FinalizeRoundResponse> => {
@@ -160,6 +223,91 @@ export const getMyRecordDirect = async (httpUrl: string, token: string): Promise
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`GET /me/record -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(getMyRecordResponseSchema, json);
+};
+
+// --- Crews + as-self identity, entirely out-of-browser (M8 Task 7 — the golden season gate) -
+
+// PUT /me — the one get-or-create path (getMeResponse.ts's own doc comment); crewSeason.spec.ts
+// uses this to mint host U's own "Al" golfer BEFORE creating a crew (createCrew.ts's own
+// requireAccountGolfer: "the web PUTs /me first").
+export const updateMeDirect = async (httpUrl: string, token: string, input: UpdateMeRequest): Promise<GolferResponse> => {
+  const body = parse(updateMeRequestSchema, input);
+  const response = await fetch(`${httpUrl}/me`, { method: "PUT", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`PUT /me -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(golferResponseSchema, json);
+};
+
+export const createCrewDirect = async (httpUrl: string, token: string, name: string): Promise<CreateCrewResponse> => {
+  const body = parse(createCrewRequestSchema, { name });
+  const response = await fetch(`${httpUrl}/crews`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /crews -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(createCrewResponseSchema, json);
+};
+
+// Mints a stable ghost golfer on the crew's own roster (addCrewMember.ts) — the SAME golferId
+// recurs across every round this crew plays, which is exactly what lets crewSeason.spec.ts
+// reuse Bo/Cy/Dee's ids across all 12 rounds.
+export const addCrewMemberDirect = async (httpUrl: string, token: string, id: CrewId, name: string): Promise<AddCrewMemberResponse> => {
+  const body = parse(addCrewMemberRequestSchema, { name });
+  const response = await fetch(`${httpUrl}/crews/${id}/members`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /crews/${id}/members -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(addCrewMemberResponseSchema, json);
+};
+
+export const saveStandingGameDirect = async (httpUrl: string, token: string, id: CrewId, standingGame: StandingGameView): Promise<SaveStandingGameResponse> => {
+  const body = parse(saveStandingGameRequestSchema, { standingGame });
+  const response = await fetch(`${httpUrl}/crews/${id}/standing-game`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`PUT /crews/${id}/standing-game -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(saveStandingGameResponseSchema, json);
+};
+
+// `season` defaults to the current UTC year server-side (routes.ts's own parseSeason) when
+// omitted here — crewSeason.spec.ts never needs to pin a season number itself since the whole
+// 12-round run happens within one UTC day.
+export const getCrewRecordsDirect = async (httpUrl: string, token: string, id: CrewId, season?: number): Promise<GetCrewRecordsResponse> => {
+  const query = season !== undefined ? `?season=${season}` : "";
+  const response = await fetch(`${httpUrl}/crews/${id}/records${query}`, { headers: { authorization: `Bearer ${token}` } });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`GET /crews/${id}/records -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(getCrewRecordsResponseSchema, json);
+};
+
+export const claimGolferDirect = async (httpUrl: string, token: string, input: ClaimGolferRequest): Promise<GolferResponse> => {
+  const body = parse(claimGolferRequestSchema, input);
+  const response = await fetch(`${httpUrl}/golfers/claim`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /golfers/claim -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(golferResponseSchema, json);
+};
+
+// Generic "keep reading until an asynchronous projector catches up" poller — identityRecord.
+// spec.ts's own pollRecord (M7 Task 8) hand-rolled exactly this shape for GET /me/record; M8
+// Task 7 needs the identical shape for GET /crews/{id}/records too, so this is the one
+// implementation both specs' polling can share instead of a second hand-rolled copy.
+export const pollUntil = async <T>(fetchOnce: () => Promise<T>, ready: (value: T) => boolean, timeoutMs = 60_000, label = "poll"): Promise<T> => {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await fetchOnce();
+    if (ready(value)) return value;
+    if (Date.now() >= deadline) throw new Error(`${label}: condition not met after ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
 };
 
 // --- Direct score recording (M7 Task 8) ----------------------------------------------------

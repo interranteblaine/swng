@@ -111,13 +111,11 @@ test.describe.serial("M7 identity/record gate — claim mid-season, live index, 
   let preRebuildRecord: GetMyRecordResponse;
 
   test.beforeAll(async ({ browser }) => {
-    // Minted BEFORE the context exists so injectAuthTokens' addInitScript is registered
-    // before this page's very first navigation (brief: "inject tokens... pre-navigation") —
-    // every goto() in this describe block, from /create through /profile, runs signed in.
+    // Minted here, but NOT injected yet — see test 3's own comment. userA is created early
+    // only so its throwaway Cognito user exists before anything needs it.
     userA = await mintThrowawayUser("user-a");
     const context = await browser.newContext();
     page = await context.newPage();
-    await injectAuthTokens(page, userA);
   });
 
   test.afterAll(async () => {
@@ -164,6 +162,21 @@ test.describe.serial("M7 identity/record gate — claim mid-season, live index, 
   });
 
   test("3: signed-in user A claims ghost g on round 1's still-live roster", async () => {
+    // Signed in HERE, not in beforeAll (M8 Task 7 field finding): M8's own "play as yourself"
+    // CreateRoundPage (commit 236809c) auto-binds ANY signed-in caller's account to whatever
+    // name they type at round-creation time (PUT /me + as-self StartRound) — this test predates
+    // that behavior (9f02cd6) and its whole story depends on Host1 (test 1) staying a SEPARATE
+    // identity from user A, who arrives later to claim ghost g. Injecting the token before test
+    // 1 would silently consume userA's one-account-one-golfer slot on "Host1" instead of
+    // leaving it free, so every claim attempt below would legitimately 409
+    // "golfer-already-claimed" — reproduced directly against beta (bypassing the UI, raw fetch)
+    // before this fix: a fresh ghost claims cleanly in isolation, but replaying this describe
+    // block's OWN sequence (sign in before test 1, type "Host1", then claim ghost g) 409s every
+    // time. addInitScript takes effect on the reload right after it, and on every navigation
+    // after that (test 4/5 need no second injection).
+    await injectAuthTokens(page, userA);
+    await page.reload();
+
     const rosterRow = page.locator("li", { hasText: "Ghost G" });
     await expect(rosterRow).toBeVisible();
     await rosterRow.getByRole("button", { name: "This is me", exact: true }).click();

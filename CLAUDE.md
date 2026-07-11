@@ -136,6 +136,57 @@ one ghost via API, claims the ghost live in the browser, asserts the hand-pinned
 against the live system, then proves a projections wipe+rebuild reproduces it exactly) and a
 termination-coverage addendum in `fieldTest.spec.ts` (an unresolved game named in the finalize
 dialog, terminated, and excluded from the settled results).
+Crews and the season ledger are real (M8): the Saturday Boys can exist as a persistent group,
+not just a one-off round. `domain/crew` (`Crew`/`CrewMember`/`StandingGame`, `addMember`,
+`applyStandingGame` — a preset game survives iff every golferId it references is present,
+mirroring `scoreGame`'s own per-kind dispatch) plus `crew/ledger.ts` (`crewContribution`/
+`aggregateSeason`, a pure commutative fold from one archive's contribution to a season's
+ledger + head-to-head) and an optional `crewId` on `round-created`, carried through state and
+archive unchanged. `contracts`/`application` gain the crew use cases (create/get/listMine/
+addMember/joinByCode/saveStandingGame/getRecords) and **play-as-yourself** as core, not a
+rider: `StartRound`/`JoinRound`/`AddParticipant` all resolve a caller-supplied `golferId`
+through the ONE shared `rounds/golferIdentity.ts` resolver (unclaimed reuse, as-self via a
+matching Cognito sub, standing crew consent for a fellow member, else a `golfer-claimed`
+rejection) — a signed-in golfer with no account golfer yet gets one minted from the form's own
+name (`PUT /me` then create, strictly in that order) so a round played as yourself needs no
+later claim step at all. The projector's crew extension is the SAME `projectArchive`
+implementation M7 already committed to (no forked math): a crew-tagged finalize upserts that
+round's own contribution by roundId, then recomputes and REPLACES the whole `(crew, season)`
+aggregate from every contribution on file — idempotent and rebuildable by construction, not by
+a special case. `adapters-dynamodb` gets a crew store (a transactional root+member-item write,
+a join-code GSI partition namespaced apart from course search's own) and crew projections
+(`CREWROUNDS#`/`RECORDS#` keyspaces, `wipeCrew` over caller-supplied seasons); `lambda` gains 8
+routes (17→25) and an `optional-golfer` auth tier (`POST /rounds`/`POST /rounds/join` take a
+Bearer when offered, proceed anonymously when not, 401 on a token that's presented but fails
+verification — never a silent downgrade). Two live defects surfaced and were fixed same-task,
+not carried forward: a bare (non-conditional) `crewId` property crashed DynamoDB's `marshall()`
+on every NON-crew round's finalize (an explicit `undefined` key, not an absent one) — caught by
+`pnpm e2e:beta`'s own gate, fixed, and redeployed before the task closed; and a three-state
+`auth.golfer` (loading vs. no-profile vs. real) collapsed into one branch let a submit during
+the GET /me loading window silently rename a profile with stale free text — fixed with an
+explicit loading state that disables submission until identity resolves. `@swng/web` gets the
+identity wave — `CreateRoundPage`'s "Playing as `<name>`" line (replacing free-text name entry
+outright once a real account golfer exists), `SetupPanel`'s "Add player" (a crew's own members
+as one-tap quick-adds, stable golferIds, ahead of a free-text ghost form), claims that carry the
+roster's own name instead of falling back to an email localpart — plus crew home
+(`CrewCreatePage`/`CrewPage`: join code, roster with claimed badges, a standing-game editor,
+season records as a ledger table + head-to-head list) and "Play the usual," one tap from the
+crew page into a pre-filled `CreateRoundPage` (course/tee/roster/games via `applyStandingGame`
+against whoever's actually present, with a dismissible notice if any preset game fails to seed
+rather than a silent drop). Gated by `apps/web/e2e/crewSeason.spec.ts` (a full 12-round crew
+season played over the API against a hand-designed, FROZEN deck — verified against the real
+domain engines locally before the first live call, and the first live run against beta agreed
+with the frozen ledger exactly: singles H2H 5W-5L-2H, skins 54 each, stableford 430/430/435/435
+— then rebuild parity, then a second account claiming a crew ghost mid-season and inheriting
+all 12 history lines in one claim) and `apps/web/e2e/primaryPath.spec.ts` (the unmodified
+primary path, all-browser per the M7-close process law — one name typed once on Profile, then
+sign-in through finalize through the profile history line, no API substitutions anywhere). A
+field finding surfaced and was fixed in the SAME task: M8's own as-self `CreateRoundPage`
+made round-creation sensitive to sign-in state for the first time, which broke an M7-era gate
+(`identityRecord.spec.ts`) that stayed signed in from its very first, previously-anonymous
+round-creation step — fixed in the test (moved the sign-in injection to the point in the story
+that actually needs it), not the product, since the new as-self behavior is correct and
+intended.
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

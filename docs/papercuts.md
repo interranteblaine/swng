@@ -125,7 +125,7 @@ personally drives the milestone's primary user flows in a real browser as a firs
 (not the plan's author-imagined scenario), and plan-time gates must include the unmodified
 primary path — API shortcuts are allowed only in steps that are not the thing being gated.
 
-### 5. Claiming a fresh ghost names the profile after the account, not the roster row
+### 5. Claiming a fresh ghost names the profile after the account, not the roster row — ADDRESSED (M8 Task 5)
 
 Found in the M7 close flow-walk (2026-07-10): claim "Walker" on a roster and your profile
 comes back named after your email localpart (e.g. `flowwalk-m7`), because
@@ -135,6 +135,14 @@ JWT-derived default. The name is editable on ProfilePage, so it's a wart, not a 
 shape: the client sends the roster row's name alongside the id (it has it on screen), or the
 claim use case resolves the name from the round the claim was made in. Fits naturally in
 M8's join-as-yourself identity work.
+
+Landed in M8 Task 5 (commit `236809c`): `claimGolferRequestSchema`
+(`packages/contracts/src/golfers.ts`) gained an optional `name`, applied only on the branch
+that lazily CREATES the target golfer row (`golferStore.claim`'s own port doc: a claim binding
+an already-ghosted, unclaimed row never renames it, no matter what name is passed) —
+`ClaimAffordance.tsx` sends the roster row's own `rowName` alongside `rowGolferId` on every
+claim, so a fresh claim's profile is named after the row you clicked, not your email. Exercised
+live by `crewSeason.spec.ts`'s own mid-season claim step (Task 7).
 
 ### 6. App sign-out doesn't end the Cognito hosted-UI session
 
@@ -146,7 +154,7 @@ through the pool's `/logout` endpoint (which clears the hosted session and retur
 registered logout URL). Belongs with M9's auth hardening (the logout URLs are already
 registered on the client).
 
-### 7. Rounds played before signing in strand their ghosts (one claim per account)
+### 7. Rounds played before signing in strand their ghosts (one claim per account) — CLOSED, write-off recorded (M8 plan decision)
 
 Field evidence from the user's own account (2026-07-10): three rounds created while signed
 in = three distinct ghosts (the web mints a fresh golferId per round; being signed in links
@@ -155,3 +163,17 @@ v1; `GolferMerged` was explicitly scoped out. So a real user's pre-claim history
 unclaimable — the no-merge cut bites the primary flow, not an edge. M8's identity work must
 pair join-as-yourself with an explicit decision about pre-existing rounds: bulk-claim,
 merge, or an accepted write-off stated to the user.
+
+Resolved as a recorded write-off, not a feature (M8 plan, flagged for and confirmed at plan
+review: "Stranded pre-M8 rounds are a recorded write-off"). Rounds played before the as-self
+flow existed — or before this milestone at all — whose ghosts differ from the one golfer an
+account eventually claims or creates stay off that account's record, permanently: `GolferMerged`
+(merging two `GolferId`s' histories into one) remains explicitly out of v1 scope, unchanged by
+M8. This is stated honestly, not swept past: it includes the project owner's own two finalized
+M7 rounds, played signed in before M8's play-as-yourself existed — under three distinct ghost
+golferIds that none of M8's work retroactively reconciles with whichever golfer the account
+goes on to claim or create. Going FORWARD, the papercut itself is what M8 actually fixes: a
+round created or joined while signed in is now the account's own golfer from the moment it's
+created (M8 Task 5's as-self flow, `CreateRoundPage`'s `asSelf` branch) or a crew's own STABLE
+ghost that any one claim adopts whole (`crewSeason.spec.ts`'s mid-season claim step, Task 7) —
+so this exact gap cannot recur for anything played from M8 onward.

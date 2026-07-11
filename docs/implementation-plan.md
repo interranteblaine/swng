@@ -433,6 +433,139 @@ already-captured Add/Edit course pages.
 **Gate:** scripted season simulation (a dozen golden rounds) produces the exact expected
 ledger and H2H records; creating Saturday's usual game is one tap from the crew page.
 
+**M8 gate — as executed (Task 7):** `docs/superpowers/plans/2026-07-10-m8-crews-ledger.md`'s
+seven tasks, real code: `domain/crew` — `Crew`/`CrewMember`/`StandingGame`, `addMember`
+(duplicate-member `DomainError`), `applyStandingGame` (a game survives iff EVERY golferId it
+references is present, preset order kept — mirrors `scoreGame`'s own per-kind dispatch) —
+plus `round-created`'s optional `crewId`, carried through `RoundState`/`RoundArchive`
+unchanged, and `crew/ledger.ts` (`crewContribution`/`aggregateSeason`, a pure commutative fold
+over one archive's contribution) (T1); `contracts`/`application` crew use cases
+(`createCrew`/`getCrew`/`listMyCrews`/`addCrewMember`/`joinCrewByCode`/`saveStandingGame`) plus
+`rounds/golferIdentity.ts`'s ONE shared `resolveSuppliedGolfer` (four arms — unclaimed reuse,
+as-self via matching sub, standing crew consent, else `golfer-claimed`) backing
+`startRound`/`joinRound`/`addParticipant` alike, and the projector's crew extension
+(upsert-by-roundId, then recompute+replace the whole `(crew, season)` aggregate — never `+=`)
+(T2); `adapters-dynamodb`'s crew store (a transactional root+member-item write, a join-code GSI
+partition namespaced apart from course search's own) and crew projections (`CREWROUNDS#`/
+`RECORDS#` keyspaces, `wipeCrew` over caller-supplied seasons) (T3); 8 new routes (route parity
+17→25) and `optional-golfer` auth (`POST /rounds`/`POST /rounds/join` take a Bearer when
+offered, proceed anonymously when not, 401 on a token that's presented but fails verification)
+(T4); the web identity wave — `CreateRoundPage`'s `asSelf` swap ("Playing as `<name>`" replaces
+free-text entirely; signed-in-with-no-golfer PUTs `/me` THEN creates as-self, strictly in that
+order), `SetupPanel`'s "Add player" (crew quick-adds ahead of a free-text ghost form), and
+`ClaimAffordance` sending the roster row's own name with a claim (T5); crew home —
+`CrewCreatePage`/`CrewPage` (join code, roster with claimed badges, `StandingGameEditor`,
+season records: a ledger table sorted wins-then-points plus an H2H list) and "Play the usual"
+(one tap into `CreateRoundPage`, pre-filled roster/games via `applyStandingGame` against
+whoever's actually present) (T6); this gate (T7).
+
+Two defects surfaced live during the milestone, both fixed and redeployed before their own
+task closed, not carried forward:
+
+- **T4's crewId defect.** `archive.ts`/`state.ts` used a bare `crewId: state.crewId`
+  object-literal property instead of a conditional spread, so every NON-crew round's archive
+  and state carried an explicit `crewId: undefined` key. DynamoDB's `marshall()` (this repo
+  never sets `removeUndefinedValues`) threw on that key in `putArchive`, 500ing a non-crew
+  round's first finalize live on beta — and the idempotent retry then false-200'd without ever
+  persisting the archive, silently stranding the round from the projector and any later
+  rebuild. `pnpm e2e:beta`'s own T4 gate caught the live 500 before it shipped further; the fix
+  (conditional spreads, matching `startRound.ts`'s own idiom, pinned at the type level too since
+  `toBeUndefined()` can't distinguish an explicit `undefined` key from an absent one) landed and
+  redeployed the SAME task, then `pnpm e2e:beta` reconfirmed 16/16. Two `UPDATE_COMPLETE`
+  deploys in T4, not one: the base crew-routes deploy, then this narrowly-scoped corrective
+  redeploy.
+- **T5's loading-window defect.** `auth.golfer` is actually three-state — `undefined` while
+  signed in means GET /me is still in flight, `null` means signed in with no profile yet, a
+  real `GolferView` means as-self — and T5's first pass collapsed `undefined` into the
+  "no golfer yet" branch. A submit during that in-flight window fired `PUT /me` with an
+  empty/stale free-text value over a profile that might already be real once the fetch landed:
+  a silent rename race. Fixed same-task (`70495a9`) with an explicit
+  `isIdentityLoading = auth.signedIn && auth.golfer === undefined` branch — a quiet "Loading
+  your profile…" placeholder (neither free-text nor "Playing as"), the submit button disabled,
+  and the submit handler itself guarding on it too (covers Enter-to-submit).
+- **T6's seed-notice defect.** "Play the usual"'s per-game `addGame` seed loop (after the round
+  itself is created) caught and dropped a failed game COMPLETELY silently — review finding:
+  "exactly wrong for one-tap Saturday, where the golfer is least likely to double-check Setup on
+  their own." Fixed same-task (`912f86a`): failed labels (via `describeStandingGame`, never a
+  raw server string) carry to `RoundPage` as router state and render a dismissible amber
+  `SeedFailureNotice`; navigation to the round still happens regardless (the round already
+  exists — stranding the golfer risks a duplicate round on re-submit).
+
+Two plan gaps surfaced during implementation and were resolved, not deferred:
+`CrewStore`'s port sketch specified only `put`/`get`/`listByGolfer` with no join-code lookup,
+but `POST /crews/join` and every crew read need one and domain's `Crew` type carries no
+`joinCode` field — Task 2 added `findByJoinCode` (mirrors `RoundStore`'s own) and moved
+`joinCode` to store-level metadata, which is what T3's crew store's own join-code GSI partition
+(`crewGsi1pk = "CREW"`, namespaced apart from course search's `"COURSE"` partition on the SAME
+gsi1) exists to serve. `GET /crews/{crewId}/records` was never named as its own use case in the
+plan (only the route, pointing at the projection-store method `getSeasonRecords` as if that
+were the whole thing) — `application/src/crews/getCrewRecords.ts` is the real wrapper
+(member-only via `requireCrewMember`, defaults `?season=` to the current UTC year, and treats
+"no finalized crew rounds yet" as an empty `{ledger: [], headToHead: []}` rather than a 404).
+
+Task 7's own gate (this task): `apps/web/e2e/crewSeason.spec.ts` (new) plays a full 12-round
+crew season entirely over the API (brief: "browser only where the thing gated is UI" — nothing
+in crew setup, 12 rounds, the ledger read, rebuild parity, or a mid-season claim is itself a UI
+behavior) against a hand-designed, FROZEN deck (`e2e/crewSeasonDeck.ts`): singles Al-Bo
+(allowance 1, inconsequential since every course handicap is 0 all season) wins Al rounds 1-5,
+halves 6-7, Bo wins 8-12 (season H2H exactly 5W-5L-2H); 4-way skins (Al, Bo, Cy, Dee) halve
+holes 1-17 every round (Cy and Dee hold flat par on every one of those holes, which alone ties
+the 4-way low regardless of what Al/Bo do) with an outright hole-18 winner rotating
+Al,Bo,Cy,Dee,... across the 12 rounds (season skins 54 each, 3 rounds × 18); 4-way stableford
+points hand-derived hole-by-hole from that same deck and frozen BEFORE the first live call —
+Al/Bo 430, Cy/Dee 435 (task-7-report.md carries the full per-round derivation table). The deck
+is verified against the REAL domain engines first (`playGoldenRoundLog` → `settleRound` →
+`crewContribution` → `aggregateSeason`, entirely in-process, no network — crewSeason.spec.ts's
+own step 1) — this passed on the first attempt, and the first LIVE run against beta also
+agreed with the frozen numbers exactly: no BLOCKED trace was ever needed. Rebuild parity
+(`invokeRebuild`, M7's own precedent) reproduces the identical ledger; a second throwaway user
+claims Bo's stable ghost mid-season and `GET /me/record` shows all 12 history lines in one
+claim — crews' whole promise (`Crew ghosts have STABLE GolferIds`, the plan's own fixed
+decision) holding end to end. `apps/web/e2e/primaryPath.spec.ts` (new) is the process-law
+gate from M7's close (papercuts.md §4): a fresh Cognito user's token is minted via
+`USER_PASSWORD_AUTH` and injected (the Hosted UI form is the user's own separate manual smoke),
+and EVERY step after that runs through rendered UI, no `*Direct` API substitutions anywhere —
+the golfer names themselves once through the real Profile form (the one name entry in the whole
+file — CreateRoundPage's "Playing as" line only replaces the free-text field once
+`auth.golfer` is a real `GolferView`, so this has to happen before "Start a round" for that
+step to show zero typed names, matching the brief's own parenthetical exactly), then Start a
+round shows "Playing as `<name>`" with no name field anywhere, 18 holes score on the real grid,
+finalize goes through the real confirm dialog, and Profile shows the round's history line
+(polled via `page.reload()` inside Playwright's own `toPass`, never a `*Direct` fetch standing
+in for the wait). `apps/web/e2e/support.ts` gained the crew + as-self `*Direct` helpers
+(`updateMeDirect`, `createCrewDirect`, `addCrewMemberDirect`, `saveStandingGameDirect`,
+`getCrewRecordsDirect`, `claimGolferDirect`, `addGameDirect`, `startRoundDirect` widened to
+accept `golferId`/`crewId`/`players`/an optional Bearer token) plus a shared `pollUntil` (the
+same "poll on shape, assert on content" idiom `identityRecord.spec.ts`'s own `pollRecord`
+established, now used by both specs instead of a second hand-rolled copy) and `ensureCourse`
+widened to return the seeded course's own `CourseId` (every prior caller only used it for its
+side effect, so this is additive).
+
+**Field finding, fixed in the SAME task:** re-running the full suite surfaced a real,
+deterministic (not flaky — 2/2 in isolation) failure in `identityRecord.spec.ts` (M7's own
+gate, untouched since `29606f5`) at its claim step — "Already claimed by another account,"
+even though the claimed golferId was a fresh UUID this run minted. Root cause, confirmed by
+reproducing the exact sequence over a raw `fetch` (bypassing the UI) both with and without the
+complication: M8's own T5 `CreateRoundPage` (commit `236809c`) made round-creation sensitive to
+sign-in state for the FIRST time — ANY signed-in caller typing a free-text name now auto-binds
+their account to that name (`PUT /me` then as-self `StartRound`). `identityRecord.spec.ts`
+predates that behavior and signs its browser in from `beforeAll`, before round 1's own
+creation — so typing "Host1" while already signed in as user A silently consumed user A's
+one-account-one-golfer slot on "Host1" instead of leaving it free, and the later claim on ghost
+`g` legitimately 409'd (`golfer-already-claimed`) every time, not intermittently. Fixed in the
+TEST, not the product (M8's as-self behavior is correct and intended): `injectAuthTokens` moved
+out of `beforeAll` into test 3 itself (immediately followed by a `page.reload()`, since
+`addInitScript` only takes effect on navigations after it's registered), restoring this gate's
+original narrative — Host1 (test 1) is a genuinely separate, anonymous identity from user A,
+who signs in only to claim ghost `g`'s history starting at test 3. Confirmed both in isolation
+and inside the full six-spec suite afterward.
+
+Gate met: `pnpm e2e:field` green three consecutive runs, 39/39 each time (7 `courseEntry.spec.ts`
++ 7 `crewSeason.spec.ts` + 9 `fieldTest.spec.ts` + 5 termination + 6 `identityRecord.spec.ts` +
+5 `primaryPath.spec.ts`), ~2.5-2.7 min per run — logs at
+`.superpowers/sdd/m8-e2e-run-{1,2,3}.log` (a fourth, pre-fix run with the single
+`identityRecord.spec.ts` failure above is kept too, as the failure evidence).
+
 ### M9 — Finish line: share, harden, ship
 
 **Goal:** the v1 bar (`roadmap.md`) met on prod.

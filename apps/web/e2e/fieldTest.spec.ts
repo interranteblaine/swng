@@ -142,12 +142,25 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await addFourballGame(pageA, { a1: "Ann", a2: "Bo", b1: "Cal", b2: "Dee" });
     await expect(chip(pageA, "Fourball match")).toBeVisible();
 
+    // Same trailing form-reset race the M7 termination describe's own singles→stableford hop
+    // guards against (see its note): AddGameForm.submit does `await onAddGame(config)` THEN
+    // `changeKind(kind)`, but the chip above appears from the OPTIMISTIC fold, before that POST
+    // resolves — so on a slow beta POST the fourball reset can fire mid-addSkinsGame, reverting
+    // Kind→fourball-match (the Players checkbox group vanishes) and hanging addSkinsGame's own
+    // `.check()`. "Side A – Player 1" returning to "Select…" (value "") is the form-local signal
+    // the reset has already fired; deterministic, no WS. Then the skins setup is race-free.
+    await expect(pageA.getByRole("combobox", { name: "Side A – Player 1", exact: true })).toHaveValue("", { timeout: 15_000 });
+
     await addSkinsGame(pageA, PLAYER_NAMES);
     await expect(chip(pageA, "Skins")).toBeVisible();
 
-    for (const page of [pageA, pageB]) {
-      await expect(page.getByRole("tab")).toHaveCount(2);
-    }
+    // pageA's own tab count is same-context (A added both games itself — its own optimistic
+    // fold), so it stays bare. pageB only learns of A's game-adds via WS broadcast —
+    // cross-context, WS-dependent, the exact seam expectOrRecover exists for (see support.ts's
+    // own doc comment) — so it gets the announced force-close + Sync-now recovery instead of a
+    // bare wait that can hang to the suite's 120s test timeout on a silently-lost push.
+    await expect(pageA.getByRole("tab")).toHaveCount(2);
+    await expectOrRecover(pageB, "B sees both game chips (test 3)", () => expect(pageB.getByRole("tab")).toHaveCount(2), bRoute);
   });
 
   test("4: A scores holes 1-9 for all four (Cal h9 = 4 as entered); B sees the pre-correction skins snapshot live over WS", async () => {
@@ -343,10 +356,17 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 // cheapest way to guarantee that (fixtureLinks18 is idempotently re-seeded either way).
 test.describe.serial("M7 termination coverage — end an unresolved game, finalize the rest", () => {
   let page: Page;
+  // Single context (Pat) — Quinn joins over a direct HTTP fetch (score-for-anyone, same
+  // precedent as Cal/Dee in the M5 describe above), so Pat's OWN page only ever learns of
+  // Quinn's join via WS broadcast/pull — the same cross-context WS-liveness seam the M5 describe
+  // guards with expectOrRecover. This route handle wires the identical recovery machinery
+  // (support.ts's installWsProxy/expectOrRecover) into this describe too.
+  const route: WsRouteHandle = { current: undefined };
 
   test.beforeAll(async ({ browser }) => {
     await ensureCourse(fixtureLinks18.courseName, fixtureLinks18); // idempotent — already seeded by the M5 block above when both run in the same pnpm e2e:field invocation
     const context = await browser.newContext();
+    await installWsProxy(context, route);
     page = await context.newPage();
   });
 
@@ -371,15 +391,42 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
     // adds nothing this scenario needs.
     const { httpUrl } = loadWebEnv();
     await joinRoundDirect(httpUrl, { code: joinCode, name: "Quinn", tee: "white", courseHandicap: 0 });
-    await waitForParticipant(page, "Quinn");
+    // Quinn's join is a direct HTTP fetch, not a browser — Pat's page only ever learns of it via
+    // WS broadcast/pull, cross-context and WS-dependent (same seam as the M5 describe's own
+    // waitForParticipant loop), so it gets the announced force-close + Sync-now recovery instead
+    // of a bare wait that can hang to the suite's 120s test timeout on a silently-lost push.
+    await expectOrRecover(page, "Pat sees Quinn's join (test 1)", () => waitForParticipant(page, "Quinn"), route);
   });
 
   test("2: a singles match (Pat vs Quinn) and a stableford (Pat, Quinn) are both added", async () => {
     await gameKindSelect(page).selectOption({ value: "singles-match" });
-    await page.getByRole("combobox", { name: "Player A", exact: true }).selectOption({ label: "Pat" });
-    await page.getByRole("combobox", { name: "Player B", exact: true }).selectOption({ label: "Quinn" });
+    await page.getByRole("combobox", { name: "Player A", exact: true }).selectOption({ label: "Pat" }); // Pat is this page's own optimistic participant — same-context, stays bare
+
+    // Player B's <option>s render from the SAME state.participants Quinn's own roster/checkbox
+    // text renders from (SetupPanel.tsx), so test 1's recovery-guarded wait above should already
+    // guarantee this — but a bare selectOption({ label }) has NO configured timeout of its own
+    // (playwright.config.ts sets no use.actionTimeout), so on any residual staleness it would
+    // silently retry for the FULL 120s test timeout rather than failing fast — exactly the "2-min
+    // hang, then 'Target page, context or browser has been closed'" symptom a real beta run hit
+    // here. Guard the <option>'s actual presence with the SAME bounded, recoverable
+    // expectOrRecover wait first, THEN do the (now cheap, already-satisfied) select.
+    const playerB = page.getByRole("combobox", { name: "Player B", exact: true });
+    const quinnOption = playerB.locator("option", { hasText: /^Quinn$/ });
+    await expectOrRecover(page, "Quinn appears in the Player B options (test 2)", () => expect(quinnOption).toHaveCount(1), route);
+    await playerB.selectOption({ label: "Quinn" });
     await page.getByRole("button", { name: "Add game" }).click();
     await expect(chip(page, "Singles match")).toBeVisible();
+
+    // Settle the singles-match submit's OWN trailing form-reset before starting the stableford.
+    // AddGameForm.submit does `await onAddGame(config)` (a network POST) THEN `changeKind(kind)`
+    // — but the "Singles match" chip above appears from the session's OPTIMISTIC fold, which can
+    // land well BEFORE that POST resolves. On a slow beta POST the reset therefore fires while
+    // addStablefordGame is mid-setup, reverting Kind→singles-match and wiping the checked Pat/
+    // Quinn, leaving "Add game" disabled forever (observed: run 5's 120s hang at this exact
+    // seam). Player A returning to "Select…" (value "") is the form-local signal that the reset
+    // has already fired — deterministic, no WS involved — so nothing can reset the form out from
+    // under the stableford setup that follows.
+    await expect(page.getByRole("combobox", { name: "Player A", exact: true })).toHaveValue("", { timeout: 15_000 });
 
     await addStablefordGame(page, ["Pat", "Quinn"]);
     await expect(chip(page, "Stableford")).toBeVisible();

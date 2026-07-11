@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addMember, crewId, golferId } from "@swng/domain";
-import { createInMemoryCrewStore, createInMemoryGolferStore } from "../testing/fakes.js";
+import { createInMemoryCrewStore, createInMemoryGolferStore, putAndBindGolfer } from "../testing/fakes.js";
 import { resolveSuppliedGolfer } from "./golferIdentity.js";
 
 // Direct unit coverage of the shared claimed-golferId rule's all FOUR arms (M8 plan) — the
@@ -30,7 +30,7 @@ describe("resolveSuppliedGolfer", () => {
   it("arm 2 — claimed AND the caller's own sub matches the bound sub: allowed (as-self)", async () => {
     const ctx = setup();
     const claimed = golferId("claimed-1");
-    await ctx.golferStore.claim(claimed, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, claimed, "sub-ann", "Ann");
 
     await expect(ctx.resolve(claimed, { sub: "sub-ann" })).resolves.toBe(claimed);
   });
@@ -38,7 +38,7 @@ describe("resolveSuppliedGolfer", () => {
   it("arm 3 — claimed by someone else, but the target IS a member of the command's crew: allowed (standing consent)", async () => {
     const ctx = setup();
     const claimed = golferId("claimed-1");
-    await ctx.golferStore.claim(claimed, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, claimed, "sub-ann", "Ann");
 
     const crew = addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: claimed, name: "Ann", role: "organizer" });
     await ctx.crewStore.put(crew, "JOINCD", undefined);
@@ -51,7 +51,7 @@ describe("resolveSuppliedGolfer", () => {
   it("arm 3 — crewId present but the target is NOT a member of that crew: falls through to rejected", async () => {
     const ctx = setup();
     const claimed = golferId("claimed-1");
-    await ctx.golferStore.claim(claimed, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, claimed, "sub-ann", "Ann");
 
     const crew = addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: golferId("someone-else"), name: "Bo", role: "member" });
     await ctx.crewStore.put(crew, "JOINCD", undefined);
@@ -62,7 +62,7 @@ describe("resolveSuppliedGolfer", () => {
   it("arm 4 — claimed, no matching sub, no crewId at all: rejected — golfer-claimed", async () => {
     const ctx = setup();
     const claimed = golferId("claimed-1");
-    await ctx.golferStore.claim(claimed, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, claimed, "sub-ann", "Ann");
 
     await expect(ctx.resolve(claimed, {})).rejects.toMatchObject({ code: "golfer-claimed" });
   });
@@ -70,7 +70,7 @@ describe("resolveSuppliedGolfer", () => {
   it("arm 4 — claimed, a DIFFERENT sub supplied, no crewId: rejected — golfer-claimed", async () => {
     const ctx = setup();
     const claimed = golferId("claimed-1");
-    await ctx.golferStore.claim(claimed, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, claimed, "sub-ann", "Ann");
 
     await expect(ctx.resolve(claimed, { sub: "sub-stranger" })).rejects.toMatchObject({ code: "golfer-claimed" });
   });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { OpId, RoundEvent } from "@swng/domain";
 import { deviceId, fixtureLinks, opId, reduceRound } from "@swng/domain";
 import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
+import type { RoundStore } from "../ports/roundStore.js";
 import type { ParticipantClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
@@ -44,8 +45,7 @@ const createClientOps = (device: string) => {
   return () => ({ opId: opId(`${device}-op-${(opCounter += 1)}`), hlc: { wallMs: wallMs++, counter: 0, deviceId: deviceId(device) } });
 };
 
-const setup = (journal: EventJournal = createInMemoryJournal()) => {
-  const store = createInMemoryRoundStore();
+const setup = (journal: EventJournal = createInMemoryJournal(), store: RoundStore = createInMemoryRoundStore()) => {
   const broadcast = createCapturingBroadcast();
   const tokens = createTestTokenIssuer();
   const clock = createFixedClock(1_000);
@@ -66,9 +66,10 @@ const setup = (journal: EventJournal = createInMemoryJournal()) => {
 };
 
 // A live round, Ann (host) + Bo, with a stableford game over both of them already added —
-// live but unscored, the starting point both carries' tests build on.
-const freshLiveRoundWithGame = async (journal?: EventJournal) => {
-  const ctx = setup(journal);
+// live but unscored, the starting point both carries' (and the repair-on-replay suite's) tests
+// build on.
+const freshLiveRoundWithGame = async (journal?: EventJournal, store?: RoundStore) => {
+  const ctx = setup(journal, store);
   const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
   const bo = await ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2 });
   const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
@@ -233,5 +234,97 @@ describe("finalizeRound — carry 2: head-seq conditional append", () => {
     // it took to give up.
     const fullLog = await inner.read(round.host.roundId, 0);
     expect(fullLog.some((event) => event.kind === "round-finalized")).toBe(false);
+  });
+});
+
+// A RoundStore decorator whose putArchive throws `failCount` times before delegating —
+// reproduces the exact M9 live defect (finalizeRound.ts's own doc comment): round-finalized
+// lands in the journal (append happens BEFORE putArchive in the success path), then putArchive
+// throws, so the round is left status "final" with no archive row. Mirrors
+// crewSlice.test.ts's createFlakyCrewStore/courseSlice.test.ts's createFlakyCourseStore's own
+// local-decorator idiom (single-test failure injection, not a reusable product-surface fake).
+interface WedgingRoundStore extends RoundStore {
+  readonly putArchiveAttempts: () => number;
+}
+const createWedgingRoundStore = (inner: RoundStore, failCount: number): WedgingRoundStore => {
+  let attempts = 0;
+  return {
+    putArchiveAttempts: () => attempts,
+    createRound: inner.createRound,
+    findByJoinCode: inner.findByJoinCode,
+    getArchive: inner.getArchive,
+    putArchive: async (archive) => {
+      attempts += 1;
+      if (attempts <= failCount) throw new Error(`synthetic putArchive failure #${attempts}`);
+      return inner.putArchive(archive);
+    },
+  };
+};
+
+describe("finalizeRound — repair-on-replay (M9 hardening)", () => {
+  it("a finalize whose archive write throws leaves round-finalized appended but the archive missing; a retry heals it without a duplicate event", async () => {
+    const wedging = createWedgingRoundStore(createInMemoryRoundStore(), 1);
+    const round = await freshLiveRoundWithGame(undefined, wedging);
+    const annPhone = createClientOps("ann-phone");
+    const boPhone = createClientOps("bo-phone");
+
+    for (let hole = 1; hole <= 9; hole += 1) {
+      await round.record(round.hostClaims, { golferId: round.host.golferId, hole, result: toResult(4), ...annPhone() });
+      await round.record(round.boClaims, { golferId: round.bo.golferId, hole, result: toResult(4), ...boPhone() });
+    }
+
+    // The first finalize appends round-finalized, then hits the synthetic putArchive failure —
+    // it must propagate, not be swallowed.
+    await expect(round.finalize(round.hostClaims)).rejects.toThrow(/synthetic putArchive failure #1/);
+
+    const afterFailedFinalize = await round.events(round.host.roundId, 0);
+    const finalizedEvents = afterFailedFinalize.events.filter((event) => event.kind === "round-finalized");
+    expect(finalizedEvents).toHaveLength(1); // round-finalized DID land — the round is wedged, not live
+    expect(reduceRound(afterFailedFinalize.events).status).toBe("final");
+    expect(await wedging.getArchive(round.host.roundId)).toBeUndefined(); // ...but no archive was ever written
+
+    // A retry hits the idempotent branch, notices the archive is missing, and heals it.
+    const healed = await round.finalize(round.hostClaims);
+    expect(healed.results).toHaveLength(1);
+    expect(wedging.putArchiveAttempts()).toBe(2); // the failing first attempt + the healing retry
+
+    const archived = await wedging.getArchive(round.host.roundId);
+    expect(archived).toBeDefined();
+    expect(archived!.results).toEqual(healed.results);
+    expect(archived!.handicapping).toEqual(healed.handicapping);
+
+    // No duplicate round-finalized — the repair never touches the journal, only the store.
+    const afterHeal = await round.events(round.host.roundId, 0);
+    expect(afterHeal.events.filter((event) => event.kind === "round-finalized")).toHaveLength(1);
+    expect(afterHeal.events).toEqual(afterFailedFinalize.events);
+  });
+
+  it("a finalize whose archive write succeeds on the first try never re-reads or re-writes the archive on a later idempotent call", async () => {
+    const inner = createInMemoryRoundStore();
+    let putCount = 0;
+    const countingStore: RoundStore = {
+      createRound: inner.createRound,
+      findByJoinCode: inner.findByJoinCode,
+      getArchive: inner.getArchive,
+      putArchive: async (archive) => {
+        putCount += 1;
+        return inner.putArchive(archive);
+      },
+    };
+    const round = await freshLiveRoundWithGame(undefined, countingStore);
+    const annPhone = createClientOps("ann-phone");
+    const boPhone = createClientOps("bo-phone");
+
+    for (let hole = 1; hole <= 9; hole += 1) {
+      await round.record(round.hostClaims, { golferId: round.host.golferId, hole, result: toResult(4), ...annPhone() });
+      await round.record(round.boClaims, { golferId: round.bo.golferId, hole, result: toResult(4), ...boPhone() });
+    }
+
+    const first = await round.finalize(round.hostClaims);
+    expect(putCount).toBe(1);
+
+    const second = await round.finalize(round.hostClaims);
+    expect(second).toEqual(first);
+    expect(putCount).toBe(1); // the healthy idempotent path finds the archive and never re-writes it
   });
 });

@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { addMember, crewId, fixtureLinks, golferId } from "@swng/domain";
 import type { ParticipantClaims, TokenIssuer } from "../ports/tokenIssuer.js";
-import { createCapturingBroadcast, createFixedClock, createInMemoryCrewStore, createInMemoryGolferStore, createInMemoryJournal, createInMemoryRoundStore, createSequentialIds } from "../testing/fakes.js";
+import {
+  createCapturingBroadcast,
+  createFixedClock,
+  createInMemoryCrewStore,
+  createInMemoryGolferStore,
+  createInMemoryJournal,
+  createInMemoryRoundStore,
+  createSequentialIds,
+  putAndBindGolfer,
+} from "../testing/fakes.js";
 import { addParticipant } from "./addParticipant.js";
 import { finalizeRound } from "./finalizeRound.js";
 import { startRound } from "./startRound.js";
@@ -69,8 +78,8 @@ describe("addParticipant", () => {
     const ctx = setup();
     const annId = golferId("ann-account");
     const boId = golferId("bo-account");
-    await ctx.golferStore.claim(annId, "sub-ann", "Ann");
-    await ctx.golferStore.claim(boId, "sub-bo", "Bo");
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, boId, "sub-bo", "Bo");
     const crew = addMember(
       addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: annId, name: "Ann", role: "organizer" }),
       { golferId: boId, name: "Bo", role: "member" },
@@ -92,7 +101,7 @@ describe("addParticipant", () => {
     const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
     const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
     const claimed = golferId("claimed-1");
-    await ctx.golferStore.claim(claimed, "sub-someone", "Someone");
+    await putAndBindGolfer(ctx.golferStore, claimed, "sub-someone", "Someone");
 
     await expect(ctx.addPlayer(hostClaims, { name: "X", tee: "white", courseHandicap: 2, golferId: claimed })).rejects.toMatchObject({
       code: "golfer-claimed",

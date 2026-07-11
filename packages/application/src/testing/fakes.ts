@@ -80,6 +80,7 @@ export const createInMemoryRoundStore = (): RoundStore => {
     putArchive: async (archive) => {
       archiveByRoundId.set(archive.roundId, archive);
     },
+    getArchive: async (roundId) => archiveByRoundId.get(roundId),
   };
 };
 
@@ -136,6 +137,12 @@ export const createInMemoryGolferStore = (): GolferStore => {
       if (!existing || existing.revision !== expectedRevision) {
         throw new ApplicationError("golfer-conflict", `golfer ${golfer.id} revision mismatch (expected ${expectedRevision})`);
       }
+      // M9 hardening: refuse a replace that would silently clear a currently-bound sub —
+      // mirrors createDynamoGolferStore's own guard (golferStore.ts's port doc:
+      // "sub-drop-forbidden").
+      if (existing.sub !== undefined && sub === undefined) {
+        throw new ApplicationError("sub-drop-forbidden", `put on golfer ${golfer.id} would drop its bound sub`);
+      }
       byId.set(golfer.id, { golfer: plain, sub, revision: existing.revision + 1 });
     },
     get: async (golferId) => {
@@ -148,19 +155,34 @@ export const createInMemoryGolferStore = (): GolferStore => {
       }
       return undefined;
     },
-    // Mirrors the port doc's exact invariant (golferStore.ts): conditional on no EXISTING
-    // sub binding on this golferId, regardless of whether the item itself pre-exists —
-    // name/handicap only seed a fresh item; an existing unclaimed item keeps its own.
-    claim: async (golferId, sub, name) => {
+    // Mirrors createDynamoGolferStore's TransactWriteItems bindSub in EFFECT (golferStore.ts's
+    // port doc): this fake is single-threaded so there's no real race to arbitrate, but the two
+    // invariants enforced are the SAME ones the real transaction's two conditions enforce — the
+    // sub isn't already bound to a DIFFERENT golferId, and this golferId isn't already bound to
+    // a (necessarily different, since sub is a fresh param here) sub. Requires the row to
+    // already exist, same as the real adapter's attribute_exists(pk) condition — bindSub never
+    // creates one.
+    bindSub: async (golferId, sub) => {
       const existing = byId.get(golferId);
-      if (existing?.sub !== undefined) throw new ApplicationError("golfer-already-claimed", `golfer ${golferId} already claimed`);
-      if (existing) {
-        byId.set(golferId, { golfer: existing.golfer, sub, revision: existing.revision + 1 });
-        return;
+      if (!existing) throw new Error(`bindSub: golfer ${golferId} has no row yet — put it first`);
+      const boundElsewhere = [...byId.entries()].some(([id, entry]) => id !== golferId && entry.sub === sub);
+      if (boundElsewhere || existing.sub !== undefined) {
+        throw new ApplicationError("golfer-already-claimed", `golfer ${golferId} could not be bound to the given sub`);
       }
-      byId.set(golferId, { golfer: { id: golferId, name, handicap: {} }, sub, revision: 1 });
+      byId.set(golferId, { golfer: existing.golfer, sub, revision: existing.revision + 1 });
     },
   };
+};
+
+// Test convenience: seeds a FRESH, claimed golfer row in one call — `put`s it unclaimed, then
+// `bindSub`s it. Exists because GolferStore.bindSub (M9 hardening) no longer creates a row
+// itself the way the old single-call `claim` did (golferStore.ts's port doc), so every test
+// across this package that used to seed a claimed golfer with one `claim(id, sub, name)` call
+// needs the same two-step dance — collapsed back to one call here rather than copy-pasted at
+// every call site (conventions §0: three-plus call sites is exactly the extraction trigger).
+export const putAndBindGolfer = async (store: GolferStore, id: GolferId, sub: string, name: string): Promise<void> => {
+  await store.put({ id, name, handicap: {} }, undefined);
+  await store.bindSub(id, sub);
 };
 
 // CrewStore's real adapter (M8 Task 3) lives on the `core` table plus a join-code GSI and a

@@ -1,5 +1,5 @@
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import type { RoundArchive, RoundId } from "@swng/domain";
 import type { RoundStore } from "@swng/application";
 import { archiveSk, metaSk, roundPk } from "./keys.js";
@@ -48,6 +48,18 @@ export const createDynamoRoundStore = (config: { client: DynamoDBDocumentClient;
           Item: { pk: roundPk(archive.roundId), sk: archiveSk, archive },
         }),
       );
+    },
+
+    getArchive: async (roundId: RoundId) => {
+      // M9 hardening: backs finalizeRound.ts's repair-on-replay check — ConsistentRead so a
+      // retry landing moments after this SAME process's own putArchive can never miss what it
+      // just wrote (same rationale as every other base-table read in this adapter family that
+      // feeds a caller's next decision, e.g. get()'s ConsistentRead elsewhere).
+      const result = await client.send(
+        new GetCommand({ TableName: tableName, Key: { pk: roundPk(roundId), sk: archiveSk }, ConsistentRead: true }),
+      );
+      const item = result.Item as { archive: RoundArchive } | undefined;
+      return item?.archive;
     },
   };
 };

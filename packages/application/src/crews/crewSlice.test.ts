@@ -5,7 +5,7 @@ import { ApplicationError } from "../errors.js";
 import type { CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
-import { createInMemoryCrewStore, createInMemoryGolferStore, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
+import { createInMemoryCrewStore, createInMemoryGolferStore, createInMemoryProjectionStore, createSequentialIds, putAndBindGolfer } from "../testing/fakes.js";
 import { addCrewMember } from "./addCrewMember.js";
 import { createCrew } from "./createCrew.js";
 import { getCrew } from "./getCrew.js";
@@ -40,10 +40,7 @@ const setup = (
 // a real bound row before it can act as a crew member.
 const seedAccountGolfer = async (golferStore: GolferStore, sub: string, name: string): Promise<GolferId> => {
   const id = golferId(`golfer-${sub}`);
-  await golferStore.put({ id, name, handicap: {} }, undefined);
-  // put() alone doesn't bind a sub (mirrors the port's own create-vs-claim split) — claim
-  // does, and this is a fresh row so it always succeeds unconditionally.
-  await golferStore.claim(id, sub, name);
+  await putAndBindGolfer(golferStore, id, sub, name);
   return id;
 };
 
@@ -62,6 +59,51 @@ describe("createCrew", () => {
   it("a caller with no account golfer yet is rejected — golfer-required (wire honesty, not a flow)", async () => {
     const ctx = setup();
     await expect(ctx.create({ sub: "sub-nobody" }, { name: "Sunday Skins" })).rejects.toMatchObject({ code: "golfer-required" });
+  });
+});
+
+// M9 hardening: the join-code mint loop (crews/createCrew.ts) skips codes an existing crew
+// already holds instead of minting once and living with a permanent collision.
+describe("createCrew — join-code collisions (M9 hardening)", () => {
+  it("skips codes already in use, minting the first free one within the attempt budget", async () => {
+    const crewStore = createInMemoryCrewStore();
+    const golferStore = createInMemoryGolferStore();
+    await seedAccountGolfer(golferStore, "sub-ann", "Ann");
+
+    // Predict the first 5 codes createSequentialIds("c") would mint (a SEPARATE instance with
+    // the SAME prefix — joinCodeFromCounter is a pure function of (prefix, counter), so it
+    // reproduces the identical sequence a fresh "c"-prefixed generator will produce below),
+    // and pre-seed the crew store with filler crews AT the first 4 of them — forcing the mint
+    // loop to skip all 4 before landing on the 5th, uncollided one.
+    const predictor = createSequentialIds("c");
+    const predictedCodes = Array.from({ length: 5 }, () => predictor.newJoinCode());
+    for (const [index, code] of predictedCodes.slice(0, 4).entries()) {
+      const filler: Crew = { id: crewId(`filler-${index}`), name: `Filler ${index}`, members: [] };
+      await crewStore.put(filler, code, undefined);
+    }
+
+    const ids = createSequentialIds("c"); // fresh instance, same prefix -> identical sequence
+    const create = createCrew({ crewStore, golferStore, ids });
+
+    const created = await create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    expect(created.crew.joinCode).toBe(predictedCodes[4]);
+  });
+
+  it("exhausting every attempt (5 collisions running) throws join-code-exhausted", async () => {
+    const crewStore = createInMemoryCrewStore();
+    const golferStore = createInMemoryGolferStore();
+    await seedAccountGolfer(golferStore, "sub-ann", "Ann");
+
+    const predictor = createSequentialIds("c");
+    for (let index = 0; index < 5; index += 1) {
+      const filler: Crew = { id: crewId(`filler-${index}`), name: `Filler ${index}`, members: [] };
+      await crewStore.put(filler, predictor.newJoinCode(), undefined);
+    }
+
+    const ids = createSequentialIds("c");
+    const create = createCrew({ crewStore, golferStore, ids });
+
+    await expect(create({ sub: "sub-ann" }, { name: "Sunday Skins" })).rejects.toMatchObject({ code: "join-code-exhausted" });
   });
 });
 

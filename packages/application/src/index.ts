@@ -70,5 +70,6 @@ export {
   createInMemoryRoundStore,
   createNullLogger,
   createSequentialIds,
+  putAndBindGolfer,
 } from "./testing/fakes.js";
 export type { CapturingBroadcast } from "./testing/fakes.js";

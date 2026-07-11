@@ -148,3 +148,23 @@ describe("toHttpError — M8 crew DomainErrors", () => {
     expect(JSON.parse(result.body)).toEqual({ code: "invalid-member-name", message: 'member name must be at least 1 character(s): "   "' });
   });
 });
+
+// M9 hardening (application/src/errors.ts): both deliberately mapped to a genuine-bug 500 —
+// a programmer-error guard, never a request the client sent wrong. Constructed exactly as
+// their real throw sites do (createDynamoGolferStore's put/bindSub; crews/createCrew.ts's
+// mint loop), not invented strings (M6 lesson).
+describe("toHttpError — M9 hardening ApplicationErrors (deliberate 500s)", () => {
+  const logger = createNullLogger();
+
+  it("maps sub-drop-forbidden to 500", () => {
+    const result = toHttpError(new ApplicationError("sub-drop-forbidden", "put on golfer g-1 would drop its bound sub"), logger);
+    expect(result.statusCode).toBe(500);
+    expect(JSON.parse(result.body)).toEqual({ code: "sub-drop-forbidden", message: "put on golfer g-1 would drop its bound sub" });
+  });
+
+  it("maps join-code-exhausted to 500", () => {
+    const result = toHttpError(new ApplicationError("join-code-exhausted", "no unique crew join code found after 5 attempts"), logger);
+    expect(result.statusCode).toBe(500);
+    expect(JSON.parse(result.body)).toEqual({ code: "join-code-exhausted", message: "no unique crew join code found after 5 attempts" });
+  });
+});

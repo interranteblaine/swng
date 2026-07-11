@@ -64,6 +64,26 @@ describe("createDynamoRoundStore", () => {
     await expect(store.putArchive(resettled)).resolves.toBeUndefined();
   });
 
+  // M9 hardening: getArchive backs finalizeRound.ts's repair-on-replay check — a retry must
+  // be able to tell "never written" apart from "written", with no eventual-consistency gap
+  // against this SAME process's own just-completed putArchive.
+  describe("getArchive", () => {
+    it("returns undefined for a round with no archive yet", async () => {
+      const store = createDynamoRoundStore({ client: local.client, tableName: local.roundsTable });
+      expect(await store.getArchive(roundId(randomUUID()))).toBeUndefined();
+    });
+
+    it("round-trips exactly what putArchive wrote, immediately (ConsistentRead)", async () => {
+      const store = createDynamoRoundStore({ client: local.client, tableName: local.roundsTable });
+      const id = roundId(randomUUID());
+      const archive = minimalArchive(id);
+
+      await store.putArchive(archive);
+
+      expect(await store.getArchive(id)).toEqual(archive);
+    });
+  });
+
   // The M8 Task 4 live defect's contract-level pin: `minimalArchive` above is a HAND-BUILT
   // fixture whose optional crewId key is simply absent — which is exactly how the explicit-
   // undefined bug slipped past this suite. settleRound used to emit `crewId: undefined` as a

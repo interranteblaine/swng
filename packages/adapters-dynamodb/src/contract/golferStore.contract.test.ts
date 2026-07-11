@@ -1,16 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { Golfer } from "@swng/domain";
 import { courseId, golferId } from "@swng/domain";
 import { createDynamoGolferStore } from "../createDynamoGolferStore.js";
+import { golferPk, golferSk } from "../keys.js";
 import type { LocalDynamo } from "../testing/local.js";
 import { startLocalDynamo } from "../testing/local.js";
 
-// Contract suite (M7 Task 3), same idiom as courseStore.contract.test.ts: proves
+// Contract suite (M7 Task 3, hardened M9), same idiom as courseStore.contract.test.ts: proves
 // createDynamoGolferStore against a real DynamoDB Local against the SAME spec the in-memory
 // fake (application/testing/fakes.ts's createInMemoryGolferStore) satisfies — put's
-// expectedRevision contract, getBySub's gsi2 lookup, and claim's atomic create-or-bind. Not
-// part of `pnpm validate`; run via `pnpm test:contract`.
+// expectedRevision contract (and, M9, its sub-drop-forbidden guard), getBySub's SUB# pointer
+// lookup, and bindSub's atomic bind. Not part of `pnpm validate`; run via `pnpm test:contract`.
 
 let local: LocalDynamo;
 
@@ -42,7 +44,7 @@ describe("createDynamoGolferStore", () => {
       expect(await store.get(golfer.id)).toEqual({ golfer, sub: undefined, revision: 1 });
     });
 
-    it("put (create, claimed) + get + getBySub round-trip", async () => {
+    it("put (create, claimed) + get round-trip — a sub set directly on create is honored on the golfer row (no bindSub needed for THIS narrow round-trip)", async () => {
       const store = newStore();
       const golfer = makeGolfer({ homeCourseId: courseId(randomUUID()) });
       const sub = `sub-${randomUUID()}`;
@@ -50,7 +52,6 @@ describe("createDynamoGolferStore", () => {
       await store.put({ ...golfer, sub }, undefined);
 
       expect(await store.get(golfer.id)).toEqual({ golfer, sub, revision: 1 });
-      expect(await store.getBySub(sub)).toEqual({ golfer, sub, revision: 1 });
     });
 
     it("get on an unknown golferId returns undefined", async () => {
@@ -85,86 +86,130 @@ describe("createDynamoGolferStore", () => {
       expect(await store.get(golfer.id)).toEqual({ golfer: renamed, sub: undefined, revision: 2 });
     });
 
-    it("a replace can drop a previously-claimed sub (put's sub is a plain overwrite, not conditional)", async () => {
+    // M9 hardening: put now REFUSES a replace that would silently clear a currently-bound sub
+    // — the old behavior (a plain overwrite, sub included or not) let a caller that forgot to
+    // carry `found.sub` forward silently unbind a golfer. Every real call site
+    // (updateMyGolfer.ts) always re-passes its own found.sub, so this only ever fires on a bug.
+    it("a replace that drops a previously-bound sub throws sub-drop-forbidden, leaving the stored row untouched", async () => {
       const store = newStore();
       const golfer = makeGolfer();
       const sub = `sub-${randomUUID()}`;
       await store.put({ ...golfer, sub }, undefined);
 
-      await store.put(golfer, 1); // no sub on this call
+      await expect(store.put(golfer, 1)).rejects.toMatchObject({ code: "sub-drop-forbidden" });
 
-      expect(await store.get(golfer.id)).toEqual({ golfer, sub: undefined, revision: 2 });
-      expect(await store.getBySub(sub)).toBeUndefined();
+      expect(await store.get(golfer.id)).toEqual({ golfer, sub, revision: 1 });
+    });
+
+    // A replace that re-passes the SAME sub it already has (the real call-site shape,
+    // updateMyGolfer.ts) is unaffected by the M9 guard above — it's not a drop.
+    it("a replace that re-passes its own already-bound sub is unaffected by the drop guard", async () => {
+      const store = newStore();
+      const golfer = makeGolfer();
+      const sub = `sub-${randomUUID()}`;
+      await store.put({ ...golfer, sub }, undefined);
+
+      const renamed = { ...golfer, name: "Callum", sub };
+      await store.put(renamed, 1);
+
+      expect(await store.get(golfer.id)).toEqual({ golfer: { ...golfer, name: "Callum" }, sub, revision: 2 });
     });
   });
 
-  describe("claim", () => {
-    it("claiming a golferId with no existing item creates a fresh golfer (name + empty handicap from the claim) bound to sub", async () => {
+  describe("getBySub — resolves via the SUB# pointer item alone (M9 hardening)", () => {
+    it("resolves a sub bound by bindSub even with NO gsi2 projection present — pins gsi2 is a dead read path", async () => {
       const store = newStore();
-      const id = golferId(randomUUID());
+      const golfer = makeGolfer();
+      await store.put(golfer, undefined);
       const sub = `sub-${randomUUID()}`;
+      await store.bindSub(golfer.id, sub);
 
-      await store.claim(id, sub, "Dee");
+      // bindSub still WRITES gsi2pk/gsi2sk (rollback safety, keys.ts's golferSubPk doc
+      // comment) — strip them directly to prove getBySub never actually depends on them.
+      await local.client.send(
+        new UpdateCommand({
+          TableName: local.coreTable,
+          Key: { pk: golferPk(golfer.id), sk: golferSk },
+          UpdateExpression: "REMOVE gsi2pk, gsi2sk",
+        }),
+      );
 
-      expect(await store.get(id)).toEqual({ golfer: { id, name: "Dee", handicap: {} }, sub, revision: 1 });
-      expect(await store.getBySub(sub)).toEqual({ golfer: { id, name: "Dee", handicap: {} }, sub, revision: 1 });
+      expect(await store.getBySub(sub)).toEqual({ golfer, sub, revision: 2 });
     });
+  });
 
-    it("claiming an existing unclaimed ghost keeps its own name/handicap — only sub (and revision) change", async () => {
+  describe("bindSub", () => {
+    it("binds sub to an existing unclaimed row, bumping revision, resolvable via getBySub", async () => {
       const store = newStore();
       const golfer = makeGolfer({ name: "Ghost Golfer", handicap: { declared: 18 } });
       await store.put(golfer, undefined);
       const sub = `sub-${randomUUID()}`;
 
-      await store.claim(golfer.id, sub, "Ignored Name");
+      await store.bindSub(golfer.id, sub);
 
       expect(await store.get(golfer.id)).toEqual({ golfer, sub, revision: 2 });
+      expect(await store.getBySub(sub)).toEqual({ golfer, sub, revision: 2 });
     });
 
-    it("a second claim on an already-claimed golferId throws golfer-already-claimed, first binding untouched", async () => {
+    it("a second bind on an already-claimed golferId throws golfer-already-claimed, the first binding untouched", async () => {
       const store = newStore();
-      const id = golferId(randomUUID());
+      const golfer = makeGolfer();
+      await store.put(golfer, undefined);
       const subA = `sub-a-${randomUUID()}`;
       const subB = `sub-b-${randomUUID()}`;
-      await store.claim(id, subA, "Ann");
+      await store.bindSub(golfer.id, subA);
 
-      await expect(store.claim(id, subB, "Bo")).rejects.toMatchObject({ code: "golfer-already-claimed" });
+      await expect(store.bindSub(golfer.id, subB)).rejects.toMatchObject({ code: "golfer-already-claimed" });
 
-      expect((await store.get(id))?.sub).toBe(subA);
+      expect((await store.get(golfer.id))?.sub).toBe(subA);
       expect(await store.getBySub(subB)).toBeUndefined();
     });
 
-    // Mirrors journal.contract.test.ts's N-concurrent-append construction: every call is
-    // constructed and fired (one store instance each) before either promise is awaited —
-    // genuine concurrency, not sequential turns wearing a Promise.all costume. The invariant
-    // under test is that DynamoDB's `attribute_not_exists(sub)` condition is what actually
-    // arbitrates the race, not that two in-process calls happen to interleave nicely.
-    it("two concurrent claims of one ghost — exactly one wins", async () => {
+    it("binding the SAME sub to a second golferId throws golfer-already-claimed (sub-uniqueness — the pointer item's own condition)", async () => {
       const store = newStore();
-      const ghost = makeGolfer({ name: "Ghost Golfer" });
-      await store.put(ghost, undefined);
+      const golferA = makeGolfer({ name: "Ann" });
+      const golferB = makeGolfer({ name: "Bo" });
+      await store.put(golferA, undefined);
+      await store.put(golferB, undefined);
+      const sub = `sub-${randomUUID()}`;
+      await store.bindSub(golferA.id, sub);
 
-      const claimants = [
-        { sub: `sub-a-${randomUUID()}`, name: "Cal" },
-        { sub: `sub-b-${randomUUID()}`, name: "Dee" },
-      ] as const;
+      await expect(store.bindSub(golferB.id, sub)).rejects.toMatchObject({ code: "golfer-already-claimed" });
 
-      const results = await Promise.allSettled(claimants.map((c) => newStore().claim(ghost.id, c.sub, c.name)));
+      expect((await store.get(golferB.id))?.sub).toBeUndefined();
+      expect(await store.getBySub(sub)).toEqual({ golfer: golferA, sub, revision: 2 });
+    });
+
+    // Mirrors the M7 two-concurrent-claims-of-one-ghost race construction (real, SEPARATE
+    // store instances, every call constructed and fired before either promise is awaited —
+    // genuine concurrency, not sequential turns wearing a Promise.all costume) but targets the
+    // invariant THIS task actually fixes: sub-uniqueness via the SUB# pointer item's own
+    // attribute_not_exists(pk) condition, not golferId-uniqueness (which the row's own
+    // attribute_not_exists(sub) condition already covered before M9). Two DIFFERENT,
+    // already-existing golfer rows race to bind the SAME sub — exactly one must win, and the
+    // pointer + both rows must stay consistent no matter which one does.
+    it("two concurrent bindSub calls for ONE sub (different golferIds) — exactly one wins, pointer + rows stay consistent", async () => {
+      const seedStore = newStore();
+      const golferA = makeGolfer({ name: "Ann" });
+      const golferB = makeGolfer({ name: "Bo" });
+      await seedStore.put(golferA, undefined);
+      await seedStore.put(golferB, undefined);
+      const sub = `sub-${randomUUID()}`;
+
+      const results = await Promise.allSettled([newStore().bindSub(golferA.id, sub), newStore().bindSub(golferB.id, sub)]);
 
       const winnerIndex = results.findIndex((r) => r.status === "fulfilled");
       const loserIndex = winnerIndex === 0 ? 1 : 0;
       expect(winnerIndex).toBeGreaterThanOrEqual(0);
       expect(results[loserIndex]).toMatchObject({ status: "rejected", reason: expect.objectContaining({ code: "golfer-already-claimed" }) });
 
-      const winner = claimants[winnerIndex]!;
-      const loser = claimants[loserIndex]!;
+      const golfers = [golferA, golferB] as const;
+      const winner = golfers[winnerIndex]!;
+      const loser = golfers[loserIndex]!;
 
-      // The item existed and was unclaimed before the race — name/handicap stay the ghost's
-      // own regardless of who won (the create-branch defaults never apply here).
-      const found = await store.get(ghost.id);
-      expect(found).toEqual({ golfer: ghost, sub: winner.sub, revision: 2 });
-      expect(await store.getBySub(winner.sub)).toEqual({ golfer: ghost, sub: winner.sub, revision: 2 });
-      expect(await store.getBySub(loser.sub)).toBeUndefined();
+      expect((await seedStore.get(winner.id))?.sub).toBe(sub);
+      expect((await seedStore.get(loser.id))?.sub).toBeUndefined();
+      expect(await seedStore.getBySub(sub)).toEqual({ golfer: winner, sub, revision: 2 });
     });
   });
 });

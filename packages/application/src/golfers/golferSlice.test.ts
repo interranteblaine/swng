@@ -157,8 +157,8 @@ describe("claimGolfer — collision arm 2: sub already bound to another golfer",
 
     await expect(ctx.claim({ sub: "sub-1" }, { golferId: otherGhost })).rejects.toMatchObject({ code: "golfer-already-claimed" });
 
-    // The precheck short-circuited before ever calling golferStore.claim — the target
-    // golferId was never created, and sub-1's own binding is unchanged.
+    // The precheck short-circuited before ever calling put/bindSub — the target golferId was
+    // never created, and sub-1's own binding is unchanged.
     expect(await ctx.golferStore.get(otherGhost)).toBeUndefined();
     const stillMine = await ctx.golferStore.getBySub("sub-1");
     expect(stillMine?.golfer.id).toBe(alreadyMine);

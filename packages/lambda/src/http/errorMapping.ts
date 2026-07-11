@@ -55,6 +55,13 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "unknown-crew": 404,
   "not-a-member": 403,
   "golfer-required": 400,
+  // M9 hardening (application/src/errors.ts): both deliberately mapped to a genuine-bug 500,
+  // not a client-shaped 4xx — every real call site is written so neither should ever actually
+  // throw (put always re-passes found.sub; the join-code mint loop only exhausts on a broken
+  // generator), so a client can't "fix" the request that triggered one. Still has to be an
+  // explicit entry: this Record is exhaustive over ApplicationErrorCode by construction.
+  "sub-drop-forbidden": 500,
+  "join-code-exhausted": 500,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`

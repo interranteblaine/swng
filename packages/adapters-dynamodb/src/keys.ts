@@ -71,6 +71,21 @@ export const golferIdFromPk = (pk: string): GolferId => golferId(pk.slice(GOLFER
 export const golferGsi2pk = (sub: string): string => `SUB#${sub}`;
 export const golferGsi2sk = "GOLFER";
 
+// bindSub's atomic SUB#<sub> pointer item (M9 hardening) — a base-table item (NOT a GSI
+// attribute; a different namespace than golferGsi2pk's own "SUB#<sub>" gsi2pk VALUE above,
+// since pk and gsi2pk are different attributes entirely) that replaces gsi2 as getBySub's
+// READ path. gsi2 is only ever eventually consistent — no DynamoDB GSI supports
+// ConsistentRead — which is exactly the "known duplicate-golfer race window" this closes: two
+// concurrent PUT /me calls for the SAME brand-new sub could each miss the other's
+// not-yet-propagated gsi2 write and each create its OWN golfer row. This pointer item, written
+// transactionally alongside the golfer row's own `sub` attribute (createDynamoGolferStore's
+// bindSub), is a real base-table key — ConsistentRead-able and the actual arbiter of a
+// concurrent bind race via its own attribute_not_exists(pk) condition. gsi2pk/gsi2sk are still
+// WRITTEN by bindSub for rollback safety, but nothing reads them anymore.
+const GOLFER_SUB_PK_PREFIX = "SUB#";
+export const golferSubPk = (sub: string): string => `${GOLFER_SUB_PK_PREFIX}${sub}`;
+export const golferSubSk = "GOLFER";
+
 // The `projections` table's key vocabulary (M7 Task 3; architecture.md §3): one partition per
 // golfer (golferPk — shared id format with the core table's golfer item, but a different
 // table), holding one HISTORY# line per finalized round the golfer played plus one INDEX

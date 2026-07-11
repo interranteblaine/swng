@@ -1,11 +1,11 @@
-import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
+import { ConditionalCheckFailedException, TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import type { Golfer, GolferId } from "@swng/domain";
-import { courseId } from "@swng/domain";
+import { courseId, golferId as toGolferId } from "@swng/domain";
 import type { GolferStore } from "@swng/application";
 import { ApplicationError } from "@swng/application";
-import { golferGsi2pk, golferGsi2sk, golferIdFromPk, golferPk, golferSk } from "./keys.js";
+import { golferGsi2pk, golferGsi2sk, golferIdFromPk, golferPk, golferSk, golferSubPk, golferSubSk } from "./keys.js";
 
 // A raw golfer item's shape on the core table (keys.ts's golferPk/golferSk): Golfer's nested
 // `handicap: { declared?, official? }` is flattened to top-level `declared`/`official`
@@ -27,6 +27,14 @@ interface GolferItem {
   readonly gsi2sk?: string;
 }
 
+// The SUB#<sub> pointer item bindSub maintains (keys.ts's golferSubPk doc comment) — carries
+// only enough to resolve back to the golfer row it points at.
+interface GolferSubPointerItem {
+  readonly pk: string;
+  readonly sk: string;
+  readonly golferId: string;
+}
+
 const golferOf = (item: GolferItem): Golfer => ({
   id: golferIdFromPk(item.pk),
   name: item.name,
@@ -40,8 +48,28 @@ const golferOf = (item: GolferItem): Golfer => ({
 export const createDynamoGolferStore = (config: { client: DynamoDBDocumentClient; tableName: string }): GolferStore => {
   const { client, tableName } = config;
 
+  const getGolferItem = async (id: GolferId): Promise<GolferItem | undefined> => {
+    const result = await client.send(new GetCommand({ TableName: tableName, Key: { pk: golferPk(id), sk: golferSk }, ConsistentRead: true }));
+    return result.Item as GolferItem | undefined;
+  };
+
   return {
     put: async (golfer, expectedRevision) => {
+      // M9 hardening: refuse a REPLACE that would silently clear a currently-bound sub — a
+      // plain read-then-check (not folded into the write's own ConditionExpression) because
+      // this is a programmer-error NET, not a concurrency invariant: every real call site
+      // (updateMyGolfer.ts) already re-passes its own found.sub on every replace, and the
+      // actual concurrency-critical invariant (no two subs racing for one binding) is
+      // bindSub's transaction, below — not put's job at all. A stale read here can only ever
+      // make this check MISS a drop that a concurrent write introduced, never falsely flag
+      // one, so a TOCTOU gap is an acceptable tradeoff for a bug-catcher, not a real race.
+      if (expectedRevision !== undefined && golfer.sub === undefined) {
+        const current = await getGolferItem(golfer.id);
+        if (current?.sub !== undefined) {
+          throw new ApplicationError("sub-drop-forbidden", `put on golfer ${golfer.id} would drop its bound sub`);
+        }
+      }
+
       // Same revision-conditional CRUD as courseStore.put — a create always lands revision 1;
       // a replace's condition checks the caller's expected value but writes one past it.
       const revision = expectedRevision === undefined ? 1 : expectedRevision + 1;
@@ -55,9 +83,9 @@ export const createDynamoGolferStore = (config: { client: DynamoDBDocumentClient
         ...(golfer.handicap.official !== undefined ? { official: golfer.handicap.official } : {}),
         // put's `sub` is a plain overwrite, not conditional — it mirrors the caller's OWN
         // golfer object exactly (matches the in-memory fake's `const { sub, ...plain } =
-        // golfer` destructure), unlike `claim` below, whose whole job is enforcing atomicity
-        // on the sub binding. A caller that always re-passes `found.sub` on every put (every
-        // real call site does — updateMyGolfer.ts) never loses a claim this way.
+        // golfer` destructure). The guard above is what stops a caller from actually DROPPING
+        // an existing sub this way; establishing a NEW binding for real is bindSub's job (its
+        // own doc comment) — no real call site sets `sub` here on create anymore.
         ...(golfer.sub !== undefined ? { sub: golfer.sub, gsi2pk: golferGsi2pk(golfer.sub), gsi2sk: golferGsi2sk } : {}),
       };
       const condition =
@@ -77,77 +105,66 @@ export const createDynamoGolferStore = (config: { client: DynamoDBDocumentClient
     },
 
     get: async (golferId: GolferId) => {
-      const result = await client.send(
-        new GetCommand({
-          TableName: tableName,
-          Key: { pk: golferPk(golferId), sk: golferSk },
-          // Same rationale as courseStore.get: callers (getOrCreateGolfer, updateMyGolfer)
-          // base their next mutation's expectedRevision on this read.
-          ConsistentRead: true,
-        }),
-      );
-      const item = result.Item as GolferItem | undefined;
+      // Same rationale as put/getBySub below: callers (getOrCreateGolfer, updateMyGolfer)
+      // base their next mutation's expectedRevision on this read.
+      const item = await getGolferItem(golferId);
       return item ? { golfer: golferOf(item), sub: item.sub, revision: item.revision } : undefined;
     },
 
+    // M9 hardening: resolves via the base-table SUB#<sub> pointer item bindSub maintains
+    // (ConsistentRead both hops) — gsi2's own sub→golfer projection is no longer read here at
+    // all (keys.ts's golferSubPk doc comment: gsi2 never supports ConsistentRead, which is
+    // exactly the eventually-consistent race this move closes). gsi2pk/gsi2sk are still
+    // WRITTEN by put/bindSub for rollback safety, but nothing reads them anymore.
     getBySub: async (sub: string) => {
-      // gsi2, like gsi1, is eventually consistent — DynamoDB GSIs never support
-      // ConsistentRead (findByJoinCode's same note in createDynamoRoundStore.ts). Accepted
-      // here too: getBySub backs GET /me and claimGolfer's precheck, neither a tight
-      // read-your-writes loop within a single request.
-      const result = await client.send(
-        new QueryCommand({
-          TableName: tableName,
-          IndexName: "gsi2",
-          KeyConditionExpression: "gsi2pk = :gsi2pk AND gsi2sk = :gsi2sk",
-          ExpressionAttributeValues: { ":gsi2pk": golferGsi2pk(sub), ":gsi2sk": golferGsi2sk },
-          Limit: 1,
-        }),
+      const pointer = await client.send(
+        new GetCommand({ TableName: tableName, Key: { pk: golferSubPk(sub), sk: golferSubSk }, ConsistentRead: true }),
       );
-      const item = result.Items?.[0] as GolferItem | undefined;
-      if (!item?.sub) return undefined;
+      const pointerItem = pointer.Item as GolferSubPointerItem | undefined;
+      if (!pointerItem) return undefined;
+
+      const item = await getGolferItem(toGolferId(pointerItem.golferId));
+      if (!item?.sub) return undefined; // defensive: the pointer names a row that's missing or unbound — shouldn't happen, but never fabricate a binding
       return { golfer: golferOf(item), sub: item.sub, revision: item.revision };
     },
 
-    // Atomically creates-or-updates the golfer item, conditional on no EXISTING sub on THIS
-    // golferId — `attribute_not_exists(sub)` is true both when the item doesn't exist at all
-    // and when it exists but is still unclaimed, exactly the two branches the port doc
-    // describes. `if_not_exists` on `revision`/`name` is what makes the two branches land in
-    // ONE UpdateItem: a brand-new item has neither attribute, so they seed from `:zero`+1 and
-    // `:name`; an existing unclaimed item already has both, so `if_not_exists` leaves them
-    // alone (the ghost's own name survives, revision still increments by exactly one).
-    //
-    // No getBySub precheck lives HERE for the "sub already bound to a DIFFERENT golferId"
-    // collision arm — that's the caller's job (claimGolfer.ts already does it, calling this
-    // same store's getBySub before ever reaching claim). This method enforces only the ONE
-    // invariant it's positioned to enforce atomically: no existing binding on THIS golferId.
-    // The condition below is that invariant; a precheck anywhere is advisory UX, never a
-    // substitute for it — which is exactly why the two-concurrent-claims contract test races
-    // real UpdateItem calls instead of trusting in-process interleaving.
-    claim: async (golferId: GolferId, sub: string, name: string) => {
+    // M9 hardening (replaces the old `claim`, which also lazily CREATED the row — bindSub
+    // never does; see golferStore.ts's port doc). ONE transaction writes the SUB#<sub>
+    // pointer item (condition: attribute_not_exists(pk) — no OTHER golferId may already hold
+    // this sub) AND sets `sub` on the golfer row (condition: attribute_exists(pk) — the row
+    // must already exist — AND attribute_not_exists(sub) — this golferId isn't already
+    // claimed). Either condition failing cancels the WHOLE transaction, so the two invariants
+    // (sub-uniqueness, golferId-uniqueness) are enforced atomically together, not as two
+    // separate non-atomic checks.
+    bindSub: async (golferId: GolferId, sub: string) => {
+      const pointerItem: GolferSubPointerItem = { pk: golferSubPk(sub), sk: golferSubSk, golferId };
       try {
         await client.send(
-          new UpdateCommand({
-            TableName: tableName,
-            Key: { pk: golferPk(golferId), sk: golferSk },
-            // Both `sub` and `name` are DynamoDB reserved words (ValidationException without
-            // the alias) — #sub/#name sidestep that; unrelated to the port's own vocabulary.
-            UpdateExpression: "SET #sub = :sub, gsi2pk = :gsi2pk, gsi2sk = :gsi2sk, revision = if_not_exists(revision, :zero) + :one, #name = if_not_exists(#name, :name)",
-            ConditionExpression: "attribute_not_exists(#sub)",
-            ExpressionAttributeNames: { "#sub": "sub", "#name": "name" },
-            ExpressionAttributeValues: {
-              ":sub": sub,
-              ":gsi2pk": golferGsi2pk(sub),
-              ":gsi2sk": golferGsi2sk,
-              ":zero": 0,
-              ":one": 1,
-              ":name": name,
-            },
+          new TransactWriteCommand({
+            TransactItems: [
+              { Put: { TableName: tableName, Item: pointerItem, ConditionExpression: "attribute_not_exists(pk)" } },
+              {
+                Update: {
+                  TableName: tableName,
+                  Key: { pk: golferPk(golferId), sk: golferSk },
+                  UpdateExpression: "SET #sub = :sub, gsi2pk = :gsi2pk, gsi2sk = :gsi2sk, revision = revision + :one",
+                  ConditionExpression: "attribute_exists(pk) AND attribute_not_exists(#sub)",
+                  ExpressionAttributeNames: { "#sub": "sub" },
+                  ExpressionAttributeValues: { ":sub": sub, ":gsi2pk": golferGsi2pk(sub), ":gsi2sk": golferGsi2sk, ":one": 1 },
+                },
+              },
+            ],
           }),
         );
       } catch (error) {
-        if (error instanceof ConditionalCheckFailedException) {
-          throw new ApplicationError("golfer-already-claimed", `golfer ${golferId} already claimed`);
+        if (error instanceof TransactionCanceledException) {
+          // Either item's condition failing means this exact bind cannot proceed — the sub is
+          // already bound elsewhere, OR this golferId is already claimed, OR (a caller bug
+          // this port doc warns against) the row doesn't exist yet. Every real caller treats
+          // this uniformly (claimGolfer.ts rethrows it as-is; getOrCreateGolfer.ts catches it
+          // and re-reads the winner), so there's no need to inspect CancellationReasons to
+          // tell the arms apart.
+          throw new ApplicationError("golfer-already-claimed", `golfer ${golferId} could not be bound to the given sub`);
         }
         throw error;
       }

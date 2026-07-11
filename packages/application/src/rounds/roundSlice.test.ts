@@ -12,6 +12,7 @@ import {
   createInMemoryJournal,
   createInMemoryRoundStore,
   createSequentialIds,
+  putAndBindGolfer,
 } from "../testing/fakes.js";
 import { addGame } from "./addGame.js";
 import { finalizeRound } from "./finalizeRound.js";
@@ -293,7 +294,7 @@ describe("joinRound — supplied golferId (Task 5b)", () => {
     const ctx = setup();
     const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
     const claimed = golferId("claimed-1");
-    await ctx.golferStore.claim(claimed, "sub-1", "Real Person");
+    await putAndBindGolfer(ctx.golferStore, claimed, "sub-1", "Real Person");
 
     await expect(
       ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2, golferId: claimed }),
@@ -347,7 +348,7 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
   it("golferId (as-self): a claimed golfer whose OWN sub matches becomes the host, no fresh id minted", async () => {
     const ctx = setup();
     const annId = golferId("ann-account");
-    await ctx.golferStore.claim(annId, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
 
     const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId }, { sub: "sub-ann" });
 
@@ -360,7 +361,7 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
   it("golferId claimed by a STRANGER (no matching sub, no crew): rejected — golfer-claimed, round never created", async () => {
     const ctx = setup();
     const claimed = golferId("claimed-1");
-    await ctx.golferStore.claim(claimed, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, claimed, "sub-ann", "Ann");
 
     await expect(
       ctx.start({ card: fixtureLinks, host: { name: "Bo", tee: "white", courseHandicap: 8 }, golferId: claimed }, { sub: "sub-stranger" }),
@@ -377,7 +378,7 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
   it("crewId whose caller's golfer is NOT a member is rejected — not-a-member", async () => {
     const ctx = setup();
     const annId = golferId("ann-account");
-    await ctx.golferStore.claim(annId, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
     const crew = addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: golferId("someone-else"), name: "Bo", role: "organizer" });
     await ctx.crewStore.put(crew, "JOINCD", undefined);
 
@@ -389,7 +390,7 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
   it("crewId whose caller's golfer IS a member: round is created and tagged, round-created carries crewId", async () => {
     const ctx = setup();
     const annId = golferId("ann-account");
-    await ctx.golferStore.claim(annId, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
     const crew = addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: annId, name: "Ann", role: "organizer" });
     await ctx.crewStore.put(crew, "JOINCD", undefined);
 
@@ -406,8 +407,8 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
     const ctx = setup();
     const annId = golferId("ann-account");
     const boId = golferId("bo-account");
-    await ctx.golferStore.claim(annId, "sub-ann", "Ann");
-    await ctx.golferStore.claim(boId, "sub-bo", "Bo"); // Bo is claimed by a DIFFERENT sub than the caller
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, boId, "sub-bo", "Bo"); // Bo is claimed by a DIFFERENT sub than the caller
     const crew = addMember(
       addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: annId, name: "Ann", role: "organizer" }),
       { golferId: boId, name: "Bo", role: "member" },
@@ -434,8 +435,8 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
     const ctx = setup();
     const annId = golferId("ann-account");
     const outsiderId = golferId("outsider");
-    await ctx.golferStore.claim(annId, "sub-ann", "Ann");
-    await ctx.golferStore.claim(outsiderId, "sub-outsider", "Outsider");
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, outsiderId, "sub-outsider", "Outsider");
     const crew = addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: annId, name: "Ann", role: "organizer" });
     await ctx.crewStore.put(crew, "JOINCD", undefined);
 
@@ -524,7 +525,7 @@ describe("JoinRound — M8 as-self and crew-consent arms (claims threaded throug
     const ctx = setup();
     const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
     const boId = golferId("bo-account");
-    await ctx.golferStore.claim(boId, "sub-bo", "Bo");
+    await putAndBindGolfer(ctx.golferStore, boId, "sub-bo", "Bo");
 
     const joined = await ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2, golferId: boId }, { sub: "sub-bo" });
     expect(joined.golferId).toBe(boId);
@@ -534,8 +535,8 @@ describe("JoinRound — M8 as-self and crew-consent arms (claims threaded throug
     const ctx = setup();
     const annId = golferId("ann-account");
     const boId = golferId("bo-account");
-    await ctx.golferStore.claim(annId, "sub-ann", "Ann");
-    await ctx.golferStore.claim(boId, "sub-bo", "Bo");
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
+    await putAndBindGolfer(ctx.golferStore, boId, "sub-bo", "Bo");
     const crew = addMember(
       addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: annId, name: "Ann", role: "organizer" }),
       { golferId: boId, name: "Bo", role: "member" },
@@ -556,7 +557,7 @@ describe("JoinRound — M8 as-self and crew-consent arms (claims threaded throug
     const ctx = setup();
     const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } }); // no crewId
     const claimed = golferId("claimed-1");
-    await ctx.golferStore.claim(claimed, "sub-someone", "Someone");
+    await putAndBindGolfer(ctx.golferStore, claimed, "sub-someone", "Someone");
 
     await expect(
       ctx.join({ code: host.joinCode, name: "X", tee: "white", courseHandicap: 2, golferId: claimed }, { sub: "sub-a-fellow-crew-member" }),

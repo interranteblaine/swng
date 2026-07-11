@@ -51,7 +51,20 @@ export type ApplicationErrorCode =
   // member — a sub with no golfer yet (never PUT /me) gets this wire-honesty 400 rather than
   // a silent auto-create; the web PUTs /me first (the same T5 pattern GET /me's plan
   // amendment established).
-  | "golfer-required";
+  | "golfer-required"
+  // M9 hardening: GolferStore.put refuses a REPLACE that would clear a currently-bound sub
+  // (golferStore.ts's port doc). Every real call site re-passes its own found.sub on every
+  // replace, so this only ever fires on a programmer error — deliberately mapped to a 500 in
+  // the lambda's error-mapping module (never a client-correctable 4xx), a guard against a bug,
+  // not a request shape the caller controls.
+  | "sub-drop-forbidden"
+  // M9 hardening: createCrew's join-code mint loop (crews/createCrew.ts) exhausted its bounded
+  // attempts without finding a code no crew already holds — astronomically unlikely at v1's
+  // scale (a fresh 6-char draw from a 32-symbol alphabet colliding 5 times running), so this
+  // is a genuine-bug signal (the alphabet/generator itself broken), not a request the caller
+  // can retry their way out of — deliberately mapped to 500, same reasoning as
+  // sub-drop-forbidden above.
+  | "join-code-exhausted";
 
 export class ApplicationError extends Error {
   constructor(

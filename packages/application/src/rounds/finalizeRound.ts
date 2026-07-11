@@ -51,7 +51,19 @@ export const finalizeRound =
       requireParticipant(state, claims.golferId);
 
       if (state.status === "final") {
+        // Repair-on-replay (M9 hardening): the idempotent branch used to trust status ===
+        // "final" alone and recompute-but-never-persist — if a PRIOR finalize's putArchive
+        // threw AFTER its round-finalized append already landed (the live defect this fixes:
+        // the two writes were never atomic), every retry kept recomputing the same archive in
+        // memory and handing back 200 while the archive ROW stayed permanently missing. Now a
+        // retry checks the store first and only recomputes+writes when it's actually absent —
+        // settleRound is deterministic over the full log, so this heals the wedge exactly once,
+        // on whichever retry notices, without ever appending a second round-finalized.
+        const archived = await deps.store.getArchive(claims.roundId);
+        if (archived) return { results: archived.results, handicapping: archived.handicapping };
+
         const archive = settleRound(events);
+        await deps.store.putArchive(archive);
         return { results: archive.results, handicapping: archive.handicapping };
       }
 

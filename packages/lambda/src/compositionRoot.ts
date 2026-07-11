@@ -131,7 +131,7 @@ const unavailableGolferStore = (): GolferStore => {
   const unavailable = (): never => {
     throw new Error("buildApp: TABLE_CORE is not set for this entry — golfer routes are HTTP-only (see swngStack.ts)");
   };
-  return { put: unavailable, get: unavailable, getBySub: unavailable, claim: unavailable };
+  return { put: unavailable, get: unavailable, getBySub: unavailable, bindSub: unavailable };
 };
 
 // Same shape again, for TABLE_CORE (unavailableCourseStore's own reason: wsConnect/

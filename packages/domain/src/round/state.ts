@@ -1,4 +1,4 @@
-import type { GameId, GolferId, OpId, RoundId } from "../ids.js";
+import type { CrewId, GameId, GolferId, OpId, RoundId } from "../ids.js";
 import type { CourseCard } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import { compareHlc, type Hlc } from "./hlc.js";
@@ -19,6 +19,9 @@ export interface RoundState {
   readonly id: RoundId;
   readonly status: RoundStatus;
   readonly card: CourseCard;
+  // Taken from genesis, same as `card` above — a round's crew tag is fixed at creation
+  // and never revised, so there's no separate LWW register for it.
+  readonly crewId?: CrewId;
   readonly participants: readonly Participant[];
   readonly games: readonly GameConfig[];
   readonly cells: Readonly<Record<string, ScoreCell>>;
@@ -191,6 +194,7 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
     id: genesis.roundId,
     status,
     card: genesis.card,
+    crewId: genesis.crewId,
     participants,
     games,
     cells,

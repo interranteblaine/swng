@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { DomainError } from "../errors.js";
-import { deviceId, gameId, golferId, opId } from "../ids.js";
+import { crewId as makeCrewId, deviceId, gameId, golferId, opId, roundId } from "../ids.js";
 import { adjustedGrossScore, scoreDifferential } from "../handicap/whs.js";
 import { playGoldenRoundLog } from "../scoring/golden/deck.js";
 import { fixtureLinks, fixtureWhite } from "../scoring/golden/fixtureCourse.js";
@@ -276,5 +276,36 @@ describe("hand-checked AGS sanity", () => {
     expect(adjustedGrossScore(fixtureWhite, 8, holesFor([5, 5, 4, 6, 5, 4, 5, 6, 4]))).toBe(44);
     expect(adjustedGrossScore(fixtureWhite, 2, holesFor([4, 5, 3, 6, 4, 4, 4, 5, 4]))).toBe(39);
     expect(adjustedGrossScore(fixtureWhite, 12, holesFor([6, 7, 4, 8, 6, 5, 6, 7, 6]))).toBe(55);
+  });
+});
+
+// M8: a round is a crew round via an optional crewId tag stamped at creation
+// (architecture.md's Crew section) — this pins the whole path: the event carries it,
+// reduceRound's fold sets it on RoundState, and settleRound carries it verbatim onto the
+// terminal RoundArchive, unchanged by anything that happens in between.
+describe("crewId — create -> fold -> settle", () => {
+  it("carries an optional crewId from round-created verbatim onto the settled archive", () => {
+    const crew = makeCrewId("saturday-boys");
+    const at = (wallMs: number) => ({ wallMs, counter: 0, deviceId: deviceId("test") });
+    const recorder = golferId("recorder");
+    const created: RoundEvent = {
+      kind: "round-created",
+      roundId: roundId("r-crew"),
+      card: fixtureLinks,
+      crewId: crew,
+      opId: opId("op-created"),
+      hlc: at(1),
+      authorId: recorder,
+    };
+    const started: RoundEvent = { kind: "round-started", opId: opId("op-started"), hlc: at(2), authorId: recorder };
+    const finalized: RoundEvent = { kind: "round-finalized", opId: opId("op-finalized"), hlc: at(3), authorId: recorder };
+
+    const archive = settleRound([created, started, finalized]);
+    expect(archive.crewId).toBe(crew);
+  });
+
+  it("leaves crewId undefined when round-created never carried one (existing rounds, unaffected)", () => {
+    const archive = settleRound(finalLog);
+    expect(archive.crewId).toBeUndefined();
   });
 });

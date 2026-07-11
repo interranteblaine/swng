@@ -1,6 +1,6 @@
 import type { CourseCard } from "../course/card.js";
 import { DomainError } from "../errors.js";
-import type { GameId, GolferId, RoundId } from "../ids.js";
+import type { CrewId, GameId, GolferId, RoundId } from "../ids.js";
 import { handicappingFor } from "../scoring/allocation.js";
 import type { GameConfig } from "../scoring/game.js";
 import { scoreGame } from "../scoring/game.js";
@@ -19,6 +19,9 @@ import { byCanonicalOrder, reduceRound, withoutSeq } from "./state.js";
 // never a mutation of an existing archive.
 export interface RoundArchive {
   readonly roundId: RoundId;
+  // Carried verbatim from RoundState.crewId (itself fixed at genesis) — a round's crew tag
+  // never changes across the settle boundary, same as every other field here.
+  readonly crewId?: CrewId;
   readonly card: CourseCard;
   readonly participants: readonly Participant[];
   readonly games: readonly GameConfig[];
@@ -69,6 +72,7 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   // never varying, on top of every field above already being independent of input order.
   return {
     roundId: state.id,
+    crewId: state.crewId,
     card: state.card,
     participants: state.participants,
     games: state.games,

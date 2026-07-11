@@ -8,6 +8,7 @@ export type GameId = Brand<string, "GameId">;
 export type OpId = Brand<string, "OpId">;
 export type DeviceId = Brand<string, "DeviceId">;
 export type CourseId = Brand<string, "CourseId">;
+export type CrewId = Brand<string, "CrewId">;
 
 export const golferId = (value: string): GolferId => value as GolferId;
 export const roundId = (value: string): RoundId => value as RoundId;
@@ -15,3 +16,4 @@ export const gameId = (value: string): GameId => value as GameId;
 export const opId = (value: string): OpId => value as OpId;
 export const deviceId = (value: string): DeviceId => value as DeviceId;
 export const courseId = (value: string): CourseId => value as CourseId;
+export const crewId = (value: string): CrewId => value as CrewId;

@@ -24,9 +24,11 @@ export * from "./scoring/golden/fieldDeck18.js";
 export * from "./handicap/whs.js";
 export * from "./golfer/golfer.js";
 export * from "./golfer/record.js";
+export * from "./crew/crew.js";
+export * from "./crew/ledger.js";
 // GameConfig is already re-exported via ./round/events.js (game.ts owns the
 // type; events.ts re-exports it so RoundEvent's "game-added" arm has a name to
 // reference) — re-export game.ts's other members individually so `export *`
 // here doesn't collide on GameConfig.
-export type { GameState, RunningTotal, StrokePlayLine, StablefordLine, SkinsLine, MatchOutcome, FourballOutcome } from "./scoring/game.js";
+export type { GameState, RunningTotal, StrokePlayLine, StablefordLine, SkinsLine, MatchOutcome, FourballOutcome, GameConfigDraft } from "./scoring/game.js";
 export { scoreGame } from "./scoring/game.js";

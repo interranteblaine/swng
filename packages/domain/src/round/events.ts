@@ -1,4 +1,4 @@
-import type { GameId, GolferId, OpId, RoundId } from "../ids.js";
+import type { CrewId, GameId, GolferId, OpId, RoundId } from "../ids.js";
 import type { CourseCard } from "../course/card.js";
 import type { GameConfig } from "../scoring/game.js";
 import type { Hlc } from "./hlc.js";
@@ -18,7 +18,10 @@ export interface RoundEventBase {
 
 export type RoundEvent = RoundEventBase &
   (
-    | { readonly kind: "round-created"; readonly roundId: RoundId; readonly card: CourseCard }
+    // crewId is optional: a round is a crew round via this tag at creation
+    // (architecture.md's Crew section), stamped once and never revised — a round doesn't
+    // move between crews after the fact.
+    | { readonly kind: "round-created"; readonly roundId: RoundId; readonly card: CourseCard; readonly crewId?: CrewId }
     | { readonly kind: "participant-joined"; readonly participant: Participant }
     | { readonly kind: "game-added"; readonly config: GameConfig }
     | { readonly kind: "round-started" }

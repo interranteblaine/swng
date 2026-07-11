@@ -465,6 +465,66 @@ describe("RoundPage", () => {
     expect(screen.queryByRole("button", { name: "End Singles match" })).toBeNull();
   });
 
+  // M8 Task 5: "Add player" (the host types Dave in), wired end to end — form submit → POST
+  // /rounds/{roundId}/players → no optimistic insert (SetupPanel's own precedent) → the row
+  // appears only once participant-joined round-trips through this tab's own sync().
+  it("Add player flow: form submit → POST /rounds/{roundId}/players → the new row appears via the fold, not optimistically", async () => {
+    const id = roundId("round-add-player");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-add", golferId: ann, name: "Ann", joinCode: "ADD001" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    // Same stand-in idiom as the terminate/finalize flow tests above: the fake endpoint
+    // appends the participant-joined event to the scripted transport's log, so this tab's own
+    // sync() (fired by the session's own natural poll/WS handling, exactly as a real
+    // participant-joined append would arrive) folds it like a real server append.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        expect(String(url)).toBe(`https://api.example.test/rounds/${id}/players`);
+        expect(init?.method).toBe("POST");
+        expect((init?.headers as Record<string, string>).authorization).toBe("Bearer tok-add");
+        expect(JSON.parse(String(init?.body))).toEqual({ name: "Dave", tee: "white", courseHandicap: 10 });
+        const event: RoundEvent = {
+          kind: "participant-joined",
+          participant: { golferId: golferId("dave-ghost"), name: "Dave", tee: "white", courseHandicap: 10 },
+          authorId: ann,
+          opId: opId("srv-add"),
+          hlc: { wallMs: 9_600, counter: 0, deviceId: SERVER_DEVICE },
+          seq: transport.log.length + 1,
+        };
+        (transport.log as RoundEvent[]).push(event);
+        return { ok: true, status: 201, json: async () => ({ events: [event] }) } as unknown as Response;
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("ADD001")).toBeTruthy());
+    expect(screen.queryByText(/Dave/)).toBeNull(); // not in the roster yet
+
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Dave" } });
+    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add player$/i }));
+
+    await waitFor(() => expect(screen.getByText(/Dave.*white.*CH 10/)).toBeTruthy());
+  });
+
   // Papercut 1: the finalize dialog computes unresolved games from the LOCAL fold and offers
   // ending them + finalizing as one action — terminates each, THEN finalizes (order asserted).
   it("finalize dialog lists unresolved games and 'End unfinished games & finalize' terminates each THEN finalizes", async () => {

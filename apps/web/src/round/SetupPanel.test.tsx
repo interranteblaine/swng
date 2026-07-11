@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defaultAllowance, fixtureLinks, gameId, golferId, playingHandicap, roundId } from "@swng/domain";
+import { crewId as makeCrewId, defaultAllowance, fixtureLinks, gameId, golferId, playingHandicap, roundId } from "@swng/domain";
 import type { GameConfig, GameState, Participant, RoundState } from "@swng/domain";
+import { addParticipantRequestSchema } from "@swng/contracts";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
@@ -27,14 +28,15 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
 });
 
 const noopAddGame = vi.fn().mockResolvedValue(undefined);
+const noopAddParticipant = vi.fn().mockResolvedValue(undefined);
 
 // Every SetupPanel render now needs an AuthProvider ancestor (ClaimAffordance calls useAuth())
 // — this is the one place that wrapping lives, so the other ~10 tests in this file that don't
 // care about auth stay untouched otherwise.
-const renderPanel = (props: SetupPanelProps) =>
+const renderPanel = (props: Omit<SetupPanelProps, "onAddParticipant"> & Partial<Pick<SetupPanelProps, "onAddParticipant">>) =>
   render(
     <AuthProvider>
-      <SetupPanel {...props} />
+      <SetupPanel {...props} onAddParticipant={props.onAddParticipant ?? noopAddParticipant} />
     </AuthProvider>,
   );
 
@@ -53,6 +55,7 @@ const signIn = () => {
 
 beforeEach(() => {
   noopAddGame.mockClear();
+  noopAddParticipant.mockClear();
   vi.stubGlobal("localStorage", createMemoryStorage());
   vi.stubGlobal("sessionStorage", createMemoryStorage());
 });
@@ -213,7 +216,10 @@ describe("SetupPanel — claim a ghost", () => {
     expect(within(annRow!).getByRole("button", { name: "This is me" })).toBeTruthy();
   });
 
-  it("still hides the affordance on the row already linked to the signed-in account (ClaimAffordance's internal guard, unweakened)", async () => {
+  // M8 Task 5: the own-row arm now renders a steady "You" marker instead of a bare null — the
+  // ClaimAffordance guard itself is unchanged (still hides the CLAIM button on this row), but
+  // the row must say whose it is, not go silent.
+  it("shows 'You' (not the claim button) on the row already linked to the signed-in account", async () => {
     signIn();
     vi.stubGlobal(
       "fetch",
@@ -225,17 +231,22 @@ describe("SetupPanel — claim a ghost", () => {
 
     const calRow = screen.getAllByRole("listitem").find((li) => /Cal/.test(li.textContent ?? ""));
     expect(within(calRow!).queryByRole("button", { name: "This is me" })).toBeNull();
+    expect(within(calRow!).getByText("You")).toBeTruthy();
   });
 
-  it("This is me -> confirm -> POST /golfers/claim -> success re-fetches /me", async () => {
+  it("This is me -> confirm -> POST /golfers/claim (carrying the roster row's name, papercut 5) -> success re-fetches /me", async () => {
     signIn();
     const calls: string[] = [];
+    let claimBody: unknown;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         const path = new URL(url).pathname;
         calls.push(`${init?.method ?? "GET"} ${path}`);
-        if (path === "/golfers/claim") return fakeResponse(200, { golfer: { golferId: "bo", name: "Bo" } });
+        if (path === "/golfers/claim") {
+          claimBody = JSON.parse(String(init?.body));
+          return fakeResponse(200, { golfer: { golferId: "bo", name: "Bo" } });
+        }
         if (path === "/me") return fakeResponse(200, { golfer: calls.includes("POST /golfers/claim") ? { golferId: "bo", name: "Bo" } : null });
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -254,6 +265,9 @@ describe("SetupPanel — claim a ghost", () => {
 
     await waitFor(() => expect(within(boRow).getByRole("status")).toBeTruthy());
     expect(calls).toContain("POST /golfers/claim");
+    // The claim carries the ROSTER row's name ("Bo"), not any account/email default — a fresh
+    // claim's profile is named after the row it claimed.
+    expect(claimBody).toEqual({ golferId: "bo", name: "Bo" });
     // Re-fetches /me after a successful claim (brief) — a real second GET, not a locally
     // synthesized echo of the claim response.
     expect(calls.filter((c) => c === "GET /me").length).toBeGreaterThanOrEqual(2);
@@ -314,5 +328,124 @@ describe("SetupPanel — claim a ghost", () => {
     await waitFor(() => expect(within(boRow).getByText("Your account already has a profile — claiming another ghost isn't supported yet.")).toBeTruthy());
     // Never the misleading arm-1 copy for this case.
     expect(within(boRow).queryByText(/already claimed by another account/i)).toBeNull();
+  });
+});
+
+// M8 Task 5: "Add player" — the host types Dave in (or, for a crew round, taps one of the
+// crew's not-yet-in-round members). POST /rounds/{roundId}/players; no optimistic insert, same
+// precedent as the "Add game" form above — the new row only ever appears once the fold
+// reflects it.
+describe("SetupPanel — Add player", () => {
+  const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
+
+  it("free-text ghost: name + tee + courseHandicap -> onAddParticipant with NO golferId key; the row appears only once the fold reflects it", async () => {
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
+
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Dave" } });
+    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add player$/i }));
+
+    await waitFor(() => expect(noopAddParticipant).toHaveBeenCalledTimes(1));
+    const sent = noopAddParticipant.mock.calls[0]![0];
+    expect(sent).toEqual({ name: "Dave", tee: "white", courseHandicap: 9 });
+    expect(() => addParticipantRequestSchema.parse(sent)).not.toThrow();
+
+    // No optimistic insert — "Dave" never appears in the roster from the click alone.
+    expect(screen.queryByText(/Dave.*white.*CH 9/)).toBeNull();
+
+    // Only once the parent re-renders with the new participant (as the real session would,
+    // after participant-joined round-trips through pull/WS) does the row show up.
+    cleanup();
+    const withDave = baseState({ participants: [...baseState().participants, participant(golferId("dave-ghost"), "Dave", "white", 9)] });
+    renderPanel({ state: withDave, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
+    expect(screen.getByText(/Dave.*white.*CH 9/)).toBeTruthy();
+  });
+
+  it("no crewId on the round: no 'From your crew' quick-add section renders, even when signed in", async () => {
+    signIn();
+    // AuthProvider's own once-per-session GET /me fires on sign-in (useAuth.ts) — stubbed so
+    // it resolves instead of hitting a real, unstubbed fetch (this test cares about the
+    // ABSENCE of a crew fetch, not about the golfer identity itself).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => fakeResponse(200, { golfer: null })),
+    );
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
+
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringContaining("/me"), expect.anything()));
+    expect(screen.queryByText(/from your crew/i)).toBeNull();
+    expect(screen.getByLabelText(/^name$/i)).toBeTruthy(); // the free-text form is still there
+    // No crewId on the round -> the crew fetch is never attempted at all (not even a failed one).
+    expect(vi.mocked(fetch)).not.toHaveBeenCalledWith(expect.stringContaining("/crews/"), expect.anything());
+  });
+
+  it("crew round: the crew's not-yet-in-round members render FIRST as one-tap quick-adds carrying their stable golferId; already-in-round members are excluded", async () => {
+    signIn();
+    const crew = makeCrewId("crew-1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === `/crews/${crew}`) {
+          return fakeResponse(200, {
+            crew: {
+              crewId: crew,
+              name: "Sunday crew",
+              joinCode: "SUN001",
+              members: [
+                { golferId: "ann", name: "Ann", role: "organizer", claimed: true }, // already in this round
+                { golferId: "dave-crew", name: "Dave", role: "member", claimed: false }, // not yet in this round
+              ],
+            },
+          });
+        }
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderPanel({ state: baseState({ crewId: crew }), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
+
+    const daveButton = await screen.findByRole("button", { name: "Dave" });
+    expect(screen.queryByRole("button", { name: "Ann" })).toBeNull(); // Ann's already in the round — not a quick-add candidate
+
+    fireEvent.click(daveButton);
+    expect(screen.getByText(/adding dave/i)).toBeTruthy();
+    // The free-text Name field is replaced while a crew member is selected (mirrors the
+    // as-self "Playing as" swap's own grammar) — no separate typed name for a quick-add.
+    expect(screen.queryByLabelText(/^name$/i)).toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add player$/i }));
+
+    await waitFor(() => expect(noopAddParticipant).toHaveBeenCalledTimes(1));
+    // The STABLE golferId travels with the quick-add, not a freshly-typed name alone.
+    expect(noopAddParticipant.mock.calls[0]![0]).toEqual({ name: "Dave", tee: "white", courseHandicap: 12, golferId: "dave-crew" });
+  });
+
+  // The crew fetch is a nicety, never a gate (JoinRoundPage's peek-fallback precedent): a
+  // non-member participant, a signed-out device, or a network failure must all degrade
+  // silently to the free-text ghost form alone.
+  it("a failed crew fetch (non-member 403, network failure, whatever) degrades silently to the free-text form alone", async () => {
+    signIn();
+    const crew = makeCrewId("crew-2");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => fakeResponse(403, { code: "not-a-member", message: "not a member of this crew" })),
+    );
+
+    renderPanel({ state: baseState({ crewId: crew }), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
+
+    await waitFor(() => expect(screen.getByLabelText(/^name$/i)).toBeTruthy());
+    expect(screen.queryByText(/from your crew/i)).toBeNull();
+
+    // The free-text path still works exactly as it would with no crew at all.
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Fran" } });
+    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "blue" } });
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add player$/i }));
+
+    await waitFor(() => expect(noopAddParticipant).toHaveBeenCalledWith({ name: "Fran", tee: "blue", courseHandicap: 3 }));
   });
 });

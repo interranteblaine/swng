@@ -1,10 +1,12 @@
 import {
   addGameResponseSchema,
+  addParticipantResponseSchema,
   addTeeSetResponseSchema,
   createCourseResponseSchema,
   errorResponseSchema,
   finalizeRoundResponseSchema,
   getCourseResponseSchema,
+  getCrewResponseSchema,
   getMeResponseSchema,
   getMyRecordResponseSchema,
   golferResponseSchema,
@@ -19,6 +21,8 @@ import {
 import type {
   AddGameRequest,
   AddGameResponse,
+  AddParticipantRequest,
+  AddParticipantResponse,
   AddTeeSetRequest,
   AddTeeSetResponse,
   ClaimGolferRequest,
@@ -26,6 +30,7 @@ import type {
   CreateCourseResponse,
   FinalizeRoundResponse,
   GetCourseResponse,
+  GetCrewResponse,
   GetMeResponse,
   GetMyRecordResponse,
   GolferResponse,
@@ -40,7 +45,7 @@ import type {
   VerifyTeeSetRequest,
   VerifyTeeSetResponse,
 } from "@swng/contracts";
-import type { CourseId, GameId, RoundId } from "@swng/domain";
+import type { CourseId, CrewId, GameId, RoundId } from "@swng/domain";
 import { config } from "./config";
 
 export class ApiError extends Error {
@@ -95,13 +100,19 @@ const requestJson = async (path: string, init: (RequestInit & { token?: string }
   return response.json();
 };
 
-export const createRound = async (input: StartRoundRequest): Promise<StartRoundResponse> => {
-  const json = await requestJson("/rounds", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+// `token` is optional (M8 Task 5): both routes are "optional-golfer" on the wire — an anonymous
+// call behaves byte-identically to before (no token, no golferId in the body), while a signed-in
+// "play as yourself" call attaches the caller's own Bearer alongside a `golferId` already present
+// in `input`. A route that's "optional-golfer" still 401s a PRESENT-but-invalid token
+// (dispatch.ts), so callers must only pass a token from an actually-valid auth session (e.g. via
+// useAuth's withAuth, which owns the refresh-then-signout policy) — never a stale/expired one.
+export const createRound = async (input: StartRoundRequest, token?: string): Promise<StartRoundResponse> => {
+  const json = await requestJson("/rounds", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
   return parse(startRoundResponseSchema, json);
 };
 
-export const joinRound = async (input: JoinRoundRequest): Promise<JoinRoundResponse> => {
-  const json = await requestJson("/rounds/join", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+export const joinRound = async (input: JoinRoundRequest, token?: string): Promise<JoinRoundResponse> => {
+  const json = await requestJson("/rounds/join", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
   return parse(joinRoundResponseSchema, json);
 };
 
@@ -109,6 +120,14 @@ export const addGame = async (roundId: RoundId, token: string, game: AddGameRequ
   const body: AddGameRequest = { game };
   const json = await requestJson(`/rounds/${roundId}/games`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), token });
   return parse(addGameResponseSchema, json);
+};
+
+// POST /rounds/{roundId}/players (M8 Task 5): "participant"-gated, same tier/token as
+// addGame/recordScore/finalizeRound above — the crew one-tap quick-add and the free-text ghost
+// form (SetupPanel's own "Add player") both go through this one call.
+export const addParticipant = async (roundId: RoundId, token: string, input: AddParticipantRequest): Promise<AddParticipantResponse> => {
+  const json = await requestJson(`/rounds/${roundId}/players`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
+  return parse(addParticipantResponseSchema, json);
 };
 
 export const finalizeRound = async (roundId: RoundId, token: string): Promise<FinalizeRoundResponse> => {
@@ -183,4 +202,13 @@ export const getMyRecord = async (token: string): Promise<GetMyRecordResponse> =
 export const terminateGame = async (roundId: RoundId, token: string, gameId: GameId): Promise<TerminateGameResponse> => {
   const json = await requestJson(`/rounds/${roundId}/games/${gameId}/terminate`, { method: "POST", token });
   return parse(terminateGameResponseSchema, json);
+};
+
+// GET /crews/{crewId} (M8 Task 5): "golfer"-gated, member-only (a non-member 403s "not-a-member",
+// application-side). SetupPanel's own "Add player" quick-add is the only caller in this
+// milestone — a failed fetch (non-member, signed-out device, network) is a nicety it degrades
+// silently from, never a gate (JoinRoundPage's peek-fallback precedent).
+export const getCrew = async (token: string, id: CrewId): Promise<GetCrewResponse> => {
+  const json = await requestJson(`/crews/${id}`, { token });
+  return parse(getCrewResponseSchema, json);
 };

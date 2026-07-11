@@ -8,15 +8,17 @@ import { credentialStore } from "../identity";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
 // Faking the api.ts module boundary (M5's own idiom) — CreateRoundPage (and the CourseSearch/
-// CourseSummaryCard it composes) only ever calls these four; getMe is here because the
-// AuthProvider wrapper below (CourseSummaryCard's verifier auto-fill, M7 Task 6) resolves
-// the signed-in golfer through the same mocked module.
+// CourseSummaryCard it composes) only ever calls these; getMe is here because the AuthProvider
+// wrapper below (CourseSummaryCard's verifier auto-fill, M7 Task 6) resolves the signed-in
+// golfer through the same mocked module. updateMe is M8 Task 5's own addition — the
+// "signed-in-with-no-golfer" as-self path calls it to mint a golfer before creating the round.
 vi.mock("../api", () => ({
   createRound: vi.fn(),
   getCourse: vi.fn(),
   searchCourses: vi.fn(),
   verifyTeeSet: vi.fn(),
   getMe: vi.fn(),
+  updateMe: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -29,14 +31,17 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, createRound, getCourse, searchCourses, verifyTeeSet } from "../api";
+import { ApiError, createRound, getCourse, getMe, searchCourses, updateMe, verifyTeeSet } from "../api";
 import { AuthProvider } from "../auth/useAuth";
+import { tokenStore } from "../auth/tokenStore";
 import { CreateRoundPage } from "./CreateRoundPage";
 
 const mockedCreateRound = vi.mocked(createRound);
 const mockedGetCourse = vi.mocked(getCourse);
 const mockedSearchCourses = vi.mocked(searchCourses);
 const mockedVerifyTeeSet = vi.mocked(verifyTeeSet);
+const mockedUpdateMe = vi.mocked(updateMe);
+const mockedGetMe = vi.mocked(getMe);
 
 const courseView: CourseView = {
   courseId: courseId("course-18"),
@@ -47,10 +52,13 @@ const courseView: CourseView = {
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
+  vi.stubGlobal("sessionStorage", createMemoryStorage());
   mockedCreateRound.mockReset();
   mockedGetCourse.mockReset();
   mockedSearchCourses.mockReset();
   mockedVerifyTeeSet.mockReset();
+  mockedUpdateMe.mockReset();
+  mockedGetMe.mockReset();
 });
 
 afterEach(() => {
@@ -58,6 +66,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
+
+// M8 Task 5 (play as yourself): same base64url-JWT-shaped idiom as SetupPanel.test.tsx's own
+// local signIn() — only the sub/email claims matter (decoded client-side for the header/email
+// fallback), never a verified signature (that's the server's job).
+const base64url = (obj: unknown): string =>
+  btoa(JSON.stringify(obj))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+const signIn = (): string => {
+  const idToken = `${base64url({ alg: "none" })}.${base64url({ sub: "sub-1", email: "signed-in@example.com" })}.sig`;
+  tokenStore.save({ idToken, refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+  return idToken;
+};
 
 const renderCreate = (initialEntry: string | { pathname: string; state?: unknown } = "/create") =>
   render(
@@ -193,5 +216,64 @@ describe("CreateRoundPage", () => {
     await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
     const body = mockedCreateRound.mock.calls[0]![0];
     expect(body.card).toEqual(revisedCard);
+  });
+});
+
+// M8 Task 5, the milestone's headline behavior: a signed-in golfer creates a round AS their
+// account golfer — no ghost, no later claim step needed.
+describe("CreateRoundPage — play as yourself", () => {
+  it("signed in WITH a golfer: the name field becomes 'Playing as <name>', and the request carries golferId + Bearer", async () => {
+    const idToken = signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-self"), joinCode: "SELF01", token: "tok-self", golferId: golferId("ann-g") });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+    expect(screen.getByText("Ann G")).toBeTruthy();
+
+    expect(screen.queryByLabelText(/your name/i)).toBeNull(); // the free-text field is gone
+    expect(screen.getByRole("link", { name: /change/i }).getAttribute("href")).toBe("/profile");
+
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
+    const [body, token] = mockedCreateRound.mock.calls[0]!;
+    expect(body).toEqual({ card: fixtureLinks18, host: { name: "Ann G", tee: "white", courseHandicap: 8 }, golferId: golferId("ann-g") });
+    expect(token).toBe(idToken);
+    expect(() => startRoundRequestSchema.parse(body)).not.toThrow();
+
+    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
+    expect(credentialStore.load(roundId("round-self"))).toEqual({ token: "tok-self", golferId: golferId("ann-g"), name: "Ann G", joinCode: "SELF01" });
+  });
+
+  it("signed in with NO golfer: the typed name creates the profile (PUT /me) BEFORE creating the round — call order asserted", async () => {
+    const idToken = signIn();
+    mockedGetMe.mockResolvedValue({ golfer: null });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+    mockedUpdateMe.mockResolvedValue({ golfer: { golferId: golferId("fresh-g"), name: "Fresh" } });
+    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-fresh"), joinCode: "FRESH1", token: "tok-fresh", golferId: golferId("fresh-g") });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(fixtureLinks18.courseName);
+    // Still the free-text field — nothing to display until PUT /me mints a golfer.
+    expect(screen.getByLabelText(/your name/i)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: "Fresh" } });
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
+    expect(mockedUpdateMe).toHaveBeenCalledWith(idToken, { name: "Fresh" });
+    const [body, token] = mockedCreateRound.mock.calls[0]!;
+    expect(body).toEqual({ card: fixtureLinks18, host: { name: "Fresh", tee: "white", courseHandicap: 3 }, golferId: golferId("fresh-g") });
+    expect(token).toBe(idToken);
+
+    // The headline call-order contract: PUT /me strictly before POST /rounds.
+    expect(mockedUpdateMe.mock.invocationCallOrder[0]!).toBeLessThan(mockedCreateRound.mock.invocationCallOrder[0]!);
+
+    expect(credentialStore.load(roundId("round-fresh"))).toEqual({ token: "tok-fresh", golferId: golferId("fresh-g"), name: "Fresh", joinCode: "FRESH1" });
   });
 });

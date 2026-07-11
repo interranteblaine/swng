@@ -1,9 +1,9 @@
 import { useCallback, useState } from "react";
 import { Navigate, useParams } from "react-router";
-import type { FinalizeRoundResponse, GameConfigInput } from "@swng/contracts";
+import type { AddParticipantRequest, FinalizeRoundResponse, GameConfigInput } from "@swng/contracts";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { GameId, GameState, GolferId, HoleResult, RoundId, RoundState } from "@swng/domain";
-import { addGame, finalizeRound, terminateGame } from "../api";
+import { addGame, addParticipant, finalizeRound, terminateGame } from "../api";
 import { credentialStore } from "../identity";
 import type { RoundCredential } from "../identity";
 import { unresolvedGames } from "../round/finalizeReadiness";
@@ -149,6 +149,7 @@ interface LiveRoundProps {
   readonly recordScore: (golferId: GolferId, hole: number, result: HoleResult) => void;
   readonly joinCode: string;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
+  readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
   readonly onFinalize: () => Promise<void>;
   readonly onTerminate: (gameId: GameId) => Promise<void>;
 }
@@ -159,7 +160,7 @@ interface LiveRoundProps {
 // tolerate `state` swapping in and out across the live/final boundary, which useHoleDigest's
 // prev-snapshot ref isn't built to do (and doesn't need to — this component simply unmounts
 // once status flips to "final" and RoundPageContent renders ResultsView instead).
-function LiveRound({ state, games, recordScore, joinCode, onAddGame, onFinalize, onTerminate }: LiveRoundProps) {
+function LiveRound({ state, games, recordScore, joinCode, onAddGame, onAddParticipant, onFinalize, onTerminate }: LiveRoundProps) {
   const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
   // Falls back to the first game until a chip is tapped (Task 5's fixed default-first-game
   // decision) — also the correct fallback if a previously-active id ever stopped matching. A
@@ -175,7 +176,7 @@ function LiveRound({ state, games, recordScore, joinCode, onAddGame, onFinalize,
       <ScorecardGrid state={state} activeGame={activeGame} recordScore={recordScore} />
       {digest && <HoleDigest digest={digest} onDismiss={dismiss} />}
       <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
-      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} />
+      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} onAddParticipant={onAddParticipant} />
     </>
   );
 }
@@ -205,6 +206,20 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     // useCallback([]) in useRoundSession.ts) rather than the whole `session` object, which is
     // a fresh literal every render (snapshot spread) and would defeat memoization entirely.
     const { sync, connect } = session;
+
+    const onAddParticipant = useCallback(
+      async (input: AddParticipantRequest) => {
+        await addParticipant(roundId, credential.token, input);
+        // No optimistic insert (SetupPanel's own precedent) — the new roster row appears once
+        // participant-joined round-trips back through the session and folds into
+        // state.participants. Same reasoning as onFinalize/onTerminate's sync() calls below:
+        // this device just caused the event, so pull it now instead of waiting on this tab's
+        // own WS echo — the host adding a player wants to see the row immediately.
+        await sync();
+      },
+      [roundId, credential.token, sync],
+    );
+
     const onFinalize = useCallback(async () => {
       const response = await finalizeRound(roundId, credential.token);
       setFinalizeResponse(response);
@@ -269,6 +284,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
             recordScore={session.recordScore}
             joinCode={credential.joinCode}
             onAddGame={onAddGame}
+            onAddParticipant={onAddParticipant}
             onFinalize={onFinalize}
             onTerminate={onTerminate}
           />

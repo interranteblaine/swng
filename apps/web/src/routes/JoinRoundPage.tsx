@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router";
-import { ApiError, joinRound, peekRound } from "../api";
+import { Link, useNavigate } from "react-router";
+import type { JoinRoundResponse } from "@swng/contracts";
+import { ApiError, joinRound, peekRound, updateMe } from "../api";
+import { useAuth } from "../auth/useAuth";
 import { credentialStore } from "../identity";
 
 // >=250ms, same debounce window as CourseSearch's own — long enough that a fast typist never
@@ -10,6 +12,12 @@ const DEBOUNCE_MS = 250;
 
 export function JoinRoundPage() {
   const navigate = useNavigate();
+  const auth = useAuth();
+  // Same asSelf story as CreateRoundPage's own (M8 Task 5): truthy only once GET /me has
+  // resolved a real GolferView — signed in with no golfer yet (null, or still loading) keeps
+  // the free-text name field, same as signed out, until PUT /me mints one at submit time below.
+  const asSelf = auth.signedIn && Boolean(auth.golfer);
+
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [tee, setTee] = useState("");
@@ -55,15 +63,43 @@ export function JoinRoundPage() {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const parsedHandicap = Number.parseInt(courseHandicap, 10);
-    if (upperCode.length !== 6 || !name.trim() || !tee.trim() || !Number.isInteger(parsedHandicap)) return;
+    // Playing as yourself always has a name (auth.golfer.name) — only the free-text path needs
+    // one typed.
+    if (upperCode.length !== 6 || !tee.trim() || !Number.isInteger(parsedHandicap) || (!asSelf && !name.trim())) return;
 
     setSubmitting(true);
     setError(undefined);
     try {
-      const response = await joinRound({ code: upperCode, name: name.trim(), tee: tee.trim(), courseHandicap: parsedHandicap });
+      let response: JoinRoundResponse;
+      let savedName: string;
+      if (asSelf) {
+        // Playing as an existing account golfer: golferId + Bearer ride along, the joined
+        // name is the account's own name.
+        const golfer = auth.golfer!;
+        savedName = golfer.name;
+        response = await auth.withAuth((token) =>
+          joinRound({ code: upperCode, name: golfer.name, tee: tee.trim(), courseHandicap: parsedHandicap, golferId: golfer.golferId }, token),
+        );
+      } else if (auth.signedIn) {
+        // Signed in with NO golfer yet: the typed name first creates the account's golfer (PUT
+        // /me), THEN the round is joined as-self with the golferId that mints — strictly in
+        // this order (assert-call-order — CreateRoundPage's own headline behavior, mirrored
+        // here for join).
+        const trimmed = name.trim();
+        savedName = trimmed;
+        response = await auth.withAuth(async (token) => {
+          const created = await updateMe(token, { name: trimmed });
+          return joinRound({ code: upperCode, name: trimmed, tee: tee.trim(), courseHandicap: parsedHandicap, golferId: created.golfer.golferId }, token);
+        });
+      } else {
+        // Signed out: byte-identical to before this milestone — no golferId, no Bearer.
+        const trimmed = name.trim();
+        savedName = trimmed;
+        response = await joinRound({ code: upperCode, name: trimmed, tee: tee.trim(), courseHandicap: parsedHandicap });
+      }
       // JoinRoundResponse carries no joinCode (only StartRoundResponse does) — the code the
       // golfer just typed IS the round's join code, so that's what's saved.
-      credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: name.trim(), joinCode: upperCode });
+      credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: savedName, joinCode: upperCode });
       navigate(`/round/${response.roundId}`);
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not join the round — try again.");
@@ -87,10 +123,22 @@ export function JoinRoundPage() {
 
         {courseName && <p className="text-sm text-slate-400">Joining {courseName}</p>}
 
-        <label className="flex flex-col gap-1">
-          Your name
-          <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
-        </label>
+        {asSelf ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-slate-400">Playing as</span>
+            <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-800 p-3 text-lg">
+              <span>{auth.golfer!.name}</span>
+              <Link to="/profile" className="text-sm text-emerald-400 underline">
+                Change
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <label className="flex flex-col gap-1">
+            Your name
+            <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+          </label>
+        )}
 
         {teeOptions ? (
           <label className="flex flex-col gap-1">

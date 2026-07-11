@@ -262,6 +262,25 @@ describe("ResultsView — claim a ghost after finalize (gap 2)", () => {
     await waitFor(() => expect(screen.getAllByRole("button", { name: "This is me" })).toHaveLength(2)); // Ann, Bo
   });
 
+  // M8 Task 5: the own-row arm renders a steady "You" marker (was a bare null) — the round
+  // could have been played AS this account golfer from the start (as-self create/join), so the
+  // finalized roster must say so even without ever running a claim in this session.
+  it("signed in + already this account's own golfer: that row shows 'You', not a claim button", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } })),
+    );
+
+    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "This is me" })).toHaveLength(1)); // Bo only
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    expect(within(annRow!).queryByRole("button", { name: "This is me" })).toBeNull();
+    expect(within(annRow!).getByText("You")).toBeTruthy();
+  });
+
   it("This is me -> confirm -> POST /golfers/claim -> success re-fetches /me, even after finalize", async () => {
     signIn();
     const calls: string[] = [];

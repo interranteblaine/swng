@@ -1,8 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { courseId, fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
-import type { AddGameRequest, AddTeeSetRequest, ClaimGolferRequest, CreateCourseRequest, JoinRoundRequest, StartRoundRequest, UpdateMeRequest, VerifyTeeSetRequest } from "@swng/contracts";
+import { courseId, crewId, fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
+import type {
+  AddGameRequest,
+  AddParticipantRequest,
+  AddTeeSetRequest,
+  ClaimGolferRequest,
+  CreateCourseRequest,
+  JoinRoundRequest,
+  StartRoundRequest,
+  UpdateMeRequest,
+  VerifyTeeSetRequest,
+} from "@swng/contracts";
 import {
   addGame,
+  addParticipant,
   addTeeSet,
   ApiError,
   claimGolfer,
@@ -10,6 +21,7 @@ import {
   createRound,
   finalizeRound,
   getCourse,
+  getCrew,
   getMe,
   getMyRecord,
   joinRound,
@@ -76,6 +88,24 @@ describe("createRound", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect(error as ApiError).toMatchObject({ code: "invalid-request", status: 400 });
   });
+
+  // M8 Task 5 (play as yourself): an optional Bearer token, attached only when the caller
+  // passes one — "optional-golfer" on the wire, same shape-preserving idiom as the token param
+  // already on addGame/finalizeRound, just optional here since an anonymous create must stay
+  // byte-identical to the call above (no `token` arg at all).
+  it("attaches a Bearer token when one is given, alongside a golferId in the body (as-self create)", async () => {
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (_url, init) => {
+      seenInit = init;
+      return fakeResponse(201, { roundId: "round-self", joinCode: "SELF01", token: "tok-self", golferId: "ann-g" });
+    });
+
+    const selfInput: StartRoundRequest = { ...input, golferId: golferId("ann-g") };
+    await createRound(selfInput, "tok-caller");
+
+    expect(JSON.parse(String(seenInit?.body))).toEqual(selfInput);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-caller");
+  });
 });
 
 describe("joinRound", () => {
@@ -105,6 +135,21 @@ describe("joinRound", () => {
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("bad-join-code");
   });
+
+  // Same optional-Bearer story as createRound above (M8 Task 5).
+  it("attaches a Bearer token when one is given, alongside a golferId in the body (as-self join)", async () => {
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (_url, init) => {
+      seenInit = init;
+      return fakeResponse(201, { roundId: "round-1", token: "tok-2", golferId: "bo-g" });
+    });
+
+    const selfInput: JoinRoundRequest = { ...input, golferId: golferId("bo-g") };
+    await joinRound(selfInput, "tok-caller");
+
+    expect(JSON.parse(String(seenInit?.body))).toEqual(selfInput);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-caller");
+  });
 });
 
 describe("addGame", () => {
@@ -128,6 +173,67 @@ describe("addGame", () => {
     // leak of a bespoke property into a standard API surface).
     expect(seenInit).not.toHaveProperty("token");
     expect(result).toEqual({ gameId: expect.anything(), seq: 5 });
+  });
+});
+
+describe("addParticipant", () => {
+  it("POSTs the request body to /rounds/{roundId}/players with the bearer token and parses the events response", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(201, { events: [] });
+    });
+
+    const input: AddParticipantRequest = { name: "Dave", tee: "white", courseHandicap: 10 };
+    const result = await addParticipant(roundId("round-1"), "tok-add", input);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/players`);
+    expect(seenInit?.method).toBe("POST");
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-add");
+    expect(result).toEqual({ events: [] });
+  });
+
+  it("carries a supplied golferId (the crew quick-add's stable id) verbatim in the body", async () => {
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (_url, init) => {
+      seenInit = init;
+      return fakeResponse(201, { events: [] });
+    });
+
+    const input: AddParticipantRequest = { name: "Cal", tee: "blue", courseHandicap: 5, golferId: golferId("cal-crew") };
+    await addParticipant(roundId("round-1"), "tok-add", input);
+
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+  });
+});
+
+describe("getCrew", () => {
+  it("GETs /crews/{crewId} with the bearer token and parses a GetCrewResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [] } });
+    });
+
+    const result = await getCrew("tok-crew", crewId("crew-1"));
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1`);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-crew");
+    expect(result.crew.crewId).toBe(crewId("crew-1"));
+  });
+
+  it("throws a coded ApiError on a non-member 403", async () => {
+    stubFetch(async () => fakeResponse(403, { code: "not-a-member", message: "not a member of this crew" }));
+
+    const error: unknown = await getCrew("tok-crew", crewId("crew-1")).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("not-a-member");
   });
 });
 

@@ -51,7 +51,7 @@ export function ResultsView({ state, games, response }: ResultsViewProps) {
           {state.participants.map((p) => (
             <li key={p.golferId} className="flex items-center gap-2">
               <span>{p.name}</span>
-              <ClaimAffordance rowGolferId={p.golferId} />
+              <ClaimAffordance rowGolferId={p.golferId} rowName={p.name} />
             </li>
           ))}
         </ul>

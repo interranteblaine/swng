@@ -5,6 +5,10 @@ import { useAuth } from "../auth/useAuth";
 
 export interface ClaimAffordanceProps {
   readonly rowGolferId: GolferId;
+  // Papercut 5 (M8 Task 5): sent with the claim so a FRESH claim's profile is named after the
+  // roster row, not the JWT-derived email default (claimGolferRequestSchema's `name` only seeds
+  // a lazily-created golfer row — never renames an existing one, golfers.ts's own doc comment).
+  readonly rowName: string;
 }
 
 // The ghost-claim affordance on one roster row (M7 Task 6; model corrected after a field smoke
@@ -26,7 +30,7 @@ export interface ClaimAffordanceProps {
 // your round" is part of the M7 promise, not just a mid-round affordance).
 // Round-membership-as-claim-capability is beta-grade by design (M9 hardens with a
 // challenge/confirmation).
-export function ClaimAffordance({ rowGolferId }: ClaimAffordanceProps) {
+export function ClaimAffordance({ rowGolferId, rowName }: ClaimAffordanceProps) {
   const auth = useAuth();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -45,15 +49,23 @@ export function ClaimAffordance({ rowGolferId }: ClaimAffordanceProps) {
     );
   }
 
-  // Hidden once this signed-in account already IS this golfer (claimed in an earlier session,
-  // or the account's own golfer joined this round) — nothing left to claim.
-  if (auth.golfer?.golferId === rowGolferId) return null;
+  // A steady "You" marker (M8 Task 5 — was a bare null) once this signed-in account already IS
+  // this golfer: claimed in an earlier session, the account's own golfer joined this round, OR
+  // (the milestone's headline behavior) the round was created/joined AS this account golfer in
+  // the first place — nothing left to claim, but the row should still say whose it is.
+  if (auth.golfer?.golferId === rowGolferId) {
+    return (
+      <span role="status" className="text-xs text-emerald-400">
+        You
+      </span>
+    );
+  }
 
   const confirm = async () => {
     setBusy(true);
     setError(undefined);
     try {
-      await auth.withAuth((token) => claimGolfer(token, { golferId: rowGolferId }));
+      await auth.withAuth((token) => claimGolfer(token, { golferId: rowGolferId, name: rowName }));
       // Re-fetch /me (brief): the claim is what binds a fresh account to its season ghost, so
       // the app's identity chrome must reflect the claimed golfer now, not on the next reload.
       await auth.refetch();

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { defaultAllowance, golferId } from "@swng/domain";
-import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
-import type { GameConfigInput } from "@swng/contracts";
+import type { CrewId, GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
+import type { AddParticipantRequest, CrewMemberView, GameConfigInput } from "@swng/contracts";
+import { getCrew } from "../api";
+import { useAuth } from "../auth/useAuth";
 import { ClaimAffordance } from "./ClaimAffordance";
 import { gameDots, gamePlayers, totalDots } from "./dots";
 
@@ -15,6 +17,10 @@ export interface SetupPanelProps {
   readonly games: readonly GameState[];
   readonly joinCode: string;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
+  // M8 Task 5: "Add player" — POST /rounds/{roundId}/players. No optimistic insert (same
+  // precedent as onAddGame): the new row appears once participant-joined round-trips through
+  // the session's own fold, never synthesized locally.
+  readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
 }
 
 const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
@@ -28,7 +34,7 @@ const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
 // `games` (live GameState, the Task 5/6 standings seam) isn't read here — this task's dots
 // derive from state.games (the frozen GameConfig) only — but it stays in SetupPanelProps so
 // RoundPage's call site doesn't need a signature change once standings actually render.
-export function SetupPanel({ state, joinCode, onAddGame }: SetupPanelProps) {
+export function SetupPanel({ state, joinCode, onAddGame, onAddParticipant }: SetupPanelProps) {
   const hasGames = state.games.length > 0;
   // Per-game dots, computed once up front rather than per participant row below — each
   // config's gameDots() call is independent of which row is currently rendering. Terminated
@@ -70,7 +76,7 @@ export function SetupPanel({ state, joinCode, onAddGame }: SetupPanelProps) {
                   <span>
                     {p.name} — {p.tee} — CH {p.courseHandicap}
                   </span>
-                  <ClaimAffordance rowGolferId={p.golferId} />
+                  <ClaimAffordance rowGolferId={p.golferId} rowName={p.name} />
                 </span>
                 {hasGames && (
                   <span className="flex flex-wrap gap-2 text-sm text-slate-400">
@@ -91,8 +97,139 @@ export function SetupPanel({ state, joinCode, onAddGame }: SetupPanelProps) {
         </ul>
       </div>
 
+      <AddPlayerForm
+        crewId={state.crewId}
+        existingGolferIds={new Set(state.participants.map((p) => p.golferId))}
+        onAddParticipant={onAddParticipant}
+      />
+
       <AddGameForm participants={state.participants} onAddGame={onAddGame} />
     </section>
+  );
+}
+
+interface AddPlayerFormProps {
+  readonly crewId: CrewId | undefined;
+  readonly existingGolferIds: ReadonlySet<GolferId>;
+  readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
+}
+
+// "Add player" (M8 Task 5, "host types Dave in"): name + tee + courseHandicap →
+// POST /rounds/{roundId}/players. When the round carries a crewId, the crew's not-yet-in-round
+// members render FIRST as one-tap quick-adds (their name IS the tap — the shared tee/CH fields
+// below still apply), a free-text ghost form always underneath. The crew fetch is a nicety, not
+// a gate (JoinRoundPage's peek-fallback precedent): a non-member participant, a signed-out
+// device, or a network failure all degrade silently to the free-text form alone.
+function AddPlayerForm({ crewId, existingGolferIds, onAddParticipant }: AddPlayerFormProps) {
+  const { withAuth, signedIn } = useAuth();
+  const [crewMembers, setCrewMembers] = useState<readonly CrewMemberView[] | undefined>(undefined);
+  const [selected, setSelected] = useState<{ readonly golferId: GolferId; readonly name: string } | undefined>(undefined);
+  const [name, setName] = useState("");
+  const [tee, setTee] = useState("");
+  const [courseHandicap, setCourseHandicap] = useState("0");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    setCrewMembers(undefined);
+    if (!crewId || !signedIn) return; // no crew, or nothing to prove membership with — free text only
+    withAuth((token) => getCrew(token, crewId))
+      .then((response) => setCrewMembers(response.crew.members))
+      .catch(() => {}); // degrade silently — see the function's own doc comment
+  }, [crewId, signedIn, withAuth]);
+
+  const quickAddCandidates = (crewMembers ?? []).filter((m) => !existingGolferIds.has(m.golferId));
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const parsedHandicap = Number.parseInt(courseHandicap, 10);
+    const effectiveName = selected ? selected.name : name.trim();
+    if (!effectiveName || !tee.trim() || !Number.isInteger(parsedHandicap)) return;
+
+    setSubmitting(true);
+    setError(undefined);
+    try {
+      await onAddParticipant({
+        name: effectiveName,
+        tee: tee.trim(),
+        courseHandicap: parsedHandicap,
+        ...(selected ? { golferId: selected.golferId } : {}),
+      });
+      // No optimistic insert (SetupPanel's own precedent, same as AddGameForm below): the new
+      // roster row appears once participant-joined round-trips through the session's fold.
+      setSelected(undefined);
+      setName("");
+      setTee("");
+      setCourseHandicap("0");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not add the player — try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4 rounded-lg bg-slate-900 p-4">
+      <h2 className="text-lg font-semibold">Add player</h2>
+
+      {quickAddCandidates.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <span className="text-sm text-slate-400">From your crew</span>
+          <div className="flex flex-wrap gap-2">
+            {quickAddCandidates.map((m) => (
+              <button
+                key={m.golferId}
+                type="button"
+                onClick={() => setSelected({ golferId: m.golferId, name: m.name })}
+                className="rounded-full bg-slate-800 px-3 py-1 text-sm font-medium text-emerald-400"
+              >
+                {m.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {selected ? (
+        <p className="flex items-center gap-2">
+          <span>Adding {selected.name}</span>
+          <button type="button" onClick={() => setSelected(undefined)} className="text-sm text-emerald-400 underline">
+            Change
+          </button>
+        </p>
+      ) : (
+        <label className="flex flex-col gap-1">
+          Name
+          <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+        </label>
+      )}
+
+      <label className="flex flex-col gap-1">
+        Tee
+        <input value={tee} onChange={(event) => setTee(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+      </label>
+
+      <label className="flex flex-col gap-1">
+        Course handicap
+        <input
+          type="number"
+          step={1}
+          value={courseHandicap}
+          onChange={(event) => setCourseHandicap(event.target.value)}
+          className="rounded-lg bg-slate-800 p-3 text-lg"
+        />
+      </label>
+
+      {error && (
+        <p role="alert" className="text-red-400">
+          {error}
+        </p>
+      )}
+
+      <button type="submit" disabled={submitting} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+        Add player
+      </button>
+    </form>
   );
 }
 

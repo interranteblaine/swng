@@ -642,4 +642,69 @@ describe("RoundPage", () => {
     // The dialog stays open (retry stays one tap away) rather than closing on the error.
     expect(screen.getByRole("dialog", { name: "Confirm finalize" })).toBeTruthy();
   });
+
+  // M8 Task 6 review fix: CreateRoundPage's "play the usual" seed loop carries any dropped
+  // preset games here via router state (LocationState in RoundPage.tsx) rather than swallowing
+  // them — this suite drives that hand-off directly (initialEntries' own `state`, same idiom
+  // CreateRoundPage.test.tsx uses) so it's independent of CreateRoundPage's own api mocks.
+  it("a seedFailures hand-off in router state renders a dismissible notice naming the count and the failed game's label", async () => {
+    const id = roundId("round-seed-fail");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-seed", golferId: ann, name: "Ann", joinCode: "SEED01" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    render(
+      <MemoryRouter
+        initialEntries={[{ pathname: `/round/${id}`, state: { seedFailures: { total: 3, failedLabels: ["Stableford — Ann, Cy"] } } }]}
+      >
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("SEED01")).toBeTruthy());
+
+    expect(screen.getByText(/1 of 3 games from the usual couldn.t be added — add them under Setup\./i)).toBeTruthy();
+    expect(screen.getByText("Stableford — Ann, Cy")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+    expect(screen.queryByText(/couldn.t be added/i)).toBeNull();
+  });
+
+  it("no seedFailures in router state: no notice renders (a direct/refreshed visit, or every preset game seeded cleanly)", async () => {
+    const id = roundId("round-seed-none");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-noseed", golferId: ann, name: "Ann", joinCode: "NOSEED1" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("NOSEED1")).toBeTruthy());
+    expect(screen.queryByText(/couldn.t be added/i)).toBeNull();
+  });
 });

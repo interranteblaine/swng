@@ -225,16 +225,27 @@ export function CreateRoundPage() {
       // games are seeded right here, with the create response's own participant token, before
       // navigating. Per-game failures are tolerated deliberately: the round already EXISTS, so
       // stranding the golfer on this page (where a re-submit would mint a SECOND round) is
-      // strictly worse than landing in the round with a game missing — SetupPanel can re-add it.
+      // strictly worse than landing in the round with a game missing — SetupPanel can re-add
+      // it. "Tolerated" is not "silent" (review finding): this is "one-tap Saturday", exactly
+      // the flow where a golfer is least likely to double-check Setup on their own — so each
+      // failed game's label is collected (describeStandingGame's own formatting, the SAME text
+      // the Games list above already renders — never a raw server/error string, M7 discipline)
+      // and carried to the round page via router state (RoundPage's own LocationState, the
+      // EditCoursePage/CreateRoundPage router-state hand-off precedent used elsewhere on this
+      // page). Navigation itself is unaffected either way — see the paragraph above.
+      const failedGameLabels: string[] = [];
       for (const game of survivingGames) {
         try {
           await addGame(response.roundId, response.token, game);
         } catch {
-          // re-addable in SetupPanel — see the loop's own comment
+          failedGameLabels.push(describeStandingGame(game, crewNameFor));
         }
       }
 
-      navigate(`/round/${response.roundId}`);
+      navigate(
+        `/round/${response.roundId}`,
+        failedGameLabels.length > 0 ? { state: { seedFailures: { total: survivingGames.length, failedLabels: failedGameLabels } } } : undefined,
+      );
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not create the round — try again.");
       setSubmitting(false);

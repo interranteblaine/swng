@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Navigate, useParams } from "react-router";
+import { Navigate, useLocation, useParams } from "react-router";
 import type { AddParticipantRequest, FinalizeRoundResponse, GameConfigInput } from "@swng/contracts";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { GameId, GameState, GolferId, HoleResult, RoundId, RoundState } from "@swng/domain";
@@ -143,6 +143,53 @@ function FinalizeControl({ state, games, onFinalize, onTerminate }: FinalizeCont
   );
 }
 
+// CreateRoundPage's own "play the usual" seed loop (M8 Task 6 fix): which of the crew
+// preset's games failed to post via addGame right after the round was created, carried here
+// through this page's own navigate() call (the EditCoursePage/CreateRoundPage router-state
+// hand-off precedent — see CreateRoundPage.tsx's own LocationState). Absent entirely when
+// every preset game seeded cleanly, or outside the "play the usual" flow altogether.
+interface SeedFailures {
+  readonly total: number;
+  readonly failedLabels: readonly string[]; // describeStandingGame's own formatting — never a raw server/error string (M7 discipline)
+}
+
+interface LocationState {
+  readonly seedFailures?: SeedFailures;
+}
+
+interface SeedFailureNoticeProps {
+  readonly seedFailures: SeedFailures;
+  readonly onDismiss: () => void;
+}
+
+// "One-tap Saturday" (review finding): a game that failed to seed leaves the round itself
+// uncorrupted (SetupPanel can always re-add it below), but was previously silent — exactly the
+// flow where a golfer is least likely to double-check Setup on their own. Mirrors
+// StatusChrome's own dismissible amber toast (rejected-ops) rather than inventing a new visual
+// language for "something didn't land, here's what and where to fix it." Dismissal is local
+// state only (RoundPageContent's seedNoticeDismissed below) — nothing persists past this mount.
+function SeedFailureNotice({ seedFailures, onDismiss }: SeedFailureNoticeProps) {
+  return (
+    <div role="status" className="mx-3 mt-2 flex flex-col gap-2 rounded-md bg-amber-950 px-3 py-2 text-sm text-amber-200">
+      <div className="flex items-center justify-between gap-2">
+        <p>
+          {seedFailures.failedLabels.length} of {seedFailures.total} games from the usual couldn&apos;t be added — add them under Setup.
+        </p>
+        <button type="button" onClick={onDismiss} className="min-h-8 shrink-0 rounded-md bg-amber-900 px-2 text-xs font-medium">
+          Dismiss
+        </button>
+      </div>
+      <ul className="flex flex-col gap-1">
+        {seedFailures.failedLabels.map((label, index) => (
+          <li key={index} className="text-xs text-amber-300">
+            {label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 interface LiveRoundProps {
   readonly state: RoundState; // status !== "final" — RoundPageContent's own contract below
   readonly games: readonly GameState[];
@@ -191,6 +238,14 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     // status flip via WS/pull (another participant finalized) never sets this, and
     // ResultsView must render fully either way (its own contract; see its doc comment).
     const [finalizeResponse, setFinalizeResponse] = useState<FinalizeRoundResponse | undefined>(undefined);
+
+    // CreateRoundPage's seed-failure hand-off (SeedFailureNotice above) — read once from
+    // whatever router state this navigation into the page carried (null on a direct/refreshed
+    // visit, same as every other LocationState reader in this app). Dismissal is local-only:
+    // there's nothing to persist, and re-navigating here later never resurrects it.
+    const location = useLocation();
+    const seedFailures = (location.state as LocationState | null)?.seedFailures;
+    const [seedNoticeDismissed, setSeedNoticeDismissed] = useState(false);
 
     const onAddGame = useCallback(
       async (game: GameConfigInput) => {
@@ -275,6 +330,9 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
           participants={session.state.participants}
           onReconnect={reconnect}
         />
+        {seedFailures && seedFailures.failedLabels.length > 0 && !seedNoticeDismissed && (
+          <SeedFailureNotice seedFailures={seedFailures} onDismiss={() => setSeedNoticeDismissed(true)} />
+        )}
         {isFinal ? (
           <ResultsView state={session.state} games={session.games} response={finalizeResponse} />
         ) : (

@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { courseId, crewId, fixtureLinks18, fixtureWhite18, gameId, golferId, roundId } from "@swng/domain";
 import { startRoundRequestSchema } from "@swng/contracts";
@@ -85,13 +85,34 @@ const signIn = (): string => {
   return idToken;
 };
 
+// Reads back whatever CreateRoundPage's own post-create navigate() hands the round page (the
+// AddCoursePage/EditCoursePage "read the outgoing hand-off via a stub" precedent — see
+// AddCoursePage.test.tsx's own CreateStub), so this file can assert the seed-failure router
+// state's SHAPE without pulling the real RoundPage (and its own session/transport machinery)
+// into these tests. "round view" is kept as its own element with no sibling text so the
+// pre-existing `screen.getByText("round view")` assertions keep matching unchanged.
+function RoundStub() {
+  const location = useLocation();
+  const state = location.state as { seedFailures?: { total: number; failedLabels: readonly string[] } } | null;
+  return (
+    <div>
+      <p>round view</p>
+      {state?.seedFailures && (
+        <p>
+          seed failures: {state.seedFailures.failedLabels.length} of {state.seedFailures.total} — {state.seedFailures.failedLabels.join("; ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 const renderCreate = (initialEntry: string | { pathname: string; state?: unknown } = "/create") =>
   render(
     <AuthProvider>
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route path="/create" element={<CreateRoundPage />} />
-          <Route path="/round/:roundId" element={<div>round view</div>} />
+          <Route path="/round/:roundId" element={<RoundStub />} />
         </Routes>
       </MemoryRouter>
     </AuthProvider>,
@@ -485,5 +506,55 @@ describe("CreateRoundPage — play the usual (crew preset)", () => {
       { name: "Bo", tee: "white", courseHandicap: 0, golferId: golferId("bo-g") },
       { name: "Cy", tee: "white", courseHandicap: 0, golferId: golferId("cy-g") },
     ]);
+  });
+
+  // The review finding this fix closes: a per-game addGame failure in the seed loop used to be
+  // caught and dropped with nothing to show for it — exactly wrong for "one-tap Saturday",
+  // where the golfer is least likely to double-check Setup on their own. Three games (not the
+  // usual two) so this arm can distinguish "the one that failed" from "the two that didn't",
+  // same shape as the fix's own "2 of 3" style copy.
+  it("a mid-loop addGame rejection still navigates to the round, carrying the failed game's own label as router state (never a raw server string)", async () => {
+    arrange();
+    const threeGameStandingGame: StandingGameView = {
+      ...standingGame,
+      games: [...standingGame.games, { kind: "skins", players: [golferId("ann-g"), golferId("bo-g"), golferId("cy-g")], allowance: 1 }],
+    };
+    // Second of three addGame calls rejects — the singles-match (1st) and skins (3rd) seed
+    // cleanly; only the stableford (2nd) fails.
+    mockedAddGame
+      .mockResolvedValueOnce({ gameId: gameId("game-1"), seq: 5 })
+      .mockRejectedValueOnce(new ApiError("internal", 500, "raw db failure xyz"))
+      .mockResolvedValueOnce({ gameId: gameId("game-3"), seq: 7 });
+
+    renderCreate({ pathname: "/create", state: { crewPreset: { ...crewPreset, standingGame: threeGameStandingGame } } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    // Navigation happens regardless of the failure — a dropped preset game must never strand
+    // the golfer on this page (a re-submit would mint a SECOND round).
+    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
+    await waitFor(() => expect(mockedAddGame).toHaveBeenCalledTimes(3));
+
+    // The count, and the failed game's own describeStandingGame label — the SAME text the
+    // prefill Games list renders — carried through router state; never the raw ApiError text
+    // ("raw db failure xyz") from the rejection above.
+    expect(screen.getByText(/seed failures: 1 of 3/i)).toBeTruthy();
+    expect(screen.getByText(/stableford — ann g, cy/i)).toBeTruthy();
+    expect(screen.queryByText(/raw db failure/i)).toBeNull();
+  });
+
+  it("no addGame failures: no seed-failure router state is sent at all", async () => {
+    arrange();
+
+    renderCreate({ pathname: "/create", state: { crewPreset } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
+    expect(screen.queryByText(/seed failures/i)).toBeNull();
   });
 });

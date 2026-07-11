@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CourseId, CrewId, CrewRole, GolferId } from "@swng/domain";
+import type { CourseId, CrewId, CrewRole, GolferId, HeadToHeadRecord, SeasonLedgerLine } from "@swng/domain";
 import type { GameConfigInput } from "./commands.js";
 import { gameConfigInputSchema } from "./commands.js";
 import { courseIdSchema, crewIdSchema, golferIdSchema } from "./ids.js";
@@ -115,4 +115,41 @@ export interface ListMyCrewsResponse {
 
 export const listMyCrewsResponseSchema: z.ZodType<ListMyCrewsResponse> = z.object({
   crews: z.array(z.object({ crewId: crewIdSchema, name: z.string(), memberCount: z.number().int() })).readonly(),
+});
+
+// GET /crews/{crewId}/records?season= (M8 Task 4): mirrors domain's SeasonLedgerLine/
+// HeadToHeadRecord (crew/ledger.ts) field-for-field, same "wire-shapes-an-already-wire-shaped-
+// domain-type" idiom as golfers.ts's golferRoundLineSchema — no separate *View interface, since
+// neither line carries a read-time-derived field the way CrewMemberView's `claimed` does.
+const seasonLedgerLineSchema: z.ZodType<SeasonLedgerLine> = z.object({
+  golferId: golferIdSchema,
+  rounds: z.number().int(),
+  wins: z.number().int(),
+  losses: z.number().int(),
+  halves: z.number().int(),
+  points: z.number().int(),
+  skins: z.number().int(),
+});
+
+const headToHeadRecordSchema: z.ZodType<HeadToHeadRecord> = z.object({
+  a: golferIdSchema,
+  b: golferIdSchema,
+  aWins: z.number().int(),
+  bWins: z.number().int(),
+  halves: z.number().int(),
+});
+
+// season always comes back explicit — the route defaults ?season= to the current UTC year
+// when the client omits it (routes.ts), but the wire response never leaves the caller guessing
+// which season it actually read.
+export interface GetCrewRecordsResponse {
+  readonly season: number;
+  readonly ledger: readonly SeasonLedgerLine[];
+  readonly headToHead: readonly HeadToHeadRecord[];
+}
+
+export const getCrewRecordsResponseSchema: z.ZodType<GetCrewRecordsResponse> = z.object({
+  season: z.number().int(),
+  ledger: z.array(seasonLedgerLineSchema).readonly(),
+  headToHead: z.array(headToHeadRecordSchema).readonly(),
 });

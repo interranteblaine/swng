@@ -1,26 +1,39 @@
 import type { z } from "zod";
-import { courseId, gameId, roundId } from "@swng/domain";
-import type { CourseId, GameId, RoundId } from "@swng/domain";
+import { courseId, crewId, gameId, roundId } from "@swng/domain";
+import type { CourseId, CrewId, GameId, RoundId } from "@swng/domain";
 import type { AccountClaims, ParticipantClaims } from "@swng/application";
 import type {
+  AddCrewMemberRequest,
+  AddCrewMemberResponse,
   AddGameRequest,
   AddGameResponse,
+  AddParticipantRequest,
+  AddParticipantResponse,
   AddTeeSetRequest,
   AddTeeSetResponse,
   ClaimGolferRequest,
   CreateCourseRequest,
   CreateCourseResponse,
+  CreateCrewRequest,
+  CreateCrewResponse,
   EventsResponse,
   FinalizeRoundResponse,
   GetCourseResponse,
+  GetCrewRecordsResponse,
+  GetCrewResponse,
   GetMeResponse,
   GetMyRecordResponse,
   GolferResponse,
+  JoinCrewRequest,
+  JoinCrewResponse,
   JoinRoundRequest,
   JoinRoundResponse,
+  ListMyCrewsResponse,
   PeekRoundResponse,
   RecordScoreRequest,
   RecordScoreResponse,
+  SaveStandingGameRequest,
+  SaveStandingGameResponse,
   SearchCoursesResponse,
   StartRoundRequest,
   StartRoundResponse,
@@ -31,12 +44,17 @@ import type {
 } from "@swng/contracts";
 import {
   ContractError,
+  addCrewMemberRequestSchema,
   addGameRequestSchema,
+  addParticipantRequestSchema,
   addTeeSetRequestSchema,
   claimGolferRequestSchema,
   createCourseRequestSchema,
+  createCrewRequestSchema,
+  joinCrewRequestSchema,
   joinRoundRequestSchema,
   recordScoreRequestSchema,
+  saveStandingGameRequestSchema,
   startRoundRequestSchema,
   updateMeRequestSchema,
   verifyTeeSetRequestSchema,
@@ -47,13 +65,22 @@ import {
 // so it never imports application's use cases directly; compositionRoot.ts is the only place
 // that builds one.
 export interface UseCases {
-  startRound: (command: StartRoundRequest) => Promise<StartRoundResponse>;
-  joinRound: (command: JoinRoundRequest) => Promise<JoinRoundResponse>;
+  // M8 Task 4: StartRound/JoinRound move to "optional-golfer" — claims is undefined for an
+  // anonymous caller (byte-identical to before this parameter existed) and set for a
+  // signed-in one, enabling the as-self/crew-consent arms (application/src/rounds/
+  // golferIdentity.ts). Both use cases already accepted this optional 2nd param since M8
+  // Tasks 1/2; only the wire tier — and this interface's own signature — changes here.
+  startRound: (command: StartRoundRequest, claims?: AccountClaims) => Promise<StartRoundResponse>;
+  joinRound: (command: JoinRoundRequest, claims?: AccountClaims) => Promise<JoinRoundResponse>;
   addGame: (claims: ParticipantClaims, command: AddGameRequest) => Promise<AddGameResponse>;
   recordScore: (claims: ParticipantClaims, command: RecordScoreRequest) => Promise<RecordScoreResponse>;
   finalizeRound: (claims: ParticipantClaims) => Promise<FinalizeRoundResponse>;
   readEvents: (id: RoundId, sinceSeq: number) => Promise<EventsResponse>;
   peekRound: (code: string) => Promise<PeekRoundResponse>;
+  // M8 Task 4: POST /rounds/{roundId}/players — an already-seated participant adds someone
+  // else to the roster, the crew one-tap flow's mid-round counterpart to StartRound's own
+  // `players` array. "participant"-gated, same tier as addGame/recordScore/finalizeRound.
+  addParticipant: (claims: ParticipantClaims, command: AddParticipantRequest) => Promise<AddParticipantResponse>;
   createCourse: (command: CreateCourseRequest) => Promise<CreateCourseResponse>;
   addTeeSet: (id: CourseId, command: AddTeeSetRequest) => Promise<AddTeeSetResponse>;
   verifyTeeSet: (id: CourseId, command: VerifyTeeSetRequest) => Promise<VerifyTeeSetResponse>;
@@ -68,6 +95,14 @@ export interface UseCases {
   updateMyGolfer: (claims: AccountClaims, command: UpdateMeRequest) => Promise<GolferResponse>;
   claimGolfer: (claims: AccountClaims, command: ClaimGolferRequest) => Promise<GolferResponse>;
   getMyRecord: (claims: AccountClaims) => Promise<GetMyRecordResponse>;
+  // M8 Task 4: crews — every route below is "golfer"-gated (routes.ts's table).
+  createCrew: (claims: AccountClaims, command: CreateCrewRequest) => Promise<CreateCrewResponse>;
+  getCrew: (claims: AccountClaims, id: CrewId) => Promise<GetCrewResponse>;
+  listMyCrews: (claims: AccountClaims) => Promise<ListMyCrewsResponse>;
+  addCrewMember: (claims: AccountClaims, id: CrewId, command: AddCrewMemberRequest) => Promise<AddCrewMemberResponse>;
+  saveStandingGame: (claims: AccountClaims, id: CrewId, command: SaveStandingGameRequest) => Promise<SaveStandingGameResponse>;
+  joinCrewByCode: (claims: AccountClaims, command: JoinCrewRequest) => Promise<JoinCrewResponse>;
+  getCrewRecords: (claims: AccountClaims, id: CrewId, season: number) => Promise<GetCrewRecordsResponse>;
 }
 
 // What a route handler sees once the dispatcher has matched the path, verified auth, and
@@ -78,7 +113,9 @@ export interface UseCases {
 // declaring `auth: "golfer"` gets a verified Cognito identity here instead of a
 // round-scoped participant token — the two tiers are mutually exclusive per route (routes.ts,
 // by construction: no route declares both), so a handler only ever reads the one its own
-// route's `auth` promises.
+// route's `auth` promises. "optional-golfer" (M8 Task 4) shares this same field: `account` is
+// set when the caller presented a valid Bearer token and left unset for a genuinely
+// anonymous request — never a third field.
 export interface RouteContext {
   readonly claims?: ParticipantClaims;
   readonly account?: AccountClaims;
@@ -92,9 +129,13 @@ export interface Route {
   readonly path: string; // template with `{name}` segments, e.g. "/rounds/{roundId}/games"
   readonly schema?: z.ZodType;
   // "participant" = a round-scoped token minted off a join code (no account required);
-  // "golfer" = a signed-in Cognito identity (M7 Task 4) — verified by the dispatcher's
-  // injected AccountVerifier, never by a route handler itself.
-  readonly auth: "none" | "participant" | "golfer";
+  // "golfer" = a signed-in Cognito identity (M7 Task 4), REQUIRED — no Bearer token 401s.
+  // "optional-golfer" (M8 Task 4: StartRound/JoinRound) = the same verified identity when a
+  // Bearer token IS presented, but a request with none proceeds anonymously (`ctx.account`
+  // simply unset) — a token that IS presented but fails verification still 401s (fail loud:
+  // a client that sent a token meant it, dispatch.ts's own comment). Every one of these is
+  // verified by the dispatcher's injected AccountVerifier, never by a route handler itself.
+  readonly auth: "none" | "participant" | "golfer" | "optional-golfer";
   // 201 for routes that mint a new resource (round/participant/game); 200 for actions
   // that read or that may be an idempotent no-op (score, finalize, events).
   readonly successStatus: 200 | 201;
@@ -148,22 +189,48 @@ const parseJoinCode = (raw: string | undefined): string => {
   return raw;
 };
 
+// GET /crews/{crewId}/records?season= (M8 Task 4): the clock stays at THIS edge, never
+// application — getCrewRecords.ts's own signature takes a required `season: number` and
+// never reads a Clock itself, so a missing ?season= resolves to "now" right here, once, and
+// the use case always receives an explicit value. A supplied season that isn't an integer
+// is the same "reject the malformed shape at the boundary" discipline as parseSinceSeq/
+// parseLimit above, not a silent coercion.
+const parseSeason = (raw: string | undefined): number => {
+  if (raw === undefined) return new Date().getUTCFullYear();
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed)) {
+    throw new ContractError("invalid-request", [`season: must be an integer, got "${raw}"`]);
+  }
+  return parsed;
+};
+
 export const buildRoutes = (useCases: UseCases): readonly Route[] => [
   {
     method: "POST",
     path: "/rounds",
     schema: startRoundRequestSchema,
-    auth: "none",
+    // M8 Task 4: "optional-golfer" — an anonymous start behaves exactly as before (ctx.account
+    // unset); a signed-in caller's verified claims thread through to startRound's own optional
+    // 2nd param, enabling the as-self/crew-consent arms.
+    auth: "optional-golfer",
     successStatus: 201,
-    handler: async (_ctx, body) => useCases.startRound(body as StartRoundRequest),
+    handler: async (ctx, body) => useCases.startRound(body as StartRoundRequest, ctx.account),
   },
   {
     method: "POST",
     path: "/rounds/join",
     schema: joinRoundRequestSchema,
-    auth: "none",
+    auth: "optional-golfer", // M8 Task 4: same optional-golfer story as POST /rounds above.
     successStatus: 201,
-    handler: async (_ctx, body) => useCases.joinRound(body as JoinRoundRequest),
+    handler: async (ctx, body) => useCases.joinRound(body as JoinRoundRequest, ctx.account),
+  },
+  {
+    method: "POST",
+    path: "/rounds/{roundId}/players",
+    schema: addParticipantRequestSchema,
+    auth: "participant", // M8 Task 4: any already-seated participant may add another (matches addGame/terminateGame's own "any participant may X").
+    successStatus: 201, // mints a new participant, same status-code spirit as JoinRound/addGame.
+    handler: async (ctx, body) => useCases.addParticipant(ctx.claims!, body as AddParticipantRequest),
   },
   {
     method: "POST",
@@ -292,5 +359,61 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 200,
     handler: async (ctx) => useCases.getMyRecord(ctx.account!),
+  },
+  // M8 Task 4: crews — every route below is "golfer"-gated (a signed-in Cognito identity,
+  // same tier as the /me* surface above). Member-only authorization (not-a-member 403) lives
+  // in application (crews/membership.ts's requireCrewMember), never re-checked here.
+  {
+    method: "POST",
+    path: "/crews",
+    schema: createCrewRequestSchema,
+    auth: "golfer",
+    successStatus: 201,
+    handler: async (ctx, body) => useCases.createCrew(ctx.account!, body as CreateCrewRequest),
+  },
+  {
+    method: "POST",
+    path: "/crews/join",
+    schema: joinCrewRequestSchema,
+    auth: "golfer",
+    successStatus: 200, // joining is idempotent for an already-a-member caller (joinCrewByCode.ts) — an act, not always a fresh mint, so 200 not 201.
+    handler: async (ctx, body) => useCases.joinCrewByCode(ctx.account!, body as JoinCrewRequest),
+  },
+  {
+    method: "GET",
+    path: "/me/crews",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.listMyCrews(ctx.account!),
+  },
+  {
+    method: "GET",
+    path: "/crews/{crewId}",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getCrew(ctx.account!, crewId(ctx.pathParams.crewId!)),
+  },
+  {
+    method: "POST",
+    path: "/crews/{crewId}/members",
+    schema: addCrewMemberRequestSchema,
+    auth: "golfer",
+    successStatus: 201, // mints a new (ghost) member, same status-code spirit as JoinRound/addGame.
+    handler: async (ctx, body) => useCases.addCrewMember(ctx.account!, crewId(ctx.pathParams.crewId!), body as AddCrewMemberRequest),
+  },
+  {
+    method: "PUT",
+    path: "/crews/{crewId}/standing-game",
+    schema: saveStandingGameRequestSchema,
+    auth: "golfer",
+    successStatus: 200, // replaces whatever preset was there (saveStandingGame.ts's own doc comment) — an act on an existing resource, not a mint.
+    handler: async (ctx, body) => useCases.saveStandingGame(ctx.account!, crewId(ctx.pathParams.crewId!), body as SaveStandingGameRequest),
+  },
+  {
+    method: "GET",
+    path: "/crews/{crewId}/records",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getCrewRecords(ctx.account!, crewId(ctx.pathParams.crewId!), parseSeason(ctx.query.season)),
   },
 ];

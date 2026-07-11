@@ -401,7 +401,7 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "$disconnect" });
     });
 
-    it("wires all seventeen HTTP routes", () => {
+    it("wires all twenty-five HTTP routes", () => {
       const expectedRouteKeys = [
         "POST /rounds",
         "POST /rounds/join",
@@ -421,6 +421,16 @@ describe("SwngStack", () => {
         "PUT /me",
         "POST /golfers/claim",
         "GET /me/record",
+        // M8 Task 4: crews + rounds played as yourself (POST /rounds, POST /rounds/join above
+        // are unchanged route keys — only their auth tier moved).
+        "POST /rounds/{roundId}/players",
+        "POST /crews",
+        "POST /crews/join",
+        "GET /me/crews",
+        "GET /crews/{crewId}",
+        "POST /crews/{crewId}/members",
+        "PUT /crews/{crewId}/standing-game",
+        "GET /crews/{crewId}/records",
       ];
       const routes = template.findResources("AWS::ApiGatewayV2::Route");
       const routeKeys = Object.values(routes).map((route) => route.Properties.RouteKey);
@@ -429,11 +439,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (17 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (25 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 19 routes total (17 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 19);
+    it("has exactly 27 routes total (25 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 27);
     });
 
     // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route

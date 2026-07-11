@@ -26,7 +26,7 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the twelve routes are declared here explicitly (matching
+// function — but the (25, as of M8 Task 4) routes are declared here explicitly (matching
 // packages/lambda/src/http/routes.ts) rather than via a single $default catch-all, so the
 // API's shape is visible in the CloudFormation template and the AWS console, not hidden
 // inside the Lambda. Exported (not module-private) so test/routesParity.test.ts can pin
@@ -52,6 +52,18 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.PUT, path: "/me" },
   { method: HttpMethod.POST, path: "/golfers/claim" },
   { method: HttpMethod.GET, path: "/me/record" },
+  // M8 Task 4: crews + rounds played as yourself. POST /rounds and POST /rounds/join above
+  // are unchanged PATHS — only their auth tier moved (routes.ts's own "optional-golfer" —
+  // API Gateway forwards every method/path here identically regardless of auth tier, so this
+  // table needs no edit for that part of the change.
+  { method: HttpMethod.POST, path: "/rounds/{roundId}/players" },
+  { method: HttpMethod.POST, path: "/crews" },
+  { method: HttpMethod.POST, path: "/crews/join" },
+  { method: HttpMethod.GET, path: "/me/crews" },
+  { method: HttpMethod.GET, path: "/crews/{crewId}" },
+  { method: HttpMethod.POST, path: "/crews/{crewId}/members" },
+  { method: HttpMethod.PUT, path: "/crews/{crewId}/standing-game" },
+  { method: HttpMethod.GET, path: "/crews/{crewId}/records" },
 ];
 
 // packages/lambda/src/entries/*.ts — resolved relative to this file so bundling works

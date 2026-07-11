@@ -4,19 +4,26 @@ import type { Crew, GolferId } from "@swng/domain";
 import { ApplicationError } from "../errors.js";
 import type { CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
-import { createInMemoryCrewStore, createInMemoryGolferStore, createSequentialIds } from "../testing/fakes.js";
+import type { ProjectionStore } from "../ports/projectionStore.js";
+import { createInMemoryCrewStore, createInMemoryGolferStore, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
 import { addCrewMember } from "./addCrewMember.js";
 import { createCrew } from "./createCrew.js";
 import { getCrew } from "./getCrew.js";
+import { getCrewRecords } from "./getCrewRecords.js";
 import { joinCrewByCode } from "./joinCrewByCode.js";
 import { listMyCrews } from "./listMyCrews.js";
 import { saveStandingGame } from "./saveStandingGame.js";
 
-const setup = (crewStore: CrewStore = createInMemoryCrewStore(), golferStore: GolferStore = createInMemoryGolferStore()) => {
+const setup = (
+  crewStore: CrewStore = createInMemoryCrewStore(),
+  golferStore: GolferStore = createInMemoryGolferStore(),
+  projectionStore: ProjectionStore = createInMemoryProjectionStore(),
+) => {
   const ids = createSequentialIds("c");
   return {
     crewStore,
     golferStore,
+    projectionStore,
     ids,
     create: createCrew({ crewStore, golferStore, ids }),
     get: getCrew({ crewStore, golferStore }),
@@ -24,6 +31,7 @@ const setup = (crewStore: CrewStore = createInMemoryCrewStore(), golferStore: Go
     addMember: addCrewMember({ crewStore, golferStore, ids }),
     join: joinCrewByCode({ crewStore, golferStore }),
     saveStanding: saveStandingGame({ crewStore, golferStore }),
+    getRecords: getCrewRecords({ crewStore, golferStore, projectionStore }),
   };
 };
 
@@ -215,6 +223,53 @@ describe("saveStandingGame", () => {
     await expect(ctx.saveStanding({ sub: "sub-stranger" }, created.crew.crewId, { standingGame: { games: [] } })).rejects.toMatchObject({
       code: "not-a-member",
     });
+  });
+});
+
+describe("getCrewRecords", () => {
+  it("member-only: a non-member is rejected — not-a-member", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    await seedAccountGolfer(ctx.golferStore, "sub-stranger", "Stranger");
+
+    await expect(ctx.getRecords({ sub: "sub-stranger" }, created.crew.crewId, 2026)).rejects.toMatchObject({ code: "not-a-member" });
+  });
+
+  it("an unknown crewId is rejected — unknown-crew", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    await expect(ctx.getRecords({ sub: "sub-ann" }, crewId("nope"), 2026)).rejects.toMatchObject({ code: "unknown-crew" });
+  });
+
+  it("a member reading a season with no finalized rounds yet gets EMPTY records, not an error", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+
+    await expect(ctx.getRecords({ sub: "sub-ann" }, created.crew.crewId, 2026)).resolves.toEqual({ season: 2026, ledger: [], headToHead: [] });
+  });
+
+  it("a member reading a populated season gets the projected ledger/head-to-head back verbatim", async () => {
+    const ctx = setup();
+    const annId = await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const boId = await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    await ctx.join({ sub: "sub-bo" }, { code: created.crew.joinCode });
+
+    const records = {
+      ledger: [
+        { golferId: annId, rounds: 1, wins: 1, losses: 0, halves: 0, points: 0, skins: 0 },
+        { golferId: boId, rounds: 1, wins: 0, losses: 1, halves: 0, points: 0, skins: 0 },
+      ],
+      headToHead: [{ a: annId, b: boId, aWins: 1, bWins: 0, halves: 0 }],
+    };
+    await ctx.projectionStore.putSeasonRecords(created.crew.crewId, 2026, records);
+
+    await expect(ctx.getRecords({ sub: "sub-ann" }, created.crew.crewId, 2026)).resolves.toEqual({ season: 2026, ...records });
+    // A different season for the SAME crew stays empty — records are season-scoped, not
+    // crew-wide.
+    await expect(ctx.getRecords({ sub: "sub-bo" }, created.crew.crewId, 2025)).resolves.toEqual({ season: 2025, ledger: [], headToHead: [] });
   });
 });
 

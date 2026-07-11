@@ -58,6 +58,30 @@ const stubUseCases: UseCases = {
   getMyRecord: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
+  addParticipant: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  createCrew: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  getCrew: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  listMyCrews: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  addCrewMember: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  saveStandingGame: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  joinCrewByCode: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  getCrewRecords: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
 };
 
 const sortKey = (route: { readonly method: string; readonly path: string }): string => `${route.method} ${route.path}`;

@@ -51,6 +51,7 @@ export { listMyCrews } from "./crews/listMyCrews.js";
 export { addCrewMember } from "./crews/addCrewMember.js";
 export { joinCrewByCode } from "./crews/joinCrewByCode.js";
 export { saveStandingGame } from "./crews/saveStandingGame.js";
+export { getCrewRecords } from "./crews/getCrewRecords.js";
 
 export { projectArchive, finalizedAtMsOf, seasonOf } from "./projections/projectArchive.js";
 export { rebuildProjections } from "./projections/rebuildProjections.js";

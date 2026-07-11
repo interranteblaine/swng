@@ -6,6 +6,7 @@ import {
   addCrewMemberRequestSchema,
   createCrewRequestSchema,
   crewViewSchema,
+  getCrewRecordsResponseSchema,
   getCrewResponseSchema,
   joinCrewRequestSchema,
   listMyCrewsResponseSchema,
@@ -127,5 +128,22 @@ describe("listMyCrewsResponseSchema", () => {
 
   it("round-trips an empty list", () => {
     roundTrips(listMyCrewsResponseSchema, { crews: [] });
+  });
+});
+
+describe("getCrewRecordsResponseSchema", () => {
+  it("round-trips a populated season's ledger + head-to-head", () => {
+    roundTrips(getCrewRecordsResponseSchema, {
+      season: 2026,
+      ledger: [
+        { golferId: golferId("ann"), rounds: 3, wins: 2, losses: 1, halves: 0, points: 0, skins: 0 },
+        { golferId: golferId("bo"), rounds: 3, wins: 1, losses: 2, halves: 0, points: 0, skins: 0 },
+      ],
+      headToHead: [{ a: golferId("ann"), b: golferId("bo"), aWins: 2, bWins: 1, halves: 0 }],
+    });
+  });
+
+  it("round-trips an empty season (no finalized rounds yet)", () => {
+    roundTrips(getCrewRecordsResponseSchema, { season: 2026, ledger: [], headToHead: [] });
   });
 });

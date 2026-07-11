@@ -83,6 +83,10 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   // are stale, the same "your view of the resource is out of date" shape as an optimistic-
   // concurrency conflict, so it gets the same 409 as course-conflict above.
   "tee-set-revised": 409,
+  // M8 Task 2 (domain/src/crew/crew.ts's addMember): the golferId named in the request is
+  // already on the roster — a failed precondition on the roster, same bucket as
+  // crew-conflict/golfer-already-in-round above, not a genuine-bug 500.
+  "duplicate-member": 409,
 };
 
 // Exported so every error-shaped response — including dispatch.ts's route-not-found 404,

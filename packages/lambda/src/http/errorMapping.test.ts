@@ -123,3 +123,18 @@ describe("toHttpError — Task 5b joinRound ApplicationErrors", () => {
     expect(JSON.parse(result.body)).toEqual({ code: "golfer-already-in-round", message: "golfer g-1 is already a participant in this round" });
   });
 });
+
+// M8 Task 2: domain/src/crew/crew.ts's addMember throws this DomainError when the golferId
+// named in the request is already on the roster — constructed exactly as that throw site
+// does (code + message), not an invented string (M6 lesson).
+describe("toHttpError — M8 crew DomainErrors", () => {
+  const logger = createNullLogger();
+
+  // Same "failed precondition on the aggregate" 409 shape as golfer-already-in-round above,
+  // not a genuine-bug 500.
+  it("maps duplicate-member to 409", () => {
+    const result = toHttpError(new DomainError("duplicate-member", 'golfer "g-1" is already a member of crew "c-1"'), logger);
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body)).toEqual({ code: "duplicate-member", message: 'golfer "g-1" is already a member of crew "c-1"' });
+  });
+});

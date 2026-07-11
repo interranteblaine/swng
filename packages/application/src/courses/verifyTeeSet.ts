@@ -4,8 +4,8 @@ import type { VerifyTeeSetRequest, VerifyTeeSetResponse } from "@swng/contracts"
 import type { Clock } from "../ports/clock.js";
 import type { CourseStore } from "../ports/courseStore.js";
 import type { Logger } from "../ports/logger.js";
+import { retryOnConflict } from "../retryOnConflict.js";
 import { toCourseView } from "./courseView.js";
-import { retryOnConflict } from "./retryOnConflict.js";
 
 export const verifyTeeSet =
   (deps: { courseStore: CourseStore; clock: Clock; logger: Logger }) =>
@@ -16,13 +16,22 @@ export const verifyTeeSet =
     // caller's own read (the card they looked at), not re-derived from whatever retryOnConflict
     // re-reads — so a revision landing mid-retry correctly fails the whole verify instead of
     // retrying into a silent transplant onto numbers the caller never saw.
-    const course = await retryOnConflict(deps.courseStore, id, (current) =>
-      verifyTeeSetEntity(current, {
-        teeName: command.teeName,
-        verifierName: command.verifierName,
-        expectedVersion: command.version,
-        nowMs: deps.clock.now(),
-      }),
+    const course = await retryOnConflict(
+      {
+        get: async () => {
+          const found = await deps.courseStore.get(id);
+          return found && { value: found.course, revision: found.revision };
+        },
+        put: (value, revision) => deps.courseStore.put(value, revision),
+      },
+      (current) =>
+        verifyTeeSetEntity(current, {
+          teeName: command.teeName,
+          verifierName: command.verifierName,
+          expectedVersion: command.version,
+          nowMs: deps.clock.now(),
+        }),
+      { notFound: "course-not-found", conflict: "course-conflict" },
     );
     deps.logger.info("tee-set-verified", { courseId: id, teeName: command.teeName, verifierName: command.verifierName });
 

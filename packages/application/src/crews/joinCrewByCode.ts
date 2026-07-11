@@ -4,8 +4,8 @@ import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
+import { retryOnConflict } from "../retryOnConflict.js";
 import { toCrewView } from "./crewView.js";
-import { retryOnConflict } from "./retryOnConflict.js";
 
 // POST /crews/join: adds the CALLER's own account golfer as a member (role "member") — the
 // self-service counterpart to addCrewMember's ghost-minting (that one's for people WITHOUT
@@ -29,14 +29,28 @@ export const joinCrewByCode =
       return { crew: await toCrewView({ golferStore: deps.golferStore }, found.crew, found.joinCode) };
     }
 
-    const { crew, joinCode } = await retryOnConflict(deps.crewStore, crewId, (current) =>
-      // Re-check against the FRESH read too — the check above can be stale under a race (two
-      // joins for the same golfer landing concurrently); addMember is a no-op copy here
-      // rather than a second call that would hit its own duplicate-member guard.
-      current.members.some((member) => member.golferId === account.golfer.id)
-        ? current
-        : addMember(current, { golferId: account.golfer.id, name: account.golfer.name, role: "member" }),
+    // joinCode never changes after minting (crewStore.ts's own doc comment) but crewStore.put
+    // still requires it on every write — captured here from whichever read wins the retry race.
+    let joinCode: string | undefined;
+    const crew = await retryOnConflict(
+      {
+        get: async () => {
+          const current = await deps.crewStore.get(crewId);
+          if (!current) return undefined;
+          joinCode = current.joinCode;
+          return { value: current.crew, revision: current.revision };
+        },
+        put: (value, revision) => deps.crewStore.put(value, joinCode!, revision),
+      },
+      (current) =>
+        // Re-check against the FRESH read too — the check above can be stale under a race (two
+        // joins for the same golfer landing concurrently); addMember is a no-op copy here
+        // rather than a second call that would hit its own duplicate-member guard.
+        current.members.some((member) => member.golferId === account.golfer.id)
+          ? current
+          : addMember(current, { golferId: account.golfer.id, name: account.golfer.name, role: "member" }),
+      { notFound: "unknown-crew", conflict: "crew-conflict" },
     );
 
-    return { crew: await toCrewView({ golferStore: deps.golferStore }, crew, joinCode) };
+    return { crew: await toCrewView({ golferStore: deps.golferStore }, crew, joinCode!) };
   };

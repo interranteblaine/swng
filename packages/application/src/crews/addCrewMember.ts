@@ -5,9 +5,9 @@ import type { AccountClaims } from "../ports/accountClaims.js";
 import type { CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
+import { retryOnConflict } from "../retryOnConflict.js";
 import { toCrewView } from "./crewView.js";
 import { requireCrewMember } from "./membership.js";
-import { retryOnConflict } from "./retryOnConflict.js";
 
 // Mints a STABLE ghost golfer for a person without an account (M8 plan) — a real GolferStore
 // row, unclaimed, so it's claimable later AND so this same id recurs across every round this
@@ -25,7 +25,22 @@ export const addCrewMember =
     // create, same reasoning as getOrCreateGolfer's own fresh-id put.
     await deps.golferStore.put({ id: ghostId, name: command.name, handicap: {} }, undefined);
 
-    const { crew, joinCode } = await retryOnConflict(deps.crewStore, id, (current) => addMember(current, { golferId: ghostId, name: command.name, role: "member" }));
+    // joinCode never changes after minting (crewStore.ts's own doc comment) but crewStore.put
+    // still requires it on every write — captured here from whichever read wins the retry race.
+    let joinCode: string | undefined;
+    const crew = await retryOnConflict(
+      {
+        get: async () => {
+          const found = await deps.crewStore.get(id);
+          if (!found) return undefined;
+          joinCode = found.joinCode;
+          return { value: found.crew, revision: found.revision };
+        },
+        put: (value, revision) => deps.crewStore.put(value, joinCode!, revision),
+      },
+      (current) => addMember(current, { golferId: ghostId, name: command.name, role: "member" }),
+      { notFound: "unknown-crew", conflict: "crew-conflict" },
+    );
 
-    return { crew: await toCrewView({ golferStore: deps.golferStore }, crew, joinCode) };
+    return { crew: await toCrewView({ golferStore: deps.golferStore }, crew, joinCode!) };
   };

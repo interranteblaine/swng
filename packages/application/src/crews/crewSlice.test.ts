@@ -10,7 +10,6 @@ import { createCrew } from "./createCrew.js";
 import { getCrew } from "./getCrew.js";
 import { joinCrewByCode } from "./joinCrewByCode.js";
 import { listMyCrews } from "./listMyCrews.js";
-import { retryOnConflict } from "./retryOnConflict.js";
 import { saveStandingGame } from "./saveStandingGame.js";
 
 const setup = (crewStore: CrewStore = createInMemoryCrewStore(), golferStore: GolferStore = createInMemoryGolferStore()) => {
@@ -241,18 +240,25 @@ const createFlakyCrewStore = (inner: CrewStore, failCount: number): FlakyCrewSto
   };
 };
 
-describe("crews/retryOnConflict", () => {
+// The generic retry loop itself (bounded attempts, conflict-vs-non-conflict discrimination)
+// is pinned once at its shared home, retryOnConflict.test.ts — these two mirror
+// courseSlice.test.ts's own addTee flaky-store pair exactly, but through addCrewMember, to
+// confirm the CREW-SPECIFIC wiring (crewStore's get/put shape, the joinCode capture,
+// unknown-crew/crew-conflict codes) is actually correct, not just the abstract algorithm.
+describe("addCrewMember conflict retry", () => {
   it("retries once on a synthetic crew-conflict from the store, then succeeds", async () => {
     const inner = createInMemoryCrewStore();
     const golferStore = createInMemoryGolferStore();
-    const annId = await seedAccountGolfer(golferStore, "sub-ann", "Ann");
+    await seedAccountGolfer(golferStore, "sub-ann", "Ann");
     const created = await createCrew({ crewStore: inner, golferStore, ids: createSequentialIds("c") })({ sub: "sub-ann" }, { name: "Sunday Skins" });
 
     const flaky = createFlakyCrewStore(inner, 1);
-    const result = await retryOnConflict(flaky, created.crew.crewId, (crew) => addMember(crew, { golferId: golferId("cal"), name: "Cal", role: "member" }));
+    const flakyCtx = setup(flaky, golferStore);
+    const added = await flakyCtx.addMember({ sub: "sub-ann" }, created.crew.crewId, { name: "Cal" });
 
-    expect(result.crew.members.map((m) => m.golferId)).toEqual(expect.arrayContaining([annId, golferId("cal")]));
-    // More than one put attempt is the proof the retry path actually ran.
+    expect(added.crew.members.map((m) => m.name)).toEqual(expect.arrayContaining(["Ann", "Cal"]));
+    // More than one put attempt is the proof the retry path actually ran, not that the first
+    // attempt just happened to succeed.
     expect(flaky.putAttempts()).toBeGreaterThan(1);
   });
 
@@ -263,32 +269,10 @@ describe("crews/retryOnConflict", () => {
     const created = await createCrew({ crewStore: inner, golferStore, ids: createSequentialIds("c") })({ sub: "sub-ann" }, { name: "Sunday Skins" });
 
     const flaky = createFlakyCrewStore(inner, Number.POSITIVE_INFINITY);
-    await expect(
-      retryOnConflict(flaky, created.crew.crewId, (crew) => addMember(crew, { golferId: golferId("cal"), name: "Cal", role: "member" })),
-    ).rejects.toMatchObject({ code: "crew-conflict" });
+    const flakyCtx = setup(flaky, golferStore);
+
+    await expect(flakyCtx.addMember({ sub: "sub-ann" }, created.crew.crewId, { name: "Cal" })).rejects.toMatchObject({ code: "crew-conflict" });
     expect(flaky.putAttempts()).toBeGreaterThan(1);
-  });
-
-  // A DIFFERENT error than the one the retry loop discriminates on (crew-conflict) — a
-  // DomainError from a `mutate` that names a golferId already on the roster (domain's
-  // addMember, crew/crew.ts) — propagates UNCAUGHT on the very first attempt, never retried
-  // and never mistaken for a conflict to recover from.
-  it("propagates a DomainError from `mutate` (e.g. duplicate-member) uncaught, without retrying", async () => {
-    const inner = createInMemoryCrewStore();
-    const golferStore = createInMemoryGolferStore();
-    const annId = await seedAccountGolfer(golferStore, "sub-ann", "Ann");
-    const created = await createCrew({ crewStore: inner, golferStore, ids: createSequentialIds("c") })({ sub: "sub-ann" }, { name: "Sunday Skins" });
-
-    let mutateCalls = 0;
-    await expect(
-      retryOnConflict(inner, created.crew.crewId, (crew) => {
-        mutateCalls += 1;
-        // Ann is already a member — addMember throws DomainError("duplicate-member") here,
-        // not ApplicationError("crew-conflict"), so retryOnConflict must NOT swallow it.
-        return addMember(crew, { golferId: annId, name: "Ann", role: "member" });
-      }),
-    ).rejects.toMatchObject({ code: "duplicate-member" });
-    expect(mutateCalls).toBe(1);
   });
 });
 

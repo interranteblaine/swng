@@ -78,15 +78,10 @@ export type AddCrewMemberRequest = z.infer<typeof addCrewMemberRequestSchema>;
 export const joinCrewRequestSchema = z.object({ code: z.string().length(6) }).strict();
 export type JoinCrewRequest = z.infer<typeof joinCrewRequestSchema>;
 
-export const saveStandingGameRequestSchema = z
-  .object({
-    standingGame: z.object({
-      courseId: courseIdSchema.optional(),
-      tee: z.string().optional(),
-      games: z.array(gameConfigInputSchema).readonly(),
-    }),
-  })
-  .strict();
+// standingGame's shape is exactly StandingGameView (standingGameViewSchema above) — same
+// wire shape reused for both a crew's read-back view and this write body, not a second,
+// independently-maintained copy of its three fields (conventions §0).
+export const saveStandingGameRequestSchema = z.object({ standingGame: standingGameViewSchema }).strict();
 export type SaveStandingGameRequest = z.infer<typeof saveStandingGameRequestSchema>;
 
 // One response shape, `{ crew }`, for every crew mutation/read — named per endpoint (courses.ts'

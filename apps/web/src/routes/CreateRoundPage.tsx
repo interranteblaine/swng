@@ -24,10 +24,13 @@ export function CreateRoundPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuth();
-  // Truthy exactly when the "Playing as <name>" line replaces the free-text name field — a
-  // real GolferView, not just signedIn (a signed-in account with no golfer yet — golfer is
-  // null, or still loading, GET /me not resolved — keeps the free-text field, same as signed
-  // out, until PUT /me mints one at submit time below).
+  // auth.golfer is three-state: undefined-while-signed-in is the GET /me loading window itself
+  // (isIdentityLoading) — the free-text field must NEVER render there, because typing into it
+  // and submitting would fire PUT /me with the typed text over a profile that may already be
+  // real once the fetch lands (a silent rename). null is signed-in-with-no-profile-yet (free
+  // text, same as signed out, until PUT /me mints one at submit time below). A real GolferView
+  // is asSelf: the "Playing as <name>" line replaces the free-text field entirely.
+  const isIdentityLoading = auth.signedIn && auth.golfer === undefined;
   const asSelf = auth.signedIn && Boolean(auth.golfer);
 
   const [courseView, setCourseView] = useState<CourseView | undefined>(undefined);
@@ -88,8 +91,10 @@ export function CreateRoundPage() {
     event.preventDefault();
     const parsedHandicap = Number.parseInt(courseHandicap, 10);
     // Playing as yourself always has a name (auth.golfer.name) — only the free-text path needs
-    // one typed. Everything else (course/tee/handicap) is required either way.
-    if (!courseView || !tee || !Number.isInteger(parsedHandicap) || (!asSelf && !name.trim())) return;
+    // one typed. Everything else (course/tee/handicap) is required either way. isIdentityLoading
+    // blocks submission outright — the button is already disabled during this window, but this
+    // guard covers any other way the form could submit (e.g. Enter in a text field).
+    if (!courseView || !tee || !Number.isInteger(parsedHandicap) || isIdentityLoading || (!asSelf && !name.trim())) return;
 
     setSubmitting(true);
     setError(undefined);
@@ -155,7 +160,14 @@ export function CreateRoundPage() {
           </p>
         )}
 
-        {asSelf ? (
+        {isIdentityLoading ? (
+          // A quiet placeholder, not the free-text field — see isIdentityLoading's own comment
+          // above for why the input must not appear here. Deliberately NOT "Playing as" (that
+          // label is reserved for the asSelf branch below, once a real name is known).
+          <div role="status" aria-label="Loading your profile" className="flex flex-col gap-1">
+            <div className="rounded-lg bg-slate-800 p-3 text-lg text-slate-500">Loading your profile…</div>
+          </div>
+        ) : asSelf ? (
           <div className="flex flex-col gap-1">
             <span className="text-sm text-slate-400">Playing as</span>
             <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-800 p-3 text-lg">
@@ -189,7 +201,11 @@ export function CreateRoundPage() {
           </p>
         )}
 
-        <button type="submit" disabled={submitting || !courseView} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+        <button
+          type="submit"
+          disabled={submitting || !courseView || isIdentityLoading}
+          className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50"
+        >
           Create round
         </button>
       </form>

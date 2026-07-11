@@ -13,9 +13,13 @@ const DEBOUNCE_MS = 250;
 export function JoinRoundPage() {
   const navigate = useNavigate();
   const auth = useAuth();
-  // Same asSelf story as CreateRoundPage's own (M8 Task 5): truthy only once GET /me has
-  // resolved a real GolferView — signed in with no golfer yet (null, or still loading) keeps
-  // the free-text name field, same as signed out, until PUT /me mints one at submit time below.
+  // Same three-state story as CreateRoundPage's own (M8 Task 5): undefined-while-signed-in is
+  // the GET /me loading window (isIdentityLoading) — the free-text field must NEVER render
+  // there, since typing into it and submitting would fire PUT /me with the typed text over a
+  // profile that may already be real once the fetch lands (a silent rename). null is
+  // signed-in-with-no-profile-yet (free text, same as signed out, until PUT /me mints one at
+  // submit time below). A real GolferView is asSelf.
+  const isIdentityLoading = auth.signedIn && auth.golfer === undefined;
   const asSelf = auth.signedIn && Boolean(auth.golfer);
 
   const [code, setCode] = useState("");
@@ -64,8 +68,10 @@ export function JoinRoundPage() {
     event.preventDefault();
     const parsedHandicap = Number.parseInt(courseHandicap, 10);
     // Playing as yourself always has a name (auth.golfer.name) — only the free-text path needs
-    // one typed.
-    if (upperCode.length !== 6 || !tee.trim() || !Number.isInteger(parsedHandicap) || (!asSelf && !name.trim())) return;
+    // one typed. isIdentityLoading blocks submission outright — the button is already disabled
+    // during this window, but this guard covers any other way the form could submit (e.g. Enter
+    // in a text field).
+    if (upperCode.length !== 6 || !tee.trim() || !Number.isInteger(parsedHandicap) || isIdentityLoading || (!asSelf && !name.trim())) return;
 
     setSubmitting(true);
     setError(undefined);
@@ -123,7 +129,14 @@ export function JoinRoundPage() {
 
         {courseName && <p className="text-sm text-slate-400">Joining {courseName}</p>}
 
-        {asSelf ? (
+        {isIdentityLoading ? (
+          // A quiet placeholder, not the free-text field — see isIdentityLoading's own comment
+          // above for why the input must not appear here. Deliberately NOT "Playing as" (that
+          // label is reserved for the asSelf branch below, once a real name is known).
+          <div role="status" aria-label="Loading your profile" className="flex flex-col gap-1">
+            <div className="rounded-lg bg-slate-800 p-3 text-lg text-slate-500">Loading your profile…</div>
+          </div>
+        ) : asSelf ? (
           <div className="flex flex-col gap-1">
             <span className="text-sm text-slate-400">Playing as</span>
             <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-800 p-3 text-lg">
@@ -180,7 +193,11 @@ export function JoinRoundPage() {
           </p>
         )}
 
-        <button type="submit" disabled={submitting} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+        <button
+          type="submit"
+          disabled={submitting || isIdentityLoading}
+          className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50"
+        >
           Join round
         </button>
       </form>

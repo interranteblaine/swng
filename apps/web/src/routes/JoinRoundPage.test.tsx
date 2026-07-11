@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { golferId, roundId } from "@swng/domain";
+import type { GetMeResponse } from "@swng/contracts";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { credentialStore } from "../identity";
@@ -220,5 +221,55 @@ describe("JoinRoundPage — play as yourself", () => {
     expect(mockedUpdateMe.mock.invocationCallOrder[0]!).toBeLessThan(mockedJoinRound.mock.invocationCallOrder[0]!);
 
     expect(credentialStore.load(roundId("round-fresh"))).toEqual({ token: "tok-fresh", golferId: golferId("fresh-g"), name: "Fresh", joinCode: "FRESH1" });
+  });
+
+  // The finding this fix closes: GET /me's own in-flight window (auth.golfer === undefined
+  // while signed in) was previously collapsed into the "signed in, no golfer yet" branch, so a
+  // submit during that window fired PUT /me with whatever the (nonexistent) free-text field
+  // held — a silent rename of a real profile that just hadn't loaded yet. Neither the free-text
+  // field nor "Playing as" may render during this window, and submit must be inert.
+  it("signed in, GET /me still in flight: no free-text field is offered, submit is disabled, and no write fires on interaction", async () => {
+    signIn();
+    mockedGetMe.mockReturnValue(new Promise<GetMeResponse>(() => {})); // the loading window itself — never resolves
+
+    renderJoin();
+    await waitFor(() => expect(mockedGetMe).toHaveBeenCalled());
+
+    // Neither today's free-text field nor "Playing as" — a quiet loading placeholder instead.
+    expect(screen.queryByLabelText(/your name/i)).toBeNull();
+    expect(screen.queryByText(/playing as/i)).toBeNull();
+    expect(screen.getByRole("status", { name: /loading your profile/i })).toBeTruthy();
+
+    const submitButton = screen.getByRole("button", { name: /join round/i });
+    expect(submitButton.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "self01" } });
+    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "6" } });
+    fireEvent.click(submitButton);
+
+    expect(mockedUpdateMe).not.toHaveBeenCalled();
+    expect(mockedJoinRound).not.toHaveBeenCalled();
+  });
+
+  it("once the deferred GET /me resolves to a golfer, the loading placeholder gives way to 'Playing as'", async () => {
+    signIn();
+    let resolveGetMe: (value: GetMeResponse) => void = () => {};
+    mockedGetMe.mockReturnValue(
+      new Promise<GetMeResponse>((resolve) => {
+        resolveGetMe = resolve;
+      }),
+    );
+
+    renderJoin();
+    await waitFor(() => expect(mockedGetMe).toHaveBeenCalled());
+    expect(screen.queryByText(/playing as/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /join round/i }).hasAttribute("disabled")).toBe(true);
+
+    resolveGetMe({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
+
+    await screen.findByText(/playing as/i);
+    expect(screen.getByText("Bo G")).toBeTruthy();
+    expect(screen.queryByRole("status", { name: /loading your profile/i })).toBeNull();
   });
 });

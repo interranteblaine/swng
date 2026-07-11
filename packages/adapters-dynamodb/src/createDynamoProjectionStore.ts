@@ -1,12 +1,13 @@
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { DeleteCommand, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
-import type { GolferId, GolferRoundLine } from "@swng/domain";
-import type { ProjectionStore } from "@swng/application";
-import { golferPk, historySk, historySkPrefix, projectionIndexSk } from "./keys.js";
+import type { CrewId, CrewRoundContribution, GolferId, GolferRoundLine } from "@swng/domain";
+import type { CrewSeasonRecords, ProjectionStore } from "@swng/application";
+import { crewRoundSk, crewRoundSkPrefix, crewRoundsPk, golferPk, historySk, historySkPrefix, projectionIndexSk, recordsPk, recordsSk } from "./keys.js";
 import { queryAllPages } from "./paginate.js";
 
 type HistoryLine = GolferRoundLine & { readonly finalizedAtMs: number };
 type IndexSnapshot = { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number };
+type CrewRoundEntry = CrewRoundContribution & { readonly finalizedAtMs: number };
 
 export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentClient; tableName: string }): ProjectionStore => {
   const { client, tableName } = config;
@@ -89,27 +90,84 @@ export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentCl
       await Promise.all(sks.map((sk) => client.send(new DeleteCommand({ TableName: tableName, Key: { pk, sk } }))));
     },
 
-    // M8 Task 2 STOPGAP: ProjectionStore grew the season-ledger methods
-    // (ports/projectionStore.ts) so application's projector could be written and tested
-    // against the port; the real `projections` table layout for LEDGER#crew#season /
-    // H2H#crew#a#b (architecture.md's persistence sketch) is M8 Task 3's job, not built
-    // here. These throw rather than silently no-op so a crew-tagged archive landing on a
-    // live stack before Task 3 fails loudly (retries via the stream trigger's no-DLQ policy)
-    // instead of quietly losing its ledger contribution forever.
-    putCrewRound: (): Promise<void> => {
-      throw new Error("createDynamoProjectionStore.putCrewRound: not implemented yet (M8 Task 3)");
+    // M8 Task 3: the crew season ledger's real `projections` table layout — one partition per
+    // (crewId, season) holding contribution entries, upserted by roundId exactly like
+    // putHistoryLine above.
+    putCrewRound: async (crewId: CrewId, season: number, entry: CrewRoundEntry) => {
+      const pk = crewRoundsPk(crewId, season);
+      const newSk = crewRoundSk(entry.finalizedAtMs, entry.roundId);
+
+      // Same query→delete→put idiom as putHistoryLine above, and for the identical reason:
+      // the sk encodes finalizedAtMs, but the upsert key is roundId (port doc: "a repeat put
+      // for the same round replaces, never accumulates") — a reopen-and-refinalize computes a
+      // DIFFERENT sk for the SAME roundId, so any prior entry for this roundId is deleted
+      // before the new one lands, or the old sk would survive as a second, stale entry.
+      const priorSks = await queryAllPages(
+        client,
+        {
+          TableName: tableName,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          FilterExpression: "#entry.roundId = :roundId",
+          ExpressionAttributeNames: { "#entry": "entry" },
+          ExpressionAttributeValues: { ":pk": pk, ":prefix": crewRoundSkPrefix, ":roundId": entry.roundId },
+          ConsistentRead: true,
+        },
+        (item) => item.sk as string,
+      );
+      await Promise.all(priorSks.filter((sk) => sk !== newSk).map((sk) => client.send(new DeleteCommand({ TableName: tableName, Key: { pk, sk } }))));
+
+      await client.send(new PutCommand({ TableName: tableName, Item: { pk, sk: newSk, entry } }));
     },
-    listCrewRounds: () => {
-      throw new Error("createDynamoProjectionStore.listCrewRounds: not implemented yet (M8 Task 3)");
+
+    listCrewRounds: (crewId: CrewId, season: number): Promise<readonly CrewRoundEntry[]> =>
+      queryAllPages(
+        client,
+        {
+          TableName: tableName,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          ExpressionAttributeValues: { ":pk": crewRoundsPk(crewId, season), ":prefix": crewRoundSkPrefix },
+        },
+        (item) => item.entry as CrewRoundEntry,
+      ),
+
+    putSeasonRecords: async (crewId: CrewId, season: number, records: CrewSeasonRecords) => {
+      // Unconditional upsert (mirrors putIndex above): the projector always recomputes the
+      // WHOLE (ledger, headToHead) snapshot from every one of that season's contributions
+      // (crew/ledger.ts's aggregateSeason), never patches it incrementally.
+      await client.send(new PutCommand({ TableName: tableName, Item: { pk: recordsPk(crewId, season), sk: recordsSk, records } }));
     },
-    putSeasonRecords: (): Promise<void> => {
-      throw new Error("createDynamoProjectionStore.putSeasonRecords: not implemented yet (M8 Task 3)");
+
+    getSeasonRecords: async (crewId: CrewId, season: number) => {
+      const result = await client.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: { pk: recordsPk(crewId, season), sk: recordsSk },
+          ConsistentRead: true,
+        }),
+      );
+      return result.Item?.records as CrewSeasonRecords | undefined;
     },
-    getSeasonRecords: () => {
-      throw new Error("createDynamoProjectionStore.getSeasonRecords: not implemented yet (M8 Task 3)");
-    },
-    wipeCrew: (): Promise<void> => {
-      throw new Error("createDynamoProjectionStore.wipeCrew: not implemented yet (M8 Task 3)");
+
+    wipeCrew: async (crewId: CrewId, seasons: readonly number[]) => {
+      // `seasons` is supplied by the caller (rebuildProjections already collected them from
+      // the archives it's about to replay) — this store never discovers its own keyspace
+      // (port doc's explicit correction over the plan's stale "enumerate seasons" prose).
+      await Promise.all(
+        seasons.map(async (season) => {
+          const pk = crewRoundsPk(crewId, season);
+          const sks = await queryAllPages(
+            client,
+            { TableName: tableName, KeyConditionExpression: "pk = :pk", ExpressionAttributeValues: { ":pk": pk }, ConsistentRead: true },
+            (item) => item.sk as string,
+          );
+          await Promise.all([
+            ...sks.map((sk) => client.send(new DeleteCommand({ TableName: tableName, Key: { pk, sk } }))),
+            // The RECORDS item may or may not exist for this season — DeleteCommand is a
+            // no-op either way, so no existence check is needed first.
+            client.send(new DeleteCommand({ TableName: tableName, Key: { pk: recordsPk(crewId, season), sk: recordsSk } })),
+          ]);
+        }),
+      );
     },
   };
 };

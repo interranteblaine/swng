@@ -1,5 +1,5 @@
-import type { CourseId, GolferId, OpId, RoundId } from "@swng/domain";
-import { courseId, golferId } from "@swng/domain";
+import type { CourseId, CrewId, GolferId, OpId, RoundId } from "@swng/domain";
+import { courseId, crewId, golferId } from "@swng/domain";
 
 // The rounds table's key vocabulary (M3 plan, Global Constraints): one item collection per
 // round (`pk`), holding the event log (`EVT#<seq>`, sorted lexically in seq order because
@@ -84,3 +84,67 @@ export const historySk = (finalizedAtMs: number, roundId: RoundId): string =>
   `${HISTORY_SK_PREFIX}${String(finalizedAtMs).padStart(15, "0")}#${roundId}`;
 export const historySkPrefix = HISTORY_SK_PREFIX;
 export const projectionIndexSk = "INDEX";
+
+// The core table's crew-item key vocabulary (M8 Task 3): a Crew, like a Course/Golfer, is a
+// plain CRUD document (crew/crew.ts's own doc comment) — one root item, `pk` = crewPk(id) /
+// `sk` fixed CREW, holding the WHOLE domain Crew (incl. its embedded `members` array) as the
+// single source of truth `get`/`put` round-trip. One MEMBER item per roster member additionally
+// exists PURELY to back `listByGolfer`'s gsi2 query (below) — it is a denormalized index, never
+// read back into a Crew.
+const CREW_PK_PREFIX = "CREW#";
+export const crewPk = (id: CrewId): string => `${CREW_PK_PREFIX}${id}`;
+export const crewSk = "CREW";
+
+// crewId parses back out of a gsi-projected item's `pk`, same idiom as courseIdFromPk /
+// golferIdFromPk above — the inverse of crewPk, so the prefix can never drift between the two.
+export const crewIdFromPk = (pk: string): CrewId => crewId(pk.slice(CREW_PK_PREFIX.length));
+
+const MEMBER_SK_PREFIX = "MEMBER#";
+export const memberSk = (golferId: GolferId): string => `${MEMBER_SK_PREFIX}${golferId}`;
+export const memberSkPrefix = MEMBER_SK_PREFIX;
+
+// findByJoinCode's lookup (mirrors RoundStore.findByJoinCode) — but unlike the rounds table,
+// the core table's gsi1 is ALREADY spoken for by course search's fixed "COURSE" partition
+// (courseGsi1pk above), and architecture.md's M8 deploy is explicitly a no-table-change
+// deploy (the plan's Task 4: "lambda-code + route additions only"), so a crew join code
+// can't get its own dedicated GSI the way a round's does. Instead crews get their OWN fixed
+// partition value on the SAME shared (gsi1pk, gsi1sk) String/String schema — a second
+// single-partition scatter-gather index living beside courses', same v1 tradeoff
+// courseGsi1pk's own doc comment already accepts (a few thousand crews trivially fits one
+// partition's limits). gsi1sk is the joinCode itself (already a fixed-format, unique,
+// server-minted 6-char code — nothing to normalize, same as RoundStore's own exact-match
+// lookup).
+export const crewGsi1pk = "CREW";
+
+// gsi2's golfer→crews lookup (listByGolfer) reuses the SAME gsi2 golferStore.getBySub
+// queries — a MEMBER item's gsi2pk is exactly golferPk(golferId) ("GOLFER#<id>"), a
+// DIFFERENT namespace than a claimed golfer's own gsi2pk (golferGsi2pk(sub), "SUB#<sub>"),
+// so the two never collide in the shared partition space (brief's own note). gsi2sk is
+// exactly crewPk(crewId) ("CREW#<id>") — reusing the two pk-format functions directly rather
+// than minting parallel gsi-specific helpers keeps the two formats from ever drifting apart.
+
+// The `projections` table's crew-round-contribution key vocabulary (M8 Task 3;
+// architecture.md's illustrative `LEDGER#crew#season` sketch, concretized): one partition per
+// (crew, season) holding one contribution entry per finalized round that season,
+// sk-ordered the same zero-padded way historySk's own `finalizedAtMs` is (15 digits — see
+// that doc comment for why) purely for a deterministic read order; listCrewRounds itself
+// doesn't promise an order (aggregateSeason's fold is commutative), but a stable one costs
+// nothing and beats an arbitrary one for debugging.
+const CREWROUNDS_PK_PREFIX = "CREWROUNDS#";
+export const crewRoundsPk = (crewId: CrewId, season: number): string => `${CREWROUNDS_PK_PREFIX}${crewId}#${season}`;
+const CREWROUND_SK_PREFIX = "ROUND#";
+export const crewRoundSk = (finalizedAtMs: number, roundId: RoundId): string =>
+  `${CREWROUND_SK_PREFIX}${String(finalizedAtMs).padStart(15, "0")}#${roundId}`;
+export const crewRoundSkPrefix = CREWROUND_SK_PREFIX;
+
+// The season records snapshot's key vocabulary: one item per (crew, season), pk
+// `RECORDS#<crewId>#<season>` / sk fixed "RECORDS". A deliberate consolidation of
+// architecture.md's illustrative `LEDGER#`/`H2H#` keys into ONE item: `aggregateSeason`
+// (crew/ledger.ts) computes the ledger and head-to-head records from the SAME fold over the
+// SAME contributions in one call, so putSeasonRecords always writes — and getSeasonRecords
+// always reads — both together; two items that must always change in lockstep would just be
+// more ways for a partial write to desync them, with no rebuildability gained (a rebuild
+// recomputes and overwrites the whole snapshot either way).
+const RECORDS_PK_PREFIX = "RECORDS#";
+export const recordsPk = (crewId: CrewId, season: number): string => `${RECORDS_PK_PREFIX}${crewId}#${season}`;
+export const recordsSk = "RECORDS";

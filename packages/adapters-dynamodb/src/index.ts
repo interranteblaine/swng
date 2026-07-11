@@ -12,6 +12,7 @@ export { createDynamoRoundStore } from "./createDynamoRoundStore.js";
 export { createDynamoConnectionRegistry } from "./createDynamoConnectionRegistry.js";
 export { createDynamoCourseStore } from "./createDynamoCourseStore.js";
 export { createDynamoGolferStore } from "./createDynamoGolferStore.js";
+export { createDynamoCrewStore } from "./createDynamoCrewStore.js";
 export { createDynamoProjectionStore } from "./createDynamoProjectionStore.js";
 export { createDynamoArchiveSource } from "./createDynamoArchiveSource.js";
 export { parseArchiveStreamImage } from "./parseArchiveStreamImage.js";

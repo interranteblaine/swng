@@ -566,6 +566,18 @@ Gate met: `pnpm e2e:field` green three consecutive runs, 39/39 each time (7 `cou
 `.superpowers/sdd/m8-e2e-run-{1,2,3}.log` (a fourth, pre-fix run with the single
 `identityRecord.spec.ts` failure above is kept too, as the failure evidence).
 
+**Post-gate controller flow-walk finding, fixed in a follow-up commit (W1).** Live-driving the
+primary create/join flow as a brand-new sign-up (no automated gate reproduces this — it needs a
+real, cold `auth.golfer` in a running browser) surfaced a sibling of T5's loading-window defect
+above: `CreateRoundPage`/`JoinRoundPage`'s PUT-/me-first arm calls `updateMe` (minting the
+account's golfer) then creates/joins as-self, but never told the `useAuth` context about the
+new golfer — `auth.golfer` stayed `null` in memory until a full reload, so the round page's own
+roster row for that very golfer failed `ClaimAffordance`'s own-row check and rendered "This is
+me" instead of "You" (tapping it then hit the confusing already-claimed 409 copy). Fixed by
+calling `auth.refetch()` — the exact re-fetch-on-success seam `ClaimAffordance`'s own claim
+success already uses, not a parallel one — right after `updateMe` succeeds in both pages'
+submit paths, before navigating to the round.
+
 ### M9 — Finish line: share, harden, ship
 
 **Goal:** the v1 bar (`roadmap.md`) met on prod.

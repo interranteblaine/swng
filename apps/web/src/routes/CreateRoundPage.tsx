@@ -211,6 +211,13 @@ export function CreateRoundPage() {
           const created = await updateMe(token, { name: trimmed });
           return createRound({ card: courseView.card, host: { name: trimmed, tee, courseHandicap: parsedHandicap }, golferId: created.golfer.golferId, ...crewFields }, token);
         });
+        // W1 (controller flow-walk finding, post-gate): PUT /me above just minted this
+        // account's golfer, but the auth context's own `golfer` field doesn't update itself —
+        // without this refetch, `auth.golfer` stays null until a full reload, so the round
+        // page's own roster row for this golfer (ClaimAffordance's own-row check) would render
+        // "This is me" instead of "You". Same refetch seam ClaimAffordance's own claim success
+        // already uses — never a parallel one.
+        await auth.refetch();
       } else {
         // Signed out: byte-identical to before this milestone — no golferId, no Bearer (and
         // outside the crew flow crewFields is empty, so this stays byte-identical there too).

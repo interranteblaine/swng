@@ -196,7 +196,10 @@ describe("JoinRoundPage — play as yourself", () => {
 
   it("signed in with NO golfer: the typed name creates the profile (PUT /me) BEFORE joining the round — call order asserted", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: null });
+    // First GET /me (the provider's own mount-time fetch) finds no golfer; the SECOND (this
+    // fix's own auth.refetch() after PUT /me) returns the freshly-minted one — see the W1 test
+    // below, which asserts on this same sequencing.
+    mockedGetMe.mockResolvedValueOnce({ golfer: null }).mockResolvedValueOnce({ golfer: { golferId: golferId("fresh-g"), name: "Fresh" } });
     mockedUpdateMe.mockResolvedValue({ golfer: { golferId: golferId("fresh-g"), name: "Fresh" } });
     mockedJoinRound.mockResolvedValue({ roundId: roundId("round-fresh"), token: "tok-fresh", golferId: golferId("fresh-g") });
 
@@ -221,6 +224,34 @@ describe("JoinRoundPage — play as yourself", () => {
     expect(mockedUpdateMe.mock.invocationCallOrder[0]!).toBeLessThan(mockedJoinRound.mock.invocationCallOrder[0]!);
 
     expect(credentialStore.load(roundId("round-fresh"))).toEqual({ token: "tok-fresh", golferId: golferId("fresh-g"), name: "Fresh", joinCode: "FRESH1" });
+  });
+
+  // W1 (controller flow-walk finding, post-gate): before this fix, auth.golfer stayed null in
+  // the context after PUT /me minted a real golfer — until a full reload, the round page's own
+  // roster row for this golfer rendered "This is me" instead of "You" (ClaimAffordance's
+  // own-row check reads auth.golfer straight from context). Proven via the same seam
+  // ClaimAffordance's own claim success uses (auth.refetch -> a second GET /me): it must fire
+  // AFTER PUT /me and its result must reach the context before this page navigates away.
+  it("W1: after PUT /me mints the profile, the auth context is refetched so auth.golfer reflects it before navigating", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValueOnce({ golfer: null }).mockResolvedValueOnce({ golfer: { golferId: golferId("fresh-g"), name: "Fresh" } });
+    mockedUpdateMe.mockResolvedValue({ golfer: { golferId: golferId("fresh-g"), name: "Fresh" } });
+    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-fresh-w1"), token: "tok-fresh-w1", golferId: golferId("fresh-g") });
+
+    renderJoin();
+    await waitFor(() => expect(mockedGetMe).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "fresh2" } });
+    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: "Fresh" } });
+    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "blue" } });
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: /join round/i }));
+
+    // The refetch's own GET /me — a SECOND call, after the provider's mount-time one.
+    await waitFor(() => expect(mockedGetMe).toHaveBeenCalledTimes(2));
+    expect(mockedUpdateMe.mock.invocationCallOrder[0]!).toBeLessThan(mockedGetMe.mock.invocationCallOrder[1]!);
+
+    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
   });
 
   // The finding this fix closes: GET /me's own in-flight window (auth.golfer === undefined

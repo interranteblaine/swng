@@ -168,3 +168,15 @@ describe("toHttpError — M9 hardening ApplicationErrors (deliberate 500s)", () 
     expect(JSON.parse(result.body)).toEqual({ code: "join-code-exhausted", message: "no unique crew join code found after 5 attempts" });
   });
 });
+
+// M9 Task 2 (claim proof-of-context, task-2-brief.md): claimGolfer.ts's own new precheck —
+// constructed exactly as its real throw site does, not an invented string (M6 lesson).
+describe("toHttpError — M9 Task 2 claim-proof-required", () => {
+  const logger = createNullLogger();
+
+  it("maps claim-proof-required to 403", () => {
+    const result = toHttpError(new ApplicationError("claim-proof-required", 'code "NOPE99" does not prove membership for golfer g-1'), logger);
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({ code: "claim-proof-required", message: 'code "NOPE99" does not prove membership for golfer g-1' });
+  });
+});

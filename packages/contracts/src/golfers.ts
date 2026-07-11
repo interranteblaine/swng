@@ -66,7 +66,14 @@ export type UpdateMeRequest = z.infer<typeof updateMeRequestSchema>;
 // same "name only seeds a fresh item" invariant golferStore.ts's port doc already states for
 // `claim`. Optional: absent falls back to defaultGolferName(claims), unchanged from before
 // this field existed.
-export const claimGolferRequestSchema = z.object({ golferId: golferIdSchema, name: z.string().min(1).optional() }).strict();
+//
+// `code` (M9 hardening, claim proof-of-context) is REQUIRED: before this field existed, a
+// bare golferId was the entire claim capability — anyone who merely LEARNED an id (shared in
+// a text thread, visible in a URL) could claim its whole history. The server now resolves
+// `code` as a round join code (the round's own participants must include `golferId`) or else
+// a crew join code (the crew's own members must include `golferId`) before either collision
+// arm runs — see claimGolfer.ts's own doc comment for the exact ordering and why it matters.
+export const claimGolferRequestSchema = z.object({ golferId: golferIdSchema, name: z.string().min(1).optional(), code: z.string().min(1) }).strict();
 export type ClaimGolferRequest = z.infer<typeof claimGolferRequestSchema>;
 
 // The wire mirror of domain's GolferRoundLine (golfer/record.ts) — structurally identical,

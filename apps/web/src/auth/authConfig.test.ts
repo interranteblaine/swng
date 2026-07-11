@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authConfig, buildAuthorizeUrl, computeCodeChallenge, generateCodeVerifier, tokenEndpoint } from "./authConfig";
+import { authConfig, buildAuthorizeUrl, buildLogoutUrl, computeCodeChallenge, generateCodeVerifier, tokenEndpoint } from "./authConfig";
 
 // vitest.config.ts pins VITE_HOSTED_UI_DOMAIN/VITE_USER_POOL_CLIENT_ID/VITE_USER_POOL_ID —
 // same "hermetic, no real .env.local needed" contract as config.test.ts's own pinned fakes.
@@ -32,6 +32,17 @@ describe("buildAuthorizeUrl", () => {
     expect(url.searchParams.get("code_challenge")).toBe("challenge-abc");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
     expect(url.searchParams.get("scope")).toBe("openid email profile");
+  });
+});
+
+// Papercut 6 (M9 hardening): the Hosted UI's own /logout endpoint, not a bare local sign-out.
+describe("buildLogoutUrl", () => {
+  it("builds the Hosted UI's /logout URL with this app's client_id and a trailing-slash logout_uri matching swngStack.ts's registered logoutUrls", () => {
+    const url = new URL(buildLogoutUrl());
+
+    expect(`${url.origin}${url.pathname}`).toBe("https://swng-test.auth.us-east-1.amazoncognito.com/logout");
+    expect(url.searchParams.get("client_id")).toBe("test-client-id");
+    expect(url.searchParams.get("logout_uri")).toBe(`${window.location.origin}/`);
   });
 });
 

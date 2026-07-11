@@ -54,18 +54,28 @@ describe("updateMeRequestSchema", () => {
 
 describe("claimGolferRequestSchema", () => {
   it("round-trips a valid claim request", () => {
-    roundTrips(claimGolferRequestSchema, { golferId: golferId("ghost-1") });
+    roundTrips(claimGolferRequestSchema, { golferId: golferId("ghost-1"), code: "ABC123" });
   });
 
   // Papercut 5 (M8 plan): an optional name, used only when the claim lazily CREATES the
   // golfer row (application/src/golfers/claimGolfer.ts) — pinned at the wire level here,
   // the claim-vs-never-rename behavior itself is application's test.
   it("round-trips a claim request carrying an optional name", () => {
-    roundTrips(claimGolferRequestSchema, { golferId: golferId("ghost-1"), name: "Cal" });
+    roundTrips(claimGolferRequestSchema, { golferId: golferId("ghost-1"), name: "Cal", code: "ABC123" });
   });
 
   it("rejects an extra field (.strict())", () => {
-    expect(() => parse(claimGolferRequestSchema, { golferId: "ghost-1", sub: "sneaky" })).toThrow(ContractError);
+    expect(() => parse(claimGolferRequestSchema, { golferId: "ghost-1", code: "ABC123", sub: "sneaky" })).toThrow(ContractError);
+  });
+
+  // M9 hardening (claim proof-of-context): `code` is REQUIRED, not optional like `name` above
+  // — a bare golferId used to be the entire claim capability (golfers.ts's own doc comment).
+  it("rejects a claim request with no code at all", () => {
+    expect(() => parse(claimGolferRequestSchema, { golferId: "ghost-1" })).toThrow(ContractError);
+  });
+
+  it("rejects an empty-string code", () => {
+    expect(() => parse(claimGolferRequestSchema, { golferId: "ghost-1", code: "" })).toThrow(ContractError);
   });
 });
 

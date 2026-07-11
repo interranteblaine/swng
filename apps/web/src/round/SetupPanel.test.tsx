@@ -266,8 +266,9 @@ describe("SetupPanel — claim a ghost", () => {
     await waitFor(() => expect(within(boRow).getByRole("status")).toBeTruthy());
     expect(calls).toContain("POST /golfers/claim");
     // The claim carries the ROSTER row's name ("Bo"), not any account/email default — a fresh
-    // claim's profile is named after the row it claimed.
-    expect(claimBody).toEqual({ golferId: "bo", name: "Bo" });
+    // claim's profile is named after the row it claimed — and the round's own join code
+    // (M9 hardening: claim proof-of-context), SetupPanel's own joinCode prop.
+    expect(claimBody).toEqual({ golferId: "bo", name: "Bo", code: "ABC123" });
     // Re-fetches /me after a successful claim (brief) — a real second GET, not a locally
     // synthesized echo of the claim response.
     expect(calls.filter((c) => c === "GET /me").length).toBeGreaterThanOrEqual(2);
@@ -328,6 +329,36 @@ describe("SetupPanel — claim a ghost", () => {
     await waitFor(() => expect(within(boRow).getByText("Your account already has a profile — claiming another ghost isn't supported yet.")).toBeTruthy());
     // Never the misleading arm-1 copy for this case.
     expect(within(boRow).queryByText(/already claimed by another account/i)).toBeNull();
+  });
+
+  // M9 hardening (claim proof-of-context): a 403 claim-proof-required gets its own honest
+  // copy — never the raw server message, and never confused with either 409 collision arm's
+  // copy above.
+  it("a 403 claim-proof-required shows the honest 'needs a round or crew code' copy", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/golfers/claim") return fakeResponse(403, { code: "claim-proof-required", message: 'code "ABC123" does not prove membership for golfer bo' });
+        if (path === "/me") return fakeResponse(200, { golfer: null });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+
+    const boRow = await waitFor(() => {
+      const row = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
+      expect(row).toBeTruthy();
+      return row!;
+    });
+
+    fireEvent.click(within(boRow).getByRole("button", { name: "This is me" }));
+    fireEvent.click(within(boRow).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(within(boRow).getByText("This claim needs a round or crew code that includes this player.")).toBeTruthy());
+    // Never the raw server message.
+    expect(within(boRow).queryByText(/does not prove membership/i)).toBeNull();
   });
 });
 

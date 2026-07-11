@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { golferId, roundId } from "@swng/domain";
+import { roundId } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import { createInMemoryGolferStore, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
-import { claimGolfer } from "./claimGolfer.js";
 import { getMyGolfer } from "./getMyGolfer.js";
 import { getMyRecord } from "./getMyRecord.js";
 import { updateMyGolfer } from "./updateMyGolfer.js";
 
+// claimGolfer's own tests moved to claimGolfer.test.ts (M9 hardening): once claiming needed
+// proof of context (a round/crew join code naming the target golferId), every claim test
+// needed a journal/roundStore/crewStore-backed setup this file's simpler golferStore-only
+// setup doesn't have — a second, purpose-built setup() was cleaner than bolting round/crew
+// machinery onto every test in this file, most of which never touch claiming at all.
 const setup = (golferStore: GolferStore = createInMemoryGolferStore()) => {
   const idGenerator = createSequentialIds("g");
   const projectionStore = createInMemoryProjectionStore();
@@ -15,7 +19,6 @@ const setup = (golferStore: GolferStore = createInMemoryGolferStore()) => {
     projectionStore,
     getMe: getMyGolfer({ golferStore }),
     updateMe: updateMyGolfer({ golferStore, idGenerator }),
-    claim: claimGolfer({ golferStore }),
     record: getMyRecord({ golferStore, projectionStore }),
   };
 };
@@ -84,84 +87,6 @@ describe("updateMyGolfer", () => {
     expect(withOfficial.golfer.official).toBe(8.1);
     expect(withOfficial.golfer.declared).toBe(14.2); // still on record, unaffected by the official patch
     expect(withOfficial.golfer).not.toHaveProperty("effective");
-  });
-});
-
-describe("claimGolfer — happy path", () => {
-  it("binds an unbound sub (no prior GET/PUT /me) to an unclaimed ghost golferId, seeding a name from the claims", async () => {
-    const ctx = setup();
-    const ghost = golferId("ghost-1");
-
-    const claimed = await ctx.claim({ sub: "sub-1", email: "cal@example.com" }, { golferId: ghost });
-    expect(claimed.golfer.golferId).toBe(ghost);
-    expect(claimed.golfer.name).toBe("cal");
-
-    const bound = await ctx.golferStore.getBySub("sub-1");
-    expect(bound?.golfer.id).toBe(ghost);
-  });
-});
-
-// Papercut 5 (M8 plan): ClaimGolferRequest.name is used ONLY when the claim lazily CREATES
-// the golfer row — a claim binding an EXISTING (already-ghosted) row never renames it, no
-// matter what name is supplied. Both arms pinned directly (golferStore.ts's port doc already
-// states the invariant; this is application's own behavioral proof of it).
-describe("claimGolfer — the optional `name` field (papercut 5)", () => {
-  it("seeds a FRESH row's name from the request when the claim creates it", async () => {
-    const ctx = setup();
-    const ghost = golferId("ghost-1");
-
-    const claimed = await ctx.claim({ sub: "sub-1", email: "cal@example.com" }, { golferId: ghost, name: "Cal Custom" });
-    expect(claimed.golfer.name).toBe("Cal Custom"); // NOT the claims-derived default ("cal")
-  });
-
-  it("falls back to the claims-derived default name when the create branch gets no name", async () => {
-    const ctx = setup();
-    const ghost = golferId("ghost-1");
-
-    const claimed = await ctx.claim({ sub: "sub-1", email: "cal@example.com" }, { golferId: ghost });
-    expect(claimed.golfer.name).toBe("cal");
-  });
-
-  it("NEVER renames an EXISTING (already-ghosted, unclaimed) row, even when a name is supplied", async () => {
-    const ctx = setup();
-    const ghost = golferId("ghost-1");
-    // A ghost with an established name from prior round play (participant-joined's own
-    // name), simulated directly on the store — the row exists, unclaimed, before any claim.
-    await ctx.golferStore.put({ id: ghost, name: "Cal From The Round", handicap: {} }, undefined);
-
-    const claimed = await ctx.claim({ sub: "sub-1", email: "cal@example.com" }, { golferId: ghost, name: "A Totally Different Name" });
-
-    expect(claimed.golfer.name).toBe("Cal From The Round"); // unchanged — never renamed
-  });
-});
-
-describe("claimGolfer — collision arm 1: golfer already claimed", () => {
-  it("a second claimant on the same golferId is rejected", async () => {
-    const ctx = setup();
-    const ghost = golferId("ghost-1");
-    await ctx.claim({ sub: "sub-a" }, { golferId: ghost });
-
-    await expect(ctx.claim({ sub: "sub-b" }, { golferId: ghost })).rejects.toMatchObject({ code: "golfer-already-claimed" });
-
-    // The first claimant's binding survives the failed second attempt untouched.
-    const bound = await ctx.golferStore.get(ghost);
-    expect(bound?.sub).toBe("sub-a");
-  });
-});
-
-describe("claimGolfer — collision arm 2: sub already bound to another golfer", () => {
-  it("a sub already bound via a prior PUT /me is rejected BEFORE the target golferId is ever touched", async () => {
-    const ctx = setup();
-    const alreadyMine = (await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {})).golfer.golferId;
-    const otherGhost = golferId("ghost-2");
-
-    await expect(ctx.claim({ sub: "sub-1" }, { golferId: otherGhost })).rejects.toMatchObject({ code: "golfer-already-claimed" });
-
-    // The precheck short-circuited before ever calling put/bindSub — the target golferId was
-    // never created, and sub-1's own binding is unchanged.
-    expect(await ctx.golferStore.get(otherGhost)).toBeUndefined();
-    const stillMine = await ctx.golferStore.getBySub("sub-1");
-    expect(stillMine?.golfer.id).toBe(alreadyMine);
   });
 });
 

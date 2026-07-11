@@ -240,7 +240,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     terminateGame: terminateGame({ journal, broadcast, clock, ids }),
     getMyGolfer: getMyGolfer({ golferStore }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
-    claimGolfer: claimGolfer({ golferStore }),
+    // roundStore/journal/crewStore (M9 hardening): claim proof-of-context needs to resolve
+    // `code` as either a round join code (participants) or a crew join code (members) — the
+    // SAME journal/store/crewStore instances every round/crew use case above already shares.
+    claimGolfer: claimGolfer({ golferStore, roundStore: store, journal, crewStore }),
     getMyRecord: getMyRecord({ golferStore, projectionStore }),
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),

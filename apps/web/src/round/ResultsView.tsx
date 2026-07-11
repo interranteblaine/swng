@@ -13,6 +13,11 @@ export interface ResultsViewProps {
   // tab that only observes the status flip via WS (another participant finalized) never gets
   // one. ResultsView must render fully either way: see the two why-comments below.
   readonly response: FinalizeRoundResponse | undefined;
+  // M9 hardening: the round's own join code — ClaimAffordance's proof token (the claim path
+  // survives finalize, same as the roster it renders on). RoundPage's own credential carries
+  // this for every round session, live or archived — same source SetupPanel's joinCode prop
+  // already reads from.
+  readonly joinCode: string;
 }
 
 type HandicappingRow = FinalizeRoundResponse["handicapping"][number];
@@ -26,7 +31,7 @@ type HandicappingRow = FinalizeRoundResponse["handicapping"][number];
 const deriveHandicapping = (state: RoundState): readonly HandicappingRow[] =>
   state.participants.map((participant) => handicappingFor(participant, state.card, state.cells));
 
-export function ResultsView({ state, games, response }: ResultsViewProps) {
+export function ResultsView({ state, games, response, joinCode }: ResultsViewProps) {
   const handicapping = response?.handicapping ?? deriveHandicapping(state);
   // Task 5: the archive gets the same chip-selected active game as a live round (RoundPage's
   // LiveRound) instead of a fixed games[0] — StandingsHeader IS the per-game standings display
@@ -51,7 +56,7 @@ export function ResultsView({ state, games, response }: ResultsViewProps) {
           {state.participants.map((p) => (
             <li key={p.golferId} className="flex items-center gap-2">
               <span>{p.name}</span>
-              <ClaimAffordance rowGolferId={p.golferId} rowName={p.name} />
+              <ClaimAffordance rowGolferId={p.golferId} rowName={p.name} code={joinCode} />
             </li>
           ))}
         </ul>

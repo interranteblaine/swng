@@ -39,6 +39,7 @@ test.describe.serial("M8 golden season gate — crew ledger, H2H, rebuild parity
 
   let hostU: AuthTokens;
   let crewId: CrewId;
+  let crewJoinCode = "";
   let ids: SeasonGolferIds;
   const roundIds: RoundId[] = [];
 
@@ -67,6 +68,7 @@ test.describe.serial("M8 golden season gate — crew ledger, H2H, rebuild parity
 
     const created = await createCrewDirect(httpUrl, hostU.idToken, "The Saturday Boys");
     crewId = created.crew.crewId;
+    crewJoinCode = created.crew.joinCode;
     expect(created.crew.members).toEqual([{ golferId: al.golfer.golferId, name: "Al", role: "organizer", claimed: true }]);
 
     const afterBo = await addCrewMemberDirect(httpUrl, hostU.idToken, crewId, "Bo");
@@ -197,7 +199,10 @@ test.describe.serial("M8 golden season gate — crew ledger, H2H, rebuild parity
     const { httpUrl } = loadWebEnv();
 
     const userV = await mintThrowawayUser("crew-v");
-    const claimed = await claimGolferDirect(httpUrl, userV.idToken, { golferId: ids.bo, name: "Bo" });
+    // M9 hardening (claim proof-of-context): the crew's OWN join code is the proof that Bo's
+    // golferId genuinely belongs to something V has real knowledge of — the crew Bo has been a
+    // member of all season, captured back in test 2.
+    const claimed = await claimGolferDirect(httpUrl, userV.idToken, { golferId: ids.bo, name: "Bo", code: crewJoinCode });
     expect(claimed.golfer.golferId).toBe(ids.bo);
     expect(claimed.golfer.name).toBe("Bo"); // Bo's row already existed (addCrewMember minted it) — the claim binds V's sub, it never renames an existing row
 

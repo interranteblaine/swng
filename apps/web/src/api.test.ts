@@ -604,7 +604,7 @@ describe("claimGolfer", () => {
       return fakeResponse(200, { golfer: { golferId: "ghost-1", name: "Ghost" } });
     });
 
-    const input: ClaimGolferRequest = { golferId: golferId("ghost-1") };
+    const input: ClaimGolferRequest = { golferId: golferId("ghost-1"), code: "ABC123" };
     const result = await claimGolfer("tok-me", input);
 
     expect(seenUrl).toBe(`${HTTP_URL}/golfers/claim`);
@@ -616,7 +616,7 @@ describe("claimGolfer", () => {
   it("throws a coded ApiError('golfer-already-claimed') on a 409", async () => {
     stubFetch(async () => fakeResponse(409, { code: "golfer-already-claimed", message: "already claimed" }));
 
-    const error: unknown = await claimGolfer("tok-me", { golferId: golferId("ghost-1") }).catch((caught: unknown) => caught);
+    const error: unknown = await claimGolfer("tok-me", { golferId: golferId("ghost-1"), code: "ABC123" }).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("golfer-already-claimed");

@@ -334,7 +334,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
           <SeedFailureNotice seedFailures={seedFailures} onDismiss={() => setSeedNoticeDismissed(true)} />
         )}
         {isFinal ? (
-          <ResultsView state={session.state} games={session.games} response={finalizeResponse} />
+          <ResultsView state={session.state} games={session.games} response={finalizeResponse} joinCode={credential.joinCode} />
         ) : (
           <LiveRound
             state={session.state}

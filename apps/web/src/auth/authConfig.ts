@@ -59,6 +59,16 @@ export const buildAuthorizeUrl = (codeChallenge: string): string => {
   return `${authConfig.hostedUiDomain}/oauth2/authorize?${params.toString()}`;
 };
 
+// Papercut 6 (M9 hardening): signOut previously only cleared LOCAL token storage — the Cognito
+// Hosted UI session cookie survived, so the next sign-in silently resumed the SAME account
+// rather than prompting fresh credentials. Cognito's own /logout endpoint ends that session;
+// `logout_uri` must be one of the User Pool Client's registered logoutUrls (swngStack.ts's
+// UserPoolClient.logoutUrls, `${origin}/` — matched here exactly, trailing slash included).
+export const buildLogoutUrl = (): string => {
+  const params = new URLSearchParams({ client_id: authConfig.userPoolClientId, logout_uri: `${window.location.origin}/` });
+  return `${authConfig.hostedUiDomain}/logout?${params.toString()}`;
+};
+
 // Raw bytes -> base64url (RFC 7636 §A) — plain btoa's alphabet ('+/=') isn't URL-safe, so every
 // PKCE value (verifier and challenge alike) goes through this before it's ever stored or sent.
 const base64UrlEncode = (bytes: Uint8Array): string => {

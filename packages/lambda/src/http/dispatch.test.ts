@@ -155,7 +155,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     terminateGame: terminateGame({ journal, broadcast, clock, ids }),
     getMyGolfer: getMyGolfer({ golferStore }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
-    claimGolfer: claimGolfer({ golferStore }),
+    claimGolfer: claimGolfer({ golferStore, roundStore: store, journal, crewStore }),
     getMyRecord: getMyRecord({ golferStore, projectionStore }),
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
@@ -739,21 +739,39 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
     );
     const ghostId = throwaway.golferId;
 
+    // M9 hardening: claim proof-of-context — the throwaway round's own join code is the ONE
+    // proof token that names ghostId as a real participant (its host).
     const claimResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/golfers/claim", token: golferBearer(bo), body: { golferId: ghostId } })),
+      await dispatcher(
+        makeEvent({ method: "POST", path: "/golfers/claim", token: golferBearer(bo), body: { golferId: ghostId, code: throwaway.joinCode } }),
+      ),
     );
     expect(claimResp.statusCode).toBe(200);
     const claimed = golferResponseSchema.parse(JSON.parse(claimResp.body!));
     expect(claimed.golfer.golferId).toBe(ghostId);
 
-    // Cal, a third, unrelated user, tries to claim the SAME ghost Bo already has — the real
-    // golfer-already-claimed error code, mapped to a REAL 409 (M6 lesson: not an invented
-    // string).
+    // Cal, a third, unrelated user, tries to claim the SAME ghost Bo already has, with the
+    // SAME valid proof code — the real golfer-already-claimed error code, mapped to a REAL 409
+    // (M6 lesson: not an invented string). Proof passing but the golfer already claimed is
+    // exactly the ordering this task pins: proof first, then the collision arms.
     const reclaimResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/golfers/claim", token: golferBearer(cal), body: { golferId: ghostId } })),
+      await dispatcher(
+        makeEvent({ method: "POST", path: "/golfers/claim", token: golferBearer(cal), body: { golferId: ghostId, code: throwaway.joinCode } }),
+      ),
     );
     expect(reclaimResp.statusCode).toBe(409);
     expect(errorResponseSchema.parse(JSON.parse(reclaimResp.body!))).toMatchObject({ code: "golfer-already-claimed" });
+
+    // A wrong code (proves nothing about ghostId) is rejected BEFORE the golfer-already-claimed
+    // 409 above would otherwise fire — claim-proof-required, mapped to 403, never leaking that
+    // ghostId is already claimed to a caller who never proved they belong in its round.
+    const wrongCodeResp = asStructured(
+      await dispatcher(
+        makeEvent({ method: "POST", path: "/golfers/claim", token: golferBearer(cal), body: { golferId: ghostId, code: "WRONGC" } }),
+      ),
+    );
+    expect(wrongCodeResp.statusCode).toBe(403);
+    expect(errorResponseSchema.parse(JSON.parse(wrongCodeResp.body!))).toMatchObject({ code: "claim-proof-required" });
   });
 
   it("GET /me/record returns an empty history for a golfer who has never played a finalized round", async () => {

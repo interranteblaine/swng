@@ -9,6 +9,12 @@ export interface ClaimAffordanceProps {
   // roster row, not the JWT-derived email default (claimGolferRequestSchema's `name` only seeds
   // a lazily-created golfer row — never renames an existing one, golfers.ts's own doc comment).
   readonly rowName: string;
+  // M9 hardening (claim proof-of-context): the round's own join code — the ONE proof token
+  // that lets the server confirm rowGolferId genuinely belongs to this round before binding
+  // the caller's sub to it. Both call sites (SetupPanel, ResultsView) already have their
+  // round's joinCode in props/session state; there is no crew-page claim affordance to send a
+  // crew code instead (checked — CrewPage.tsx has none).
+  readonly code: string;
 }
 
 // The ghost-claim affordance on one roster row (M7 Task 6; model corrected after a field smoke
@@ -30,7 +36,7 @@ export interface ClaimAffordanceProps {
 // your round" is part of the M7 promise, not just a mid-round affordance).
 // Round-membership-as-claim-capability is beta-grade by design (M9 hardens with a
 // challenge/confirmation).
-export function ClaimAffordance({ rowGolferId, rowName }: ClaimAffordanceProps) {
+export function ClaimAffordance({ rowGolferId, rowName, code }: ClaimAffordanceProps) {
   const auth = useAuth();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -65,21 +71,27 @@ export function ClaimAffordance({ rowGolferId, rowName }: ClaimAffordanceProps) 
     setBusy(true);
     setError(undefined);
     try {
-      await auth.withAuth((token) => claimGolfer(token, { golferId: rowGolferId, name: rowName }));
+      await auth.withAuth((token) => claimGolfer(token, { golferId: rowGolferId, name: rowName, code }));
       // Re-fetch /me (brief): the claim is what binds a fresh account to its season ghost, so
       // the app's identity chrome must reflect the claimed golfer now, not on the next reload.
       await auth.refetch();
       setClaimed(true);
       setConfirming(false);
     } catch (caught) {
-      // Never the raw caught.message — the 409 arm gets honest wording. Both of
-      // claimGolfer.ts's collision arms throw the SAME "golfer-already-claimed" code, so the
-      // client disambiguates by auth.golfer instead: if this signed-in account already has a
-      // golfer (auth.golfer non-null), the 409 is arm 2 — THIS account's sub is already bound
-      // elsewhere, one profile-Save away for every new user, and claiming a second ghost isn't
-      // supported yet. Only when auth.golfer is null could the 409 mean arm 1 — the row itself
-      // already claimed by a different account.
-      if (caught instanceof ApiError && caught.code === "golfer-already-claimed") {
+      // Never the raw caught.message — every arm below gets honest wording.
+      if (caught instanceof ApiError && caught.code === "claim-proof-required") {
+        // M9 hardening: `code` didn't resolve to a round/crew naming this golferId — always a
+        // real proof failure here (this component only ever sends the round's OWN join code,
+        // so this arm is effectively unreachable in practice, but the copy stays honest rather
+        // than falling through to the generic "try again" if it ever were).
+        setError("This claim needs a round or crew code that includes this player.");
+      } else if (caught instanceof ApiError && caught.code === "golfer-already-claimed") {
+        // Both of claimGolfer.ts's collision arms throw the SAME "golfer-already-claimed"
+        // code, so the client disambiguates by auth.golfer instead: if this signed-in account
+        // already has a golfer (auth.golfer non-null), the 409 is arm 2 — THIS account's sub
+        // is already bound elsewhere, one profile-Save away for every new user, and claiming a
+        // second ghost isn't supported yet. Only when auth.golfer is null could the 409 mean
+        // arm 1 — the row itself already claimed by a different account.
         setError(auth.golfer ? "Your account already has a profile — claiming another ghost isn't supported yet." : "Already claimed by another account.");
       } else {
         setError("Could not claim — try again.");

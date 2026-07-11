@@ -70,7 +70,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   });
 
   it("ResultsView renders exactly what describeGame(games()...) renders locally — the brief's literal check", () => {
-    render(<ResultsView state={state} games={localGames} response={response} />);
+    render(<ResultsView state={state} games={localGames} response={response} joinCode="TESTJC" />);
 
     for (const game of localGames) {
       const { line } = describeGame(game, state);
@@ -82,7 +82,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   });
 
   it("handicapping rows render the server's response verbatim — no local recomputation when a response exists", () => {
-    render(<ResultsView state={state} games={localGames} response={response} />);
+    render(<ResultsView state={state} games={localGames} response={response} joinCode="TESTJC" />);
     for (const row of response.handicapping) {
       if (row.kind !== "complete") continue;
       const name = state.participants.find((p) => p.golferId === row.golferId)!.name;
@@ -91,7 +91,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   });
 
   it("the archived card reuses ScorecardGrid, read-only — a cell tap is inert", () => {
-    render(<ResultsView state={state} games={localGames} response={response} />);
+    render(<ResultsView state={state} games={localGames} response={response} joinCode="TESTJC" />);
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole 1` });
     expect(cell.hasAttribute("disabled")).toBe(true);
   });
@@ -107,7 +107,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
     const hole = [...fourballDots.keys()].find((h) => (fourballDots.get(h) ?? 0) === 0 && (skinsDots.get(h) ?? 0) > 0);
     expect(hole).toBeDefined();
 
-    render(<ResultsView state={state} games={localGames} response={response} />);
+    render(<ResultsView state={state} games={localGames} response={response} joinCode="TESTJC" />);
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole ${hole}` });
 
     // fourball is games[0] (fieldDeck18's own [fourball, skins] order) — the default active
@@ -128,7 +128,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     const localGames = state.games.map((config) => scoreGame(config, state));
     const archive = settleRound(events); // the true source — this tab never called finalize, only settleRound did (server-side)
 
-    render(<ResultsView state={state} games={localGames} response={undefined} />);
+    render(<ResultsView state={state} games={localGames} response={undefined} joinCode="TESTJC" />);
 
     for (const row of archive.handicapping) {
       const name = state.participants.find((p) => p.golferId === row.golferId)!.name;
@@ -146,7 +146,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     const state = reduceRound(events);
     const localGames = state.games.map((config) => scoreGame(config, state));
 
-    render(<ResultsView state={state} games={localGames} response={undefined} />);
+    render(<ResultsView state={state} games={localGames} response={undefined} joinCode="TESTJC" />);
 
     expect(screen.getByText("Ann & Bo win 2&1")).toBeTruthy();
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole 1` });
@@ -175,7 +175,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     };
     const games = [scoreGame(terminatedConfig, state), scoreGame(resolvedConfig, state)];
 
-    render(<ResultsView state={state} games={games} response={undefined} />);
+    render(<ResultsView state={state} games={games} response={undefined} joinCode="TESTJC" />);
 
     expect(screen.getByRole("tab", { name: /Stableford/ }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: /Singles match/ }).getAttribute("aria-selected")).toBe("false");
@@ -196,7 +196,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
       terminatedGameIds: new Set(),
     };
 
-    render(<ResultsView state={state} games={[]} response={undefined} />);
+    render(<ResultsView state={state} games={[]} response={undefined} joinCode="TESTJC" />);
     expect(screen.getByText("Ann — incomplete")).toBeTruthy();
   });
 });
@@ -243,7 +243,7 @@ describe("ResultsView — claim a ghost after finalize (gap 2)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("not signed in: the finalized roster still renders (name only), with no claim affordances at all", () => {
-    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
+    render(<ResultsView state={finalState()} games={[]} response={undefined} joinCode="TESTJC" />);
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     expect(annRow).toBeTruthy();
@@ -257,7 +257,7 @@ describe("ResultsView — claim a ghost after finalize (gap 2)", () => {
       vi.fn(async () => fakeResponse(200, { golfer: null })),
     );
 
-    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
+    render(<ResultsView state={finalState()} games={[]} response={undefined} joinCode="TESTJC" />);
 
     await waitFor(() => expect(screen.getAllByRole("button", { name: "This is me" })).toHaveLength(2)); // Ann, Bo
   });
@@ -272,7 +272,7 @@ describe("ResultsView — claim a ghost after finalize (gap 2)", () => {
       vi.fn(async () => fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } })),
     );
 
-    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
+    render(<ResultsView state={finalState()} games={[]} response={undefined} joinCode="TESTJC" />);
 
     await waitFor(() => expect(screen.getAllByRole("button", { name: "This is me" })).toHaveLength(1)); // Bo only
 
@@ -295,7 +295,7 @@ describe("ResultsView — claim a ghost after finalize (gap 2)", () => {
       }),
     );
 
-    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
+    render(<ResultsView state={finalState()} games={[]} response={undefined} joinCode="TESTJC" />);
 
     const boRow = await waitFor(() => {
       const row = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));

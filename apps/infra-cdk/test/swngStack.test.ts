@@ -358,9 +358,10 @@ describe("SwngStack", () => {
     // redirectUri = `${origin}/auth/callback`) — Cognito requires an EXACT match, so a bare
     // origin here would make every real Hosted-UI sign-in fail with redirect_mismatch. This
     // pin asserts the full `/auth/callback` URL, not just a substring/origin match, so a
-    // regression back to the bare origin fails here. LogoutURLs stays the bare origin: the
-    // app's signOut (useAuth.ts) never redirects through Cognito's /logout endpoint.
-    it("has exactly one User Pool Client: no secret, authorization-code OAuth flow, USER_PASSWORD_AUTH enabled, callback URL is the bare origin + /auth/callback, logout URL is the bare origin", () => {
+    // regression back to the bare origin fails here. LogoutURLs (M9 hardening, papercut 6) is
+    // the origin WITH a trailing slash — authConfig.ts's buildLogoutUrl always sends
+    // `${origin}/` as logout_uri, and Cognito's exact-match rule applies here too.
+    it("has exactly one User Pool Client: no secret, authorization-code OAuth flow, USER_PASSWORD_AUTH enabled, callback URL is the bare origin + /auth/callback, logout URL is the origin + trailing slash", () => {
       template.resourceCountIs("AWS::Cognito::UserPoolClient", 1);
       template.hasResourceProperties("AWS::Cognito::UserPoolClient", {
         GenerateSecret: false,
@@ -368,7 +369,7 @@ describe("SwngStack", () => {
         AllowedOAuthFlowsUserPoolClient: true,
         AllowedOAuthScopes: Match.arrayWith(["openid", "email", "profile"]),
         CallbackURLs: Match.arrayWith(["http://localhost:5173/auth/callback"]),
-        LogoutURLs: Match.arrayWith(["http://localhost:5173"]),
+        LogoutURLs: Match.arrayWith(["http://localhost:5173/"]),
         // M9 hardening item (why-comment in swngStack.ts): e2e-gate JWT minting via
         // InitiateAuth, alongside the real web app's authorization-code+PKCE flow above.
         ExplicitAuthFlows: Match.arrayWith(["ALLOW_USER_PASSWORD_AUTH"]),

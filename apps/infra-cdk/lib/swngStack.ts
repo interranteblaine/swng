@@ -222,11 +222,14 @@ export class SwngStack extends Stack {
         // `${origin}/auth/callback`, never the bare origin, so the bare origins alone here
         // would make every real Hosted-UI sign-in fail with redirect_mismatch.
         callbackUrls: webOrigins.map((origin) => `${origin}/auth/callback`),
-        // The app's signOut (apps/web/src/auth/useAuth.ts) only clears local token storage —
-        // it never redirects through Cognito's /logout endpoint, so there's no path string to
-        // match here the way callbackUrls needs one; the bare origins stay valid registered
-        // values for if/when a real Hosted-UI logout redirect is added.
-        logoutUrls: webOrigins,
+        // Papercut 6 (M9 hardening): the app's signOut (apps/web/src/auth/useAuth.ts) now
+        // redirects through Cognito's /logout endpoint to actually end the Hosted UI's own
+        // session (clearing local tokens alone left it alive, so the next signIn() silently
+        // resumed the same account) — `logout_uri` must EXACTLY match a registered value here,
+        // same "Cognito requires an exact match" rule as callbackUrls above. authConfig.ts's
+        // buildLogoutUrl always sends `${origin}/` (trailing slash, no path), not the bare
+        // origin callbackUrls' own `/auth/callback` needs.
+        logoutUrls: webOrigins.map((origin) => `${origin}/`),
       },
     });
 

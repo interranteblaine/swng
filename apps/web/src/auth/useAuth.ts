@@ -2,7 +2,7 @@ import { createContext, createElement, useCallback, useContext, useEffect, useRe
 import type { ReactNode } from "react";
 import type { GolferView } from "@swng/contracts";
 import { ApiError, getMe } from "../api";
-import { authConfig, buildAuthorizeUrl, computeCodeChallenge, generateCodeVerifier, tokenEndpoint } from "./authConfig";
+import { authConfig, buildAuthorizeUrl, buildLogoutUrl, computeCodeChallenge, generateCodeVerifier, tokenEndpoint } from "./authConfig";
 import type { AuthTokens } from "./tokenStore";
 import { pkceVerifierStore, tokenStore } from "./tokenStore";
 
@@ -77,11 +77,16 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     tokensRef.current = tokens;
   }, [tokens]);
 
+  // Papercut 6 (M9 hardening): clearing local tokens alone left the Hosted UI's OWN session
+  // cookie alive, so the next signIn() silently resumed the same account instead of prompting
+  // fresh credentials — this redirect through Cognito's /logout is what actually ends that
+  // session (mirrors signIn's own window.location.assign redirect below, same seam).
   const signOut = useCallback(() => {
     tokenStore.clear();
     tokensRef.current = undefined;
     setTokens(undefined);
     setGolfer(undefined);
+    window.location.assign(buildLogoutUrl());
   }, []);
 
   // The one 401-anywhere policy (brief): try the call; on a 401, refresh once and retry; if

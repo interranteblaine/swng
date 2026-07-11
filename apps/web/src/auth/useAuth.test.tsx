@@ -138,6 +138,37 @@ describe("AuthProvider / useAuth — signed in", () => {
     expect(tokenStore.load()).toBeUndefined();
   });
 
+  // Papercut 6 (M9 hardening): signOut clears local tokens AND ends the Hosted UI's own
+  // session by redirecting through Cognito's /logout — otherwise the next signIn() silently
+  // resumes the same account. Same window.location seam as the PKCE signIn redirect test
+  // below (happy-dom actually updates window.location.href on assign, no extra mock needed).
+  it("signOut() redirects to the Hosted UI's /logout URL, after clearing tokens", async () => {
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } })),
+    );
+
+    render(
+      <AuthProvider>
+        <Harness />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("golfer").textContent).toBe("Ann"));
+
+    // Captured BEFORE the redirect — window.location.origin itself changes once the assign
+    // below actually navigates, so this is the app's own origin the logout_uri must echo.
+    const appOrigin = window.location.origin;
+
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+    await waitFor(() => expect(new URL(window.location.href).pathname).toBe("/logout"));
+    const url = new URL(window.location.href);
+    expect(url.origin).toBe("https://swng-test.auth.us-east-1.amazoncognito.com");
+    expect(url.searchParams.get("client_id")).toBe("test-client-id");
+    expect(url.searchParams.get("logout_uri")).toBe(`${appOrigin}/`);
+  });
+
   it("refetch() re-runs GET /me on demand (e.g. after a claim/profile save elsewhere)", async () => {
     tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
     let call = 0;

@@ -62,6 +62,11 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // explicit entry: this Record is exhaustive over ApplicationErrorCode by construction.
   "sub-drop-forbidden": 500,
   "join-code-exhausted": 500,
+  // M9 hardening (claim proof-of-context): a forbidden ACTOR (the caller hasn't proven they
+  // belong to this golferId's round/crew), same bucket as golfer-claimed/not-a-member above —
+  // 403, not a 409 (this isn't a conflicting write, and it's checked before either 409 arm so
+  // it never leaks claim status).
+  "claim-proof-required": 403,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`

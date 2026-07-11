@@ -64,7 +64,14 @@ export type ApplicationErrorCode =
   // is a genuine-bug signal (the alphabet/generator itself broken), not a request the caller
   // can retry their way out of — deliberately mapped to 500, same reasoning as
   // sub-drop-forbidden above.
-  | "join-code-exhausted";
+  | "join-code-exhausted"
+  // M9 hardening (claim proof-of-context, task-2-brief.md): claimGolfer.ts's `code` failed to
+  // resolve to a round or crew that actually contains the target golferId — a forbidden actor
+  // (the caller hasn't proven they belong to this golfer's history), the same shape as
+  // golfer-claimed/not-a-member above, so 403. Checked BEFORE golfer-already-claimed/
+  // golfer-conflict below so a wrong code can never be used to probe whether a golferId is
+  // already claimed.
+  | "claim-proof-required";
 
 export class ApplicationError extends Error {
   constructor(

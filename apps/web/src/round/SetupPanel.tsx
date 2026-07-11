@@ -79,7 +79,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onAddParticipant }: Set
                   <span>
                     {p.name} — {p.tee} — CH {p.courseHandicap}
                   </span>
-                  <ClaimAffordance rowGolferId={p.golferId} rowName={p.name} />
+                  <ClaimAffordance rowGolferId={p.golferId} rowName={p.name} code={joinCode} />
                 </span>
                 {hasGames && (
                   <span className="flex flex-wrap gap-2 text-sm text-slate-400">

@@ -630,7 +630,10 @@ cited spot, this is just the one consolidated list Task 2 works from.
   finalizing near-simultaneously that share a participant can land on different shards and race
   `projectArchive`'s `listHistory` → `computeIndexDetail` → `putIndex` sequence, momentarily
   storing an index short one differential. Self-heals on that golfer's next finalize or a
-  `rebuildProjections` pass.
+  `rebuildProjections` pass. The crew season ledger shares the identical shape: `putCrewRound`
+  → `listCrewRounds` → `putSeasonRecords` (same file) is a read-modify-write over the whole
+  `(crewId, season)` bucket, last-writer-wins under two near-simultaneous finalizes for the
+  same crew/season — same self-heal path (next finalize or rebuild).
 - **Rebuild-vs-live-finalize wipe window** (`rebuildProjections.ts`): the manual rebuild's
   archive Scan (`createDynamoArchiveSource`) necessarily predates its own wipe step; a round
   that finalizes (and runs the live stream-triggered `projectArchive`) after the Scan but before
@@ -657,6 +660,51 @@ cited spot, this is just the one consolidated list Task 2 works from.
   now (beta is disposable, not prod), but unbounded over the project's lifetime; M9 should add
   teardown (`AdminDeleteUser` in an `afterAll`, or a periodic beta-only sweep) before beta data
   volume itself becomes a hardening concern.
+- **Finalize false-200 on a `putArchive` failure** (`finalizeRound.ts`): the `round-finalized`
+  event append and the archive write (`deps.store.putArchive`) are two separate calls, not one
+  transaction. If `putArchive` throws after the event has already landed, the round is now
+  final-but-archiveless — and the idempotent-replay branch this same function takes on retry
+  (`state.status === "final"` → recompute from the log and return, no `putArchive` call) means
+  that retry returns 200 without ever repairing the missing archive row, or the projections a
+  stream trigger off that write would have produced. Observed live during M8 Task 4: two
+  throwaway rounds wedged on beta this exact way. M9 needs either a single-transaction
+  append+archive write, or the idempotent-replay branch to re-attempt `putArchive` when the
+  archive is found missing.
+- **Cross-season re-finalize strands the old season's crew contribution + RECORDS**
+  (`createDynamoProjectionStore.ts`'s `putCrewRound` dedupe and `rebuildProjections.ts`'s
+  `touchedCrewSeasons`): both are scoped to `(crewId, season)` — a reopen-and-refinalize whose
+  new `finalizedAtMs` lands in a different UTC year (season = `seasonOf(finalizedAtMs)`,
+  `projectArchive.ts`) never finds, and so never deletes, the OLD season's `CrewRoundEntry`; it
+  strands there forever, and a full rebuild can't reach it either (`touchedCrewSeasons` is
+  collected from the CURRENT archive set the same season-scoped way, so it never re-wipes a
+  season nothing currently finalizes into). Unreachable in v1 (nothing reopens a finalized
+  round yet); latent once something does. See `createDynamoProjectionStore.ts`'s `putCrewRound`
+  comment for the corrected (non-claiming-it's-handled) version of this note.
+- **Crew join codes: permanent, no uniqueness condition, arbitrary winner on collision**
+  (`createCrew.ts`'s `deps.ids.newJoinCode()` + `createDynamoCrewStore.ts`'s `put`/
+  `findByJoinCode`): unlike a round's own join code (scoped to that round's lifetime), a crew's
+  join code is permanent — minted once at creation with no conditional check against an
+  existing code, and `findByJoinCode`'s `Limit:1` GSI query would silently resolve to whichever
+  of two colliding crews the (eventually-consistent) index happens to return first. A
+  consent-boundary miss more than a correctness one (whoever holds a stale or leaked code can
+  join that crew forever) — negligible at the join-code alphabet's real collision odds today,
+  but accumulates as the crew count grows.
+- **Triaged-M9 web/UX papercuts** (full detail in the M8 close-out review, not reproduced
+  here): `startRound`'s `players[]` roster has no duplicate-golfer guard; the `parseSeason`
+  family parses an empty string as if it were a real season (`Number("")` is 0, an integer, so
+  `?season=` resolves to season 0 instead of the current-year default); `AddPlayerForm` wipes
+  its tee/course-handicap fields back to defaults after every successful add, so seating
+  several same-tee players means retyping the tee each time; `onAddGame` is missing a
+  post-call sync on one outlier path; "play the usual" hides itself rather than showing
+  disabled-with-an-explainer when the crew has no saved preset; a signed-in golfer's own
+  roster row transiently shows the "This is me" claim affordance while identity is still
+  loading (`auth.golfer` undefined skips the "You" branch); `SeedFailureNotice` can render on
+  a round that's already landed final; `saveStandingGame` doesn't validate a preset's
+  golferIds against the current roster; crew names aren't validated in the domain layer the
+  way member names are (a whitespace-only crew name persists — contrast fix #1 above);
+  `addCrewMember` can leave an orphaned ghost row if the crew write retries out after the
+  golfer row is already created; departed-member ledger lines render a truncated raw golferId
+  instead of "Former member" copy.
 
 ---
 

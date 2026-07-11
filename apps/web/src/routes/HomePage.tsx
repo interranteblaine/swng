@@ -21,6 +21,9 @@ export function HomePage() {
   const [joinCode, setJoinCode] = useState("");
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | undefined>(undefined);
+  // golfer-required is its own arm, not folded into joinError (M8 close-out fix #2): this
+  // form collects no name, so "try again" is a dead end — the honest fix is a link to /profile.
+  const [joinGolferRequired, setJoinGolferRequired] = useState(false);
 
   useEffect(() => {
     if (!signedIn) {
@@ -43,17 +46,24 @@ export function HomePage() {
 
     setJoining(true);
     setJoinError(undefined);
+    setJoinGolferRequired(false);
     try {
       const response = await withAuth((token) => joinCrew(token, { code: upperCode }));
       navigate(`/crews/${response.crew.crewId}`);
     } catch (caught) {
       // Humanized 404 copy, never the raw server text (the M7 discipline — the raw message
       // echoes the typed code back in server vocabulary, not something a golfer acts on).
-      setJoinError(
-        caught instanceof ApiError && caught.code === "unknown-crew"
-          ? "No crew found with that code — check it with whoever shared it."
-          : "Could not join the crew — try again.",
-      );
+      // golfer-required gets its own honest arm below instead of the generic retry: this form
+      // collects no name, so retrying can never fix it — only a profile visit can.
+      if (caught instanceof ApiError && caught.code === "golfer-required") {
+        setJoinGolferRequired(true);
+      } else {
+        setJoinError(
+          caught instanceof ApiError && caught.code === "unknown-crew"
+            ? "No crew found with that code — check it with whoever shared it."
+            : "Could not join the crew — try again.",
+        );
+      }
       setJoining(false);
     }
   };
@@ -103,6 +113,14 @@ export function HomePage() {
                 className="rounded-lg bg-slate-800 p-3 text-lg uppercase tracking-widest"
               />
             </label>
+            {joinGolferRequired && (
+              <p role="alert" className="text-red-400">
+                Set your name on your profile before joining a crew.{" "}
+                <Link to="/profile" className="underline">
+                  Go to profile
+                </Link>
+              </p>
+            )}
             {joinError && (
               <p role="alert" className="text-red-400">
                 {joinError}

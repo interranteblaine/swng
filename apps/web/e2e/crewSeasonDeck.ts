@@ -78,7 +78,8 @@ const ROUND_PLAN: readonly RoundPlan[] = [
       { hole: 2, favor: "al" },
     ],
     hole18Winner: "bo",
-  }, // R2: Al wins — +2 on 1-17 overcomes hole18's -1 (Bo)
+  }, // R2: Al wins 2&1 — the +2 margin from holes 1-2 already closes the match at hole 17 (2up
+  // with 1 to play); hole18Winner=bo only decides the skins pot, moot for the singles match
   { decisive: [{ hole: 1, favor: "al" }], hole18Winner: "cy" }, // R3: Al wins — +1 (hole18 halved, Cy wins skins)
   { decisive: [{ hole: 1, favor: "al" }], hole18Winner: "dee" }, // R4: Al wins — +1 (hole18 halved, Dee wins skins)
   { decisive: [], hole18Winner: "al" }, // R5: Al wins — hole18 alone contributes +1
@@ -91,7 +92,8 @@ const ROUND_PLAN: readonly RoundPlan[] = [
       { hole: 2, favor: "bo" },
     ],
     hole18Winner: "al",
-  }, // R9: Bo wins — -2 overcomes hole18's +1 (Al)
+  }, // R9: Bo wins 2&1 — the -2 margin from holes 1-2 already closes the match at hole 17 (2up
+  // with 1 to play); hole18Winner=al only decides the skins pot, moot for the singles match
   { decisive: [], hole18Winner: "bo" }, // R10: Bo wins — hole18 alone contributes -1
   { decisive: [{ hole: 1, favor: "bo" }], hole18Winner: "cy" }, // R11: Bo wins — -1 (hole18 halved, Cy wins skins)
   { decisive: [{ hole: 1, favor: "bo" }], hole18Winner: "dee" }, // R12: Bo wins — -1 (hole18 halved, Dee wins skins)

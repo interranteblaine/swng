@@ -87,6 +87,10 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   // already on the roster — a failed precondition on the roster, same bucket as
   // crew-conflict/golfer-already-in-round above, not a genuine-bug 500.
   "duplicate-member": 409,
+  // M8 close-out fix #1: addMember's sibling throw — the wire's `min(1)` doesn't trim, so a
+  // whitespace-only name reaches this. A bad-body precondition, same shape as
+  // duplicate-tee-name/unknown-golfer-in-game above — client-correctable, not a genuine bug.
+  "invalid-member-name": 400,
 };
 
 // Exported so every error-shaped response — including dispatch.ts's route-not-found 404,

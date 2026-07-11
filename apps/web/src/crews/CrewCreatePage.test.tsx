@@ -92,7 +92,7 @@ describe("CrewCreatePage", () => {
   it("a failed create shows humanized copy, never the raw server text", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: null });
-    mockedCreateCrew.mockRejectedValue(new ApiError("golfer-required", 400, "golfer row required for sub sub-1"));
+    mockedCreateCrew.mockRejectedValue(new ApiError("http-500", 500, "internal error"));
 
     renderPage();
 
@@ -101,7 +101,27 @@ describe("CrewCreatePage", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toMatch(/could not create the crew/i);
+    expect(screen.queryByText(/internal error/)).toBeNull();
+  });
+
+  // M8 close-out fix #2: golfer-required means the signed-in account has no golfer profile
+  // yet — this form collects no name, so retrying can never fix it. The generic "try again"
+  // copy was a dead end; this arm points at the ONE place that fixes it.
+  it("golfer-required points at the profile page instead of a dead-end retry", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: null });
+    mockedCreateCrew.mockRejectedValue(new ApiError("golfer-required", 400, "golfer row required for sub sub-1"));
+
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText(/crew name/i), { target: { value: "Sunday crew" } });
+    fireEvent.click(screen.getByRole("button", { name: /create crew/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/set your name on your profile/i);
     expect(screen.queryByText(/sub sub-1/)).toBeNull();
+    const link = screen.getByRole("link", { name: /profile/i });
+    expect(link.getAttribute("href")).toBe("/profile");
   });
 
   it("signed out: prompts to sign in instead of offering the form", () => {

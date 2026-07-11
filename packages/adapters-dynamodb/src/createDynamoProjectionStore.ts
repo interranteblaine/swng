@@ -102,6 +102,13 @@ export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentCl
       // for the same round replaces, never accumulates") — a reopen-and-refinalize computes a
       // DIFFERENT sk for the SAME roundId, so any prior entry for this roundId is deleted
       // before the new one lands, or the old sk would survive as a second, stale entry.
+      // CORRECTION (M8 close-out review, M9 hardening ledger): this dedupe only reaches
+      // entries in THIS season's partition (pk = crewRoundsPk(crewId, season)). A
+      // reopen-and-refinalize whose new finalizedAtMs lands in a DIFFERENT UTC year (season =
+      // seasonOf(finalizedAtMs), projectArchive.ts) never finds — and so never deletes — the
+      // OLD season's entry: it strands there forever, unrepairable even by rebuildProjections
+      // (its touchedCrewSeasons is collected the same season-scoped way). Unreachable in v1
+      // (nothing reopens a finalized round yet), latent once M9 or later adds it.
       const priorSks = await queryAllPages(
         client,
         {

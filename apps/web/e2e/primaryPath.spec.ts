@@ -8,10 +8,12 @@ import { enterScore, ensureCourse, injectAuthTokens, mintThrowawayUser, screensh
 // failed M7's smoke, now the headline"): a fresh golfer, signed in, plays a round AS THEMSELVES
 // with no ghost, no ceremony, no typed name at round-creation — end to end through the REAL
 // UI. Process law from M7's close (papercuts.md §4): every step after sign-in goes through
-// rendered UI, no *Direct API substitutions anywhere in this file — the one allowed shortcut is
-// minting the JWT itself (USER_PASSWORD_AUTH, exactly like identityRecord.spec.ts's own
-// precedent), since the Hosted UI form is the user's own separate manual smoke, not something
-// this automated gate re-drives.
+// rendered UI, no *Direct API substitutions anywhere in this file — the two allowed non-UI
+// shortcuts are minting the JWT itself (USER_PASSWORD_AUTH, exactly like identityRecord.spec.ts's
+// own precedent), since the Hosted UI form is the user's own separate manual smoke, not
+// something this automated gate re-drives, and seeding the course via the public API
+// (ensureCourse, below) — test-fixture setup, the same precedent every other spec's step 1
+// already follows, not a step a golfer takes.
 //
 // "Playing as ... no name typed anywhere" (brief) is scoped to the round-creation step
 // specifically: CreateRoundPage.tsx only shows the free-text "Your name" field for a

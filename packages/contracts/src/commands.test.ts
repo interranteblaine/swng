@@ -50,6 +50,30 @@ describe("startRoundRequestSchema", () => {
     };
     expect(parse(startRoundRequestSchema, request)).toEqual(request);
   });
+
+  // M8 close-out fix #4: StartRound appends 2 TransactWriteItems per event (EVT + OPID Put,
+  // createDynamoEventJournal.ts) and DynamoDB caps a single transaction at 100 items — an
+  // unbounded `players` array could grow the event batch (round-created + host-joined +
+  // round-started + one participant-joined per player) past that cap and 500 instead of
+  // giving the caller an honest 400. `.max(40)` stays comfortably clear (40 players is 86
+  // items, well under 100) while being far beyond any realistic roster.
+  it("rejects a players roster over the cap", () => {
+    const request = {
+      card,
+      host: { name: "Ann", tee: "white", courseHandicap: 8 },
+      players: Array.from({ length: 41 }, (_, i) => ({ name: `Player ${i}`, tee: "white", courseHandicap: 0 })),
+    };
+    expect(() => parse(startRoundRequestSchema, request)).toThrow(ContractError);
+  });
+
+  it("accepts a players roster right at the cap", () => {
+    const request = {
+      card,
+      host: { name: "Ann", tee: "white", courseHandicap: 8 },
+      players: Array.from({ length: 40 }, (_, i) => ({ name: `Player ${i}`, tee: "white", courseHandicap: 0 })),
+    };
+    expect(parse(startRoundRequestSchema, request)).toEqual(request);
+  });
 });
 
 describe("joinRoundRequestSchema", () => {

@@ -48,9 +48,10 @@ export const createDynamoCourseStore = (config: { client: DynamoDBDocumentClient
           TableName: tableName,
           Key: { pk: coursePk(courseId), sk: courseSk },
           // Consistent for the same reason createDynamoEventJournal's headSeq is: this is the
-          // read retryOnConflict (application/src/courses/retryOnConflict.ts) bases its next
-          // mutation and expectedRevision on, so an eventually-consistent read here could hand
-          // back an already-stale revision and needlessly spin (or fail) the retry loop.
+          // read retryOnConflict (application/src/retryOnConflict.ts — shared, not course-
+          // specific) bases its next mutation and expectedRevision on, so an eventually-
+          // consistent read here could hand back an already-stale revision and needlessly
+          // spin (or fail) the retry loop.
           ConsistentRead: true,
         }),
       );

@@ -183,6 +183,28 @@ describe("HomePage — crews", () => {
     expect(screen.queryByText(/no crew for join code/i)).toBeNull();
   });
 
+  // M8 close-out fix #2: golfer-required means the signed-in account has no golfer profile
+  // yet — the join-code form collects no name, so retrying can never fix it. This arm points
+  // at the ONE place that fixes it instead of a dead-end "try again".
+  it("golfer-required points at the profile page instead of a dead-end retry", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: null });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+    mockedJoinCrew.mockRejectedValue(new ApiError("golfer-required", 400, "golfer row required for sub sub-1"));
+
+    renderHome();
+    await screen.findByText(/your crews/i);
+
+    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "CRW999" } });
+    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/set your name on your profile/i);
+    expect(screen.queryByText(/sub sub-1/)).toBeNull();
+    const link = screen.getByRole("link", { name: /profile/i });
+    expect(link.getAttribute("href")).toBe("/profile");
+  });
+
   it("a short code never submits", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: null });

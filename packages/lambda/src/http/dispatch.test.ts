@@ -1078,6 +1078,26 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     },
   );
 
+  // M8 close-out fix #1: the wire schema's `min(1)` doesn't trim, so a whitespace-only name
+  // reaches domain crew.ts's addMember throw (invalid-member-name) — this pins it as a 400,
+  // not the 500 it was mapped to before errorMapping.ts gained the entry.
+  it("POST /crews/{crewId}/members with a whitespace-only name is rejected — 400 invalid-member-name", async () => {
+    const { dispatcher } = setupCrews();
+    await putMe(dispatcher, ann, "Ann");
+    const createResp = asStructured(
+      await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
+    );
+    const created = createCrewResponseSchema.parse(JSON.parse(createResp.body!));
+
+    const resp = asStructured(
+      await dispatcher(
+        makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/members`, token: golferBearer(ann), body: { name: "   " } }),
+      ),
+    );
+    expect(resp.statusCode).toBe(400);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-member-name" });
+  });
+
   it("GET /crews/{crewId}/records rejects a non-integer ?season= — 400 invalid-request", async () => {
     const { dispatcher } = setupCrews();
     await putMe(dispatcher, ann, "Ann");

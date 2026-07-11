@@ -52,7 +52,14 @@ export const startRoundRequestSchema = z.object({
   // "not-a-member" otherwise) and unlocks the claimed-golferId resolver's standing-consent
   // arm for every golferId this request supplies (host's own + every player's).
   crewId: crewIdSchema.optional(),
-  players: z.array(startRoundPlayerSchema).optional(),
+  // Capped well below DynamoDB's own hard limit: StartRound's whole event batch (round-
+  // created + host-joined + round-started + one participant-joined per player) rides ONE
+  // createDynamoEventJournal transaction, and DynamoDB caps a single TransactWriteItems call
+  // at 100 items — 2 items per event (EVT Put + its OPID dedup Put), so more than 50 events
+  // fails with a ValidationException (that adapter's own append() comment). 40 players is
+  // 43 events = 86 items, comfortably clear of the cap while still far beyond any realistic
+  // roster — an honest 400 here beats a 500 surfaced from deep inside the transaction.
+  players: z.array(startRoundPlayerSchema).max(40).optional(),
 });
 export type StartRoundRequest = z.infer<typeof startRoundRequestSchema>;
 

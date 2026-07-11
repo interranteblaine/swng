@@ -137,4 +137,14 @@ describe("toHttpError — M8 crew DomainErrors", () => {
     expect(result.statusCode).toBe(409);
     expect(JSON.parse(result.body)).toEqual({ code: "duplicate-member", message: 'golfer "g-1" is already a member of crew "c-1"' });
   });
+
+  // M8 close-out fix #1: crew.ts's addMember throws this when the (trimmed) name is empty —
+  // the wire's `min(1)` doesn't trim, so a whitespace-only name reaches this throw. A bad-body
+  // precondition, same shape as unknown-golfer-in-game/duplicate-tee-name above — a coded 400,
+  // not the generic 500 it fell through to before this fix.
+  it("maps invalid-member-name to 400", () => {
+    const result = toHttpError(new DomainError("invalid-member-name", 'member name must be at least 1 character(s): "   "'), logger);
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body)).toEqual({ code: "invalid-member-name", message: 'member name must be at least 1 character(s): "   "' });
+  });
 });

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router";
-import { createCrew } from "../api";
+import { Link, useNavigate } from "react-router";
+import { ApiError, createCrew } from "../api";
 import { useAuth } from "../auth/useAuth";
 
 // name → POST /crews → the new crew's page (brief). Crews are golfer-gated end to end
@@ -13,6 +13,9 @@ export function CrewCreatePage() {
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  // golfer-required is its own arm, not folded into `error` (M8 close-out fix #2): this form
+  // collects no name, so "try again" is a dead end — the honest fix is a link to /profile.
+  const [golferRequired, setGolferRequired] = useState(false);
 
   if (!auth.signedIn) {
     return (
@@ -30,13 +33,20 @@ export function CrewCreatePage() {
 
     setSubmitting(true);
     setError(undefined);
+    setGolferRequired(false);
     try {
       const response = await auth.withAuth((token) => createCrew(token, { name: trimmed }));
       navigate(`/crews/${response.crew.crewId}`);
-    } catch {
+    } catch (caught) {
       // Never the raw caught.message (the M7 never-raw-server-text discipline) — a
-      // golfer-required 400 names the caller's raw sub, nothing a golfer can act on.
-      setError("Could not create the crew — try again.");
+      // golfer-required 400 names the caller's raw sub, nothing a golfer can act on. That code
+      // gets its own honest arm instead of the generic retry: this form collects no name, so
+      // retrying can never fix it — only a profile visit can.
+      if (caught instanceof ApiError && caught.code === "golfer-required") {
+        setGolferRequired(true);
+      } else {
+        setError("Could not create the crew — try again.");
+      }
       setSubmitting(false);
     }
   };
@@ -49,6 +59,15 @@ export function CrewCreatePage() {
           Crew name
           <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
         </label>
+
+        {golferRequired && (
+          <p role="alert" className="text-red-400">
+            Set your name on your profile before creating a crew.{" "}
+            <Link to="/profile" className="underline">
+              Go to profile
+            </Link>
+          </p>
+        )}
 
         {error && (
           <p role="alert" className="text-red-400">

@@ -110,6 +110,9 @@ describe("crewContribution — per-kind rules", () => {
     const config = { kind: "fourball-match", id: gameId("fourball-halved"), a: [A, B], b: [C, D] } as const;
     const archive = buildArchive({ games: [config], results: [{ kind: "fourball-match", id: config.id, outcome: { halved: true }, thru: 18 }] });
     const contribution = crewContribution(archive);
+    // .every() on an empty array is vacuously true — pin the length too, or a regression that
+    // drops all four lines would pass this assertion silently (M8 close-out fix #8).
+    expect(contribution.lines).toHaveLength(4);
     expect(contribution.lines.every((line) => line.halves === 1)).toBe(true);
     expect(contribution.headToHead).toEqual([]);
   });

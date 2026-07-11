@@ -1,9 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { courseId, fixtureLinks18, fixtureWhite18, golferId, roundId } from "@swng/domain";
+import { courseId, crewId, fixtureLinks18, fixtureWhite18, gameId, golferId, roundId } from "@swng/domain";
 import { startRoundRequestSchema } from "@swng/contracts";
-import type { CourseView, GetMeResponse } from "@swng/contracts";
+import type { CourseView, CrewMemberView, GetMeResponse, StandingGameView } from "@swng/contracts";
 import { credentialStore } from "../identity";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
@@ -14,6 +14,7 @@ import { createMemoryStorage } from "../testSupport/memoryStorage";
 // "signed-in-with-no-golfer" as-self path calls it to mint a golfer before creating the round.
 vi.mock("../api", () => ({
   createRound: vi.fn(),
+  addGame: vi.fn(),
   getCourse: vi.fn(),
   searchCourses: vi.fn(),
   verifyTeeSet: vi.fn(),
@@ -31,12 +32,13 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, createRound, getCourse, getMe, searchCourses, updateMe, verifyTeeSet } from "../api";
+import { addGame, ApiError, createRound, getCourse, getMe, searchCourses, updateMe, verifyTeeSet } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { CreateRoundPage } from "./CreateRoundPage";
 
 const mockedCreateRound = vi.mocked(createRound);
+const mockedAddGame = vi.mocked(addGame);
 const mockedGetCourse = vi.mocked(getCourse);
 const mockedSearchCourses = vi.mocked(searchCourses);
 const mockedVerifyTeeSet = vi.mocked(verifyTeeSet);
@@ -54,6 +56,7 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
   vi.stubGlobal("sessionStorage", createMemoryStorage());
   mockedCreateRound.mockReset();
+  mockedAddGame.mockReset();
   mockedGetCourse.mockReset();
   mockedSearchCourses.mockReset();
   mockedVerifyTeeSet.mockReset();
@@ -325,5 +328,162 @@ describe("CreateRoundPage — play as yourself", () => {
     await screen.findByText(/playing as/i);
     expect(screen.getByText("Ann G")).toBeTruthy();
     expect(screen.queryByRole("status", { name: /loading your profile/i })).toBeNull();
+  });
+});
+
+// M8 Task 6, the product moment this milestone exists for: "Play the usual" lands here with the
+// crew's id + members + preset in router state (CrewPage's hand-off), and ONE further tap
+// (Create round) starts Saturday — every crew member seated, the preset's games seeded, nothing
+// retyped.
+describe("CreateRoundPage — play the usual (crew preset)", () => {
+  // A second tee on the card ("blue", the preset's own) so honoring the PRESET's tee is
+  // distinguishable from the page's default first-tee selection.
+  const blueTee = { ...fixtureWhite18, name: "blue" };
+  const twoTeeCard = { ...fixtureLinks18, teeSets: [fixtureWhite18, blueTee] };
+  const twoTeeCourseView: CourseView = {
+    courseId: courseId("course-18"),
+    name: fixtureLinks18.courseName,
+    card: twoTeeCard,
+    teeSets: [
+      { name: "white", version: 1, provenance: "community", enteredBy: "Ann", verifiedBy: [] },
+      { name: "blue", version: 1, provenance: "community", enteredBy: "Ann", verifiedBy: [] },
+    ],
+  };
+
+  const members: readonly CrewMemberView[] = [
+    { golferId: golferId("ann-g"), name: "Ann G", role: "organizer", claimed: true },
+    { golferId: golferId("bo-g"), name: "Bo", role: "member", claimed: false },
+    { golferId: golferId("cy-g"), name: "Cy", role: "member", claimed: false },
+  ];
+
+  const standingGame: StandingGameView = {
+    courseId: courseId("course-18"),
+    tee: "blue",
+    games: [
+      { kind: "singles-match", a: golferId("ann-g"), b: golferId("bo-g"), allowance: 1 },
+      { kind: "stableford", players: [golferId("ann-g"), golferId("cy-g")], allowance: 0.95 },
+    ],
+  };
+
+  const crewPreset = { crewId: crewId("crew-1"), members, standingGame };
+
+  const arrange = (): string => {
+    const idToken = signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetCourse.mockResolvedValue({ course: twoTeeCourseView });
+    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-usual"), joinCode: "USUAL1", token: "tok-usual", golferId: golferId("ann-g") });
+    mockedAddGame.mockResolvedValue({ gameId: gameId("game-x"), seq: 5 });
+    return idToken;
+  };
+
+  it("one remaining tap: pre-filled from the preset, a single Create-round click sends the full crew request and seeds the preset's games", async () => {
+    const idToken = arrange();
+
+    renderCreate({ pathname: "/create", state: { crewPreset } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    // The prefill is all on screen before any interaction: both preset games described by name.
+    expect(screen.getByText(/singles match — ann g vs bo/i)).toBeTruthy();
+    expect(screen.getByText(/stableford — ann g, cy/i)).toBeTruthy();
+
+    // The ONE remaining tap — no other input touched first.
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
+    const [body, token] = mockedCreateRound.mock.calls[0]!;
+    expect(body).toEqual({
+      card: twoTeeCard, // the fetched card verbatim (the freeze source), preset course honored
+      host: { name: "Ann G", tee: "blue", courseHandicap: 0 }, // you as-self; preset tee; CH prefill 0
+      golferId: golferId("ann-g"),
+      crewId: crewId("crew-1"),
+      players: [
+        { name: "Bo", tee: "blue", courseHandicap: 0, golferId: golferId("bo-g") },
+        { name: "Cy", tee: "blue", courseHandicap: 0, golferId: golferId("cy-g") },
+      ],
+    });
+    expect(token).toBe(idToken);
+    expect(() => startRoundRequestSchema.parse(body)).not.toThrow();
+
+    // Games arrive without retyping: addGame per surviving preset game, with the create
+    // response's own participant token, in preset order.
+    await waitFor(() => expect(mockedAddGame).toHaveBeenCalledTimes(2));
+    expect(mockedAddGame).toHaveBeenNthCalledWith(1, roundId("round-usual"), "tok-usual", standingGame.games[0]);
+    expect(mockedAddGame).toHaveBeenNthCalledWith(2, roundId("round-usual"), "tok-usual", standingGame.games[1]);
+
+    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
+    expect(credentialStore.load(roundId("round-usual"))).toEqual({ token: "tok-usual", golferId: golferId("ann-g"), name: "Ann G", joinCode: "USUAL1" });
+  });
+
+  it("removing a player before creating reactively drops the games that reference them (applyStandingGame over the CURRENT roster)", async () => {
+    arrange();
+
+    renderCreate({ pathname: "/create", state: { crewPreset } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+    expect(screen.getByText(/singles match — ann g vs bo/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Bo" }));
+
+    // The singles match referencing Bo disappears from the games list; the stableford
+    // (Ann G + Cy, both still present) stays.
+    expect(screen.queryByText(/singles match — ann g vs bo/i)).toBeNull();
+    expect(screen.getByText(/stableford — ann g, cy/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
+    const [body] = mockedCreateRound.mock.calls[0]!;
+    expect(body.players).toEqual([{ name: "Cy", tee: "blue", courseHandicap: 0, golferId: golferId("cy-g") }]);
+
+    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
+    // Only the surviving game was seeded — never a renumbered/partial singles match.
+    expect(mockedAddGame).toHaveBeenCalledTimes(1);
+    expect(mockedAddGame).toHaveBeenCalledWith(roundId("round-usual"), "tok-usual", standingGame.games[1]);
+  });
+
+  it("prefilled tees and handicaps stay editable per player before the tap", async () => {
+    arrange();
+
+    renderCreate({ pathname: "/create", state: { crewPreset } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    fireEvent.change(screen.getByLabelText("Tee for Cy"), { target: { value: "white" } });
+    fireEvent.change(screen.getByLabelText("Course handicap for Cy"), { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
+    const [body] = mockedCreateRound.mock.calls[0]!;
+    expect(body.players).toEqual([
+      { name: "Bo", tee: "blue", courseHandicap: 0, golferId: golferId("bo-g") },
+      { name: "Cy", tee: "white", courseHandicap: 7, golferId: golferId("cy-g") },
+    ]);
+  });
+
+  it("a preset with no tee falls back to free-text player tees (empty until typed) and blocks the tap until they're filled", async () => {
+    arrange();
+    const tvNoTee: StandingGameView = { courseId: courseId("course-18"), games: standingGame.games };
+
+    renderCreate({ pathname: "/create", state: { crewPreset: { ...crewPreset, standingGame: tvNoTee } } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    // Host tee fell back to the card's first tee (the page's own default); player tees are
+    // empty free text, so the submit guard holds until they're typed.
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+    expect(mockedCreateRound).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Tee for Bo"), { target: { value: "white" } });
+    fireEvent.change(screen.getByLabelText("Tee for Cy"), { target: { value: "white" } });
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
+    const [body] = mockedCreateRound.mock.calls[0]!;
+    expect(body.host.tee).toBe("white");
+    expect(body.players).toEqual([
+      { name: "Bo", tee: "white", courseHandicap: 0, golferId: golferId("bo-g") },
+      { name: "Cy", tee: "white", courseHandicap: 0, golferId: golferId("cy-g") },
+    ]);
   });
 });

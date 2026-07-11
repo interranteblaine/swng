@@ -3,6 +3,8 @@ import { SignInButton } from "./auth/SignInButton";
 import { AuthProvider, useAuth } from "./auth/useAuth";
 import { AddCoursePage } from "./courses/AddCoursePage";
 import { EditCoursePage } from "./courses/EditCoursePage";
+import { CrewCreatePage } from "./crews/CrewCreatePage";
+import { CrewPage } from "./crews/CrewPage";
 import { AuthCallbackPage } from "./routes/AuthCallbackPage";
 import { CreateRoundPage } from "./routes/CreateRoundPage";
 import { HomePage } from "./routes/HomePage";
@@ -59,6 +61,8 @@ export function App() {
             <Route path="/create" element={<CreateRoundPage />} />
             <Route path="/courses/new" element={<AddCoursePage />} />
             <Route path="/courses/:courseId/edit" element={<EditCoursePage />} />
+            <Route path="/crews/new" element={<CrewCreatePage />} />
+            <Route path="/crews/:crewId" element={<CrewPage />} />
             <Route path="/join" element={<JoinRoundPage />} />
             <Route path="/round/:roundId" element={<RoundPage />} />
             <Route path="/profile" element={<ProfilePage />} />

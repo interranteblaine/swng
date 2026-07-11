@@ -1,10 +1,37 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { golferId, roundId } from "@swng/domain";
+import { crewId, golferId, roundId } from "@swng/domain";
 import { credentialStore } from "../identity";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
+
+// M8 Task 6: HomePage now composes useAuth (the crews surface is golfer-gated), so the api.ts
+// module boundary is faked here too — getMe for the AuthProvider, listMyCrews/joinCrew for the
+// new "Your crews" section.
+vi.mock("../api", () => ({
+  getMe: vi.fn(),
+  listMyCrews: vi.fn(),
+  joinCrew: vi.fn(),
+  ApiError: class ApiError extends Error {
+    constructor(
+      readonly code: string,
+      readonly status?: number,
+      message?: string,
+    ) {
+      super(message ?? code);
+      this.name = "ApiError";
+    }
+  },
+}));
+
+import { ApiError, getMe, joinCrew, listMyCrews } from "../api";
+import { AuthProvider } from "../auth/useAuth";
+import { tokenStore } from "../auth/tokenStore";
 import { HomePage } from "./HomePage";
+
+const mockedGetMe = vi.mocked(getMe);
+const mockedListMyCrews = vi.mocked(listMyCrews);
+const mockedJoinCrew = vi.mocked(joinCrew);
 
 // vitest.config.ts doesn't set test.globals, so @testing-library/react's own auto-cleanup
 // (which only fires when it finds a GLOBAL `afterEach`) never registers — every spec file in
@@ -12,6 +39,10 @@ import { HomePage } from "./HomePage";
 // (and localStorage stub) bleeds into the next.
 beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
+  vi.stubGlobal("sessionStorage", createMemoryStorage());
+  mockedGetMe.mockReset();
+  mockedListMyCrews.mockReset();
+  mockedJoinCrew.mockReset();
 });
 
 afterEach(() => {
@@ -19,11 +50,28 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const base64url = (obj: unknown): string =>
+  btoa(JSON.stringify(obj))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+const signIn = (): string => {
+  const idToken = `${base64url({ alg: "none" })}.${base64url({ sub: "sub-1", email: "signed-in@example.com" })}.sig`;
+  tokenStore.save({ idToken, refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+  return idToken;
+};
+
 const renderHome = () =>
   render(
-    <MemoryRouter initialEntries={["/"]}>
-      <HomePage />
-    </MemoryRouter>,
+    <AuthProvider>
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/crews/:crewId" element={<div>crew page probe</div>} />
+        </Routes>
+      </MemoryRouter>
+    </AuthProvider>,
   );
 
 describe("HomePage", () => {
@@ -57,5 +105,95 @@ describe("HomePage", () => {
     renderHome();
 
     expect(screen.getByText(/no rounds yet/i)).toBeTruthy();
+  });
+});
+
+// M8 Task 6: the signed-in home gains "Your crews" (GET /me/crews), "New crew", and
+// "Join a crew" — none of which exist signed out (every crew route is golfer-gated).
+describe("HomePage — crews", () => {
+  it("signed out: no crews section, no crew fetch", () => {
+    renderHome();
+
+    expect(screen.queryByText(/your crews/i)).toBeNull();
+    expect(mockedListMyCrews).not.toHaveBeenCalled();
+  });
+
+  it("signed in: lists crews from GET /me/crews, each linking to its crew page", async () => {
+    const idToken = signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedListMyCrews.mockResolvedValue({
+      crews: [
+        { crewId: crewId("crew-1"), name: "Sunday crew", memberCount: 4 },
+        { crewId: crewId("crew-2"), name: "Work league", memberCount: 8 },
+      ],
+    });
+
+    renderHome();
+
+    const sundayLink = await screen.findByRole("link", { name: /sunday crew/i });
+    expect(sundayLink.getAttribute("href")).toBe("/crews/crew-1");
+    expect(screen.getByRole("link", { name: /work league/i }).getAttribute("href")).toBe("/crews/crew-2");
+    expect(mockedListMyCrews).toHaveBeenCalledWith(idToken);
+  });
+
+  it("signed in: offers a New crew link to /crews/new", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: null });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+
+    renderHome();
+
+    const link = await screen.findByRole("link", { name: /new crew/i });
+    expect(link.getAttribute("href")).toBe("/crews/new");
+  });
+
+  it("join a crew: code entry → POST /crews/join → navigates to the crew page", async () => {
+    const idToken = signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+    mockedJoinCrew.mockResolvedValue({ crew: { crewId: crewId("crew-9"), name: "Saturday crew", joinCode: "CRW999", members: [] } });
+
+    renderHome();
+    await screen.findByText(/your crews/i);
+
+    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "crw999" } });
+    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
+
+    await waitFor(() => expect(mockedJoinCrew).toHaveBeenCalledTimes(1));
+    // Uppercased before it rides the wire (joinCrewRequestSchema's canonical 6-char form —
+    // JoinRoundPage's own code-input precedent).
+    expect(mockedJoinCrew).toHaveBeenCalledWith(idToken, { code: "CRW999" });
+    await screen.findByText("crew page probe");
+  });
+
+  it("an unknown code surfaces humanized copy, never the raw server text", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+    mockedJoinCrew.mockRejectedValue(new ApiError("unknown-crew", 404, 'no crew for join code "ZZZZZZ"'));
+
+    renderHome();
+    await screen.findByText(/your crews/i);
+
+    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "ZZZZZZ" } });
+    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/no crew found with that code/i);
+    expect(screen.queryByText(/no crew for join code/i)).toBeNull();
+  });
+
+  it("a short code never submits", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: null });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+
+    renderHome();
+    await screen.findByText(/your crews/i);
+
+    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "ABC" } });
+    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
+
+    expect(mockedJoinCrew).not.toHaveBeenCalled();
   });
 });

@@ -71,4 +71,23 @@ describe("App", () => {
     const link = await screen.findByRole("link", { name: "fresh" });
     expect(link.getAttribute("href")).toBe("/profile");
   });
+
+  // M8 Task 6: same router-wiring smoke as "renders Home at the root route" — each crew page
+  // carries its own full behavior-contract suite in src/crews/.
+  it("routes /crews/new to CrewCreatePage", () => {
+    window.history.pushState({}, "", "/crews/new");
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "New crew" })).toBeTruthy();
+    window.history.pushState({}, "", "/");
+  });
+
+  it("routes /crews/:crewId to CrewPage", () => {
+    window.history.pushState({}, "", "/crews/crew-1");
+    render(<App />);
+
+    // Signed out (no token saved) — CrewPage's own sign-in prompt is proof the route landed.
+    expect(screen.getByText(/sign in to see your crew/i)).toBeTruthy();
+    window.history.pushState({}, "", "/");
+  });
 });

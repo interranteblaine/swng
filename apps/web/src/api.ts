@@ -1,24 +1,32 @@
 import {
+  addCrewMemberResponseSchema,
   addGameResponseSchema,
   addParticipantResponseSchema,
   addTeeSetResponseSchema,
   createCourseResponseSchema,
+  createCrewResponseSchema,
   errorResponseSchema,
   finalizeRoundResponseSchema,
   getCourseResponseSchema,
+  getCrewRecordsResponseSchema,
   getCrewResponseSchema,
   getMeResponseSchema,
   getMyRecordResponseSchema,
   golferResponseSchema,
+  joinCrewResponseSchema,
   joinRoundResponseSchema,
+  listMyCrewsResponseSchema,
   parse,
   peekRoundResponseSchema,
+  saveStandingGameResponseSchema,
   searchCoursesResponseSchema,
   startRoundResponseSchema,
   terminateGameResponseSchema,
   verifyTeeSetResponseSchema,
 } from "@swng/contracts";
 import type {
+  AddCrewMemberRequest,
+  AddCrewMemberResponse,
   AddGameRequest,
   AddGameResponse,
   AddParticipantRequest,
@@ -28,15 +36,23 @@ import type {
   ClaimGolferRequest,
   CreateCourseRequest,
   CreateCourseResponse,
+  CreateCrewRequest,
+  CreateCrewResponse,
   FinalizeRoundResponse,
   GetCourseResponse,
+  GetCrewRecordsResponse,
   GetCrewResponse,
   GetMeResponse,
   GetMyRecordResponse,
   GolferResponse,
+  JoinCrewRequest,
+  JoinCrewResponse,
   JoinRoundRequest,
   JoinRoundResponse,
+  ListMyCrewsResponse,
   PeekRoundResponse,
+  SaveStandingGameRequest,
+  SaveStandingGameResponse,
   SearchCoursesResponse,
   StartRoundRequest,
   StartRoundResponse,
@@ -211,4 +227,40 @@ export const terminateGame = async (roundId: RoundId, token: string, gameId: Gam
 export const getCrew = async (token: string, id: CrewId): Promise<GetCrewResponse> => {
   const json = await requestJson(`/crews/${id}`, { token });
   return parse(getCrewResponseSchema, json);
+};
+
+// M8 Task 6: the crew home + "play the usual" surface — the remaining six crew routes, same
+// requestJson + per-endpoint idiom as every call above. Every one is "golfer"-gated (a Bearer
+// token is never optional here, unlike createRound/joinRound's anonymous path).
+export const createCrew = async (token: string, input: CreateCrewRequest): Promise<CreateCrewResponse> => {
+  const json = await requestJson("/crews", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
+  return parse(createCrewResponseSchema, json);
+};
+
+export const joinCrew = async (token: string, input: JoinCrewRequest): Promise<JoinCrewResponse> => {
+  const json = await requestJson("/crews/join", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
+  return parse(joinCrewResponseSchema, json);
+};
+
+export const listMyCrews = async (token: string): Promise<ListMyCrewsResponse> => {
+  const json = await requestJson("/me/crews", { token });
+  return parse(listMyCrewsResponseSchema, json);
+};
+
+export const addCrewMember = async (token: string, id: CrewId, input: AddCrewMemberRequest): Promise<AddCrewMemberResponse> => {
+  const json = await requestJson(`/crews/${id}/members`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
+  return parse(addCrewMemberResponseSchema, json);
+};
+
+export const saveStandingGame = async (token: string, id: CrewId, input: SaveStandingGameRequest): Promise<SaveStandingGameResponse> => {
+  const json = await requestJson(`/crews/${id}/standing-game`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
+  return parse(saveStandingGameResponseSchema, json);
+};
+
+// `season` always rides the current-UTC-year default (routes.ts's own doc comment) — no
+// picker in this milestone (brief: "a picker is NOT required"), so this never sends
+// `?season=`.
+export const getCrewRecords = async (token: string, id: CrewId): Promise<GetCrewRecordsResponse> => {
+  const json = await requestJson(`/crews/${id}/records`, { token });
+  return parse(getCrewRecordsResponseSchema, json);
 };

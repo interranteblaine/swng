@@ -1,31 +1,41 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { courseId, crewId, fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
 import type {
+  AddCrewMemberRequest,
   AddGameRequest,
   AddParticipantRequest,
   AddTeeSetRequest,
   ClaimGolferRequest,
   CreateCourseRequest,
+  CreateCrewRequest,
+  JoinCrewRequest,
   JoinRoundRequest,
+  SaveStandingGameRequest,
   StartRoundRequest,
   UpdateMeRequest,
   VerifyTeeSetRequest,
 } from "@swng/contracts";
 import {
+  addCrewMember,
   addGame,
   addParticipant,
   addTeeSet,
   ApiError,
   claimGolfer,
   createCourse,
+  createCrew,
   createRound,
   finalizeRound,
   getCourse,
   getCrew,
+  getCrewRecords,
   getMe,
   getMyRecord,
+  joinCrew,
   joinRound,
+  listMyCrews,
   peekRound,
+  saveStandingGame,
   searchCourses,
   terminateGame,
   updateMe,
@@ -234,6 +244,133 @@ describe("getCrew", () => {
 
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("not-a-member");
+  });
+});
+
+// M8 Task 6: the crew home + "play the usual" surface — same requestJson + bearer-token idiom
+// as every golfer-gated call above.
+describe("createCrew", () => {
+  it("POSTs { name } to /crews with the bearer token and parses a CreateCrewResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(201, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [] } });
+    });
+
+    const input: CreateCrewRequest = { name: "Sunday crew" };
+    const result = await createCrew("tok-crew", input);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews`);
+    expect(seenInit?.method).toBe("POST");
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-crew");
+    expect(result.crew.crewId).toBe(crewId("crew-1"));
+  });
+});
+
+describe("joinCrew", () => {
+  it("POSTs { code } to /crews/join with the bearer token and parses a JoinCrewResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [] } });
+    });
+
+    const input: JoinCrewRequest = { code: "ZZZ111" };
+    const result = await joinCrew("tok-me", input);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/join`);
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+    expect(result.crew.crewId).toBe(crewId("crew-1"));
+  });
+
+  it("throws a coded ApiError('unknown-crew') on an unknown code", async () => {
+    stubFetch(async () => fakeResponse(404, { code: "unknown-crew", message: "no crew with that code" }));
+
+    const error: unknown = await joinCrew("tok-me", { code: "ZZZ999" }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("unknown-crew");
+  });
+});
+
+describe("listMyCrews", () => {
+  it("GETs /me/crews with the bearer token and parses a ListMyCrewsResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { crews: [{ crewId: "crew-1", name: "Sunday crew", memberCount: 4 }] });
+    });
+
+    const result = await listMyCrews("tok-me");
+
+    expect(seenUrl).toBe(`${HTTP_URL}/me/crews`);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
+    expect(result).toEqual({ crews: [{ crewId: crewId("crew-1"), name: "Sunday crew", memberCount: 4 }] });
+  });
+});
+
+describe("addCrewMember", () => {
+  it("POSTs { name } to /crews/{crewId}/members with the bearer token and parses an AddCrewMemberResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(201, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [{ golferId: "ghost-1", name: "Dave", role: "member", claimed: false }] } });
+    });
+
+    const input: AddCrewMemberRequest = { name: "Dave" };
+    const result = await addCrewMember("tok-crew", crewId("crew-1"), input);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/members`);
+    expect(seenInit?.method).toBe("POST");
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+    expect(result.crew.members).toEqual([{ golferId: golferId("ghost-1"), name: "Dave", role: "member", claimed: false }]);
+  });
+});
+
+describe("saveStandingGame", () => {
+  it("PUTs { standingGame } to /crews/{crewId}/standing-game with the bearer token and parses a SaveStandingGameResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [] } });
+    });
+
+    const input: SaveStandingGameRequest = { standingGame: { courseId: courseId("course-1"), tee: "white", games: [] } };
+    const result = await saveStandingGame("tok-crew", crewId("crew-1"), input);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/standing-game`);
+    expect(seenInit?.method).toBe("PUT");
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+    expect(result.crew.crewId).toBe(crewId("crew-1"));
+  });
+});
+
+describe("getCrewRecords", () => {
+  it("GETs /crews/{crewId}/records (no ?season=) with the bearer token and parses a GetCrewRecordsResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { season: 2026, ledger: [], headToHead: [] });
+    });
+
+    const result = await getCrewRecords("tok-crew", crewId("crew-1"));
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/records`);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-crew");
+    expect(result).toEqual({ season: 2026, ledger: [], headToHead: [] });
   });
 });
 

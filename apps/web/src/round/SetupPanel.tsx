@@ -23,7 +23,10 @@ export interface SetupPanelProps {
   readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
 }
 
-const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
+// Exported (M8 Task 6): StandingGameEditor reuses this SAME label map + AddGameForm below
+// verbatim — a crew's standing-game preset editor needs the identical five-kind game-config
+// idiom this round-setup panel already has, not a second copy of it (conventions §0).
+export const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
   "stroke-play": "Stroke play",
   "singles-match": "Singles match",
   stableford: "Stableford",
@@ -236,14 +239,17 @@ function AddPlayerForm({ crewId, existingGolferIds, onAddParticipant }: AddPlaye
 type Kind = GameConfig["kind"];
 const KINDS: readonly Kind[] = ["stroke-play", "singles-match", "stableford", "fourball-match", "skins"];
 
-interface AddGameFormProps {
+export interface AddGameFormProps {
   readonly participants: readonly Participant[];
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
 }
 
 // One flat form covering all five kinds — only the fields relevant to the chosen kind render,
-// matching this task's "functional clarity, not the Task 5 pad" styling bar (brief).
-function AddGameForm({ participants, onAddGame }: AddGameFormProps) {
+// matching this task's "functional clarity, not the Task 5 pad" styling bar (brief). Exported
+// (M8 Task 6): StandingGameEditor reuses this directly for the crew preset's game-config idiom
+// — `onAddGame` there just appends to the preset's local array instead of firing a request, the
+// same participants-in/GameConfigInput-out shape either way.
+export function AddGameForm({ participants, onAddGame }: AddGameFormProps) {
   const [kind, setKind] = useState<Kind>("stableford");
   const [scoring, setScoring] = useState<"gross" | "net">("net");
   const [players, setPlayers] = useState<readonly GolferId[]>([]);

@@ -42,7 +42,7 @@ of swng per `docs/product.md` → `docs/roadmap.md` → `docs/architecture.md`. 
 proof-of-concept is **deleted from the tree** — it exists only at git tag `poc-final`, holds
 no authority, and must never be resurrected as design input.
 
-Current state (M0–M6 complete): nine packages under `packages/` matching
+Current state (M0–M9 complete): nine packages under `packages/` matching
 `docs/architecture.md` §3 (`domain`, `contracts`, `application`, `client`, four `adapters-*`,
 `lambda`), plus `apps/web` and the root `e2e/` workspace, with the layer direction and
 package boundaries enforced by `eslint.config.mjs` (the web app may import

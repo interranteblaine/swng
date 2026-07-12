@@ -3,6 +3,7 @@
 
 export type { AppendOptions, AppendResult, EventJournal } from "./ports/eventJournal.js";
 export type { RoundStore } from "./ports/roundStore.js";
+export type { SnapshotStore } from "./ports/snapshotStore.js";
 export type { CourseStore } from "./ports/courseStore.js";
 export type { CrewStore } from "./ports/crewStore.js";
 export type { GolferStore } from "./ports/golferStore.js";
@@ -69,8 +70,9 @@ export {
   createInMemoryJournal,
   createInMemoryProjectionStore,
   createInMemoryRoundStore,
+  createInMemorySnapshotStore,
   createNullLogger,
   createSequentialIds,
   putAndBindGolfer,
 } from "./testing/fakes.js";
-export type { CapturingBroadcast } from "./testing/fakes.js";
+export type { CapturingBroadcast, InMemorySnapshotStore } from "./testing/fakes.js";

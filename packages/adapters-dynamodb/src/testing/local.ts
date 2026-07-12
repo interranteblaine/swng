@@ -34,6 +34,7 @@ export interface LocalDynamo {
   readonly connectionsTable: string;
   readonly coreTable: string;
   readonly projectionsTable: string;
+  readonly snapshotsTable: string;
   readonly stop: () => Promise<void>;
 }
 
@@ -140,6 +141,7 @@ const createTables = async (
   connectionsTable: string,
   coreTable: string,
   projectionsTable: string,
+  snapshotsTable: string,
 ): Promise<void> => {
   // Rounds table (M3 plan, Global Constraints): pk `ROUND#<id>` / sk `EVT#<seq>` | META |
   // ARCHIVE | `OPID#<opId>`; gsi1 on `joinCode` (META items only).
@@ -245,17 +247,31 @@ const createTables = async (
     }),
   );
 
+  // Snapshots table (projection-realignment spec §1/§11, mirroring swngStack.ts's real
+  // SnapshotsTable): pk-only (the bare roundId — keys.ts's snapshotPk), no sk (time is the
+  // `finalizedAt` attribute, never a sort key), no GSI. "The atom": one immutable item per
+  // finalized round, written only by the atomic finalize transaction.
+  await dynamo.send(
+    new CreateTableCommand({
+      TableName: snapshotsTable,
+      BillingMode: "PAY_PER_REQUEST",
+      AttributeDefinitions: [{ AttributeName: "pk", AttributeType: "S" }],
+      KeySchema: [{ AttributeName: "pk", KeyType: "HASH" }],
+    }),
+  );
+
   await Promise.all([
     waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: roundsTable }),
     waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: connectionsTable }),
     waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: coreTable }),
     waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: projectionsTable }),
+    waitUntilTableExists({ client: dynamo, maxWaitTime: 30 }, { TableName: snapshotsTable }),
   ]);
 };
 
 // Downloads DynamoDB Local if absent, boots it in-memory on a free port, creates the
-// `rounds` + `connections` + `core` + `projections` tables, and returns a ready-to-use
-// document client plus a `stop` that tears the JVM down. Any failure along the way (no java,
+// `rounds` + `connections` + `core` + `projections` + `snapshots` tables, and returns a
+// ready-to-use document client plus a `stop` that tears the JVM down. Any failure along the way (no java,
 // download/extract failure, the process never becoming reachable) throws — the contract suite
 // must fail loudly, never silently skip.
 export const startLocalDynamo = async (): Promise<LocalDynamo> => {
@@ -289,7 +305,8 @@ export const startLocalDynamo = async (): Promise<LocalDynamo> => {
     const connectionsTable = "connections";
     const coreTable = "core";
     const projectionsTable = "projections";
-    await createTables(dynamo, roundsTable, connectionsTable, coreTable, projectionsTable);
+    const snapshotsTable = "snapshots";
+    await createTables(dynamo, roundsTable, connectionsTable, coreTable, projectionsTable, snapshotsTable);
 
     const client = DynamoDBDocumentClient.from(dynamo);
 
@@ -312,7 +329,7 @@ export const startLocalDynamo = async (): Promise<LocalDynamo> => {
       });
     };
 
-    return { client, roundsTable, connectionsTable, coreTable, projectionsTable, stop };
+    return { client, roundsTable, connectionsTable, coreTable, projectionsTable, snapshotsTable, stop };
   } catch (error) {
     proc.kill("SIGKILL");
     dynamo.destroy();

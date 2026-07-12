@@ -59,8 +59,8 @@ export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentCl
       ),
 
     putIndex: async (golferId: GolferId, snapshot: IndexSnapshot) => {
-      // Unconditional upsert (mirrors createDynamoRoundStore.putArchive): each finalize
-      // recomputes the whole snapshot from history, never patches it incrementally.
+      // Unconditional upsert: each finalize recomputes the whole snapshot from history, never
+      // patches it incrementally (same idempotent-write posture as the snapshots-table put).
       await client.send(new PutCommand({ TableName: tableName, Item: { pk: golferPk(golferId), sk: projectionIndexSk, snapshot } }));
     },
 

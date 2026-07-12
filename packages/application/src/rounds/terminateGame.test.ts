@@ -8,6 +8,7 @@ import {
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryRoundStore,
+  createInMemorySnapshotStore,
   createSequentialIds,
 } from "../testing/fakes.js";
 import { addGame } from "./addGame.js";
@@ -42,7 +43,8 @@ const createClientOps = (device: string) => {
 };
 
 const setup = () => {
-  const journal = createInMemoryJournal();
+  const snapshots = createInMemorySnapshotStore();
+  const journal = createInMemoryJournal(snapshots);
   const store = createInMemoryRoundStore();
   const broadcast = createCapturingBroadcast();
   const tokens = createTestTokenIssuer();
@@ -57,7 +59,7 @@ const setup = () => {
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
-    finalize: finalizeRound({ journal, store, broadcast, clock, ids }),
+    finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
     terminate: terminateGame({ journal, broadcast, clock, ids }),
     events: readEvents({ journal }),
   };

@@ -1,9 +1,10 @@
 import { TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
-import type { OpId, RoundEvent, RoundId } from "@swng/domain";
+import type { OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
 import type { AppendOptions, AppendResult, EventJournal } from "@swng/application";
-import { evtSk, evtSkMax, opIdSk, roundPk } from "./keys.js";
+import { finalizedAtMsOf } from "@swng/application";
+import { evtSk, evtSkMax, opIdSk, roundPk, snapshotPk } from "./keys.js";
 import { queryAllPages } from "./paginate.js";
 
 // Each Query page is capped well under DynamoDB's natural ~1MB boundary so `read` always
@@ -51,39 +52,52 @@ const headSeq = async (client: DynamoDBDocumentClient, tableName: string, roundI
 };
 
 // Stamps `batch` starting at `head + 1` and attempts to land every event + its OPID marker
-// in one transaction. Returns the events that need retrying (either because their own EVT
-// slot lost a seq race, or because a sibling in the same transaction did and rolled the
-// whole batch back) alongside any opIds now confirmed as permanent duplicates.
+// in one transaction. When `snapshot` is given, its Put joins the SAME transaction as one more
+// item (the finalize atom — projection-realignment spec §2), so round-finalized and its
+// settled archive commit together or roll back together. Returns the events that need retrying
+// (either because their own EVT slot lost a seq race, or because a sibling in the same
+// transaction did and rolled the whole batch back) alongside any opIds now confirmed as
+// permanent duplicates.
 const attemptCommit = async (
   client: DynamoDBDocumentClient,
   tableName: string,
   roundId: RoundId,
   batch: readonly RoundEvent[],
   head: number,
+  snapshot?: { tableName: string; archive: RoundArchive },
 ): Promise<{ committed: readonly RoundEvent[] } | { retry: readonly RoundEvent[]; duplicateOpIds: readonly OpId[] }> => {
   const stamped = batch.map((event, i) => ({ ...event, seq: head + 1 + i }));
 
+  const eventItems = stamped.flatMap((event) => [
+    {
+      Put: {
+        TableName: tableName,
+        Item: { pk: roundPk(roundId), sk: evtSk(event.seq), event, opId: event.opId },
+        ConditionExpression: "attribute_not_exists(sk)",
+      },
+    },
+    {
+      Put: {
+        TableName: tableName,
+        Item: { pk: roundPk(roundId), sk: opIdSk(event.opId) },
+        ConditionExpression: "attribute_not_exists(sk)",
+      },
+    },
+  ]);
+
+  // The snapshot Put is LAST and carries NO condition — a re-finalize replaces it, and the
+  // EVT slots' own attribute_not_exists conditions are the transaction's guard (if any of them
+  // loses its seq race the whole transaction, snapshot included, rolls back). Because it's
+  // unconditional it can never be the cancellation cause, so the CancellationReasons indexing
+  // below (which only inspects the per-event reasons at positions i*2 / i*2+1) is unaffected by
+  // this trailing item. pk is the bare roundId (snapshotPk); `finalizedAt` is the archive's own
+  // round-finalized wallMs (finalizedAtMsOf — one definition, shared with the projector).
+  const snapshotItems = snapshot
+    ? [{ Put: { TableName: snapshot.tableName, Item: { pk: snapshotPk(roundId), finalizedAt: finalizedAtMsOf(snapshot.archive), archive: snapshot.archive } } }]
+    : [];
+
   try {
-    await client.send(
-      new TransactWriteCommand({
-        TransactItems: stamped.flatMap((event) => [
-          {
-            Put: {
-              TableName: tableName,
-              Item: { pk: roundPk(roundId), sk: evtSk(event.seq), event, opId: event.opId },
-              ConditionExpression: "attribute_not_exists(sk)",
-            },
-          },
-          {
-            Put: {
-              TableName: tableName,
-              Item: { pk: roundPk(roundId), sk: opIdSk(event.opId) },
-              ConditionExpression: "attribute_not_exists(sk)",
-            },
-          },
-        ]),
-      }),
-    );
+    await client.send(new TransactWriteCommand({ TransactItems: [...eventItems, ...snapshotItems] }));
     return { committed: stamped };
   } catch (error) {
     if (!(error instanceof TransactionCanceledException)) throw error;
@@ -109,15 +123,28 @@ const attemptCommit = async (
 export const createDynamoEventJournal = (config: {
   client: DynamoDBDocumentClient;
   tableName: string;
+  // The snapshots table the atomic finalize commit puts into (projection-realignment spec §2).
+  // Optional because only httpFn ever carries it (swngStack.ts) and only finalizeRound ever
+  // sets options.snapshot; an append that DOES set options.snapshot with this unconfigured is a
+  // composition-root bug and throws loudly at call time below (never a silent no-snapshot
+  // finalize).
+  snapshotsTableName?: string;
   // Injection points for the contract suite to run fast/deterministic if it ever needs to —
   // production callers omit both and get a real timer-based sleep and Math.random.
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
 }): EventJournal => {
-  const { client, tableName, sleep = defaultSleep, random = Math.random } = config;
+  const { client, tableName, snapshotsTableName, sleep = defaultSleep, random = Math.random } = config;
 
   return {
     append: async (roundId: RoundId, events: readonly RoundEvent[], options?: AppendOptions): Promise<AppendResult> => {
+      // The snapshot leg needs a table to put into — a snapshot without one configured is a
+      // wiring bug, caught here rather than committing round-finalized with no snapshot beside it.
+      if (options?.snapshot !== undefined && snapshotsTableName === undefined) {
+        throw new Error("createDynamoEventJournal: append was given options.snapshot but no snapshotsTableName was configured (composition-root bug)");
+      }
+      const snapshotPut =
+        options?.snapshot !== undefined && snapshotsTableName !== undefined ? { tableName: snapshotsTableName, archive: options.snapshot } : undefined;
       // Each event costs 2 TransactItems (the EVT Put + its OPID marker Put, see
       // attemptCommit above), and DynamoDB caps a single TransactWriteItems call at 100
       // items — so a batch of more than 50 events would exceed the cap and fail with a
@@ -144,7 +171,7 @@ export const createDynamoEventJournal = (config: {
           return { appended: [], duplicateOpIds: [], headSeqConflict: true };
         }
 
-        const outcome = await attemptCommit(client, tableName, roundId, pending, head);
+        const outcome = await attemptCommit(client, tableName, roundId, pending, head, snapshotPut);
 
         if ("committed" in outcome) return { appended: outcome.committed, duplicateOpIds };
 

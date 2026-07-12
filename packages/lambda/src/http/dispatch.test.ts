@@ -18,6 +18,7 @@ import {
   createInMemoryJournal,
   createInMemoryProjectionStore,
   createInMemoryRoundStore,
+  createInMemorySnapshotStore,
   createNullLogger,
   createSequentialIds,
   finalizeRound,
@@ -128,7 +129,8 @@ const neverCalledVerifier: AccountVerifier = {
 // never dispatch a golfer-tier route) — the golfer/terminate describe block below passes its
 // own stubVerifier instead, sharing every other fake.
 const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
-  const journal = createInMemoryJournal();
+  const snapshots = createInMemorySnapshotStore();
+  const journal = createInMemoryJournal(snapshots);
   const store = createInMemoryRoundStore();
   const courseStore = createInMemoryCourseStore();
   const golferStore = createInMemoryGolferStore();
@@ -145,7 +147,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
-    finalizeRound: finalizeRound({ journal, store, broadcast, clock, ids }),
+    finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),

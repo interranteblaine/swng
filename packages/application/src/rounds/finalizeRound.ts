@@ -5,7 +5,7 @@ import type { Broadcast } from "../ports/broadcast.js";
 import type { Clock } from "../ports/clock.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
-import type { RoundStore } from "../ports/roundStore.js";
+import type { SnapshotStore } from "../ports/snapshotStore.js";
 import type { ParticipantClaims } from "../ports/tokenIssuer.js";
 import { requireParticipant } from "../scoringPolicy.js";
 import { loadRoundState } from "./loadRoundState.js";
@@ -18,78 +18,69 @@ import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 const MAX_FINALIZE_ATTEMPTS = 5;
 
 // Finalize is idempotent by design (architecture.md §3: "projections treat finalize as an
-// idempotent upsert"): a round that's already final just recomputes and returns — never a
-// second round-finalized event, never a second archive write.
+// idempotent upsert"): a round that's already final just hands back its stored snapshot —
+// never a second round-finalized event, never a second snapshot write.
 //
-// Settle-before-append (carry 1): settleRound is run against the CANDIDATE log (current
-// events + the not-yet-appended round-finalized) BEFORE anything touches the journal. If a
-// configured game hasn't resolved, settleRound throws game-unresolved right here — no
-// round-finalized event is ever appended, so the round stays "live" and a later finalize
-// (once the game resolves) can still succeed. The prior version appended round-finalized
-// FIRST and settled after: a game-unresolved throw there left the round permanently wedged
-// final-but-unsettleable, since every retry re-threw against the same unresolvable log.
+// The snapshot IS the atom (projection-realignment spec §2): round-finalized and the settled
+// RoundArchive commit in ONE cross-table transaction (journal.append's `snapshot` option), so
+// a final log and its snapshot can never diverge. This is what retired the M9 repair-on-replay
+// branch: there is no longer a window where round-finalized lands but the archive write fails
+// separately, so the idempotent branch below can trust a missing snapshot to mean corruption
+// (loud throw) rather than a wedge to heal.
 //
-// Head-seq conditional append (carry 2): the settle-check above reads the log once, but a
-// RecordScore can land in the gap between that read and this function's own append. Without
-// a condition, the append would blindly land round-finalized after whatever's now at the
-// head — including an event the settle-check never validated against. `expectedHeadSeq`
+// Settle-before-append (carry 1): settleRound runs against the CANDIDATE log (current events +
+// the not-yet-appended round-finalized) BEFORE anything touches the journal. If a configured
+// game hasn't resolved, settleRound throws game-unresolved right here — no round-finalized
+// event is ever appended, so the round stays "live" and a later finalize (once the game
+// resolves) can still succeed. The archive settleRound returns here is ALSO the exact snapshot
+// committed with the append: one settlement, validated and stored, no second computation.
+//
+// Head-seq conditional append (carry 2): the settle-check reads the log once, but a
+// RecordScore can land in the gap between that read and this function's append. `expectedHeadSeq`
 // (EventJournal port) makes the append itself fail (`headSeqConflict`) if the head has moved,
-// forcing a full re-read + re-validate below (bounded by MAX_FINALIZE_ATTEMPTS) instead of
-// trusting a stale settle-check.
-//
-// Still-accepted race (v1, unchanged): once round-finalized's append itself has landed, a
-// RecordScore racing that exact instant can still append its score-recorded AFTER it — the
-// `fullLog` re-read below (post-append) picks that late score up, so the archive THIS call
-// writes can include a cell a different reader (one that stopped at round-finalized)
-// wouldn't. Accepted because settlement is idempotent and putArchive upserts (EventJournal
-// port doc): a reopen-and-refinalize heals it by recomputing from the full log again.
+// forcing a full re-read + re-settle below (bounded by MAX_FINALIZE_ATTEMPTS) so the snapshot
+// that finally commits is settled from the log AS IT ACTUALLY IS at commit — never a stale one
+// computed from a candidate log that a late score already invalidated. The post-append re-read
+// the prior version did is gone: the head-seq condition guarantees the committed log is exactly
+// the candidate log this attempt settled, so the archive is exact, not racy.
 export const finalizeRound =
-  (deps: { journal: EventJournal; store: RoundStore; broadcast: Broadcast; clock: Clock; ids: IdGenerator }) =>
+  (deps: { journal: EventJournal; snapshots: SnapshotStore; broadcast: Broadcast; clock: Clock; ids: IdGenerator }) =>
   async (claims: ParticipantClaims): Promise<FinalizeRoundResponse> => {
     for (let attempt = 0; attempt < MAX_FINALIZE_ATTEMPTS; attempt += 1) {
       const { events, state } = await loadRoundState(deps.journal, claims.roundId);
       requireParticipant(state, claims.golferId);
 
       if (state.status === "final") {
-        // Repair-on-replay (M9 hardening): the idempotent branch used to trust status ===
-        // "final" alone and recompute-but-never-persist — if a PRIOR finalize's putArchive
-        // threw AFTER its round-finalized append already landed (the live defect this fixes:
-        // the two writes were never atomic), every retry kept recomputing the same archive in
-        // memory and handing back 200 while the archive ROW stayed permanently missing. Now a
-        // retry checks the store first and only recomputes+writes when it's actually absent —
-        // settleRound is deterministic over the full log, so this heals the wedge exactly once,
-        // on whichever retry notices, without ever appending a second round-finalized.
-        const archived = await deps.store.getArchive(claims.roundId);
-        if (archived) return { results: archived.results, handicapping: archived.handicapping };
-
-        const archive = settleRound(events);
-        await deps.store.putArchive(archive);
-        return { results: archive.results, handicapping: archive.handicapping };
+        // The round already finalized — its snapshot committed atomically with round-finalized,
+        // so it MUST be present. A missing snapshot under a final log is corruption (the atom's
+        // two legs can't land apart), never a wedge to recompute away: throw loudly instead of
+        // silently re-settling a log a different reader might settle differently.
+        const archived = await deps.snapshots.get(claims.roundId);
+        if (!archived) throw new Error(`finalizeRound: round ${claims.roundId} is final but has no snapshot — corrupt`);
+        return { results: archived.results, handicapping: archived.handicapping };
       }
 
       const hlc = createServerHlcSource(deps.clock);
       const candidate: RoundEvent = { kind: "round-finalized", ...serverEnvelope({ hlc, ids: deps.ids }, claims.golferId) };
 
-      // Validate settle-ability against the candidate log BEFORE ever touching the journal
-      // (carry 1) — a game-unresolved throw here propagates uncaught, same idiom as every
-      // other domain validation in this package, and leaves the journal untouched.
-      settleRound([...events, candidate]);
+      // Settle the CANDIDATE log (carry 1) — this both VALIDATES settle-ability (a
+      // game-unresolved throw here propagates uncaught, leaving the journal untouched) AND
+      // produces the exact archive committed with the append below.
+      const candidateLog = [...events, candidate];
+      const archive = settleRound(candidateLog);
 
       const expectedHeadSeq = events[events.length - 1]?.seq ?? 0;
-      const result = await deps.journal.append(claims.roundId, [candidate], { expectedHeadSeq });
+      // One cross-table transaction: round-finalized's EVT/OPID slots plus the snapshot's item.
+      const result = await deps.journal.append(claims.roundId, [candidate], { expectedHeadSeq, snapshot: archive });
 
       if (result.headSeqConflict) {
-        // Something landed after the seq this attempt validated against (carry 2) — re-read
-        // and re-validate from scratch on the next loop iteration rather than trust the
-        // now-stale settle-check above.
+        // Something landed after the seq this attempt validated against (carry 2) — re-read and
+        // re-settle from scratch on the next iteration so the snapshot reflects the new log,
+        // rather than committing an archive built from a now-stale candidate.
         continue;
       }
 
-      const fullLog = await deps.journal.read(claims.roundId, 0); // the FULL post-append log
-      const archive = settleRound(fullLog);
-      await deps.store.putArchive(archive);
       await deps.broadcast.publish(claims.roundId, result.appended);
-
       return { results: archive.results, handicapping: archive.handicapping };
     }
 

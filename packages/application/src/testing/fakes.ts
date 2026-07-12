@@ -11,6 +11,7 @@ import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
 import type { CrewSeasonRecords, ProjectionStore } from "../ports/projectionStore.js";
 import type { RoundStore } from "../ports/roundStore.js";
+import type { SnapshotStore } from "../ports/snapshotStore.js";
 
 // In-memory ports for application's own tests AND exported product surface for lambda/E2E
 // unit tests later in M3 — the Dynamo journal adapter is tested against this SAME
@@ -24,7 +25,15 @@ import type { RoundStore } from "../ports/roundStore.js";
 // carry two Put operations against the same item key (opIdSk(event.opId) collides). This is
 // unreachable by every current caller: every real batch is either 1 event (RecordScore,
 // FinalizeRound) or 3 freshly-minted events with distinct opIds (StartRound).
-export const createInMemoryJournal = (): EventJournal => {
+//
+// `snapshotSink` models createDynamoEventJournal's atomic finalize commit HONESTLY (the real
+// adapter batches the snapshot's Put into the SAME TransactWriteItems as the EVT/OPID slots):
+// when a call carries `options.snapshot` and the append lands, the snapshot is recorded into
+// the sink; on a headSeqConflict early-return NOTHING is recorded, exactly as a rolled-back
+// transaction would write neither. Pass the InMemorySnapshotStore created by
+// createInMemorySnapshotStore below so finalizeRound's SnapshotStore reads the same map this
+// writes; omit it for the many suites that never finalize (the sink is then a no-op).
+export const createInMemoryJournal = (snapshotSink?: Pick<InMemorySnapshotStore, "record">): EventJournal => {
   const byRound = new Map<RoundId, RoundEvent[]>();
   const seenOpIds = new Map<RoundId, Set<OpId>>();
 
@@ -36,6 +45,8 @@ export const createInMemoryJournal = (): EventJournal => {
       // answers with the array it already has.
       const headSeq = stored.length;
       if (options?.expectedHeadSeq !== undefined && options.expectedHeadSeq !== headSeq) {
+        // The would-be transaction rolls back whole — event AND snapshot — so the sink is
+        // deliberately untouched on this path.
         return { appended: [], duplicateOpIds: [], headSeqConflict: true };
       }
 
@@ -58,6 +69,8 @@ export const createInMemoryJournal = (): EventJournal => {
 
       byRound.set(roundId, stored);
       seenOpIds.set(roundId, seen);
+      // The append committed — the snapshot leg of the same transaction commits with it.
+      if (options?.snapshot !== undefined) snapshotSink?.record(options.snapshot);
       return { appended, duplicateOpIds };
     },
 
@@ -70,17 +83,41 @@ export const createInMemoryJournal = (): EventJournal => {
 
 export const createInMemoryRoundStore = (): RoundStore => {
   const roundIdByJoinCode = new Map<string, RoundId>();
-  const archiveByRoundId = new Map<RoundId, RoundArchive>();
 
   return {
     createRound: async ({ roundId, joinCode }) => {
       roundIdByJoinCode.set(joinCode, roundId);
     },
     findByJoinCode: async (code) => roundIdByJoinCode.get(code),
-    putArchive: async (archive) => {
-      archiveByRoundId.set(archive.roundId, archive);
+  };
+};
+
+// The read side of the snapshots table (SnapshotStore's port doc), plus a `record` write side
+// that is NOT part of the port — the real adapter only ever gets a snapshot written through
+// EventJournal.append's transaction, and this fake mirrors that: hand this store to
+// createInMemoryJournal above so its atomic finalize commit records here, and finalizeRound's
+// `snapshots.get` reads it back. `record` sits outside SnapshotStore so no production caller
+// can reach a write path the real system doesn't have.
+export interface InMemorySnapshotStore extends SnapshotStore {
+  readonly record: (archive: RoundArchive) => void;
+}
+export const createInMemorySnapshotStore = (): InMemorySnapshotStore => {
+  const byRoundId = new Map<RoundId, RoundArchive>();
+  return {
+    record: (archive) => {
+      byRoundId.set(archive.roundId, archive);
     },
-    getArchive: async (roundId) => archiveByRoundId.get(roundId),
+    get: async (roundId) => byRoundId.get(roundId),
+    // Order isn't promised and absent ids are omitted (SnapshotStore's port doc) — a flatMap
+    // that drops the misses reproduces a BatchGetItem's own contract.
+    getMany: async (roundIds) =>
+      roundIds.flatMap((id) => {
+        const archive = byRoundId.get(id);
+        return archive ? [archive] : [];
+      }),
+    // The whole table in one page — real pagination is the adapter's concern (contract-tested);
+    // a fake at test scale never needs a cursor.
+    page: async () => ({ snapshots: [...byRoundId.values()] }),
   };
 };
 

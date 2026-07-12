@@ -4,8 +4,10 @@ import { courseId, crewId, golferId } from "@swng/domain";
 // The rounds table's key vocabulary (M3 plan, Global Constraints): one item collection per
 // round (`pk`), holding the event log (`EVT#<seq>`, sorted lexically in seq order because
 // the padding fixes every sk to the same width), the mutable pointer to itself (`META`, also
-// the gsi1 join-code lookup target), the terminal settlement (`ARCHIVE`), and one tombstone
-// per ingested opId (`OPID#<id>`) that makes append's dedupe a plain conditional put.
+// the gsi1 join-code lookup target), and one tombstone per ingested opId (`OPID#<id>`) that
+// makes append's dedupe a plain conditional put. The terminal settlement no longer lives here
+// — the projection-realignment moved it to its own snapshots table (snapshotPk below), written
+// atomically with round-finalized by the finalize transaction.
 export const roundPk = (id: RoundId): string => `ROUND#${id}`;
 
 // Zero-padded to 10 digits so string (lexical) order and numeric order agree — the property
@@ -19,9 +21,17 @@ export const evtSk = (seq: number): string => `EVT#${String(seq).padStart(10, "0
 export const evtSkMax: string = evtSk(9_999_999_999);
 
 export const metaSk = "META";
-export const archiveSk = "ARCHIVE";
 
 export const opIdSk = (id: OpId): string => `OPID#${id}`;
+
+// The snapshots table's key vocabulary (projection-realignment spec §1/§11: "the snapshot IS
+// the atom"): pk-only, and the pk is the BARE roundId — a key is an identity, not a namespaced
+// path (unlike roundPk's "ROUND#" prefix, which shares one table across many item kinds; the
+// snapshots table holds exactly one item kind, so it needs no discriminator). Time is the
+// `finalizedAt` attribute, never a sort key — the table has no sk at all. The item is written
+// only by createDynamoEventJournal's atomic finalize transaction and read by
+// createDynamoSnapshotStore; both go through this one helper so the format can't drift.
+export const snapshotPk = (id: RoundId): string => id;
 
 // The connections table's key vocabulary: one item per live WS connection, looked up by its
 // own id on register/deregister and fanned out to via gsi1 on roundId for broadcast.

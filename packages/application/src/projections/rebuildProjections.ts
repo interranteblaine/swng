@@ -17,8 +17,8 @@ export interface ArchiveSource {
 // archive in finalizedAt order, so the replay reproduces the exact same incremental history
 // the live stream trigger built up one finalize at a time.
 //
-// ACCEPTED RACE (wipe-replay window): `archives` above is collected from a full-table Scan
-// (createDynamoArchiveSource) that necessarily takes some time to finish; the wipe loop only
+// ACCEPTED RACE (wipe-replay window): `archives` above is collected from a full-table walk
+// (the snapshots-table page() shim, projection-realignment) that necessarily takes some time to finish; the wipe loop only
 // runs once that enumeration is done. A round that finalizes — and lands its own live
 // projectArchive call via the stream trigger — AFTER the Scan has already passed (or started)
 // but BEFORE the wipe step touches that same golfer will have its freshly-written history

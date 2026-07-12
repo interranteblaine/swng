@@ -153,6 +153,28 @@ describe("buildApp — TABLE_PROJECTIONS is optional (wsConnect/wsDisconnect nev
   });
 });
 
+// Projection-realignment Task 2: same "shared buildApp, entry-scoped env" story — only httpFn
+// carries TABLE_SNAPSHOTS (swngStack.ts); wsConnect/wsDisconnect never do. The journal is
+// constructed with snapshotsTableName either way (undefined for those entries) — the guard only
+// fires if an append actually sets options.snapshot, which only finalize does, and only httpFn
+// dispatches finalize. So buildApp must read it optionally, mirroring the TABLE_CORE idiom.
+describe("buildApp — TABLE_SNAPSHOTS is optional (wsConnect/wsDisconnect never set it)", () => {
+  const baseEnv = {
+    TABLE_ROUNDS: "rounds-table",
+    TABLE_CONNECTIONS: "connections-table",
+    TOKEN_SECRET: "test-secret",
+    WS_ENDPOINT: "https://example.execute-api.us-east-1.amazonaws.com/beta",
+  };
+
+  it("does not throw when TABLE_SNAPSHOTS is absent — wsConnect/wsDisconnect's real env shape", () => {
+    expect(() => buildApp(baseEnv)).not.toThrow();
+  });
+
+  it("does not throw when TABLE_SNAPSHOTS IS present — httpFn's real env shape", () => {
+    expect(() => buildApp({ ...baseEnv, TABLE_SNAPSHOTS: "snapshots-table" })).not.toThrow();
+  });
+});
+
 describe("buildProjector / buildRebuild — required env vars", () => {
   it("buildProjector throws a clear error when TABLE_PROJECTIONS is missing", () => {
     expect(() => buildProjector({})).toThrow(/TABLE_PROJECTIONS/);
@@ -162,16 +184,19 @@ describe("buildProjector / buildRebuild — required env vars", () => {
     expect(() => buildProjector({ TABLE_PROJECTIONS: "projections-table" })).not.toThrow();
   });
 
-  it("buildRebuild throws a clear error when TABLE_ROUNDS is missing", () => {
-    expect(() => buildRebuild({ TABLE_PROJECTIONS: "projections-table" })).toThrow(/TABLE_ROUNDS/);
+  // Projection-realignment Task 2: the rebuild reads the snapshots table now, not the rounds
+  // table — its required env is TABLE_SNAPSHOTS + TABLE_PROJECTIONS (matching swngStack.ts's
+  // RebuildFunction env, which dropped TABLE_ROUNDS for TABLE_SNAPSHOTS).
+  it("buildRebuild throws a clear error when TABLE_SNAPSHOTS is missing", () => {
+    expect(() => buildRebuild({ TABLE_PROJECTIONS: "projections-table" })).toThrow(/TABLE_SNAPSHOTS/);
   });
 
   it("buildRebuild throws a clear error when TABLE_PROJECTIONS is missing", () => {
-    expect(() => buildRebuild({ TABLE_ROUNDS: "rounds-table" })).toThrow(/TABLE_PROJECTIONS/);
+    expect(() => buildRebuild({ TABLE_SNAPSHOTS: "snapshots-table" })).toThrow(/TABLE_PROJECTIONS/);
   });
 
   it("buildRebuild does not throw when both required vars are present", () => {
-    expect(() => buildRebuild({ TABLE_ROUNDS: "rounds-table", TABLE_PROJECTIONS: "projections-table" })).not.toThrow();
+    expect(() => buildRebuild({ TABLE_SNAPSHOTS: "snapshots-table", TABLE_PROJECTIONS: "projections-table" })).not.toThrow();
   });
 });
 
@@ -204,7 +229,7 @@ describe("createProjectorHandler", () => {
   });
 
   // The "image" the fake parseArchive below reads back is the archive itself, unwrapped —
-  // never real DynamoDB-JSON-shaped AttributeValues (that's parseArchiveStreamImage's own
+  // never real DynamoDB-JSON-shaped AttributeValues (that's parseSnapshotStreamImage's own
   // concern, unit-tested in adapters-dynamodb), so NewImage's real type is cast away here.
   const streamEventFor = (records: readonly { eventId: string; image: RoundArchive | undefined }[]): DynamoDBStreamEvent => ({
     Records: records.map(
@@ -212,7 +237,7 @@ describe("createProjectorHandler", () => {
     ),
   });
 
-  // A fake parseArchive standing in for adapters-dynamodb's real parseArchiveStreamImage
+  // A fake parseArchive standing in for adapters-dynamodb's real parseSnapshotStreamImage
   // (which needs an actually-marshalled DynamoDB image) — here the "image" IS the archive
   // itself, unwrapped, so this loop's own control flow is what's under test, not marshalling.
   const fakeParseArchive = (image: Record<string, unknown> | undefined): RoundArchive => {

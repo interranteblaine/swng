@@ -1,8 +1,8 @@
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import type { RoundArchive, RoundId } from "@swng/domain";
+import { PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import type { RoundId } from "@swng/domain";
 import type { RoundStore } from "@swng/application";
-import { archiveSk, metaSk, roundPk } from "./keys.js";
+import { metaSk, roundPk } from "./keys.js";
 
 export const createDynamoRoundStore = (config: { client: DynamoDBDocumentClient; tableName: string }): RoundStore => {
   const { client, tableName } = config;
@@ -37,29 +37,6 @@ export const createDynamoRoundStore = (config: { client: DynamoDBDocumentClient;
       );
       const item = result.Items?.[0] as { roundId: RoundId } | undefined;
       return item?.roundId;
-    },
-
-    putArchive: async (archive: RoundArchive) => {
-      // Unconditional upsert (M3 plan): re-finalizing a reopened round overwrites the prior
-      // archive — settlement is idempotent, not append-only, at this layer.
-      await client.send(
-        new PutCommand({
-          TableName: tableName,
-          Item: { pk: roundPk(archive.roundId), sk: archiveSk, archive },
-        }),
-      );
-    },
-
-    getArchive: async (roundId: RoundId) => {
-      // M9 hardening: backs finalizeRound.ts's repair-on-replay check — ConsistentRead so a
-      // retry landing moments after this SAME process's own putArchive can never miss what it
-      // just wrote (same rationale as every other base-table read in this adapter family that
-      // feeds a caller's next decision, e.g. get()'s ConsistentRead elsewhere).
-      const result = await client.send(
-        new GetCommand({ TableName: tableName, Key: { pk: roundPk(roundId), sk: archiveSk }, ConsistentRead: true }),
-      );
-      const item = result.Item as { archive: RoundArchive } | undefined;
-      return item?.archive;
     },
   };
 };

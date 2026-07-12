@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { OpId, RoundEvent } from "@swng/domain";
-import { deviceId, fixtureLinks, opId, reduceRound } from "@swng/domain";
+import { deviceId, fixtureLinks, opId, reduceRound, settleRound } from "@swng/domain";
 import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
 import type { RoundStore } from "../ports/roundStore.js";
+import type { SnapshotStore } from "../ports/snapshotStore.js";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
@@ -11,6 +12,7 @@ import {
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryRoundStore,
+  createInMemorySnapshotStore,
   createSequentialIds,
 } from "../testing/fakes.js";
 import { addGame } from "./addGame.js";
@@ -45,7 +47,15 @@ const createClientOps = (device: string) => {
   return () => ({ opId: opId(`${device}-op-${(opCounter += 1)}`), hlc: { wallMs: wallMs++, counter: 0, deviceId: deviceId(device) } });
 };
 
-const setup = (journal: EventJournal = createInMemoryJournal(), store: RoundStore = createInMemoryRoundStore()) => {
+// journal + snapshots must SHARE state: the atomic finalize commit records into the snapshot
+// store the SnapshotStore then reads (testing/fakes.ts models the real cross-table
+// transaction this way). setup pairs them by default; the carry-2 suites below pass in their
+// own already-paired pair so a race-injecting wrapper can sit over the same `inner`.
+const setup = (overrides?: { journal?: EventJournal; store?: RoundStore; snapshots?: SnapshotStore }) => {
+  const snapshotStore = createInMemorySnapshotStore();
+  const journal = overrides?.journal ?? createInMemoryJournal(snapshotStore);
+  const snapshots = overrides?.snapshots ?? snapshotStore;
+  const store = overrides?.store ?? createInMemoryRoundStore();
   const broadcast = createCapturingBroadcast();
   const tokens = createTestTokenIssuer();
   const clock = createFixedClock(1_000);
@@ -55,21 +65,22 @@ const setup = (journal: EventJournal = createInMemoryJournal(), store: RoundStor
 
   return {
     journal,
+    snapshots,
     broadcast,
     start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
-    finalize: finalizeRound({ journal, store, broadcast, clock, ids }),
+    finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
     events: readEvents({ journal }),
   };
 };
 
 // A live round, Ann (host) + Bo, with a stableford game over both of them already added —
-// live but unscored, the starting point both carries' (and the repair-on-replay suite's) tests
+// live but unscored, the starting point both carries' (and the atomic-commit suite's) tests
 // build on.
-const freshLiveRoundWithGame = async (journal?: EventJournal, store?: RoundStore) => {
-  const ctx = setup(journal, store);
+const freshLiveRoundWithGame = async (overrides?: { journal?: EventJournal; store?: RoundStore; snapshots?: SnapshotStore }) => {
+  const ctx = setup(overrides);
   const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
   const bo = await ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2 });
   const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
@@ -77,6 +88,142 @@ const freshLiveRoundWithGame = async (journal?: EventJournal, store?: RoundStore
   await ctx.addStableford(hostClaims, { game: { kind: "stableford", players: [host.golferId, bo.golferId] } });
   return { ...ctx, host, bo, hostClaims, boClaims };
 };
+
+// Scores all 9 holes for both players so the stableford game resolves — the precondition for
+// a successful finalize.
+const scoreAll = async (
+  round: Awaited<ReturnType<typeof freshLiveRoundWithGame>>,
+  annPhone: ReturnType<typeof createClientOps>,
+  boPhone: ReturnType<typeof createClientOps>,
+) => {
+  for (let hole = 1; hole <= 9; hole += 1) {
+    await round.record(round.hostClaims, { golferId: round.host.golferId, hole, result: toResult(4), ...annPhone() });
+    await round.record(round.boClaims, { golferId: round.bo.golferId, hole, result: toResult(4), ...boPhone() });
+  }
+};
+
+// A journal decorator that counts how many appends carried a snapshot — the direct proof that
+// round-finalized and its snapshot ride ONE append call, not two writes.
+const snapshotCountingJournal = (inner: EventJournal): EventJournal & { readonly snapshotAppends: () => number } => {
+  let snapshotAppends = 0;
+  return {
+    snapshotAppends: () => snapshotAppends,
+    append: (roundId, events, options?: AppendOptions): Promise<AppendResult> => {
+      if (options?.snapshot !== undefined) snapshotAppends += 1;
+      return inner.append(roundId, events, options);
+    },
+    read: (roundId, sinceSeq) => inner.read(roundId, sinceSeq),
+  };
+};
+
+describe("finalizeRound — atomic snapshot commit", () => {
+  it("finalize commits round-finalized and the snapshot atomically — one append call carries both", async () => {
+    const snapshots = createInMemorySnapshotStore();
+    const inner = createInMemoryJournal(snapshots);
+    const counting = snapshotCountingJournal(inner);
+    const round = await freshLiveRoundWithGame({ journal: counting, snapshots });
+    await scoreAll(round, createClientOps("ann-phone"), createClientOps("bo-phone"));
+
+    const result = await round.finalize(round.hostClaims);
+    expect(result.results).toHaveLength(1);
+
+    // Exactly ONE append carried a snapshot — the finalize commit. No separate archive write.
+    expect(counting.snapshotAppends()).toBe(1);
+
+    const log = await inner.read(round.host.roundId, 0);
+    expect(log.filter((event) => event.kind === "round-finalized")).toHaveLength(1);
+
+    // The committed snapshot IS the settled archive of the committed log — same object, one
+    // transaction, no post-append re-read that could drift.
+    const stored = await snapshots.get(round.host.roundId);
+    expect(stored).toBeDefined();
+    expect(stored).toEqual(settleRound(log));
+    expect(stored!.results).toEqual(result.results);
+    expect(stored!.handicapping).toEqual(result.handicapping);
+  });
+
+  it("idempotent branch: already-final round returns the stored snapshot without appending", async () => {
+    const snapshots = createInMemorySnapshotStore();
+    const inner = createInMemoryJournal(snapshots);
+    const counting = snapshotCountingJournal(inner);
+    const round = await freshLiveRoundWithGame({ journal: counting, snapshots });
+    await scoreAll(round, createClientOps("ann-phone"), createClientOps("bo-phone"));
+
+    const first = await round.finalize(round.hostClaims);
+    const logAfterFirst = await inner.read(round.host.roundId, 0);
+
+    const second = await round.finalize(round.hostClaims);
+
+    expect(second).toEqual(first); // same settled results, handed straight back from the stored snapshot
+    expect(counting.snapshotAppends()).toBe(1); // the second finalize appended NOTHING — no second commit
+    const logAfterSecond = await inner.read(round.host.roundId, 0);
+    expect(logAfterSecond).toEqual(logAfterFirst); // and no second round-finalized event
+    expect(logAfterSecond.filter((event) => event.kind === "round-finalized")).toHaveLength(1);
+  });
+
+  it("a final round with NO stored snapshot throws loudly (corrupt) — the repair branch is gone", async () => {
+    const snapshots = createInMemorySnapshotStore();
+    const inner = createInMemoryJournal(snapshots);
+    const round = await freshLiveRoundWithGame({ journal: inner, snapshots });
+    await scoreAll(round, createClientOps("ann-phone"), createClientOps("bo-phone"));
+
+    // Land round-finalized DIRECTLY — an unconditional append with no `snapshot` option, so the
+    // paired snapshot store is never written. This reproduces a `final` log with no snapshot: a
+    // state the atomic commit rules out going forward, but the idempotent branch must still
+    // refuse to silently re-settle it (the M9 repair-on-replay branch that recomputed-and-wrote
+    // here is deleted — a missing snapshot under a final log is corruption, not a retry to heal).
+    const orphanFinal: RoundEvent = {
+      kind: "round-finalized",
+      opId: opId("orphan-final"),
+      hlc: { wallMs: 9_000, counter: 0, deviceId: deviceId("server") },
+      authorId: round.host.golferId,
+    };
+    await inner.append(round.host.roundId, [orphanFinal]);
+
+    expect(reduceRound(await inner.read(round.host.roundId, 0)).status).toBe("final");
+    expect(await snapshots.get(round.host.roundId)).toBeUndefined();
+
+    await expect(round.finalize(round.hostClaims)).rejects.toThrow(/no snapshot|corrupt/);
+  });
+
+  it("headSeqConflict → re-read → snapshot computed from the NEW candidate log", async () => {
+    const snapshots = createInMemorySnapshotStore();
+    const inner = createInMemoryJournal(snapshots);
+    const round = await freshLiveRoundWithGame({ journal: inner, snapshots });
+    const annPhone = createClientOps("ann-phone");
+    await scoreAll(round, annPhone, createClientOps("bo-phone"));
+
+    // The event that "lands" in the gap between the settle-check read and the conditional
+    // append — a re-send of Ann's hole-1 score with a later hlc (still resolved).
+    let injectedOpId: OpId | undefined;
+    const lateCorrection = (): RoundEvent => {
+      const stamp = annPhone();
+      injectedOpId = stamp.opId;
+      return { kind: "score-recorded", golferId: round.host.golferId, hole: 1, result: toResult(4), authorId: round.host.golferId, ...stamp };
+    };
+
+    const racy = createRaceInjectingJournal(inner, lateCorrection, 1);
+    const raceFinalize = finalizeRound({
+      journal: racy,
+      snapshots,
+      broadcast: createCapturingBroadcast(),
+      clock: createFixedClock(9_000),
+      ids: createSequentialIds("race"),
+    });
+
+    const finalized = await raceFinalize(round.hostClaims);
+    expect(finalized.results).toHaveLength(1);
+
+    // The stored snapshot was settled from the log AS IT WAS AT COMMIT — which includes the
+    // injected late correction, because the first attempt's headSeqConflict forced a re-read +
+    // re-settle. A stale snapshot (computed from the pre-race candidate log) would omit it.
+    const fullLog = await inner.read(round.host.roundId, 0);
+    const stored = await snapshots.get(round.host.roundId);
+    expect(stored).toBeDefined();
+    expect(stored!.events.some((event) => event.opId === injectedOpId)).toBe(true);
+    expect(stored).toEqual(settleRound(fullLog));
+  });
+});
 
 describe("finalizeRound — carry 1: settle-before-append", () => {
   it("a finalize on an unresolvable game leaves NO round-finalized event and status live; a later finalize succeeds once the game resolves", async () => {
@@ -96,6 +243,8 @@ describe("finalizeRound — carry 1: settle-before-append", () => {
     const afterFailedFinalize = await round.events(round.host.roundId, 0);
     expect(afterFailedFinalize.events.some((event) => event.kind === "round-finalized")).toBe(false);
     expect(reduceRound(afterFailedFinalize.events).status).toBe("live");
+    // A settle-check that threw before touching the journal also never wrote a snapshot.
+    expect(await round.snapshots.get(round.host.roundId)).toBeUndefined();
 
     // A second failed attempt is just as much a no-op as the first — the round must never
     // accumulate a wedged round-finalized event no matter how many times finalize is retried
@@ -116,6 +265,7 @@ describe("finalizeRound — carry 1: settle-before-append", () => {
     const afterSuccess = await round.events(round.host.roundId, 0);
     expect(afterSuccess.events.filter((event) => event.kind === "round-finalized")).toHaveLength(1);
     expect(reduceRound(afterSuccess.events).status).toBe("final");
+    expect(await round.snapshots.get(round.host.roundId)).toBeDefined();
   });
 });
 
@@ -147,8 +297,9 @@ const createRaceInjectingJournal = (
 
 describe("finalizeRound — carry 2: head-seq conditional append", () => {
   it("a score appended between the settle-check read and the append forces a re-read + re-validate, then succeeds", async () => {
-    const inner = createInMemoryJournal();
-    const round = await freshLiveRoundWithGame(inner);
+    const snapshots = createInMemorySnapshotStore();
+    const inner = createInMemoryJournal(snapshots);
+    const round = await freshLiveRoundWithGame({ journal: inner, snapshots });
     const annPhone = createClientOps("ann-phone");
     const boPhone = createClientOps("bo-phone");
 
@@ -173,7 +324,7 @@ describe("finalizeRound — carry 2: head-seq conditional append", () => {
     const racy = createRaceInjectingJournal(inner, lateCorrection, 1);
     const raceFinalize = finalizeRound({
       journal: racy,
-      store: createInMemoryRoundStore(),
+      snapshots,
       broadcast: createCapturingBroadcast(),
       clock: createFixedClock(9_000),
       ids: createSequentialIds("race"),
@@ -198,8 +349,9 @@ describe("finalizeRound — carry 2: head-seq conditional append", () => {
   });
 
   it("gives up after bounded attempts if the head keeps moving out from under every retry", async () => {
-    const inner = createInMemoryJournal();
-    const round = await freshLiveRoundWithGame(inner);
+    const snapshots = createInMemorySnapshotStore();
+    const inner = createInMemoryJournal(snapshots);
+    const round = await freshLiveRoundWithGame({ journal: inner, snapshots });
     const annPhone = createClientOps("ann-phone");
     const boPhone = createClientOps("bo-phone");
 
@@ -222,7 +374,7 @@ describe("finalizeRound — carry 2: head-seq conditional append", () => {
     const racy = createRaceInjectingJournal(inner, relentlessCorrection, Number.POSITIVE_INFINITY);
     const raceFinalize = finalizeRound({
       journal: racy,
-      store: createInMemoryRoundStore(),
+      snapshots,
       broadcast: createCapturingBroadcast(),
       clock: createFixedClock(9_000),
       ids: createSequentialIds("race2"),
@@ -230,101 +382,10 @@ describe("finalizeRound — carry 2: head-seq conditional append", () => {
 
     await expect(raceFinalize(round.hostClaims)).rejects.toThrow(/did not converge/);
 
-    // Bounded means bounded: no round-finalized event ever lands, no matter how many retries
-    // it took to give up.
+    // Bounded means bounded: no round-finalized event ever lands, and no snapshot is ever
+    // written, no matter how many retries it took to give up.
     const fullLog = await inner.read(round.host.roundId, 0);
     expect(fullLog.some((event) => event.kind === "round-finalized")).toBe(false);
-  });
-});
-
-// A RoundStore decorator whose putArchive throws `failCount` times before delegating —
-// reproduces the exact M9 live defect (finalizeRound.ts's own doc comment): round-finalized
-// lands in the journal (append happens BEFORE putArchive in the success path), then putArchive
-// throws, so the round is left status "final" with no archive row. Mirrors
-// crewSlice.test.ts's createFlakyCrewStore/courseSlice.test.ts's createFlakyCourseStore's own
-// local-decorator idiom (single-test failure injection, not a reusable product-surface fake).
-interface WedgingRoundStore extends RoundStore {
-  readonly putArchiveAttempts: () => number;
-}
-const createWedgingRoundStore = (inner: RoundStore, failCount: number): WedgingRoundStore => {
-  let attempts = 0;
-  return {
-    putArchiveAttempts: () => attempts,
-    createRound: inner.createRound,
-    findByJoinCode: inner.findByJoinCode,
-    getArchive: inner.getArchive,
-    putArchive: async (archive) => {
-      attempts += 1;
-      if (attempts <= failCount) throw new Error(`synthetic putArchive failure #${attempts}`);
-      return inner.putArchive(archive);
-    },
-  };
-};
-
-describe("finalizeRound — repair-on-replay (M9 hardening)", () => {
-  it("a finalize whose archive write throws leaves round-finalized appended but the archive missing; a retry heals it without a duplicate event", async () => {
-    const wedging = createWedgingRoundStore(createInMemoryRoundStore(), 1);
-    const round = await freshLiveRoundWithGame(undefined, wedging);
-    const annPhone = createClientOps("ann-phone");
-    const boPhone = createClientOps("bo-phone");
-
-    for (let hole = 1; hole <= 9; hole += 1) {
-      await round.record(round.hostClaims, { golferId: round.host.golferId, hole, result: toResult(4), ...annPhone() });
-      await round.record(round.boClaims, { golferId: round.bo.golferId, hole, result: toResult(4), ...boPhone() });
-    }
-
-    // The first finalize appends round-finalized, then hits the synthetic putArchive failure —
-    // it must propagate, not be swallowed.
-    await expect(round.finalize(round.hostClaims)).rejects.toThrow(/synthetic putArchive failure #1/);
-
-    const afterFailedFinalize = await round.events(round.host.roundId, 0);
-    const finalizedEvents = afterFailedFinalize.events.filter((event) => event.kind === "round-finalized");
-    expect(finalizedEvents).toHaveLength(1); // round-finalized DID land — the round is wedged, not live
-    expect(reduceRound(afterFailedFinalize.events).status).toBe("final");
-    expect(await wedging.getArchive(round.host.roundId)).toBeUndefined(); // ...but no archive was ever written
-
-    // A retry hits the idempotent branch, notices the archive is missing, and heals it.
-    const healed = await round.finalize(round.hostClaims);
-    expect(healed.results).toHaveLength(1);
-    expect(wedging.putArchiveAttempts()).toBe(2); // the failing first attempt + the healing retry
-
-    const archived = await wedging.getArchive(round.host.roundId);
-    expect(archived).toBeDefined();
-    expect(archived!.results).toEqual(healed.results);
-    expect(archived!.handicapping).toEqual(healed.handicapping);
-
-    // No duplicate round-finalized — the repair never touches the journal, only the store.
-    const afterHeal = await round.events(round.host.roundId, 0);
-    expect(afterHeal.events.filter((event) => event.kind === "round-finalized")).toHaveLength(1);
-    expect(afterHeal.events).toEqual(afterFailedFinalize.events);
-  });
-
-  it("a finalize whose archive write succeeds on the first try never re-reads or re-writes the archive on a later idempotent call", async () => {
-    const inner = createInMemoryRoundStore();
-    let putCount = 0;
-    const countingStore: RoundStore = {
-      createRound: inner.createRound,
-      findByJoinCode: inner.findByJoinCode,
-      getArchive: inner.getArchive,
-      putArchive: async (archive) => {
-        putCount += 1;
-        return inner.putArchive(archive);
-      },
-    };
-    const round = await freshLiveRoundWithGame(undefined, countingStore);
-    const annPhone = createClientOps("ann-phone");
-    const boPhone = createClientOps("bo-phone");
-
-    for (let hole = 1; hole <= 9; hole += 1) {
-      await round.record(round.hostClaims, { golferId: round.host.golferId, hole, result: toResult(4), ...annPhone() });
-      await round.record(round.boClaims, { golferId: round.bo.golferId, hole, result: toResult(4), ...boPhone() });
-    }
-
-    const first = await round.finalize(round.hostClaims);
-    expect(putCount).toBe(1);
-
-    const second = await round.finalize(round.hostClaims);
-    expect(second).toEqual(first);
-    expect(putCount).toBe(1); // the healthy idempotent path finds the archive and never re-writes it
+    expect(await snapshots.get(round.host.roundId)).toBeUndefined();
   });
 });

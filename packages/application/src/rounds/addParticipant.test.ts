@@ -8,6 +8,7 @@ import {
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryRoundStore,
+  createInMemorySnapshotStore,
   createSequentialIds,
   putAndBindGolfer,
 } from "../testing/fakes.js";
@@ -31,7 +32,8 @@ const createTestTokenIssuer = (): TokenIssuer => {
 };
 
 const setup = () => {
-  const journal = createInMemoryJournal();
+  const snapshots = createInMemorySnapshotStore();
+  const journal = createInMemoryJournal(snapshots);
   const store = createInMemoryRoundStore();
   const broadcast = createCapturingBroadcast();
   const tokens = createTestTokenIssuer();
@@ -45,7 +47,7 @@ const setup = () => {
     golferStore,
     crewStore,
     start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
-    finalize: finalizeRound({ journal, store, broadcast, clock, ids }),
+    finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
     addPlayer: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore }),
   };
 };

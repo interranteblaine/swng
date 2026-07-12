@@ -12,6 +12,7 @@ import type {
   IdGenerator,
   Logger,
   ProjectionStore,
+  SnapshotStore,
   TokenIssuer,
 } from "@swng/application";
 import {
@@ -48,7 +49,6 @@ import { createApiGatewayBroadcast, createManagementClient } from "@swng/adapter
 import { createCognitoVerifier } from "@swng/adapters-cognito";
 import {
   createDocumentClient,
-  createDynamoArchiveSource,
   createDynamoConnectionRegistry,
   createDynamoCourseStore,
   createDynamoCrewStore,
@@ -56,7 +56,8 @@ import {
   createDynamoGolferStore,
   createDynamoProjectionStore,
   createDynamoRoundStore,
-  parseArchiveStreamImage,
+  createDynamoSnapshotStore,
+  parseSnapshotStreamImage,
 } from "@swng/adapters-dynamodb";
 import { createHmacTokenIssuer } from "./auth/hmacTokenIssuer.js";
 import { createDispatcher } from "./http/dispatch.js";
@@ -171,6 +172,18 @@ const unavailableProjectionStore = (): ProjectionStore => {
   };
 };
 
+// Same shape again, for TABLE_SNAPSHOTS (projection-realignment Task 2): only httpFn carries it
+// (swngStack.ts), and only finalizeRound reads a snapshot back (its idempotent branch); wsConnect/
+// wsDisconnect never dispatch finalize, so they get this stub. finalizeRound's atomic write path
+// doesn't go through this store at all — it's the journal's snapshotsTableName that must be set,
+// which is likewise absent for those entries (and unreached, since they never finalize).
+const unavailableSnapshotStore = (): SnapshotStore => {
+  const unavailable = (): never => {
+    throw new Error("buildApp: TABLE_SNAPSHOTS is not set for this entry — finalize is HTTP-only (see swngStack.ts)");
+  };
+  return { get: unavailable, getMany: unavailable, page: unavailable };
+};
+
 export interface App {
   readonly dispatcher: (event: APIGatewayProxyEventV2) => Promise<APIGatewayProxyResultV2>;
   readonly registry: ConnectionRegistry;
@@ -189,6 +202,7 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const tableConnections = requireEnv(env, "TABLE_CONNECTIONS");
   const tableCore = env.TABLE_CORE; // optional — see unavailableCourseStore above
   const tableProjections = env.TABLE_PROJECTIONS; // optional — see unavailableProjectionStore above
+  const tableSnapshots = env.TABLE_SNAPSHOTS; // optional — see unavailableSnapshotStore above
   const userPoolId = env.USER_POOL_ID; // optional — see unavailableVerifier above
   const userPoolClientId = env.USER_POOL_CLIENT_ID; // optional, same reason
   const tokenSecret = requireEnv(env, "TOKEN_SECRET");
@@ -199,8 +213,13 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const logger = createConsoleLogger();
 
   const documentClient = createDocumentClient();
-  const journal = createDynamoEventJournal({ client: documentClient, tableName: tableRounds });
+  // snapshotsTableName lets finalizeRound's append commit round-finalized + the settled snapshot
+  // in one transaction (projection-realignment §2). Optional here — only httpFn carries
+  // TABLE_SNAPSHOTS, and only finalize sets options.snapshot, so the other entries never trip
+  // the "snapshot without a table" guard inside the journal.
+  const journal = createDynamoEventJournal({ client: documentClient, tableName: tableRounds, snapshotsTableName: tableSnapshots });
   const store = createDynamoRoundStore({ client: documentClient, tableName: tableRounds });
+  const snapshots = tableSnapshots !== undefined ? createDynamoSnapshotStore({ client: documentClient, tableName: tableSnapshots }) : unavailableSnapshotStore();
   const registry = createDynamoConnectionRegistry({ client: documentClient, tableName: tableConnections });
   const courseStore = tableCore !== undefined ? createDynamoCourseStore({ client: documentClient, tableName: tableCore }) : unavailableCourseStore();
   // golferStore lives on the SAME table as courseStore (keys.ts's golferPk — the core
@@ -229,7 +248,7 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
-    finalizeRound: finalizeRound({ journal, store, broadcast, clock, ids }),
+    finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
@@ -261,8 +280,8 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   return { dispatcher, registry, tokens };
 };
 
-// --- Projector (M7 Task 4): the DynamoDB Streams trigger on the rounds table's ARCHIVE
-// items --------------------------------------------------------------------------------------
+// --- Projector (M7 Task 4; projection-realignment Task 2): the DynamoDB Streams trigger on the
+// snapshots table — every item there IS a finished round, so the stream is unfiltered ----------
 
 export interface ProjectorApp {
   readonly handler: (event: DynamoDBStreamEvent) => Promise<void>;
@@ -270,7 +289,7 @@ export interface ProjectorApp {
 
 // The stream-record loop, factored out from its DynamoDB wiring (buildProjector below) —
 // `parseArchive` is deps-injected (rather than this calling adapters-dynamodb's
-// parseArchiveStreamImage directly) so compositionRoot.test.ts can drive the whole loop
+// parseSnapshotStreamImage directly) so compositionRoot.test.ts can drive the whole loop
 // (multi-record batches, poison-record handling) against a plain fake, no AWS SDK types or
 // calls involved (packages/lambda may not import `@aws-sdk/*` directly — eslint.config.mjs).
 // Beta has no DLQ / on-failure destination on this event source mapping (swngStack.ts) — a
@@ -312,11 +331,11 @@ export const buildProjector = (env: NodeJS.ProcessEnv): ProjectorApp => {
   const projectionStore = createDynamoProjectionStore({ client: documentClient, tableName: tableProjections });
   const project = projectArchive({ projectionStore, clock, logger });
 
-  return { handler: createProjectorHandler({ parseArchive: parseArchiveStreamImage, project, logger }) };
+  return { handler: createProjectorHandler({ parseArchive: parseSnapshotStreamImage, project, logger }) };
 };
 
-// --- Rebuild (M7 Task 4): manual-invoke only, replays every archive in the rounds table
-// through the SAME projectArchive the stream trigger uses (rebuildProjections' own doc
+// --- Rebuild (M7 Task 4; projection-realignment Task 2): manual-invoke only, replays every
+// snapshot through the SAME projectArchive the stream trigger uses (rebuildProjections' own doc
 // comment: "no forked math") -------------------------------------------------------------
 
 export interface RebuildApp {
@@ -324,14 +343,29 @@ export interface RebuildApp {
 }
 
 export const buildRebuild = (env: NodeJS.ProcessEnv): RebuildApp => {
-  const tableRounds = requireEnv(env, "TABLE_ROUNDS");
+  const tableSnapshots = requireEnv(env, "TABLE_SNAPSHOTS");
   const tableProjections = requireEnv(env, "TABLE_PROJECTIONS");
 
   const clock = createSystemClock();
   const logger = createConsoleLogger();
   const documentClient = createDocumentClient();
   const projectionStore = createDynamoProjectionStore({ client: documentClient, tableName: tableProjections });
-  const archiveSource: ArchiveSource = createDynamoArchiveSource({ client: documentClient, tableName: tableRounds });
+  const snapshots = createDynamoSnapshotStore({ client: documentClient, tableName: tableSnapshots });
+
+  // DYING IN TASK 5: rebuildProjections still consumes the old ArchiveSource (an AsyncIterable
+  // of archives). Until Task 5 rewrites rebuild to page the snapshots table directly, adapt
+  // SnapshotStore.page() into that shape inline — the snapshots table replaced the rounds-table
+  // Scan the old createDynamoArchiveSource did, but the replay itself is unchanged.
+  const archiveSource: ArchiveSource = {
+    listArchives: async function* () {
+      let cursor: string | undefined;
+      do {
+        const { snapshots: page, cursor: next } = await snapshots.page(cursor);
+        for (const archive of page) yield archive;
+        cursor = next;
+      } while (cursor);
+    },
+  };
 
   return { handler: rebuildProjections({ archiveSource, projectionStore, clock, logger }) };
 };

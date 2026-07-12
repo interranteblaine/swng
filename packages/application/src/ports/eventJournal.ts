@@ -1,4 +1,4 @@
-import type { OpId, RoundEvent, RoundId } from "@swng/domain";
+import type { OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
 
 // Ingest is idempotent by construction (M3 plan, Global Constraints): a retried opId is a
 // no-op success, never an error. `appended` carries only the events that actually landed,
@@ -22,6 +22,15 @@ export interface AppendOptions {
   // as `headSeqConflict` rather than silently retrying against a newer head the caller never
   // validated against (see finalizeRound.ts, "Head-seq conditional append").
   readonly expectedHeadSeq?: number;
+  // When set, this snapshot's put commits in the SAME transaction as the event append (a
+  // cross-table TransactWriteItems: the rounds table's EVT/OPID slots plus the snapshots
+  // table's one item) — round-finalized and its settled RoundArchive land atomically or not at
+  // all (projection-realignment spec §2: "the snapshot IS the atom"). Only finalizeRound sets
+  // it, always alongside expectedHeadSeq: if the EVT slot loses its seq race the whole
+  // transaction rolls back, snapshot included, and the caller sees headSeqConflict. The
+  // snapshot put is unconditional (a re-finalize replaces it) — the EVT slot's own
+  // attribute_not_exists condition is the transaction's guard, so the snapshot needs none.
+  readonly snapshot?: RoundArchive;
 }
 
 export interface EventJournal {

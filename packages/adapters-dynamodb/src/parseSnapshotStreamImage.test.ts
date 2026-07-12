@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { marshall } from "@aws-sdk/util-dynamodb";
 import { deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
 import type { Participant, RoundArchive, RoundEvent } from "@swng/domain";
-import { archiveSk, roundPk } from "./keys.js";
-import { parseArchiveStreamImage } from "./parseArchiveStreamImage.js";
+import { snapshotPk } from "./keys.js";
+import { parseSnapshotStreamImage } from "./parseSnapshotStreamImage.js";
 
 // Same minimal hand-built archive idiom as application/src/projections/projectionSlice.test.ts
 // — no real scoring/handicap math needed here, only that the archive round-trips through
@@ -27,24 +27,24 @@ const archive: RoundArchive = {
   handicapping: [{ golferId: ann, kind: "complete", ags: 90, differential: 9.0 }],
 };
 
-// Mirrors createDynamoRoundStore.putArchive's exact Item shape — the real producer of what a
-// stream NEW_IMAGE for an ARCHIVE record looks like.
-const archiveItem = { pk: roundPk(archive.roundId), sk: archiveSk, archive };
+// Mirrors createDynamoEventJournal's snapshot-leg Item shape — the real producer of what a
+// stream NEW_IMAGE for a snapshot record looks like: pk-only (no sk), `finalizedAt`, `archive`.
+const snapshotItem = { pk: snapshotPk(archive.roundId), finalizedAt: 1_000, archive };
 
-describe("parseArchiveStreamImage", () => {
-  it("round-trips a marshalled ARCHIVE item back into the same RoundArchive", () => {
-    const image = marshall(archiveItem, { removeUndefinedValues: true });
+describe("parseSnapshotStreamImage", () => {
+  it("round-trips a marshalled snapshot item back into the same RoundArchive", () => {
+    const image = marshall(snapshotItem, { removeUndefinedValues: true });
 
-    expect(parseArchiveStreamImage(image)).toEqual(archive);
+    expect(parseSnapshotStreamImage(image)).toEqual(archive);
   });
 
   it("throws when the image is undefined (a REMOVE event, or StreamViewType misconfigured)", () => {
-    expect(() => parseArchiveStreamImage(undefined)).toThrow(/NEW_IMAGE/);
+    expect(() => parseSnapshotStreamImage(undefined)).toThrow(/NEW_IMAGE/);
   });
 
-  it("throws when sk isn't ARCHIVE (a filter-criteria miss, or a non-archive record reaching the projector)", () => {
-    const image = marshall({ pk: roundPk(archive.roundId), sk: "META", roundId: archive.roundId, joinCode: "ABC123" }, { removeUndefinedValues: true });
+  it("throws when the `archive` attribute is absent (not a snapshot item, or a corrupt one)", () => {
+    const image = marshall({ pk: snapshotPk(archive.roundId), finalizedAt: 1_000 }, { removeUndefinedValues: true });
 
-    expect(() => parseArchiveStreamImage(image)).toThrow(/expected sk "ARCHIVE"/);
+    expect(() => parseSnapshotStreamImage(image)).toThrow(/archive/);
   });
 });

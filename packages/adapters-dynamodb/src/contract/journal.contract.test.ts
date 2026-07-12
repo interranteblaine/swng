@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { RoundEvent } from "@swng/domain";
-import { deviceId, golferId, opId, roundId } from "@swng/domain";
+import type { CrewId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import { crewId, deviceId, fixtureLinks, golferId, opId, roundId, settleRound } from "@swng/domain";
 import { createDynamoEventJournal } from "../createDynamoEventJournal.js";
+import { evtSk, opIdSk, roundPk, snapshotPk } from "../keys.js";
 import type { LocalDynamo } from "../testing/local.js";
 import { startLocalDynamo } from "../testing/local.js";
 
@@ -36,6 +38,44 @@ const makeEvent = (hole: number): RoundEvent => ({
 });
 
 const newJournal = () => createDynamoEventJournal({ client: local.client, tableName: local.roundsTable });
+
+// A journal wired with the snapshots table — the only configuration that may carry
+// options.snapshot (the atomic finalize commit).
+const newFinalizingJournal = () => createDynamoEventJournal({ client: local.client, tableName: local.roundsTable, snapshotsTableName: local.snapshotsTable });
+
+const makeFinalizeEvent = (): RoundEvent => ({
+  kind: "round-finalized",
+  opId: opId(`op-${(opCounter += 1)}`),
+  hlc: { wallMs: 1_000 + opCounter, counter: 0, deviceId: device },
+  authorId: golfer,
+});
+
+// A hand-built archive carrying its own round-finalized event at a known wallMs — the snapshot
+// leg's `finalizedAt` is derived from it (finalizedAtMsOf), so the test can pin that value.
+const buildArchive = (id: RoundId, finalizedAtMs: number): RoundArchive => ({
+  roundId: id,
+  card: fixtureLinks,
+  participants: [{ golferId: golfer, name: "Golfer", tee: "white", courseHandicap: 8 }],
+  games: [],
+  cells: {},
+  events: [{ kind: "round-finalized", opId: opId(`archive-final-${id}`), hlc: { wallMs: finalizedAtMs, counter: 0, deviceId: deviceId("server") }, authorId: golfer }],
+  results: [],
+  terminatedGameIds: [],
+  handicapping: [{ golferId: golfer, kind: "complete", ags: 90, differential: 9.0 }],
+});
+
+// A minimal final log for settleRound to produce a REAL archive from — an optional crewId tag
+// exercises the M8 explicit-undefined class (a non-crew archive must carry NO crewId key at all,
+// or the document client's marshall() throws on it).
+const settledLog = (id: RoundId, tag?: CrewId): RoundEvent[] => {
+  const at = (wallMs: number) => ({ wallMs, counter: 0, deviceId: deviceId("contract-test") });
+  const author = golferId(`author-${id}`);
+  return [
+    { kind: "round-created", roundId: id, card: fixtureLinks, ...(tag !== undefined ? { crewId: tag } : {}), opId: opId(`op-${id}-created`), hlc: at(1), authorId: author },
+    { kind: "round-started", opId: opId(`op-${id}-started`), hlc: at(2), authorId: author },
+    { kind: "round-finalized", opId: opId(`op-${id}-finalized`), hlc: at(3), authorId: author },
+  ];
+};
 
 describe("createDynamoEventJournal", () => {
   it("assigns 1..n contiguous seq on the first append", async () => {
@@ -203,6 +243,87 @@ describe("createDynamoEventJournal", () => {
       expect(log.map((event) => event.seq)).toEqual([1, 2, 3]); // contiguous — no gaps, no dupes
       expect(log).toHaveLength(3);
       expect(log[2]!.opId).toBe(winningOpId); // the log's only new event is the winner's
+    });
+  });
+
+  // The atomic finalize commit (projection-realignment spec §2): round-finalized's EVT/OPID
+  // slots and the settled snapshot land in ONE cross-table transaction, or not at all.
+  describe("append(..., { snapshot }) — the atomic finalize commit", () => {
+    it("writes EVT + OPID + snapshot item in one transaction", async () => {
+      const journal = newFinalizingJournal();
+      const id = roundId(randomUUID());
+      const archive = buildArchive(id, 12_345);
+      const evt = makeFinalizeEvent();
+
+      const result = await journal.append(id, [evt], { expectedHeadSeq: 0, snapshot: archive });
+      expect(result.headSeqConflict).toBeFalsy();
+      expect(result.appended.map((event) => event.seq)).toEqual([1]);
+
+      // The EVT slot and its OPID marker landed on the rounds table...
+      const evtItem = await local.client.send(new GetCommand({ TableName: local.roundsTable, Key: { pk: roundPk(id), sk: evtSk(1) } }));
+      expect(evtItem.Item).toBeDefined();
+      const opidItem = await local.client.send(new GetCommand({ TableName: local.roundsTable, Key: { pk: roundPk(id), sk: opIdSk(evt.opId) } }));
+      expect(opidItem.Item).toBeDefined();
+
+      // ...and the snapshot landed on the snapshots table, keyed by the BARE roundId, its
+      // finalizedAt taken from the archive's own round-finalized wallMs.
+      const snapItem = await local.client.send(new GetCommand({ TableName: local.snapshotsTable, Key: { pk: snapshotPk(id) } }));
+      expect(snapItem.Item?.archive).toEqual(archive);
+      expect(snapItem.Item?.finalizedAt).toBe(12_345);
+    });
+
+    it("whose EVT slot loses the seq race writes NO snapshot item", async () => {
+      const journal = newFinalizingJournal();
+      const id = roundId(randomUUID());
+      const archive = buildArchive(id, 999);
+
+      // Pre-occupy the exact EVT slot this conditional append will target (evtSk(1)) with a
+      // sentinel whose event.seq reads as 0 — so headSeq() still returns 0 and the append PASSES
+      // its pre-check, then loses the per-slot attribute_not_exists condition INSIDE the
+      // transaction. The whole transaction, snapshot leg included, must roll back.
+      await local.client.send(new PutCommand({ TableName: local.roundsTable, Item: { pk: roundPk(id), sk: evtSk(1), event: { seq: 0 } } }));
+
+      const result = await journal.append(id, [makeFinalizeEvent()], { expectedHeadSeq: 0, snapshot: archive });
+      expect(result).toMatchObject({ appended: [], headSeqConflict: true });
+
+      const snapItem = await local.client.send(new GetCommand({ TableName: local.snapshotsTable, Key: { pk: snapshotPk(id) } }));
+      expect(snapItem.Item).toBeUndefined(); // atomicity: the snapshot never landed without its EVT slot
+    });
+
+    it("throws at call time when options.snapshot is set but no snapshotsTableName was configured", async () => {
+      const journal = newJournal(); // no snapshotsTableName
+      const id = roundId(randomUUID());
+      await expect(journal.append(id, [makeFinalizeEvent()], { expectedHeadSeq: 0, snapshot: buildArchive(id, 1) })).rejects.toThrow(/snapshotsTableName/);
+    });
+
+    // The M8 explicit-undefined class, re-pinned at its NEW write site: settleRound emits NO
+    // crewId key on a non-crew archive (an explicit `crewId: undefined` crashed the document
+    // client's marshall() live on beta). The atomic commit marshals the archive into the
+    // transaction, so the class must stay pinned here, not just in domain.
+    it("commits a settleRound-PRODUCED non-crew archive snapshot without crashing marshall", async () => {
+      const journal = newFinalizingJournal();
+      const id = roundId(randomUUID());
+      const archive = settleRound(settledLog(id));
+      expect("crewId" in archive).toBe(false);
+
+      await journal.append(id, [makeFinalizeEvent()], { expectedHeadSeq: 0, snapshot: archive }); // must not throw
+
+      const snapItem = await local.client.send(new GetCommand({ TableName: local.snapshotsTable, Key: { pk: snapshotPk(id) } }));
+      expect(snapItem.Item?.archive).toEqual(archive);
+      expect("crewId" in (snapItem.Item?.archive as Record<string, unknown>)).toBe(false);
+    });
+
+    it("round-trips a settleRound-PRODUCED crew-tagged archive snapshot with its crewId intact", async () => {
+      const journal = newFinalizingJournal();
+      const id = roundId(randomUUID());
+      const tag = crewId(`crew-${randomUUID()}`);
+      const archive = settleRound(settledLog(id, tag));
+      expect(archive.crewId).toBe(tag);
+
+      await journal.append(id, [makeFinalizeEvent()], { expectedHeadSeq: 0, snapshot: archive });
+
+      const snapItem = await local.client.send(new GetCommand({ TableName: local.snapshotsTable, Key: { pk: snapshotPk(id) } }));
+      expect((snapItem.Item?.archive as { crewId?: string }).crewId).toBe(tag);
     });
   });
 

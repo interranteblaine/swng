@@ -144,7 +144,7 @@ an already-ghosted, unclaimed row never renames it, no matter what name is passe
 claim, so a fresh claim's profile is named after the row you clicked, not your email. Exercised
 live by `crewSeason.spec.ts`'s own mid-season claim step (Task 7).
 
-### 6. App sign-out doesn't end the Cognito hosted-UI session
+### 6. App sign-out doesn't end the Cognito hosted-UI session — CLOSED (M9 Task 2)
 
 Found in the M7 close flow-walk (2026-07-10): "Sign out" clears the app's local tokens but
 leaves Cognito's own hosted-UI session cookie alive, so the next "Sign in" can silently
@@ -153,6 +153,14 @@ multi-account device and a real concern on a shared one. Fix shape: sign-out red
 through the pool's `/logout` endpoint (which clears the hosted session and returns to a
 registered logout URL). Belongs with M9's auth hardening (the logout URLs are already
 registered on the client).
+
+**Landed (2026-07-11):** M9 Task 2 (commit `5561c76`) shipped the fix shape named above
+exactly — `useAuth.ts`'s `signOut()` now clears local tokens and redirects through Cognito's
+own `/logout` endpoint; `apps/infra-cdk/lib/swngStack.ts`'s `UserPoolClient.logoutUrls` gained
+`${origin}/` for each registered origin. The deploy's own live smoke (a `/logout` redirect
+round-trip, `curl -I` → 302) confirmed the endpoint change at deploy time; the milestone's
+separate controller close-out flow-walk re-confirms it end-to-end in-browser (sign out, sign
+in again — a fresh login form, not a silent re-authentication as the previous account).
 
 ### 7. Rounds played before signing in strand their ghosts (one claim per account) — CLOSED, write-off recorded (M8 plan decision)
 

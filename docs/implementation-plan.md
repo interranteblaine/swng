@@ -603,6 +603,77 @@ re-accepted-with-dated-record; a share link proven by a no-auth browser; control
 flow-walk clean. No field test — casual dogfooding on hosted beta is available but gates
 nothing.
 
+**M9 — as executed:** `docs/superpowers/plans/2026-07-11-m9-share-harden-ship.md`'s seven
+tasks, entirely on the EXISTING `swng-beta` stack — no new stack, no prod (prod and the
+v1-bar field Saturday are M10 below, user-triggered only). Five beta deploys, all green:
+
+- **T1** (deploy #1, `9fe8226`) — backend correctness: `finalizeRound`'s idempotent branch
+  now repairs on replay (re-attempts `putArchive` when the archive is found missing, healing
+  a wedged finalize on retry instead of returning a false 200 forever); sub-uniqueness becomes
+  a real invariant (a base-table `SUB#<sub>` pointer item written atomically with the golfer
+  row via `TransactWriteItems` + `attribute_not_exists`, `getBySub` reads the pointer with a
+  consistent read, gsi2's own `SUB#` entry keeps being written for rollback safety but is no
+  longer read); crew join codes mint unique (a bounded retry against `findByJoinCode`,
+  exhaustion throws `join-code-exhausted`). This deploy also carried M8's own undeployed
+  `4baa04a` fixes live for the first time.
+- **T2** (deploy #2, `5561c76`) — identity hardening: claiming requires proof of context —
+  `ClaimGolferRequest` gains a REQUIRED `code` (a round join code whose round contains the
+  golferId, or a crew join code whose crew has them as a member), verified BEFORE the two
+  existing 409 collision arms so a wrong code can never be used to probe claim status (403
+  `claim-proof-required`); the web supplies the code automatically from whichever context
+  (round or crew) the claim is made in. Real sign-out closes papercut 6: `signOut()` now
+  redirects through Cognito's own `/logout` endpoint so the hosted-UI session actually ends,
+  and `UserPoolClient.logoutUrls` gained `${origin}/`.
+- **T3** (deploy #3, `10ebd68`) — share links: a spectator token (`scope: "spectator"` baked
+  into the same signed HMAC payload as participant tokens — one signer, no fork; deliberately
+  no `exp`, so a link never expires), `POST /rounds/{roundId}/share` (participant auth) mints
+  a deterministic `/watch/{roundId}#<token>` URL (same round → same link, every time), a new
+  dispatcher `round-read` auth tier accepts participant OR spectator tokens on read routes and
+  403s a spectator token presented to any write route (`read-only-token`), and a read-only
+  `WatchPage` (token read from `location.hash`, never a query param, so it never hits access
+  logs) that renders the live round and flips to the archived card at finalize — no session,
+  no outbox, no edit affordances. No revocation in v1 (a ledger item below, for the ship
+  milestone).
+- **T4** (`69aa4fd`, `b34d2c4`, `3e48030`) — 14 web papercuts landed in one batch: a
+  duplicate-golfer guard on the roster, the `parseSeason` empty-string-is-not-zero fix,
+  `AddPlayerForm` keeping tee/course-handicap across adds, `onAddGame`'s missing post-call
+  sync, "play the usual" rendering disabled-with-an-explainer instead of hiding, no claim
+  affordance on a roster row while identity is still loading, `SeedFailureNotice` suppressed
+  on an already-final round, `saveStandingGame` roster validation (`unknown-preset-player`),
+  domain-layer crew-name validation, an orphan-order why-comment on `addCrewMember`, "Former
+  member" ledger copy for departed members, an error/empty-surface sweep removing raw server
+  text, plus gating `ClaimAffordance` off on an empty code and a terminal error state for
+  `useWatchRound` — alongside a reconnect-QA e2e (`killNetwork.spec.ts`: WS-drop-then-Sync-now
+  convergence, offline-through-finalize-attempt) and a deterministic WS-liveness hardening of
+  `fieldTest.spec.ts`'s own cross-context game-add/join-propagation waits (recovery waits
+  added, no assertion weakened).
+- **T5** (deploy #4, `71076dc`, `78f0e6b`) — ops: HTTP API throttling (stage default 50
+  rps/100 burst; a tighter 5 rps/10 burst on the 8 anonymous-reachable routes — `POST
+  /rounds`, `/rounds/join`, `GET /rounds/peek`, the 5 course routes); 12 CloudWatch alarms
+  onto one SNS topic (`swng-alarms-beta`) with an email subscription to
+  `interrante.blaine@gmail.com` (**still PendingConfirmation at deploy time — the owner must
+  click the confirm link before alarms actually page**); e2e Cognito-user teardown (a
+  cross-worker run-scoped mint-then-delete: a run file collects minted users, a Playwright
+  `globalTeardown` deletes them from the live pool after all workers finish).
+- **T6** (deploy #5, `41f6332`) — hosted beta web: S3 + CloudFront (Origin Access Control, SPA
+  fallback routing 403/404 → `index.html`, a strict CSP — `default-src 'self'; connect-src
+  'self' <http-api> <wss ws-api> <cognito-domain>; script-src 'self'; style-src 'self'
+  'unsafe-inline'; img-src 'self' data:`) added to the EXISTING `swng-beta` stack;
+  `UserPoolClient` learns the CloudFront origin (localhost stays registered, dev keeps
+  working). **Live at https://d5qqgppnyb7y1.cloudfront.net/** — the controller verified a
+  full PKCE sign-in AND sign-out round-trip on a phone viewport with zero CSP violations.
+- **T7** (this task) — the docs step: `docs/field-test.md` (new, shelf-ready, unscheduled —
+  the v1-bar checklist plus a findings-ledger template, gating nothing in M9), this
+  as-executed note, the hardening-ledger updates below, `CLAUDE.md`'s current-state paragraph,
+  and `papercuts.md` item 6 closed. The controller's own close-out (`pnpm validate`; `pnpm
+  e2e:beta` ×2; `pnpm e2e:field` ×3 consecutive; a flow-walk on six real-browser flows —
+  primary path, play-the-usual, add-a-player, claim-with-proof on both the round-code and
+  crew-code arms, a share link followed from a second signed-out context, and a real
+  sign-out/sign-in round-trip) is a separate step after this commit, not reproduced here.
+
+Every M7-close hardening-ledger item below is now either landed in M9 or explicitly
+re-accepted with a 2026-07-11 dated record — see each entry's own update.
+
 ### M10 — Ship (user-triggered; not scheduled)
 
 **Goal:** the v1 bar (`roadmap.md`) met on prod. This milestone begins only when the owner
@@ -627,11 +698,20 @@ cited spot, this is just the one consolidated list Task 2 works from.
   `pnpm e2e:beta`/`e2e:field` can mint a JWT via `InitiateAuth` without a browser. Narrow or
   remove it once the e2e gates have another way to authenticate (a Hosted-UI-driving Playwright
   flow, or a dedicated test-only token-mint endpoint gated off in prod).
+  **RE-ACCEPTED WITH RECORD (2026-07-11):** M9 left this unchanged by design — there is no
+  prod pool yet for it to be absent from, and M9 deploys no new stack. Closes for real in M10,
+  which stands up the prod pool without it.
 - **localStorage token storage** (`apps/web/src/auth/tokenStore.ts`): plaintext Cognito
   tokens (id + refresh) in `localStorage`, no rotation beyond the one-shot 401-triggered
   refresh `useAuth.ts` drives. An XSS on the web app reads them directly. Accepted for beta's
   threat model (no third-party script surface); prod hardening is an httpOnly-cookie session or
   short-lived-token-in-memory-only design.
+  **RE-ACCEPTED WITH RECORD (2026-07-11):** M9 Task 6 added a strict CSP at the CloudFront
+  layer (`default-src 'self'; connect-src 'self' <http-api> <wss ws-api> <cognito-domain>;
+  script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:`) as the beta-grade
+  mitigation — no third-party script origin exists on the hosted app, which is the load-bearing
+  fact behind re-accepting this rather than fixing it now. The httpOnly-cookie redesign itself
+  stays out, deferred to M10.
 - **Claim capability = knowledge of the golferId, nothing more** (`claimGolfer.ts` /
   `SetupPanel.tsx`'s `ClaimAffordance`): the only thing standing between "browsing a round" and
   "claiming that ghost's whole history" is the golferId's own secrecy — there's no server-side
@@ -643,18 +723,29 @@ cited spot, this is just the one consolidated list Task 2 works from.
   another account.") is a UX mitigation, not a security one — it stops the common accidental
   case (a new user hasn't Saved their own profile yet) from reading as a hack attempt, but does
   nothing about a deliberate golferId-guessing claim.
+  **LANDED (M9 Task 2, 2026-07-11):** `ClaimGolferRequest` now requires a `code` — a round join
+  code whose round contains the golferId, or a crew join code whose crew has them as a member —
+  verified server-side BEFORE the two 409 collision arms (403 `claim-proof-required` on a bad
+  or missing code, so a wrong code can't be used to probe claim status either). Knowledge of
+  the golferId alone no longer claims anything.
 - **Join-vs-claim race** (`joinRound.ts`, the `boundElsewhere`/`existing?.sub` check): a claim
   can land between `joinRound`'s golferStore read and its `participant-joined` append, letting a
   golferId get joined into a round moments after being claimed elsewhere. Narrow window, needs
   advance knowledge of the golferId mid-claim, and grants nothing beyond what an unclaimed
   ghost's participant token already carries (M4: ghost tokens carry no auth) — accepted, not
   revisited until identity hardening needs the same claim-atomicity work anyway.
+  **RE-ACCEPTED WITH RECORD (2026-07-11):** untouched by M9 — the claim proof-of-context work
+  (Task 2) closes a different hole (who may attempt a claim, not the join/claim interleaving
+  itself); still narrow, still grants nothing beyond an unclaimed ghost's existing token scope.
 - **`GolferStore.put` can silently drop a `sub`** (`createDynamoGolferStore.ts`): `put`'s `sub`
   field is a plain overwrite, not conditional or merged — a caller that reconstructs a `Golfer`
   without re-passing `found.sub` clears the claim on save. Every real call site today
   (`updateMyGolfer.ts`) re-passes it correctly, so this is a discipline invariant, not a
   structural one; M9 should either make `put` sub-preserving by default or add a lint/test that
   pins every call site.
+  **LANDED (M9 Task 1, 2026-07-11):** `put` now REFUSES to unbind — it throws
+  `ApplicationError("sub-drop-forbidden")` (a deliberate 500, programmer-error guard) when the
+  stored row has a sub and the incoming golfer would clear it.
 - **gsi2 eventual-consistency duplicate-golfer window** (`getOrCreateGolfer`,
   `getMyGolfer.ts`): sub-uniqueness is enforced by querying gsi2 (`getBySub`), and GSIs are
   never strongly consistent — two near-simultaneous first-ever PUT /me calls for the same sub
@@ -663,6 +754,10 @@ cited spot, this is just the one consolidated list Task 2 works from.
   pointer item (consistent-readable, created via a real conditional `put`) would make
   sub-uniqueness a true invariant instead of a race that merely self-heals on the next GET /me
   picking one winner.
+  **LANDED (M9 Task 1, 2026-07-11):** a base-table `SUB#<sub>` pointer item, written atomically
+  with the golfer row via `TransactWriteItems` + `attribute_not_exists`, makes sub-uniqueness a
+  true invariant exactly as designed here; `getBySub` reads the pointer with a consistent read.
+  gsi2's own `SUB#` entry is still written (rollback safety) but is no longer read.
 - **Projector staleness — per-shard, not per-golfer, serialization** (`projectArchive.ts`):
   DynamoDB Streams order per shard, and shards partition by round, not golfer — two rounds
   finalizing near-simultaneously that share a participant can land on different shards and race
@@ -672,12 +767,15 @@ cited spot, this is just the one consolidated list Task 2 works from.
   → `listCrewRounds` → `putSeasonRecords` (same file) is a read-modify-write over the whole
   `(crewId, season)` bucket, last-writer-wins under two near-simultaneous finalizes for the
   same crew/season — same self-heal path (next finalize or rebuild).
+  **RE-ACCEPTED WITH RECORD (2026-07-11):** untouched by M9; the self-heal-on-next-finalize-or-
+  rebuild path stands as the mitigation.
 - **Rebuild-vs-live-finalize wipe window** (`rebuildProjections.ts`): the manual rebuild's
   archive Scan (`createDynamoArchiveSource`) necessarily predates its own wipe step; a round
   that finalizes (and runs the live stream-triggered `projectArchive`) after the Scan but before
   the wipe has its fresh projection wiped and never restored by that same rebuild run. Operator
   note: don't invoke `RebuildFunction` while rounds are actively finalizing, or just invoke it
   again.
+  **RE-ACCEPTED WITH RECORD (2026-07-11):** untouched by M9; the operator note stands.
 - **Non-atomic `putHistoryLine` upsert** (`projectArchive.ts`'s `putHistoryLine` +
   `listHistory` + `putIndex` sequence): three separate writes/reads per golfer per finalize, no
   transaction across them. A crash or throw between them leaves a history line posted without
@@ -685,12 +783,16 @@ cited spot, this is just the one consolidated list Task 2 works from.
   the test's poll condition, not the product). Acceptable for a projection (rebuild is the
   general-purpose repair path); would need real atomicity if projections ever became a source
   of truth.
+  **RE-ACCEPTED WITH RECORD (2026-07-11):** untouched by M9.
 - **`RebuildFunction`'s global full-table replay** (`packages/lambda/src/entries/rebuild.ts`):
   no pagination or partial-range replay — every invocation Scans and replays every archive in
   the table, unconditionally. Fine at today's "a few thousand events across an afternoon" scale
   (`architecture.md` §3); as the archive count grows this eventually blows the Lambda's memory
   (materializing every archive in one array) and its 5-minute timeout before hardening does.
   M9 should add either incremental/windowed rebuild or a streaming (non-materializing) pass.
+  **RE-ACCEPTED WITH RECORD (2026-07-11):** the replay shape itself is unchanged, but M9 Task 5
+  added a CloudWatch alarm on `RebuildFunction` Duration > 4 minutes (the 5-minute-timeout
+  tripwire) — "eventually blows up" is now a page, not a silent surprise.
 - **Throwaway e2e Cognito users/data accretion on beta**: `identityRecord.spec.ts`'s
   `mintThrowawayUser` (`AdminCreateUser`/`AdminSetUserPassword`) and its own throwaway courses
   (`Identity Record Course ${Date.now()}`) are never deleted after the run — every `e2e:beta`/
@@ -698,6 +800,11 @@ cited spot, this is just the one consolidated list Task 2 works from.
   now (beta is disposable, not prod), but unbounded over the project's lifetime; M9 should add
   teardown (`AdminDeleteUser` in an `afterAll`, or a periodic beta-only sweep) before beta data
   volume itself becomes a hardening concern.
+  **PARTIALLY LANDED (M9 Task 5, 2026-07-11):** the Cognito-user half is fixed — a cross-worker
+  run-scoped teardown (a run file collects minted users, a Playwright `globalTeardown` deletes
+  them from the live pool after all workers finish) now runs on every `e2e:beta`/`e2e:field`
+  invocation. Course/round/crew data rows are unchanged and **RE-ACCEPTED WITH RECORD** — still
+  inert, still unbounded over the project's lifetime.
 - **Finalize false-200 on a `putArchive` failure** (`finalizeRound.ts`): the `round-finalized`
   event append and the archive write (`deps.store.putArchive`) are two separate calls, not one
   transaction. If `putArchive` throws after the event has already landed, the round is now
@@ -708,6 +815,9 @@ cited spot, this is just the one consolidated list Task 2 works from.
   throwaway rounds wedged on beta this exact way. M9 needs either a single-transaction
   append+archive write, or the idempotent-replay branch to re-attempt `putArchive` when the
   archive is found missing.
+  **LANDED (M9 Task 1, 2026-07-11):** the idempotent-replay branch now re-attempts `putArchive`
+  when the archive is found missing — the exact fix named here. (The two wedged M8 throwaway
+  rounds on beta stay as-is — throwaway data, not repaired retroactively.)
 - **Cross-season re-finalize strands the old season's crew contribution + RECORDS**
   (`createDynamoProjectionStore.ts`'s `putCrewRound` dedupe and `rebuildProjections.ts`'s
   `touchedCrewSeasons`): both are scoped to `(crewId, season)` — a reopen-and-refinalize whose
@@ -718,6 +828,8 @@ cited spot, this is just the one consolidated list Task 2 works from.
   season nothing currently finalizes into). Unreachable in v1 (nothing reopens a finalized
   round yet); latent once something does. See `createDynamoProjectionStore.ts`'s `putCrewRound`
   comment for the corrected (non-claiming-it's-handled) version of this note.
+  **RE-ACCEPTED WITH RECORD (2026-07-11):** untouched by M9; still unreachable in v1 (nothing
+  reopens a finalized round yet).
 - **Crew join codes: permanent, no uniqueness condition, arbitrary winner on collision**
   (`createCrew.ts`'s `deps.ids.newJoinCode()` + `createDynamoCrewStore.ts`'s `put`/
   `findByJoinCode`): unlike a round's own join code (scoped to that round's lifetime), a crew's
@@ -727,6 +839,10 @@ cited spot, this is just the one consolidated list Task 2 works from.
   consent-boundary miss more than a correctness one (whoever holds a stale or leaked code can
   join that crew forever) — negligible at the join-code alphabet's real collision odds today,
   but accumulates as the crew count grows.
+  **LANDED (M9 Task 1, 2026-07-11):** `createCrew` now retries `newJoinCode()` against
+  `findByJoinCode` (bounded, 5 attempts), exhaustion throws `join-code-exhausted` — a genuine
+  uniqueness condition at mint time. (The consent-boundary point — a leaked code still joins
+  that crew forever — is unchanged and was never in scope of the uniqueness fix.)
 - **Triaged-M9 web/UX papercuts** (full detail in the M8 close-out review, not reproduced
   here): `startRound`'s `players[]` roster has no duplicate-golfer guard; the `parseSeason`
   family parses an empty string as if it were a real season (`Number("")` is 0, an integer, so
@@ -743,6 +859,9 @@ cited spot, this is just the one consolidated list Task 2 works from.
   `addCrewMember` can leave an orphaned ghost row if the crew write retries out after the
   golfer row is already created; departed-member ledger lines render a truncated raw golferId
   instead of "Former member" copy.
+  **LANDED (M9 Task 4, 2026-07-11):** every item above shipped in the 14-item papercut batch
+  (`69aa4fd`) — see the M9 as-executed note above for the full list and the accompanying
+  reconnect-QA hardening.
 
 ---
 

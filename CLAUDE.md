@@ -187,6 +187,44 @@ made round-creation sensitive to sign-in state for the first time, which broke a
 round-creation step — fixed in the test (moved the sign-in injection to the point in the story
 that actually needs it), not the product, since the new as-self behavior is correct and
 intended.
+Share links and hardening are real (M9): swng runs from a phone with no laptop, all on the
+SAME `swng-beta` stack — no new stack; prod stays a separate, user-triggered M10. Five beta
+deploys, all green: backend correctness (`9fe8226`) — `finalizeRound`'s idempotent branch now
+repairs on replay (re-attempts `putArchive` when the archive is found missing, healing a
+wedged finalize on retry), a real sub-uniqueness invariant (a base-table `SUB#<sub>` pointer
+written atomically with the golfer row via `TransactWriteItems` + `attribute_not_exists`,
+`getBySub` reads the pointer, gsi2's own `SUB#` entry stays written for rollback safety but is
+no longer read), and crew join codes that mint unique (a bounded retry, `join-code-exhausted`
+on exhaustion); identity hardening (`5561c76`) — claiming now requires proof of context
+(`ClaimGolferRequest.code`: a round join code whose round contains the golferId, or a crew
+join code whose crew has them as a member, checked BEFORE the two 409 collision arms so a
+wrong code can't probe claim status — 403 `claim-proof-required`) and real sign-out
+(`signOut()` redirects through Cognito's own `/logout`, `logoutUrls` gains the app origin);
+share links (`10ebd68`) — a spectator token (`scope: "spectator"` baked into the same signed
+HMAC payload as participant tokens, no `exp`, one signer, no fork), `POST
+/rounds/{roundId}/share` (participant auth) mints a deterministic `/watch/{roundId}#<token>`
+URL, a new `round-read` auth tier accepts participant OR spectator tokens for reads and 403s a
+spectator token on any write (`read-only-token`), and a read-only `WatchPage` (token from
+`location.hash`, live → archived, no session/outbox/edit affordances); the web papercut batch
+(`69aa4fd`, `b34d2c4`, `3e48030`) — 14 fixes (a duplicate-golfer guard, the `parseSeason`
+empty-string fix, standing-game roster validation, domain-layer crew-name validation, "Former
+member" ledger copy, a raw-error-text sweep, and more) plus a reconnect-QA e2e
+(`killNetwork.spec.ts`) and a deterministic WS-liveness hardening of `fieldTest.spec.ts`'s own
+cross-context waits; ops (`71076dc`, `78f0e6b`) — HTTP API throttling (50 rps/100 burst
+default, 5/10 on the 8 anonymous-reachable routes), 12 CloudWatch alarms onto one SNS topic
+(email subscription to `interrante.blaine@gmail.com`, pending confirmation), and e2e
+Cognito-user teardown; and hosted beta web (`41f6332`) — S3+CloudFront (OAC, SPA fallback, a
+strict CSP) on the existing stack, **live at https://d5qqgppnyb7y1.cloudfront.net/**, with a
+full PKCE sign-in/out round-trip and zero CSP violations verified on a phone viewport. Every
+hardening-ledger item from M7's close either landed in M9 or is re-accepted-with-dated-record
+(2026-07-11) in `implementation-plan.md`'s M9 section — localStorage tokens (the new CSP is
+the beta mitigation), `USER_PASSWORD_AUTH` (no prod pool exists yet to be absent from),
+share-link revocation, and the remaining self-healing projector/rebuild races among them.
+`docs/field-test.md` is a new, shelf-ready v1-bar field-test kit — it gates nothing in M9; it
+exists for the user-triggered M10 Saturday. Prod deployment and the field test itself are
+explicitly out of M9 (owner decision, 2026-07-11) and form M10; M9's own gate (`pnpm
+validate`, `pnpm e2e:beta` ×2, `pnpm e2e:field` ×3 consecutive, a controller flow-walk on six
+real-browser flows) is the milestone's separate close-out step.
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

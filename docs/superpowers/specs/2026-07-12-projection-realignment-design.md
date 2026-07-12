@@ -1,154 +1,195 @@
-# The round is a sealed fact; everything else points at it — architecture correction
+# The snapshot realignment — target design
 
-> **Status:** product/architecture correction (target model + the drift it corrects). Surfaced
-> 2026-07-12 by questioning what a "crew" is; sharpened into a single dependency rule. This is
-> the principle three implementation threads will serve — captured now, scheduled separately.
+> **Status:** approved design (2026-07-12, converged in review with the owner). Supersedes the
+> earlier correction-only version of this document; the drift record it captured is condensed
+> in §8. This is the system as it should be; implementation follows via an implementation
+> plan. `docs/architecture.md` §Crew and the persistence sketch are corrected as part of this
+> work.
 
-## The one rule
+## 0. The rule
 
-**A round is a sealed leaf. Everything points *at* it; it points at nothing.**
+**A round is a sealed leaf. Everything points at it; it points at nothing.**
 
-- A **round** records only **facts about that round** — the course card frozen in at creation,
-  who played (golferIds + the name/handicap frozen at join), the games, the scores, when it
-  finalized. It has **no** field, tag, or reference to a golfer's summary, a crew, or a season.
-  It does not know who counts it. It is identified by a `roundId` and is otherwise self-contained.
-- **Finalize seals it** into an immutable snapshot (`RoundArchive`). Nothing edits it after.
-- **Every derived thing references rounds inbound, by `roundId`** — a golfer's history, the list
-  of rounds a golfer has played, a crew-season's standings. The reference is always
-  *outside → round*, never *round → outside*.
+A round records only facts about itself — the frozen course card, who played, the games, the
+scores, the results. It carries no field, tag, or reference to a golfer summary, a crew, or a
+season. Everything derived references rounds inbound, by `roundId`.
+
+## 1. State model — four stores, one job each
+
+| Store | Holds | Nature |
+| --- | --- | --- |
+| `rounds` | event logs of rounds in flight | working state; the only event-sourced thing |
+| `snapshots` | one immutable record per finished round, keyed by `roundId` | **the atom**; system of record for everything downstream |
+| `core` | golfers, courses, crews (roster + seasons + counted rounds) | entities; documents recording acts people took |
+| `projections` | golfer records + presence | derived, disposable, rebuildable |
+
+The snapshot is today's `RoundArchive`, moved out of the rounds table into its own table
+(pk = `roundId`, one item, tens of KB). A single-purpose table means reading it *is*
+enumerating the projection inputs — no scan-through-event-logs, ever.
+
+## 2. The finalize chain
+
+1. A participant taps finalize → the HTTP entry folds the round's events, validates
+   settle-ability, and runs `settleRound` (pure) → the snapshot.
+2. **One `TransactWriteItems`** commits the `round-finalized` event append (rounds table,
+   existing head-seq condition) and the snapshot put (snapshots table) together. DynamoDB
+   transactions span tables. The wedge state "finalized but no archive" becomes
+   unrepresentable; M9's repair-on-replay branch is deleted with its reason.
+3. The snapshots table's stream invokes the projector. Every stream record is a snapshot —
+   no filter, no branching.
+4. The projector does one thing: **for each participant, update that golfer's record**
+   (§3). It does not know crews exist. The chain ends here.
+
+The stream is at-least-once; every projector write is an upsert keyed by `roundId` and the
+index is recomputed from the full line set, so re-delivery lands the identical state.
+
+## 3. The golfer record (the one stored projection)
+
+One partition per golfer in the projections table:
 
 ```
-   golfer summary (index/history) ──┐
-   my-rounds list  (auto-derived)  ─┤                     ┌───────────────────────────┐
-   crew-season     (curated list)  ─┼──  inbound, by id  ─► ROUND — sealed facts only  │
-                                     │                     │ frozen card · players ·   │
-                                     │                     │ games · scores · final    │
-                                     │                     │ (references NOTHING out)  │
-                                     └─────────────────────►                          │
-                                                           └───────────────────────────┘
+GOLFER#<golferId>  ROUND#<roundId>   { finalizedAt, courseName, tee, holes, ags?, differential?, distribution }
+GOLFER#<golferId>  INDEX             { value, differentialsUsed, computedAt }
+GOLFER#<golferId>  LIVE#<roundId>    { courseName, joinedAt, ttl }        ← presence, §5
 ```
 
-**The anti-drift test:** if a round (or its `round-created` event) points outward at a golfer
-summary, a crew, or a season, that is the drift. It has happened three times (below); each fix
-is the same inversion — move the reference to the thing that owns it, pointing back at the round
-by id.
+- A **line** is a ~250-byte summary of one finalized round, extracted from the snapshot by
+  the existing pure `archiveGolferLine`. The lines ARE the "my rounds" list; each links to
+  its snapshot by `roundId`.
+- **Keys are identities; time is an attribute.** The sort key is `ROUND#<roundId>` — stable —
+  because reopen-and-refinalize changes `finalizedAt`, and a time-embedded key would turn a
+  correction into a duplicate item (the exact documented, unrepairable year-boundary bug in
+  today's `putCrewRound`). Replace-on-write; order by the `finalizedAt` attribute in memory.
+- **Index recompute:** on each finalize, upsert this round's line, Query the golfer's own
+  lines (a 1,000-round career ≈ 250KB ≈ two pages), sort by `finalizedAt` in memory, run the
+  pure fold (`combineNineHoleDifferentials` → `computeIndexDetail`), replace `INDEX`. Never
+  incremental — best-8-of-20 doesn't patch, and full recompute is what makes replay idempotent.
 
-## The snapshot is the atom
+## 4. Crews — fully outside the chain
 
-The finalized snapshot is the unit everything aggregates from. It is already persisted
-(`settleRound` → `RoundArchive` → `putArchive`) and everything is **rebuildable** by replaying
-snapshots (`rebuildProjections`). The snapshot must become **first-class**: listable and
-individually viewable — at both the user level and the crew level. Today it is only reachable as
-summary *lines* (`GET /me/record`) or through a share/watch link; there is no "my rounds → open
-this one" and no "the crew's counted rounds → open this one." That absence is the core modelling
-gap, and per the product it was fundamental, not optional.
+A crew is entity data in `core`, one partition:
 
-One atom, aggregated up **two independent axes**:
+```
+CREW#<id>  CREW                        { name, joinCode }
+CREW#<id>  MEMBER#<golferId>           { name, role }
+CREW#<id>  SEASON#<seasonId>           { name, status: open | closed }
+CREW#<id>  SEASON#<seasonId>#ROUND#<roundId>   { roundId, finalizedAt, appendedBy, appendedAt }
+```
 
-- **Player** → *every* snapshot a golfer played feeds their global index/history. (Correct today
-  — `projectArchive.ts:49-64`, ungated, keyed by golferId. This is the model done right; make
-  everything else match it.)
-- **Crew-season** → the snapshots *selected* for it feed the crew's standings/head-to-head **and**
-  each member's standing within that crew-season.
+- **Membership: real accounts only.** `addCrewMember` requires the target golfer to have a
+  bound sub; join-by-code is already account-gated. Ghosts exist only inside rounds
+  (onboarding stays: play as ghost → claim in-round → account → optionally join a crew).
+  **Leave** = delete the member item; past counted rounds stay counted; `applyStandingGame`
+  already tolerates absent golfers. Existing beta ghost members are left in place and labeled.
+- **Season = a named thing a member creates** ("2026", "Summer Cup"), open/closed. Never a
+  calendar computation — `seasonOf = getUTCFullYear` is deleted.
+- **Counting a round is an append on the crew page**: a member picks one of *their own*
+  finalized rounds; the server checks (caller is a member) ∧ (caller's golferId is in that
+  snapshot's participants) ∧ (entry absent), then writes the one entry item above. The round
+  is never read-modified, tagged, or touched. Un-count = the appender deletes the entry.
+  The same round may be counted in seasons of different crews, or two seasons of one crew —
+  each season is its own competition lens.
+- **Standings are computed on read, stored nowhere.** Season page → Query the season's
+  entries → `BatchGetItem` those snapshots → pure fold (`aggregateSeason` over
+  `crewContribution`) in the request. A season is 30–50 rounds × 30–80KB snapshots — one
+  BatchGet, a few MB, tens of ms, for a page a handful of people view. Nothing can go stale;
+  a re-finalized round is correct at the next look with zero recompute machinery. If a season
+  ever measures hot, cache the fold then — not preemptively.
+- Non-member golfers appearing in counted rounds (guests, departed members) aggregate as
+  recorded and are labeled in the view — standings never depend on membership *history*.
 
-The player's *global* summary is all their snapshots; a crew-season is a *subset lens*. There is
-no path where a crew-season feeds a golfer's global summary — those are separate scopes over the
-same atom.
+## 5. Presence — live rounds by identity
 
-## The two lists (both inbound references, one auto, one curated)
+`LIVE#<roundId>` items in the golfer's own projections partition: written synchronously by
+StartRound/JoinRound/AddParticipant for **every** participant golferId (ghosts included — a
+mid-round claim inherits home-screen presence for free), deleted by the projector at finalize
+(participants are in the snapshot in hand) and by abandon, with a ~36h TTL as the backstop so
+a never-finished round can't haunt the home screen. A register, not a projection: no rebuild
+path, none needed.
 
-- **User → their rounds** — a projection that *reads* snapshots by participant golferId. You
-  played it, so it's listed. Auto-derived. The round is never told it's in your list. → `list my
-  finalized rounds`, `open one snapshot`.
-- **Crew-season → its rounds** — a list of `roundId`s the **crew-season owns**. On the crew page,
-  a member **appends a `roundId`** ("count my Saturday round"). That write touches the
-  *crew-season's list only* — the round is never opened, modified, or tagged. Explicitly curated,
-  not auto-derived (your solo range round doesn't count unless you append it). → `list the crew's
-  counted rounds`, `open one snapshot`.
+Home: signed-in → "Your rounds" queries `LIVE#` under the caller's golfer. The device-token
+list remains **only** for anonymous ghost sessions — a ghost has no identity to query by.
 
-Both lists hold the reference **outside** the round. Neither writes anything onto the round.
+## 6. Capability from identity
 
-## Season
+`POST /rounds/{roundId}/token` (golfer auth): fold the round; if the caller's golferId is a
+participant, mint the same participant token StartRound/JoinRound mint; else 403. New phone,
+or seated by a friend → tap the round on home → scoring. Deletes the "seated but locked out"
+gap without weakening the token model.
 
-A season is a **grouping a crew defines** — a named competition/period ("2026", "Summer Cup"),
-the container a standing aggregates over. A crew may have one perpetual season or several. A
-snapshot enters a crew-season only by the append above. Season is **not** a calendar year
-auto-derived in the projector (today: `getUTCFullYear`, `projectArchive.ts:10`), and it is
-**never** an attribute of a round. It lives entirely on the crew side.
+## 7. Scrapping, viewing, listing
 
-## Crew
+- **`round-abandoned`**: a terminal event mirroring `round-finalized`'s fold semantics.
+  Produces **no snapshot** — the round aggregates nowhere and drops off presence. Emphatically
+  not "mark holes picked-up and finalize." Participant-gated route + confirm-gated "Scrap this
+  round" in the round menu. Finalize rejects on abandoned and vice versa.
+- **`GET /rounds/{roundId}/archive`** (golfer auth): allowed for a participant, or a member of
+  a crew that counts the round in any season (per-crew entry check — the caller belongs to a
+  handful of crews, each with a few hundred tiny entries). Spectator links stay the
+  anyone-else path. Web: an archived-round page; profile lines and counted-round lists link
+  to it.
+- **`GET /me/rounds`**: served from the lines (§3) — they already carry course, tee,
+  differential, distribution, roundId.
 
-- **A crew is a list of real accounts.** Ghosts are **not** crew members. Ghosts exist only as
-  unclaimed participants *inside a round* — onboarding is: play as a ghost → get a code → claim
-  in-round → become an account → then, optionally, be added to a crew. This removes the
-  ghost/seating/token complexity that was leaking into crews.
-- **Join** — a real account by code or invite (today: `joinCrewByCode` / `addCrewMember`; drop
-  the add-a-ghost path).
-- **Leave** — a member drops off the roster. **Does not exist today** (no such use case — a real
-  gap). What already counted stays in the historical record (rebuildable); the member simply
-  stops being eligible to append to open seasons.
-- **See all your crew-seasons** — a projection across the crews you belong to.
+## 8. Replay — two layers, matching the two derivation steps
 
-## Scrapping a round
+- **Snapshot → projections (rebuild; routine).** Paged read of the snapshots table — every
+  item read is an input; that is what backfill means — running the same per-golfer derivation
+  on each record; `{ processed, cursor }` out; re-invoke until the cursor is null. Needed
+  when: derivation logic changes (index-math fix; a v2 projection backfilling all history), a
+  projector invocation is lost beyond stream retries, or projections are corrupted. No
+  buffer-everything, no global sort (order-independent by construction), no wipe step, no
+  wipe-race.
+- **Events → snapshot (re-settle; rare, surgical).** A defect in `settleRound` itself →
+  re-settle the *affected rounds* from their event logs, per round, by id — never a sweep.
+  The corrected snapshot write flows through the same stream, so downstream projections
+  re-derive automatically.
 
-There is **no scrap/abandon today** — a round goes created → live → finalized (with
-`round-reopened` to un-finalize) and has no discard path, so an abandoned round lives forever or
-gets finalized as garbage. Scrapping must be a first-class terminal — a **`round-abandoned`**
-event that ends the round with **no snapshot**, so it aggregates nowhere and drops off the
-current-rounds list. It is emphatically **not** "mark every hole picked-up and finalize" — that
-seals a real snapshot that would then count.
+## 9. What gets deleted (the correction, condensed drift record)
 
-## The three drifts this corrects (each: a round pointing outward)
+The drift, three times over, was the round pointing outward — competition welded to a
+`crewId` on `round-created`, discovery welded to device-held tokens, capability welded to the
+join-call artifact. Each fix above is the same inversion. Deleted outright:
 
-1. **Competition welded to the round's `crewId`.** `round-created` carries `crewId`
-   (`{roundId, card, crewId?}`); `projectArchive.ts:72` gates the crew ledger on it and
-   aggregates that one round's participants; head-to-head rides the same gate (`H2H#crew#a#b`).
-   → Consequence: two members who play separate rounds never share a standing; your all-time
-   record vs. Dave can't exist unless every shared round carried the same tag. → **Fix:** drop
-   `crewId` from the round; a crew-season owns a curated list of `roundId`s; the standing is the
-   aggregate of those snapshots.
-2. **Live-round discovery welded to the device.** Home's "Your rounds" (`HomePage.tsx:13`) reads
-   `credentialStore` — rounds this *device* holds a token for. → You can't see your live round on
-   a new phone; a *seated* player (`startRound.ts:96-100`) has no credential at all. And it's the
-   wrong list: home should show your **current (live) rounds** by identity; finalized rounds are
-   history. → **Fix:** a `golfer → current rounds` projection keyed by identity.
-3. **Scoring capability welded to the join-call artifact.** A participant token is minted only at
-   `startRound.ts:114` / `joinRound.ts:71` and kept on the device; there is no "give me a token
-   because I'm signed in and already a participant." → Fresh device or seated player → can't
-   score. → **Fix:** an identity-gated token re-mint (as-self via Cognito sub), deriving the
-   capability from participation rather than the device artifact.
+- `crewId` from `round-created`, `StartRoundRequest`, `RoundState`, and the snapshot (wire
+  schemas tolerate-and-ignore it on old stored events; nothing writes or reads it).
+- The projector's crew arm; `putCrewRound` / `putSeasonRecords` / `getSeasonRecords` /
+  `wipeCrew`; the `CREWROUNDS#` / `RECORDS#` keyspaces; `seasonOf = getUTCFullYear`.
+- The `ARCHIVE` item in the rounds table and the full-table-scan `ArchiveSource`.
+- `rebuildProjections`' buffer / global-sort / wipe-then-replay and its documented
+  lost-finalize race.
+- Time-embedded sort keys (`HISTORY#<ms>#`, `CREWROUND#<ms>#`), both query-then-delete
+  idioms, and the unrepairable year-boundary bug class.
+- `finalizeRound`'s repair-on-replay branch (subsumed by the transaction).
+- Ghost-adding to crews.
 
-## Intentional couplings to keep (do NOT over-correct)
+Nothing new gets a GSI, a shard, or a pointer item.
 
-These are *values frozen into the round*, not outbound references — consistent with the rule:
+## 10. Intentional couplings to keep (do not over-correct)
 
-- **The round embeds a frozen `CourseCard`** (a copy, not a live link) so a later course edit
-  can't rewrite settled history.
-- **`courseHandicap` frozen at join** — you play at the handicap you started with.
-- **The index snapshot (`putIndex`)** — a rebuildable read cache, never a source of truth.
-- **`tabDeviceId` in `sessionStorage`** — a sync-correctness id, not a domain coupling.
+Values frozen *into* the round, consistent with the rule: the embedded frozen `CourseCard`;
+`courseHandicap` frozen at join; the `INDEX` item as a rebuildable read cache; `tabDeviceId`
+as a sync-correctness id.
 
-## What doesn't exist today (net-new, not just re-keying)
+## 11. Deploy & migration notes (beta only)
 
-- A first-class **snapshot view** (open one finalized round) and **`list my rounds`** — user level.
-- **Crew-season as a curated list of `roundId`s** + the **append-round-on-the-crew-page** action,
-  and **`list the crew's counted rounds`**.
-- **Leave a crew.**
-- **Scrap/abandon a round** (`round-abandoned`, no snapshot).
+- New `snapshots` table + stream is additive CDK; the projector's event source moves to it.
+- One-time copy of existing beta `ARCHIVE` items into the snapshots table (a handful).
+- Golfer-record keyspace change: rebuild-from-snapshots repopulates it; old `HISTORY#` items
+  and the `CREWROUNDS#`/`RECORDS#` keyspaces are dropped.
+- M8 crew-ledger data: no migration — beta test data; dogfood rounds get re-appended by hand.
+- `swng-beta` only, `pnpm deploy:beta` only, never the `InfraCdkStack-*` names.
 
-## Open decisions (resolve when each thread is planned)
+## 12. Implementation path — four steps, each its own reviewed task chain
 
-- Season model: how a crew names/opens/closes a season; whether an appended round can be pulled
-  back; who may append (the player only, any member).
-- Leave-crew semantics: confirm past counts stay, future eligibility stops.
-- `crewId` removal: confirm nothing non-drift depends on it, then a rebuild backfills corrected
-  projections from existing snapshots.
-- Current-rounds projection: exactly what "current" means (created, not finalized, not abandoned).
+1. **The atom**: snapshots table; transactional finalize; projector source move; beta archive
+   copy; delete the scan `ArchiveSource` and the repair branch.
+2. **The record**: golfer record on stable keys; rebuild-as-backfill with cursor; delete
+   wipe/sort/buffer; `GET /me/rounds` + snapshot view + web archived-round page.
+3. **The crew correction**: seasons + counted rounds + standings-on-read; de-ghost; leave;
+   delete `crewId` and the crew projection layer; crew-page web (seasons, count-a-round
+   picker, standings, leave).
+4. **Identity presence & capability**: `LIVE#` presence + home "Your rounds"; token re-mint;
+   `round-abandoned` end-to-end.
 
-## Scope & docs
-
-Three independent threads — **competition (crew-season as inbound curated list)**, **live-round
-discovery**, **identity-derived scoring capability** — plus the layer corrections (de-ghost
-crews, de-season/de-crew the round, add abandon). Each is its own spec → plan → build.
-**`docs/architecture.md` §143–144, 198 currently encode the crew-owns-round weld and the
-calendar-year season; they are corrected as part of this realignment.**
+Step 1 precedes 2 (rebuild reads the snapshots table); 3 and 4 are independent after 1.

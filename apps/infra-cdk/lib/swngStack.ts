@@ -8,7 +8,7 @@ import { HttpLambdaIntegration, WebSocketLambdaIntegration } from "aws-cdk-lib/a
 import { CfnUserPoolClient, OAuthScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
 import { Distribution, ResponseHeadersPolicy, ViewerProtocolPolicy } from "aws-cdk-lib/aws-cloudfront";
 import { S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
-import { FilterCriteria, FilterRule, Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
+import { Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
 import { DynamoEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
@@ -101,19 +101,6 @@ export const ANON_THROTTLED_ROUTES: ReadonlyArray<{ readonly method: HttpMethod;
 // whether CDK is invoked from apps/infra-cdk or the repo root.
 const entryPath = (name: string): string => join(import.meta.dirname, "..", "..", "..", "packages", "lambda", "src", "entries", `${name}.ts`);
 
-// Mirrors adapters-dynamodb/src/keys.ts's `archiveSk` constant by hand (M7 Task 4). Every
-// round's archive item is written with sk fixed to this exact literal
-// (createDynamoRoundStore.ts's putArchive), so the ProjectorFunction's event-source filter
-// criteria below, matching on `dynamodb.Keys.sk.S`, restricts it to ARCHIVE images only —
-// never a stray EVT#/META/OPID# record from the same table's stream. A hand-duplicated
-// literal with no parity check would let the two silently drift (the projector filter would
-// then never match anything, and nothing would ever be indexed) — closed the same way
-// routesParity.test.ts closes the equivalent risk for HTTP_ROUTES above: `archiveSk` is
-// exported from `@swng/adapters-dynamodb` (an infra-cdk devDependency, M7 Task 5 rider) and
-// `test/swngStack.test.ts` pins `ARCHIVE_SK === archiveSk`, so a future rename in keys.ts
-// fails CI here instead of silently starving the projector.
-export const ARCHIVE_SK = "ARCHIVE";
-
 export class SwngStack extends Stack {
   constructor(scope: Construct, id: string, props: SwngStackProps = {}) {
     if (FORBIDDEN_ID.test(id)) {
@@ -133,19 +120,42 @@ export class SwngStack extends Stack {
       partitionKey: { name: "pk", type: AttributeType.STRING },
       sortKey: { name: "sk", type: AttributeType.STRING },
       billingMode: BillingMode.PAY_PER_REQUEST,
-      // The event log + archive are the source of truth for a round — never delete this
-      // table out from under a stack teardown.
+      // The event log is the source of truth for a round in flight — never delete this table
+      // out from under a stack teardown.
       removalPolicy: RemovalPolicy.RETAIN,
-      // M7 Task 4: NEW_IMAGE feeds the ProjectorFunction below (filtered to ARCHIVE items
-      // only) — an in-place update (adding a stream never changes the table's logical id or
-      // physical resource, unlike a GSI addition it doesn't even need CloudFormation to
-      // replace anything for).
+      // M7 Task 4 added this stream to feed the ProjectorFunction (filtered to ARCHIVE items).
+      // Snapshot realignment Task 1 moves that event source to the snapshots table below (its
+      // stream needs no filter — every item there IS a finished round) — nothing in this stack
+      // consumes this stream any longer, but removing it is not this task's call: the ARCHIVE
+      // item itself still lives here until a later task's transactional finalize stops writing
+      // it (spec §9/§11), so a consumer could plausibly still read it meanwhile. Left as a
+      // harmless no-op property, not a table replacement, either way.
       stream: StreamViewType.NEW_IMAGE,
     });
     roundsTable.addGlobalSecondaryIndex({
       indexName: "gsi1",
       partitionKey: { name: "joinCode", type: AttributeType.STRING },
       projectionType: ProjectionType.ALL,
+    });
+
+    // Snapshot realignment Task 1 (docs/superpowers/specs/2026-07-12-projection-realignment-
+    // design.md §1/§2/§11): "the atom" — one immutable item per finalized round, pk-only (no
+    // sk: a key is an identity, time is an attribute — the plan's own Global Constraints rule
+    // out a sort key ever embedding a timestamp here). A later task makes the finalize
+    // transaction (round-finalized append + this table's put, ONE TransactWriteItems) the
+    // sole writer; nothing else ever puts here. RETAIN + PITR mirror the rounds table's own
+    // durability posture above — a finalized round is exactly as irreplaceable as the event
+    // log it was settled from. The stream feeds ProjectorFunction below with NO filter: every
+    // item on this table already IS a finished round, unlike the rounds table's own stream
+    // (which mixed in every EVT#/OPID#/META record too, hence that one's now-unused ARCHIVE
+    // filter — deleted outright below, not narrowed, per spec §2 "no filter, no branching").
+    const snapshotsTable = new Table(this, "SnapshotsTable", {
+      tableName: `swng-snapshots-${stage}`,
+      partitionKey: { name: "pk", type: AttributeType.STRING },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.RETAIN,
+      pointInTimeRecovery: true,
+      stream: StreamViewType.NEW_IMAGE,
     });
 
     // The core table now backs courses (M6 Task 3: createDynamoCourseStore) — pk `COURSE#<id>`
@@ -193,6 +203,12 @@ export class SwngStack extends Stack {
       sortKey: { name: "sk", type: AttributeType.STRING },
       billingMode: BillingMode.PAY_PER_REQUEST,
       removalPolicy: RemovalPolicy.RETAIN,
+      // Snapshot realignment Task 1 / spec §5: presence rows (a golfer's currently-live rounds,
+      // written in a later task) are self-expiring — TTL is provisioned now, forward of that
+      // task, same idiom M7 Task 4 used granting httpFn TABLE_PROJECTIONS access before any
+      // route read it. Golfer-record items (history lines, the index) never set `ttl`, so DynamoDB's
+      // background sweep never touches them — TTL only deletes items that carry the attribute.
+      timeToLiveAttribute: "ttl",
     });
 
     const connectionsTable = new Table(this, "ConnectionsTable", {
@@ -330,9 +346,13 @@ export class SwngStack extends Stack {
     httpFn.addEnvironment("TABLE_PROJECTIONS", projectionsTable.tableName);
     httpFn.addEnvironment("USER_POOL_ID", userPool.userPoolId);
     httpFn.addEnvironment("USER_POOL_CLIENT_ID", userPoolClient.userPoolClientId);
+    // Snapshot realignment Task 1: forward-provisioned ahead of the transactional finalize (a
+    // later task) that makes httpFn the snapshots table's sole writer — same "grant + env land
+    // now so that task is route-wiring only" idiom as TABLE_PROJECTIONS above.
+    httpFn.addEnvironment("TABLE_SNAPSHOTS", snapshotsTable.tableName);
 
-    // ProjectorFunction (the rounds table's stream, filtered to ARCHIVE items) and
-    // RebuildFunction (manual invoke only — no event source) are their own minimal
+    // ProjectorFunction (the snapshots table's stream, unfiltered — snapshot realignment Task
+    // 1) and RebuildFunction (manual invoke only — no event source) are their own minimal
     // NodejsFunctions, not built via makeFunction above: neither needs TABLE_CONNECTIONS,
     // TOKEN_SECRET, or WS_ENDPOINT (they never broadcast or touch a participant token), so
     // giving them `sharedEnv` would leak table names/secrets into a Lambda console that has
@@ -341,6 +361,9 @@ export class SwngStack extends Stack {
       entry: entryPath("projector"),
       handler: "handler",
       runtime: Runtime.NODEJS_20_X,
+      // TABLE_SNAPSHOTS is deliberately absent: the projector reads nothing by table name — a
+      // later task's parseSnapshotStreamImage unmarshalls the archive straight out of the
+      // stream record the event source below hands it.
       environment: { TABLE_PROJECTIONS: projectionsTable.tableName },
       timeout: Duration.seconds(15),
       memorySize: 512,
@@ -349,19 +372,25 @@ export class SwngStack extends Stack {
       entry: entryPath("rebuild"),
       handler: "handler",
       runtime: Runtime.NODEJS_20_X,
-      environment: { TABLE_PROJECTIONS: projectionsTable.tableName, TABLE_ROUNDS: roundsTable.tableName },
+      // Snapshot realignment Task 1: TABLE_ROUNDS is gone — the rebuild never touches the
+      // rounds table again (a later task backfills by paging the snapshots table instead of
+      // Scanning the rounds table for ARCHIVE items).
+      environment: { TABLE_PROJECTIONS: projectionsTable.tableName, TABLE_SNAPSHOTS: snapshotsTable.tableName },
       // Longer than the other functions' fixed 15s budget on purpose: this replays every
-      // archive in the rounds table in one invocation (a full Scan plus one projectArchive
-      // call per archive), not a single request — an operator-triggered job, not a hot path.
+      // snapshot in one invocation, not a single request — an operator-triggered job, not a
+      // hot path.
       timeout: Duration.minutes(5),
       memorySize: 512,
     });
 
+    // Snapshot realignment Task 1 / spec §2 ("no filter, no branching"): sourced from the
+    // snapshots table's own stream now, not the rounds table's — every item there already IS a
+    // finished round, so the ARCHIVE-only FilterCriteria this used to carry is deleted outright,
+    // not narrowed.
     projectorFn.addEventSource(
-      new DynamoEventSource(roundsTable, {
+      new DynamoEventSource(snapshotsTable, {
         startingPosition: StartingPosition.TRIM_HORIZON,
         batchSize: 10,
-        filters: [FilterCriteria.filter({ dynamodb: { Keys: { sk: { S: FilterRule.isEqual(ARCHIVE_SK) } } } })],
       }),
     );
 
@@ -463,19 +492,25 @@ export class SwngStack extends Stack {
     connectionsTable.grantReadWriteData(httpFn);
     connectionsTable.grantReadWriteData(wsConnectFn);
     connectionsTable.grantReadWriteData(wsDisconnectFn);
+    // Snapshot realignment Task 1: the finalize transaction (a later task) writes the snapshot
+    // through httpFn — read+write, mirroring roundsTable's own grant above (httpFn also reads
+    // a snapshot back for the archived-round view, another later task).
+    snapshotsTable.grantReadWriteData(httpFn);
     // Only `http` broadcasts (adapters-apigateway's createApiGatewayBroadcast, wired in
     // compositionRoot.ts) — wsConnect/wsDisconnect never call PostToConnection.
     webSocketApi.grantManageConnections(httpFn);
 
     // M7 Task 4: the projections table's readers/writers. projectorFn's stream READ access
-    // (GetRecords/DescribeStream/etc. on the rounds table's stream) is granted automatically
-    // by addEventSource above (DynamoEventSource.bind calls table.grantStreamRead) — it needs
-    // no separate grant call here.
+    // (GetRecords/DescribeStream/etc. on the snapshots table's stream, snapshot realignment
+    // Task 1) is granted automatically by addEventSource above (DynamoEventSource.bind calls
+    // table.grantStreamRead) — it needs no separate grant call here.
     projectionsTable.grantReadWriteData(projectorFn);
     projectionsTable.grantReadWriteData(rebuildFn);
     projectionsTable.grantReadWriteData(httpFn);
-    // Read-only: rebuild only Scans for archives, never writes the rounds table.
-    roundsTable.grantReadData(rebuildFn);
+    // Snapshot realignment Task 1: rebuild now reads the snapshots table instead of the rounds
+    // table (the rebuild never touches the rounds table again — its own TABLE_ROUNDS grant and
+    // env are gone, not just narrowed).
+    snapshotsTable.grantReadData(rebuildFn);
 
     // --- Alarms -> one SNS topic (M9 Task 5) -----------------------------------------------
     //

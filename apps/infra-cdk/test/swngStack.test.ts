@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { App } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
-import { archiveSk } from "@swng/adapters-dynamodb";
-import { ANON_THROTTLED_ROUTES, ARCHIVE_SK, HTTP_ROUTES, SwngStack } from "../lib/swngStack.js";
+import { ANON_THROTTLED_ROUTES, HTTP_ROUTES, SwngStack } from "../lib/swngStack.js";
 
 // One stack, synthesized once, asserted against many times — synthesis (which bundles all
 // three Lambdas with esbuild) is the expensive part of this suite; sharing it across `it`
@@ -41,8 +40,9 @@ describe("SwngStack", () => {
   });
 
   describe("tables", () => {
-    it("has exactly 4 DynamoDB tables", () => {
-      template.resourceCountIs("AWS::DynamoDB::Table", 4);
+    // Snapshot realignment Task 1: the snapshots table joins rounds/core/projections/connections.
+    it("has exactly 5 DynamoDB tables", () => {
+      template.resourceCountIs("AWS::DynamoDB::Table", 5);
     });
 
     it("swng-rounds-beta: pk/sk + gsi1 on joinCode, RETAIN, stream NEW_IMAGE", () => {
@@ -147,6 +147,17 @@ describe("SwngStack", () => {
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-projections-beta" }) });
     });
 
+    // Snapshot realignment Task 1 / spec §3: the golfer record's presence rows (Task 13, later
+    // in the plan) are self-expiring — TTL is provisioned now so that task is route/store
+    // wiring only, not another CDK change (same forward-provisioning idiom M7 Task 4 used for
+    // TABLE_PROJECTIONS on httpFn before any route read it).
+    it("projections table has TTL enabled on 'ttl'", () => {
+      template.hasResourceProperties("AWS::DynamoDB::Table", {
+        TableName: "swng-projections-beta",
+        TimeToLiveSpecification: { AttributeName: "ttl", Enabled: true },
+      });
+    });
+
     it("swng-connections-beta: pk only + gsi1 on roundId, DESTROY", () => {
       template.hasResourceProperties("AWS::DynamoDB::Table", {
         TableName: "swng-connections-beta",
@@ -159,6 +170,24 @@ describe("SwngStack", () => {
         GlobalSecondaryIndexes: [Match.objectLike({ IndexName: "gsi1", KeySchema: [{ AttributeName: "roundId", KeyType: "HASH" }] })],
       });
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Delete", Properties: Match.objectLike({ TableName: "swng-connections-beta" }) });
+    });
+
+    // Snapshot realignment Task 1 / spec §1+§11: the snapshots table is "the atom" — one
+    // immutable item per finalized round, pk-only (no sk: a key is an identity, never a
+    // timestamp — plan's own Global Constraints), RETAIN + PITR mirroring the rounds table's
+    // own durability posture (a finalized round is exactly as irreplaceable as its own event
+    // log). The stream feeds ProjectorFunction with NO filter (asserted in "event sources"
+    // below) — every item on this table IS a finished round, unlike the rounds table's stream
+    // which mixed in every EVT/OPID/META record too.
+    it("swng-snapshots-beta: pk-only, stream, RETAIN, PITR", () => {
+      template.hasResourceProperties("AWS::DynamoDB::Table", {
+        TableName: "swng-snapshots-beta",
+        BillingMode: "PAY_PER_REQUEST",
+        KeySchema: [{ AttributeName: "pk", KeyType: "HASH" }],
+        StreamSpecification: { StreamViewType: "NEW_IMAGE" },
+        PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+      });
+      template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-snapshots-beta" }) });
     });
   });
 
@@ -245,6 +274,19 @@ describe("SwngStack", () => {
       expect(withTableProjections).toHaveLength(3);
     });
 
+    // Snapshot realignment Task 1: httpFn (the finalize transaction writes the snapshot) and
+    // rebuildFn (the backfill reads from it, a later task) — projectorFn deliberately does
+    // NOT get this env: its event source hands stream records straight to the invocation
+    // payload (parseSnapshotStreamImage, a later task), so it never needs the table name to
+    // issue its own read.
+    it("exactly two functions (http, rebuild) carry TABLE_SNAPSHOTS", () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      const withTableSnapshots = Object.values(functions).filter(
+        (fn) => "TABLE_SNAPSHOTS" in ((fn.Properties.Environment?.Variables ?? {}) as Record<string, unknown>),
+      );
+      expect(withTableSnapshots).toHaveLength(2);
+    });
+
     it("exactly one function (http) carries USER_POOL_ID/USER_POOL_CLIENT_ID", () => {
       const functions = template.findResources("AWS::Lambda::Function");
       const withUserPool = Object.values(functions).filter((fn) => {
@@ -254,6 +296,10 @@ describe("SwngStack", () => {
       expect(withUserPool).toHaveLength(1);
     });
 
+    // Snapshot realignment Task 1: unchanged by this task — the projector's event source moves
+    // to the snapshots table's stream (below), but the FUNCTION's own env stays exactly
+    // TABLE_PROJECTIONS (it reads nothing by table name; it upserts the projection its stream
+    // record already carries the archive for).
     it("ProjectorFunction: 15s/512MB, TABLE_PROJECTIONS only (no TOKEN_SECRET/WS_ENDPOINT it has no use for)", () => {
       const functions = template.findResources("AWS::Lambda::Function");
       const id = Object.keys(functions).find((key) => key.startsWith("ProjectorFunction"));
@@ -264,14 +310,17 @@ describe("SwngStack", () => {
       expect(Object.keys(fn.Properties.Environment.Variables)).toEqual(["TABLE_PROJECTIONS"]);
     });
 
-    it("RebuildFunction: a longer timeout than the request-shaped functions (a full-table replay, not a single request), TABLE_PROJECTIONS + TABLE_ROUNDS only", () => {
+    // Snapshot realignment Task 1: TABLE_ROUNDS is GONE (the rebuild never touches the rounds
+    // table again — it backfills from the snapshots table's own page() instead, a later task);
+    // TABLE_SNAPSHOTS replaces it.
+    it("RebuildFunction: a longer timeout than the request-shaped functions (a full-table replay, not a single request), TABLE_PROJECTIONS + TABLE_SNAPSHOTS only", () => {
       const functions = template.findResources("AWS::Lambda::Function");
       const id = Object.keys(functions).find((key) => key.startsWith("RebuildFunction"));
       expect(id).toBeDefined();
       const fn = functions[id!]!;
       expect(fn.Properties.Timeout).toBe(300);
       expect(fn.Properties.MemorySize).toBe(512);
-      expect(Object.keys(fn.Properties.Environment.Variables).sort()).toEqual(["TABLE_PROJECTIONS", "TABLE_ROUNDS"]);
+      expect(Object.keys(fn.Properties.Environment.Variables).sort()).toEqual(["TABLE_PROJECTIONS", "TABLE_SNAPSHOTS"]);
     });
   });
 
@@ -280,16 +329,20 @@ describe("SwngStack", () => {
       template.resourceCountIs("AWS::Lambda::EventSourceMapping", 1);
     });
 
-    it("ProjectorFunction's event source: the rounds table's stream, batch 10, TRIM_HORIZON, filtered to ARCHIVE items", () => {
+    // Snapshot realignment Task 1: the event source moves from the rounds table (filtered to
+    // ARCHIVE items, since that table's stream mixed in every EVT/OPID/META record too) to the
+    // snapshots table's own stream, where every item IS a finished round — so the filter is
+    // deleted outright, not narrowed (spec §2: "no filter, no branching").
+    it("ProjectorFunction's event source: the snapshots table's stream, batch 10, TRIM_HORIZON, NO filter", () => {
       const tables = template.findResources("AWS::DynamoDB::Table");
-      const roundsTableLogicalId = Object.keys(tables).find((id) => id.startsWith("RoundsTable"));
-      expect(roundsTableLogicalId).toBeDefined();
+      const snapshotsTableLogicalId = Object.keys(tables).find((id) => id.startsWith("SnapshotsTable"));
+      expect(snapshotsTableLogicalId).toBeDefined();
 
       template.hasResourceProperties("AWS::Lambda::EventSourceMapping", {
-        EventSourceArn: { "Fn::GetAtt": [roundsTableLogicalId, "StreamArn"] },
+        EventSourceArn: { "Fn::GetAtt": [snapshotsTableLogicalId, "StreamArn"] },
         BatchSize: 10,
         StartingPosition: "TRIM_HORIZON",
-        FilterCriteria: { Filters: [{ Pattern: JSON.stringify({ dynamodb: { Keys: { sk: { S: ["ARCHIVE"] } } } }) }] },
+        FilterCriteria: Match.absent(),
       });
     });
 
@@ -348,24 +401,67 @@ describe("SwngStack", () => {
       });
     });
 
-    // Read-only: rebuild only Scans for archives (createDynamoArchiveSource), never writes
-    // the rounds table — so its policy should carry a read action (Scan) but not a write one
-    // (PutItem would mean grantReadWriteData was used here by mistake).
-    it("rebuildFn's role has a read-only policy statement covering the rounds table (no write actions)", () => {
+    // Snapshot realignment Task 1: the rebuild reads the snapshots table now, not the rounds
+    // table — same read-only shape as before (no write actions), new table. No GSIs on this
+    // table, so Resource is a single Fn::GetAtt (the projections-table test's shape above),
+    // not the core table's array-of-[tableArn, indexArns].
+    it("rebuildFn's role has a read-only policy statement covering the snapshots table (no write actions)", () => {
       const tables = template.findResources("AWS::DynamoDB::Table");
-      const roundsTableLogicalId = Object.keys(tables).find((id) => id.startsWith("RoundsTable"));
-      expect(roundsTableLogicalId).toBeDefined();
+      const snapshotsTableLogicalId = Object.entries(tables).find(([, table]) => table.Properties.TableName === "swng-snapshots-beta")?.[0];
+      expect(snapshotsTableLogicalId).toBeDefined();
 
       template.hasResourceProperties("AWS::IAM::Policy", {
         PolicyDocument: Match.objectLike({
           Statement: Match.arrayWith([
             Match.objectLike({
-              Action: Match.arrayWith(["dynamodb:Scan"]),
-              Resource: Match.arrayWith([Match.objectLike({ "Fn::GetAtt": Match.arrayWith([roundsTableLogicalId]) })]),
+              Action: Match.arrayWith(["dynamodb:GetItem"]),
+              Resource: Match.objectLike({ "Fn::GetAtt": [snapshotsTableLogicalId, "Arn"] }),
             }),
           ]),
         }),
       });
+    });
+
+    // httpFn's finalize transaction writes the snapshot (a later task) — read+write, same
+    // no-GSI Resource shape as the read-only rebuildFn test just above.
+    it("httpFn's role has a policy statement covering the snapshots table (read+write actions)", () => {
+      const tables = template.findResources("AWS::DynamoDB::Table");
+      const snapshotsTableLogicalId = Object.entries(tables).find(([, table]) => table.Properties.TableName === "swng-snapshots-beta")?.[0];
+      expect(snapshotsTableLogicalId).toBeDefined();
+
+      template.hasResourceProperties("AWS::IAM::Policy", {
+        PolicyDocument: Match.objectLike({
+          Statement: Match.arrayWith([
+            Match.objectLike({
+              Action: Match.arrayWith(["dynamodb:GetItem", "dynamodb:PutItem"]),
+              Resource: Match.objectLike({ "Fn::GetAtt": [snapshotsTableLogicalId, "Arn"] }),
+            }),
+          ]),
+        }),
+      });
+    });
+
+    // The grant is gone, not just the env var (brief: "REMOVE TABLE_ROUNDS env + its grant") —
+    // resolves rebuildFn's OWN role, then asserts none of ITS policy statements mention the
+    // rounds table at all (a stronger check than "no write action" above: rebuildFn should
+    // have no relationship to this table whatsoever now).
+    it("rebuildFn's role carries no policy statement covering the rounds table at all (the grant is gone, not just the env var)", () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      const rebuildId = Object.keys(functions).find((id) => id.startsWith("RebuildFunction"));
+      expect(rebuildId).toBeDefined();
+      const roleRef = functions[rebuildId!]!.Properties.Role as { "Fn::GetAtt": [string, string] };
+      const roleLogicalId = roleRef["Fn::GetAtt"][0];
+
+      const tables = template.findResources("AWS::DynamoDB::Table");
+      const roundsTableLogicalId = Object.keys(tables).find((id) => id.startsWith("RoundsTable"));
+      expect(roundsTableLogicalId).toBeDefined();
+
+      const policies = template.findResources("AWS::IAM::Policy");
+      const rebuildPolicies = Object.values(policies).filter((policy) => JSON.stringify(policy.Properties.Roles).includes(roleLogicalId));
+      expect(rebuildPolicies.length).toBeGreaterThan(0);
+      for (const policy of rebuildPolicies) {
+        expect(JSON.stringify(policy.Properties.PolicyDocument)).not.toContain(roundsTableLogicalId);
+      }
     });
   });
 
@@ -512,16 +608,6 @@ describe("SwngStack", () => {
       for (const method of routeMethods) {
         expect(allowMethods).toContain(method);
       }
-    });
-  });
-
-  // M7 Task 5 rider: closes the drift risk the file's own ARCHIVE_SK comment names — a
-  // future rename of keys.ts's `archiveSk` (the projector's event-source filter target) with
-  // no matching update here would silently starve the projector (its filter would never
-  // match a real archive item), and nothing would catch it without this pin.
-  describe("ARCHIVE_SK parity (M7 Task 5 rider)", () => {
-    it("ARCHIVE_SK matches adapters-dynamodb's own archiveSk constant exactly", () => {
-      expect(ARCHIVE_SK).toBe(archiveSk);
     });
   });
 

@@ -3,6 +3,7 @@ import type { GetMyRecordResponse } from "@swng/contracts";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
+import { sortLines } from "../projections/projectArchive.js";
 
 // Strips the projection store's internal finalizedAtMs (sort metadata, not part of the
 // wire shape) — GetMyRecordResponse's history is exactly GolferRoundLine, not an extension
@@ -26,14 +27,16 @@ export const getMyRecord =
     const found = await deps.golferStore.getBySub(claims.sub);
     if (!found) return { history: [] };
 
-    const history = await deps.projectionStore.listHistory(found.golfer.id);
+    const lines = await deps.projectionStore.listLines(found.golfer.id);
     const index = await deps.projectionStore.getIndex(found.golfer.id);
 
-    // listHistory is oldest → newest (what the index projector needs, projections/
-    // projectArchive.ts); the wire response reads newest-first, top-down, "what did I just
-    // play".
+    // listLines is UNORDERED (ports/projectionStore.ts) — sortLines (projections/
+    // projectArchive.ts, the SAME ordering the index fold itself uses) gives oldest → newest
+    // BEFORE this reverses to newest-first, top-down, "what did I just play" — so this wire
+    // response stays byte-identical to the old time-embedded-sk behavior even though the store
+    // itself no longer promises an order.
     return {
       ...(index !== undefined ? { index } : {}),
-      history: [...history].reverse().map(toWireLine),
+      history: sortLines(lines).reverse().map(toWireLine),
     };
   };

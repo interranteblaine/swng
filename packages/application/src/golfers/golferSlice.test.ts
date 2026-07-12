@@ -100,7 +100,7 @@ describe("getMyRecord", () => {
   it("bootstrap not met: history present, index absent below 3 differentials", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
-    await ctx.projectionStore.putHistoryLine(golfer.golferId, {
+    await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
       tee: "white",
@@ -119,7 +119,7 @@ describe("getMyRecord", () => {
   it("assembles index + history newest-first once the projection store has them", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
-    await ctx.projectionStore.putHistoryLine(golfer.golferId, {
+    await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
       tee: "white",
@@ -129,7 +129,7 @@ describe("getMyRecord", () => {
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
     });
-    await ctx.projectionStore.putHistoryLine(golfer.golferId, {
+    await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r2"),
       courseName: "Casa Verde GC",
       tee: "white",

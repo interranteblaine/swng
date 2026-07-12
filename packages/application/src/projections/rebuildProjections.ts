@@ -26,7 +26,7 @@ export interface ArchiveSource {
 // `archives` (the Scan predates it). The golfer's projection is then missing that round's
 // contribution until the NEXT rebuild re-scans and picks it up — a later, unrelated finalize
 // for a different round does not repair it (projectArchive only appends off of what
-// listHistory already returns). Operator note: don't run this rebuild while rounds are
+// listLines already returns). Operator note: don't run this rebuild while rounds are
 // actively finalizing; if one might have raced it, just re-run rebuild once more.
 export const rebuildProjections =
   (deps: { archiveSource: ArchiveSource; projectionStore: ProjectionStore; clock: Clock; logger: Logger }) =>

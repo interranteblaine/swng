@@ -157,10 +157,15 @@ const unavailableProjectionStore = (): ProjectionStore => {
     throw new Error("buildApp: TABLE_PROJECTIONS is not set for this entry — the record route is HTTP-only (see swngStack.ts)");
   };
   return {
-    putHistoryLine: unavailable,
-    listHistory: unavailable,
+    putLine: unavailable,
+    listLines: unavailable,
     putIndex: unavailable,
     getIndex: unavailable,
+    // Presence (realignment Task 13/15 wires real callers; the shape lands now — ports/
+    // projectionStore.ts's own doc comment).
+    putLive: unavailable,
+    deleteLive: unavailable,
+    listLive: unavailable,
     wipeGolfer: unavailable,
     // M8: the season ledger projections (ProjectionStore grew these — ports/projectionStore.ts)
     // share the same optionality as the golfer projections above.

@@ -228,10 +228,11 @@ const createTables = async (
     }),
   );
 
-  // Projections table (M7 Task 3; architecture.md §3): one partition per golfer (pk
-  // `GOLFER#<id>`), holding `HISTORY#<finalizedAtMs>#<roundId>` lines and one `INDEX`
-  // snapshot (keys.ts). No GSI — every access pattern (upsert/list a golfer's own history,
-  // get/put/wipe their index) is a base-table op on this one partition key.
+  // Projections table (M7 Task 3; keys stabilized in the projection-realignment, spec §3): one
+  // partition per golfer (pk `GOLFER#<id>`), holding `ROUND#<roundId>` lines, one `INDEX`
+  // snapshot, and `LIVE#<roundId>` presence rows (keys.ts). No GSI — every access pattern
+  // (upsert/list a golfer's own lines, get/put/wipe their index, presence put/list/delete) is a
+  // base-table op on this one partition key.
   await dynamo.send(
     new CreateTableCommand({
       TableName: projectionsTable,

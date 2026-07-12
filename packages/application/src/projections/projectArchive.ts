@@ -7,7 +7,20 @@ import type { ProjectionStore } from "../ports/projectionStore.js";
 // season = the UTC calendar year a round finalized in (M8 plan) — never re-derived
 // differently in projectArchive vs. rebuildProjections, same "one definition" discipline as
 // finalizedAtMsOf itself.
+// DELETED IN REALIGNMENT TASK 9/10 alongside the crew ledger it exists for (spec §4: "Never a
+// calendar computation — seasonOf = getUTCFullYear is deleted").
 export const seasonOf = (finalizedAtMs: number): number => new Date(finalizedAtMs).getUTCFullYear();
+
+// The one place a golfer's own lines get a canonical order (projection-realignment spec §3):
+// ProjectionStore.listLines is UNORDERED by contract (ports/projectionStore.ts) — the stable
+// `ROUND#<roundId>` sk carries no time to sort by — so every reader imposes this SAME order
+// itself rather than trusting insertion order, or two readers (this fold, getMyRecord's wire
+// response) silently disagreeing. Ascending by finalizedAtMs; roundId is a tiebreak for a
+// same-millisecond pair (unreachable at real wall-clock resolution, but a deterministic order
+// beats an unspecified one at zero cost, and it's the exact order the old time-embedded sk gave
+// for free).
+export const sortLines = <T extends { readonly finalizedAtMs: number; readonly roundId: string }>(lines: readonly T[]): T[] =>
+  [...lines].sort((a, b) => a.finalizedAtMs - b.finalizedAtMs || (a.roundId < b.roundId ? -1 : a.roundId > b.roundId ? 1 : 0));
 
 // The one place archive.events is searched for round-finalized — both projectArchive
 // (below) and rebuildProjections' own sort key (rebuildProjections.ts) go through this, so
@@ -35,12 +48,12 @@ export const finalizedAtMsOf = (archive: RoundArchive): number => {
 // ordering per shard, and shards partition by the STREAM'S own key (the round, here) — not by
 // golfer. Two rounds that finalize at nearly the same moment and share a participant can land
 // on different shards and invoke this function concurrently for that golfer. Each call's
-// putHistoryLine (below) is independent and safe, but the immediately-following listHistory +
-// computeIndexDetail can race: one call's listHistory can run before the OTHER call's
-// putHistoryLine has landed, so the index it computes and stores is momentarily short one
+// putLine (below) is independent and safe, but the immediately-following listLines +
+// computeIndexDetail can race: one call's listLines can run before the OTHER call's
+// putLine has landed, so the index it computes and stores is momentarily short one
 // differential. Self-heals the next time this golfer's projection is touched — either their
-// next finalize (a fresh listHistory sees everything written so far) or a rebuildProjections
-// pass (which replays every archive in finalizedAt order, deterministically, from scratch).
+// next finalize (a fresh listLines sees everything written so far) or a rebuild pass over the
+// snapshots table.
 export const projectArchive =
   (deps: { projectionStore: ProjectionStore; clock: Clock; logger: Logger }) =>
   async (archive: RoundArchive): Promise<void> => {
@@ -48,10 +61,15 @@ export const projectArchive =
 
     for (const participant of archive.participants) {
       const line = archiveGolferLine(archive, participant.golferId);
-      await deps.projectionStore.putHistoryLine(participant.golferId, { ...line, finalizedAtMs });
+      await deps.projectionStore.putLine(participant.golferId, { ...line, finalizedAtMs });
 
-      const history = await deps.projectionStore.listHistory(participant.golferId);
-      const complete = history.filter((entry) => entry.differential !== undefined);
+      // listLines is UNORDERED (ports/projectionStore.ts) — sortLines imposes the
+      // (finalizedAtMs, roundId) order combineNineHoleDifferentials/computeIndexDetail need
+      // BEFORE the fold runs, so this fold's result never depends on the store's own,
+      // unspecified iteration order (a real DynamoDB Query vs. an in-memory fake's Map could
+      // otherwise disagree).
+      const lines = sortLines(await deps.projectionStore.listLines(participant.golferId));
+      const complete = lines.filter((entry) => entry.differential !== undefined);
       const combined = combineNineHoleDifferentials(complete.map((entry) => ({ differential: entry.differential!, holes: entry.holes })));
       const detail = computeIndexDetail(combined);
       // Bootstrap not met yet (computeIndexDetail returns undefined below 3 differentials) —
@@ -63,12 +81,14 @@ export const projectArchive =
       await deps.projectionStore.putIndex(participant.golferId, { value: detail.value, computedAtMs: deps.clock.now(), differentialsUsed: detail.differentialsUsed });
     }
 
-    // M8: a crew-tagged archive additionally feeds the season ledger. Upsert-then-recompute
-    // (never `+=`, crew/ledger.ts's own doc comment on aggregateSeason): putCrewRound
-    // upserts THIS round's contribution by roundId, then the whole (crew, season) is
-    // recomputed from every contribution on file and the result REPLACES whatever
-    // putSeasonRecords held before — so projecting the same archive twice reproduces
-    // identical records, by construction, not by a special-cased idempotence check.
+    // DELETED IN REALIGNMENT TASK 9 (spec §4/§9: "the projector's crew arm" is named for
+    // deletion outright — crew standings become computed-on-read, never a projection). Kept
+    // UNCHANGED for this task only. M8: a crew-tagged archive additionally feeds the season
+    // ledger. Upsert-then-recompute (never `+=`, crew/ledger.ts's own doc comment on
+    // aggregateSeason): putCrewRound upserts THIS round's contribution by roundId, then the
+    // whole (crew, season) is recomputed from every contribution on file and the result
+    // REPLACES whatever putSeasonRecords held before — so projecting the same archive twice
+    // reproduces identical records, by construction, not by a special-cased idempotence check.
     if (archive.crewId !== undefined) {
       const season = seasonOf(finalizedAtMs);
       await deps.projectionStore.putCrewRound(archive.crewId, season, { ...crewContribution(archive), finalizedAtMs });

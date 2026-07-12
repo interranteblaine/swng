@@ -80,7 +80,7 @@ const playApiRound = async (httpUrl: string, card: CourseCard, hostLabel: string
 // entries/projector.ts) — asynchronous relative to finalizeRound's own HTTP response, so a
 // bare single fetch right after finalize is a race. Polls the SAME endpoint finalize's own doc
 // comment already treats as the authoritative read, not a fixed sleep.
-// projectArchive.ts's own two writes per golfer (putHistoryLine, THEN — a separate later
+// projectArchive.ts's own two writes per golfer (putLine, THEN — a separate later
 // await in the SAME call — putIndex once the bootstrap is met) are not transactional: a poll
 // gated on history.length alone can observe the gap between them, where the 3rd line has
 // landed but the index it unblocks hasn't yet (caught by this gate's own run 3: "Received:
@@ -200,7 +200,7 @@ test.describe.serial("M7 identity/record gate — claim mid-season, live index, 
     expect(record.history).toHaveLength(3);
 
     // history is newest-first (packages/contracts/src/golfers.ts's own doc comment;
-    // getMyRecord.ts implements it via reverse of listHistory's oldest->newest) — and this
+    // getMyRecord.ts implements it via sortLines + reverse, oldest->newest then flipped) — and this
     // describe block's own control flow makes the finalize order, and therefore the position
     // of each differential, deterministic: round 2 finalizes inside test 2's playApiRound call
     // (bogeys 13 -> AGS 85), then round 3 (bogeys 16 -> AGS 88), then round 1 finalizes LAST

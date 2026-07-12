@@ -258,35 +258,53 @@ export const createInMemoryCrewStore = (): CrewStore => {
   };
 };
 
-// ProjectionStore's real adapter (M7 Task 3, extended M8) lives on the `projections` table,
-// sk-ordered so listHistory's oldest-first read is free (architecture.md §3); this fake
-// reproduces that ordering explicitly via a sort, since a Map's insertion order isn't a
-// promise this port doc makes.
+// ProjectionStore's real adapter (M7 Task 3, extended M8, keys stabilized in the
+// projection-realignment) lives on the `projections` table, one golfer partition holding
+// ROUND#/INDEX/LIVE# items — this fake mirrors it with one Map per golfer keyed by roundId
+// (upsert-by-roundId is the whole point of the stable-key rewrite: a repeat putLine for the
+// same round REPLACES the Map entry, never adds a second one). listLines deliberately does NOT
+// sort — the port's own contract is UNORDERED (ports/projectionStore.ts); every caller
+// (projections/projectArchive.ts's sortLines) imposes order itself, and a fake that quietly
+// sorted here would let a caller that forgot to sort pass anyway.
 export const createInMemoryProjectionStore = (): ProjectionStore => {
-  const historyByGolfer = new Map<GolferId, Map<RoundId, GolferRoundLine & { finalizedAtMs: number }>>();
+  const linesByGolfer = new Map<GolferId, Map<RoundId, GolferRoundLine & { finalizedAtMs: number }>>();
   const indexByGolfer = new Map<GolferId, { value: number; computedAtMs: number; differentialsUsed: number }>();
+  const liveByGolfer = new Map<GolferId, Map<RoundId, { roundId: RoundId; courseName: string; joinedAtMs: number; expiresAtSec: number }>>();
   // Keyed by "crewId#season" — mirrors the real adapter's LEDGER#crew#season sort-key shape
   // (architecture.md) closely enough for a fake without actually building a composite-key
-  // Map type.
+  // Map type. DELETED IN REALIGNMENT TASK 9 alongside ProjectionStore's own crew section.
   const crewRoundsByKey = new Map<string, Map<RoundId, CrewRoundContribution & { finalizedAtMs: number }>>();
   const seasonRecordsByKey = new Map<string, CrewSeasonRecords>();
   const crewSeasonKey = (crewId: CrewId, season: number): string => `${crewId}#${season}`;
 
   return {
-    putHistoryLine: async (golferId, line) => {
-      const lines = historyByGolfer.get(golferId) ?? new Map<RoundId, GolferRoundLine & { finalizedAtMs: number }>();
-      lines.set(line.roundId, line); // upsert by roundId
-      historyByGolfer.set(golferId, lines);
+    putLine: async (golferId, line) => {
+      const lines = linesByGolfer.get(golferId) ?? new Map<RoundId, GolferRoundLine & { finalizedAtMs: number }>();
+      lines.set(line.roundId, line); // upsert by roundId — REPLACES on a reopen-and-refinalize, never adds a second entry
+      linesByGolfer.set(golferId, lines);
     },
-    listHistory: async (golferId) => [...(historyByGolfer.get(golferId)?.values() ?? [])].sort((a, b) => a.finalizedAtMs - b.finalizedAtMs),
+    listLines: async (golferId) => [...(linesByGolfer.get(golferId)?.values() ?? [])],
     putIndex: async (golferId, snapshot) => {
       indexByGolfer.set(golferId, snapshot);
     },
     getIndex: async (golferId) => indexByGolfer.get(golferId),
-    wipeGolfer: async (golferId) => {
-      historyByGolfer.delete(golferId);
-      indexByGolfer.delete(golferId);
+    putLive: async (golferId, entry) => {
+      const live = liveByGolfer.get(golferId) ?? new Map<RoundId, { roundId: RoundId; courseName: string; joinedAtMs: number; expiresAtSec: number }>();
+      live.set(entry.roundId, entry); // upsert by roundId
+      liveByGolfer.set(golferId, live);
     },
+    deleteLive: async (golferId, roundId) => {
+      liveByGolfer.get(golferId)?.delete(roundId);
+    },
+    listLive: async (golferId) =>
+      [...(liveByGolfer.get(golferId)?.values() ?? [])].map(({ roundId, courseName, joinedAtMs }) => ({ roundId, courseName, joinedAtMs })),
+    // DELETED IN REALIGNMENT TASK 5 alongside its one remaining caller (rebuildProjections.ts).
+    wipeGolfer: async (golferId) => {
+      linesByGolfer.delete(golferId);
+      indexByGolfer.delete(golferId);
+      liveByGolfer.delete(golferId);
+    },
+    // DELETED IN REALIGNMENT TASK 9 — unchanged from before this task.
     putCrewRound: async (crewId, season, entry) => {
       const key = crewSeasonKey(crewId, season);
       const rounds = crewRoundsByKey.get(key) ?? new Map<RoundId, CrewRoundContribution & { finalizedAtMs: number }>();

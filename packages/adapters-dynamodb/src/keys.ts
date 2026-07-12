@@ -96,19 +96,24 @@ const GOLFER_SUB_PK_PREFIX = "SUB#";
 export const golferSubPk = (sub: string): string => `${GOLFER_SUB_PK_PREFIX}${sub}`;
 export const golferSubSk = "GOLFER";
 
-// The `projections` table's key vocabulary (M7 Task 3; architecture.md §3): one partition per
-// golfer (golferPk — shared id format with the core table's golfer item, but a different
-// table), holding one HISTORY# line per finalized round the golfer played plus one INDEX
-// snapshot. finalizedAtMs is zero-padded to 15 digits so the sk's lexical order agrees with
-// its numeric time order (the same trick evtSk plays on seq) — listHistory's oldest-first read
-// then falls out of a plain ascending Query, no client-side sort needed. 15 digits is headroom
-// into the year ~33700 (10^15 ms past the epoch) — deliberately generous, same spirit as
-// evtSk's own 10-digit choice for a count that will never approach it.
-const HISTORY_SK_PREFIX = "HISTORY#";
-export const historySk = (finalizedAtMs: number, roundId: RoundId): string =>
-  `${HISTORY_SK_PREFIX}${String(finalizedAtMs).padStart(15, "0")}#${roundId}`;
-export const historySkPrefix = HISTORY_SK_PREFIX;
+// The `projections` table's golfer-record key vocabulary (projection-realignment spec §3: "a
+// key is an identity, time is an attribute" — replaces M7 Task 3's time-embedded
+// `HISTORY#<15-digit-ms>#<roundId>` scheme): one partition per golfer (golferPk — shared
+// id format with the core table's golfer item, but a different table), holding one ROUND# line
+// per finalized round the golfer played, one INDEX snapshot, and LIVE# presence rows (spec §5;
+// written starting realignment Task 13 — the key format lives here now so the store's shape
+// changes exactly once). `lineSk`/`liveSk` embed ONLY the roundId — never finalizedAtMs — so a
+// reopen-and-refinalize (a NEW finalizedAtMs for the SAME roundId) computes the SAME sk both
+// times: a plain unconditional Put replaces the prior line outright, no query-then-delete
+// dance. `listLines` makes no order promise (createDynamoProjectionStore.ts's own doc comment);
+// every reader sorts by the `finalizedAtMs` attribute itself.
+const LINE_SK_PREFIX = "ROUND#";
+export const lineSk = (roundId: RoundId): string => `${LINE_SK_PREFIX}${roundId}`;
+export const lineSkPrefix = LINE_SK_PREFIX;
 export const projectionIndexSk = "INDEX";
+const LIVE_SK_PREFIX = "LIVE#";
+export const liveSk = (roundId: RoundId): string => `${LIVE_SK_PREFIX}${roundId}`;
+export const liveSkPrefix = LIVE_SK_PREFIX;
 
 // The core table's crew-item key vocabulary (M8 Task 3): a Crew, like a Course/Golfer, is a
 // plain CRUD document (crew/crew.ts's own doc comment) — one root item, `pk` = crewPk(id) /
@@ -148,20 +153,35 @@ export const crewGsi1pk = "CREW";
 // exactly crewPk(crewId) ("CREW#<id>") — reusing the two pk-format functions directly rather
 // than minting parallel gsi-specific helpers keeps the two formats from ever drifting apart.
 
+// DELETED IN REALIGNMENT TASK 9: the crew season ledger moves fully outside the finalize chain
+// (projection-realignment spec §4/§9 — "the projector's crew arm; putCrewRound /
+// putSeasonRecords / getSeasonRecords / wipeCrew; the CREWROUNDS# / RECORDS# keyspaces" are
+// named for deletion outright) — standings become computed-on-read over the snapshots table,
+// never stored. Kept here, and on ProjectionStore/createDynamoProjectionStore, UNCHANGED for
+// this task only, so the crew routes (still live, still tested) don't wedge on a half-deleted
+// dependency mid-realignment; Task 9 deletes this block and its last consumers together.
+//
 // The `projections` table's crew-round-contribution key vocabulary (M8 Task 3;
 // architecture.md's illustrative `LEDGER#crew#season` sketch, concretized): one partition per
-// (crew, season) holding one contribution entry per finalized round that season,
-// sk-ordered the same zero-padded way historySk's own `finalizedAtMs` is (15 digits — see
-// that doc comment for why) purely for a deterministic read order; listCrewRounds itself
-// doesn't promise an order (aggregateSeason's fold is commutative), but a stable one costs
-// nothing and beats an arbitrary one for debugging.
+// (crew, season) holding one contribution entry per finalized round that season, sk-ordered the
+// same zero-padded way lineSk's sibling scheme used to be (15 digits) purely for a deterministic
+// read order; listCrewRounds itself doesn't promise an order (aggregateSeason's fold is
+// commutative), but a stable one costs nothing and beats an arbitrary one for debugging. NOTE:
+// this scheme still has the exact unrepairable year-boundary bug lineSk's own doc comment above
+// was rewritten to eliminate (createDynamoProjectionStore.ts's putCrewRound doc comment) — left
+// as-is because the whole keyspace dies in Task 9 rather than getting patched here.
 const CREWROUNDS_PK_PREFIX = "CREWROUNDS#";
 export const crewRoundsPk = (crewId: CrewId, season: number): string => `${CREWROUNDS_PK_PREFIX}${crewId}#${season}`;
+// A DIFFERENT partition namespace than lineSk's own "ROUND#" prefix above (crewRoundsPk's
+// CREWROUNDS# pk vs. golferPk's GOLFER# pk) — the two never collide despite sharing this literal
+// prefix string.
 const CREWROUND_SK_PREFIX = "ROUND#";
 export const crewRoundSk = (finalizedAtMs: number, roundId: RoundId): string =>
   `${CREWROUND_SK_PREFIX}${String(finalizedAtMs).padStart(15, "0")}#${roundId}`;
 export const crewRoundSkPrefix = CREWROUND_SK_PREFIX;
 
+// DELETED IN REALIGNMENT TASK 9 (same block as crewRoundsPk above — see that note).
+//
 // The season records snapshot's key vocabulary: one item per (crew, season), pk
 // `RECORDS#<crewId>#<season>` / sk fixed "RECORDS". A deliberate consolidation of
 // architecture.md's illustrative `LEDGER#`/`H2H#` keys into ONE item: `aggregateSeason`

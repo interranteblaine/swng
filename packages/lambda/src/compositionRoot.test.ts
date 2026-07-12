@@ -262,8 +262,8 @@ describe("createProjectorHandler", () => {
       ]),
     );
 
-    expect(await ctx.projectionStore.listHistory(ann)).toHaveLength(1);
-    expect(await ctx.projectionStore.listHistory(bo)).toHaveLength(1);
+    expect(await ctx.projectionStore.listLines(ann)).toHaveLength(1);
+    expect(await ctx.projectionStore.listLines(bo)).toHaveLength(1);
   });
 
   it("a poison record (unparseable NEW_IMAGE) logs and rethrows — never silently skipped", async () => {
@@ -292,7 +292,7 @@ describe("createProjectorHandler", () => {
 
     // The first record's write lands (already awaited before the poison record throws), but
     // the third — after the poison record in this batch — never runs.
-    expect(await ctx.projectionStore.listHistory(ann)).toHaveLength(1);
-    expect(await ctx.projectionStore.listHistory(bo)).toHaveLength(0);
+    expect(await ctx.projectionStore.listLines(ann)).toHaveLength(1);
+    expect(await ctx.projectionStore.listLines(bo)).toHaveLength(0);
   });
 });

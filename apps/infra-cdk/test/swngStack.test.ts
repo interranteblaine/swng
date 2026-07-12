@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { App } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { archiveSk } from "@swng/adapters-dynamodb";
-import { ARCHIVE_SK, HTTP_ROUTES, SwngStack } from "../lib/swngStack.js";
+import { ANON_THROTTLED_ROUTES, ARCHIVE_SK, HTTP_ROUTES, SwngStack } from "../lib/swngStack.js";
 
 // One stack, synthesized once, asserted against many times — synthesis (which bundles all
 // three Lambdas with esbuild) is the expensive part of this suite; sharing it across `it`
@@ -474,6 +474,156 @@ describe("SwngStack", () => {
   describe("ARCHIVE_SK parity (M7 Task 5 rider)", () => {
     it("ARCHIVE_SK matches adapters-dynamodb's own archiveSk constant exactly", () => {
       expect(ARCHIVE_SK).toBe(archiveSk);
+    });
+  });
+
+  // M9 Task 5: HTTP API stage throttling — a stage-wide default plus a tighter per-route
+  // ceiling on the anonymous-reachable routes (routes.ts's own auth column; ANON_THROTTLED_ROUTES
+  // above names exactly which 8).
+  describe("throttling (M9 Task 5)", () => {
+    it("every ANON_THROTTLED_ROUTES entry is a real HTTP_ROUTES route (no typo'd path silently throttles nothing)", () => {
+      for (const anonRoute of ANON_THROTTLED_ROUTES) {
+        const isReal = HTTP_ROUTES.some((route) => route.method === anonRoute.method && route.path === anonRoute.path);
+        expect(isReal, `${anonRoute.method} ${anonRoute.path} is not in HTTP_ROUTES`).toBe(true);
+      }
+    });
+
+    it("the HTTP API's default stage carries a stage-wide default throttle of rate 50 / burst 100", () => {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
+        StageName: "$default",
+        DefaultRouteSettings: { ThrottlingRateLimit: 50, ThrottlingBurstLimit: 100 },
+      });
+    });
+
+    // Named anon routes get the tighter rate 5 / burst 10 ceiling — POST /rounds (an
+    // "optional-golfer" route, anonymous-reachable) and GET /courses/{courseId} (a "none"-auth
+    // course route) each pinned individually, plus a full-membership check below that every one
+    // of the 8 keys is present with the same values (a single Match.objectLike per key would
+    // pass even if the OTHER 7 routes were silently dropped from the map).
+    it("POST /rounds carries the tighter per-route throttle (rate 5 / burst 10)", () => {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
+        RouteSettings: Match.objectLike({ "POST /rounds": { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 } }),
+      });
+    });
+
+    it("GET /courses/{courseId} carries the tighter per-route throttle too (not just the round-entry routes)", () => {
+      template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
+        RouteSettings: Match.objectLike({ "GET /courses/{courseId}": { ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 } }),
+      });
+    });
+
+    it("all 8 anonymous-reachable routes carry the tighter throttle, and no others are present in RouteSettings", () => {
+      const stages = template.findResources("AWS::ApiGatewayV2::Stage");
+      const defaultStage = Object.values(stages).find((stage) => stage.Properties.StageName === "$default");
+      expect(defaultStage).toBeDefined();
+      const routeSettings = defaultStage!.Properties.RouteSettings as Record<string, { ThrottlingRateLimit: number; ThrottlingBurstLimit: number }>;
+      const expectedKeys = ANON_THROTTLED_ROUTES.map((route) => `${route.method} ${route.path}`).sort();
+      expect(Object.keys(routeSettings).sort()).toEqual(expectedKeys);
+      for (const key of expectedKeys) {
+        expect(routeSettings[key]).toEqual({ ThrottlingRateLimit: 5, ThrottlingBurstLimit: 10 });
+      }
+    });
+  });
+
+  // M9 Task 5: every alarm routes into the SAME SNS topic (the owner's one inbox), so this
+  // suite checks the count once and the topic-wiring once across every alarm found, rather than
+  // repeating the same AlarmActions assertion by hand for all 12.
+  describe("alarms (M9 Task 5)", () => {
+    it("has exactly 12 CloudWatch alarms (5 function errors + 1 HTTP 5xx + 1 IteratorAge + 1 Rebuild Duration + 4 table throttled-requests)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 12);
+    });
+
+    it("every alarm's AlarmActions targets the one AlarmsTopic (no alarm silently rings nowhere)", () => {
+      const topics = template.findResources("AWS::SNS::Topic");
+      const topicLogicalId = Object.keys(topics).find((id) => id.startsWith("AlarmsTopic"));
+      expect(topicLogicalId).toBeDefined();
+
+      const alarms = template.findResources("AWS::CloudWatch::Alarm");
+      const alarmEntries = Object.entries(alarms);
+      expect(alarmEntries.length).toBe(12);
+      for (const [, alarm] of alarmEntries) {
+        expect(alarm.Properties.AlarmActions).toEqual([{ Ref: topicLogicalId }]);
+      }
+    });
+
+    it("every one of the 5 functions has its own Errors >= 1 (5 min) alarm", () => {
+      const alarms = template.findResources("AWS::CloudWatch::Alarm");
+      const errorAlarms = Object.values(alarms).filter((alarm) => alarm.Properties.MetricName === "Errors" && alarm.Properties.Namespace === "AWS/Lambda");
+      expect(errorAlarms).toHaveLength(5);
+      for (const alarm of errorAlarms) {
+        expect(alarm.Properties.Threshold).toBe(1);
+        expect(alarm.Properties.Period).toBe(300);
+        expect(alarm.Properties.Statistic).toBe("Sum");
+        expect(alarm.Properties.ComparisonOperator).toBe("GreaterThanOrEqualToThreshold");
+      }
+    });
+
+    it("the HTTP API 5xx alarm: AWS/ApiGateway 5xx, threshold 5, 5-minute period", () => {
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        Namespace: "AWS/ApiGateway",
+        MetricName: "5xx",
+        Statistic: "Sum",
+        Period: 300,
+        Threshold: 5,
+        ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      });
+    });
+
+    it("the projector IteratorAge alarm: AWS/Lambda IteratorAge, threshold 300000ms (5 minutes), strictly greater-than", () => {
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        Namespace: "AWS/Lambda",
+        MetricName: "IteratorAge",
+        Statistic: "Maximum",
+        Threshold: 300_000,
+        ComparisonOperator: "GreaterThanThreshold",
+      });
+    });
+
+    it("the rebuild Duration alarm: AWS/Lambda Duration, threshold 240000ms (4 minutes) — the 5-minute-timeout tripwire", () => {
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        Namespace: "AWS/Lambda",
+        MetricName: "Duration",
+        Statistic: "Maximum",
+        Threshold: 240_000,
+        ComparisonOperator: "GreaterThanThreshold",
+      });
+    });
+
+    it("all 4 tables get a throttled-requests math-expression alarm (threshold 1, summed across the real operations adapters-dynamodb issues)", () => {
+      const alarms = template.findResources("AWS::CloudWatch::Alarm");
+      const throttleAlarms = Object.values(alarms).filter((alarm) =>
+        (alarm.Properties.AlarmDescription as string | undefined)?.includes("throttled request"),
+      );
+      expect(throttleAlarms).toHaveLength(4);
+      for (const alarm of throttleAlarms) {
+        expect(alarm.Properties.Threshold).toBe(1);
+        expect(alarm.Properties.ComparisonOperator).toBe("GreaterThanOrEqualToThreshold");
+        // A math-expression alarm carries `Metrics`, not a bare `MetricName` — pinning this
+        // rules out a future edit accidentally swapping in a single-metric (non-summed) alarm.
+        expect(Array.isArray(alarm.Properties.Metrics)).toBe(true);
+      }
+    });
+  });
+
+  // M9 Task 5: one SNS topic, one email subscription to the plan's flagged owner address — the
+  // subscription itself needs a confirmation click after deploy (SNS's own protocol), which is
+  // a real human action, not something this stack (or a deploy script) can complete.
+  describe("SNS alarms topic (M9 Task 5)", () => {
+    it("has exactly one SNS topic named swng-alarms-beta", () => {
+      template.resourceCountIs("AWS::SNS::Topic", 1);
+      template.hasResourceProperties("AWS::SNS::Topic", { TopicName: "swng-alarms-beta" });
+    });
+
+    it("has exactly one email subscription to interrante.blaine@gmail.com, targeting the alarms topic", () => {
+      template.resourceCountIs("AWS::SNS::Subscription", 1);
+      const topics = template.findResources("AWS::SNS::Topic");
+      const topicLogicalId = Object.keys(topics).find((id) => id.startsWith("AlarmsTopic"));
+      expect(topicLogicalId).toBeDefined();
+      template.hasResourceProperties("AWS::SNS::Subscription", {
+        Protocol: "email",
+        Endpoint: "interrante.blaine@gmail.com",
+        TopicArn: { Ref: topicLogicalId },
+      });
     });
   });
 

@@ -1,13 +1,17 @@
 import { join } from "node:path";
 import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
-import { AttributeType, BillingMode, ProjectionType, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
-import { CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
+import { Alarm, ComparisonOperator, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
+import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
+import { AttributeType, BillingMode, Operation, ProjectionType, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
+import { CfnStage, CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration, WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { OAuthScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
 import { FilterCriteria, FilterRule, Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
 import { DynamoEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
+import { Topic } from "aws-cdk-lib/aws-sns";
+import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
 import type { Construct } from "constructs";
 
 // The live POC stacks (deployed pre-rebuild, still holding production-shaped data) are
@@ -67,6 +71,27 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.POST, path: "/crews/{crewId}/members" },
   { method: HttpMethod.PUT, path: "/crews/{crewId}/standing-game" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/records" },
+];
+
+// M9 Task 5 (ops): the eight routes anyone can call with NO token at all — routes.ts's own
+// `auth` column names exactly why each one is here. POST /rounds and POST /rounds/join are
+// "optional-golfer" (an absent Bearer still proceeds anonymously); GET /rounds/peek is "none"
+// (no participant exists yet to hold a token before joining, M6 Task 4); the five course routes
+// are the whole CRUD/search surface, deliberately unauthenticated in v1 (same M6 Task 4 call).
+// Every OTHER route requires a real participant/golfer token first — minting one is already a
+// much higher bar than a bare HTTP call — so only these eight get the tighter per-route ceiling
+// below. Cross-checked against HTTP_ROUTES itself in swngStack.test.ts (every entry here must
+// also be a real route) so a typo'd path here fails loudly instead of silently throttling
+// nothing.
+export const ANON_THROTTLED_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly path: string }> = [
+  { method: HttpMethod.POST, path: "/rounds" },
+  { method: HttpMethod.POST, path: "/rounds/join" },
+  { method: HttpMethod.GET, path: "/rounds/peek" },
+  { method: HttpMethod.POST, path: "/courses" },
+  { method: HttpMethod.POST, path: "/courses/{courseId}/tees" },
+  { method: HttpMethod.POST, path: "/courses/{courseId}/verify" },
+  { method: HttpMethod.GET, path: "/courses/{courseId}" },
+  { method: HttpMethod.GET, path: "/courses" },
 ];
 
 // packages/lambda/src/entries/*.ts — resolved relative to this file so bundling works
@@ -377,6 +402,57 @@ export class SwngStack extends Stack {
       httpApi.addRoutes({ path: route.path, methods: [route.method], integration: httpIntegration });
     }
 
+    // --- Throttling (M9 Task 5) -----------------------------------------------------------
+    //
+    // Abuse ceilings, not capacity planning: a real Saturday crew's whole round generates on
+    // the order of 1 request/sec (a handful of golfers tapping scores between shots). 50 rps /
+    // 100 burst on the stage default leaves a hundredfold headroom above that while still
+    // bounding a runaway client or a scripted flood. The 8 anonymous-reachable routes
+    // (ANON_THROTTLED_ROUTES above) get a tighter ceiling — no participant/golfer token to make
+    // minting expensive first — at a tenth of the stage default: still ~5x a Saturday crew's own
+    // rate, but nowhere near enough headroom for a script to mint thousands of rounds/courses a
+    // minute.
+    const STAGE_THROTTLE_RATE_LIMIT = 50;
+    const STAGE_THROTTLE_BURST_LIMIT = 100;
+    const ANON_ROUTE_THROTTLE_RATE_LIMIT = 5;
+    const ANON_ROUTE_THROTTLE_BURST_LIMIT = 10;
+
+    // apigatewayv2's L2 HttpApi/HttpStage constructs expose NO throttle knob anywhere on the
+    // auto-created default stage — HttpApiProps carries no `throttle` field at all (only
+    // `addStage`'s own HttpStageOptions does, and that's for a NEW stage this code doesn't
+    // create; replacing the existing default stage with one built via addStage would change its
+    // logical id, and therefore its physical resource — exactly what the deploy policy forbids).
+    // The default stage's underlying CfnStage resource DOES support both `defaultRouteSettings`
+    // (whole-stage default) and `routeSettings` (a "METHOD /path" -> {rate, burst} map — the
+    // documented per-route mechanism, AWS::ApiGatewayV2::Stage's own RouteSettings property) —
+    // so this reaches through the L2's own defaultChild (the L1 escape hatch) rather than
+    // replacing the stage construct, keeping its logical id — and the already-deployed stage's
+    // physical id — untouched.
+    if (!httpApi.defaultStage) {
+      throw new Error("HttpApi has no defaultStage — createDefaultStage must stay true for the throttle escape hatch below to apply");
+    }
+    const defaultStageResource = httpApi.defaultStage.node.defaultChild as CfnStage;
+    // `defaultRouteSettings` is a strongly-typed `CfnStage.RouteSettingsProperty` — its own
+    // camelCase properties (`throttlingRateLimit`/`throttlingBurstLimit`) go through a real
+    // property mapper that PascalCases them into the template.
+    defaultStageResource.defaultRouteSettings = {
+      throttlingRateLimit: STAGE_THROTTLE_RATE_LIMIT,
+      throttlingBurstLimit: STAGE_THROTTLE_BURST_LIMIT,
+    };
+    // `routeSettings`, by contrast, is typed `any` (CDK's own generated escape hatch for this
+    // property — verified against aws-cdk-lib's generated mapper: RouteSettings goes through
+    // `objectToCloudFormation`, which is a bare identity function, not a property mapper) — so
+    // unlike defaultRouteSettings above, nothing here PascalCases nested keys automatically.
+    // The exact CloudFormation property names (ThrottlingRateLimit/ThrottlingBurstLimit) must be
+    // supplied directly, and the outer keys must be real route keys ("METHOD /path", matching
+    // AWS::ApiGatewayV2::Route's own RouteKey format used elsewhere in this file).
+    defaultStageResource.routeSettings = Object.fromEntries(
+      ANON_THROTTLED_ROUTES.map((route) => [
+        `${route.method} ${route.path}`,
+        { ThrottlingRateLimit: ANON_ROUTE_THROTTLE_RATE_LIMIT, ThrottlingBurstLimit: ANON_ROUTE_THROTTLE_BURST_LIMIT },
+      ]),
+    );
+
     // --- Grants ---------------------------------------------------------------------------
 
     roundsTable.grantReadWriteData(httpFn);
@@ -397,6 +473,145 @@ export class SwngStack extends Stack {
     projectionsTable.grantReadWriteData(httpFn);
     // Read-only: rebuild only Scans for archives, never writes the rounds table.
     roundsTable.grantReadData(rebuildFn);
+
+    // --- Alarms -> one SNS topic (M9 Task 5) -----------------------------------------------
+    //
+    // One topic, one email subscription — every alarm below fires into the SAME topic so the
+    // owner gets one inbox to watch, not five. The email subscription itself needs a
+    // confirmation click (SNS's own protocol) — that's a real human action after deploy, not
+    // something this stack (or a deploy script) can complete on the owner's behalf.
+    const alarmsTopic = new Topic(this, "AlarmsTopic", { topicName: `swng-alarms-${stage}` });
+    alarmsTopic.addSubscription(new EmailSubscription("interrante.blaine@gmail.com"));
+
+    // Every alarm constructed below is routed through this — wiring the SAME action everywhere
+    // is what "all alarms -> one topic" means structurally, not just "they happen to share a
+    // topic reference."
+    const paged = (alarm: Alarm): Alarm => {
+      alarm.addAlarmAction(new SnsAction(alarmsTopic));
+      return alarm;
+    };
+
+    const FIVE_MINUTES = Duration.minutes(5);
+
+    // Per-function Errors >= 1 over 5 minutes, for every one of the 5 functions — the first
+    // signal of "something threw," before a human would otherwise notice via a support message
+    // or a stalled projection.
+    const alarmedFunctions: ReadonlyArray<readonly [string, NodejsFunction]> = [
+      ["Http", httpFn],
+      ["WsConnect", wsConnectFn],
+      ["WsDisconnect", wsDisconnectFn],
+      ["Projector", projectorFn],
+      ["Rebuild", rebuildFn],
+    ];
+    for (const [name, fn] of alarmedFunctions) {
+      paged(
+        new Alarm(this, `${name}ErrorsAlarm`, {
+          alarmDescription: `${name}Function: at least 1 error in 5 minutes`,
+          metric: fn.metricErrors({ period: FIVE_MINUTES, statistic: "Sum" }),
+          threshold: 1,
+          evaluationPeriods: 1,
+          comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+          treatMissingData: TreatMissingData.NOT_BREACHING,
+        }),
+      );
+    }
+
+    // HTTP API 5xx >= 5 over 5 minutes — httpApi.metricServerError() aggregates the documented
+    // AWS/ApiGateway "5xx" metric (dimensioned by ApiId only, no Stage dimension) across every
+    // stage of this API; there is exactly one (the default stage above), so this is unambiguous.
+    paged(
+      new Alarm(this, "HttpApi5xxAlarm", {
+        alarmDescription: "HTTP API: at least 5 5xx responses in 5 minutes",
+        metric: httpApi.metricServerError({ period: FIVE_MINUTES, statistic: "Sum" }),
+        threshold: 5,
+        evaluationPeriods: 1,
+        comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: TreatMissingData.NOT_BREACHING,
+      }),
+    );
+
+    // Projector stream IteratorAge > 5 minutes — the projections table (golfer index/history)
+    // is falling behind the rounds table's own stream. aws-lambda's Function/NodejsFunction
+    // class exposes metricErrors/metricDuration/metricThrottles but NO metricIteratorAge helper
+    // (verified against function-base.d.ts) — this is the documented AWS/Lambda namespace
+    // metric, dimensioned by FunctionName alone (unambiguous here: projectorFn has exactly one
+    // stream event source, wired above).
+    paged(
+      new Alarm(this, "ProjectorIteratorAgeAlarm", {
+        alarmDescription: "ProjectorFunction: stream IteratorAge over 5 minutes — the projector is falling behind the rounds table's stream",
+        metric: new Metric({
+          namespace: "AWS/Lambda",
+          metricName: "IteratorAge",
+          dimensionsMap: { FunctionName: projectorFn.functionName },
+          period: FIVE_MINUTES,
+          statistic: "Maximum",
+        }),
+        threshold: FIVE_MINUTES.toMilliseconds(),
+        evaluationPeriods: 1,
+        comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: TreatMissingData.NOT_BREACHING,
+      }),
+    );
+
+    // Rebuild Duration > 4 minutes — the 5-minute-timeout tripwire (rebuildFn's own CDK timeout,
+    // set above): a full-table replay of every finalized round's projections that's still
+    // running at 4 minutes is heading for a hard cutoff at 5, so the owner gets a page with a
+    // minute of runway left to investigate rather than only learning about it from the timeout
+    // itself (or a silently incomplete rebuild).
+    paged(
+      new Alarm(this, "RebuildDurationAlarm", {
+        alarmDescription: "RebuildFunction: an invocation ran over 4 minutes — approaching its own 5-minute hard timeout",
+        metric: rebuildFn.metricDuration({ period: FIVE_MINUTES, statistic: "Maximum" }),
+        threshold: Duration.minutes(4).toMilliseconds(),
+        evaluationPeriods: 1,
+        comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: TreatMissingData.NOT_BREACHING,
+      }),
+    );
+
+    // DynamoDB throttled-requests >= 1 over 5 minutes, on all 4 tables — PAY_PER_REQUEST tables
+    // throttle far more rarely than provisioned ones, but a hot partition (e.g. one very active
+    // round or a course-search spike on the shared gsi1 partition, core table's own doc comment
+    // above) can still throttle; this is the earliest signal a golfer's own tap silently failed
+    // to persist. metricThrottledRequestsForOperations builds ONE math expression summing a
+    // per-operation metric each — CloudWatch caps a math-expression alarm at 10 individual
+    // metrics, and the default `operations` (every Operation the enum knows, 14) blows past
+    // that (confirmed against a real `cdk synth`: "Alarms on math expressions cannot contain
+    // more than 10 individual metrics"). `THROTTLEABLE_OPERATIONS` below is the real, narrower
+    // set adapters-dynamodb actually issues (grepped across packages/adapters-dynamodb/src's own
+    // *Command construction — CreateTable/ListTables are admin/test-only, never a live runtime
+    // path, so they're deliberately excluded), 8 operations, safely under the cap, shared
+    // identically across all four tables below (a table that never issues one of these ops
+    // simply reports 0 for that leg of the sum — harmless, and one shared list is simpler than
+    // four hand-curated ones).
+    const THROTTLEABLE_OPERATIONS: Operation[] = [
+      Operation.GET_ITEM,
+      Operation.PUT_ITEM,
+      Operation.UPDATE_ITEM,
+      Operation.DELETE_ITEM,
+      Operation.QUERY,
+      Operation.SCAN,
+      Operation.BATCH_GET_ITEM,
+      Operation.TRANSACT_WRITE_ITEMS,
+    ];
+    const alarmedTables: ReadonlyArray<readonly [string, Table]> = [
+      ["Rounds", roundsTable],
+      ["Core", coreTable],
+      ["Projections", projectionsTable],
+      ["Connections", connectionsTable],
+    ];
+    for (const [name, table] of alarmedTables) {
+      paged(
+        new Alarm(this, `${name}TableThrottledRequestsAlarm`, {
+          alarmDescription: `${name}Table: at least 1 throttled request in 5 minutes`,
+          metric: table.metricThrottledRequestsForOperations({ period: FIVE_MINUTES, operations: THROTTLEABLE_OPERATIONS }),
+          threshold: 1,
+          evaluationPeriods: 1,
+          comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+          treatMissingData: TreatMissingData.NOT_BREACHING,
+        }),
+      );
+    }
 
     // --- Outputs ----------------------------------------------------------------------
 

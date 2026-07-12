@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { CloudFormationClient, DescribeStackResourcesCommand } from "@aws-sdk/client-cloudformation";
 import {
   AdminCreateUserCommand,
+  AdminDeleteUserCommand,
   AdminSetUserPasswordCommand,
   CognitoIdentityProviderClient,
   InitiateAuthCommand,
@@ -386,6 +387,14 @@ export const recordScoreDirect = async (
 // running `pnpm e2e:field`.
 const AWS_REGION = "us-east-1";
 
+// M9 Task 5 (ops): every user mintThrowawayUser mints below is a real, permanent Cognito
+// account — nothing about it expires or self-deletes. Tracked here (per userPoolId, since a
+// future second pool isn't out of the question) so the afterAll hook below can best-effort
+// delete every one of THIS file's own minted accounts once its tests finish. Course/round/crew
+// rows a run leaves behind stay accepted (task-5-brief.md's own scoping call: inert data, not
+// an account with sign-in ability) — only the accounts themselves get this cleanup.
+const mintedUsers: Array<{ readonly userPoolId: string; readonly username: string }> = [];
+
 // Mints a per-run throwaway Cognito user via the admin APIs (AdminCreateUser +
 // AdminSetUserPassword, MessageAction SUPPRESS so no real email ever sends) and exchanges it
 // for real tokens via InitiateAuth USER_PASSWORD_AUTH — the same beta-grade flow
@@ -409,6 +418,10 @@ export const mintThrowawayUser = async (label: string): Promise<AuthTokens> => {
       TemporaryPassword: password,
     }),
   );
+  // Tracked for cleanup only once the user actually exists — a failed AdminCreateUser above
+  // throws before this line runs, so the afterAll hook below never attempts to delete a user
+  // that was never actually minted.
+  mintedUsers.push({ userPoolId, username });
   // FORCE_CHANGE_PASSWORD -> CONFIRMED, Permanent: true — InitiateAuth's own USER_PASSWORD_AUTH
   // flow below rejects a still-temporary password with a NEW_PASSWORD_REQUIRED challenge this
   // helper has no interactive way to answer.
@@ -423,6 +436,28 @@ export const mintThrowawayUser = async (label: string): Promise<AuthTokens> => {
   }
   return { idToken: result.IdToken, refreshToken: result.RefreshToken, expiresAt: Date.now() + result.ExpiresIn * 1000 };
 };
+
+// Best-effort teardown (M9 Task 5): AdminDeleteUser for every user mintThrowawayUser minted in
+// this file's own run. "Best-effort" is load-bearing, not decorative — a deletion failure here
+// (throttling, a user already gone, a transient Cognito error) must NEVER fail a suite that has
+// already reported its own pass/fail by the time this hook runs, so every per-user delete is
+// individually try/caught and swallowed (logged, not thrown) and the hook itself never rejects.
+// Registered once per spec file (Playwright resets the module cache between test files, so this
+// top-level call — and the mintedUsers array above — are each fresh per file, never shared
+// across files in the same worker).
+test.afterAll(async () => {
+  if (mintedUsers.length === 0) return;
+  const cognito = new CognitoIdentityProviderClient({ region: AWS_REGION });
+  for (const { userPoolId, username } of mintedUsers) {
+    try {
+      await cognito.send(new AdminDeleteUserCommand({ UserPoolId: userPoolId, Username: username }));
+    } catch (err) {
+      // Never let cleanup fail the suite — this is genuinely best-effort (the brief's own
+      // words): log and move on to the next user.
+      console.warn(`[e2e cleanup] AdminDeleteUser failed for ${username} (best-effort, not fatal): ${String(err)}`);
+    }
+  }
+});
 
 // Injects tokenStore.ts's own AUTH_KEY ("swng:auth") — duplicated here as a literal because
 // this runs in Node, outside the page, and can't import a browser-only module's runtime

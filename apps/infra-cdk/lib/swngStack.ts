@@ -5,11 +5,14 @@ import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
 import { AttributeType, BillingMode, Operation, ProjectionType, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
 import { CfnStage, CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration, WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
-import { OAuthScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
+import { CfnUserPoolClient, OAuthScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
+import { Distribution, ResponseHeadersPolicy, ViewerProtocolPolicy } from "aws-cdk-lib/aws-cloudfront";
+import { S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { FilterCriteria, FilterRule, Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
 import { DynamoEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
+import { BlockPublicAccess, Bucket } from "aws-cdk-lib/aws-s3";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
 import type { Construct } from "constructs";
@@ -613,6 +616,87 @@ export class SwngStack extends Stack {
       );
     }
 
+    // --- Hosted web (M9 Task 6): S3 + CloudFront, so the app is reachable from a phone -----
+    //
+    // The bucket holds only re-publishable Vite build output (apps/web/dist, synced by
+    // scripts/publishWeb.mjs on every `pnpm publish:web:beta`) — never irreplaceable data,
+    // unlike the tables/pool above which stay RETAIN. DESTROY + autoDeleteObjects is the
+    // right removal policy here: the bucket is never empty in practice (a fresh sync always
+    // repopulates it immediately), so RETAIN or bare DESTROY would either leak the bucket
+    // forever or make `cdk destroy` fail outright on a non-empty bucket — autoDeleteObjects
+    // is what actually makes "destroy this stack" work.
+    const webBucket = new Bucket(this, "WebBucket", {
+      removalPolicy: RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      // The ONLY reader is CloudFront via Origin Access Control below — no public access, no
+      // website-hosting endpoint.
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+    });
+
+    // The CSP's connect-src origins, read from this stack's own live constructs — never
+    // hardcoded, so a redeploy that changes any of these (a new HTTP API domain, e.g.) can't
+    // silently leave the CSP pointing at a stale origin. httpApi.apiEndpoint and
+    // userPoolDomain.baseUrl() already carry `https://`; webSocketStage.url already carries
+    // `wss://` (confirmed against the existing WsApiUrl output above / cdk-outputs.json) — none
+    // need a scheme prefixed here.
+    const contentSecurityPolicy = [
+      "default-src 'self'",
+      `connect-src 'self' ${httpApi.apiEndpoint} ${webSocketStage.url} ${userPoolDomain.baseUrl()}`,
+      // No third-party script origin exists anywhere in this app (the load-bearing fact behind
+      // M9's localStorage-token re-acceptance) — 'self' only, no CDN/analytics allowance.
+      "script-src 'self'",
+      // Tailwind emits inline <style> at runtime — style-src needs 'unsafe-inline' or the app
+      // renders unstyled.
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data:",
+    ].join("; ");
+
+    const webResponseHeadersPolicy = new ResponseHeadersPolicy(this, "WebResponseHeadersPolicy", {
+      responseHeadersPolicyName: `swng-web-csp-${stage}`,
+      securityHeadersBehavior: {
+        contentSecurityPolicy: { contentSecurityPolicy, override: true },
+      },
+    });
+
+    const distribution = new Distribution(this, "WebDistribution", {
+      defaultRootObject: "index.html",
+      defaultBehavior: {
+        // S3BucketOrigin.withOriginAccessControl creates a real Origin Access Control (the
+        // modern replacement for the legacy Origin Access Identity) AND wires the bucket
+        // policy that grants ONLY this distribution's OAC read access — no separate policy
+        // wiring needed here.
+        origin: S3BucketOrigin.withOriginAccessControl(webBucket),
+        viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        responseHeadersPolicy: webResponseHeadersPolicy,
+      },
+      // SPA fallback: a client-side route with no matching S3 key (`/watch/:roundId`,
+      // `/round/:id`, `/profile`, ...) surfaces from a private OAC-fronted bucket as 403 (S3's
+      // "missing key" response through OAC is Access Denied, not 404) — so BOTH 403 and 404 map
+      // to index.html with a 200, letting react-router's client-side routing take over instead
+      // of the browser rendering a raw CloudFront error page.
+      errorResponses: [
+        { httpStatus: 403, responseHttpStatus: 200, responsePagePath: "/index.html" },
+        { httpStatus: 404, responseHttpStatus: 200, responsePagePath: "/index.html" },
+      ],
+    });
+
+    // The distribution's domain is only known here — it's built from httpApi/webSocketStage
+    // (constructed earlier, above), so it can't be folded into userPoolClient's ORIGINAL
+    // callbackUrls/logoutUrls at construction time without a real circular dependency. Reached
+    // through the L1 escape hatch instead (same idiom as the throttling section's CfnStage
+    // reach-through above) to APPEND the CloudFront origin onto the SAME UserPoolClient
+    // construct — unchanged logical id, an in-place property update (CallbackURLs/LogoutURLs
+    // are mutable, non-replacing AWS::Cognito::UserPoolClient properties — the same fact M9
+    // Task 2's own logoutUrls change already relied on), never a reconstruction. The existing
+    // localhost entries stay untouched so dev keeps working.
+    const cfnUserPoolClient = userPoolClient.node.defaultChild as CfnUserPoolClient;
+    cfnUserPoolClient.callbackUrLs = [
+      ...webOrigins.map((origin) => `${origin}/auth/callback`),
+      `https://${distribution.distributionDomainName}/auth/callback`,
+    ];
+    cfnUserPoolClient.logoutUrLs = [...webOrigins.map((origin) => `${origin}/`), `https://${distribution.distributionDomainName}/`];
+
     // --- Outputs ----------------------------------------------------------------------
 
     new CfnOutput(this, "HttpApiUrl", { value: `${httpApi.apiEndpoint}/` });
@@ -620,5 +704,9 @@ export class SwngStack extends Stack {
     new CfnOutput(this, "UserPoolId", { value: userPool.userPoolId });
     new CfnOutput(this, "UserPoolClientId", { value: userPoolClient.userPoolClientId });
     new CfnOutput(this, "HostedUiDomain", { value: userPoolDomain.baseUrl() });
+    // scripts/publishWeb.mjs reads these two to sync apps/web/dist and invalidate the cache.
+    new CfnOutput(this, "WebBucketName", { value: webBucket.bucketName });
+    new CfnOutput(this, "DistributionId", { value: distribution.distributionId });
+    new CfnOutput(this, "WebUrl", { value: `https://${distribution.distributionDomainName}/` });
   }
 }

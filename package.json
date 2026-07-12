@@ -19,7 +19,8 @@
     "typecheck": "pnpm -r typecheck",
     "test:contract": "pnpm -F @swng/adapters-dynamodb test:contract",
     "e2e:beta": "pnpm -F @swng/e2e test:e2e",
-    "e2e:field": "pnpm -F @swng/web e2e:field"
+    "e2e:field": "pnpm -F @swng/web e2e:field",
+    "publish:web:beta": "node scripts/publishWeb.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

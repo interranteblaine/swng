@@ -108,10 +108,11 @@ export default [
     },
   },
   {
-    // scripts/webEnv.mjs is a plain Node script (run via `node scripts/webEnv.mjs`, never
-    // bundled) — it's the one place in the repo that's actually plain JS instead of TS, so
-    // it needs the Node globals TS's own lib/types normally supply implicitly elsewhere.
-    files: ["apps/web/scripts/**/*.mjs"],
+    // apps/web/scripts/webEnv.mjs and the root scripts/publishWeb.mjs (M9 Task 6) are plain
+    // Node scripts (run via `node <path>`, never bundled) — the only places in the repo that
+    // are actually plain JS instead of TS, so they need the Node globals TS's own lib/types
+    // normally supply implicitly elsewhere.
+    files: ["apps/web/scripts/**/*.mjs", "scripts/**/*.mjs"],
     languageOptions: {
       globals: { process: "readonly", console: "readonly", URL: "readonly" },
     },

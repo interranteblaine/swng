@@ -11,6 +11,17 @@ const template = Template.fromStack(new SwngStack(new App(), "swng-beta", { stag
 
 const ENV_KEYS = ["TABLE_ROUNDS", "TABLE_CONNECTIONS", "TOKEN_SECRET", "WS_ENDPOINT"];
 
+// Resolves a resource's logical id dynamically (never hardcode one of CDK's own hashed ids,
+// same idiom as the core/rounds-table logical-id pins above) — shared by the identity and
+// hosted-web suites below, both of which need to point an assertion at a specific construct's
+// own CloudFormation reference.
+const findLogicalId = (resourceType: string, predicate?: (properties: Record<string, unknown>) => boolean): string => {
+  const resources = template.findResources(resourceType);
+  const entry = predicate ? Object.entries(resources).find(([, resource]) => predicate(resource.Properties)) : Object.entries(resources)[0];
+  expect(entry, `no ${resourceType} resource found matching the predicate`).toBeDefined();
+  return entry![0];
+};
+
 describe("SwngStack", () => {
   describe("guard against the live POC stack namespace", () => {
     it("throws when constructed under an InfraCdkStack* id", () => {
@@ -164,15 +175,29 @@ describe("SwngStack", () => {
       return Object.entries(functions).filter(([id]) => ORIGINAL_FUNCTION_PREFIXES.some((prefix) => id.startsWith(prefix)));
     };
 
-    it("has exactly 5 Lambda functions (http, wsConnect, wsDisconnect, projector, rebuild)", () => {
-      template.resourceCountIs("AWS::Lambda::Function", 5);
+    // M9 Task 6: WebBucket's autoDeleteObjects (below) adds a 6th, CDK-MANAGED Lambda — the
+    // singleton Custom::S3AutoDeleteObjects provider — which is not one of OUR 5 application
+    // entry points (it carries no TABLE_*/WS_ENDPOINT env, a runtime CDK picks for us, not
+    // NODEJS_20_X, and is never dispatched through packages/lambda at all). appFunctions()
+    // scopes the tests below to the 5 that are ours; a separate test pins the real total of 6.
+    const APP_FUNCTION_PREFIXES = [...ORIGINAL_FUNCTION_PREFIXES, "ProjectorFunction", "RebuildFunction"];
+    const appFunctions = () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      return Object.entries(functions).filter(([id]) => APP_FUNCTION_PREFIXES.some((prefix) => id.startsWith(prefix)));
+    };
+
+    it("has exactly 5 application Lambda functions (http, wsConnect, wsDisconnect, projector, rebuild)", () => {
+      expect(appFunctions()).toHaveLength(5);
     });
 
-    it("every function is Node 20", () => {
-      const functions = template.findResources("AWS::Lambda::Function");
-      const entries = Object.values(functions);
+    it("has exactly 6 Lambda functions total (the 5 application functions + the CDK-managed WebBucket auto-delete-objects custom resource provider, M9 Task 6)", () => {
+      template.resourceCountIs("AWS::Lambda::Function", 6);
+    });
+
+    it("every application function is Node 20 (the CDK-managed auto-delete-objects provider's runtime is CDK's own choice, not this stack's)", () => {
+      const entries = appFunctions();
       expect(entries.length).toBe(5);
-      for (const fn of entries) {
+      for (const [, fn] of entries) {
         expect(fn.Properties.Runtime).toBe("nodejs20.x");
       }
     });
@@ -200,9 +225,12 @@ describe("SwngStack", () => {
     // M6 Task 3: course routes are HTTP-only (no WS entry point ever touches the core
     // table), unlike TABLE_ROUNDS/TABLE_CONNECTIONS/WS_ENDPOINT above which every function
     // needs — so exactly one of the five functions (httpFn) should carry TABLE_CORE.
+    // `Environment?.Variables` (not a bare `.Environment.Variables`): the M9 Task 6 auto-
+    // delete-objects Lambda (above) carries NO Environment property at all — a bare access
+    // would throw TypeError on it rather than just correctly reporting "no TABLE_CORE here".
     it("exactly one function (http) carries TABLE_CORE", () => {
       const functions = template.findResources("AWS::Lambda::Function");
-      const withTableCore = Object.values(functions).filter((fn) => "TABLE_CORE" in (fn.Properties.Environment.Variables as Record<string, unknown>));
+      const withTableCore = Object.values(functions).filter((fn) => "TABLE_CORE" in ((fn.Properties.Environment?.Variables ?? {}) as Record<string, unknown>));
       expect(withTableCore).toHaveLength(1);
     });
 
@@ -212,7 +240,7 @@ describe("SwngStack", () => {
     it("exactly three functions (http, projector, rebuild) carry TABLE_PROJECTIONS", () => {
       const functions = template.findResources("AWS::Lambda::Function");
       const withTableProjections = Object.values(functions).filter(
-        (fn) => "TABLE_PROJECTIONS" in (fn.Properties.Environment.Variables as Record<string, unknown>),
+        (fn) => "TABLE_PROJECTIONS" in ((fn.Properties.Environment?.Variables ?? {}) as Record<string, unknown>),
       );
       expect(withTableProjections).toHaveLength(3);
     });
@@ -220,7 +248,7 @@ describe("SwngStack", () => {
     it("exactly one function (http) carries USER_POOL_ID/USER_POOL_CLIENT_ID", () => {
       const functions = template.findResources("AWS::Lambda::Function");
       const withUserPool = Object.values(functions).filter((fn) => {
-        const variables = fn.Properties.Environment.Variables as Record<string, unknown>;
+        const variables = (fn.Properties.Environment?.Variables ?? {}) as Record<string, unknown>;
         return "USER_POOL_ID" in variables && "USER_POOL_CLIENT_ID" in variables;
       });
       expect(withUserPool).toHaveLength(1);
@@ -381,6 +409,26 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::Cognito::UserPoolDomain", {
         Domain: { "Fn::Join": ["", ["swng-beta-", { Ref: "AWS::AccountId" }]] },
       });
+    });
+
+    // M9 Task 6: the CloudFront origin is APPENDED onto the same UserPoolClient (resourceCountIs
+    // above already pins "exactly one" — this is the SAME client, not a second one from a
+    // replacement), reached through the L1 escape hatch since the distribution's domain isn't
+    // known until after the HTTP/WS APIs the CSP depends on are built. The original localhost
+    // entries (asserted above) MUST still be present too — dev must keep working.
+    it("callback/logout URLs include BOTH localhost (dev) AND the CloudFront distribution origin, on the SAME client", () => {
+      const distributionLogicalId = findLogicalId("AWS::CloudFront::Distribution");
+      const clients = template.findResources("AWS::Cognito::UserPoolClient");
+      const props = Object.values(clients)[0]!.Properties as Record<string, unknown>;
+      const callbackUrls = JSON.stringify(props.CallbackURLs);
+      const logoutUrls = JSON.stringify(props.LogoutURLs);
+
+      expect(callbackUrls).toContain("http://localhost:5173/auth/callback");
+      expect(callbackUrls).toContain(distributionLogicalId);
+      expect(callbackUrls).toContain("/auth/callback");
+
+      expect(logoutUrls).toContain("http://localhost:5173/");
+      expect(logoutUrls).toContain(distributionLogicalId);
     });
   });
 
@@ -627,6 +675,83 @@ describe("SwngStack", () => {
     });
   });
 
+  // M9 Task 6: S3 + CloudFront so the app is reachable from a phone.
+  describe("hosted web (S3 + CloudFront, M9 Task 6)", () => {
+    it("has exactly one CloudFront distribution with index.html as the default root object", () => {
+      template.resourceCountIs("AWS::CloudFront::Distribution", 1);
+      template.hasResourceProperties("AWS::CloudFront::Distribution", {
+        DistributionConfig: Match.objectLike({ DefaultRootObject: "index.html" }),
+      });
+    });
+
+    // SPA fallback: a client-side route with no matching S3 key (/watch/:roundId, /round/:id,
+    // /profile, ...) surfaces from a private OAC-fronted bucket as 403 (S3's "missing key"
+    // response through OAC is Access Denied, not 404) — BOTH must map to index.html with a 200
+    // so react-router's client routing takes over instead of a raw CloudFront error page.
+    it("SPA fallback: both 403 and 404 map to /index.html with a 200", () => {
+      template.hasResourceProperties("AWS::CloudFront::Distribution", {
+        DistributionConfig: Match.objectLike({
+          CustomErrorResponses: Match.arrayWith([
+            { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: "/index.html" },
+            { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: "/index.html" },
+          ]),
+        }),
+      });
+    });
+
+    it("uses Origin Access Control (OAC), never the legacy Origin Access Identity (OAI)", () => {
+      template.resourceCountIs("AWS::CloudFront::OriginAccessControl", 1);
+      template.resourceCountIs("AWS::CloudFront::CloudFrontOriginAccessIdentity", 0);
+    });
+
+    it("the web bucket blocks all public access — CloudFront's OAC is the only reader", () => {
+      template.hasResourceProperties("AWS::S3::Bucket", {
+        PublicAccessBlockConfiguration: {
+          BlockPublicAcls: true,
+          BlockPublicPolicy: true,
+          IgnorePublicAcls: true,
+          RestrictPublicBuckets: true,
+        },
+      });
+    });
+
+    // Unlike the RETAIN tables/pool pinned above: this bucket holds only re-publishable Vite
+    // build output, never irreplaceable data, so DESTROY (rather than a table/pool's RETAIN) is
+    // the correct removal policy — pinned here so a future edit can't silently change that.
+    it("the web bucket's removal policy is DESTROY (re-publishable build output, unlike the RETAIN tables/pool above)", () => {
+      template.hasResource("AWS::S3::Bucket", { DeletionPolicy: "Delete" });
+    });
+
+    it("the response headers policy's CSP carries the full directive set, with connect-src built from THIS stack's own httpApi/webSocketApi/userPoolDomain tokens (not hardcoded)", () => {
+      const httpApiLogicalId = findLogicalId("AWS::ApiGatewayV2::Api", (properties) => properties.ProtocolType === "HTTP");
+      const wsApiLogicalId = findLogicalId("AWS::ApiGatewayV2::Api", (properties) => properties.ProtocolType === "WEBSOCKET");
+      const userPoolDomainLogicalId = findLogicalId("AWS::Cognito::UserPoolDomain");
+
+      const policies = template.findResources("AWS::CloudFront::ResponseHeadersPolicy");
+      const policyEntries = Object.values(policies);
+      expect(policyEntries).toHaveLength(1);
+      const securityHeaders = policyEntries[0]!.Properties.ResponseHeadersPolicyConfig.SecurityHeadersConfig;
+      expect(securityHeaders.ContentSecurityPolicy.Override).toBe(true);
+
+      // Stringified rather than matched structurally: the CSP is a compound Fn::Join of
+      // literal fragments and per-construct tokens, and a literal-region assumption here would
+      // make this test depend on how the STACK ITSELF resolves `Stack.region` (a real stack
+      // deploy — bin/infra-cdk.ts — pins it to a literal, but a construct with no explicit env,
+      // like this suite's own `template` above, resolves it to the AWS::Region pseudo
+      // parameter instead) — a distinction this test has no reason to care about. Checking
+      // that each real construct's OWN logical id appears somewhere in the rendered value is a
+      // direct, resolution-agnostic proof that the CSP was built from live stack tokens.
+      const rendered = JSON.stringify(securityHeaders.ContentSecurityPolicy.ContentSecurityPolicy);
+      expect(rendered).toContain("default-src 'self'; connect-src 'self' ");
+      expect(rendered).toContain(httpApiLogicalId);
+      expect(rendered).toContain(" wss://");
+      expect(rendered).toContain(wsApiLogicalId);
+      expect(rendered).toContain(userPoolDomainLogicalId);
+      expect(rendered).toContain(".auth.");
+      expect(rendered).toContain("amazoncognito.com; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:");
+    });
+  });
+
   describe("outputs", () => {
     it("outputs HttpApiUrl and WsApiUrl", () => {
       template.hasOutput("HttpApiUrl", {});
@@ -637,6 +762,12 @@ describe("SwngStack", () => {
       template.hasOutput("UserPoolId", {});
       template.hasOutput("UserPoolClientId", {});
       template.hasOutput("HostedUiDomain", {});
+    });
+
+    it("outputs WebBucketName, DistributionId, and WebUrl (scripts/publishWeb.mjs's own inputs)", () => {
+      template.hasOutput("WebBucketName", {});
+      template.hasOutput("DistributionId", {});
+      template.hasOutput("WebUrl", {});
     });
   });
 });

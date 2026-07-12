@@ -410,16 +410,41 @@ describe("SwngStack", () => {
       const snapshotsTableLogicalId = Object.entries(tables).find(([, table]) => table.Properties.TableName === "swng-snapshots-beta")?.[0];
       expect(snapshotsTableLogicalId).toBeDefined();
 
-      template.hasResourceProperties("AWS::IAM::Policy", {
-        PolicyDocument: Match.objectLike({
-          Statement: Match.arrayWith([
-            Match.objectLike({
-              Action: Match.arrayWith(["dynamodb:GetItem"]),
-              Resource: Match.objectLike({ "Fn::GetAtt": [snapshotsTableLogicalId, "Arn"] }),
-            }),
-          ]),
-        }),
-      });
+      // Resolve rebuildFn's role to find its policies
+      const functions = template.findResources("AWS::Lambda::Function");
+      const rebuildId = Object.keys(functions).find((id) => id.startsWith("RebuildFunction"));
+      expect(rebuildId).toBeDefined();
+      const roleRef = functions[rebuildId!]!.Properties.Role as { "Fn::GetAtt": [string, string] };
+      const roleLogicalId = roleRef["Fn::GetAtt"][0];
+
+      // Find the policy statement for the snapshots table
+      const policies = template.findResources("AWS::IAM::Policy");
+      const rebuildPolicies = Object.values(policies).filter((policy) => JSON.stringify(policy.Properties.Roles).includes(roleLogicalId));
+      expect(rebuildPolicies.length).toBeGreaterThan(0);
+
+      // Find the statement that covers the snapshots table and assert it's read-only
+      let foundStatement = false;
+      for (const policy of rebuildPolicies) {
+        const statements = (policy.Properties.PolicyDocument.Statement ?? []) as Array<{
+          Action?: string | string[];
+          Resource?: unknown;
+        }>;
+        for (const statement of statements) {
+          const stmtResourceStr = JSON.stringify(statement.Resource);
+          if (stmtResourceStr.includes(snapshotsTableLogicalId!)) {
+            foundStatement = true;
+            const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+            // Assert GetItem is present
+            expect(actions).toContain("dynamodb:GetItem");
+            // Assert no write actions
+            const writeActions = ["dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:BatchWriteItem"];
+            for (const writeAction of writeActions) {
+              expect(actions).not.toContain(writeAction);
+            }
+          }
+        }
+      }
+      expect(foundStatement, "snapshots table statement not found in rebuildFn's policies").toBe(true);
     });
 
     // httpFn's finalize transaction writes the snapshot (a later task) — read+write, same
@@ -661,10 +686,10 @@ describe("SwngStack", () => {
 
   // M9 Task 5: every alarm routes into the SAME SNS topic (the owner's one inbox), so this
   // suite checks the count once and the topic-wiring once across every alarm found, rather than
-  // repeating the same AlarmActions assertion by hand for all 12.
+  // repeating the same AlarmActions assertion by hand for all 13.
   describe("alarms (M9 Task 5)", () => {
-    it("has exactly 12 CloudWatch alarms (5 function errors + 1 HTTP 5xx + 1 IteratorAge + 1 Rebuild Duration + 4 table throttled-requests)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 12);
+    it("has exactly 13 CloudWatch alarms (5 function errors + 1 HTTP 5xx + 1 IteratorAge + 1 Rebuild Duration + 5 table throttled-requests)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 13);
     });
 
     it("every alarm's AlarmActions targets the one AlarmsTopic (no alarm silently rings nowhere)", () => {
@@ -674,7 +699,7 @@ describe("SwngStack", () => {
 
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const alarmEntries = Object.entries(alarms);
-      expect(alarmEntries.length).toBe(12);
+      expect(alarmEntries.length).toBe(13);
       for (const [, alarm] of alarmEntries) {
         expect(alarm.Properties.AlarmActions).toEqual([{ Ref: topicLogicalId }]);
       }
@@ -723,12 +748,12 @@ describe("SwngStack", () => {
       });
     });
 
-    it("all 4 tables get a throttled-requests math-expression alarm (threshold 1, summed across the real operations adapters-dynamodb issues)", () => {
+    it("all 5 tables get a throttled-requests math-expression alarm (threshold 1, summed across the real operations adapters-dynamodb issues)", () => {
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const throttleAlarms = Object.values(alarms).filter((alarm) =>
         (alarm.Properties.AlarmDescription as string | undefined)?.includes("throttled request"),
       );
-      expect(throttleAlarms).toHaveLength(4);
+      expect(throttleAlarms).toHaveLength(5);
       for (const alarm of throttleAlarms) {
         expect(alarm.Properties.Threshold).toBe(1);
         expect(alarm.Properties.ComparisonOperator).toBe("GreaterThanOrEqualToThreshold");

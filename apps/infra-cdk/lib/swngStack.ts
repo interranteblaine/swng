@@ -569,14 +569,14 @@ export class SwngStack extends Stack {
     );
 
     // Projector stream IteratorAge > 5 minutes — the projections table (golfer index/history)
-    // is falling behind the rounds table's own stream. aws-lambda's Function/NodejsFunction
+    // is falling behind the snapshots table's own stream. aws-lambda's Function/NodejsFunction
     // class exposes metricErrors/metricDuration/metricThrottles but NO metricIteratorAge helper
     // (verified against function-base.d.ts) — this is the documented AWS/Lambda namespace
     // metric, dimensioned by FunctionName alone (unambiguous here: projectorFn has exactly one
     // stream event source, wired above).
     paged(
       new Alarm(this, "ProjectorIteratorAgeAlarm", {
-        alarmDescription: "ProjectorFunction: stream IteratorAge over 5 minutes — the projector is falling behind the rounds table's stream",
+        alarmDescription: "ProjectorFunction: stream IteratorAge over 5 minutes — the projector is falling behind the snapshots table's stream",
         metric: new Metric({
           namespace: "AWS/Lambda",
           metricName: "IteratorAge",
@@ -635,6 +635,7 @@ export class SwngStack extends Stack {
     const alarmedTables: ReadonlyArray<readonly [string, Table]> = [
       ["Rounds", roundsTable],
       ["Core", coreTable],
+      ["Snapshots", snapshotsTable],
       ["Projections", projectionsTable],
       ["Connections", connectionsTable],
     ];

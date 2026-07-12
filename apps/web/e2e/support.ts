@@ -4,16 +4,10 @@
 // two-tap grid interaction every score entry in either spec goes through. Split out of the spec
 // files for the same reason e2e/support/client.ts is split from the root workspace's own specs:
 // one place for the plumbing, one file per scenario for the story.
-import { mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { CloudFormationClient, DescribeStackResourcesCommand } from "@aws-sdk/client-cloudformation";
-import {
-  AdminCreateUserCommand,
-  AdminDeleteUserCommand,
-  AdminSetUserPasswordCommand,
-  CognitoIdentityProviderClient,
-  InitiateAuthCommand,
-} from "@aws-sdk/client-cognito-identity-provider";
+import { AdminCreateUserCommand, AdminSetUserPasswordCommand, CognitoIdentityProviderClient, InitiateAuthCommand } from "@aws-sdk/client-cognito-identity-provider";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page, WebSocketRoute } from "@playwright/test";
@@ -78,6 +72,15 @@ export const screenshotPath = (name: string): string => {
   mkdirSync(SCREENSHOT_DIR, { recursive: true });
   return `${SCREENSHOT_DIR}${name}`;
 };
+
+// M9 Task 5 (ops) fix: a run-scoped, cross-process record of every Cognito user THIS run has
+// minted (see mintThrowawayUser/trackMintedUser below for why this can't just be an in-memory
+// array — same gitignored-scratch directory as SCREENSHOT_DIR above, never a committed
+// artifact). globalSetup.ts clears it at the start of every run (so an interrupted prior run's
+// leftover file can never bleed into this run's own delete list); globalTeardown.ts is the
+// ONLY reader, once, after every worker has finished.
+const MINTED_USERS_DIR = fileURLToPath(new URL("../../../.superpowers/sdd/", import.meta.url));
+export const MINTED_USERS_FILE = `${MINTED_USERS_DIR}e2e-minted-users.ndjson`;
 
 // --- Endpoints ---------------------------------------------------------------------------
 
@@ -384,16 +387,40 @@ export const recordScoreDirect = async (
 // same region rather than reading it from an env var; the PROFILE, by the same repo-wide
 // convention (root package.json's own cdk:guard script), is never named in source — the
 // caller's shell must already have credentials active (AWS_PROFILE=swng or equivalent) before
-// running `pnpm e2e:field`.
-const AWS_REGION = "us-east-1";
+// running `pnpm e2e:field`. Exported: globalTeardown.ts's own AdminDeleteUser calls need the
+// SAME region, not a second hardcoded copy.
+export const AWS_REGION = "us-east-1";
 
-// M9 Task 5 (ops): every user mintThrowawayUser mints below is a real, permanent Cognito
-// account — nothing about it expires or self-deletes. Tracked here (per userPoolId, since a
-// future second pool isn't out of the question) so the afterAll hook below can best-effort
-// delete every one of THIS file's own minted accounts once its tests finish. Course/round/crew
-// rows a run leaves behind stay accepted (task-5-brief.md's own scoping call: inert data, not
-// an account with sign-in ability) — only the accounts themselves get this cleanup.
-const mintedUsers: Array<{ readonly userPoolId: string; readonly username: string }> = [];
+// M9 Task 5 fix: a PREVIOUS version of this cleanup kept `mintedUsers` as a plain in-memory
+// array and registered a top-level `test.afterAll` right here to flush it. That looked correct
+// in review and did NOT work — verified against a real `pnpm e2e:field` run against beta: the
+// pool still held every user minted during the run's window, and the run log had ZERO
+// "[e2e cleanup] ... failed" warnings, meaning AdminDeleteUser was never even attempted.
+//
+// Root cause, confirmed by reading how Playwright actually loads test files (not assumed):
+// `workers: 1` + `fullyParallel: false` (playwright.config.ts) means every spec file in a
+// `pnpm e2e:field` run shares ONE Node worker process, and Node's ES module cache is per
+// PROCESS, not per file — importing "./support.js" from a SECOND spec file returns the
+// already-evaluated module without re-running its top-level code. A `test.afterAll(...)` call
+// sitting at this file's top level only ever executes ONCE, attributed to whichever spec file
+// happens to import support.ts FIRST in the run (alphabetically, courseEntry.spec.ts — which
+// never calls mintThrowawayUser itself). That file's afterAll fires early, sees an empty
+// `mintedUsers` (nothing to warn about — matches the zero-warning evidence), and every LATER
+// file's minted users (crewSeason/identityRecord/primaryPath) land in the same shared array
+// but NO afterAll ever fires again to flush it — they leak silently. The doc comment this
+// replaced ("Playwright resets the module cache between test files") was simply wrong.
+//
+// Fix: cross-worker, cross-file state that doesn't depend on a hook firing inside any specific
+// spec file at all. Every mint appends a `{userPoolId, username}` line to MINTED_USERS_FILE (a
+// plain file on disk — survives across every file/worker in the run, unlike a JS module
+// binding). A Playwright `globalSetup` (globalSetup.ts) clears that file once at the very start
+// of the run; a `globalTeardown` (globalTeardown.ts) reads it ONCE, after every worker has
+// finished — not attributed to any single spec file — and best-effort AdminDeleteUsers every
+// line, then removes the file. See those two files for the actual delete logic.
+const trackMintedUser = (userPoolId: string, username: string): void => {
+  mkdirSync(MINTED_USERS_DIR, { recursive: true });
+  appendFileSync(MINTED_USERS_FILE, `${JSON.stringify({ userPoolId, username })}\n`);
+};
 
 // Mints a per-run throwaway Cognito user via the admin APIs (AdminCreateUser +
 // AdminSetUserPassword, MessageAction SUPPRESS so no real email ever sends) and exchanges it
@@ -419,9 +446,9 @@ export const mintThrowawayUser = async (label: string): Promise<AuthTokens> => {
     }),
   );
   // Tracked for cleanup only once the user actually exists — a failed AdminCreateUser above
-  // throws before this line runs, so the afterAll hook below never attempts to delete a user
-  // that was never actually minted.
-  mintedUsers.push({ userPoolId, username });
+  // throws before this line runs, so globalTeardown.ts never attempts to delete a user that
+  // was never actually minted.
+  trackMintedUser(userPoolId, username);
   // FORCE_CHANGE_PASSWORD -> CONFIRMED, Permanent: true — InitiateAuth's own USER_PASSWORD_AUTH
   // flow below rejects a still-temporary password with a NEW_PASSWORD_REQUIRED challenge this
   // helper has no interactive way to answer.
@@ -436,28 +463,6 @@ export const mintThrowawayUser = async (label: string): Promise<AuthTokens> => {
   }
   return { idToken: result.IdToken, refreshToken: result.RefreshToken, expiresAt: Date.now() + result.ExpiresIn * 1000 };
 };
-
-// Best-effort teardown (M9 Task 5): AdminDeleteUser for every user mintThrowawayUser minted in
-// this file's own run. "Best-effort" is load-bearing, not decorative — a deletion failure here
-// (throttling, a user already gone, a transient Cognito error) must NEVER fail a suite that has
-// already reported its own pass/fail by the time this hook runs, so every per-user delete is
-// individually try/caught and swallowed (logged, not thrown) and the hook itself never rejects.
-// Registered once per spec file (Playwright resets the module cache between test files, so this
-// top-level call — and the mintedUsers array above — are each fresh per file, never shared
-// across files in the same worker).
-test.afterAll(async () => {
-  if (mintedUsers.length === 0) return;
-  const cognito = new CognitoIdentityProviderClient({ region: AWS_REGION });
-  for (const { userPoolId, username } of mintedUsers) {
-    try {
-      await cognito.send(new AdminDeleteUserCommand({ UserPoolId: userPoolId, Username: username }));
-    } catch (err) {
-      // Never let cleanup fail the suite — this is genuinely best-effort (the brief's own
-      // words): log and move on to the next user.
-      console.warn(`[e2e cleanup] AdminDeleteUser failed for ${username} (best-effort, not fatal): ${String(err)}`);
-    }
-  }
-});
 
 // Injects tokenStore.ts's own AUTH_KEY ("swng:auth") — duplicated here as a literal because
 // this runs in Node, outside the page, and can't import a browser-only module's runtime

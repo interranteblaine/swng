@@ -15,6 +15,13 @@ import { defineConfig } from "@playwright/test";
 // stand-in for the real production hosting model this app will ship behind.
 export default defineConfig({
   testDir: "./e2e",
+  // M9 Task 5 fix: cross-worker, run-scoped Cognito-user cleanup. globalSetup clears the
+  // run-scoped tracking file support.ts's mintThrowawayUser appends to; globalTeardown reads it
+  // ONCE after every worker finishes and best-effort deletes every user this run minted. Not a
+  // per-spec-file `test.afterAll` — see support.ts's own comment above trackMintedUser for why
+  // that doesn't reliably fire across multiple spec files sharing one worker process.
+  globalSetup: "./e2e/globalSetup.ts",
+  globalTeardown: "./e2e/globalTeardown.ts",
   // The whole scenario is one long, inherently-sequential story (test.describe.serial's
   // numbered steps in fieldTest.spec.ts) — one worker keeps it that way and avoids two runs
   // racing the same webServer port.

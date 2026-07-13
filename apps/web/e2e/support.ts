@@ -22,7 +22,6 @@ import {
   createCrewRequestSchema,
   createCrewResponseSchema,
   finalizeRoundResponseSchema,
-  getCrewRecordsResponseSchema,
   getMyRecordResponseSchema,
   golferResponseSchema,
   joinRoundRequestSchema,
@@ -45,7 +44,6 @@ import type {
   CreateCrewResponse,
   FinalizeRoundResponse,
   GameConfigInput,
-  GetCrewRecordsResponse,
   GetMyRecordResponse,
   GolferResponse,
   JoinRoundResponse,
@@ -293,16 +291,11 @@ export const saveStandingGameDirect = async (httpUrl: string, token: string, id:
   return parse(saveStandingGameResponseSchema, json);
 };
 
-// `season` defaults to the current UTC year server-side (routes.ts's own parseSeason) when
-// omitted here — crewSeason.spec.ts never needs to pin a season number itself since the whole
-// 12-round run happens within one UTC day.
-export const getCrewRecordsDirect = async (httpUrl: string, token: string, id: CrewId, season?: number): Promise<GetCrewRecordsResponse> => {
-  const query = season !== undefined ? `?season=${season}` : "";
-  const response = await fetch(`${httpUrl}/crews/${id}/records${query}`, { headers: { authorization: `Bearer ${token}` } });
-  const json: unknown = await response.json();
-  if (!response.ok) throw new Error(`GET /crews/${id}/records -> ${response.status}: ${JSON.stringify(json)}`);
-  return parse(getCrewRecordsResponseSchema, json);
-};
+// getCrewRecordsDirect (GET /crews/{id}/records) is GONE — the route itself was deleted in
+// architecture-realignment Task 9 (standings-on-read replaced the crew projection layer
+// entirely), and its wire schema followed in Task 11. crewSeason.spec.ts's own season-record
+// assertions are quarantined below (test.skip) pending Task 12's rewrite against
+// GET /crews/{crewId}/seasons/{seasonId}/standings.
 
 export const claimGolferDirect = async (httpUrl: string, token: string, input: ClaimGolferRequest): Promise<GolferResponse> => {
   const body = parse(claimGolferRequestSchema, input);

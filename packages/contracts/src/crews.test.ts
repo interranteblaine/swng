@@ -9,7 +9,6 @@ import {
   createSeasonRequestSchema,
   createSeasonResponseSchema,
   crewViewSchema,
-  getCrewRecordsResponseSchema,
   getCrewResponseSchema,
   joinCrewRequestSchema,
   listMyCrewsResponseSchema,
@@ -138,24 +137,9 @@ describe("listMyCrewsResponseSchema", () => {
   });
 });
 
-describe("getCrewRecordsResponseSchema", () => {
-  it("round-trips a populated season's ledger + head-to-head", () => {
-    roundTrips(getCrewRecordsResponseSchema, {
-      season: 2026,
-      ledger: [
-        { golferId: golferId("ann"), rounds: 3, wins: 2, losses: 1, halves: 0, points: 0, skins: 0 },
-        { golferId: golferId("bo"), rounds: 3, wins: 1, losses: 2, halves: 0, points: 0, skins: 0 },
-      ],
-      headToHead: [{ a: golferId("ann"), b: golferId("bo"), aWins: 2, bWins: 1, halves: 0 }],
-    });
-  });
-
-  it("round-trips an empty season (no finalized rounds yet)", () => {
-    roundTrips(getCrewRecordsResponseSchema, { season: 2026, ledger: [], headToHead: [] });
-  });
-});
-
-// Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read.
+// Architecture-realignment Task 9/11: crew seasons + counted rounds + standings-on-read
+// replaced GET /crews/{crewId}/records (and its own getCrewRecordsResponseSchema) entirely —
+// seasonStandingsResponseSchema below is the one ledger/head-to-head wire shape left.
 describe("season + standings schemas", () => {
   it("createSeasonRequestSchema rejects a server-assigned seasonId (.strict())", () => {
     roundTrips(createSeasonRequestSchema, { name: "Summer Cup" });

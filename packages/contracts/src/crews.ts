@@ -120,41 +120,17 @@ export const listMyCrewsResponseSchema: z.ZodType<ListMyCrewsResponse> = z.objec
   crews: z.array(z.object({ crewId: crewIdSchema, name: z.string(), memberCount: z.number().int() })).readonly(),
 });
 
-// GET /crews/{crewId}/records?season= (M8 Task 4): mirrors domain's SeasonLedgerLine/
-// HeadToHeadRecord (crew/ledger.ts) field-for-field, same "wire-shapes-an-already-wire-shaped-
-// domain-type" idiom as golfers.ts's golferRoundLineSchema — no separate *View interface, since
-// neither line carries a read-time-derived field the way CrewMemberView's `claimed` does.
-const seasonLedgerLineSchema: z.ZodType<SeasonLedgerLine> = z.object({
-  golferId: golferIdSchema,
-  rounds: z.number().int(),
-  wins: z.number().int(),
-  losses: z.number().int(),
-  halves: z.number().int(),
-  points: z.number().int(),
-  skins: z.number().int(),
-});
-
+// Mirrors domain's HeadToHeadRecord (crew/ledger.ts) field-for-field, same "wire-shapes-an-
+// already-wire-shaped-domain-type" idiom as golfers.ts's golferRoundLineSchema. Shared by
+// seasonStandingsResponseSchema below — the GET /crews/{crewId}/records route (and its own
+// season-only ledger line schema) that used to share this is deleted (architecture-realignment
+// Task 9/11: standings-on-read replaced the crew projection layer entirely).
 const headToHeadRecordSchema: z.ZodType<HeadToHeadRecord> = z.object({
   a: golferIdSchema,
   b: golferIdSchema,
   aWins: z.number().int(),
   bWins: z.number().int(),
   halves: z.number().int(),
-});
-
-// season always comes back explicit — the route defaults ?season= to the current UTC year
-// when the client omits it (routes.ts), but the wire response never leaves the caller guessing
-// which season it actually read.
-export interface GetCrewRecordsResponse {
-  readonly season: number;
-  readonly ledger: readonly SeasonLedgerLine[];
-  readonly headToHead: readonly HeadToHeadRecord[];
-}
-
-export const getCrewRecordsResponseSchema: z.ZodType<GetCrewRecordsResponse> = z.object({
-  season: z.number().int(),
-  ledger: z.array(seasonLedgerLineSchema).readonly(),
-  headToHead: z.array(headToHeadRecordSchema).readonly(),
 });
 
 // Architecture-realignment Task 9 (crew seasons + counted rounds + standings-on-read). A season

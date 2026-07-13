@@ -3,12 +3,13 @@ import {
   addGameResponseSchema,
   addParticipantResponseSchema,
   addTeeSetResponseSchema,
+  appendCountedRoundResponseSchema,
   createCourseResponseSchema,
   createCrewResponseSchema,
+  createSeasonResponseSchema,
   errorResponseSchema,
   finalizeRoundResponseSchema,
   getCourseResponseSchema,
-  getCrewRecordsResponseSchema,
   getCrewResponseSchema,
   getMeResponseSchema,
   getMyRecordResponseSchema,
@@ -17,11 +18,15 @@ import {
   golferResponseSchema,
   joinCrewResponseSchema,
   joinRoundResponseSchema,
+  leaveCrewResponseSchema,
   listMyCrewsResponseSchema,
+  listSeasonsResponseSchema,
   parse,
   peekRoundResponseSchema,
+  removeCountedRoundResponseSchema,
   saveStandingGameResponseSchema,
   searchCoursesResponseSchema,
+  seasonStandingsResponseSchema,
   shareLinkResponseSchema,
   startRoundResponseSchema,
   terminateGameResponseSchema,
@@ -36,14 +41,17 @@ import type {
   AddParticipantResponse,
   AddTeeSetRequest,
   AddTeeSetResponse,
+  AppendCountedRoundRequest,
+  AppendCountedRoundResponse,
   ClaimGolferRequest,
   CreateCourseRequest,
   CreateCourseResponse,
   CreateCrewRequest,
   CreateCrewResponse,
+  CreateSeasonRequest,
+  CreateSeasonResponse,
   FinalizeRoundResponse,
   GetCourseResponse,
-  GetCrewRecordsResponse,
   GetCrewResponse,
   GetMeResponse,
   GetMyRecordResponse,
@@ -54,11 +62,15 @@ import type {
   JoinCrewResponse,
   JoinRoundRequest,
   JoinRoundResponse,
+  LeaveCrewResponse,
   ListMyCrewsResponse,
+  ListSeasonsResponse,
   PeekRoundResponse,
+  RemoveCountedRoundResponse,
   SaveStandingGameRequest,
   SaveStandingGameResponse,
   SearchCoursesResponse,
+  SeasonStandingsResponse,
   ShareLinkResponse,
   StartRoundRequest,
   StartRoundResponse,
@@ -287,10 +299,42 @@ export const saveStandingGame = async (token: string, id: CrewId, input: SaveSta
   return parse(saveStandingGameResponseSchema, json);
 };
 
-// `season` always rides the current-UTC-year default (routes.ts's own doc comment) — no
-// picker in this milestone (brief: "a picker is NOT required"), so this never sends
-// `?season=`.
-export const getCrewRecords = async (token: string, id: CrewId): Promise<GetCrewRecordsResponse> => {
-  const json = await requestJson(`/crews/${id}/records`, { token });
-  return parse(getCrewRecordsResponseSchema, json);
+// Architecture-realignment Task 11: crew seasons + counted rounds + standings-on-read + leave —
+// the six routes Task 9 (application/contracts/lambda) wired but no web caller yet used. Same
+// requestJson + per-endpoint idiom as every crew call above; every one is "golfer"-gated.
+// `seasonId` rides as a bare string in the URL (never branded — same wire contract as the path
+// param itself, routes.ts's own doc comment).
+export const createSeason = async (token: string, id: CrewId, input: CreateSeasonRequest): Promise<CreateSeasonResponse> => {
+  const json = await requestJson(`/crews/${id}/seasons`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
+  return parse(createSeasonResponseSchema, json);
+};
+
+export const listSeasons = async (token: string, id: CrewId): Promise<ListSeasonsResponse> => {
+  const json = await requestJson(`/crews/${id}/seasons`, { token });
+  return parse(listSeasonsResponseSchema, json);
+};
+
+export const appendCountedRound = async (token: string, id: CrewId, seasonId: string, input: AppendCountedRoundRequest): Promise<AppendCountedRoundResponse> => {
+  const json = await requestJson(`/crews/${id}/seasons/${seasonId}/rounds`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+    token,
+  });
+  return parse(appendCountedRoundResponseSchema, json);
+};
+
+export const removeCountedRound = async (token: string, id: CrewId, seasonId: string, roundId: RoundId): Promise<RemoveCountedRoundResponse> => {
+  const json = await requestJson(`/crews/${id}/seasons/${seasonId}/rounds/${roundId}`, { method: "DELETE", token });
+  return parse(removeCountedRoundResponseSchema, json);
+};
+
+export const getSeasonStandings = async (token: string, id: CrewId, seasonId: string): Promise<SeasonStandingsResponse> => {
+  const json = await requestJson(`/crews/${id}/seasons/${seasonId}/standings`, { token });
+  return parse(seasonStandingsResponseSchema, json);
+};
+
+export const leaveCrew = async (token: string, id: CrewId): Promise<LeaveCrewResponse> => {
+  const json = await requestJson(`/crews/${id}/leave`, { method: "POST", token });
+  return parse(leaveCrewResponseSchema, json);
 };

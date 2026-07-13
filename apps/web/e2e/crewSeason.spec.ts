@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import type { GetCrewRecordsResponse, GetMyRecordResponse } from "@swng/contracts";
+import type { GetMyRecordResponse } from "@swng/contracts";
 import { golferId } from "@swng/domain";
 import type { CrewId, GolferId, RoundId } from "@swng/domain";
 import type { AuthTokens } from "../src/auth/tokenStore.js";
@@ -11,9 +11,7 @@ import {
   createScoreOps,
   ensureCourse,
   finalizeRoundDirect,
-  getCrewRecordsDirect,
   getMyRecordDirect,
-  invokeRebuild,
   loadWebEnv,
   mintThrowawayUser,
   pollUntil,
@@ -157,41 +155,27 @@ test.describe.serial("M8 golden season gate — crew ledger, H2H, rebuild parity
     expect(roundIds).toHaveLength(SEASON_ROUNDS);
   });
 
-  let liveRecords: GetCrewRecordsResponse;
-
-  test("5: GET /crews/{id}/records deep-equals the frozen season expectation", async () => {
-    test.setTimeout(120_000);
-    const { httpUrl } = loadWebEnv();
-    const frozen = frozenSeasonExpectation(ids);
-
-    // projectArchive's own crew-tagged write (packages/application/src/projections/
-    // projectArchive.ts) runs off the LAST round's finalize asynchronously (DynamoDB Streams)
-    // relative to that finalize's own HTTP response — poll on structural readiness (every
-    // ledger line at 12 rounds) before asserting exact values, same "poll on shape, assert on
-    // content" split as identityRecord.spec.ts's own pollRecord.
-    liveRecords = await pollUntil(
-      () => getCrewRecordsDirect(httpUrl, hostU.idToken, crewId),
-      (r) => r.ledger.length === 4 && r.ledger.every((line) => line.rounds === SEASON_ROUNDS),
-      120_000,
-      "crew records",
+  // Tests 5 and 6 (GET /crews/{id}/records parity + rebuild parity) targeted the M8 crew
+  // projection layer, which architecture-realignment Task 9 deleted outright — standings are
+  // computed on read now (GET /crews/{crewId}/seasons/{seasonId}/standings), and this whole
+  // spec never creates a season or counts a round into one (that surface didn't exist when this
+  // file was written). Task 9's own report flagged this exact gap ("the crewSeason.spec.ts e2e
+  // still references the kept records schema and hits the now-deleted /records route at
+  // runtime... rewritten in Task 12"); Task 11 (this task) is web-UI-only (CrewPage/SeasonPanel)
+  // and removed the now-dead getCrewRecordsResponseSchema/getCrewRecordsDirect the deleted route
+  // left behind, which is what forces this quarantine now rather than leaving it silently
+  // broken. `frozenSeasonExpectation`'s own ledger/headToHead numbers stay pinned in
+  // crewSeasonDeck.ts for Task 12 to assert against the new standings endpoint instead of
+  // re-deriving them.
+  test.describe("5 & 6: season-record parity (quarantined pending Task 12)", () => {
+    test.skip(
+      true,
+      "GET /crews/{id}/records is deleted (architecture-realignment Task 9 — standings-on-read " +
+        "replaced the crew projection layer). This spec never creates a season/counts a round " +
+        "(that surface postdates this file). Task 12 rewrites this against " +
+        "GET /crews/{crewId}/seasons/{seasonId}/standings, including rebuild parity.",
     );
-
-    expect(liveRecords.headToHead).toHaveLength(1); // singles Al-Bo is the only head-to-head pair this season ever plays
-    expect(liveRecords.ledger).toEqual(frozen.ledger);
-    expect(liveRecords.headToHead).toEqual(frozen.headToHead);
-  });
-
-  test("6: rebuild parity — wiping and replaying every projection reproduces the identical ledger", async () => {
-    test.setTimeout(360_000); // the rebuild lambda replays every finalized round on beta (5-minute CDK timeout)
-
-    const summary = await invokeRebuild();
-    console.log(`[crewSeason] rebuild: ${summary.processed} snapshots processed`);
-    expect(summary.processed).toBeGreaterThanOrEqual(SEASON_ROUNDS);
-
-    const { httpUrl } = loadWebEnv();
-    const postRebuild = await getCrewRecordsDirect(httpUrl, hostU.idToken, crewId);
-    expect(postRebuild.ledger).toEqual(liveRecords.ledger);
-    expect(postRebuild.headToHead).toEqual(liveRecords.headToHead);
+    test("documented above — see the skip reason and this block's own leading comment", () => {});
   });
 
   test("7: mid-season claim continuity — V claims Bo's ghost and inherits all 12 history lines", async () => {

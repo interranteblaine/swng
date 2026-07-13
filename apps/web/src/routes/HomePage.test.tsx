@@ -232,6 +232,29 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
     // Never entered — no credential was ever stored for this failed attempt.
     expect(credentialStore.load(roundId("live-1"))).toBeUndefined();
   });
+
+  it("a 409 round-final surfaces finished copy with an archive link and removes the row from live rounds", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+    mockedMintParticipantToken.mockRejectedValue(new ApiError("round-final", 409, "round live-1 is finalized"));
+
+    renderHome();
+    const link = await screen.findByRole("link", { name: /casa verde gc/i });
+    expect(link).toBeTruthy(); // precondition: row exists before click
+
+    fireEvent.click(link);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/this round has finished/i);
+    expect(screen.queryByText(/is finalized/i)).toBeNull();
+    // Archive link is present with the correct href
+    const archiveLink = screen.getByRole("link", { name: /view archived round/i });
+    expect(archiveLink.getAttribute("href")).toBe(`/rounds/live-1/archive`);
+    // Row removed from live list
+    expect(screen.queryByRole("link", { name: /casa verde gc/i })).toBeNull();
+  });
 });
 
 // Fix wave (review of 1b39f4d): hasGolferIdentity = Boolean(golfer) can't distinguish "GET /me

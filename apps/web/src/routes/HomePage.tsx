@@ -48,9 +48,11 @@ export function HomePage() {
   // Task 14: a round found by identity may have no local device credential at all — started
   // or joined from a different device/browser. `enteringRoundId` gates a double-tap while the
   // re-mint is in flight; `enterError` is the ONE alert this section shows (never raw server
-  // text — the M9 papercut discipline).
+  // text — the M9 papercut discipline). `finishedRoundId` tracks a 409 round-final error so
+  // we can show an archive link instead of a dead-end retry.
   const [enteringRoundId, setEnteringRoundId] = useState<RoundId | undefined>(undefined);
   const [enterError, setEnterError] = useState<string | undefined>(undefined);
+  const [finishedRoundId, setFinishedRoundId] = useState<RoundId | undefined>(undefined);
 
   // Scoring capability derives from PARTICIPATION, not the device that joined (this task's own
   // headline): mint a fresh participant token for THIS device and store it exactly as a join
@@ -63,15 +65,24 @@ export function HomePage() {
   const enterLiveRound = async (id: RoundId) => {
     if (enteringRoundId) return; // a re-mint is already in flight — no double-tap
     setEnterError(undefined);
+    setFinishedRoundId(undefined);
     setEnteringRoundId(id);
     try {
       const response = await withAuth((token) => mintParticipantToken(token, id));
       credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer!.name, joinCode: "" });
       navigate(`/round/${response.roundId}`);
     } catch (caught) {
-      setEnterError(
-        caught instanceof ApiError && caught.code === "not-a-participant" ? "You're not in this round." : "Could not open that round — try again.",
-      );
+      if (caught instanceof ApiError && caught.code === "round-final") {
+        setEnterError("This round has finished.");
+        setFinishedRoundId(id);
+        // Remove the stale presence entry from liveRounds — the server's projector will delete it;
+        // dropping it now matches reality and avoids a dead-end retry row.
+        setLiveRounds((prevRounds) => (prevRounds ? prevRounds.filter((r) => r.roundId !== id) : prevRounds));
+      } else if (caught instanceof ApiError && caught.code === "not-a-participant") {
+        setEnterError("You're not in this round.");
+      } else {
+        setEnterError("Could not open that round — try again.");
+      }
       setEnteringRoundId(undefined);
     }
   };
@@ -213,15 +224,22 @@ export function HomePage() {
             Loading your rounds…
           </div>
         ) : hasGolferIdentity ? (
-          !liveRounds || liveRounds.length === 0 ? (
-            <p className="text-slate-400">No rounds yet</p>
-          ) : (
-            <>
-              {enterError && (
-                <p role="alert" className="text-red-400">
-                  {enterError}
-                </p>
-              )}
+          <>
+            {enterError && (
+              <div role="alert" className="text-red-400">
+                <p>{enterError}</p>
+                {finishedRoundId && (
+                  <p>
+                    <Link to={`/rounds/${finishedRoundId}/archive`} className="underline">
+                      View archived round
+                    </Link>
+                  </p>
+                )}
+              </div>
+            )}
+            {!liveRounds || liveRounds.length === 0 ? (
+              <p className="text-slate-400">No rounds yet</p>
+            ) : (
               <ul className="flex flex-col gap-2">
                 {liveRounds.map((round) => (
                   <li key={round.roundId}>
@@ -241,8 +259,8 @@ export function HomePage() {
                   </li>
                 ))}
               </ul>
-            </>
-          )
+            )}
+          </>
         ) : rounds.length === 0 ? (
           <p className="text-slate-400">No rounds yet</p>
         ) : (

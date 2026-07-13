@@ -6,7 +6,7 @@
 // one place for the plumbing, one file per scenario for the story.
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { CloudFormationClient, DescribeStackResourcesCommand } from "@aws-sdk/client-cloudformation";
+import { CloudFormationClient, ListStackResourcesCommand } from "@aws-sdk/client-cloudformation";
 import { AdminCreateUserCommand, AdminSetUserPasswordCommand, CognitoIdentityProviderClient, InitiateAuthCommand } from "@aws-sdk/client-cognito-identity-provider";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { expect, test } from "@playwright/test";
@@ -519,12 +519,23 @@ export const injectAuthTokens = async (page: Page, tokens: AuthTokens): Promise<
 // instead of a hardcoded physical name.
 const resolveRebuildFunctionName = async (): Promise<string> => {
   const cfn = new CloudFormationClient({ region: AWS_REGION });
-  const resources = await cfn.send(new DescribeStackResourcesCommand({ StackName: "swng-beta" }));
-  const rebuildResource = resources.StackResources?.find((r) => r.LogicalResourceId?.startsWith("RebuildFunction"));
-  if (!rebuildResource?.PhysicalResourceId) {
-    throw new Error(`no RebuildFunction* resource found in the swng-beta stack (${resources.StackResources?.length ?? 0} resources scanned)`);
+  let nextToken: string | undefined;
+  let totalScanned = 0;
+
+  for (;;) {
+    const resources = await cfn.send(new ListStackResourcesCommand({ StackName: "swng-beta", NextToken: nextToken }));
+    const rebuildResource = resources.StackResourceSummaries?.find((r) => r.LogicalResourceId?.startsWith("RebuildFunction"));
+    if (rebuildResource?.PhysicalResourceId) {
+      return rebuildResource.PhysicalResourceId;
+    }
+
+    totalScanned += resources.StackResourceSummaries?.length ?? 0;
+    nextToken = resources.NextToken;
+
+    if (!nextToken) break; // no more pages
   }
-  return rebuildResource.PhysicalResourceId;
+
+  throw new Error(`no RebuildFunction* resource found in the swng-beta stack (${totalScanned} resources scanned)`);
 };
 
 // Invokes the manual-only rebuild entry (packages/lambda/src/entries/rebuild.ts) — paged

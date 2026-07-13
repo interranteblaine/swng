@@ -6,6 +6,13 @@ import { createScriptedTransport, stampSeq } from "../testSupport/scriptedTransp
 import type { ScriptedTransport } from "../testSupport/scriptedTransport";
 import { createUseWatchRound } from "./useWatchRound";
 
+// KNOWN FLAKE, seen once (2026-07-13, full-suite run only): three "Unhandled Rejection:
+// window is not defined" errors surfaced from this file while every test in the run passed —
+// some async path in the hook or these tests outlived happy-dom's environment teardown.
+// Isolated (7/7) and repeated full-suite reruns were clean, so it's a latent teardown race,
+// not randomness in the assertions. If it recurs: hunt the pending promise/timer that escapes
+// the test's lifecycle (an un-awaited transport callback is the likely shape) — don't rerun
+// until green and move on.
 const ROUND_ID = roundId("round-1");
 const ANN_ID = golferId("ann");
 const BO_ID = golferId("bo");

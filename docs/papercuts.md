@@ -185,3 +185,27 @@ round created or joined while signed in is now the account's own golfer from the
 created (M8 Task 5's as-self flow, `CreateRoundPage`'s `asSelf` branch) or a crew's own STABLE
 ghost that any one claim adopts whole (`crewSeason.spec.ts`'s mid-season claim step, Task 7) —
 so this exact gap cannot recur for anything played from M8 onward.
+
+### 8. Profile's set-your-name alert offers "Go to profile" from the profile itself
+
+Observed 2026-07-13 (crew-is-a-grouping final review). When the crews section moved from
+HomePage to ProfilePage, the join-by-code `golfer-required` alert kept its copy byte-identical
+— deliberately, that was the relocation rule — so "Set your name on your profile before
+joining a crew. Go to profile" now renders with its link pointing at the page you're already
+on, a few hundred pixels below the very name field it's asking you to fill. Behavior is
+correct (the join is properly gated until identity resolves); the copy just wasn't rethought
+for its new home. Wanted shape: on /profile the alert should say "set your name in the form
+above" (or focus the name input); the link phrasing only ever made sense from elsewhere.
+Surfacing site: `ProfilePage.tsx`'s crews join-by-code error branch.
+
+### 9. A season whose contributors all left the crew reads "Standings build as rounds are counted"
+
+Observed 2026-07-13 (crew-is-a-grouping final review). Members-only aggregation (spec §11a:
+lines for current roster members only) means a season can hold counted rounds whose every
+contributor has since left the crew — the ledger computes empty, and `SeasonPanel` renders the
+zero-state copy, which is untrue in that corner: rounds ARE counted, there's just no current
+member in them to show. Rare by construction (requires counted rounds + full contributor
+departure) and self-healing (anyone rejoining restores their rows at the next read). Wanted
+shape: distinguish "no rounds counted yet" from "no current members appear in this season's
+rounds." Surfacing site: `SeasonPanel.tsx`'s empty-ledger branch beside the counted-rounds
+list, which already shows the rounds and makes the mismatch visible.

@@ -1,18 +1,22 @@
-import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { GameConfig, OpId, RoundEvent } from "@swng/domain";
 import { createScriptedTransport, stampSeq } from "../testSupport/scriptedTransport";
 import type { ScriptedTransport } from "../testSupport/scriptedTransport";
 import { createUseWatchRound } from "./useWatchRound";
 
-// KNOWN FLAKE, seen once (2026-07-13, full-suite run only): three "Unhandled Rejection:
-// window is not defined" errors surfaced from this file while every test in the run passed —
-// some async path in the hook or these tests outlived happy-dom's environment teardown.
-// Isolated (7/7) and repeated full-suite reruns were clean, so it's a latent teardown race,
-// not randomness in the assertions. If it recurs: hunt the pending promise/timer that escapes
-// the test's lifecycle (an un-awaited transport callback is the likely shape) — don't rerun
-// until green and move on.
+// Unmount every mounted hook when its test ends. Testing Library only auto-registers this
+// when a GLOBAL afterEach exists, and this suite imports vitest APIs explicitly (no globals)
+// — so without this line nothing ever unmounts, and each mounted hook's real 4s poll interval
+// (useWatchRound's own POLL_MS default; no test here shortens it) stays scheduled after its
+// test finishes. On a loaded machine the worker can still be tearing down when that timer
+// fires into the destroyed happy-dom environment — seen live 2026-07-13 as three "Unhandled
+// Rejection: window is not defined" errors from this file while every test passed. cleanup()
+// unmounts, which runs the hook's own effect teardown (cancelled + clearInterval +
+// closeSocket), killing the leak deterministically.
+afterEach(cleanup);
+
 const ROUND_ID = roundId("round-1");
 const ANN_ID = golferId("ann");
 const BO_ID = golferId("bo");

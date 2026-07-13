@@ -185,8 +185,8 @@ test.describe.serial("M8 golden season gate — crew ledger, H2H, rebuild parity
     test.setTimeout(360_000); // the rebuild lambda replays every finalized round on beta (5-minute CDK timeout)
 
     const summary = await invokeRebuild();
-    console.log(`[crewSeason] rebuild: ${summary.rounds} rounds, ${summary.golfers} golfers`);
-    expect(summary.rounds).toBeGreaterThanOrEqual(SEASON_ROUNDS);
+    console.log(`[crewSeason] rebuild: ${summary.processed} snapshots processed`);
+    expect(summary.processed).toBeGreaterThanOrEqual(SEASON_ROUNDS);
 
     const { httpUrl } = loadWebEnv();
     const postRebuild = await getCrewRecordsDirect(httpUrl, hostU.idToken, crewId);

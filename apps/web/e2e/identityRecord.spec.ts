@@ -252,8 +252,8 @@ test.describe.serial("M7 identity/record gate — claim mid-season, live index, 
     test.setTimeout(360_000); // the rebuild lambda replays every finalized round on beta (5-minute CDK timeout) — comfortably slower than every other step here
 
     const summary = await invokeRebuild();
-    console.log(`[identityRecord] rebuild: ${summary.rounds} rounds, ${summary.golfers} golfers`);
-    expect(summary.rounds).toBeGreaterThanOrEqual(3); // at least this run's own 3 rounds
+    console.log(`[identityRecord] rebuild: ${summary.processed} snapshots processed`);
+    expect(summary.processed).toBeGreaterThanOrEqual(3); // at least this run's own 3 rounds
 
     const { httpUrl } = loadWebEnv();
     const postRebuildRecord = await getMyRecordDirect(httpUrl, userA.idToken);

@@ -493,24 +493,39 @@ const resolveRebuildFunctionName = async (): Promise<string> => {
   return rebuildResource.PhysicalResourceId;
 };
 
-// Invokes the manual-only rebuild entry (packages/lambda/src/entries/rebuild.ts) — wipes and
-// replays EVERY finalized round's projections on beta (rebuildProjections.ts's own doc
-// comment: "no forked math", the SAME projectArchive the stream trigger uses), synchronously
-// (RequestResponse), and returns its own { rounds, golfers } summary. No client-side timeout
-// is configured — the function's own 5-minute CDK timeout (apps/infra-cdk/lib/swngStack.ts)
-// is the real bound, and the AWS SDK v3's NodeHttpHandler default (no request timeout) simply
-// waits for it; the caller sets its OWN Playwright test.setTimeout generously instead.
-export const invokeRebuild = async (): Promise<{ readonly rounds: number; readonly golfers: number }> => {
+// Invokes the manual-only rebuild entry (packages/lambda/src/entries/rebuild.ts) — paged
+// backfill over the snapshots table with idempotent upserts and cursor-resume. Loops until
+// the response carries no cursor (all snapshots processed). No client-side timeout is
+// configured — the function's own 5-minute CDK timeout (apps/infra-cdk/lib/swngStack.ts)
+// is the real bound, and the AWS SDK v3's NodeHttpHandler default (no request timeout)
+// simply waits for it; the caller sets its OWN Playwright test.setTimeout generously instead.
+export const invokeRebuild = async (): Promise<{ readonly processed: number }> => {
   const functionName = await resolveRebuildFunctionName();
   const lambda = new LambdaClient({ region: AWS_REGION });
-  const response = await lambda.send(new InvokeCommand({ FunctionName: functionName, InvocationType: "RequestResponse" }));
-  const payloadText = response.Payload ? Buffer.from(response.Payload).toString("utf8") : "";
-  if (response.FunctionError) throw new Error(`rebuild lambda failed (${response.FunctionError}): ${payloadText}`);
-  const payload = payloadText ? (JSON.parse(payloadText) as { rounds?: unknown; golfers?: unknown }) : {};
-  if (typeof payload.rounds !== "number" || typeof payload.golfers !== "number") {
-    throw new Error(`rebuild lambda returned an unexpected payload: ${payloadText}`);
+
+  let cursor: string | undefined;
+  let totalProcessed = 0;
+
+  for (;;) {
+    const response = await lambda.send(
+      new InvokeCommand({
+        FunctionName: functionName,
+        InvocationType: "RequestResponse",
+        Payload: JSON.stringify({ cursor, maxSnapshots: undefined }),
+      }),
+    );
+    const payloadText = response.Payload ? Buffer.from(response.Payload).toString("utf8") : "";
+    if (response.FunctionError) throw new Error(`rebuild lambda failed (${response.FunctionError}): ${payloadText}`);
+    const payload = payloadText ? (JSON.parse(payloadText) as { processed?: unknown; cursor?: unknown }) : {};
+    if (typeof payload.processed !== "number") {
+      throw new Error(`rebuild lambda returned an unexpected payload: ${payloadText}`);
+    }
+    totalProcessed += payload.processed;
+    cursor = typeof payload.cursor === "string" ? payload.cursor : undefined;
+    if (!cursor) break;
   }
-  return { rounds: payload.rounds, golfers: payload.golfers };
+
+  return { processed: totalProcessed };
 };
 
 // --- The deck as the oracle: expected UI strings, derived, not hand-copied -----------------

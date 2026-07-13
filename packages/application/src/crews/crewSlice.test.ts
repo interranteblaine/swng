@@ -370,6 +370,13 @@ const createFlakyCrewStore = (inner: CrewStore, failCount: number): FlakyCrewSto
     get: inner.get,
     findByJoinCode: inner.findByJoinCode,
     listByGolfer: inner.listByGolfer,
+    putSeason: inner.putSeason,
+    getSeason: inner.getSeason,
+    listSeasons: inner.listSeasons,
+    addCountedRound: inner.addCountedRound,
+    removeCountedRound: inner.removeCountedRound,
+    listCountedRounds: inner.listCountedRounds,
+    countsRound: inner.countsRound,
     put: async (crew, joinCode, expectedRevision) => {
       putAttempts += 1;
       if (putAttempts <= failCount) throw new ApplicationError("crew-conflict", `synthetic conflict #${putAttempts}`);

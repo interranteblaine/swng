@@ -147,7 +147,19 @@ const unavailableCrewStore = (): CrewStore => {
   const unavailable = (): never => {
     throw new Error("buildApp: TABLE_CORE is not set for this entry — crew routes are HTTP-only (see swngStack.ts)");
   };
-  return { put: unavailable, get: unavailable, findByJoinCode: unavailable, listByGolfer: unavailable };
+  return {
+    put: unavailable,
+    get: unavailable,
+    findByJoinCode: unavailable,
+    listByGolfer: unavailable,
+    putSeason: unavailable,
+    getSeason: unavailable,
+    listSeasons: unavailable,
+    addCountedRound: unavailable,
+    removeCountedRound: unavailable,
+    listCountedRounds: unavailable,
+    countsRound: unavailable,
+  };
 };
 
 // Same shape again, for TABLE_PROJECTIONS (M7 Task 5: granted + env'd onto httpFn since Task

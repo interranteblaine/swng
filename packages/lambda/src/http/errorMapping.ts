@@ -78,6 +78,12 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // Projection-realignment Task 6: getRoundArchive's own forbidden-actor code — same 403
   // bucket as not-a-participant/not-a-member/claim-proof-required above.
   "not-a-viewer": 403,
+  // Architecture-realignment Task 8 (application/src/errors.ts): CrewStore.addCountedRound's
+  // collision signal, forward-provisioned ahead of any real route that calls it (same
+  // "exhaustive Record" precedent as course-conflict/crew-conflict above) — a failed
+  // precondition on an append, same bucket as crew-conflict/golfer-already-in-round, not a
+  // genuine-bug 500.
+  "round-already-counted": 409,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`

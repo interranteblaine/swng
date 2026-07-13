@@ -5,7 +5,7 @@ import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJo
 import type { Broadcast } from "../ports/broadcast.js";
 import type { Clock } from "../ports/clock.js";
 import type { CourseStore } from "../ports/courseStore.js";
-import type { CrewStore } from "../ports/crewStore.js";
+import type { CountedRound, CrewSeason, CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
@@ -246,6 +246,14 @@ export const putAndBindGolfer = async (store: GolferStore, id: GolferId, sub: st
 export const createInMemoryCrewStore = (): CrewStore => {
   const byId = new Map<CrewId, { crew: Crew; joinCode: string; revision: number }>();
   const idByJoinCode = new Map<string, CrewId>();
+  // Seasons + counted rounds (task-8-brief.md), reproducing createDynamoCrewStore's own key
+  // scheme without Dynamo: one Map<seasonId, CrewSeason> per crew, and one
+  // Map<seasonId, Map<roundId, CountedRound>> per crew for counted rounds — the SAME roundId
+  // in TWO different seasons of one crew lives in two different inner Maps, so they never
+  // collide (mirrors the real adapter's independent "SEASON#<a>#ROUND#<r>" vs.
+  // "SEASON#<b>#ROUND#<r>" sort keys).
+  const seasonsByCrew = new Map<CrewId, Map<string, CrewSeason>>();
+  const countedRoundsByCrew = new Map<CrewId, Map<string, Map<RoundId, CountedRound>>>();
 
   return {
     put: async (crew, joinCode, expectedRevision) => {
@@ -270,6 +278,35 @@ export const createInMemoryCrewStore = (): CrewStore => {
       [...byId.values()]
         .filter(({ crew }) => crew.members.some((member) => member.golferId === golferId))
         .map(({ crew }) => ({ crewId: crew.id, name: crew.name, memberCount: crew.members.length })),
+
+    putSeason: async (crewId, season) => {
+      const seasons = seasonsByCrew.get(crewId) ?? new Map<string, CrewSeason>();
+      seasons.set(season.seasonId, season); // unconditional upsert — create/rename/close all land here
+      seasonsByCrew.set(crewId, seasons);
+    },
+    getSeason: async (crewId, seasonId) => seasonsByCrew.get(crewId)?.get(seasonId),
+    // NO ORDER PROMISED (port doc) — insertion order here is incidental, never relied upon.
+    listSeasons: async (crewId) => [...(seasonsByCrew.get(crewId)?.values() ?? [])],
+
+    addCountedRound: async (crewId, seasonId, entry) => {
+      const seasons = countedRoundsByCrew.get(crewId) ?? new Map<string, Map<RoundId, CountedRound>>();
+      const rounds = seasons.get(seasonId) ?? new Map<RoundId, CountedRound>();
+      if (rounds.has(entry.roundId)) {
+        throw new ApplicationError("round-already-counted", `round ${entry.roundId} is already counted in season ${seasonId} of crew ${crewId}`);
+      }
+      rounds.set(entry.roundId, entry);
+      seasons.set(seasonId, rounds);
+      countedRoundsByCrew.set(crewId, seasons);
+    },
+    removeCountedRound: async (crewId, seasonId, roundId) => {
+      countedRoundsByCrew.get(crewId)?.get(seasonId)?.delete(roundId); // absent entry: no-op, not an error
+    },
+    listCountedRounds: async (crewId, seasonId) => [...(countedRoundsByCrew.get(crewId)?.get(seasonId)?.values() ?? [])],
+    countsRound: async (crewId, roundId) => {
+      const seasons = countedRoundsByCrew.get(crewId);
+      if (!seasons) return false;
+      return [...seasons.values()].some((rounds) => rounds.has(roundId));
+    },
   };
 };
 

@@ -153,6 +153,24 @@ export const crewGsi1pk = "CREW";
 // exactly crewPk(crewId) ("CREW#<id>") — reusing the two pk-format functions directly rather
 // than minting parallel gsi-specific helpers keeps the two formats from ever drifting apart.
 
+// Crew seasons + counted rounds (architecture-realignment task-8-brief.md §4): entity data
+// ABOUT the crew, living under the crew's OWN pk (crewPk) alongside its root/MEMBER items —
+// a season and its counted rounds are never a projection, so unlike the DELETED block just
+// below (a rebuildable ledger computed FROM rounds), there is nothing here to rebuild from;
+// this key space IS the source of truth. `seasonSk` and `countedRoundSk` share the
+// "SEASON#<seasonId>" prefix ON PURPOSE: one Query (begins_with(sk, "SEASON#")) walks BOTH a
+// season's own item and every round entry filed under it, cheap at this scale (a crew's
+// seasons + counted rounds are, per the brief, "hundreds at most"). `countedRoundSkMarker`
+// ("#ROUND#") is exported so listSeasons' own client-side exclusion filter (createDynamoCrewStore
+// — "does this sk belong to a counted-round entry, not a season itself") can never drift from
+// the format countedRoundSk actually writes.
+const SEASON_SK_PREFIX = "SEASON#";
+export const seasonSk = (seasonId: string): string => `${SEASON_SK_PREFIX}${seasonId}`;
+export const seasonSkPrefix = SEASON_SK_PREFIX;
+export const countedRoundSkMarker = "#ROUND#";
+export const countedRoundSk = (seasonId: string, roundId: RoundId): string => `${seasonSk(seasonId)}${countedRoundSkMarker}${roundId}`;
+export const countedRoundSkPrefix = (seasonId: string): string => `${seasonSk(seasonId)}${countedRoundSkMarker}`;
+
 // DELETED IN REALIGNMENT TASK 9: the crew season ledger moves fully outside the finalize chain
 // (projection-realignment spec §4/§9 — "the projector's crew arm; putCrewRound /
 // putSeasonRecords / getSeasonRecords / wipeCrew; the CREWROUNDS# / RECORDS# keyspaces" are

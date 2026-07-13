@@ -1,12 +1,44 @@
-import { TransactionCanceledException } from "@aws-sdk/client-dynamodb";
+import { ConditionalCheckFailedException, TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { BatchGetCommand, GetCommand, QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
-import type { Crew, CrewId, CrewMember, GolferId } from "@swng/domain";
+import { BatchGetCommand, DeleteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import type { Crew, CrewId, CrewMember, GolferId, RoundId } from "@swng/domain";
 import { golferId as toGolferId } from "@swng/domain";
-import type { CrewStore } from "@swng/application";
+import type { CountedRound, CrewSeason, CrewStore } from "@swng/application";
 import { ApplicationError } from "@swng/application";
-import { crewGsi1pk, crewIdFromPk, crewPk, crewSk, golferPk, memberSk, memberSkPrefix } from "./keys.js";
+import {
+  countedRoundSk,
+  countedRoundSkMarker,
+  countedRoundSkPrefix,
+  crewGsi1pk,
+  crewIdFromPk,
+  crewPk,
+  crewSk,
+  golferPk,
+  memberSk,
+  memberSkPrefix,
+  seasonSk,
+  seasonSkPrefix,
+} from "./keys.js";
 import { queryAllPages } from "./paginate.js";
+
+// One item per season (keys.ts's seasonSk) — the WHOLE CrewSeason nested under `season`, same
+// nest-the-whole-domain-value idiom CrewItem's own `crew` attribute uses above.
+interface SeasonItem {
+  readonly pk: string;
+  readonly sk: string;
+  readonly season: CrewSeason;
+}
+
+// One item per round counted into a season (keys.ts's countedRoundSk) — the WHOLE CountedRound
+// nested under `entry`, mirroring createDynamoProjectionStore's own crew-round-contribution
+// item shape (its `entry: CrewRoundContribution` — same reasoning: countsRound's
+// FilterExpression below reads `entry.roundId` the identical way that store's own
+// listCrewRounds-adjacent write reads its own nested roundId).
+interface CountedRoundItem {
+  readonly pk: string;
+  readonly sk: string;
+  readonly entry: CountedRound;
+}
 
 // A crew root item's shape on the core table (keys.ts's crewPk/crewSk): unlike
 // createDynamoGolferStore's flattened attrs, the WHOLE domain Crew is nested under `crew` —
@@ -167,6 +199,94 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
       }
 
       return crews.map((item) => ({ crewId: item.crew.id, name: item.crew.name, memberCount: item.crew.members.length }));
+    },
+
+    putSeason: async (crewId: CrewId, season: CrewSeason) => {
+      // Unconditional upsert — create, rename, and close are all the SAME put keyed by
+      // seasonId (the port doc's own contract). No revision to conflict on.
+      const item: SeasonItem = { pk: crewPk(crewId), sk: seasonSk(season.seasonId), season };
+      await client.send(new PutCommand({ TableName: tableName, Item: item }));
+    },
+
+    getSeason: async (crewId: CrewId, seasonId: string) => {
+      const result = await client.send(
+        new GetCommand({ TableName: tableName, Key: { pk: crewPk(crewId), sk: seasonSk(seasonId) }, ConsistentRead: true }),
+      );
+      const item = result.Item as SeasonItem | undefined;
+      return item?.season;
+    },
+
+    listSeasons: async (crewId: CrewId) => {
+      // One Query over the shared "SEASON#" prefix returns BOTH a season's own item AND every
+      // round entry filed under it (keys.ts's own doc comment on why: cheap at this scale) — so
+      // this filters OUT anything whose sk carries the "#ROUND#" marker client-side rather than
+      // running a second, narrower Query. Cheap because a crew's whole season + counted-round
+      // item count is small (task-8-brief.md: "hundreds at most").
+      const items = await queryAllPages(
+        client,
+        {
+          TableName: tableName,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          ExpressionAttributeValues: { ":pk": crewPk(crewId), ":prefix": seasonSkPrefix },
+          ConsistentRead: true,
+        },
+        (item) => item as unknown as SeasonItem,
+      );
+      return items.filter((item) => !item.sk.includes(countedRoundSkMarker)).map((item) => item.season);
+    },
+
+    addCountedRound: async (crewId: CrewId, seasonId: string, entry: CountedRound) => {
+      const item: CountedRoundItem = { pk: crewPk(crewId), sk: countedRoundSk(seasonId, entry.roundId), entry };
+      try {
+        await client.send(new PutCommand({ TableName: tableName, Item: item, ConditionExpression: "attribute_not_exists(sk)" }));
+      } catch (error) {
+        if (error instanceof ConditionalCheckFailedException) {
+          throw new ApplicationError("round-already-counted", `round ${entry.roundId} is already counted in season ${seasonId} of crew ${crewId}`);
+        }
+        throw error;
+      }
+    },
+
+    removeCountedRound: async (crewId: CrewId, seasonId: string, roundId: RoundId) => {
+      // No existence condition — removing an entry that was never there (or is already gone)
+      // is a no-op, not an error (the port doc's own contract). WHO may remove is enforced one
+      // layer up.
+      await client.send(new DeleteCommand({ TableName: tableName, Key: { pk: crewPk(crewId), sk: countedRoundSk(seasonId, roundId) } }));
+    },
+
+    listCountedRounds: async (crewId: CrewId, seasonId: string) =>
+      queryAllPages(
+        client,
+        {
+          TableName: tableName,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          ExpressionAttributeValues: { ":pk": crewPk(crewId), ":prefix": countedRoundSkPrefix(seasonId) },
+          ConsistentRead: true,
+        },
+        (item) => (item as unknown as CountedRoundItem).entry,
+      ),
+
+    countsRound: async (crewId: CrewId, roundId: RoundId) => {
+      // Query every season-namespaced item this crew has (season items AND counted-round
+      // entries alike — begins_with(sk, "SEASON#") catches both) and FILTER on the entry's own
+      // roundId attribute; a season item carries no `entry.roundId` at all, so it never matches
+      // the filter and is excluded for free — no separate exclusion step needed here the way
+      // listSeasons above needs one. Paginated to exhaustion (queryAllPages): a filter can
+      // produce empty pages with more left to scan, so a naive single-page check could
+      // false-negative.
+      const matches = await queryAllPages(
+        client,
+        {
+          TableName: tableName,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          FilterExpression: "#entry.roundId = :roundId",
+          ExpressionAttributeNames: { "#entry": "entry" },
+          ExpressionAttributeValues: { ":pk": crewPk(crewId), ":prefix": seasonSkPrefix, ":roundId": roundId },
+          ConsistentRead: true,
+        },
+        (item) => item.sk as string,
+      );
+      return matches.length > 0;
     },
   };
 };

@@ -5,7 +5,7 @@ export type { AppendOptions, AppendResult, EventJournal } from "./ports/eventJou
 export type { RoundStore } from "./ports/roundStore.js";
 export type { SnapshotStore } from "./ports/snapshotStore.js";
 export type { CourseStore } from "./ports/courseStore.js";
-export type { CrewStore } from "./ports/crewStore.js";
+export type { CountedRound, CrewSeason, CrewStore } from "./ports/crewStore.js";
 export type { GolferStore } from "./ports/golferStore.js";
 export type { CrewSeasonRecords, ProjectionStore } from "./ports/projectionStore.js";
 export type { Broadcast } from "./ports/broadcast.js";

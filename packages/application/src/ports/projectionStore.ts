@@ -27,11 +27,12 @@ export interface ProjectionStore {
 
   // Presence (spec §5). Implemented here — ahead of any real writer — so the store's shape
   // rewrites exactly once rather than growing a second time when realignment Task 13 (the
-  // StartRound/JoinRound/AddParticipant writers + "Your rounds" home read) and Task 15 (the
-  // finalize-time deleteLive call) land. `expiresAtSec` is epoch SECONDS — DynamoDB TTL's own
-  // unit, unlike every other timestamp in this codebase (milliseconds) — and the adapter writes
-  // it into the item's `ttl` attribute, the one the projections table's TTL spec already names
-  // (apps/infra-cdk/lib/swngStack.ts, realignment Task 1).
+  // StartRound/JoinRound/AddParticipant writers + "Your rounds" home read, AND the finalize-time
+  // deleteLive call via projectArchive's per-participant loop) lands. `expiresAtSec` is epoch
+  // SECONDS — DynamoDB TTL's own unit, unlike every other timestamp in this codebase
+  // (milliseconds) — and the adapter writes it into the item's `ttl` attribute, the one the
+  // projections table's TTL spec already names (apps/infra-cdk/lib/swngStack.ts, realignment
+  // Task 1).
   putLive(golferId: GolferId, entry: { readonly roundId: RoundId; readonly courseName: string; readonly joinedAtMs: number; readonly expiresAtSec: number }): Promise<void>;
   deleteLive(golferId: GolferId, roundId: RoundId): Promise<void>;
   listLive(golferId: GolferId): Promise<readonly { roundId: RoundId; courseName: string; joinedAtMs: number }[]>;

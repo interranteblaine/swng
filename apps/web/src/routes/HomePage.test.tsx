@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { GetMeResponse } from "@swng/contracts";
 import { crewId, golferId, roundId } from "@swng/domain";
 import { credentialStore } from "../identity";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
@@ -162,6 +163,76 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
 
     const link = await screen.findByRole("link", { name: "Device Round" });
     expect(link.getAttribute("href")).toBe("/round/device-round");
+    expect(mockedGetMyLiveRounds).not.toHaveBeenCalled();
+  });
+});
+
+// Fix wave (review of 1b39f4d): hasGolferIdentity = Boolean(golfer) can't distinguish "GET /me
+// still in flight" from "signed out" — a signed-in golfer used to see the device credential
+// list (or "No rounds yet") flash for the whole GET /me round trip before the identity list
+// replaced it. A resolve-next-microtask mock can't catch this (the loading window never
+// observably exists); a DEFERRED promise held open across an assertion is the only way to prove
+// the flash is gone.
+describe("HomePage — GET /me loading window never flashes the device list (fix wave)", () => {
+  it("signed in, GET /me still in flight: neither the device list nor the identity list renders — a quiet placeholder instead", async () => {
+    credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
+    signIn();
+    mockedGetMe.mockReturnValue(new Promise<GetMeResponse>(() => {})); // the loading window itself — never resolves
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+
+    renderHome();
+
+    // The device list must NOT appear during this window (the bug this closes) — asserted
+    // synchronously, before any resolution could occur, so a regression back to
+    // Boolean(golfer) would fail this line even under a resolve-next-microtask mock.
+    expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
+    expect(screen.queryByText(/no rounds yet/i)).toBeNull();
+    expect(screen.getByRole("status", { name: /loading your rounds/i })).toBeTruthy();
+  });
+
+  it("once the deferred GET /me resolves to a golfer, the loading placeholder gives way to the identity list", async () => {
+    credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
+    signIn();
+    let resolveGetMe: (value: GetMeResponse) => void = () => {};
+    mockedGetMe.mockReturnValue(
+      new Promise<GetMeResponse>((resolve) => {
+        resolveGetMe = resolve;
+      }),
+    );
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+
+    renderHome();
+    expect(screen.getByRole("status", { name: /loading your rounds/i })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
+
+    resolveGetMe({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+
+    const link = await screen.findByRole("link", { name: /casa verde gc/i });
+    expect(link.getAttribute("href")).toBe("/round/live-1");
+    expect(screen.queryByRole("status", { name: /loading your rounds/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
+  });
+
+  it("once the deferred GET /me resolves to no golfer row, the loading placeholder gives way to the device list", async () => {
+    credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
+    signIn();
+    let resolveGetMe: (value: GetMeResponse) => void = () => {};
+    mockedGetMe.mockReturnValue(
+      new Promise<GetMeResponse>((resolve) => {
+        resolveGetMe = resolve;
+      }),
+    );
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+
+    renderHome();
+    expect(screen.getByRole("status", { name: /loading your rounds/i })).toBeTruthy();
+
+    resolveGetMe({ golfer: null });
+
+    const link = await screen.findByRole("link", { name: "Device Round" });
+    expect(link.getAttribute("href")).toBe("/round/device-round");
+    expect(screen.queryByRole("status", { name: /loading your rounds/i })).toBeNull();
     expect(mockedGetMyLiveRounds).not.toHaveBeenCalled();
   });
 });

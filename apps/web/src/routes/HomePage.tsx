@@ -21,6 +21,14 @@ export function HomePage() {
   // "Your rounds" list; every other state keeps the device credentialStore list exactly as
   // before this task (spec §5's own binding resolution).
   const hasGolferIdentity = Boolean(golfer);
+  // Same isIdentityLoading idiom CreateRoundPage/JoinRoundPage/ClaimAffordance already use:
+  // `golfer` stays undefined ONLY while signed in and the initial (or a later) GET /me hasn't
+  // resolved yet — signed-out also reports golfer===undefined, but useAuth.ts's own `signedIn`
+  // disambiguates the two. Fix for the review finding: `hasGolferIdentity` alone can't tell
+  // "auth still resolving" from "signed out," so a signed-in golfer used to see the device
+  // credential list (or "No rounds yet") flash for the whole GET /me round trip before the
+  // identity list replaced it — the M8 three-state bug shape (CLAUDE.md's M8 note), here.
+  const isIdentityLoading = signedIn && golfer === undefined;
 
   // undefined = not loaded yet (or signed out / no golfer) — the section renders its own
   // loading/empty copy only once this has a real array, same idiom as `crews` below.
@@ -157,7 +165,14 @@ export function HomePage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-semibold text-slate-300">Your rounds</h2>
-        {hasGolferIdentity ? (
+        {isIdentityLoading ? (
+          // A quiet placeholder — NEVER the device list and never "No rounds yet" (both are
+          // claims about data this render doesn't have yet). Same role/label idiom as
+          // CreateRoundPage/JoinRoundPage's own "Loading your profile" placeholder.
+          <div role="status" aria-label="Loading your rounds" className="rounded-lg bg-slate-800 p-3 text-slate-500">
+            Loading your rounds…
+          </div>
+        ) : hasGolferIdentity ? (
           !liveRounds || liveRounds.length === 0 ? (
             <p className="text-slate-400">No rounds yet</p>
           ) : (

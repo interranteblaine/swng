@@ -28,6 +28,7 @@ import {
   getCourse,
   getCrew,
   getMyGolfer,
+  getMyLiveRounds,
   getMyRecord,
   getMyRounds,
   getRoundArchive,
@@ -95,6 +96,7 @@ const createRandomIds = (): IdGenerator => ({
 // missed `level`, which a `data.level` key could still clobber.)
 export const createConsoleLogger = (): Logger => ({
   info: (message, data) => console.log(JSON.stringify({ ...data, level: "info", message })),
+  warn: (message, data) => console.warn(JSON.stringify({ ...data, level: "warn", message })),
   error: (message, data) => console.error(JSON.stringify({ ...data, level: "error", message })),
 });
 
@@ -169,7 +171,9 @@ const unavailableCrewStore = (): CrewStore => {
 
 // Same shape again, for TABLE_PROJECTIONS (M7 Task 5: granted + env'd onto httpFn since Task
 // 4, but unread by buildApp until now — only getMyRecord needs it; wsConnect/wsDisconnect
-// never do).
+// never do). Realignment Task 13 widens the real set of callers (startRound/joinRound/
+// addParticipant's own presence writes, getMyLiveRounds' own read) but the story is
+// unchanged: every one of them is HTTP-only, so wsConnect/wsDisconnect still never reach this.
 const unavailableProjectionStore = (): ProjectionStore => {
   const unavailable = (): never => {
     throw new Error("buildApp: TABLE_PROJECTIONS is not set for this entry — the record route is HTTP-only (see swngStack.ts)");
@@ -179,8 +183,8 @@ const unavailableProjectionStore = (): ProjectionStore => {
     listLines: unavailable,
     putIndex: unavailable,
     getIndex: unavailable,
-    // Presence (realignment Task 13/15 wires real callers; the shape lands now — ports/
-    // projectionStore.ts's own doc comment).
+    // Presence (realignment Task 13): real callers as of this task — ports/projectionStore.ts's
+    // own doc comment.
     putLive: unavailable,
     deleteLive: unavailable,
     listLive: unavailable,
@@ -261,8 +265,12 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // golferStore/crewStore threaded through for the shared claimed-golferId resolver
     // (rounds/golferIdentity.ts, M8) — the SAME golferStore/crewStore instances the crew
     // routes below also share.
-    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
-    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
+    // projectionStore/logger (projection-realignment Task 13): every seated participant gets a
+    // best-effort presence write (rounds/presence.ts) — the SAME projectionStore instance
+    // getMyRecord/getMyRounds/getMyLiveRounds already share, and the SAME logger every other
+    // use case in this table does.
+    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
@@ -272,7 +280,7 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // snapshots/golferStore/crewStore (projection-realignment Task 6): the SAME instances the
     // finalize/crew use cases above already share.
     getRoundArchive: getRoundArchive({ snapshots, golferStore, crewStore }),
-    addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore }),
+    addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore, projectionStore, logger }),
     createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
     addTeeSet: addTeeSet({ courseStore, clock, logger }),
     verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
@@ -287,6 +295,7 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     claimGolfer: claimGolfer({ golferStore, roundStore: store, journal, crewStore }),
     getMyRecord: getMyRecord({ golferStore, projectionStore }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
+    getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore }),
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),

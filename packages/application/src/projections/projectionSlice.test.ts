@@ -132,6 +132,40 @@ describe("projectArchive", () => {
     const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
     await expect(project(corrupt)).rejects.toThrow();
   });
+
+  // Presence cleanup (projection-realignment spec §5, Task 13): the finalized archive's own
+  // participant list IS the seated roster a LIVE pointer was written for at seat-time
+  // (rounds/presence.ts) — this is the PRIMARY removal path (TTL is only a backstop for a
+  // round that never finalizes).
+  it("deletes the LIVE pointer for every participant on the archive", async () => {
+    const ctx = setup();
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo }]);
+    await ctx.projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
+    await ctx.projectionStore.putLive(bo, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600, expiresAtSec: 9_999_999_999 });
+    // A DIFFERENT round's presence for ann must survive untouched.
+    await ctx.projectionStore.putLive(ann, { roundId: roundId("other-round"), courseName: "Pebble Municipal", joinedAtMs: 100, expiresAtSec: 9_999_999_999 });
+    const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
+
+    await project(archive);
+
+    expect(await ctx.projectionStore.listLive(ann)).toEqual([{ roundId: roundId("other-round"), courseName: "Pebble Municipal", joinedAtMs: 100 }]);
+    expect(await ctx.projectionStore.listLive(bo)).toEqual([]);
+  });
+
+  // Idempotence, same discipline as putLine's own re-projection pin above: a re-projection of
+  // an already-projected archive (the stream trigger's own at-least-once delivery, or a
+  // rebuild replay) calls deleteLive on a pointer that's already gone — never an error.
+  it("re-projecting the same archive a second time is a no-op for presence, not an error", async () => {
+    const ctx = setup();
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]);
+    await ctx.projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
+    const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
+
+    await project(archive);
+    await expect(project(archive)).resolves.toBeUndefined();
+
+    expect(await ctx.projectionStore.listLive(ann)).toEqual([]);
+  });
 });
 
 // ProjectionStore.listLines is UNORDERED by contract (ports/projectionStore.ts) — the stable

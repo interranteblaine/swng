@@ -33,6 +33,7 @@ import {
   getCourse,
   getCrew,
   getMe,
+  getMyLiveRounds,
   getMyRecord,
   getMyRounds,
   getRoundArchive,
@@ -822,6 +823,24 @@ describe("getMyRounds", () => {
     const result = await getMyRounds("tok-me");
 
     expect(seenUrl).toBe(`${HTTP_URL}/me/rounds`);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
+    expect(result).toEqual({ rounds: [] });
+  });
+});
+
+describe("getMyLiveRounds", () => {
+  it("GETs /me/rounds/live with the bearer token and parses a GetMyLiveRoundsResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { rounds: [] });
+    });
+
+    const result = await getMyLiveRounds("tok-me");
+
+    expect(seenUrl).toBe(`${HTTP_URL}/me/rounds/live`);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
     expect(result).toEqual({ rounds: [] });
   });

@@ -3,6 +3,7 @@ import { roundId } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import { createInMemoryGolferStore, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
 import { getMyGolfer } from "./getMyGolfer.js";
+import { getMyLiveRounds } from "./getMyLiveRounds.js";
 import { getMyRecord } from "./getMyRecord.js";
 import { getMyRounds } from "./getMyRounds.js";
 import { updateMyGolfer } from "./updateMyGolfer.js";
@@ -22,6 +23,7 @@ const setup = (golferStore: GolferStore = createInMemoryGolferStore()) => {
     updateMe: updateMyGolfer({ golferStore, idGenerator }),
     record: getMyRecord({ golferStore, projectionStore }),
     myRounds: getMyRounds({ golferStore, projectionStore }),
+    myLiveRounds: getMyLiveRounds({ golferStore, projectionStore }),
   };
 };
 
@@ -218,5 +220,38 @@ describe("getMyRounds", () => {
     const record = await ctx.record({ sub: "sub-1" });
     const rounds = await ctx.myRounds({ sub: "sub-1" });
     expect(rounds.rounds.map((line) => line.roundId)).toEqual(record.history.map((line) => line.roundId));
+  });
+});
+
+// GET /me/rounds/live (projection-realignment Task 13): "your rounds, right now" — presence,
+// not finalized history (getMyRounds above). Same get-or-nothing discipline; the store is
+// exercised directly via putLive (not through startRound/joinRound — those are covered in
+// rounds/roundSlice.test.ts's own presence suite) since this file's setup has no round
+// journal at all.
+describe("getMyLiveRounds", () => {
+  it("returns an empty list for a sub with no golfer row at all — no throw, no create", async () => {
+    const ctx = setup();
+    expect(await ctx.myLiveRounds({ sub: "sub-1" })).toEqual({ rounds: [] });
+  });
+
+  it("returns an empty list for a real golfer with no live rounds", async () => {
+    const ctx = setup();
+    await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    expect(await ctx.myLiveRounds({ sub: "sub-1" })).toEqual({ rounds: [] });
+  });
+
+  it("lists live rounds newest-joined first, each carrying courseName + joinedAt (the wire name for joinedAtMs)", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
+    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r2"), courseName: "Pebble Municipal", joinedAtMs: 2_000, expiresAtSec: 9_999_999_999 });
+
+    const result = await ctx.myLiveRounds({ sub: "sub-1" });
+    expect(result.rounds).toEqual([
+      { roundId: roundId("r2"), courseName: "Pebble Municipal", joinedAt: 2_000 },
+      { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000 },
+    ]);
+    // Never the store's own internal field name leaking onto the wire.
+    expect(result.rounds.every((entry) => !("joinedAtMs" in entry))).toBe(true);
   });
 });

@@ -7,11 +7,13 @@ import { createMemoryStorage } from "../testSupport/memoryStorage";
 
 // M8 Task 6: HomePage now composes useAuth (the crews surface is golfer-gated), so the api.ts
 // module boundary is faked here too — getMe for the AuthProvider, listMyCrews/joinCrew for the
-// new "Your crews" section.
+// "Your crews" section. Realignment Task 13 adds getMyLiveRounds for the signed-in-with-a-
+// golfer "Your rounds" section (presence, not the device credentialStore list).
 vi.mock("../api", () => ({
   getMe: vi.fn(),
   listMyCrews: vi.fn(),
   joinCrew: vi.fn(),
+  getMyLiveRounds: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -24,7 +26,7 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, getMe, joinCrew, listMyCrews } from "../api";
+import { ApiError, getMe, getMyLiveRounds, joinCrew, listMyCrews } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { HomePage } from "./HomePage";
@@ -32,6 +34,7 @@ import { HomePage } from "./HomePage";
 const mockedGetMe = vi.mocked(getMe);
 const mockedListMyCrews = vi.mocked(listMyCrews);
 const mockedJoinCrew = vi.mocked(joinCrew);
+const mockedGetMyLiveRounds = vi.mocked(getMyLiveRounds);
 
 // vitest.config.ts doesn't set test.globals, so @testing-library/react's own auto-cleanup
 // (which only fires when it finds a GLOBAL `afterEach`) never registers — every spec file in
@@ -43,6 +46,11 @@ beforeEach(() => {
   mockedGetMe.mockReset();
   mockedListMyCrews.mockReset();
   mockedJoinCrew.mockReset();
+  mockedGetMyLiveRounds.mockReset();
+  // Default: no live rounds — the crews-focused suite below never sets this itself, so this
+  // keeps that suite's assertions (about "Your crews", not "Your rounds") from tripping over
+  // an unhandled mock return.
+  mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
 });
 
 afterEach(() => {
@@ -105,6 +113,56 @@ describe("HomePage", () => {
     renderHome();
 
     expect(screen.getByText(/no rounds yet/i)).toBeTruthy();
+  });
+});
+
+// Architecture-realignment Task 13 (spec §5): "Your rounds" follows IDENTITY once a real
+// account golfer exists — GET /me/rounds/live, never the device credentialStore list. Every
+// OTHER state (signed out, or signed in with no golfer row yet) keeps the device list exactly
+// as the untouched suite above pins.
+describe("HomePage — your rounds by identity (Task 13)", () => {
+  it("signed in with a golfer: lists live rounds from GET /me/rounds/live, not the device credential list", async () => {
+    // A device credential exists too — proves the identity list wins, not merely "renders
+    // something."
+    credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
+    const idToken = signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+
+    renderHome();
+
+    const link = await screen.findByRole("link", { name: /casa verde gc/i });
+    expect(link.getAttribute("href")).toBe("/round/live-1");
+    expect(mockedGetMyLiveRounds).toHaveBeenCalledWith(idToken);
+    expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
+  });
+
+  it("signed in with a golfer but no live rounds: shows the empty state, never falling back to the device credential list", async () => {
+    credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
+
+    renderHome();
+    await screen.findByText(/your crews/i); // wait for the signed-in render to settle
+
+    expect(screen.getByText(/no rounds yet/i)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
+  });
+
+  it("signed in but no golfer row yet: keeps the device credential list and never calls GET /me/rounds/live", async () => {
+    credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: null });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+
+    renderHome();
+
+    const link = await screen.findByRole("link", { name: "Device Round" });
+    expect(link.getAttribute("href")).toBe("/round/device-round");
+    expect(mockedGetMyLiveRounds).not.toHaveBeenCalled();
   });
 });
 

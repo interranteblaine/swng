@@ -3,15 +3,19 @@ import type { HoleResult } from "@swng/domain";
 import { addMember, compareHlc, crewId, deviceId, fixtureLinks, golferId, opId, reduceRound } from "@swng/domain";
 import type { Clock } from "../ports/clock.js";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
+import type { ProjectionStore } from "../ports/projectionStore.js";
 import {
   createCapturingBroadcast,
+  createCapturingLogger,
   createFixedClock,
   createFrozenClock,
   createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
+  createInMemoryProjectionStore,
   createInMemoryRoundStore,
   createInMemorySnapshotStore,
+  createNullLogger,
   createSequentialIds,
   putAndBindGolfer,
 } from "../testing/fakes.js";
@@ -60,14 +64,17 @@ const setup = (clock: Clock = createFixedClock(1_000)) => {
   const ids = createSequentialIds("t");
   const golferStore = createInMemoryGolferStore();
   const crewStore = createInMemoryCrewStore();
+  const projectionStore = createInMemoryProjectionStore();
+  const logger = createNullLogger();
 
   return {
     broadcast,
     tokens,
     golferStore,
     crewStore,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
-    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
+    projectionStore,
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
@@ -583,5 +590,110 @@ describe("JoinRound — as-self and co-membership arms (claims threaded through)
     await expect(
       ctx.join({ code: host.joinCode, name: "X", tee: "white", courseHandicap: 2, golferId: claimed }, { sub: "sub-a-stranger" }),
     ).rejects.toMatchObject({ code: "golfer-claimed" });
+  });
+});
+
+// Presence (projection-realignment spec §5, Task 13): StartRound/JoinRound each write a LIVE
+// pointer (rounds/presence.ts's writePresence) for every golfer they seat — the host + every
+// `players[]` entry for StartRound, the joiner for JoinRound. addParticipant's own presence
+// write is pinned in addParticipant.test.ts instead (a separate file, separate setup).
+describe("StartRound/JoinRound — presence (Task 13)", () => {
+  it("StartRound writes a LIVE pointer for the host, carrying the round's own courseName", async () => {
+    const ctx = setup();
+    const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
+
+    const live = await ctx.projectionStore.listLive(host.golferId);
+    expect(live).toEqual([{ roundId: host.roundId, courseName: fixtureLinks.courseName, joinedAtMs: expect.any(Number) }]);
+  });
+
+  it("StartRound writes a LIVE pointer for every players[] entry too, not just the host", async () => {
+    const ctx = setup();
+    const host = await ctx.start({
+      card: fixtureLinks,
+      host: { name: "Ann", tee: "white", courseHandicap: 8 },
+      players: [{ name: "Bo", tee: "white", courseHandicap: 2, golferId: golferId("bo-ghost") }],
+    });
+
+    const boLive = await ctx.projectionStore.listLive(golferId("bo-ghost"));
+    expect(boLive).toEqual([{ roundId: host.roundId, courseName: fixtureLinks.courseName, joinedAtMs: expect.any(Number) }]);
+  });
+
+  it("JoinRound writes a LIVE pointer for the joiner", async () => {
+    const ctx = setup();
+    const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
+    const bo = await ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2 });
+
+    const live = await ctx.projectionStore.listLive(bo.golferId);
+    expect(live).toEqual([{ roundId: host.roundId, courseName: fixtureLinks.courseName, joinedAtMs: expect.any(Number) }]);
+  });
+
+  // A ghost's presence is written under the SAME GolferId a later claim inherits — no special
+  // casing needed; this just pins that a SUPPLIED (not freshly minted) golferId still gets a
+  // pointer, same as the freshly-minted case above.
+  it("a ghost golferId reused across StartRound calls still gets its own LIVE pointer per round", async () => {
+    const ctx = setup();
+    const ghost = golferId("ghost-recurring");
+
+    const roundA = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: ghost });
+    const roundB = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: ghost });
+
+    const live = await ctx.projectionStore.listLive(ghost);
+    expect(live.map((entry) => entry.roundId).sort()).toEqual([roundA.roundId, roundB.roundId].sort());
+  });
+
+  // The binding resolution (task-13-brief.md): "a discovery nicety must never block play." A
+  // putLive that always throws must not stop the round from starting or being joined — and
+  // the failure must be logged, not silently swallowed.
+  it("a putLive failure does NOT fail StartRound — logged via logger.warn, round still starts", async () => {
+    const throwingStore: ProjectionStore = {
+      ...createInMemoryProjectionStore(),
+      putLive: async () => {
+        throw new Error("presence table unavailable");
+      },
+    };
+    const logger = createCapturingLogger();
+    const journal = createInMemoryJournal();
+    const store = createInMemoryRoundStore();
+    const broadcast = createCapturingBroadcast();
+    const tokens = createTestTokenIssuer();
+    const clock = createFixedClock(1_000);
+    const ids = createSequentialIds("t");
+    const golferStore = createInMemoryGolferStore();
+    const crewStore = createInMemoryCrewStore();
+    const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore: throwingStore, logger });
+
+    const host = await start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
+
+    expect(host.roundId).toBeDefined(); // the round started — presence's own failure never propagated
+    expect(logger.warnings).toHaveLength(1);
+    expect(logger.warnings[0]?.message).toBe("presence-write-failed");
+  });
+
+  it("a putLive failure does NOT fail JoinRound — logged via logger.warn, join still succeeds", async () => {
+    const throwingStore: ProjectionStore = {
+      ...createInMemoryProjectionStore(),
+      putLive: async () => {
+        throw new Error("presence table unavailable");
+      },
+    };
+    const logger = createCapturingLogger();
+    const journal = createInMemoryJournal();
+    const store = createInMemoryRoundStore();
+    const broadcast = createCapturingBroadcast();
+    const tokens = createTestTokenIssuer();
+    const clock = createFixedClock(1_000);
+    const ids = createSequentialIds("t");
+    const golferStore = createInMemoryGolferStore();
+    const crewStore = createInMemoryCrewStore();
+    const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore: throwingStore, logger });
+    const join = joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore: throwingStore, logger });
+
+    const host = await start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
+    const bo = await join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2 });
+
+    expect(bo.golferId).toBeDefined(); // the join succeeded — presence's own failure never propagated
+    // 2 warnings: the host's own StartRound presence write, then Bo's JoinRound one.
+    expect(logger.warnings).toHaveLength(2);
+    expect(logger.warnings.every((entry) => entry.message === "presence-write-failed")).toBe(true);
   });
 });

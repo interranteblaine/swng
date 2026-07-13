@@ -25,6 +25,7 @@ import type {
   GetCourseResponse,
   GetCrewResponse,
   GetMeResponse,
+  GetMyLiveRoundsResponse,
   GetMyRecordResponse,
   GetMyRoundsResponse,
   GetRoundArchiveResponse,
@@ -116,6 +117,9 @@ export interface UseCases {
   getMyRecord: (claims: AccountClaims) => Promise<GetMyRecordResponse>;
   // Projection-realignment Task 6: "list my rounds" — same golfer-tier auth as getMyRecord.
   getMyRounds: (claims: AccountClaims) => Promise<GetMyRoundsResponse>;
+  // Projection-realignment Task 13: "your rounds, right now" — presence pointers, not
+  // finalized history (getMyRounds just above). Same golfer-tier auth.
+  getMyLiveRounds: (claims: AccountClaims) => Promise<GetMyLiveRoundsResponse>;
   // M8 Task 4: crews — every route below is "golfer"-gated (routes.ts's table).
   createCrew: (claims: AccountClaims, command: CreateCrewRequest) => Promise<CreateCrewResponse>;
   getCrew: (claims: AccountClaims, id: CrewId) => Promise<GetCrewResponse>;
@@ -417,6 +421,15 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 200,
     handler: async (ctx) => useCases.getMyRounds(ctx.account!),
+  },
+  // Projection-realignment Task 13: "your rounds, right now" — presence, not finalized
+  // history (GET /me/rounds just above). Same golfer tier.
+  {
+    method: "GET",
+    path: "/me/rounds/live",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getMyLiveRounds(ctx.account!),
   },
   // M8 Task 4: crews — every route below is "golfer"-gated (a signed-in Cognito identity,
   // same tier as the /me* surface above). Member-only authorization (not-a-member 403) lives

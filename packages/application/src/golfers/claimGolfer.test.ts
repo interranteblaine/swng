@@ -9,7 +9,9 @@ import {
   createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
+  createInMemoryProjectionStore,
   createInMemoryRoundStore,
+  createNullLogger,
   createSequentialIds,
 } from "../testing/fakes.js";
 import { claimGolfer } from "./claimGolfer.js";
@@ -39,14 +41,16 @@ const setup = () => {
   const tokens = createTestTokenIssuer();
   const clock = createFixedClock(1_000);
   const ids = createSequentialIds("t");
+  const projectionStore = createInMemoryProjectionStore();
+  const logger = createNullLogger();
 
   return {
     golferStore,
     roundStore,
     crewStore,
     journal,
-    start: startRound({ journal, store: roundStore, broadcast, tokens, clock, ids, golferStore, crewStore }),
-    join: joinRound({ journal, store: roundStore, broadcast, tokens, clock, ids, golferStore, crewStore }),
+    start: startRound({ journal, store: roundStore, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    join: joinRound({ journal, store: roundStore, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
     claim: claimGolfer({ golferStore, roundStore, journal, crewStore }),
   };
 };

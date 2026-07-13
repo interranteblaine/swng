@@ -33,7 +33,7 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (33, as of architecture-realignment Task 9) routes are declared here
+// function — but the (34, as of architecture-realignment Task 13) routes are declared here
 // explicitly (matching packages/lambda/src/http/routes.ts) rather than via a single $default
 // catch-all, so the API's shape is visible in the CloudFormation template and the AWS
 // console, not hidden inside the Lambda. Exported (not module-private) so
@@ -69,6 +69,9 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.GET, path: "/me/record" },
   // Projection-realignment Task 6: "list my rounds" — same golfer tier as GET /me/record.
   { method: HttpMethod.GET, path: "/me/rounds" },
+  // Projection-realignment Task 13: "your rounds, right now" — presence, not finalized
+  // history. Same golfer tier.
+  { method: HttpMethod.GET, path: "/me/rounds/live" },
   // M8 Task 4: crews + rounds played as yourself. POST /rounds and POST /rounds/join above
   // are unchanged PATHS — only their auth tier moved (routes.ts's own "optional-golfer" —
   // API Gateway forwards every method/path here identically regardless of auth tier, so this

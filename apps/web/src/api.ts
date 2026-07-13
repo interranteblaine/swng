@@ -12,6 +12,7 @@ import {
   getCourseResponseSchema,
   getCrewResponseSchema,
   getMeResponseSchema,
+  getMyLiveRoundsResponseSchema,
   getMyRecordResponseSchema,
   getMyRoundsResponseSchema,
   getRoundArchiveResponseSchema,
@@ -54,6 +55,7 @@ import type {
   GetCourseResponse,
   GetCrewResponse,
   GetMeResponse,
+  GetMyLiveRoundsResponse,
   GetMyRecordResponse,
   GetMyRoundsResponse,
   GetRoundArchiveResponse,
@@ -246,6 +248,15 @@ export const getMyRecord = async (token: string): Promise<GetMyRecordResponse> =
 export const getMyRounds = async (token: string): Promise<GetMyRoundsResponse> => {
   const json = await requestJson("/me/rounds", { token });
   return parse(getMyRoundsResponseSchema, json);
+};
+
+// Projection-realignment Task 13: "your rounds, right now" — presence, not finalized history
+// (getMyRounds above). Same requestJson + per-endpoint idiom, "golfer"-gated the same way.
+// HomePage's signed-in "Your rounds" section reads this instead of the device credentialStore
+// list.
+export const getMyLiveRounds = async (token: string): Promise<GetMyLiveRoundsResponse> => {
+  const json = await requestJson("/me/rounds/live", { token });
+  return parse(getMyLiveRoundsResponseSchema, json);
 };
 
 // Projection-realignment Task 6: opens one finalized round's own event log — "golfer"-gated

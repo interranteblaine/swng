@@ -9,10 +9,13 @@ import type { CrewStore } from "../ports/crewStore.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
+import type { Logger } from "../ports/logger.js";
+import type { ProjectionStore } from "../ports/projectionStore.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { TokenIssuer } from "../ports/tokenIssuer.js";
 import { resolveSuppliedGolfer } from "./golferIdentity.js";
 import { loadRoundState } from "./loadRoundState.js";
+import { writePresence } from "./presence.js";
 import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 
 export const joinRound =
@@ -25,6 +28,8 @@ export const joinRound =
     ids: IdGenerator;
     golferStore: GolferStore;
     crewStore: CrewStore;
+    projectionStore: ProjectionStore;
+    logger: Logger;
   }) =>
   // claims is optional: JoinRound's route has never required an account (a join code is
   // enough — M3's whole point). It's threaded through so a SIGNED-IN caller supplying an
@@ -66,6 +71,10 @@ export const joinRound =
     const hlc = createServerHlcSource(deps.clock);
     const result = await deps.journal.append(id, [{ kind: "participant-joined", participant, ...serverEnvelope({ hlc, ids: deps.ids }, golfer) }]);
     await deps.broadcast.publish(id, result.appended);
+
+    // Presence (spec §5, Task 13): the joiner's own LIVE pointer, written only after the join
+    // has actually committed above — best-effort, never undoes the join (presence.ts).
+    await writePresence({ projectionStore: deps.projectionStore, logger: deps.logger, clock: deps.clock }, golfer, id, state.card.courseName);
 
     const token = deps.tokens.issue({ scope: "participant", roundId: id, golferId: golfer });
 

@@ -56,6 +56,15 @@ export const projectArchive =
       const line = archiveGolferLine(archive, participant.golferId);
       await deps.projectionStore.putLine(participant.golferId, { ...line, finalizedAtMs });
 
+      // Presence cleanup (spec §5, Task 13): the finalized archive's own participant list IS
+      // the seated roster — the same one startRound/joinRound/addParticipant wrote a LIVE
+      // pointer for at seat-time (rounds/presence.ts) — so this is the primary removal path,
+      // TTL being only a backstop for a round that never finalizes. Same at-least-once
+      // idempotence reasoning as putLine just above: a re-projection of an already-projected
+      // archive (rebuildProjections' own replay, or the stream trigger's own at-least-once
+      // delivery) calls deleteLive on a pointer that's already gone — a no-op, never an error.
+      await deps.projectionStore.deleteLive(participant.golferId, archive.roundId);
+
       // listLines is UNORDERED (ports/projectionStore.ts) — sortLines imposes the
       // (finalizedAtMs, roundId) order combineNineHoleDifferentials/computeIndexDetail need
       // BEFORE the fold runs, so this fold's result never depends on the store's own,

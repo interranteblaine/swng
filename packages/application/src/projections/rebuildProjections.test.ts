@@ -38,10 +38,11 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
 // Wraps the real in-memory ProjectionStore, recording every WRITE method it sees (never the
 // reads — listLines/getIndex tell you nothing about whether a wipe happened). Exists to prove
 // the one negative fact a passing test suite can't show any other way: rebuildProjections' loop
-// (Task 5) has no code path that can call a wipe method at all, not merely "didn't happen to in
-// this fixture" — this fake is how a regression that reintroduced one would get caught. (The
-// crew ledger and its wipe are gone entirely as of Task 9, so the only write surface left to
-// guard is the golfer-record one.)
+// (Task 5) has no code path that can call a DESTRUCTIVE wipe method at all, not merely "didn't
+// happen to in this fixture" — this fake is how a regression that reintroduced one would get
+// caught. (The crew ledger and its wipe are gone entirely as of Task 9. deleteLive — added
+// Task 13 — is recorded here too, but it's projectArchive's own idempotent presence cleanup,
+// not a destructive wipe; see the "touches exactly {putLine, putIndex, deleteLive}" test below.)
 const createRecordingProjectionStore = (): ProjectionStore & { readonly writeCalls: readonly string[] } => {
   const inner = createInMemoryProjectionStore();
   const writeCalls: string[] = [];
@@ -110,10 +111,19 @@ describe("rebuildProjections", () => {
     expect(all).toHaveLength(6); // every round exactly once across both calls — no re-processing, no gap
   });
 
-  it("never calls a wipe method — the recording store sees only putLine/putIndex writes", async () => {
+  // "Wipe" here means a destructive full-replace (the OLD crew ledger's own wipe, gone as of
+  // Task 9) — deleteLive is NOT that: it's projectArchive's own idempotent presence cleanup
+  // (Task 13, projections/projectArchive.ts), the SAME call the real stream-triggered
+  // projector makes at finalize time. A rebuild replaying an already-finalized archive calls
+  // deleteLive on a pointer that's already gone (a no-op, per its own port doc) — this test's
+  // job is narrower than its name once was: prove the write surface is EXACTLY
+  // {putLine, putIndex, deleteLive}, nothing beyond what projectArchive itself does for every
+  // archive it's handed.
+  it("touches exactly {putLine, putIndex, deleteLive} — no OTHER write surface (no destructive wipe)", async () => {
     // 3 archives for the SAME golfer, ascending differentials — the 3rd crosses the bootstrap
     // (computeIndexDetail needs 3+), so putIndex fires too and this isn't just "putLine never
-    // wipes," it's "the whole write surface this run touches is exactly {putLine, putIndex}."
+    // wipes," it's "the whole write surface this run touches is exactly {putLine, putIndex,
+    // deleteLive}."
     const archives = [
       archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]),
       archiveAt("r2", 2_000, [{ golferId: ann, differential: 10.0 }]),
@@ -126,7 +136,7 @@ describe("rebuildProjections", () => {
 
     await rebuild();
 
-    expect(new Set(recording.writeCalls)).toEqual(new Set(["putLine", "putIndex"]));
+    expect(new Set(recording.writeCalls)).toEqual(new Set(["putLine", "putIndex", "deleteLive"]));
   });
 
   it("replaying the same page(s) twice yields identical store state (idempotence — no wipe means a repeat pass is always safe)", async () => {

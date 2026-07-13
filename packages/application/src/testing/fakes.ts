@@ -428,5 +428,26 @@ export const createSequentialIds = (prefix: string): IdGenerator => {
 
 export const createNullLogger = (): Logger => ({
   info: () => {},
+  warn: () => {},
   error: () => {},
 });
+
+// Records every warn() call (message + data) — exists for the ONE assertion createNullLogger
+// can't make: that a caller actually DID warn (realignment Task 13's "presence write failure
+// must not fail the seating act, but it must still be logged" — startRound/joinRound/
+// addParticipant's own tests pin both halves of that with this fake).
+export interface CapturingLogger extends Logger {
+  readonly warnings: readonly { readonly message: string; readonly data?: Record<string, unknown> }[];
+}
+
+export const createCapturingLogger = (): CapturingLogger => {
+  const warnings: { message: string; data?: Record<string, unknown> }[] = [];
+  return {
+    warnings,
+    info: () => {},
+    warn: (message, data) => {
+      warnings.push({ message, data });
+    },
+    error: () => {},
+  };
+};

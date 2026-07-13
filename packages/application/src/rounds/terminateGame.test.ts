@@ -7,8 +7,10 @@ import {
   createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
+  createInMemoryProjectionStore,
   createInMemoryRoundStore,
   createInMemorySnapshotStore,
+  createNullLogger,
   createSequentialIds,
 } from "../testing/fakes.js";
 import { addGame } from "./addGame.js";
@@ -52,11 +54,13 @@ const setup = () => {
   const ids = createSequentialIds("t");
   const golferStore = createInMemoryGolferStore();
   const crewStore = createInMemoryCrewStore();
+  const projectionStore = createInMemoryProjectionStore();
+  const logger = createNullLogger();
 
   return {
     broadcast,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
-    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CourseId, GolferId, GolferRoundLine } from "@swng/domain";
+import type { CourseId, GolferId, GolferRoundLine, RoundId } from "@swng/domain";
 import { courseIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
 
 // The wire projection of a Golfer aggregate (application/src/golfers/golferView.ts builds
@@ -124,4 +124,19 @@ export interface GetMyRoundsResponse {
 
 export const getMyRoundsResponseSchema: z.ZodType<GetMyRoundsResponse> = z.object({
   rounds: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int() })).readonly(),
+});
+
+// GET /me/rounds/live (projection-realignment Task 13): "your rounds, right now" — presence
+// pointers (application/src/rounds/presence.ts's writePresence, written at seat-time by
+// startRound/joinRound/addParticipant and removed at finalize by projections/
+// projectArchive.ts's deleteLive loop), a DIFFERENT surface from GetMyRoundsResponse above
+// (that one is finalized-round HISTORY). `joinedAt` is the wire name for the projection
+// store's own `joinedAtMs` (same rename discipline as GetMyRoundsResponse's `finalizedAt`).
+// Sorted newest-joined first (application/src/golfers/getMyLiveRounds.ts).
+export interface GetMyLiveRoundsResponse {
+  readonly rounds: readonly { readonly roundId: RoundId; readonly courseName: string; readonly joinedAt: number }[];
+}
+
+export const getMyLiveRoundsResponseSchema: z.ZodType<GetMyLiveRoundsResponse> = z.object({
+  rounds: z.array(z.object({ roundId: roundIdSchema, courseName: z.string(), joinedAt: z.number().int() })).readonly(),
 });

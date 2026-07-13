@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { addMember, crewId, fixtureLinks, golferId } from "@swng/domain";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
+import type { ProjectionStore } from "../ports/projectionStore.js";
 import {
   createCapturingBroadcast,
+  createCapturingLogger,
   createFixedClock,
   createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
+  createInMemoryProjectionStore,
   createInMemoryRoundStore,
   createInMemorySnapshotStore,
+  createNullLogger,
   createSequentialIds,
   putAndBindGolfer,
 } from "../testing/fakes.js";
@@ -41,14 +45,17 @@ const setup = () => {
   const ids = createSequentialIds("t");
   const golferStore = createInMemoryGolferStore();
   const crewStore = createInMemoryCrewStore();
+  const projectionStore = createInMemoryProjectionStore();
+  const logger = createNullLogger();
 
   return {
     broadcast,
     golferStore,
     crewStore,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
+    projectionStore,
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
-    addPlayer: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore }),
+    addPlayer: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore, projectionStore, logger }),
   };
 };
 
@@ -149,5 +156,51 @@ describe("addParticipant", () => {
     await ctx.finalize(hostClaims);
 
     await expect(ctx.addPlayer(hostClaims, { name: "Bo", tee: "white", courseHandicap: 2 })).rejects.toMatchObject({ code: "round-final" });
+  });
+
+  // Presence (projection-realignment spec §5, Task 13): the added player gets a LIVE pointer
+  // too — ghosts inherit presence for free, same as StartRound/JoinRound (roundSlice.test.ts's
+  // own presence suite).
+  it("writes a LIVE pointer for the added player, carrying the round's own courseName", async () => {
+    const ctx = setup();
+    const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
+    const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
+    const ghost = golferId("ghost-1");
+
+    await ctx.addPlayer(hostClaims, { name: "Bo", tee: "white", courseHandicap: 2, golferId: ghost });
+
+    const live = await ctx.projectionStore.listLive(ghost);
+    expect(live).toEqual([{ roundId: host.roundId, courseName: fixtureLinks.courseName, joinedAtMs: expect.any(Number) }]);
+  });
+
+  // Same binding resolution as StartRound/JoinRound's own pin (roundSlice.test.ts): a
+  // discovery nicety must never block play.
+  it("a putLive failure does NOT fail addParticipant — logged via logger.warn, add still succeeds", async () => {
+    const snapshots = createInMemorySnapshotStore();
+    const journal = createInMemoryJournal(snapshots);
+    const store = createInMemoryRoundStore();
+    const broadcast = createCapturingBroadcast();
+    const tokens = createTestTokenIssuer();
+    const clock = createFixedClock(1_000);
+    const ids = createSequentialIds("t");
+    const golferStore = createInMemoryGolferStore();
+    const crewStore = createInMemoryCrewStore();
+    const logger = createCapturingLogger();
+    const throwingStore: ProjectionStore = {
+      ...createInMemoryProjectionStore(),
+      putLive: async () => {
+        throw new Error("presence table unavailable");
+      },
+    };
+    const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore: throwingStore, logger });
+    const addPlayer = addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore, projectionStore: throwingStore, logger });
+
+    const host = await start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
+    const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
+
+    const result = await addPlayer(hostClaims, { name: "Bo", tee: "white", courseHandicap: 2 });
+
+    expect(result.events).toHaveLength(1); // the add succeeded — presence's own failure never propagated
+    expect(logger.warnings.some((entry) => entry.message === "presence-write-failed")).toBe(true);
   });
 });

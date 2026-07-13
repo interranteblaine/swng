@@ -27,6 +27,7 @@ import {
   getCourse,
   getCrew,
   getMyGolfer,
+  getMyLiveRounds,
   getMyRecord,
   getMyRounds,
   getRoundArchive,
@@ -62,6 +63,7 @@ import {
   getCourseResponseSchema,
   getCrewResponseSchema,
   getMeResponseSchema,
+  getMyLiveRoundsResponseSchema,
   getMyRecordResponseSchema,
   getMyRoundsResponseSchema,
   getRoundArchiveResponseSchema,
@@ -157,8 +159,8 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
   const logger = createNullLogger();
 
   const useCases: UseCases = {
-    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
-    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore }),
+    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
@@ -166,7 +168,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
     getRoundArchive: getRoundArchive({ snapshots, golferStore, crewStore }),
-    addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore }),
+    addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore, projectionStore, logger }),
     createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
     addTeeSet: addTeeSet({ courseStore, clock, logger }),
     verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
@@ -178,6 +180,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     claimGolfer: claimGolfer({ golferStore, roundStore: store, journal, crewStore }),
     getMyRecord: getMyRecord({ golferStore, projectionStore }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
+    getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore }),
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
@@ -1592,6 +1595,50 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
     it("401s with no bearer token at all", async () => {
       const { dispatcher } = setupArchive();
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds" })));
+      expect(resp.statusCode).toBe(401);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+    });
+  });
+
+  // Projection-realignment Task 13: "your rounds, right now" — presence, not finalized
+  // history. Same golfer tier/wiring idiom as GET /me/rounds just above.
+  describe("GET /me/rounds/live", () => {
+    it("returns an empty list for a golfer with no live round", async () => {
+      const { dispatcher } = setupArchive();
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds/live", token: golferBearer(bo) })));
+      expect(resp.statusCode).toBe(200);
+      expect(getMyLiveRoundsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: [] });
+    });
+
+    it("lists a round the golfer just started, by identity — courseName + joinedAt on the wire", async () => {
+      const { dispatcher } = setupArchive();
+      const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
+      const annGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
+
+      const started = startRoundResponseSchema.parse(
+        JSON.parse(
+          asStructured(
+            await dispatcher(
+              makeEvent({
+                method: "POST",
+                path: "/rounds",
+                token: golferBearer(ann),
+                body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annGolfer.golfer.golferId },
+              }),
+            ),
+          ).body!,
+        ),
+      );
+
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds/live", token: golferBearer(ann) })));
+      expect(resp.statusCode).toBe(200);
+      const parsed = getMyLiveRoundsResponseSchema.parse(JSON.parse(resp.body!));
+      expect(parsed.rounds).toEqual([{ roundId: started.roundId, courseName: fixtureLinks.courseName, joinedAt: expect.any(Number) }]);
+    });
+
+    it("401s with no bearer token at all", async () => {
+      const { dispatcher } = setupArchive();
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds/live" })));
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });

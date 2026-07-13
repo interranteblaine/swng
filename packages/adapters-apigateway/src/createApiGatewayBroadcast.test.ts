@@ -41,7 +41,7 @@ describe("createApiGatewayBroadcast", () => {
 
     const send = vi.fn().mockResolvedValue({});
     const client = { send } as unknown as ApiGatewayManagementApiClient;
-    const logger: Logger = { info: vi.fn(), error: vi.fn() };
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const broadcast = createApiGatewayBroadcast({ client, connections, logger });
 
     await broadcast.publish(rid, [sampleEvent]);
@@ -59,7 +59,7 @@ describe("createApiGatewayBroadcast", () => {
     const connections = createInMemoryConnectionRegistry();
     const send = vi.fn();
     const client = { send } as unknown as ApiGatewayManagementApiClient;
-    const broadcast = createApiGatewayBroadcast({ client, connections, logger: { info: vi.fn(), error: vi.fn() } });
+    const broadcast = createApiGatewayBroadcast({ client, connections, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } });
 
     await broadcast.publish(roundId("round-empty"), [sampleEvent]);
 
@@ -78,7 +78,7 @@ describe("createApiGatewayBroadcast", () => {
         : Promise.resolve({}),
     );
     const client = { send } as unknown as ApiGatewayManagementApiClient;
-    const broadcast = createApiGatewayBroadcast({ client, connections, logger: { info: vi.fn(), error: vi.fn() } });
+    const broadcast = createApiGatewayBroadcast({ client, connections, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } });
 
     await expect(broadcast.publish(rid, [sampleEvent])).resolves.toBeUndefined();
 
@@ -92,7 +92,7 @@ describe("createApiGatewayBroadcast", () => {
 
     const send = vi.fn().mockRejectedValue(new Error("network blip"));
     const client = { send } as unknown as ApiGatewayManagementApiClient;
-    const logger: Logger = { info: vi.fn(), error: vi.fn() };
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const broadcast = createApiGatewayBroadcast({ client, connections, logger });
 
     await expect(broadcast.publish(rid, [sampleEvent])).resolves.toBeUndefined();
@@ -111,7 +111,7 @@ describe("createApiGatewayBroadcast", () => {
     };
     const send = vi.fn();
     const client = { send } as unknown as ApiGatewayManagementApiClient;
-    const logger: Logger = { info: vi.fn(), error: vi.fn() };
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const broadcast = createApiGatewayBroadcast({ client, connections, logger });
 
     await expect(broadcast.publish(rid, [sampleEvent])).resolves.toBeUndefined();
@@ -127,7 +127,7 @@ describe("createApiGatewayBroadcast", () => {
 
     const send = vi.fn().mockRejectedValue(new GoneException({ message: "connection is gone", $metadata: {} }));
     const client = { send } as unknown as ApiGatewayManagementApiClient;
-    const logger: Logger = { info: vi.fn(), error: vi.fn() };
+    const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const deregisterSpy = vi.spyOn(connections, "deregister").mockRejectedValue(new Error("registry unavailable"));
     const broadcast = createApiGatewayBroadcast({ client, connections, logger });
 

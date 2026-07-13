@@ -1,18 +1,40 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
-import type { ListMyCrewsResponse } from "@swng/contracts";
-import { ApiError, joinCrew, listMyCrews } from "../api";
+import type { GetMyLiveRoundsResponse, ListMyCrewsResponse } from "@swng/contracts";
+import { ApiError, getMyLiveRounds, joinCrew, listMyCrews } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { credentialStore } from "../identity";
 
 // Reads localStorage directly on render rather than through useRoundSession/state — Home
 // never opens a live session (that's per-round, from RoundPage), it only needs the flat list
-// of rounds this device already holds a credential for.
+// of rounds this device already holds a credential for. This is now the ANONYMOUS/ghost path
+// only (architecture-realignment Task 13, spec §5) — a signed-in golfer's "Your rounds"
+// instead reads live rounds by IDENTITY (GET /me/rounds/live), below.
 export function HomePage() {
   const rounds = credentialStore.list();
-  const { withAuth, signedIn } = useAuth();
+  const { withAuth, signedIn, golfer } = useAuth();
   const navigate = useNavigate();
+
+  // A real account golfer (not undefined = signed out, not null = signed in but no golfer row
+  // yet — useAuth.ts's own three-state doc comment) is the ONE condition for the identity-based
+  // "Your rounds" list; every other state keeps the device credentialStore list exactly as
+  // before this task (spec §5's own binding resolution).
+  const hasGolferIdentity = Boolean(golfer);
+
+  // undefined = not loaded yet (or signed out / no golfer) — the section renders its own
+  // loading/empty copy only once this has a real array, same idiom as `crews` below.
+  const [liveRounds, setLiveRounds] = useState<GetMyLiveRoundsResponse["rounds"] | undefined>(undefined);
+
+  useEffect(() => {
+    if (!hasGolferIdentity) {
+      setLiveRounds(undefined);
+      return;
+    }
+    void withAuth((token) => getMyLiveRounds(token))
+      .then((response) => setLiveRounds(response.rounds))
+      .catch(() => {}); // degrade silently — same discipline as the crews fetch below
+  }, [hasGolferIdentity, withAuth]);
 
   // undefined = signed out / not loaded (yet or failed) — the list renders only from a real
   // response. The fetch is a nicety: a transient failure just leaves the section's list empty
@@ -135,7 +157,26 @@ export function HomePage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-semibold text-slate-300">Your rounds</h2>
-        {rounds.length === 0 ? (
+        {hasGolferIdentity ? (
+          !liveRounds || liveRounds.length === 0 ? (
+            <p className="text-slate-400">No rounds yet</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {liveRounds.map((round) => (
+                <li key={round.roundId}>
+                  {/* TODO(Task 14): a round found by identity may have no local device
+                      credential at all (started/joined from a different device or browser) —
+                      re-mint a scoring token here, before navigating, once that capability
+                      exists. For now this link navigates unconditionally; RoundPage's existing
+                      no-credential path (bounce to /join) covers the gap until then. */}
+                  <Link to={`/round/${round.roundId}`} className="block rounded-lg bg-slate-800 px-4 py-3">
+                    {round.courseName}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : rounds.length === 0 ? (
           <p className="text-slate-400">No rounds yet</p>
         ) : (
           <ul className="flex flex-col gap-2">

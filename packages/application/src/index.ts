@@ -48,6 +48,7 @@ export { updateMyGolfer } from "./golfers/updateMyGolfer.js";
 export { claimGolfer } from "./golfers/claimGolfer.js";
 export { getMyRecord } from "./golfers/getMyRecord.js";
 export { getMyRounds } from "./golfers/getMyRounds.js";
+export { getMyLiveRounds } from "./golfers/getMyLiveRounds.js";
 
 export { createCrew } from "./crews/createCrew.js";
 export { getCrew } from "./crews/getCrew.js";
@@ -69,6 +70,7 @@ export { rebuildProjections } from "./projections/rebuildProjections.js";
 // just this package's own tests.
 export {
   createCapturingBroadcast,
+  createCapturingLogger,
   createFixedClock,
   createInMemoryCourseStore,
   createInMemoryCrewStore,
@@ -81,4 +83,4 @@ export {
   createSequentialIds,
   putAndBindGolfer,
 } from "./testing/fakes.js";
-export type { CapturingBroadcast, InMemorySnapshotStore } from "./testing/fakes.js";
+export type { CapturingBroadcast, CapturingLogger, InMemorySnapshotStore } from "./testing/fakes.js";

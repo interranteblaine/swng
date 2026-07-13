@@ -8,10 +8,13 @@ import type { CrewStore } from "../ports/crewStore.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
+import type { Logger } from "../ports/logger.js";
+import type { ProjectionStore } from "../ports/projectionStore.js";
 import type { ParticipantClaims } from "../ports/tokenIssuer.js";
 import { requireParticipant } from "../scoringPolicy.js";
 import { resolveSuppliedGolfer } from "./golferIdentity.js";
 import { loadRoundState } from "./loadRoundState.js";
+import { writePresence } from "./presence.js";
 import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 
 // POST /rounds/{roundId}/players (participant auth, M8 plan): an ALREADY-seated participant
@@ -30,7 +33,16 @@ import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 // deliberate narrowing under round-is-a-sealed-leaf: the round no longer names a crew, so a
 // bare participant token can't stand in for proof of who the caller is.
 export const addParticipant =
-  (deps: { journal: EventJournal; broadcast: Broadcast; clock: Clock; ids: IdGenerator; golferStore: GolferStore; crewStore: CrewStore }) =>
+  (deps: {
+    journal: EventJournal;
+    broadcast: Broadcast;
+    clock: Clock;
+    ids: IdGenerator;
+    golferStore: GolferStore;
+    crewStore: CrewStore;
+    projectionStore: ProjectionStore;
+    logger: Logger;
+  }) =>
   async (claims: ParticipantClaims, command: AddParticipantRequest): Promise<AddParticipantResponse> => {
     const { state } = await loadRoundState(deps.journal, claims.roundId);
     requireParticipant(state, claims.golferId);
@@ -59,6 +71,10 @@ export const addParticipant =
       { kind: "participant-joined", participant, ...serverEnvelope({ hlc, ids: deps.ids }, claims.golferId) },
     ]);
     await deps.broadcast.publish(claims.roundId, result.appended);
+
+    // Presence (spec §5, Task 13): the added player's own LIVE pointer, written only after the
+    // add has actually committed above — best-effort, never undoes the add (presence.ts).
+    await writePresence({ projectionStore: deps.projectionStore, logger: deps.logger, clock: deps.clock }, golfer, claims.roundId, state.card.courseName);
 
     return { events: result.appended };
   };

@@ -144,6 +144,9 @@ export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
   z.object({ ...envelope, kind: z.literal("score-recorded"), golferId: golferIdSchema, hole: z.number(), result: holeResultSchema }),
   z.object({ ...envelope, kind: z.literal("round-finalized") }),
   z.object({ ...envelope, kind: z.literal("round-reopened") }),
+  // task-15: a round scrapped for good — terminal, envelope-only, mirroring round-finalized's
+  // shape. Additive (append-only event schema); an old client that never sends it is unaffected.
+  z.object({ ...envelope, kind: z.literal("round-abandoned") }),
   z.object({ ...envelope, kind: z.literal("game-terminated"), gameId: gameIdSchema }),
 ]);
 export const roundEventSchema: z.ZodType<RoundEvent> = roundEventSchemaImpl;

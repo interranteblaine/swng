@@ -190,6 +190,41 @@ describe("settleRound — game termination", () => {
   });
 });
 
+// A scrapped round produces NO snapshot, ever — it counts nowhere (task-15). settleRound is the
+// structural enforcement point: it refuses an abandoned log outright, so no archive / handicap
+// index / crew season can ever derive a result from one.
+describe("settleRound — abandoned round", () => {
+  const abandonAt = (wallMs: number, id: string): RoundEvent => ({
+    kind: "round-abandoned",
+    opId: opId(id),
+    hlc: { wallMs, counter: 0, deviceId: deviceId("test") },
+    authorId: A,
+  });
+
+  it("throws round-abandoned on an abandoned log — a scrapped round has no snapshot", () => {
+    const liveLog = playGoldenRoundLog(fixtureLinks, players3, [skins, stableford], cards, corrections, false);
+    const attempt = () => settleRound([...liveLog, abandonAt(9_000, "abandon-1")]);
+    expect(attempt).toThrowError(DomainError);
+    expect(attempt).toThrowError(expect.objectContaining({ code: "round-abandoned" }));
+  });
+
+  it("throws round-abandoned even when a later round-finalized rode the log too (abandon dominates settlement)", () => {
+    const liveLog = playGoldenRoundLog(fixtureLinks, players3, [skins, stableford], cards, corrections, false);
+    const finalizeLate: RoundEvent = {
+      kind: "round-finalized",
+      opId: opId("finalize-late"),
+      hlc: { wallMs: 9_500, counter: 0, deviceId: deviceId("test") },
+      authorId: A,
+    };
+    // The finalize has a LATER hlc than the abandon — this IS finalizeRound's own candidate log
+    // — yet settlement still refuses it as abandoned, never producing a snapshot: the code
+    // returned is round-abandoned, not round-not-final, so the caller (finalizeRound) surfaces
+    // the honest terminal-state error rather than a misleading "not final yet."
+    const attempt = () => settleRound([...liveLog, abandonAt(9_000, "abandon-2"), finalizeLate]);
+    expect(attempt).toThrowError(expect.objectContaining({ code: "round-abandoned" }));
+  });
+});
+
 describe("settleRound — incomplete handicapping", () => {
   it("resolves a match decided early while both golfers' cards stay incomplete (holes 8-9 never recorded)", () => {
     const D = golferId("dee");

@@ -407,6 +407,98 @@ describe("RoundPage", () => {
     expect(screen.queryByRole("button", { name: "Finalize round" })).toBeNull();
   });
 
+  // task-15: the scrap flow, wired end to end — confirm dialog → POST /rounds/{id}/abandon → the
+  // round-abandoned event folds back through this tab's own sync() → the whole page swaps to the
+  // honest scrapped notice (NOT ResultsView — a scrapped round has no results).
+  it("scrap flow: 'Scrap this round' → confirm → POST /abandon → the scrapped notice, no scoring chrome", async () => {
+    const id = roundId("round-scrap-flow");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-scrap", golferId: ann, name: "Ann", joinCode: "SCR001" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    // Same stand-in idiom as the finalize/terminate flow tests above: the fake endpoint appends
+    // the round-abandoned event to the scripted transport's log, so this tab's own sync() (fired
+    // by RoundPage right after the POST resolves) folds it like a real server append.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        expect(String(url)).toBe(`https://api.example.test/rounds/${id}/abandon`);
+        expect(init?.method).toBe("POST");
+        expect((init?.headers as Record<string, string>).authorization).toBe("Bearer tok-scrap");
+        (transport.log as RoundEvent[]).push({
+          kind: "round-abandoned",
+          authorId: ann,
+          opId: opId("srv-abandon"),
+          hlc: { wallMs: 9_999, counter: 0, deviceId: SERVER_DEVICE },
+          seq: transport.log.length + 1,
+        });
+        return { ok: true, status: 200, json: async () => ({ status: "abandoned" }) } as unknown as Response;
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("SCR001")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Scrap this round" }));
+    expect(screen.getByRole("dialog", { name: "Confirm scrap" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Scrap round" }));
+
+    await waitFor(() => expect(screen.getByText("This round was scrapped.")).toBeTruthy());
+    // The live scoring chrome is gone — no finalize, no scrap control, no scorecard.
+    expect(screen.queryByRole("button", { name: "Finalize round" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Scrap this round" })).toBeNull();
+    expect(screen.queryByText("SCR001")).toBeNull();
+  });
+
+  // task-15: a client that lands on an already-abandoned round (refreshed/rejoining, or one that
+  // only observed the status flip via WS/pull) renders the scrapped notice directly — never
+  // ResultsView, never the live scorecard.
+  it("a round that's already abandoned renders the scrapped notice directly — no scoring chrome", async () => {
+    const id = roundId("round-already-abandoned");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-ab", golferId: ann, name: "Ann", joinCode: "ABN001" });
+
+    const abandoned: RoundEvent = { kind: "round-abandoned", authorId: ann, opId: opId("abandon-op"), hlc: { wallMs: 9_999, counter: 0, deviceId: SERVER_DEVICE } };
+    const transport = createScriptedTransport(stampSeq([...buildServerLog(id, ann, "Ann"), abandoned]));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByText("This round was scrapped.")).toBeTruthy());
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Finalize round" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Scrap this round" })).toBeNull();
+  });
+
   // M7 Task 6: the chip End-game flow, wired end to end — overflow → confirm → POST terminate
   // → the game-terminated event folds back through the session → chip stays with an Ended badge.
   it("chip End-game flow: overflow → confirm → POST terminate → chip stays with an Ended badge", async () => {

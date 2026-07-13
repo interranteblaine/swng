@@ -150,3 +150,42 @@ describe("reduceRound — game termination", () => {
     expect(reduceRound([genesis, joinA, started, gameAdded]).terminatedGameIds).toEqual(new Set());
   });
 });
+
+// round-abandoned: a terminal lifecycle event that scraps the round outright (task-15). Unlike
+// round-finalized (which round-reopened can un-do), an abandon has NO inverse, so its fold
+// behavior is DOMINANT — once the log carries one, status is "abandoned" regardless of any
+// later lifecycle event that races in. This is the structural half of "a scrapped round counts
+// nowhere": settleRound (archive.test.ts) refuses any log that folds to abandoned.
+describe("reduceRound — round abandonment", () => {
+  it("folds to status 'abandoned' when a round-abandoned event is present", () => {
+    const abandoned: RoundEvent = { ...base(4), kind: "round-abandoned" };
+    expect(reduceRound([genesis, joinA, started, abandoned]).status).toBe("abandoned");
+  });
+
+  it("is DOMINANT and terminal: a later round-finalized (higher hlc) never resurrects an abandoned round", () => {
+    const abandoned: RoundEvent = { ...base(4), kind: "round-abandoned" };
+    const finalized: RoundEvent = { ...base(5), kind: "round-finalized" };
+    // The finalize lands AFTER the abandon (later hlc) — plain last-wins would make it "final",
+    // but abandon has no un-abandon, so the fold stays "abandoned" in EITHER delivery order.
+    // This is exactly finalizeRound's own candidate log (events + a fresh round-finalized).
+    expect(reduceRound([genesis, joinA, started, abandoned, finalized]).status).toBe("abandoned");
+    expect(reduceRound([genesis, joinA, started, finalized, abandoned]).status).toBe("abandoned");
+  });
+
+  it("folds identically under any delivery order (forward, reverse, shuffled)", () => {
+    const abandoned: RoundEvent = { ...base(4), kind: "round-abandoned" };
+    const forward = reduceRound([genesis, joinA, started, abandoned]);
+    const reverse = reduceRound([abandoned, started, joinA, genesis]);
+    const shuffled = reduceRound([started, abandoned, genesis, joinA]);
+    expect(forward.status).toBe("abandoned");
+    expect(reverse).toEqual(forward);
+    expect(shuffled).toEqual(forward);
+  });
+
+  it("is idempotent under duplicate delivery of the same abandon", () => {
+    const abandoned: RoundEvent = { ...base(4), kind: "round-abandoned" };
+    const once = reduceRound([genesis, joinA, started, abandoned]);
+    const twice = reduceRound([genesis, joinA, started, abandoned, abandoned]);
+    expect(twice).toEqual(once);
+  });
+});

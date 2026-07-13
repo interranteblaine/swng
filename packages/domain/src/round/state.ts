@@ -6,7 +6,11 @@ import type { HoleResult } from "./holeResult.js";
 import type { Participant } from "./participant.js";
 import type { GameConfig, RoundEvent } from "./events.js";
 
-export type RoundStatus = "setup" | "live" | "final";
+// "abandoned" is a TERMINAL status like "final", but for a scrapped round rather than a settled
+// one (task-15): unlike "final" (which round-reopened can flip back to "live"), nothing ever
+// leaves "abandoned" — an abandon has no inverse. settleRound refuses an abandoned log, so a
+// scrapped round produces no snapshot and counts nowhere.
+export type RoundStatus = "setup" | "live" | "final" | "abandoned";
 
 export interface ScoreCell {
   readonly result: HoleResult;
@@ -30,11 +34,12 @@ export interface RoundState {
 
 export const cellKey = (golfer: GolferId, hole: number): string => `${golfer}#${hole}`;
 
-const LIFECYCLE_STATUS: Record<"round-created" | "round-started" | "round-finalized" | "round-reopened", RoundStatus> = {
+const LIFECYCLE_STATUS: Record<"round-created" | "round-started" | "round-finalized" | "round-reopened" | "round-abandoned", RoundStatus> = {
   "round-created": "setup",
   "round-started": "live",
   "round-finalized": "final",
   "round-reopened": "live",
+  "round-abandoned": "abandoned",
 };
 
 // Deterministic serialization with explicitly sorted object keys — NOT plain
@@ -121,6 +126,17 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
       status = LIFECYCLE_STATUS[event.kind as keyof typeof LIFECYCLE_STATUS];
     }
   }
+  // round-abandoned is TERMINAL and DOMINANT, unlike every other lifecycle event: a round is
+  // scrapped for good — there is no un-abandon event the way round-reopened un-finalizes — so
+  // once the log carries ONE abandon the fold is "abandoned" regardless of any later
+  // round-finalized/round-started/round-reopened that races in with a higher hlc. Expressed as a
+  // dominant override AFTER the last-wins scan above (not as a plain reliance on the
+  // LIFECYCLE_STATUS entry) precisely because last-wins alone would let a later finalize win.
+  // This is what makes "a scrapped round counts nowhere" STRUCTURAL: settleRound (archive.ts)
+  // throws on any log that folds to "abandoned", including finalizeRound's own candidate log
+  // (its appended round-finalized can never out-vote an abandon already on the log). It stays
+  // commutative/idempotent — a pure set-membership check over the log, order-independent.
+  if (deduped.some((event) => event.kind === "round-abandoned")) status = "abandoned";
 
   // 4. participants: LWW map keyed by golferId, but roster ORDER is join order —
   //    tracked separately as the first-write hlc — while the payload stays LWW

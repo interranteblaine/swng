@@ -65,7 +65,11 @@ export const finalizeRound =
 
       // Settle the CANDIDATE log (carry 1) — this both VALIDATES settle-ability (a
       // game-unresolved throw here propagates uncaught, leaving the journal untouched) AND
-      // produces the exact archive committed with the append below.
+      // produces the exact archive committed with the append below. task-15: this same
+      // settle-check is what refuses a SCRAPPED round — no explicit "abandoned" guard is needed
+      // here because an abandon DOMINATES the fold (domain state.ts), so this candidate log
+      // (existing events + the round-finalized above) still folds to "abandoned" and settleRound
+      // throws round-abandoned (409) before the journal is ever touched.
       const candidateLog = [...events, candidate];
       const archive = settleRound(candidateLog);
 

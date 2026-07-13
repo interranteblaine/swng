@@ -167,6 +167,40 @@ describe("createRoundSession", () => {
     expect(kinds).not.toContain("wolf-9000");
   });
 
+  it("surfaces a terminal, non-scorable state once the round is abandoned", async () => {
+    // The server log ends with a round-abandoned event — the scrapped-round terminal state a
+    // client lands on by pulling (task-15: another participant scrapped the round). The fold
+    // handles the new kind by the append-only rule — nothing in @swng/client's own known-set is
+    // event-kind-specific (KNOWN_GAME_KINDS filters GAME kinds only), so it just flows through
+    // reduceRound like every other lifecycle event.
+    const liveLog = buildServerLog();
+    const abandoned: RoundEvent = {
+      kind: "round-abandoned",
+      authorId: ANN_ID,
+      opId: opId("server-abandon"),
+      hlc: { wallMs: 9_000, counter: 0, deviceId: SERVER_DEVICE },
+      seq: liveLog.length + 1,
+    };
+    const transport = createScriptedTransport([...liveLog, abandoned]);
+    const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+    await session.sync();
+
+    // Terminal: the fold reports the scrapped status the UI reads to stop offering scoring — and
+    // games() still renders without throwing (a terminal round is displayable, just not editable).
+    expect(session.state().status).toBe("abandoned");
+    expect(() => session.games()).not.toThrow();
+
+    // Non-scorable in practice: the client never gates recordScore on status (the server is the
+    // authority), so a score still queues optimistically — but the server refuses it on a
+    // scrapped round (round-not-live), and that permanent rejection lands in rejected() rather
+    // than sticking in the outbox forever.
+    transport.rejectOpId = opId("ann-phone-1");
+    session.recordScore(ANN_ID, 1, toResult(5));
+    await session.sync();
+
+    expect(session.rejected().map((rejected) => rejected.code)).toContain("round-not-live");
+  });
+
   it("keeps state() deep-equal before and after the outbox prunes a confirmed duplicate", async () => {
     const transport = createScriptedTransport(buildServerLog());
     const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });

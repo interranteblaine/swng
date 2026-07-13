@@ -137,6 +137,14 @@ export interface FinalizeRoundResponse {
   readonly handicapping: RoundArchive["handicapping"];
 }
 
+// POST /rounds/{roundId}/abandon (task-15): a scrapped round produces no snapshot and counts
+// nowhere. `status` is the literal "abandoned", not the full RoundStatus union — this endpoint
+// only ever yields that one terminal state on success (a non-abandonable round, e.g. one already
+// final, is a 409, never a 200 carrying a different status).
+export interface AbandonRoundResponse {
+  readonly status: "abandoned";
+}
+
 export interface EventsResponse {
   readonly events: readonly RoundEvent[];
   readonly nextSeq: number;
@@ -178,6 +186,10 @@ const handicappingEntrySchema = z.discriminatedUnion("kind", [
 export const finalizeRoundResponseSchema: z.ZodType<FinalizeRoundResponse> = z.object({
   results: z.array(gameResultSchema).readonly(),
   handicapping: z.array(handicappingEntrySchema).readonly(),
+});
+
+export const abandonRoundResponseSchema: z.ZodType<AbandonRoundResponse> = z.object({
+  status: z.literal("abandoned"),
 });
 
 export const eventsResponseSchema: z.ZodType<EventsResponse> = z.object({

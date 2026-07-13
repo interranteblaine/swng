@@ -46,6 +46,9 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.POST, path: "/rounds/{roundId}/games" },
   { method: HttpMethod.POST, path: "/rounds/{roundId}/scores" },
   { method: HttpMethod.POST, path: "/rounds/{roundId}/finalize" },
+  // task-15: scrap a round — a terminal event that produces NO snapshot, so the round counts
+  // nowhere. "participant"-gated, same tier as finalize above.
+  { method: HttpMethod.POST, path: "/rounds/{roundId}/abandon" },
   { method: HttpMethod.GET, path: "/rounds/{roundId}/events" },
   // M9 Task 3 (share): mints this round's immortal spectator link — participant-gated, same
   // tier as finalize/terminate above.

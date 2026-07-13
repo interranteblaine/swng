@@ -3,6 +3,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "
 import { deviceId, fixtureLinks, fixtureWhite, opId } from "@swng/domain";
 import type { AccountClaims, AccountVerifier } from "@swng/application";
 import {
+  abandonRound,
   addCrewMember,
   addGame,
   addParticipant,
@@ -165,6 +166,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
+    abandonRound: abandonRound({ journal, broadcast, clock, ids, projectionStore, logger }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),

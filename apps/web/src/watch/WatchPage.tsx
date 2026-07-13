@@ -66,6 +66,21 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
     }
 
     const isFinal = view.state.status === "final";
+    const isAbandoned = view.state.status === "abandoned";
+
+    // task-15: a scrapped round is terminal with nothing to show a spectator — no results, no
+    // live scorecard. Render an honest notice rather than crash or show a stale live grid (the
+    // fold reports "abandoned"; useWatchRound's reduceRound handles the kind by the append-only
+    // rule, so a spectator whose round is scrapped mid-watch simply lands here on the next poll).
+    if (isAbandoned) {
+      return (
+        <main className="min-h-screen bg-slate-950">
+          <div role="status" className="flex min-h-screen items-center justify-center p-6 text-center text-slate-100">
+            This round was scrapped — there&apos;s nothing to show.
+          </div>
+        </main>
+      );
+    }
 
     return (
       <main className="min-h-screen bg-slate-950">

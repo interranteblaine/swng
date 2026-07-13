@@ -45,6 +45,14 @@ export interface RoundArchive {
 // hanging game is a contradiction the archive must never represent.
 export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   const state = reduceRound(events);
+  // A scrapped round produces NO snapshot, ever — it counts nowhere (task-15). This is the
+  // structural half of that promise: settlement refuses an abandoned log outright, so no
+  // archive / handicap-index / crew-season path can ever derive a result from one. Checked
+  // BEFORE the round-not-final guard below because "abandoned" is also not "final", and the
+  // honest signal a caller (finalizeRound) needs is round-abandoned, not a misleading
+  // round-not-final. Reachable via finalizeRound's own candidate log too: an abandon dominates
+  // the fold (state.ts), so an appended round-finalized can never turn a scrapped round settleable.
+  if (state.status === "abandoned") throw new DomainError("round-abandoned", "settleRound: a scrapped round has no snapshot");
   if (state.status !== "final") throw new DomainError("round-not-final", "settleRound requires a final round");
 
   // A terminated game never joins the must-resolve set — settlement isn't waiting on a

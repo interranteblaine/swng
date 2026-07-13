@@ -125,6 +125,11 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   // are stale, the same "your view of the resource is out of date" shape as an optimistic-
   // concurrency conflict, so it gets the same 409 as course-conflict above.
   "tee-set-revised": 409,
+  // task-15: settleRound refused a scrapped round (finalizeRound's own settle-check throws this
+  // when its candidate log folds to "abandoned"). A failed precondition on the round's terminal
+  // lifecycle state, the same 409 bucket as game-unresolved/round-final above — never a
+  // genuine-bug 500.
+  "round-abandoned": 409,
   // M8 Task 2 (domain/src/crew/crew.ts's addMember): the golferId named in the request is
   // already on the roster — a failed precondition on the roster, same bucket as
   // crew-conflict/golfer-already-in-round above, not a genuine-bug 500.

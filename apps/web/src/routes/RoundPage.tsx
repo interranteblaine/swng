@@ -3,7 +3,7 @@ import { Navigate, useLocation, useParams } from "react-router";
 import type { AddParticipantRequest, FinalizeRoundResponse, GameConfigInput } from "@swng/contracts";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { GameId, GameState, GolferId, HoleResult, RoundId, RoundState } from "@swng/domain";
-import { addGame, addParticipant, finalizeRound, terminateGame } from "../api";
+import { abandonRound, addGame, addParticipant, finalizeRound, terminateGame } from "../api";
 import { credentialStore } from "../identity";
 import type { RoundCredential } from "../identity";
 import { unresolvedGames } from "../round/finalizeReadiness";
@@ -144,6 +144,89 @@ function FinalizeControl({ state, games, onFinalize, onTerminate }: FinalizeCont
   );
 }
 
+// "Scrap this round" (task-15): a first-class scrap path — NOT "mark holes picked-up and
+// finalize." A scrapped round produces no snapshot and counts nowhere, so this is a distinct,
+// rare, destructive action with its own confirm gate (its own dialog, like FinalizeControl's),
+// deliberately styled quiet/secondary so it never competes with Finalize for a tap. On success
+// the round-abandoned event folds back through the session (onAbandon's own sync()), flipping
+// status to "abandoned" — RoundPageContent then swaps this whole subtree for the scrapped-round
+// notice, so like FinalizeControl this component simply stops rendering, no local "done" state.
+function ScrapControl({ onAbandon }: { readonly onAbandon: () => Promise<void> }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  const scrapNow = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await onAbandon();
+    } catch {
+      // The dialog stays open (retry one tap away); a human line, never a raw server message
+      // (the same discipline FinalizeControl's own catch follows).
+      setError("Could not scrap the round — try again.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="px-3 pb-3">
+      <button
+        type="button"
+        onClick={() => {
+          setError(undefined);
+          setConfirming(true);
+        }}
+        className="min-h-12 w-full rounded-lg bg-slate-900 px-4 text-sm font-medium text-slate-500 active:bg-slate-800"
+      >
+        Scrap this round
+      </button>
+
+      {confirming && (
+        <div role="dialog" aria-label="Confirm scrap" className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 rounded-t-2xl bg-slate-900 p-4 shadow-2xl">
+          <p className="text-sm text-slate-300">
+            Scrap this round? It counts nowhere — no results, no handicap posting — and this can&apos;t be undone.
+          </p>
+          <button
+            type="button"
+            onClick={() => void scrapNow()}
+            disabled={busy}
+            className="min-h-14 rounded-lg bg-red-800 px-4 text-base font-semibold text-slate-100 disabled:opacity-50"
+          >
+            {busy ? "Scrapping…" : "Scrap round"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            disabled={busy}
+            className="min-h-14 rounded-lg bg-slate-800 px-4 text-base font-medium text-slate-300 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          {error && (
+            <p role="alert" className="text-red-400">
+              {error}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// The honest terminal treatment for a scrapped round (task-15): NOT ResultsView — there are no
+// results — just a plain statement that the round counts nowhere. Rendered for anyone who lands
+// on an abandoned round, whether they scrapped it themselves or only observed the status flip via
+// WS/pull (same "status comes from the folded log, not local memory" contract as the final path).
+function ScrappedRound() {
+  return (
+    <div role="status" className="flex min-h-screen flex-col items-center justify-center gap-2 p-6 text-center text-slate-100">
+      <p className="text-lg font-semibold">This round was scrapped.</p>
+      <p className="max-w-sm text-sm text-slate-400">It counts nowhere — no results, no handicap posting. Start a new round to play again.</p>
+    </div>
+  );
+}
+
 // CreateRoundPage's own "play the usual" seed loop (M8 Task 6 fix): which of the crew
 // preset's games failed to post via addGame right after the round was created, carried here
 // through this page's own navigate() call (the EditCoursePage/CreateRoundPage router-state
@@ -203,6 +286,7 @@ interface LiveRoundProps {
   readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
   readonly onFinalize: () => Promise<void>;
   readonly onTerminate: (gameId: GameId) => Promise<void>;
+  readonly onAbandon: () => Promise<void>;
 }
 
 // Everything that's only ever rendered pre-finalize, as its OWN component (not an inline
@@ -211,7 +295,7 @@ interface LiveRoundProps {
 // tolerate `state` swapping in and out across the live/final boundary, which useHoleDigest's
 // prev-snapshot ref isn't built to do (and doesn't need to — this component simply unmounts
 // once status flips to "final" and RoundPageContent renders ResultsView instead).
-function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onAddParticipant, onFinalize, onTerminate }: LiveRoundProps) {
+function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onAddParticipant, onFinalize, onTerminate, onAbandon }: LiveRoundProps) {
   const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
   // Falls back to the first game until a chip is tapped (Task 5's fixed default-first-game
   // decision) — also the correct fallback if a previously-active id ever stopped matching. A
@@ -229,6 +313,7 @@ function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onAd
       {digest && <HoleDigest digest={digest} onDismiss={dismiss} />}
       <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
       <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} onAddParticipant={onAddParticipant} />
+      <ScrapControl onAbandon={onAbandon} />
     </>
   );
 }
@@ -307,6 +392,14 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
       [roundId, credential.token, sync],
     );
 
+    const onAbandon = useCallback(async () => {
+      await abandonRound(roundId, credential.token);
+      // The round-abandoned event arrives via this tab's own pull/WS (same as any other event)
+      // — sync() pulls it now so the live→scrapped-notice swap below follows immediately,
+      // matching onFinalize/onTerminate's own explicit sync().
+      await sync();
+    }, [roundId, credential.token, sync]);
+
     // StatusChrome's "Sync now" button: connect() re-opens the socket if it dropped (a no-op
     // otherwise — session.ts's own idempotency), then sync() explicitly pushes+pulls once,
     // through the same serialized gate as every other trigger, so it coalesces onto whatever
@@ -329,8 +422,20 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     }
 
     // status comes from the folded log, not local memory (brief) — a refreshed/rejoining
-    // client, or one that never called finalize itself, lands here identically.
+    // client, or one that never called finalize/abandon itself, lands here identically.
     const isFinal = session.state.status === "final";
+    const isAbandoned = session.state.status === "abandoned";
+
+    // A scrapped round is terminal and has no scorecard/results to show — swap the whole page
+    // for the honest notice, ahead of any scoring chrome (StatusChrome's offline banner / pending
+    // badge would be meaningless noise over a round that counts nowhere).
+    if (isAbandoned) {
+      return (
+        <main className="min-h-screen bg-slate-950">
+          <ScrappedRound />
+        </main>
+      );
+    }
 
     return (
       <main className="min-h-screen bg-slate-950">
@@ -367,6 +472,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
             onAddParticipant={onAddParticipant}
             onFinalize={onFinalize}
             onTerminate={onTerminate}
+            onAbandon={onAbandon}
           />
         )}
       </main>

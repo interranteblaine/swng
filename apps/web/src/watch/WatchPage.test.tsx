@@ -44,6 +44,8 @@ const buildLiveLog = (): RoundEvent[] => {
 
 const buildFinalLog = (): RoundEvent[] => [...buildLiveLog(), { kind: "round-finalized", authorId: ANN_ID, opId: opId("op-finalize"), hlc: { wallMs: 9_000, counter: 0, deviceId: SERVER_DEVICE } }];
 
+const buildAbandonedLog = (): RoundEvent[] => [...buildLiveLog(), { kind: "round-abandoned", authorId: ANN_ID, opId: opId("op-abandon"), hlc: { wallMs: 9_000, counter: 0, deviceId: SERVER_DEVICE } }];
+
 // A fixed WatchRoundView, no hook/transport machinery — WatchPage's own contract only needs a
 // `(roundId, token) => WatchRoundView` function (same "hand a fixed view, not a live hook" idiom
 // this suite uses throughout), so a test can drive the LIVE and FINAL render paths directly
@@ -141,5 +143,21 @@ describe("WatchPage", () => {
     // Every archived-card cell is disabled too (ResultsView's own readOnly contract).
     const cell = screen.getByRole("button", { name: "Ann hole 1" });
     expect(cell.hasAttribute("disabled")).toBe(true);
+  });
+
+  // task-15: a scrapped round is terminal with nothing to show a spectator — an honest notice,
+  // never a crash, never a stale live grid or a results view.
+  it("renders an honest scrapped notice once status is abandoned — no scorecard, no results", async () => {
+    const { reduceRound, scoreGame } = await import("@swng/domain");
+    const events = buildAbandonedLog();
+    const state = reduceRound(events);
+    const games = state.games.map((g) => scoreGame(g, state));
+    const view: WatchRoundView = { hydrated: true, error: false, state, games };
+
+    renderWatchPage(`/watch/${ROUND_ID}#spectator-tok-abandoned`, fixedUseWatchRound(view));
+
+    await waitFor(() => expect(screen.getByText(/was scrapped/)).toBeTruthy());
+    expect(screen.queryByRole("tab", { name: /Stableford/ })).toBeNull();
+    expect(screen.queryByText("Final results")).toBeNull();
   });
 });

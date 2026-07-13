@@ -1,4 +1,5 @@
 import {
+  abandonRoundResponseSchema,
   addCrewMemberResponseSchema,
   addGameResponseSchema,
   addParticipantResponseSchema,
@@ -34,6 +35,7 @@ import {
   verifyTeeSetResponseSchema,
 } from "@swng/contracts";
 import type {
+  AbandonRoundResponse,
   AddCrewMemberRequest,
   AddCrewMemberResponse,
   AddGameRequest,
@@ -169,6 +171,14 @@ export const addParticipant = async (roundId: RoundId, token: string, input: Add
 export const finalizeRound = async (roundId: RoundId, token: string): Promise<FinalizeRoundResponse> => {
   const json = await requestJson(`/rounds/${roundId}/finalize`, { method: "POST", token });
   return parse(finalizeRoundResponseSchema, json);
+};
+
+// POST /rounds/{roundId}/abandon (task-15): scraps the round — a terminal event that produces NO
+// snapshot, so the round counts nowhere. "participant"-gated, same token as finalize above;
+// idempotent (abandoning an already-abandoned round succeeds).
+export const abandonRound = async (roundId: RoundId, token: string): Promise<AbandonRoundResponse> => {
+  const json = await requestJson(`/rounds/${roundId}/abandon`, { method: "POST", token });
+  return parse(abandonRoundResponseSchema, json);
 };
 
 // M9 Task 3 (share): mints this round's own immortal spectator link. `url` is a path+fragment

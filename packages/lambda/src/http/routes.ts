@@ -3,6 +3,7 @@ import { courseId, crewId, gameId, roundId } from "@swng/domain";
 import type { CourseId, CrewId, GameId, RoundId } from "@swng/domain";
 import type { AccountClaims, ParticipantClaims } from "@swng/application";
 import type {
+  AbandonRoundResponse,
   AddCrewMemberRequest,
   AddCrewMemberResponse,
   AddGameRequest,
@@ -88,6 +89,9 @@ export interface UseCases {
   addGame: (claims: ParticipantClaims, command: AddGameRequest) => Promise<AddGameResponse>;
   recordScore: (claims: ParticipantClaims, command: RecordScoreRequest) => Promise<RecordScoreResponse>;
   finalizeRound: (claims: ParticipantClaims) => Promise<FinalizeRoundResponse>;
+  // task-15: scrap a round — a terminal event that produces NO snapshot, so the round counts
+  // nowhere. "participant"-gated, same tier as addGame/recordScore/finalizeRound above.
+  abandonRound: (claims: ParticipantClaims) => Promise<AbandonRoundResponse>;
   readEvents: (id: RoundId, sinceSeq: number) => Promise<EventsResponse>;
   peekRound: (code: string) => Promise<PeekRoundResponse>;
   // M9 Task 3 (share): mints (deterministically) this round's own spectator link — participant-
@@ -292,6 +296,13 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "participant",
     successStatus: 200,
     handler: async (ctx) => useCases.finalizeRound(ctx.claims!),
+  },
+  {
+    method: "POST",
+    path: "/rounds/{roundId}/abandon",
+    auth: "participant", // task-15: any participant may scrap the round, same tier as finalize/terminate.
+    successStatus: 200, // idempotent (abandoning an abandoned round is a no-op success) + an act on an existing round, not a mint — same 200 spirit as finalize/terminate.
+    handler: async (ctx) => useCases.abandonRound(ctx.claims!),
   },
   // GET /rounds/peek must be matched BEFORE any /rounds/{roundId}/... template below it —
   // the dispatcher (http/dispatch.ts) walks this array in order and returns the first match,

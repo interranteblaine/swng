@@ -29,6 +29,7 @@ export { addParticipant } from "./rounds/addParticipant.js";
 export { addGame } from "./rounds/addGame.js";
 export { recordScore } from "./rounds/recordScore.js";
 export { finalizeRound } from "./rounds/finalizeRound.js";
+export { abandonRound } from "./rounds/abandonRound.js";
 export { terminateGame } from "./rounds/terminateGame.js";
 export { readEvents } from "./rounds/readEvents.js";
 export { peekRound } from "./rounds/peekRound.js";

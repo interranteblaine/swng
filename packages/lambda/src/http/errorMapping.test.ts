@@ -53,6 +53,14 @@ describe("toHttpError — course validation DomainErrors map to coded 400s", () 
     expect(JSON.parse(result.body)).toEqual({ code: "tee-set-revised", message: 'tee "white" is now version 2, expected version 1' });
   });
 
+  // task-15: settleRound throws round-abandoned when finalize's candidate log folds to a scrapped
+  // round — a 409 terminal-state precondition, the same bucket as game-unresolved, never a 500.
+  it("maps round-abandoned to 409", () => {
+    const result = toHttpError(new DomainError("round-abandoned", "a scrapped round has no snapshot"), logger);
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body)).toEqual({ code: "round-abandoned", message: "a scrapped round has no snapshot" });
+  });
+
   // An unmapped DomainError code is still a genuine-bug 500, never a client-shaped error.
   it("falls through to 500 for a DomainError code this boundary doesn't recognize", () => {
     const result = toHttpError(new DomainError("some-unmapped-code", "boom"), logger);

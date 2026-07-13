@@ -51,6 +51,12 @@ export const addGame =
     const { state } = await loadRoundState(deps.journal, claims.roundId);
     requireParticipant(state, claims.golferId);
     if (state.status === "final") throw new ApplicationError("round-final");
+    // A scrapped round is closed to new games just like a final one (task-15): abandoned isn't
+    // "live" either. round-not-live is the SAME signal recordScore/terminateGame already give an
+    // abandoned round (their `!== "live"` guards); addGame's own guard is phrased against "final"
+    // because it must still permit "setup", so this second arm folds abandoned into the same
+    // rejection rather than silently letting a game be added to a scrapped round.
+    if (state.status === "abandoned") throw new ApplicationError("round-not-live");
 
     for (const golfer of referencedGolfers(command.game)) {
       if (!isParticipant(state, golfer)) throw new ApplicationError("unknown-golfer-in-game");

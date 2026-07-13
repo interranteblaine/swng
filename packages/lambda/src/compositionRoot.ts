@@ -15,6 +15,7 @@ import type {
   TokenIssuer,
 } from "@swng/application";
 import {
+  abandonRound,
   addCrewMember,
   addGame,
   addParticipant,
@@ -275,6 +276,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
+    // projectionStore/logger (task-15): abandon clears each participant's LIVE presence pointer
+    // itself — no snapshot is written, so the projector never runs the finalize-time deleteLive
+    // loop for a scrapped round. Same projectionStore/logger instances startRound/joinRound share.
+    abandonRound: abandonRound({ journal, broadcast, clock, ids, projectionStore, logger }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),

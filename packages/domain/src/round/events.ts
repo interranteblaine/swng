@@ -32,5 +32,11 @@ export type RoundEvent = RoundEventBase &
     | { readonly kind: "score-recorded"; readonly golferId: GolferId; readonly hole: number; readonly result: HoleResult }
     | { readonly kind: "round-finalized" }
     | { readonly kind: "round-reopened" }
+    // A round scrapped for good (task-15): a terminal, envelope-only lifecycle event mirroring
+    // round-finalized's shape exactly. Distinct from round-finalized in the fold, though — an
+    // abandon has NO inverse (there is no un-abandon the way round-reopened un-finalizes), so it
+    // is DOMINANT and terminal in reduceRound (state.ts), and settleRound (archive.ts) produces
+    // NO snapshot for it: a scrapped round counts nowhere.
+    | { readonly kind: "round-abandoned" }
     | { readonly kind: "game-terminated"; readonly gameId: GameId }
   );

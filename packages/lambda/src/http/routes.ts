@@ -97,6 +97,12 @@ export interface UseCases {
   // account, never a round-scoped participant token — the archive outlives any one device's
   // credential) — getRoundArchive.ts's own doc comment covers the participant/stranger split.
   getRoundArchive: (claims: AccountClaims, id: RoundId) => Promise<GetRoundArchiveResponse>;
+  // Architecture-realignment Task 14: the participant-token re-mint — "golfer"-gated (the SAME
+  // signed-in account tier getRoundArchive above uses, not a round-scoped participant token,
+  // since the whole point is minting one for a device that has none yet). Reuses
+  // JoinRoundResponse verbatim (mintParticipantToken.ts's own doc comment: the two shapes are
+  // byte-identical, and the brief prefers reuse over a parallel type).
+  mintParticipantToken: (claims: AccountClaims, id: RoundId) => Promise<JoinRoundResponse>;
   // M8 Task 4: POST /rounds/{roundId}/players — an already-seated participant adds someone
   // else to the roster, the crew one-tap flow's mid-round counterpart to StartRound's own
   // `players` array. "participant"-gated, same tier as addGame/recordScore/finalizeRound.
@@ -333,6 +339,18 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 200,
     handler: async (ctx) => useCases.getRoundArchive(ctx.account!, roundId(ctx.pathParams.roundId!)),
+  },
+  // Architecture-realignment Task 14: the participant-token re-mint. "golfer"-gated (same tier
+  // as the archive route just above) — no request body, path param only, same shape as
+  // POST /rounds/{roundId}/games/{gameId}/terminate below. 200, not 201: this re-issues
+  // credentials for an ALREADY-existing participation, never mints a new participant or round
+  // (same "act on an existing resource" status-code spirit as getShareLink/terminate above).
+  {
+    method: "POST",
+    path: "/rounds/{roundId}/token",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.mintParticipantToken(ctx.account!, roundId(ctx.pathParams.roundId!)),
   },
   {
     method: "POST",

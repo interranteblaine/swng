@@ -9,12 +9,15 @@ import { createMemoryStorage } from "../testSupport/memoryStorage";
 // M8 Task 6: HomePage now composes useAuth (the crews surface is golfer-gated), so the api.ts
 // module boundary is faked here too — getMe for the AuthProvider, listMyCrews/joinCrew for the
 // "Your crews" section. Realignment Task 13 adds getMyLiveRounds for the signed-in-with-a-
-// golfer "Your rounds" section (presence, not the device credentialStore list).
+// golfer "Your rounds" section (presence, not the device credentialStore list). Task 14 adds
+// mintParticipantToken — the tap-to-enter re-mint for a live round this device holds no local
+// credential for.
 vi.mock("../api", () => ({
   getMe: vi.fn(),
   listMyCrews: vi.fn(),
   joinCrew: vi.fn(),
   getMyLiveRounds: vi.fn(),
+  mintParticipantToken: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -27,7 +30,7 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, getMe, getMyLiveRounds, joinCrew, listMyCrews } from "../api";
+import { ApiError, getMe, getMyLiveRounds, joinCrew, listMyCrews, mintParticipantToken } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { HomePage } from "./HomePage";
@@ -36,6 +39,7 @@ const mockedGetMe = vi.mocked(getMe);
 const mockedListMyCrews = vi.mocked(listMyCrews);
 const mockedJoinCrew = vi.mocked(joinCrew);
 const mockedGetMyLiveRounds = vi.mocked(getMyLiveRounds);
+const mockedMintParticipantToken = vi.mocked(mintParticipantToken);
 
 // vitest.config.ts doesn't set test.globals, so @testing-library/react's own auto-cleanup
 // (which only fires when it finds a GLOBAL `afterEach`) never registers — every spec file in
@@ -48,6 +52,7 @@ beforeEach(() => {
   mockedListMyCrews.mockReset();
   mockedJoinCrew.mockReset();
   mockedGetMyLiveRounds.mockReset();
+  mockedMintParticipantToken.mockReset();
   // Default: no live rounds — the crews-focused suite below never sets this itself, so this
   // keeps that suite's assertions (about "Your crews", not "Your rounds") from tripping over
   // an unhandled mock return.
@@ -78,6 +83,7 @@ const renderHome = () =>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/crews/:crewId" element={<div>crew page probe</div>} />
+          <Route path="/round/:roundId" element={<div>round page probe</div>} />
         </Routes>
       </MemoryRouter>
     </AuthProvider>,
@@ -164,6 +170,67 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
     const link = await screen.findByRole("link", { name: "Device Round" });
     expect(link.getAttribute("href")).toBe("/round/device-round");
     expect(mockedGetMyLiveRounds).not.toHaveBeenCalled();
+  });
+});
+
+// Architecture-realignment Task 14: tapping a live round the caller's identity shows may have
+// no local device credential at all (started/joined elsewhere) — a re-mint call, stored via
+// credentialStore exactly as a real join would, before entering. A device that already holds a
+// credential must navigate exactly as before this task — no network call at all.
+describe("HomePage — tapping a live round re-mints a scoring credential when this device has none (Task 14)", () => {
+  it("no local credential: mints a token, stores it via credentialStore, and enters — no raw Link navigation", async () => {
+    const idToken = signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+    mockedMintParticipantToken.mockResolvedValue({ roundId: roundId("live-1"), token: "fresh-token", golferId: golferId("ann-g") });
+
+    renderHome();
+    const link = await screen.findByRole("link", { name: /casa verde gc/i });
+    expect(credentialStore.load(roundId("live-1"))).toBeUndefined(); // precondition: no local credential yet
+
+    fireEvent.click(link);
+
+    await screen.findByText("round page probe");
+    expect(mockedMintParticipantToken).toHaveBeenCalledWith(idToken, roundId("live-1"));
+    expect(credentialStore.load(roundId("live-1"))).toEqual({ token: "fresh-token", golferId: golferId("ann-g"), name: "Ann G", joinCode: "" });
+  });
+
+  it("a local credential already exists: navigates directly, never calling the re-mint", async () => {
+    credentialStore.save(roundId("live-1"), { token: "existing-token", golferId: golferId("ann-g"), name: "Ann G", joinCode: "XYZ123" });
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+
+    renderHome();
+    const link = await screen.findByRole("link", { name: /casa verde gc/i });
+
+    fireEvent.click(link);
+
+    await screen.findByText("round page probe");
+    expect(mockedMintParticipantToken).not.toHaveBeenCalled();
+    // The pre-existing credential is untouched — no clobbering by a call that never happened.
+    expect(credentialStore.load(roundId("live-1"))).toEqual({ token: "existing-token", golferId: golferId("ann-g"), name: "Ann G", joinCode: "XYZ123" });
+  });
+
+  it("a 403 not-a-participant surfaces human copy, never the raw server text", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedListMyCrews.mockResolvedValue({ crews: [] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+    mockedMintParticipantToken.mockRejectedValue(new ApiError("not-a-participant", 403, "golfer ann-g is not a participant in round live-1"));
+
+    renderHome();
+    const link = await screen.findByRole("link", { name: /casa verde gc/i });
+
+    fireEvent.click(link);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/you're not in this round/i);
+    expect(screen.queryByText(/is not a participant in round/i)).toBeNull();
+    // Never entered — no credential was ever stored for this failed attempt.
+    expect(credentialStore.load(roundId("live-1"))).toBeUndefined();
   });
 });
 

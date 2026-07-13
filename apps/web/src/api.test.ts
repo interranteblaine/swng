@@ -43,6 +43,7 @@ import {
   leaveCrew,
   listMyCrews,
   listSeasons,
+  mintParticipantToken,
   peekRound,
   removeCountedRound,
   saveStandingGame,
@@ -861,6 +862,25 @@ describe("getRoundArchive", () => {
     expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/archive`);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-archive");
     expect(result).toEqual({ events: [] });
+  });
+});
+
+describe("mintParticipantToken", () => {
+  it("POSTs to /rounds/{roundId}/token with the bearer token and parses a JoinRoundResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { roundId: "round-1", token: "fresh-token", golferId: "golfer-1" });
+    });
+
+    const result = await mintParticipantToken("tok-mint", roundId("round-1"));
+
+    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/token`);
+    expect(seenInit?.method).toBe("POST");
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-mint");
+    expect(result).toEqual({ roundId: roundId("round-1"), token: "fresh-token", golferId: golferId("golfer-1") });
   });
 });
 

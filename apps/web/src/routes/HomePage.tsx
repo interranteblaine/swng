@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, MouseEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import type { GetMyLiveRoundsResponse, ListMyCrewsResponse } from "@swng/contracts";
-import { ApiError, getMyLiveRounds, joinCrew, listMyCrews } from "../api";
+import type { RoundId } from "@swng/domain";
+import { ApiError, getMyLiveRounds, joinCrew, listMyCrews, mintParticipantToken } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { credentialStore } from "../identity";
 
@@ -43,6 +44,45 @@ export function HomePage() {
       .then((response) => setLiveRounds(response.rounds))
       .catch(() => {}); // degrade silently — same discipline as the crews fetch below
   }, [hasGolferIdentity, withAuth]);
+
+  // Task 14: a round found by identity may have no local device credential at all — started
+  // or joined from a different device/browser. `enteringRoundId` gates a double-tap while the
+  // re-mint is in flight; `enterError` is the ONE alert this section shows (never raw server
+  // text — the M9 papercut discipline).
+  const [enteringRoundId, setEnteringRoundId] = useState<RoundId | undefined>(undefined);
+  const [enterError, setEnterError] = useState<string | undefined>(undefined);
+
+  // Scoring capability derives from PARTICIPATION, not the device that joined (this task's own
+  // headline): mint a fresh participant token for THIS device and store it exactly as a join
+  // would (credentialStore.save, the SAME shape JoinRoundPage's own submit uses), then enter.
+  // `joinCode: ""` — the mint response carries no join code (JoinRoundResponse's own shape),
+  // same "no code known" precedent WatchPage/ArchivedRoundPage already established for a
+  // credential minted outside the join flow; ClaimAffordance's own empty-code guard already
+  // treats "" as "no claim affordance here" (harmless — this device's own row already reads
+  // as "You", never "This is me", since the caller IS this account's own golfer).
+  const enterLiveRound = async (id: RoundId) => {
+    if (enteringRoundId) return; // a re-mint is already in flight — no double-tap
+    setEnterError(undefined);
+    setEnteringRoundId(id);
+    try {
+      const response = await withAuth((token) => mintParticipantToken(token, id));
+      credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer!.name, joinCode: "" });
+      navigate(`/round/${response.roundId}`);
+    } catch (caught) {
+      setEnterError(
+        caught instanceof ApiError && caught.code === "not-a-participant" ? "You're not in this round." : "Could not open that round — try again.",
+      );
+      setEnteringRoundId(undefined);
+    }
+  };
+
+  // A device that already holds a scoring credential for this round navigates exactly as
+  // before this task — no network call at all. Only an ABSENT credential triggers the re-mint.
+  const handleLiveRoundClick = (id: RoundId) => (event: MouseEvent<HTMLAnchorElement>) => {
+    if (credentialStore.load(id)) return;
+    event.preventDefault();
+    void enterLiveRound(id);
+  };
 
   // undefined = signed out / not loaded (yet or failed) — the list renders only from a real
   // response. The fetch is a nicety: a transient failure just leaves the section's list empty
@@ -176,20 +216,32 @@ export function HomePage() {
           !liveRounds || liveRounds.length === 0 ? (
             <p className="text-slate-400">No rounds yet</p>
           ) : (
-            <ul className="flex flex-col gap-2">
-              {liveRounds.map((round) => (
-                <li key={round.roundId}>
-                  {/* TODO(Task 14): a round found by identity may have no local device
-                      credential at all (started/joined from a different device or browser) —
-                      re-mint a scoring token here, before navigating, once that capability
-                      exists. For now this link navigates unconditionally; RoundPage's existing
-                      no-credential path (bounce to /join) covers the gap until then. */}
-                  <Link to={`/round/${round.roundId}`} className="block rounded-lg bg-slate-800 px-4 py-3">
-                    {round.courseName}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <>
+              {enterError && (
+                <p role="alert" className="text-red-400">
+                  {enterError}
+                </p>
+              )}
+              <ul className="flex flex-col gap-2">
+                {liveRounds.map((round) => (
+                  <li key={round.roundId}>
+                    {/* Task 14: a round found by identity may have no local device credential
+                        at all (started/joined from a different device or browser) —
+                        handleLiveRoundClick re-mints one before navigating whenever this
+                        device holds none; a device that already holds one navigates exactly
+                        as a plain Link would, no network call. */}
+                    <Link
+                      to={`/round/${round.roundId}`}
+                      onClick={handleLiveRoundClick(round.roundId)}
+                      aria-busy={enteringRoundId === round.roundId}
+                      className="block rounded-lg bg-slate-800 px-4 py-3"
+                    >
+                      {round.courseName}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
           )
         ) : rounds.length === 0 ? (
           <p className="text-slate-400">No rounds yet</p>

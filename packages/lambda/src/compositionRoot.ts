@@ -39,6 +39,7 @@ import {
   leaveCrew,
   listMyCrews,
   listSeasons,
+  mintParticipantToken,
   peekRound,
   projectArchive,
   readEvents,
@@ -280,6 +281,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // snapshots/golferStore/crewStore (projection-realignment Task 6): the SAME instances the
     // finalize/crew use cases above already share.
     getRoundArchive: getRoundArchive({ snapshots, golferStore, crewStore }),
+    // journal/golferStore/tokens (architecture-realignment Task 14): the SAME journal/tokens
+    // instances startRound/joinRound above already share, plus the SAME golferStore
+    // getRoundArchive above shares.
+    mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
     addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore, projectionStore, logger }),
     createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
     addTeeSet: addTeeSet({ courseStore, clock, logger }),

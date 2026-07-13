@@ -38,6 +38,7 @@ import {
   leaveCrew,
   listMyCrews,
   listSeasons,
+  mintParticipantToken,
   peekRound,
   readEvents,
   recordScore,
@@ -168,6 +169,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
     getRoundArchive: getRoundArchive({ snapshots, golferStore, crewStore }),
+    mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
     addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore, projectionStore, logger }),
     createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
     addTeeSet: addTeeSet({ courseStore, clock, logger }),
@@ -1642,5 +1644,119 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });
+  });
+});
+
+// Architecture-realignment Task 14: the participant-token re-mint — the route+auth pin (a
+// dispatch-level check that the wire is actually assembled correctly; the full use-case
+// behavior matrix — check order, every error arm — lives in
+// application/src/rounds/mintParticipantToken.test.ts). Same ann/bo/golferBearer/stubVerifier
+// idiom as the snapshot-routes suite above, self-contained rather than sharing its closure.
+describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participant token re-mint)", () => {
+  const ann: AccountClaims = { sub: "cognito-sub-ann-token", email: "ann-token@example.com" };
+  const bo: AccountClaims = { sub: "cognito-sub-bo-token", email: "bo-token@example.com" };
+  const golferBearer = (account: AccountClaims): string => `golfer-token-${account.sub}`;
+
+  const stubVerifier: AccountVerifier = {
+    verify: async (bearer: string) => {
+      const account = [ann, bo].find((candidate) => golferBearer(candidate) === bearer);
+      if (!account) throw new Error("stubVerifier: unknown token");
+      return account;
+    },
+  };
+
+  const setupToken = () => setup(stubVerifier);
+
+  // Seeds ann's own account golfer and starts a LIVE round as-self (StartRound's own-golferId
+  // arm) — the smallest real round with a real account-golfer participant this suite needs.
+  const seedAnnsLiveRound = async (dispatcher: ReturnType<typeof createDispatcher>) => {
+    const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
+    const annGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
+
+    return startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(
+            makeEvent({
+              method: "POST",
+              path: "/rounds",
+              token: golferBearer(ann),
+              body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annGolfer.golfer.golferId },
+            }),
+          ),
+        ).body!,
+      ),
+    );
+  };
+
+  it("mints a fresh, WORKING participant token for the caller's own participation — same wire shape as JoinRoundResponse", async () => {
+    const { dispatcher } = setupToken();
+    const started = await seedAnnsLiveRound(dispatcher);
+
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(ann) })));
+    expect(resp.statusCode).toBe(200);
+    const minted = joinRoundResponseSchema.parse(JSON.parse(resp.body!));
+    expect(minted).toEqual({ roundId: started.roundId, token: expect.any(String), golferId: started.golferId });
+
+    // The re-minted token actually authorizes a "participant"-tier route — a real round trip,
+    // not just a response-shape check.
+    const scoreResp = asStructured(
+      await dispatcher(
+        makeEvent({
+          method: "POST",
+          path: `/rounds/${started.roundId}/scores`,
+          token: minted.token,
+          body: {
+            golferId: started.golferId,
+            hole: 1,
+            result: { kind: "strokes", strokes: 4 },
+            opId: opId("mint-token-op-1"),
+            hlc: { wallMs: 1, counter: 0, deviceId: deviceId("mint-token-device") },
+          },
+        }),
+      ),
+    );
+    expect(scoreResp.statusCode).toBe(200);
+  });
+
+  it("403s not-a-participant for a signed-in golfer who was never seated in this round", async () => {
+    const { dispatcher } = setupToken();
+    const started = await seedAnnsLiveRound(dispatcher);
+
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(bo) })));
+    expect(resp.statusCode).toBe(403);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-a-participant" });
+  });
+
+  it("404s round-not-found for a roundId that was never created — for a caller who DOES have an account golfer", async () => {
+    const { dispatcher } = setupToken();
+    // A real golfer row for ann first (PUT /me) — otherwise the no-golfer-row 403 would fire
+    // before the round is ever folded (mintParticipantToken.ts's own check-order doc comment),
+    // masking this specific 404 case.
+    await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
+
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds/never-started/token", token: golferBearer(ann) })));
+    expect(resp.statusCode).toBe(404);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "round-not-found" });
+  });
+
+  it("409s round-final for an actual participant once the round is finalized", async () => {
+    const { dispatcher } = setupToken();
+    const started = await seedAnnsLiveRound(dispatcher);
+    const finalizeResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })));
+    expect(finalizeResp.statusCode).toBe(200);
+
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(ann) })));
+    expect(resp.statusCode).toBe(409);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "round-final" });
+  });
+
+  it("401s with no bearer token at all — golfer-tier auth, never the round-scoped participant tier", async () => {
+    const { dispatcher } = setupToken();
+    const started = await seedAnnsLiveRound(dispatcher);
+
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token` })));
+    expect(resp.statusCode).toBe(401);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
 });

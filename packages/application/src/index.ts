@@ -34,6 +34,9 @@ export { readEvents } from "./rounds/readEvents.js";
 export { peekRound } from "./rounds/peekRound.js";
 export { getShareLink } from "./rounds/getShareLink.js";
 export { getRoundArchive } from "./rounds/getRoundArchive.js";
+// Architecture-realignment Task 14: the participant-token re-mint — scoring capability
+// derives from participation, not the device that joined.
+export { mintParticipantToken } from "./rounds/mintParticipantToken.js";
 export { resolveSuppliedGolfer } from "./rounds/golferIdentity.js";
 export type { GolferIdentityContext } from "./rounds/golferIdentity.js";
 

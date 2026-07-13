@@ -268,6 +268,16 @@ export const getRoundArchive = async (token: string, id: RoundId): Promise<GetRo
   return parse(getRoundArchiveResponseSchema, json);
 };
 
+// Architecture-realignment Task 14: the participant-token re-mint — "golfer"-gated (a
+// signed-in account's Bearer), no request body. HomePage calls this for a live round the
+// caller's identity shows (GET /me/rounds/live) but this device holds no local scoring
+// credential for (started/joined elsewhere) — the response is the SAME wire shape joinRound's
+// own token mint returns, so it's parsed with the SAME schema rather than a parallel one.
+export const mintParticipantToken = async (token: string, id: RoundId): Promise<JoinRoundResponse> => {
+  const json = await requestJson(`/rounds/${id}/token`, { method: "POST", token });
+  return parse(joinRoundResponseSchema, json);
+};
+
 export const terminateGame = async (roundId: RoundId, token: string, gameId: GameId): Promise<TerminateGameResponse> => {
   const json = await requestJson(`/rounds/${roundId}/games/${gameId}/terminate`, { method: "POST", token });
   return parse(terminateGameResponseSchema, json);

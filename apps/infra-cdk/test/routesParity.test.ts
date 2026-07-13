@@ -70,6 +70,9 @@ const stubUseCases: UseCases = {
   getRoundArchive: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
+  mintParticipantToken: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
   addParticipant: () => {
     throw new Error("not implemented: parity test never dispatches");
   },

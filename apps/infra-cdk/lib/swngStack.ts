@@ -33,7 +33,7 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (34, as of architecture-realignment Task 13) routes are declared here
+// function — but the (35, as of architecture-realignment Task 14) routes are declared here
 // explicitly (matching packages/lambda/src/http/routes.ts) rather than via a single $default
 // catch-all, so the API's shape is visible in the CloudFormation template and the AWS
 // console, not hidden inside the Lambda. Exported (not module-private) so
@@ -54,6 +54,10 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // (routes.ts's own doc comment on why this differs from GET /rounds/{roundId}/events'
   // round-scoped "round-read" tier just above).
   { method: HttpMethod.GET, path: "/rounds/{roundId}/archive" },
+  // Architecture-realignment Task 14: the participant-token re-mint — "golfer"-gated, same
+  // tier as the archive route just above. Scoring capability derives from participation, not
+  // the device that joined.
+  { method: HttpMethod.POST, path: "/rounds/{roundId}/token" },
   // M6 Task 4: peek + the course CRUD/search surface.
   { method: HttpMethod.GET, path: "/rounds/peek" },
   { method: HttpMethod.POST, path: "/courses" },

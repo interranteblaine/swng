@@ -3,7 +3,7 @@ import type { CourseCard } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import { compareHlc, type Hlc } from "./hlc.js";
 import type { HoleResult } from "./holeResult.js";
-import type { Participant } from "./participant.js";
+import type { Participant, RosterEntry } from "./participant.js";
 import type { GameConfig, RoundEvent } from "./events.js";
 
 // "abandoned" is a TERMINAL status like "final", but for a scrapped round rather than a settled
@@ -23,7 +23,7 @@ export interface RoundState {
   readonly id: RoundId;
   readonly status: RoundStatus;
   readonly card: CourseCard;
-  readonly participants: readonly Participant[];
+  readonly participants: readonly RosterEntry[];
   readonly games: readonly GameConfig[];
   readonly cells: Readonly<Record<string, ScoreCell>>;
   // Every "game-terminated" gameId ever seen, terminated or not yet added — a config
@@ -138,21 +138,40 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
   // commutative/idempotent — a pure set-membership check over the log, order-independent.
   if (deduped.some((event) => event.kind === "round-abandoned")) status = "abandoned";
 
-  // 4. participants: LWW map keyed by golferId, but roster ORDER is join order —
-  //    tracked separately as the first-write hlc — while the payload stays LWW
-  //    (latest write wins). Canonical ascending processing order means the first
-  //    time we see a golferId is necessarily their earliest write, and a later
-  //    overwrite always has hlc >= the one it replaces, so a correction updates
-  //    the payload in place without moving the golfer to the end of the roster.
-  const participantsByGolfer = new Map<GolferId, { participant: Participant; hlc: Hlc; firstHlc: Hlc }>();
+  // 4. participants: seat data is an LWW map keyed by golferId (latest join wins), but roster
+  //    ORDER is join order — tracked separately as the first-write hlc — while the payload
+  //    stays LWW. Canonical ascending processing order means the first time we see a golferId
+  //    is necessarily their earliest write, and a later overwrite always has hlc >= the one it
+  //    replaces, so a correction updates the payload in place without moving the golfer to the
+  //    end of the roster.
+  //
+  //    Presence layers on top, resolved by HLC exactly like a score cell: for each golferId
+  //    the latest of {participant-joined, participant-left} by the total order decides
+  //    `departed` — a leave strictly later than that golfer's latest join marks them departed;
+  //    a rejoin (a still-later join) clears it. Seat data and presence are SEPARATE concerns,
+  //    so a departed golfer keeps their latest join's seat data on the roster. A leave for a
+  //    golferId with no join yet folded creates no seat and never throws — its hlc just waits
+  //    in leavesByGolfer for a join that may or may not arrive, which is what keeps the fold
+  //    commutative over a leave that lands before its join. `departed` is set only when true
+  //    (absent ≡ present, the default), so a departure-free round is byte-identical to before.
+  const seatByGolfer = new Map<GolferId, { participant: Participant; latestJoinHlc: Hlc; firstHlc: Hlc }>();
+  const leavesByGolfer = new Map<GolferId, Hlc>();
   for (const event of deduped) {
-    if (event.kind !== "participant-joined") continue;
-    const existing = participantsByGolfer.get(event.participant.golferId);
-    participantsByGolfer.set(event.participant.golferId, { participant: event.participant, hlc: event.hlc, firstHlc: existing?.firstHlc ?? event.hlc });
+    if (event.kind === "participant-joined") {
+      const existing = seatByGolfer.get(event.participant.golferId);
+      seatByGolfer.set(event.participant.golferId, { participant: event.participant, latestJoinHlc: event.hlc, firstHlc: existing?.firstHlc ?? event.hlc });
+    } else if (event.kind === "participant-left") {
+      const existing = leavesByGolfer.get(event.golferId);
+      if (!existing || compareHlc(event.hlc, existing) > 0) leavesByGolfer.set(event.golferId, event.hlc);
+    }
   }
-  const participants = [...participantsByGolfer.values()]
+  const participants: RosterEntry[] = [...seatByGolfer.values()]
     .sort((a, b) => compareHlc(a.firstHlc, b.firstHlc) || (a.participant.golferId < b.participant.golferId ? -1 : a.participant.golferId > b.participant.golferId ? 1 : 0))
-    .map((entry) => entry.participant);
+    .map(({ participant, latestJoinHlc }) => {
+      const leaveHlc = leavesByGolfer.get(participant.golferId);
+      const departed = leaveHlc !== undefined && compareHlc(leaveHlc, latestJoinHlc) > 0;
+      return departed ? { ...participant, departed: true } : participant;
+    });
 
   // 5. games: same LWW-map treatment keyed by config.id, with the same
   //    join-order-by-first-write-hlc roster ordering as participants (#4).

@@ -39,4 +39,12 @@ export type RoundEvent = RoundEventBase &
     // NO snapshot for it: a scrapped round counts nowhere.
     | { readonly kind: "round-abandoned" }
     | { readonly kind: "game-terminated"; readonly gameId: GameId }
+    // A participant walks off (accounts-only identity spec §4): an ordinary round event with
+    // NO preconditions in the fold — no referenced-by-a-game gate, no dominance rules beyond
+    // the existing terminal-event law. `golferId` names who left (the SUBJECT); `authorId`
+    // (the envelope) is who recorded it — the domain does not enforce self-authorship, the API
+    // layer does. Presence is resolved by HLC in reduceRound (state.ts): for each golferId the
+    // latest of {participant-joined, participant-left} wins. Additive/append-only, like every
+    // event kind before it — an old client that never sends it is unaffected.
+    | { readonly kind: "participant-left"; readonly golferId: GolferId }
   );

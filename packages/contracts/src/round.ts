@@ -148,6 +148,9 @@ export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
   // shape. Additive (append-only event schema); an old client that never sends it is unaffected.
   z.object({ ...envelope, kind: z.literal("round-abandoned") }),
   z.object({ ...envelope, kind: z.literal("game-terminated"), gameId: gameIdSchema }),
+  // accounts-only identity spec §4: a participant walks off. Additive/append-only, like every
+  // arm above. `golferId` is the SUBJECT (who left); `authorId` (envelope) is who recorded it.
+  z.object({ ...envelope, kind: z.literal("participant-left"), golferId: golferIdSchema }),
 ]);
 export const roundEventSchema: z.ZodType<RoundEvent> = roundEventSchemaImpl;
 

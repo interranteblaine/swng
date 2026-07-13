@@ -23,6 +23,7 @@ export * from "./scoring/golden/deck.js";
 export * from "./scoring/golden/fieldDeck18.js";
 export * from "./handicap/whs.js";
 export * from "./golfer/golfer.js";
+export * from "./golfer/placeholderName.js";
 export * from "./golfer/record.js";
 export * from "./crew/crew.js";
 export * from "./crew/ledger.js";

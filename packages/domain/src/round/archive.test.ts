@@ -6,7 +6,7 @@ import { adjustedGrossScore, scoreDifferential } from "../handicap/whs.js";
 import { playGoldenRoundLog } from "../scoring/golden/deck.js";
 import { fixtureLinks, fixtureWhite } from "../scoring/golden/fixtureCourse.js";
 import { settleRound } from "./archive.js";
-import { reduceRound } from "./state.js";
+import { cellKey, reduceRound } from "./state.js";
 import type { RoundEvent } from "./events.js";
 
 // The milestone's headline concurrency deck (scoring/concurrent.test.ts): one log, two
@@ -222,6 +222,78 @@ describe("settleRound — abandoned round", () => {
     // the honest terminal-state error rather than a misleading "not final yet."
     const attempt = () => settleRound([...liveLog, abandonAt(9_000, "abandon-2"), finalizeLate]);
     expect(attempt).toThrowError(expect.objectContaining({ code: "round-abandoned" }));
+  });
+});
+
+// Leaving a round (accounts-only identity spec §4): "leaving stops the future and never
+// rewrites the past." settleRound applies departure rules ADDITIVELY on top of the ordinary
+// settle — played holes and resolved games count exactly as scored/resolved (concessions
+// included), a `departed: true` flag rides along on the departed player's archive entry, and
+// the single empty-case rule below OMITS a departed participant who has nothing to aggregate
+// (no scored holes, no game membership) so they appear nowhere downstream — because there is
+// nothing to settle, not because a reader filtered them.
+describe("settleRound — participant departure", () => {
+  const nineA = [5, 5, 4, 6, 5, 4, 5, 6, 4];
+  const nineB = [4, 5, 3, 6, 4, 4, 4, 5, 4];
+  const nineC = [6, 7, 4, 8, 6, 5, 6, 7, 6];
+  const stablefordAB = { kind: "stableford", id: gameId("s-ab"), players: [A, B] } as const;
+  const leaveC: RoundEvent = { kind: "participant-left", golferId: C, opId: opId("leave-c"), hlc: { wallMs: 5_000, counter: 0, deviceId: deviceId("test") }, authorId: C };
+  const finalizeAt = (wallMs: number, id: string): RoundEvent => ({ kind: "round-finalized", opId: opId(id), hlc: { wallMs, counter: 0, deviceId: deviceId("test") }, authorId: A });
+
+  it("OMITS a departed participant with zero scored holes AND zero game membership — no entry, no line, nowhere downstream", () => {
+    // Cal joins, is in no game, records no scores, then leaves. Ann/Bo play a stableford.
+    const log = [
+      ...playGoldenRoundLog(fixtureLinks, players3, [stablefordAB], { [A]: nineA, [B]: nineB, [C]: [] }, [], false),
+      leaveC,
+      finalizeAt(6_000, "final-omit"),
+    ];
+    const archive = settleRound(log);
+    expect(archive.participants.map((p) => p.golferId)).toEqual([A, B]); // Cal is gone entirely
+    expect(archive.handicapping.map((h) => h.golferId)).toEqual([A, B]); // no handicapping line for Cal
+    expect(archive.results).toHaveLength(1);
+    expect(archive.results[0]).toMatchObject({ kind: "stableford", id: stablefordAB.id });
+  });
+
+  it("KEEPS a departed participant who scored holes — settles their played holes normally, flags departed: true", () => {
+    const log = [
+      ...playGoldenRoundLog(fixtureLinks, players3, [stablefordAB], { [A]: nineA, [B]: nineB, [C]: [6, 7, 4] }, [], false),
+      leaveC,
+      finalizeAt(6_000, "final-keep"),
+    ];
+    const archive = settleRound(log);
+    expect(archive.participants.map((p) => p.golferId)).toEqual([A, B, C]);
+    const cal = archive.participants.find((p) => p.golferId === C);
+    expect(cal?.departed).toBe(true);
+    // Cal played only 3 holes → their handicapping is honestly incomplete, not omitted.
+    expect(archive.handicapping.find((h) => h.golferId === C)?.kind).toBe("incomplete");
+  });
+
+  it("settles a mid-round departure the SAME as no departure — differing ONLY in the departed player's unscored holes and flag, never another player's results", () => {
+    const withoutDeparture = settleRound(playGoldenRoundLog(fixtureLinks, players3, [stablefordAB], { [A]: nineA, [B]: nineB, [C]: nineC }, [], true));
+    const withDeparture = settleRound([
+      // The identical deck, except Cal stops after hole 6 and leaves (holes 7-9 unscored).
+      ...playGoldenRoundLog(fixtureLinks, players3, [stablefordAB], { [A]: nineA, [B]: nineB, [C]: [6, 7, 4, 8, 6, 5] }, [], false),
+      leaveC,
+      finalizeAt(6_000, "final-diff"),
+    ]);
+
+    // The stableford result (Ann vs Bo) is byte-identical — Cal's absence changed nothing.
+    expect(withDeparture.results).toEqual(withoutDeparture.results);
+    // Ann's and Bo's handicapping is untouched by Cal leaving.
+    expect(withDeparture.handicapping.filter((h) => h.golferId !== C)).toEqual(withoutDeparture.handicapping.filter((h) => h.golferId !== C));
+    // Ann's and Bo's cells are identical hole-for-hole; only Cal's holes 7-9 differ.
+    for (const g of [A, B]) {
+      for (let h = 1; h <= 9; h++) expect(withDeparture.cells[cellKey(g, h)]).toEqual(withoutDeparture.cells[cellKey(g, h)]);
+    }
+    for (let h = 7; h <= 9; h++) {
+      expect(withoutDeparture.cells[cellKey(C, h)]).toBeDefined();
+      expect(withDeparture.cells[cellKey(C, h)]).toBeUndefined();
+    }
+    // The only participant-entry difference is Cal's departed flag.
+    expect(withDeparture.participants.map((p) => p.golferId)).toEqual([A, B, C]);
+    expect(withDeparture.participants.find((p) => p.golferId === C)?.departed).toBe(true);
+    const calWithout = withoutDeparture.participants.find((p) => p.golferId === C)!;
+    expect("departed" in calWithout).toBe(false);
   });
 });
 

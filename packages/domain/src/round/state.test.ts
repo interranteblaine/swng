@@ -189,3 +189,113 @@ describe("reduceRound — round abandonment", () => {
     expect(twice).toEqual(once);
   });
 });
+
+// participant-left: presence resolves by HLC exactly the way a score cell does
+// (accounts-only identity spec §4). For each golferId the latest of {participant-joined,
+// participant-left} by the existing HLC total order decides presence — a leave later than
+// their latest join marks them `departed: true`; a rejoin (a still-later join) clears it and
+// applies its own seat data. Seat data and presence are SEPARATE concerns: a departed golfer
+// still renders on the roster with their latest join's seat data. INVARIANT: the fold stays
+// commutative — every delivery order (including a leave that folds in BEFORE its join) folds
+// to the identical state — and `departed` is present only when true, so a round with no
+// departures is byte-identical to one folded before this field existed.
+describe("reduceRound — participant leaving (presence by HLC)", () => {
+  // The domain does NOT enforce self-authorship — the event records golferId (who left);
+  // authorId follows the ordinary envelope convention (here base()'s default A). The
+  // "you can only leave yourself" rule lives in the API layer, not the fold.
+  const leaveAt = (wallMs: number, golfer = A, device = "d1"): RoundEvent => ({ ...base(wallMs, device), kind: "participant-left", golferId: golfer });
+  const rejoinAt = (wallMs: number, courseHandicap: number): RoundEvent => ({
+    ...base(wallMs),
+    kind: "participant-joined",
+    participant: { golferId: A, name: "Ann", tee: "white", courseHandicap },
+  });
+
+  it("marks a participant departed when a participant-left is later than their latest join", () => {
+    const state = reduceRound([genesis, joinA, started, leaveAt(10)]);
+    expect(state.participants).toHaveLength(1);
+    expect(state.participants[0]?.golferId).toBe(A);
+    expect(state.participants[0]?.departed).toBe(true);
+  });
+
+  it("leaves 'departed' absent (default present) for a participant who never left", () => {
+    const state = reduceRound([genesis, joinA, started]);
+    // `in`, not toBeUndefined(): the field must be genuinely ABSENT (default false), so a
+    // round with no departures serializes identically to one folded before this field existed.
+    expect("departed" in state.participants[0]!).toBe(false);
+  });
+
+  it("rejoin (a later join) clears departed and applies the rejoin's seat data", () => {
+    const state = reduceRound([genesis, joinA, started, leaveAt(10), rejoinAt(20, 12)]);
+    expect(state.participants).toHaveLength(1);
+    expect("departed" in state.participants[0]!).toBe(false);
+    expect(state.participants[0]?.courseHandicap).toBe(12); // the rejoin's seat data wins by hlc
+  });
+
+  it("a departed participant still renders with their latest join's seat data (leaving never erases the seat)", () => {
+    const fixTee = rejoinAt(5, 9); // a correcting re-join BEFORE the leave
+    const state = reduceRound([genesis, joinA, fixTee, started, leaveAt(10)]);
+    expect(state.participants[0]?.departed).toBe(true);
+    expect(state.participants[0]?.courseHandicap).toBe(9);
+  });
+
+  it("a participant-left for a golfer with no join yet seen creates no seat and never crashes", () => {
+    const state = reduceRound([genesis, started, leaveAt(10)]); // A never joined
+    expect(state.participants).toHaveLength(0);
+  });
+
+  it("converges when a participant-left folds in BEFORE its participant-joined (arrival order must not matter)", () => {
+    const leave = leaveAt(10);
+    const joinThenLeave = reduceRound([genesis, joinA, started, leave]);
+    const leaveThenJoin = reduceRound([genesis, started, leave, joinA]); // the leave arrives first
+    expect(leaveThenJoin).toEqual(joinThenLeave);
+    expect(leaveThenJoin.participants[0]?.departed).toBe(true); // join(2) < leave(10) → departed
+  });
+
+  it("converges over shuffled orders of a join→leave→join→leave chain (latest is a leave → departed)", () => {
+    const leave1 = leaveAt(4);
+    const rejoin = rejoinAt(6, 15);
+    const leave2 = leaveAt(8);
+    const log = [genesis, started, joinA, leave1, rejoin, leave2];
+    const forward = reduceRound(log);
+    const reverse = reduceRound([...log].reverse());
+    const shuffled = reduceRound([leave2, genesis, rejoin, started, leave1, joinA]);
+    expect(forward.participants[0]?.departed).toBe(true); // latest event is leave2(8) > rejoin(6)
+    expect(forward.participants[0]?.courseHandicap).toBe(15); // latest join is the rejoin
+    expect(reverse).toEqual(forward);
+    expect(shuffled).toEqual(forward);
+  });
+
+  it("converges to present over shuffled orders of a join→leave→join chain (latest is a join)", () => {
+    const leave1 = leaveAt(4);
+    const rejoin = rejoinAt(6, 15);
+    const log = [genesis, started, joinA, leave1, rejoin];
+    const forward = reduceRound(log);
+    const shuffled = reduceRound([rejoin, leave1, genesis, joinA, started]);
+    expect("departed" in forward.participants[0]!).toBe(false); // latest event is rejoin(6) > leave1(4)
+    expect(shuffled).toEqual(forward);
+  });
+
+  it("converges on a game-add referencing a departed golfer in any arrival order — game exists, player departed, holes unscored (no dominance, no voiding)", () => {
+    const joinB: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: B, name: "Bea", tee: "white", courseHandicap: 12 } };
+    const gameAB: RoundEvent = { ...base(6), kind: "game-added", config: { kind: "stroke-play", id: gameId("g1"), scoring: "gross", players: [A, B] } };
+    const leave = leaveAt(10);
+    const forward = reduceRound([genesis, joinA, joinB, started, gameAB, leave]);
+    const reverse = reduceRound([leave, gameAB, started, joinB, joinA, genesis]);
+    const shuffled = reduceRound([gameAB, genesis, leave, started, joinA, joinB]);
+    expect(reverse).toEqual(forward);
+    expect(shuffled).toEqual(forward);
+    expect(forward.games.map((g) => g.id)).toEqual([gameId("g1")]); // game still exists
+    expect(forward.participants.find((p) => p.golferId === A)?.departed).toBe(true); // player departed
+    expect(Object.keys(forward.cells)).toHaveLength(0); // holes unscored — scoreGame untouched
+  });
+
+  it("a participant-left after round-finalized does not change the terminal status (a leave is not a lifecycle event)", () => {
+    const finalized: RoundEvent = { ...base(10), kind: "round-finalized" };
+    expect(reduceRound([genesis, joinA, started, finalized, leaveAt(20)]).status).toBe("final");
+  });
+
+  it("a participant-left after round-abandoned does not change the terminal status", () => {
+    const abandoned: RoundEvent = { ...base(10), kind: "round-abandoned" };
+    expect(reduceRound([genesis, joinA, started, abandoned, leaveAt(20)]).status).toBe("abandoned");
+  });
+});

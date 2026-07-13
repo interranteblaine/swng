@@ -1,4 +1,5 @@
 import type { CourseCard } from "../course/card.js";
+import { findTeeSet } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import type { GameId, GolferId, RoundId } from "../ids.js";
 import { handicappingFor } from "../scoring/allocation.js";
@@ -6,10 +7,10 @@ import type { GameConfig } from "../scoring/game.js";
 import { scoreGame } from "../scoring/game.js";
 import type { GameResult } from "../scoring/result.js";
 import { resultOf } from "../scoring/result.js";
-import type { Participant } from "./participant.js";
+import type { RosterEntry } from "./participant.js";
 import type { RoundEvent } from "./events.js";
 import type { ScoreCell } from "./state.js";
-import { byCanonicalOrder, reduceRound, withoutSeq } from "./state.js";
+import { byCanonicalOrder, cellKey, reduceRound, withoutSeq } from "./state.js";
 
 // The event log's write side is RoundState — a live projection that keeps re-folding as
 // new events arrive. RoundArchive is its terminal read side: the frozen, content-addressed
@@ -24,7 +25,10 @@ export interface RoundArchive {
   // (CrewStore's counted rounds), so the outbound link this field used to be simply doesn't
   // exist anymore.
   readonly card: CourseCard;
-  readonly participants: readonly Participant[];
+  // Departed participants who settled carry `departed: true` (RosterEntry's optional flag);
+  // everyone else has no such key — additive-optional so old snapshots deserialize unchanged.
+  // A departed participant with nothing to aggregate is omitted here entirely (see settleRound).
+  readonly participants: readonly RosterEntry[];
   readonly games: readonly GameConfig[];
   readonly cells: Readonly<Record<string, ScoreCell>>;
   readonly events: readonly RoundEvent[]; // canonical domain order — the replay source
@@ -38,6 +42,24 @@ export interface RoundArchive {
     | { readonly golferId: GolferId; readonly kind: "incomplete" }
   )[];
 }
+
+// Every golferId a game config references — the union across all five kinds' player fields
+// (players[] for the medal family, a/b for singles, the two pairs for fourball). Used only
+// by the departure omission rule below, and unconditional on termination: a config still
+// "references" its players even if the game was later terminated. Exhaustive by kind — a new
+// game kind must add its own arm here (TS flags the missing return path).
+const gameMembers = (config: GameConfig): readonly GolferId[] => {
+  switch (config.kind) {
+    case "stroke-play":
+    case "stableford":
+    case "skins":
+      return config.players;
+    case "singles-match":
+      return [config.a, config.b];
+    case "fourball-match":
+      return [...config.a, ...config.b];
+  }
+};
 
 // Folds the log, then freezes it. Settlement only ever runs against a `final` round (the
 // one lifecycle state that means "no more events are coming" in practice — a reopened round
@@ -68,7 +90,23 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
 
   const terminatedGameIds = [...state.terminatedGameIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
-  const handicapping = state.participants.map((participant) => handicappingFor(participant, state.card, state.cells));
+  // Departure rule (accounts-only identity spec §4), applied additively on top of the ordinary
+  // settle. "Leaving stops the future and never rewrites the past": a departed participant's
+  // played holes and resolved games (concessions included) count exactly as scored — the
+  // `departed: true` flag is already on the folded roster entry and simply rides along. The one
+  // extra rule is the empty case: a departed participant with NO scored holes AND membership in
+  // NO game is omitted from the archive entirely — no participant entry, no handicapping line —
+  // so they appear nowhere downstream. That is settle deciding once, not a reader filtering:
+  // there is genuinely nothing to aggregate for them. Every non-departed participant is kept
+  // unconditionally (this filter only ever removes a departed one).
+  const hasScoredHole = (entry: RosterEntry): boolean => {
+    const teeSet = findTeeSet(state.card, entry.tee);
+    return teeSet.holes.some((hole) => state.cells[cellKey(entry.golferId, hole.number)] !== undefined);
+  };
+  const inSomeGame = (golferId: GolferId): boolean => state.games.some((config) => gameMembers(config).includes(golferId));
+  const settledParticipants = state.participants.filter((entry) => !entry.departed || hasScoredHole(entry) || inSomeGame(entry.golferId));
+
+  const handicapping = settledParticipants.map((participant) => handicappingFor(participant, state.card, state.cells));
 
   // seq is server-ack metadata, not event content (see state.ts) — the archive's identity
   // must be the same regardless of which device's copy happened to get acked, so every
@@ -82,7 +120,7 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   return {
     roundId: state.id,
     card: state.card,
-    participants: state.participants,
+    participants: settledParticipants,
     games: state.games,
     cells: state.cells,
     events: canonicalEvents,

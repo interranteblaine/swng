@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { RoundEvent } from "@swng/domain";
 import { deviceId, fixtureLinks, opId, reduceRound } from "@swng/domain";
+import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
+import type { RoundStore } from "../ports/roundStore.js";
+import type { SnapshotStore } from "../ports/snapshotStore.js";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
@@ -43,10 +47,14 @@ const createClientOps = (device: string) => {
   return () => ({ opId: opId(`${device}-op-${(opCounter += 1)}`), hlc: { wallMs: wallMs++, counter: 0, deviceId: deviceId(device) } });
 };
 
-const setup = () => {
-  const snapshots = createInMemorySnapshotStore();
-  const journal = createInMemoryJournal(snapshots);
-  const store = createInMemoryRoundStore();
+// overrides let the race suites below share one `inner` journal/snapshot pair between a
+// race-injecting wrapper and a plain finalizeRound/abandonRound call — same idiom as
+// finalizeRound.test.ts's own setup().
+const setup = (overrides?: { journal?: EventJournal; store?: RoundStore; snapshots?: SnapshotStore }) => {
+  const snapshotStore = createInMemorySnapshotStore();
+  const journal = overrides?.journal ?? createInMemoryJournal(snapshotStore);
+  const snapshots = overrides?.snapshots ?? snapshotStore;
+  const store = overrides?.store ?? createInMemoryRoundStore();
   const broadcast = createCapturingBroadcast();
   const tokens = createTestTokenIssuer();
   const clock = createFixedClock(1_000);
@@ -57,6 +65,8 @@ const setup = () => {
   const logger = createNullLogger();
 
   return {
+    journal,
+    snapshots,
     broadcast,
     projectionStore,
     start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
@@ -72,8 +82,8 @@ const setup = () => {
 // A live round, Ann (host) + Bo, with a stableford game over both already added — start + join
 // each write a LIVE presence pointer for their own golfer (rounds/presence.ts), which the
 // presence-cleanup case below depends on.
-const freshLiveRoundWithGame = async () => {
-  const ctx = setup();
+const freshLiveRoundWithGame = async (overrides?: { journal?: EventJournal; store?: RoundStore; snapshots?: SnapshotStore }) => {
+  const ctx = setup(overrides);
   const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
   const bo = await ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2 });
   const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
@@ -177,5 +187,135 @@ describe("abandonRound — closes the round to further appends", () => {
 
     const after = await round.events(round.host.roundId, 0);
     expect(after.events.some((event) => event.kind === "round-finalized")).toBe(false);
+  });
+});
+
+// A journal decorator that runs `inject` (an arbitrary async action against `inner` — either a
+// raw append or a full use-case call) the first `times` times it sees a CONDITIONAL append
+// (`options.expectedHeadSeq` set) BEFORE forwarding that append to `inner` — same idiom as
+// finalizeRound.test.ts's own createRaceInjectingJournal (carry 2), generalized to an arbitrary
+// injector instead of a single synthesized event so it can drive a real finalizeRound call, not
+// just a raw event, into the gap between abandon's read and its own append.
+const createRaceInjectingJournal = (
+  inner: EventJournal,
+  inject: () => Promise<void>,
+  times: number,
+): EventJournal & { readonly injections: () => number } => {
+  let injectionsRemaining = times;
+  let injections = 0;
+  return {
+    injections: () => injections,
+    append: async (roundId, events, options?: AppendOptions): Promise<AppendResult> => {
+      if (options?.expectedHeadSeq !== undefined && injectionsRemaining > 0) {
+        injectionsRemaining -= 1;
+        injections += 1;
+        await inject();
+      }
+      return inner.append(roundId, events, options);
+    },
+    read: (roundId, sinceSeq) => inner.read(roundId, sinceSeq),
+  };
+};
+
+// task-15 fix wave: abandonRound's append is now conditional (expectedHeadSeq), closing the
+// exact race a code review of 1e40bc9 found — device A's abandon reads live state, device B's
+// finalizeRound commits round-finalized + snapshot atomically, and A's OLD unconditional append
+// used to land round-abandoned after it anyway: the fold said abandoned (dominant) but the
+// snapshot existed, already projected. These three tests pin the closed window.
+describe("abandonRound — carry: head-seq conditional append (task-15 fix)", () => {
+  it("a finalize that lands in abandon's read-append gap wins the race: abandon 409s round-final, no round-abandoned lands, and the finalized snapshot survives", async () => {
+    const snapshots = createInMemorySnapshotStore();
+    const inner = createInMemoryJournal(snapshots);
+    const round = await freshLiveRoundWithGame({ journal: inner, snapshots });
+    await scoreAll(round); // resolves the stableford game so the injected finalize can succeed
+
+    const finalizeDuringWindow = finalizeRound({
+      journal: inner,
+      snapshots,
+      broadcast: createCapturingBroadcast(),
+      clock: createFixedClock(9_000),
+      ids: createSequentialIds("race-finalize"),
+    });
+
+    const racy = createRaceInjectingJournal(
+      inner,
+      async () => {
+        await finalizeDuringWindow(round.hostClaims);
+      },
+      1,
+    );
+    const raceAbandon = abandonRound({
+      journal: racy,
+      broadcast: createCapturingBroadcast(),
+      clock: createFixedClock(9_000),
+      ids: createSequentialIds("race-abandon"),
+      projectionStore: round.projectionStore,
+      logger: createNullLogger(),
+    });
+
+    await expect(raceAbandon(round.hostClaims)).rejects.toMatchObject({ code: "round-final" });
+    // Exactly one injected race — the FIRST attempt is the one that hit the interleaving finalize.
+    expect(racy.injections()).toBe(1);
+
+    const fullLog = await inner.read(round.host.roundId, 0);
+    expect(fullLog.some((event) => event.kind === "round-abandoned")).toBe(false);
+    expect(fullLog.filter((event) => event.kind === "round-finalized")).toHaveLength(1);
+    expect(reduceRound(fullLog).status).toBe("final");
+
+    // The load-bearing assertion: the snapshot the race was about EXISTS. Under the old
+    // unconditional append, abandon's dominant fold would land anyway and this would strand a
+    // snapshot that counts nowhere per the fold but is durably present, listable, and projected.
+    const archived = await snapshots.get(round.host.roundId);
+    expect(archived).toBeDefined();
+    expect(archived!.results).toHaveLength(1);
+  });
+
+  it("abandon still wins when it lands first: a late finalize 409s round-abandoned with no snapshot ever written (reverse re-check)", async () => {
+    const round = await freshLiveRoundWithGame();
+    await round.abandon(round.hostClaims);
+
+    await expect(round.finalize(round.hostClaims)).rejects.toMatchObject({ code: "round-abandoned" });
+
+    const after = await round.events(round.host.roundId, 0);
+    expect(after.events.some((event) => event.kind === "round-finalized")).toBe(false);
+    expect(reduceRound(after.events).status).toBe("abandoned");
+    expect(await round.snapshots.get(round.host.roundId)).toBeUndefined();
+  });
+
+  it("a concurrent abandon (a second device) landing in the read-append gap is caught by the re-read: idempotent success, exactly one round-abandoned event", async () => {
+    const snapshots = createInMemorySnapshotStore();
+    const inner = createInMemoryJournal(snapshots);
+    const round = await freshLiveRoundWithGame({ journal: inner, snapshots });
+
+    const concurrentAbandon = (): RoundEvent => ({
+      kind: "round-abandoned",
+      opId: opId("concurrent-device-b-abandon"),
+      hlc: { wallMs: 9_000, counter: 0, deviceId: deviceId("bo-phone") },
+      authorId: round.bo.golferId,
+    });
+
+    const racy = createRaceInjectingJournal(
+      inner,
+      async () => {
+        await inner.append(round.host.roundId, [concurrentAbandon()]);
+      },
+      1,
+    );
+    const raceAbandon = abandonRound({
+      journal: racy,
+      broadcast: createCapturingBroadcast(),
+      clock: createFixedClock(9_000),
+      ids: createSequentialIds("race-abandon-2"),
+      projectionStore: round.projectionStore,
+      logger: createNullLogger(),
+    });
+
+    const result = await raceAbandon(round.hostClaims);
+    expect(result).toEqual({ status: "abandoned" });
+    expect(racy.injections()).toBe(1);
+
+    const fullLog = await inner.read(round.host.roundId, 0);
+    expect(fullLog.filter((event) => event.kind === "round-abandoned")).toHaveLength(1);
+    expect(reduceRound(fullLog).status).toBe("abandoned");
   });
 });

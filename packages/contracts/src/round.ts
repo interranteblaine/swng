@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { CourseCard, GameConfig, GameResult, HoleResult, Participant, RoundEvent } from "@swng/domain";
-import { crewIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
+import { gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
 
 // Wire mirrors of domain types. These stay structural (loose numeric bounds where the
 // domain type itself doesn't declare one) — the source of truth for "is this score
@@ -133,9 +133,11 @@ const envelope = {
 // reason: round.test.ts's parity check needs this impl's own inferred Output type, not one
 // steered to RoundEvent by an annotation on this const itself.
 export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
-  // crewId mirrors domain's optional tag (round/events.ts): stamped once at genesis, never
-  // revised — M8's crew round tag.
-  z.object({ ...envelope, kind: z.literal("round-created"), roundId: roundIdSchema, card: courseCardSchema, crewId: crewIdSchema.optional() }),
+  // Round-is-a-sealed-leaf: round-created carries only the round's own facts (id + frozen
+  // card), never a crew reference. This object is NOT `.strict()`, so an old stored event
+  // from the M8 era that still carries a `crewId` key parses fine — Zod's default strips the
+  // unknown key rather than rejecting it (event schema is append-only; tolerate old data).
+  z.object({ ...envelope, kind: z.literal("round-created"), roundId: roundIdSchema, card: courseCardSchema }),
   z.object({ ...envelope, kind: z.literal("participant-joined"), participant: participantSchema }),
   z.object({ ...envelope, kind: z.literal("game-added"), config: gameConfigSchemaImpl }),
   z.object({ ...envelope, kind: z.literal("round-started") }),

@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 import { defaultAllowance, golferId } from "@swng/domain";
-import type { CrewId, GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
-import type { AddParticipantRequest, CrewMemberView, GameConfigInput } from "@swng/contracts";
-import { ApiError, getCrew } from "../api";
-import { useAuth } from "../auth/useAuth";
+import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
+import type { AddParticipantRequest, GameConfigInput } from "@swng/contracts";
+import { ApiError } from "../api";
 import { ClaimAffordance } from "./ClaimAffordance";
 import { gameDots, gamePlayers, totalDots } from "./dots";
 
@@ -100,11 +99,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onAddParticipant }: Set
         </ul>
       </div>
 
-      <AddPlayerForm
-        crewId={state.crewId}
-        existingGolferIds={new Set(state.participants.map((p) => p.golferId))}
-        onAddParticipant={onAddParticipant}
-      />
+      <AddPlayerForm onAddParticipant={onAddParticipant} />
 
       <AddGameForm participants={state.participants} onAddGame={onAddGame} />
     </section>
@@ -112,59 +107,38 @@ export function SetupPanel({ state, joinCode, onAddGame, onAddParticipant }: Set
 }
 
 interface AddPlayerFormProps {
-  readonly crewId: CrewId | undefined;
-  readonly existingGolferIds: ReadonlySet<GolferId>;
   readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
 }
 
 // "Add player" (M8 Task 5, "host types Dave in"): name + tee + courseHandicap →
-// POST /rounds/{roundId}/players. When the round carries a crewId, the crew's not-yet-in-round
-// members render FIRST as one-tap quick-adds (their name IS the tap — the shared tee/CH fields
-// below still apply), a free-text ghost form always underneath. The crew fetch is a nicety, not
-// a gate (JoinRoundPage's peek-fallback precedent): a non-member participant, a signed-out
-// device, or a network failure all degrade silently to the free-text form alone.
-function AddPlayerForm({ crewId, existingGolferIds, onAddParticipant }: AddPlayerFormProps) {
-  const { withAuth, signedIn } = useAuth();
-  const [crewMembers, setCrewMembers] = useState<readonly CrewMemberView[] | undefined>(undefined);
-  const [selected, setSelected] = useState<{ readonly golferId: GolferId; readonly name: string } | undefined>(undefined);
+// POST /rounds/{roundId}/players, a free-text ghost seat. Round-is-a-sealed-leaf: the round no
+// longer names a crew, so there's no crew roster to offer as one-tap quick-adds here — the M8
+// "From your crew" section rode on the round's (now-deleted) crew tag. A signed-in crew member
+// who wants their OWN golfer seated joins with their golferId through the join flow instead;
+// mid-round, everyone else is a typed name.
+function AddPlayerForm({ onAddParticipant }: AddPlayerFormProps) {
   const [name, setName] = useState("");
   const [tee, setTee] = useState("");
   const [courseHandicap, setCourseHandicap] = useState("0");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  useEffect(() => {
-    setCrewMembers(undefined);
-    if (!crewId || !signedIn) return; // no crew, or nothing to prove membership with — free text only
-    withAuth((token) => getCrew(token, crewId))
-      .then((response) => setCrewMembers(response.crew.members))
-      .catch(() => {}); // degrade silently — see the function's own doc comment
-  }, [crewId, signedIn, withAuth]);
-
-  const quickAddCandidates = (crewMembers ?? []).filter((m) => !existingGolferIds.has(m.golferId));
-
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const parsedHandicap = Number.parseInt(courseHandicap, 10);
-    const effectiveName = selected ? selected.name : name.trim();
+    const effectiveName = name.trim();
     if (!effectiveName || !tee.trim() || !Number.isInteger(parsedHandicap)) return;
 
     setSubmitting(true);
     setError(undefined);
     try {
-      await onAddParticipant({
-        name: effectiveName,
-        tee: tee.trim(),
-        courseHandicap: parsedHandicap,
-        ...(selected ? { golferId: selected.golferId } : {}),
-      });
+      await onAddParticipant({ name: effectiveName, tee: tee.trim(), courseHandicap: parsedHandicap });
       // No optimistic insert (SetupPanel's own precedent, same as AddGameForm below): the new
       // roster row appears once participant-joined round-trips through the session's fold.
       // Papercut 3 (M9 hardening): tee/courseHandicap deliberately survive a successful add —
       // a Saturday roster is almost always the same tee, so retyping it for every player added
-      // in a row is exactly the papercut this fixes. Only the identity fields (name/selection)
-      // reset, since the NEXT player is a different person by definition.
-      setSelected(undefined);
+      // in a row is exactly the papercut this fixes. Only the name resets, since the NEXT player
+      // is a different person by definition.
       setName("");
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not add the player — try again.");
@@ -177,37 +151,10 @@ function AddPlayerForm({ crewId, existingGolferIds, onAddParticipant }: AddPlaye
     <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4 rounded-lg bg-slate-900 p-4">
       <h2 className="text-lg font-semibold">Add player</h2>
 
-      {quickAddCandidates.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <span className="text-sm text-slate-400">From your crew</span>
-          <div className="flex flex-wrap gap-2">
-            {quickAddCandidates.map((m) => (
-              <button
-                key={m.golferId}
-                type="button"
-                onClick={() => setSelected({ golferId: m.golferId, name: m.name })}
-                className="rounded-full bg-slate-800 px-3 py-1 text-sm font-medium text-emerald-400"
-              >
-                {m.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {selected ? (
-        <p className="flex items-center gap-2">
-          <span>Adding {selected.name}</span>
-          <button type="button" onClick={() => setSelected(undefined)} className="text-sm text-emerald-400 underline">
-            Change
-          </button>
-        </p>
-      ) : (
-        <label className="flex flex-col gap-1">
-          Name
-          <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
-        </label>
-      )}
+      <label className="flex flex-col gap-1">
+        Name
+        <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+      </label>
 
       <label className="flex flex-col gap-1">
         Tee

@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { crewId as makeCrewId, defaultAllowance, fixtureLinks, gameId, golferId, playingHandicap, roundId } from "@swng/domain";
+import { defaultAllowance, fixtureLinks, gameId, golferId, playingHandicap, roundId } from "@swng/domain";
 import type { GameConfig, GameState, Participant, RoundState } from "@swng/domain";
 import { addParticipantRequestSchema } from "@swng/contracts";
 import { AuthProvider } from "../auth/useAuth";
@@ -449,11 +449,15 @@ describe("SetupPanel — Add player", () => {
     expect(document.body.textContent).not.toMatch(/Cannot read properties/);
   });
 
-  it("no crewId on the round: no 'From your crew' quick-add section renders, even when signed in", async () => {
+  // Round-is-a-sealed-leaf: the round no longer names a crew, so SetupPanel's "Add player" is
+  // always the free-text ghost form. The M8 "From your crew" one-tap quick-add section rode on
+  // the round's (now-deleted) crew tag, so it's gone — and the panel never fetches a crew, since
+  // the round doesn't know one to fetch.
+  it("Add player is always the free-text form — no 'From your crew' quick-adds, and no crew fetch even when signed in", async () => {
     signIn();
-    // AuthProvider's own once-per-session GET /me fires on sign-in (useAuth.ts) — stubbed so
-    // it resolves instead of hitting a real, unstubbed fetch (this test cares about the
-    // ABSENCE of a crew fetch, not about the golfer identity itself).
+    // AuthProvider's own once-per-session GET /me fires on sign-in (useAuth.ts) — stubbed so it
+    // resolves instead of hitting a real, unstubbed fetch. This test cares about the ABSENCE of
+    // any crew fetch, not about the golfer identity itself.
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => fakeResponse(200, { golfer: null })),
@@ -462,72 +466,11 @@ describe("SetupPanel — Add player", () => {
 
     await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringContaining("/me"), expect.anything()));
     expect(screen.queryByText(/from your crew/i)).toBeNull();
-    expect(screen.getByLabelText(/^name$/i)).toBeTruthy(); // the free-text form is still there
-    // No crewId on the round -> the crew fetch is never attempted at all (not even a failed one).
+    expect(screen.getByLabelText(/^name$/i)).toBeTruthy(); // the free-text form is the only add path
+    // A crew is never fetched — the round doesn't know one to fetch (sealed leaf).
     expect(vi.mocked(fetch)).not.toHaveBeenCalledWith(expect.stringContaining("/crews/"), expect.anything());
-  });
 
-  it("crew round: the crew's not-yet-in-round members render FIRST as one-tap quick-adds carrying their stable golferId; already-in-round members are excluded", async () => {
-    signIn();
-    const crew = makeCrewId("crew-1");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        const path = new URL(url).pathname;
-        if (path === `/crews/${crew}`) {
-          return fakeResponse(200, {
-            crew: {
-              crewId: crew,
-              name: "Sunday crew",
-              joinCode: "SUN001",
-              members: [
-                { golferId: "ann", name: "Ann", role: "organizer", claimed: true }, // already in this round
-                { golferId: "dave-crew", name: "Dave", role: "member", claimed: false }, // not yet in this round
-              ],
-            },
-          });
-        }
-        throw new Error(`unexpected fetch ${path}`);
-      }),
-    );
-
-    renderPanel({ state: baseState({ crewId: crew }), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
-
-    const daveButton = await screen.findByRole("button", { name: "Dave" });
-    expect(screen.queryByRole("button", { name: "Ann" })).toBeNull(); // Ann's already in the round — not a quick-add candidate
-
-    fireEvent.click(daveButton);
-    expect(screen.getByText(/adding dave/i)).toBeTruthy();
-    // The free-text Name field is replaced while a crew member is selected (mirrors the
-    // as-self "Playing as" swap's own grammar) — no separate typed name for a quick-add.
-    expect(screen.queryByLabelText(/^name$/i)).toBeNull();
-
-    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
-    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "12" } });
-    fireEvent.click(screen.getByRole("button", { name: /^add player$/i }));
-
-    await waitFor(() => expect(noopAddParticipant).toHaveBeenCalledTimes(1));
-    // The STABLE golferId travels with the quick-add, not a freshly-typed name alone.
-    expect(noopAddParticipant.mock.calls[0]![0]).toEqual({ name: "Dave", tee: "white", courseHandicap: 12, golferId: "dave-crew" });
-  });
-
-  // The crew fetch is a nicety, never a gate (JoinRoundPage's peek-fallback precedent): a
-  // non-member participant, a signed-out device, or a network failure must all degrade
-  // silently to the free-text ghost form alone.
-  it("a failed crew fetch (non-member 403, network failure, whatever) degrades silently to the free-text form alone", async () => {
-    signIn();
-    const crew = makeCrewId("crew-2");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => fakeResponse(403, { code: "not-a-member", message: "not a member of this crew" })),
-    );
-
-    renderPanel({ state: baseState({ crewId: crew }), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
-
-    await waitFor(() => expect(screen.getByLabelText(/^name$/i)).toBeTruthy());
-    expect(screen.queryByText(/from your crew/i)).toBeNull();
-
-    // The free-text path still works exactly as it would with no crew at all.
+    // The free-text add still works end to end, no golferId attached.
     fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Fran" } });
     fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "blue" } });
     fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "3" } });

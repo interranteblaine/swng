@@ -341,12 +341,13 @@ describe("StartRound's batch under a frozen clock (regression: same-ms server ev
   });
 });
 
-// M8: StartRound's new fields (golferId as-self create, crewId tag, an initial `players`
-// roster) and the crewId tag threading through to JoinRound's own resolver. Builds crew
-// fixtures directly on the shared crewStore (domain's addMember + crewStore.put) rather than
-// pulling in crews/createCrew.ts — keeps this suite's fixtures self-contained the same way
-// golferIdentity.test.ts's own fixtures are.
-describe("StartRound — M8 as-self create, crewId tag, and an initial players roster", () => {
+// StartRound's identity fields (golferId as-self create, an initial `players` roster) and the
+// co-membership consent arm threaded through the shared resolver. Round-is-a-sealed-leaf: there
+// is no crewId on the request and no round crew tag — a signed-in host seating a claimed fellow
+// crew member is authorized by CO-MEMBERSHIP (the caller's own crews ∩ the target's), derived
+// inside golferIdentity.ts. Builds crew fixtures directly on the shared crewStore (domain's
+// addMember + crewStore.put), self-contained like golferIdentity.test.ts's own fixtures.
+describe("StartRound — as-self create, an initial players roster, and co-membership seating", () => {
   it("golferId (as-self): a claimed golfer whose OWN sub matches becomes the host, no fresh id minted", async () => {
     const ctx = setup();
     const annId = golferId("ann-account");
@@ -370,26 +371,7 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
     ).rejects.toMatchObject({ code: "golfer-claimed" });
   });
 
-  it("crewId with no claims at all is rejected — not-a-member (can't authorize an anonymous request against crew membership)", async () => {
-    const ctx = setup();
-    await expect(
-      ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, crewId: crewId("crew-1") }),
-    ).rejects.toMatchObject({ code: "not-a-member" });
-  });
-
-  it("crewId whose caller's golfer is NOT a member is rejected — not-a-member", async () => {
-    const ctx = setup();
-    const annId = golferId("ann-account");
-    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
-    const crew = addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: golferId("someone-else"), name: "Bo", role: "organizer" });
-    await ctx.crewStore.put(crew, "JOINCD", undefined);
-
-    await expect(
-      ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, crewId: crewId("crew-1") }, { sub: "sub-ann" }),
-    ).rejects.toMatchObject({ code: "not-a-member" });
-  });
-
-  it("crewId whose caller's golfer IS a member: round is created and tagged, round-created carries crewId", async () => {
+  it("round-created never carries a crewId, even when the host is signed in and in a crew (sealed leaf)", async () => {
     const ctx = setup();
     const annId = golferId("ann-account");
     await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
@@ -397,15 +379,16 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
     await ctx.crewStore.put(crew, "JOINCD", undefined);
 
     const host = await ctx.start(
-      { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId, crewId: crewId("crew-1") },
+      { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId },
       { sub: "sub-ann" },
     );
 
     const genesis = await ctx.events(host.roundId, 0);
-    expect(genesis.events[0]).toMatchObject({ kind: "round-created", crewId: crewId("crew-1") });
+    expect(genesis.events[0]).toMatchObject({ kind: "round-created" });
+    expect(genesis.events[0]).not.toHaveProperty("crewId");
   });
 
-  it("crewId's standing-consent arm: a claimed crew member (not the caller) can be seated via the players array", async () => {
+  it("co-membership: a claimed fellow crew member (not the caller) can be seated via the players array", async () => {
     const ctx = setup();
     const annId = golferId("ann-account");
     const boId = golferId("bo-account");
@@ -417,12 +400,12 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
     );
     await ctx.crewStore.put(crew, "JOINCD", undefined);
 
+    // No crewId on the request — Ann and Bo share crew-1, and that's the whole consent.
     const host = await ctx.start(
       {
         card: fixtureLinks,
         host: { name: "Ann", tee: "white", courseHandicap: 8 },
         golferId: annId,
-        crewId: crewId("crew-1"),
         players: [{ name: "Bo", tee: "white", courseHandicap: 2, golferId: boId }],
       },
       { sub: "sub-ann" },
@@ -433,12 +416,13 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
     expect(boJoin).toMatchObject({ participant: { golferId: boId, name: "Bo" } });
   });
 
-  it("crewId's standing-consent arm does NOT extend to a golfer claimed by someone outside the crew — golfer-claimed", async () => {
+  it("co-membership does NOT extend to a golfer claimed by someone the caller shares no crew with — golfer-claimed", async () => {
     const ctx = setup();
     const annId = golferId("ann-account");
     const outsiderId = golferId("outsider");
     await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
     await putAndBindGolfer(ctx.golferStore, outsiderId, "sub-outsider", "Outsider");
+    // Ann is in crew-1; the outsider is claimed and in NO crew Ann belongs to.
     const crew = addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: annId, name: "Ann", role: "organizer" });
     await ctx.crewStore.put(crew, "JOINCD", undefined);
 
@@ -448,7 +432,6 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
           card: fixtureLinks,
           host: { name: "Ann", tee: "white", courseHandicap: 8 },
           golferId: annId,
-          crewId: crewId("crew-1"),
           players: [{ name: "Outsider", tee: "white", courseHandicap: 2, golferId: outsiderId }],
         },
         { sub: "sub-ann" },
@@ -537,11 +520,11 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
     expect(boJoin).toMatchObject({ participant: { golferId: ghost } });
   });
 
-  // Pins invariant 1: an absent golferId/crewId/players request is byte-identical to the
-  // pre-M8 behavior — the golden-path test earlier in this file already exercises this
-  // exact call shape and passes UNTOUCHED; this is an explicit second pin on the shape of
-  // the response itself (no M8 fields leak in when absent).
-  it("with none of the M8 fields set, StartRound's response shape is unchanged — no crewId/players artifact", async () => {
+  // Pins the plain path: an absent golferId/players request is byte-identical to the
+  // pre-M8 behavior — the golden-path test earlier in this file already exercises this exact
+  // call shape and passes UNTOUCHED; this is an explicit second pin on the shape of the
+  // response and the genesis event (no crewId, no players artifact leaks in when absent).
+  it("with none of the optional fields set, StartRound's response shape is unchanged — no crewId/players artifact", async () => {
     const ctx = setup();
     const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
     expect(Object.keys(host).sort()).toEqual(["golferId", "joinCode", "roundId", "token"]);
@@ -552,12 +535,13 @@ describe("StartRound — M8 as-self create, crewId tag, and an initial players r
   });
 });
 
-// M8: JoinRound's own claims-carrying arms (the resolver is shared with StartRound/
-// addParticipant — golferIdentity.ts). T5b's existing "claimed -> golfer-claimed" test above
-// passes NO claims (ctx.sub always undefined there), so it only ever exercises arm 4
-// (claimed-stranger) — these tests are the NEW arms 2 and 3 becoming reachable through
-// JoinRound specifically.
-describe("JoinRound — M8 as-self and crew-consent arms (claims threaded through)", () => {
+// JoinRound's own claims-carrying arms (the resolver is shared with StartRound/addParticipant
+// — golferIdentity.ts). T5b's existing "claimed -> golfer-claimed" test above passes NO claims
+// (ctx.sub always undefined there), so it only ever exercises arm 4 (claimed-stranger) — these
+// tests are the sub-gated as-self and co-membership arms becoming reachable through JoinRound.
+// Round-is-a-sealed-leaf: the round carries no crew tag, so co-membership is derived purely from
+// the caller's own crews ∩ the target's, never from the round.
+describe("JoinRound — as-self and co-membership arms (claims threaded through)", () => {
   it("as-self: a signed-in caller supplying their OWN claimed golferId is allowed", async () => {
     const ctx = setup();
     const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
@@ -568,36 +552,36 @@ describe("JoinRound — M8 as-self and crew-consent arms (claims threaded throug
     expect(joined.golferId).toBe(boId);
   });
 
-  it("crew-consent: the round is crew-tagged and the target golfer is a member of that SAME crew — allowed even though the caller is someone else", async () => {
+  it("co-membership: a signed-in fellow crew member can seat a claimed crew-mate they share a crew with — even joining on their behalf", async () => {
     const ctx = setup();
-    const annId = golferId("ann-account");
     const boId = golferId("bo-account");
-    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
+    const calId = golferId("cal-account");
     await putAndBindGolfer(ctx.golferStore, boId, "sub-bo", "Bo");
+    await putAndBindGolfer(ctx.golferStore, calId, "sub-cal", "Cal");
+    // Bo and Cal share a crew — the consent for Cal to seat Bo flows from THAT, not from any
+    // tag on the round (which has none).
     const crew = addMember(
-      addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: annId, name: "Ann", role: "organizer" }),
+      addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: calId, name: "Cal", role: "organizer" }),
       { golferId: boId, name: "Bo", role: "member" },
     );
     await ctx.crewStore.put(crew, "JOINCD", undefined);
 
-    const host = await ctx.start(
-      { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId, crewId: crewId("crew-1") },
-      { sub: "sub-ann" },
-    );
+    const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
 
-    // Cal (a fellow crew member, not Bo, not signed in as Bo at all) seats Bo via JoinRound.
-    const joined = await ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2, golferId: boId }, { sub: "sub-cal-fellow-member" });
+    // Cal (signed in as sub-cal, not Bo) seats Bo via JoinRound — allowed by co-membership.
+    const joined = await ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 2, golferId: boId }, { sub: "sub-cal" });
     expect(joined.golferId).toBe(boId);
   });
 
-  it("crew-consent does NOT apply when the round carries NO crewId at all — falls through to golfer-claimed", async () => {
+  it("co-membership does NOT apply when the caller shares no crew with the claimed target — falls through to golfer-claimed", async () => {
     const ctx = setup();
-    const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } }); // no crewId
+    const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
     const claimed = golferId("claimed-1");
     await putAndBindGolfer(ctx.golferStore, claimed, "sub-someone", "Someone");
 
+    // The caller's sub resolves to no golfer at all (no crews to intersect), so no consent.
     await expect(
-      ctx.join({ code: host.joinCode, name: "X", tee: "white", courseHandicap: 2, golferId: claimed }, { sub: "sub-a-fellow-crew-member" }),
+      ctx.join({ code: host.joinCode, name: "X", tee: "white", courseHandicap: 2, golferId: claimed }, { sub: "sub-a-stranger" }),
     ).rejects.toMatchObject({ code: "golfer-claimed" });
   });
 });

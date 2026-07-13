@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { crewId, deviceId, gameId, golferId, opId, roundId } from "@swng/domain";
+import { deviceId, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { CourseCard, GameConfig, GameResult, RoundEvent } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
 import { gameConfigSchemaImpl, gameResultSchemaImpl, roundEventSchema, roundEventSchemaImpl, shareLinkResponseSchema, terminateGameResponseSchema } from "./round.js";
@@ -76,19 +76,23 @@ describe("roundEventSchema", () => {
     expect(roundTripped).not.toHaveProperty("crewId");
   });
 
-  // M8: round-created's optional crewId tag (round/events.ts) — stamped once at genesis.
-  it("parses a round-created event carrying a crewId and round-trips through JSON unchanged", () => {
-    const event: RoundEvent = {
+  // Round-is-a-sealed-leaf + append-only event log: an OLD stored round-created from the M8 era
+  // still carries a `crewId` key. The schema no longer declares that field, but it isn't
+  // `.strict()` either — so the key parses and is STRIPPED (Zod's default), never rejected. The
+  // parsed result must have no crewId property at all.
+  it("parses an OLD round-created event carrying a stray crewId and strips it", () => {
+    const legacy = {
       kind: "round-created",
       roundId: roundId("r1"),
       card,
-      crewId: crewId("crew-1"),
+      crewId: "crew-1", // the stray key an M8-era stored log still carries
       opId: opId("op-create"),
       hlc: baseHlc,
       authorId: golferId("author"),
     };
-    const roundTripped = parse(roundEventSchema, JSON.parse(JSON.stringify(event)) as unknown);
-    expect(roundTripped).toEqual(event);
+    const parsed = parse(roundEventSchema, legacy);
+    expect(parsed).not.toHaveProperty("crewId");
+    expect(parsed).toMatchObject({ kind: "round-created", roundId: roundId("r1") });
   });
 
   it("roundEventSchema, gameConfigSchema, and gameResultSchema type-parity holds in both directions (compile-time check)", () => {

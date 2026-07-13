@@ -76,7 +76,12 @@ describe("addParticipant", () => {
     expect(joined && joined.kind === "participant-joined" ? joined.participant.golferId : undefined).not.toBe(host.golferId);
   });
 
-  it("crew-consent (arm 3): a golfer claimed by someone ELSE but who IS a member of THIS round's crew is seated", async () => {
+  // Round-is-a-sealed-leaf narrowing: co-membership consent now derives from the CALLER's sub
+  // (golferIdentity.ts), and a participant token carries none. So even a claimed golfer who is a
+  // crew-mate of the round's host can NOT be seated through this surface — it rejects
+  // golfer-claimed. (Seating a claimed crew-mate lives on startRound/joinRound, which carry an
+  // optional AccountClaims.)
+  it("a claimed crew-mate is NOT seatable through the participant-token surface — golfer-claimed (no sub for co-membership)", async () => {
     const ctx = setup();
     const annId = golferId("ann-account");
     const boId = golferId("bo-account");
@@ -89,13 +94,14 @@ describe("addParticipant", () => {
     await ctx.crewStore.put(crew, "JOINCD", undefined);
 
     const host = await ctx.start(
-      { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId, crewId: crewId("crew-1") },
+      { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId },
       { sub: "sub-ann" },
     );
     const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: annId };
 
-    const result = await ctx.addPlayer(hostClaims, { name: "Bo", tee: "white", courseHandicap: 2, golferId: boId });
-    expect(result.events[0]).toMatchObject({ kind: "participant-joined", participant: { golferId: boId } });
+    await expect(ctx.addPlayer(hostClaims, { name: "Bo", tee: "white", courseHandicap: 2, golferId: boId })).rejects.toMatchObject({
+      code: "golfer-claimed",
+    });
   });
 
   it("a claimed golferId with no crew consent available is rejected — golfer-claimed (arm 4; as-self is structurally unreachable through this participant-token surface)", async () => {

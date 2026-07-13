@@ -122,7 +122,9 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
     if (!crew.standingGame) return;
     // Router-state hand-off (resolution 2, the EditCoursePage return precedent): CreateRoundPage
     // reads crewPreset out of location.state and renders it as its normal editable form state.
-    navigate("/create", { state: { crewPreset: { crewId: crew.crewId, members: crew.members, standingGame: crew.standingGame } } });
+    // No crewId in the preset: round-is-a-sealed-leaf, the created round never names the crew —
+    // the preset is pure client-side prefill (roster + standing game), nothing more.
+    navigate("/create", { state: { crewPreset: { members: crew.members, standingGame: crew.standingGame } } });
   };
 
   // A ledger line can outlive its member row (projections keep history; rosters are edited) —

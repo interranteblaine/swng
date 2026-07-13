@@ -1,6 +1,6 @@
 import type { CourseCard } from "../course/card.js";
 import { DomainError } from "../errors.js";
-import type { CrewId, GameId, GolferId, RoundId } from "../ids.js";
+import type { GameId, GolferId, RoundId } from "../ids.js";
 import { handicappingFor } from "../scoring/allocation.js";
 import type { GameConfig } from "../scoring/game.js";
 import { scoreGame } from "../scoring/game.js";
@@ -19,9 +19,10 @@ import { byCanonicalOrder, reduceRound, withoutSeq } from "./state.js";
 // never a mutation of an existing archive.
 export interface RoundArchive {
   readonly roundId: RoundId;
-  // Carried verbatim from RoundState.crewId (itself fixed at genesis) — a round's crew tag
-  // never changes across the settle boundary, same as every other field here.
-  readonly crewId?: CrewId;
+  // A settled round is a sealed leaf: the archive records only the round's own facts and
+  // references no crew. A crew that wants this round in a season counts it inbound by roundId
+  // (CrewStore's counted rounds), so the outbound link this field used to be simply doesn't
+  // exist anymore.
   readonly card: CourseCard;
   readonly participants: readonly Participant[];
   readonly games: readonly GameConfig[];
@@ -70,15 +71,8 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   // One literal object shape, fields in a fixed order, every time this runs — the mechanism
   // that makes JSON.stringify(settleRound(log)) order-stable is this literal's key order
   // never varying, on top of every field above already being independent of input order.
-  // (An absent optional field is deterministic too: for a given log, crewId is either present
-  // on every settle or absent on every settle — the conditional spread never varies across
-  // runs. It must BE a conditional spread, not `crewId: state.crewId`: an explicit-undefined
-  // key on this archive — the canonical stream/projector payload — crashed DynamoDB's
-  // marshall() in putArchive for every non-crew round's finalize, observed live on beta in
-  // M8 Task 4.)
   return {
     roundId: state.id,
-    ...(state.crewId !== undefined ? { crewId: state.crewId } : {}),
     card: state.card,
     participants: state.participants,
     games: state.games,

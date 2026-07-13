@@ -11,7 +11,6 @@ import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { TokenIssuer } from "../ports/tokenIssuer.js";
-import { requireCrewMember } from "../crews/membership.js";
 import { resolveSuppliedGolfer } from "./golferIdentity.js";
 import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 
@@ -52,17 +51,12 @@ export const startRound =
       throw new ApplicationError("golfer-already-in-round");
     }
 
-    // A crew-tagged round requires the caller's OWN golfer to be a member of that crew —
-    // checked before anything is minted or written, same "validate before touching state"
-    // discipline as the tee-set checks above. Anonymous crewId (no claims at all) can never
-    // pass membership, so it's rejected the same way a real non-member would be.
-    if (command.crewId !== undefined) {
-      if (!claims) throw new ApplicationError("not-a-member");
-      await requireCrewMember({ golferStore: deps.golferStore, crewStore: deps.crewStore }, claims, command.crewId);
-    }
-
+    // Round-is-a-sealed-leaf: a round no longer tags itself with a crew, so there's no crew
+    // membership to check at creation. A signed-in caller may still seat a claimed fellow crew
+    // member — that consent now flows from co-membership inside the shared resolver (it derives
+    // the caller's own crews from claims.sub), not from a tag on the round.
     const resolveGolfer = resolveSuppliedGolfer({ golferStore: deps.golferStore, crewStore: deps.crewStore });
-    const identityCtx = { sub: claims?.sub, crewId: command.crewId };
+    const identityCtx = { sub: claims?.sub };
 
     const id = roundId(deps.ids.newId());
     const host: GolferId = command.golferId !== undefined ? await resolveGolfer(command.golferId, identityCtx) : golferId(deps.ids.newId());
@@ -82,17 +76,15 @@ export const startRound =
         kind: "round-created",
         roundId: id,
         card: command.card,
-        ...(command.crewId !== undefined ? { crewId: command.crewId } : {}),
         ...serverEnvelope({ hlc, ids: deps.ids }, host),
       },
       { kind: "participant-joined", participant: hostParticipant, ...serverEnvelope({ hlc, ids: deps.ids }, host) },
     ];
 
-    // M8 crew one-tap: seed the round with a whole roster in one call. Every player's
-    // optional golferId goes through the SAME resolver as the host's, including the
-    // crew-consent arm (identityCtx carries command.crewId) — appended in request order,
-    // right after the host, all authored by the host (this whole batch is the host's own
-    // setup act).
+    // Crew one-tap: seed the round with a whole roster in one call. Every player's optional
+    // golferId goes through the SAME resolver as the host's, including its co-membership arm (a
+    // signed-in host seating a claimed fellow crew member) — appended in request order, right
+    // after the host, all authored by the host (this whole batch is the host's own setup act).
     for (const player of command.players ?? []) {
       const playerGolfer: GolferId = player.golferId !== undefined ? await resolveGolfer(player.golferId, identityCtx) : golferId(deps.ids.newId());
       const participant: Participant = { golferId: playerGolfer, name: player.name, tee: player.tee, courseHandicap: player.courseHandicap };

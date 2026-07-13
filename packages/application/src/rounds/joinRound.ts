@@ -51,7 +51,6 @@ export const joinRound =
       // have no auth). M8/M9 identity hardening revisits this. Deliberate, not an oversight.
       golfer = await resolveSuppliedGolfer({ golferStore: deps.golferStore, crewStore: deps.crewStore })(command.golferId, {
         sub: claims?.sub,
-        crewId: state.crewId,
       });
       // UX guard: a duplicate participant-joined is harmless at the domain layer (last-write-wins
       // on golferId), but we reject it here to prevent surprising joiners with silent changes.

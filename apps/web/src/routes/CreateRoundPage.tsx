@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { applyStandingGame } from "@swng/domain";
-import type { CourseId, CrewId, GolferId } from "@swng/domain";
+import type { CourseId, GolferId } from "@swng/domain";
 import type { CourseView, CrewMemberView, GameConfigInput, StandingGameView, StartRoundRequest, StartRoundResponse } from "@swng/contracts";
 import { addGame, ApiError, createRound, getCourse, updateMe } from "../api";
 import { useAuth } from "../auth/useAuth";
@@ -12,11 +12,12 @@ import { describeStandingGame } from "../crews/standingGamePreview";
 import { credentialStore } from "../identity";
 
 // CrewPage's "Play the usual" hand-off (M8 Task 6): everything this page needs to pre-fill
-// Saturday — the crew tag for the request, the full roster to seat, and the preset to seed
-// course/tee/games from. Carried whole in router state (the EditCoursePage return precedent)
-// so nothing has to be re-fetched before the one remaining tap.
+// Saturday — the full roster to seat and the preset to seed course/tee/games from. Carried
+// whole in router state (the EditCoursePage return precedent) so nothing has to be re-fetched
+// before the one remaining tap. No crewId: round-is-a-sealed-leaf, so the round the tap creates
+// never names the crew — the prefill is a pure client-side convenience, seeded from the crew's
+// standing game, and the created round carries only its own facts.
 interface CrewPresetState {
-  readonly crewId: CrewId;
   readonly members: readonly CrewMemberView[];
   readonly standingGame: StandingGameView;
 }
@@ -64,11 +65,11 @@ export function CreateRoundPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  // The crew prefill (all empty/undefined outside the play-the-usual flow): crewId tags the
-  // request; crewRows is the editable roster selection (ALL members, self included — the self
-  // row renders as the "Playing as" block's twin below and can't be removed); presetGames is
-  // the preset's game list, filtered against the CURRENT selection at render time.
-  const [crewId, setCrewId] = useState<CrewId | undefined>(undefined);
+  // The crew prefill (all empty outside the play-the-usual flow): crewRows is the editable
+  // roster selection (ALL members, self included — the self row renders as the "Playing as"
+  // block's twin below and can't be removed); presetGames is the preset's game list, filtered
+  // against the CURRENT selection at render time. Nothing here tags the created round with a
+  // crew — the round is a sealed leaf; this is pure client-side prefill.
   const [crewMembers, setCrewMembers] = useState<readonly CrewMemberView[]>([]);
   const [crewRows, setCrewRows] = useState<readonly CrewPlayerRow[]>([]);
   const [presetGames, setPresetGames] = useState<readonly GameConfigInput[]>([]);
@@ -118,7 +119,6 @@ export function CreateRoundPage() {
     // course handicaps prefill 0, all editable below.
     if (state?.crewPreset) {
       const preset = state.crewPreset;
-      setCrewId(preset.crewId);
       setCrewMembers(preset.members);
       setCrewRows(preset.members.map((member) => ({ golferId: member.golferId, name: member.name, tee: preset.standingGame.tee ?? "", courseHandicap: "0" })));
       setPresetGames(preset.standingGame.games);
@@ -186,10 +186,8 @@ export function CreateRoundPage() {
       golferId: row.golferId,
     }));
     if (players.some((player) => !player.tee || !Number.isInteger(player.courseHandicap))) return;
-    const crewFields: Pick<StartRoundRequest, "crewId" | "players"> = {
-      ...(crewId !== undefined ? { crewId } : {}),
-      ...(players.length > 0 ? { players } : {}),
-    };
+    // Only the roster rides the request now — the round names no crew (sealed leaf).
+    const playersField: Pick<StartRoundRequest, "players"> = players.length > 0 ? { players } : {};
 
     setSubmitting(true);
     setError(undefined);
@@ -206,7 +204,7 @@ export function CreateRoundPage() {
         const golfer = auth.golfer!;
         savedName = golfer.name;
         response = await auth.withAuth((token) =>
-          createRound({ card: courseView.card, host: { name: golfer.name, tee, courseHandicap: parsedHandicap }, golferId: golfer.golferId, ...crewFields }, token),
+          createRound({ card: courseView.card, host: { name: golfer.name, tee, courseHandicap: parsedHandicap }, golferId: golfer.golferId, ...playersField }, token),
         );
       } else if (auth.signedIn) {
         // Signed in with NO golfer yet: the typed name first creates the account's golfer (PUT
@@ -218,7 +216,7 @@ export function CreateRoundPage() {
         savedName = trimmed;
         response = await auth.withAuth(async (token) => {
           const created = await updateMe(token, { name: trimmed });
-          return createRound({ card: courseView.card, host: { name: trimmed, tee, courseHandicap: parsedHandicap }, golferId: created.golfer.golferId, ...crewFields }, token);
+          return createRound({ card: courseView.card, host: { name: trimmed, tee, courseHandicap: parsedHandicap }, golferId: created.golfer.golferId, ...playersField }, token);
         });
         // W1 (controller flow-walk finding, post-gate): PUT /me above just minted this
         // account's golfer, but the auth context's own `golfer` field doesn't update itself —
@@ -229,10 +227,10 @@ export function CreateRoundPage() {
         await auth.refetch();
       } else {
         // Signed out: byte-identical to before this milestone — no golferId, no Bearer (and
-        // outside the crew flow crewFields is empty, so this stays byte-identical there too).
+        // outside the crew flow playersField is empty, so this stays byte-identical there too).
         const trimmed = name.trim();
         savedName = trimmed;
-        response = await createRound({ card: courseView.card, host: { name: trimmed, tee, courseHandicap: parsedHandicap }, ...crewFields });
+        response = await createRound({ card: courseView.card, host: { name: trimmed, tee, courseHandicap: parsedHandicap }, ...playersField });
       }
       credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: savedName, joinCode: response.joinCode });
 
@@ -324,7 +322,7 @@ export function CreateRoundPage() {
           />
         </label>
 
-        {crewId && (
+        {crewRows.length > 0 && (
           <section className="flex flex-col gap-2">
             <h2 className="text-lg font-semibold">Players</h2>
             <ul className="flex flex-col gap-2">

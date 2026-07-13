@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { CrewId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
-import { crewId, deviceId, fixtureLinks, golferId, opId, roundId, settleRound } from "@swng/domain";
+import type { RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import { deviceId, fixtureLinks, golferId, opId, roundId, settleRound } from "@swng/domain";
 import { createDynamoEventJournal } from "../createDynamoEventJournal.js";
 import { evtSk, opIdSk, roundPk, snapshotPk } from "../keys.js";
 import type { LocalDynamo } from "../testing/local.js";
@@ -64,14 +64,18 @@ const buildArchive = (id: RoundId, finalizedAtMs: number): RoundArchive => ({
   handicapping: [{ golferId: golfer, kind: "complete", ags: 90, differential: 9.0 }],
 });
 
-// A minimal final log for settleRound to produce a REAL archive from — an optional crewId tag
-// exercises the M8 explicit-undefined class (a non-crew archive must carry NO crewId key at all,
-// or the document client's marshall() throws on it).
-const settledLog = (id: RoundId, tag?: CrewId): RoundEvent[] => {
+// A minimal final log for settleRound to produce a REAL archive from. `strayCrewId` models an
+// OLD M8-era stored genesis that still carries a crewId JSON key (RoundEvent has no such field
+// now, so it's injected via cast): round-is-a-sealed-leaf, so settleRound must ignore it and
+// emit NO crewId key on the archive — the explicit-undefined class that once crashed the
+// document client's marshall() live on beta.
+const settledLog = (id: RoundId, strayCrewId?: string): RoundEvent[] => {
   const at = (wallMs: number) => ({ wallMs, counter: 0, deviceId: deviceId("contract-test") });
   const author = golferId(`author-${id}`);
+  const created = { kind: "round-created", roundId: id, card: fixtureLinks, opId: opId(`op-${id}-created`), hlc: at(1), authorId: author };
+  const genesis = (strayCrewId !== undefined ? { ...created, crewId: strayCrewId } : created) as unknown as RoundEvent;
   return [
-    { kind: "round-created", roundId: id, card: fixtureLinks, ...(tag !== undefined ? { crewId: tag } : {}), opId: opId(`op-${id}-created`), hlc: at(1), authorId: author },
+    genesis,
     { kind: "round-started", opId: opId(`op-${id}-started`), hlc: at(2), authorId: author },
     { kind: "round-finalized", opId: opId(`op-${id}-finalized`), hlc: at(3), authorId: author },
   ];
@@ -296,11 +300,11 @@ describe("createDynamoEventJournal", () => {
       await expect(journal.append(id, [makeFinalizeEvent()], { expectedHeadSeq: 0, snapshot: buildArchive(id, 1) })).rejects.toThrow(/snapshotsTableName/);
     });
 
-    // The M8 explicit-undefined class, re-pinned at its NEW write site: settleRound emits NO
-    // crewId key on a non-crew archive (an explicit `crewId: undefined` crashed the document
-    // client's marshall() live on beta). The atomic commit marshals the archive into the
-    // transaction, so the class must stay pinned here, not just in domain.
-    it("commits a settleRound-PRODUCED non-crew archive snapshot without crashing marshall", async () => {
+    // The explicit-undefined class, re-pinned at its NEW write site: settleRound emits NO crewId
+    // key on the archive (an explicit `crewId: undefined` crashed the document client's
+    // marshall() live on beta). The atomic commit marshals the archive into the transaction, so
+    // the class must stay pinned here, not just in domain.
+    it("commits a settleRound-PRODUCED archive snapshot without a crewId key (never crashes marshall)", async () => {
       const journal = newFinalizingJournal();
       const id = roundId(randomUUID());
       const archive = settleRound(settledLog(id));
@@ -313,17 +317,19 @@ describe("createDynamoEventJournal", () => {
       expect("crewId" in (snapItem.Item?.archive as Record<string, unknown>)).toBe(false);
     });
 
-    it("round-trips a settleRound-PRODUCED crew-tagged archive snapshot with its crewId intact", async () => {
+    // Round-is-a-sealed-leaf + append-only tolerance, end to end through the real marshal path: an
+    // OLD genesis carrying a stray crewId JSON key still settles, and the archive it produces (and
+    // the snapshot it round-trips) carries NO crewId key at all.
+    it("strips a legacy stray crewId — a genesis carrying one settles to an archive with no crewId key", async () => {
       const journal = newFinalizingJournal();
       const id = roundId(randomUUID());
-      const tag = crewId(`crew-${randomUUID()}`);
-      const archive = settleRound(settledLog(id, tag));
-      expect(archive.crewId).toBe(tag);
+      const archive = settleRound(settledLog(id, `crew-${randomUUID()}`));
+      expect("crewId" in archive).toBe(false);
 
       await journal.append(id, [makeFinalizeEvent()], { expectedHeadSeq: 0, snapshot: archive });
 
       const snapItem = await local.client.send(new GetCommand({ TableName: local.snapshotsTable, Key: { pk: snapshotPk(id) } }));
-      expect((snapItem.Item?.archive as { crewId?: string }).crewId).toBe(tag);
+      expect("crewId" in (snapItem.Item?.archive as Record<string, unknown>)).toBe(false);
     });
   });
 

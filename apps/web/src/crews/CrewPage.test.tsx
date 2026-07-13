@@ -289,8 +289,10 @@ describe("CrewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /play the usual/i }));
 
     const probe = await screen.findByTestId("create-probe");
+    // No crewId in the preset: round-is-a-sealed-leaf — "Play the usual" hands off only the
+    // roster + standing game to prefill, never a crew tag for the created round.
     expect(JSON.parse(probe.textContent!)).toEqual({
-      crewPreset: { crewId: "crew-1", members: crew.members, standingGame: crew.standingGame },
+      crewPreset: { members: crew.members, standingGame: crew.standingGame },
     });
   });
 

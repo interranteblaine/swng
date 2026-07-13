@@ -1061,7 +1061,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
 
   it(
     "drives create -> join -> add an existing account member (de-ghost) -> save standing game -> GET /me/crews -> " +
-      "StartRound as-self with players+crewId (a signed-in caller) -> POST .../players -> create season -> list seasons",
+      "StartRound as-self with players (co-membership seats a claimed crew-mate) -> POST .../players -> create season -> list seasons",
     async () => {
       const { dispatcher } = setupCrews();
       const annGolfer = await putMe(dispatcher, ann, "Ann");
@@ -1111,10 +1111,11 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const myCrews = listMyCrewsResponseSchema.parse(JSON.parse(myCrewsResp.body!));
       expect(myCrews.crews).toEqual(expect.arrayContaining([{ crewId: created.crew.crewId, name: "Sunday Skins", memberCount: 3 }]));
 
-      // StartRound as-self, with players+crewId, under a signed-in caller (ann): the host's
-      // OWN golferId plus a `players` entry for Bo's own claimed golferId, both authorized by
-      // ann's verified sub via the crew's standing consent / as-self arms
-      // (rounds/golferIdentity.ts) — never a fresh ghost id for either.
+      // StartRound as-self, with players, under a signed-in caller (ann): the host's OWN
+      // golferId (as-self arm) plus a `players` entry for Bo's own claimed golferId. Bo is
+      // authorized by CO-MEMBERSHIP — ann and Bo share this crew — not by any tag on the round
+      // (round-is-a-sealed-leaf: the request carries no crewId and the round names no crew).
+      // Never a fresh ghost id for either.
       const startResp = asStructured(
         await dispatcher(
           makeEvent({
@@ -1125,7 +1126,6 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
               card: fixtureLinks,
               host: { name: "Ann", tee: "white", courseHandicap: 8 },
               golferId: annGolfer.golferId,
-              crewId: created.crew.crewId,
               players: [{ name: "Bo", tee: "white", courseHandicap: 2, golferId: boGolfer.golferId }],
             },
           }),

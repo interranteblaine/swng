@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { GameId, GameResult, GolferId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
-import { crewIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
+import { gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
 import { courseCardSchema, gameConfigFields, gameResultSchema, holeResultSchema, roundEventSchema } from "./round.js";
 
 // gameConfigFields' five field sets, minus `id` (they never had one — id-ness is
@@ -47,11 +47,11 @@ export const startRoundRequestSchema = z.object({
   // golferId rule as JoinRound's golferId (application/src/rounds/golferIdentity.ts) — a
   // signed-in golfer can start a round playing as themselves instead of a fresh ghost.
   golferId: golferIdSchema.optional(),
-  // Tags the round as a crew round (round-created's own optional crewId, domain/round/events.ts)
-  // — requires the caller's own golfer to be a member of this crew (application enforces,
-  // "not-a-member" otherwise) and unlocks the claimed-golferId resolver's standing-consent
-  // arm for every golferId this request supplies (host's own + every player's).
-  crewId: crewIdSchema.optional(),
+  // No crewId: round-is-a-sealed-leaf, so a round never tags itself with a crew. This object
+  // is NOT `.strict()`, so an old client still sending `crewId` isn't rejected — Zod's default
+  // strips the unknown key. Consent to seat a claimed fellow golfer now flows from
+  // co-membership (the resolver derives it from the caller's own crews — golferIdentity.ts),
+  // not from a tag on the round.
   // Capped well below DynamoDB's own hard limit: StartRound's whole event batch (round-
   // created + host-joined + round-started + one participant-joined per player) rides ONE
   // createDynamoEventJournal transaction, and DynamoDB caps a single TransactWriteItems call

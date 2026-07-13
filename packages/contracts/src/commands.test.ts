@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CourseCard } from "@swng/domain";
-import { crewId, golferId } from "@swng/domain";
+import { golferId } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
 import {
   addGameRequestSchema,
@@ -34,21 +34,29 @@ describe("startRoundRequestSchema", () => {
     expect(() => parse(startRoundRequestSchema, request)).toThrow(ContractError);
   });
 
-  // M8: as-self create (golferId), a crew tag (crewId), and an initial roster beyond the
-  // host (players) — every field optional, round-tripped together to pin none of the three
-  // gets silently dropped nor disturbs the other two.
-  it("round-trips the M8 fields: golferId, crewId, and an initial players roster", () => {
+  // As-self create (golferId) and an initial roster beyond the host (players) — both optional,
+  // round-tripped together to pin that neither gets silently dropped nor disturbs the other.
+  // No crewId: round-is-a-sealed-leaf, a round never tags itself with a crew.
+  it("round-trips golferId and an initial players roster", () => {
     const request = {
       card,
       host: { name: "Ann", tee: "white", courseHandicap: 8 },
       golferId: golferId("ann-1"),
-      crewId: crewId("crew-1"),
       players: [
         { name: "Bo", tee: "white", courseHandicap: 2, golferId: golferId("bo-1") },
         { name: "Cal", tee: "white", courseHandicap: 10 },
       ],
     };
     expect(parse(startRoundRequestSchema, request)).toEqual(request);
+  });
+
+  // An OLD client still sending a crewId (M8 wire) must not be rejected — the schema isn't
+  // `.strict()`, so Zod's default strips the unknown key. The parsed request has no crewId.
+  it("strips a stray crewId from an old-client body rather than rejecting it", () => {
+    const request = { card, host: { name: "Ann", tee: "white", courseHandicap: 8 }, crewId: "crew-1" };
+    const parsed = parse(startRoundRequestSchema, request);
+    expect(parsed).not.toHaveProperty("crewId");
+    expect(parsed).toMatchObject({ host: { name: "Ann" } });
   });
 
   // M8 close-out fix #4: StartRound appends 2 TransactWriteItems per event (EVT + OPID Put,

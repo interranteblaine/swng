@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { courseId, crewId, fixtureLinks18, fixtureWhite18, gameId, golferId, roundId } from "@swng/domain";
+import { courseId, fixtureLinks18, fixtureWhite18, gameId, golferId, roundId } from "@swng/domain";
 import { startRoundRequestSchema } from "@swng/contracts";
 import type { CourseView, CrewMemberView, GetMeResponse, StandingGameView } from "@swng/contracts";
 import { credentialStore } from "../identity";
@@ -416,7 +416,7 @@ describe("CreateRoundPage — play the usual (crew preset)", () => {
     ],
   };
 
-  const crewPreset = { crewId: crewId("crew-1"), members, standingGame };
+  const crewPreset = { members, standingGame };
 
   const arrange = (): string => {
     const idToken = signIn();
@@ -447,7 +447,7 @@ describe("CreateRoundPage — play the usual (crew preset)", () => {
       card: twoTeeCard, // the fetched card verbatim (the freeze source), preset course honored
       host: { name: "Ann G", tee: "blue", courseHandicap: 0 }, // you as-self; preset tee; CH prefill 0
       golferId: golferId("ann-g"),
-      crewId: crewId("crew-1"),
+      // No crewId: round-is-a-sealed-leaf — the created round never names the crew.
       players: [
         { name: "Bo", tee: "blue", courseHandicap: 0, golferId: golferId("bo-g") },
         { name: "Cy", tee: "blue", courseHandicap: 0, golferId: golferId("cy-g") },

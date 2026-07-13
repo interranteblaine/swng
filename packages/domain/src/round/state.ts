@@ -1,4 +1,4 @@
-import type { CrewId, GameId, GolferId, OpId, RoundId } from "../ids.js";
+import type { GameId, GolferId, OpId, RoundId } from "../ids.js";
 import type { CourseCard } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import { compareHlc, type Hlc } from "./hlc.js";
@@ -19,9 +19,6 @@ export interface RoundState {
   readonly id: RoundId;
   readonly status: RoundStatus;
   readonly card: CourseCard;
-  // Taken from genesis, same as `card` above — a round's crew tag is fixed at creation
-  // and never revised, so there's no separate LWW register for it.
-  readonly crewId?: CrewId;
   readonly participants: readonly Participant[];
   readonly games: readonly GameConfig[];
   readonly cells: Readonly<Record<string, ScoreCell>>;
@@ -194,13 +191,10 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
     id: genesis.roundId,
     status,
     card: genesis.card,
-    // Conditional spread, never `crewId: genesis.crewId` as a bare literal: an untagged
-    // round's state must have NO crewId key at all, not an explicit `undefined` — this
-    // state flows into settleRound's archive (the canonical stream/projector payload), and
-    // an explicit-undefined property crashes DynamoDB's marshall() in putArchive (observed
-    // live on beta, M8 Task 4: every non-crew round's first finalize 500'd). Same idiom as
-    // startRound.ts's own round-created construction.
-    ...(genesis.crewId !== undefined ? { crewId: genesis.crewId } : {}),
+    // No crewId register: a round is a sealed leaf, so `genesis` never contributes an
+    // outbound crew reference. An old genesis that still carries a stray `crewId` JSON key is
+    // simply ignored here (it's not read into state) — the fold tolerates the extra key rather
+    // than rejecting an append-only log.
     participants,
     games,
     cells,

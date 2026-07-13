@@ -22,10 +22,13 @@ import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 //
 // A participant TOKEN never carries a Cognito sub (tokenIssuer.ts: "GolferId is deliberately
 // not the Cognito sub... a participant token is issued off a join code, no account
-// required"), so the shared resolver's ctx here always passes sub: undefined — the "claimed
-// + as-self" arm is structurally unreachable through THIS surface (it's covered on
-// startRound/joinRound, which DO have an optional AccountClaims). The other three arms
-// (unclaimed, crew-consent, claimed-stranger-rejected) are all reachable here.
+// required"), so the shared resolver's ctx here always passes sub: undefined. That disables
+// BOTH sub-gated arms through this surface: as-self AND co-membership consent (which now
+// derives the caller's crews from their sub — golferIdentity.ts). Only the unclaimed arm and
+// the claimed-stranger rejection are reachable here; seating a CLAIMED fellow crew member
+// happens on startRound/joinRound instead, which do carry an optional AccountClaims. This is a
+// deliberate narrowing under round-is-a-sealed-leaf: the round no longer names a crew, so a
+// bare participant token can't stand in for proof of who the caller is.
 export const addParticipant =
   (deps: { journal: EventJournal; broadcast: Broadcast; clock: Clock; ids: IdGenerator; golferStore: GolferStore; crewStore: CrewStore }) =>
   async (claims: ParticipantClaims, command: AddParticipantRequest): Promise<AddParticipantResponse> => {
@@ -38,7 +41,6 @@ export const addParticipant =
     if (command.golferId !== undefined) {
       golfer = await resolveSuppliedGolfer({ golferStore: deps.golferStore, crewStore: deps.crewStore })(command.golferId, {
         sub: undefined,
-        crewId: state.crewId,
       });
       // UX guard, same as joinRound's own: a duplicate participant-joined is harmless at the
       // domain layer (last-write-wins on golferId) but rejected here to avoid surprising the

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { DomainError } from "../errors.js";
-import { crewId as makeCrewId, deviceId, gameId, golferId, opId, roundId } from "../ids.js";
+import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
 import { adjustedGrossScore, scoreDifferential } from "../handicap/whs.js";
 import { playGoldenRoundLog } from "../scoring/golden/deck.js";
 import { fixtureLinks, fixtureWhite } from "../scoring/golden/fixtureCourse.js";
@@ -280,50 +280,54 @@ describe("hand-checked AGS sanity", () => {
   });
 });
 
-// M8: a round is a crew round via an optional crewId tag stamped at creation
-// (architecture.md's Crew section) — this pins the whole path: the event carries it,
-// reduceRound's fold sets it on RoundState, and settleRound carries it verbatim onto the
-// terminal RoundArchive, unchanged by anything that happens in between.
-describe("crewId — create -> fold -> settle", () => {
-  it("carries an optional crewId from round-created verbatim onto the settled archive", () => {
-    const crew = makeCrewId("saturday-boys");
-    const at = (wallMs: number) => ({ wallMs, counter: 0, deviceId: deviceId("test") });
-    const recorder = golferId("recorder");
-    const created: RoundEvent = {
+// Round-is-a-sealed-leaf (realignment, spec 2026-07-12): a round names no crew — not in its
+// events, not in the folded state, not in the settled archive. The crew tag M8 stamped on
+// round-created is gone; a crew now references a finished round inbound (counts it by roundId
+// into a season), never the reverse. The event log is append-only, though, so a genesis event
+// left over from the M8 era with a stray `crewId` JSON key must still parse and fold — this
+// pins tolerate-and-strip at the fold: the extra key is ignored, and NO crewId key survives
+// onto state or archive.
+describe("round is a sealed leaf — no crewId on state or archive", () => {
+  const at = (wallMs: number) => ({ wallMs, counter: 0, deviceId: deviceId("test") });
+  const recorder = golferId("recorder");
+
+  // An old stored genesis carrying a stray crewId JSON key. The current RoundEvent type has no
+  // such field, so the key is injected through an unknown-cast — exactly the shape a log
+  // written under M8's schema deserializes into today.
+  const legacyGenesisWithStrayCrewId = (): RoundEvent =>
+    ({
       kind: "round-created",
-      roundId: roundId("r-crew"),
+      roundId: roundId("r-legacy"),
       card: fixtureLinks,
-      crewId: crew,
+      crewId: "saturday-boys", // the stray key an M8-era log still carries
       opId: opId("op-created"),
       hlc: at(1),
       authorId: recorder,
-    };
+    }) as unknown as RoundEvent;
+
+  it("reduceRound over a genesis with a stray crewId key produces state with NO crewId property", () => {
+    const started: RoundEvent = { kind: "round-started", opId: opId("op-started"), hlc: at(2), authorId: recorder };
+    const state = reduceRound([legacyGenesisWithStrayCrewId(), started]);
+    // `in`, not toBeUndefined(): an explicit-undefined key passes toBeUndefined() and vitest's
+    // toEqual ignores undefined-valued keys entirely — the distinction that matters here (and
+    // to DynamoDB's marshall() downstream) is whether the KEY exists at all.
+    expect("crewId" in state).toBe(false);
+  });
+
+  it("settleRound over that same legacy genesis yields an archive with NO crewId property", () => {
     const started: RoundEvent = { kind: "round-started", opId: opId("op-started"), hlc: at(2), authorId: recorder };
     const finalized: RoundEvent = { kind: "round-finalized", opId: opId("op-finalized"), hlc: at(3), authorId: recorder };
-
-    const archive = settleRound([created, started, finalized]);
-    expect(archive.crewId).toBe(crew);
-  });
-
-  it("leaves crewId undefined when round-created never carried one (existing rounds, unaffected)", () => {
-    const archive = settleRound(finalLog);
-    expect(archive.crewId).toBeUndefined();
-  });
-
-  // The M8 Task 4 live defect, pinned at its source: a non-crew archive must have NO crewId
-  // KEY at all — `crewId: state.crewId` as a bare literal left an explicit `undefined`
-  // property that crashed DynamoDB's marshall() in putArchive on beta (every non-crew
-  // round's first finalize 500'd, and the retry false-200'd without ever persisting the
-  // archive). `toBeUndefined()` above can't catch this (an explicit-undefined key passes it,
-  // and vitest's toEqual ignores undefined-valued keys entirely), so this uses the `in`
-  // operator — the distinction JSON.stringify hides but DynamoDB's marshall() enforces.
-  it("a non-crew archive has NO crewId key at all — never an explicit undefined property", () => {
-    const archive = settleRound(finalLog);
+    const archive = settleRound([legacyGenesisWithStrayCrewId(), started, finalized]);
     expect("crewId" in archive).toBe(false);
   });
 
-  it("a non-crew folded RoundState has NO crewId key at all — the archive inherits its shape from here", () => {
+  it("a folded RoundState from a plain log has NO crewId key at all", () => {
     const state = reduceRound(finalLog);
     expect("crewId" in state).toBe(false);
+  });
+
+  it("a settled archive from a plain log has NO crewId key at all", () => {
+    const archive = settleRound(finalLog);
+    expect("crewId" in archive).toBe(false);
   });
 });

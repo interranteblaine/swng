@@ -27,16 +27,24 @@ maintaining that fake. The market is the persistent crew, which signs up once.
 
 ## 2. Identity: account = golfer, born together
 
-- Sign-up collects the person's **name** and mints the account and the golfer record
-  together. The state "signed in but no golfer" becomes unrepresentable. The name is a
-  display attribute, editable forever on the profile; nothing keys on it (GolferIds do).
+- **Cognito is a pure authenticator** (owner amendment, 2026-07-13): it verifies the
+  email and hands us a `sub` — no custom attributes, no name claim, no product data,
+  stock sign-up form. The name lives only in the domain, where it is a display
+  attribute, editable forever on the profile; nothing keys on it (GolferIds do).
 - **Get-or-create returns, and is now sound.** M7's "GET /me never creates" rule existed
   because sign-in couldn't distinguish a new golfer from someone's claimable ghost.
-  That ambiguity is dead, so the backend may deterministically mint the golfer on first
-  authenticated touch from the sign-up name. Mechanism: the Cognito `name` standard
-  attribute, required at sign-up (Hosted UI collects it; e2e admin-minted users set it
-  explicitly); the first authenticated request that needs a golfer creates it from the
-  token's `name` claim, idempotently.
+  That ambiguity is dead: the first authenticated request that needs the caller's
+  golfer mints it, with a **deterministic placeholder name derived from the sub**
+  ("Golfer 4821" — boring by design, never cute; f(sub) so the concurrent-first-request
+  race cannot even generate two names). The mint routes through the existing M9
+  `SUB#<sub>` `attribute_not_exists` transaction: the race's loser re-reads and gets the
+  winner's golfer. One golfer per account, always, with no Cognito trigger and no
+  sign-up-flow failure mode.
+- **The placeholder is the invariant's backstop, not the UX.** On first landing — for
+  most people the join-link funnel — the app asks one required field, "What should the
+  card call you?", which is simply a PUT of the name at the highest-motivation moment.
+  Someone who deep-links around the prompt renders as the bland placeholder until they
+  fix it on the profile; nothing anywhere blocks on it.
 - Papercut 8 is resolved structurally: there is no moment in any flow where a person
   exists but cannot be shown on a roster, card, or ledger.
 
@@ -47,9 +55,9 @@ maintaining that fake. The market is the persistent crew, which signs up once.
   always as-self from the caller's token; `JoinRoundRequest.golferId` and what remains of
   `resolveSuppliedGolfer` are deleted (as-self is all that exists).
 - **The join link is the invite and the sign-up funnel.** One artifact per round. A
-  signed-in tap joins; a signed-out tap routes through sign-up (name collected there,
-  §2) and lands on the card. There is no invite system, no pending state, no
-  acknowledgment protocol.
+  signed-in tap joins; a signed-out tap routes through stock sign-up, then the funnel's
+  one name prompt (§2), and lands on the card. There is no invite system, no pending
+  state, no acknowledgment protocol.
 - **Anonymous round creation and joining die.** The `optional-golfer` route tier's
   reason to exist goes with them; round create/join become `golfer` auth. The
   spectator/watch tier is untouched — the participation matrix is: on the card /
@@ -109,8 +117,9 @@ form; ghost lines in projections (only account golfers are projected); the
 (`identityRecord`'s play-then-claim arc, `crewSeason`'s claim-Bo-inherits step) —
 rewritten to accounts-only stories with equivalent coverage of what remains.
 
-**Added:** name at sign-up (Cognito `name` attribute) + deterministic golfer
-get-or-create on first touch; the join-link sign-up funnel flow; `participant-left`
+**Added:** deterministic golfer get-or-create on first touch (placeholder name f(sub),
+via the existing `SUB#` transaction); the funnel's required "what should the card call
+you?" name prompt; the join-link sign-up funnel flow; `participant-left`
 (additive event kind, standard tolerate rules for old consumers) with leave/rejoin
 affordances; the departed-participant settle rule; the designation rendering.
 

@@ -422,5 +422,34 @@ describe("createDynamoCrewStore", () => {
         expect(await store.countsRound(crew.id, entry.roundId)).toBe(false);
       });
     });
+
+    describe("seasonId guard — # character forbidden", () => {
+      it("putSeason rejects seasonId containing '#' with a plain Error and writes nothing", async () => {
+        const store = newStore();
+        const crew = makeCrew("Guard Crew");
+        await store.put(crew, newJoinCode(), undefined);
+        const badSeason: CrewSeason = { seasonId: "X#ROUND#Y", name: "Bad Season", status: "open", createdAtMs: Date.now() };
+
+        await expect(store.putSeason(crew.id, badSeason)).rejects.toThrow(/seasonId contains "#"/);
+
+        // Verify nothing was written: getSeason returns undefined and listSeasons is empty.
+        expect(await store.getSeason(crew.id, badSeason.seasonId)).toBeUndefined();
+        expect(await store.listSeasons(crew.id)).toEqual([]);
+      });
+
+      it("addCountedRound rejects seasonId containing '#' with a plain Error and writes nothing", async () => {
+        const store = newStore();
+        const crew = makeCrew("Guard Crew 2");
+        await store.put(crew, newJoinCode(), undefined);
+        const badSeasonId = "X#ROUND#Y";
+        const entry = newCountedRound();
+
+        await expect(store.addCountedRound(crew.id, badSeasonId, entry)).rejects.toThrow(/seasonId contains "#"/);
+
+        // Verify nothing was written: listCountedRounds is empty and countsRound is false.
+        expect(await store.listCountedRounds(crew.id, badSeasonId)).toEqual([]);
+        expect(await store.countsRound(crew.id, entry.roundId)).toBe(false);
+      });
+    });
   });
 });

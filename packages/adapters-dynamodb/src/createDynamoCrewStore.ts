@@ -78,6 +78,18 @@ const memberItemOf = (crewId: CrewId, member: CrewMember): MemberItem => ({
 
 const golferIdFromMemberSk = (sk: string): GolferId => toGolferId(sk.slice(memberSkPrefix.length));
 
+// Guard: seasonId MUST NOT contain "#" (the store's key vocabulary composites it between
+// separators — seasonSk + countedRoundSk share the "SEASON#" prefix and use "#ROUND#" to
+// distinguish them; a "#" in seasonId would create a key collision, breaking listSeasons).
+// This is a programming-error guard (crewStore.ts port doc's caller contract), not a
+// business-logic error, so we throw plain Error like the journal's missing-snapshotsTableName
+// guard, never ApplicationError.
+const validateSeasonId = (seasonId: string): void => {
+  if (seasonId.includes("#")) {
+    throw new Error(`seasonId contains "#" — key vocabulary collision: "${seasonId}"`);
+  }
+};
+
 export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; tableName: string }): CrewStore => {
   const { client, tableName } = config;
 
@@ -202,6 +214,7 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
     },
 
     putSeason: async (crewId: CrewId, season: CrewSeason) => {
+      validateSeasonId(season.seasonId);
       // Unconditional upsert — create, rename, and close are all the SAME put keyed by
       // seasonId (the port doc's own contract). No revision to conflict on.
       const item: SeasonItem = { pk: crewPk(crewId), sk: seasonSk(season.seasonId), season };
@@ -236,6 +249,7 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
     },
 
     addCountedRound: async (crewId: CrewId, seasonId: string, entry: CountedRound) => {
+      validateSeasonId(seasonId);
       const item: CountedRoundItem = { pk: crewPk(crewId), sk: countedRoundSk(seasonId, entry.roundId), entry };
       try {
         await client.send(new PutCommand({ TableName: tableName, Item: item, ConditionExpression: "attribute_not_exists(sk)" }));

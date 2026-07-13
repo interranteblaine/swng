@@ -255,6 +255,15 @@ export const createInMemoryCrewStore = (): CrewStore => {
   const seasonsByCrew = new Map<CrewId, Map<string, CrewSeason>>();
   const countedRoundsByCrew = new Map<CrewId, Map<string, Map<RoundId, CountedRound>>>();
 
+  // Guard: seasonId MUST NOT contain "#" (mirrors createDynamoCrewStore's validator — the key
+  // vocabulary composites it between separators, so a "#" in seasonId would create a collision
+  // breaking the ability to filter season items apart from counted-round items).
+  const validateSeasonId = (seasonId: string): void => {
+    if (seasonId.includes("#")) {
+      throw new Error(`seasonId contains "#" — key vocabulary collision: "${seasonId}"`);
+    }
+  };
+
   return {
     put: async (crew, joinCode, expectedRevision) => {
       const existing = byId.get(crew.id);
@@ -280,6 +289,7 @@ export const createInMemoryCrewStore = (): CrewStore => {
         .map(({ crew }) => ({ crewId: crew.id, name: crew.name, memberCount: crew.members.length })),
 
     putSeason: async (crewId, season) => {
+      validateSeasonId(season.seasonId);
       const seasons = seasonsByCrew.get(crewId) ?? new Map<string, CrewSeason>();
       seasons.set(season.seasonId, season); // unconditional upsert — create/rename/close all land here
       seasonsByCrew.set(crewId, seasons);
@@ -289,6 +299,7 @@ export const createInMemoryCrewStore = (): CrewStore => {
     listSeasons: async (crewId) => [...(seasonsByCrew.get(crewId)?.values() ?? [])],
 
     addCountedRound: async (crewId, seasonId, entry) => {
+      validateSeasonId(seasonId);
       const seasons = countedRoundsByCrew.get(crewId) ?? new Map<string, Map<RoundId, CountedRound>>();
       const rounds = seasons.get(seasonId) ?? new Map<RoundId, CountedRound>();
       if (rounds.has(entry.roundId)) {

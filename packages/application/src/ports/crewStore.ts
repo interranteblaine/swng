@@ -7,6 +7,13 @@ import type { Crew, CrewId, GolferId, RoundId } from "@swng/domain";
 // (Task 9's create-season use case, via IdGenerator.newId()) — this store treats it as an
 // opaque string, same as a crew's own joinCode is opaque to CrewStore.put.
 export interface CrewSeason {
+  // CALLER CONTRACT: seasonId is an opaque server-minted id (IdGenerator.newId() → UUID) and
+  // MUST NEVER contain the "#" character. The store's key vocabulary composites seasonId
+  // between "#" separators: seasonSk(seasonId) = "SEASON#<seasonId>" and
+  // countedRoundSk(seasonId, roundId) = "SEASON#<seasonId>#ROUND#<roundId>". A "#" in
+  // seasonId would create a key collision between season items and counted-round items,
+  // breaking listSeasons' ability to filter them apart. Guards in putSeason/addCountedRound
+  // enforce this invariant at the store level.
   readonly seasonId: string;
   readonly name: string;
   readonly status: "open" | "closed";

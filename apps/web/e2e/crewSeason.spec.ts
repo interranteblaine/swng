@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { GetMyRecordResponse, SeasonStandingLine } from "@swng/contracts";
 import { golferId } from "@swng/domain";
-import type { CrewId, GolferId, RoundId, SeasonLedgerLine } from "@swng/domain";
+import type { CrewId, GolferId, HeadToHeadRecord, RoundId, SeasonLedgerLine } from "@swng/domain";
 import type { AuthTokens } from "../src/auth/tokenStore.js";
 import {
   addGameDirect,
@@ -15,6 +15,7 @@ import {
   getRoundEventsDirect,
   getSeasonStandingsDirect,
   invokeRebuild,
+  joinCrewDirect,
   loadWebEnv,
   mintThrowawayUser,
   pollUntil,
@@ -47,24 +48,29 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
   let hostU: AuthTokens;
   let alId: GolferId;
   let crewId: CrewId;
+  let crewJoinCode = ""; // V's route into the roster in step 8, minted at crew creation (step 2)
   let ids: SeasonGolferIds;
   let seasonId = "";
   let roundOneJoinCode = ""; // V's claim proof in step 8: a round Bo verifiably played in
   const roundIds: RoundId[] = [];
 
-  // The frozen ledger, resolved to the wire's SeasonStandingLine shape: `name` resolves from
-  // the counted snapshots' own participants (every round seats the same four names) and
-  // `member` from the CURRENT roster — which is Al alone, since membership is real accounts
-  // only now (de-ghost, architecture realignment) and Bo/Cy/Dee stay round-minted ghosts all
-  // season. That ghosts aggregate with member:false is getSeasonStandings' own documented
-  // behavior ("standings never depend on membership history"), asserted here, not worked
-  // around.
-  const expectedStandingLines = (lines: readonly SeasonLedgerLine[]): readonly SeasonStandingLine[] =>
-    lines.map((line) => ({
-      ...line,
-      name: line.golferId === ids.al ? "Al" : line.golferId === ids.bo ? "Bo" : line.golferId === ids.cy ? "Cy" : "Dee",
-      member: line.golferId === ids.al,
-    }));
+  // The frozen ledger, resolved to the wire's SeasonStandingLine shape: a crew is a
+  // grouping/competition ONLY (owner ruling, spec §11a) — standings aggregate the CURRENT
+  // roster only, `name` comes from the roster's own CrewMember.name, and there is no `member`
+  // flag on the wire (getSeasonStandings.ts's own doc comment: every row that reaches here is,
+  // by construction, a member). `memberIds` is the roster AT THE POINT OF THE CALL — Al alone
+  // through steps 5-7 (Bo/Cy/Dee stay round-minted ghosts, never crew members, all season), Al
+  // + Bo once V claims Bo's ghost and joins the crew in step 8.
+  const nameOf = (id: GolferId): string => (id === ids.al ? "Al" : id === ids.bo ? "Bo" : id === ids.cy ? "Cy" : "Dee");
+
+  const expectedStandingLines = (lines: readonly SeasonLedgerLine[], memberIds: ReadonlySet<GolferId>): readonly SeasonStandingLine[] =>
+    lines.filter((line) => memberIds.has(line.golferId)).map((line) => ({ ...line, name: nameOf(line.golferId) }));
+
+  // A head-to-head pair survives only when BOTH sides are current members (getSeasonStandings.ts)
+  // — with Al the crew's sole member through steps 5-7, the Al-Bo pair is filtered to nothing;
+  // it only reappears once Bo joins too (step 8).
+  const expectedHeadToHead = (records: readonly HeadToHeadRecord[], memberIds: ReadonlySet<GolferId>): readonly HeadToHeadRecord[] =>
+    records.filter((record) => memberIds.has(record.a) && memberIds.has(record.b));
 
   test("1: local verification — the hand-derived deck matches the domain engines exactly", () => {
     // Placeholder golferIds are enough here: this step never touches the network, it only
@@ -96,6 +102,7 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // the "ghosts still exist inside rounds" arm the realignment kept.
     const created = await createCrewDirect(httpUrl, hostU.idToken, "The Saturday Boys");
     crewId = created.crew.crewId;
+    crewJoinCode = created.crew.joinCode;
     expect(created.crew.members).toEqual([{ golferId: alId, name: "Al", role: "organizer", claimed: true }]);
   });
 
@@ -230,9 +237,14 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // THE frozen numbers (crewSeasonDeck.ts): singles H2H 5W-5L-2H, skins 54 each, stableford
     // 430/430/435/435 — identical to what the M8 projector once served from the deleted
     // GET /crews/{id}/records, now folded on read. A mismatch is a PRODUCT defect
-    // (BLOCKED-don't-fudge), never an assertion to bend.
-    expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger));
-    expect(standings.headToHead).toEqual(frozen.headToHead);
+    // (BLOCKED-don't-fudge), never an assertion to bend. Membership is Al ALONE at this point
+    // (Bo/Cy/Dee are round-participants, never crew members) — a members-only aggregation
+    // (owner ruling, spec §11a) surfaces only Al's row and an EMPTY head-to-head (no pair has
+    // two members yet). The ghosts' frozen numbers stay pinned in crewSeasonDeck.ts as
+    // constants; they resurface once Bo joins the roster in step 8.
+    const memberIds = new Set<GolferId>([ids.al]);
+    expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
+    expect(standings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
   });
 
   test("6: un-counting round 1 shifts the standings by exactly its contribution; re-counting restores the frozen ledger", async () => {
@@ -256,7 +268,9 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // Bo/Cy/Dee 18×2 = 36 each. The expected 11-round ledger is therefore the frozen one minus
     // exactly: Al -1 win, -37 points, -18 skins; Bo -1 loss, -36 points; Cy/Dee -36 points;
     // everyone -1 round; H2H Al 5→4 wins. Derived by SUBTRACTION from frozenSeasonExpectation
-    // so the frozen numbers stay the single source of truth.
+    // so the frozen numbers stay the single source of truth — asserted against the wire
+    // members-only (Al alone; the H2H delta is computed for completeness but resolves to empty
+    // either way, same as step 5, since Bo still isn't on the roster).
     const frozen = frozenSeasonExpectation(ids);
     const minusRoundOne = frozen.ledger.map((line) =>
       line.golferId === ids.al
@@ -265,10 +279,12 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
           ? { ...line, rounds: SEASON_ROUNDS - 1, losses: line.losses - 1, points: line.points - 36 }
           : { ...line, rounds: SEASON_ROUNDS - 1, points: line.points - 36 },
     );
-    expect(without.ledger).toEqual(expectedStandingLines(minusRoundOne));
-    expect(without.headToHead).toEqual(
-      frozen.headToHead.map((record) => (record.a === ids.al ? { ...record, aWins: record.aWins - 1 } : { ...record, bWins: record.bWins - 1 })),
+    const minusRoundOneHeadToHead = frozen.headToHead.map((record) =>
+      record.a === ids.al ? { ...record, aWins: record.aWins - 1 } : { ...record, bWins: record.bWins - 1 },
     );
+    const memberIds = new Set<GolferId>([ids.al]);
+    expect(without.ledger).toEqual(expectedStandingLines(minusRoundOne, memberIds));
+    expect(without.headToHead).toEqual(expectedHeadToHead(minusRoundOneHeadToHead, memberIds));
 
     // Re-count it — standings return to the frozen values exactly (counting is a pure inbound
     // reference; nothing about the round itself changed while it was uncounted).
@@ -277,8 +293,8 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
     const restored = await getSeasonStandingsDirect(httpUrl, hostU.idToken, crewId, seasonId);
     expect([...restored.rounds.map((round) => round.roundId)].sort()).toEqual([...roundIds].sort());
-    expect(restored.ledger).toEqual(expectedStandingLines(frozen.ledger));
-    expect(restored.headToHead).toEqual(frozen.headToHead);
+    expect(restored.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
+    expect(restored.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
   });
 
   test("7: rebuild parity — the paged snapshot backfill reproduces Al's record; standings never depended on it", async () => {
@@ -312,11 +328,14 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(post.index?.computedAtMs).not.toBe(pre.index?.computedAtMs);
 
     // Standings are computed on read from the counted rounds' own snapshots — there is no
-    // season projection for a rebuild to touch, and the frozen ledger must hold verbatim.
+    // season projection for a rebuild to touch, and the frozen ledger must hold verbatim,
+    // still filtered to the same Al-alone roster as steps 5-6 (membership itself is untouched
+    // by a rebuild — it lives on the crew, not the snapshots).
     const standings = await getSeasonStandingsDirect(httpUrl, hostU.idToken, crewId, seasonId);
     const frozen = frozenSeasonExpectation(ids);
-    expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger));
-    expect(standings.headToHead).toEqual(frozen.headToHead);
+    const memberIds = new Set<GolferId>([ids.al]);
+    expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
+    expect(standings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
   });
 
   test("8: mid-season claim continuity — V claims Bo's ghost and inherits all 12 history lines", async () => {
@@ -349,5 +368,27 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     );
     expect(record.history).toHaveLength(SEASON_ROUNDS);
     expect([...record.history.map((line) => line.roundId)].sort()).toEqual([...roundIds].sort());
+
+    // The live proof that membership is pure aggregation scope: V, now bound to Bo's golferId,
+    // joins the crew by its own join code (minted at creation, step 2) — the self-service arm
+    // (joinCrewByCode.ts) that adds the CALLER's own account golfer, never a ghost. Bo's row
+    // name comes from the roster entry this write creates, sourced from V's own account golfer
+    // name (set at claim time, above) — asserted directly off the live join response before
+    // trusting it in the standings comparison below.
+    const joined = await joinCrewDirect(httpUrl, userV.idToken, crewJoinCode);
+    expect(joined.crew.members.map((member) => member.golferId).sort()).toEqual([ids.al, ids.bo].sort());
+    const boMember = joined.crew.members.find((member) => member.golferId === ids.bo);
+    expect(boMember?.name).toBe("Bo");
+    expect(boMember?.role).toBe("member");
+    expect(boMember?.claimed).toBe(true);
+
+    // Standings, re-fetched: Bo's frozen rows and the Al-Bo head-to-head materialize on the
+    // very next read — nothing was lost while Bo was a non-member, since the counted rounds
+    // themselves never changed, only the roster this read filters against.
+    const standings = await getSeasonStandingsDirect(httpUrl, hostU.idToken, crewId, seasonId);
+    const frozen = frozenSeasonExpectation(ids);
+    const memberIds = new Set<GolferId>([ids.al, ids.bo]);
+    expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
+    expect(standings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
   });
 });

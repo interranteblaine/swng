@@ -27,6 +27,8 @@ import {
   finalizeRoundResponseSchema,
   getMyRecordResponseSchema,
   golferResponseSchema,
+  joinCrewRequestSchema,
+  joinCrewResponseSchema,
   joinRoundRequestSchema,
   joinRoundResponseSchema,
   parse,
@@ -51,6 +53,7 @@ import type {
   GameConfigInput,
   GetMyRecordResponse,
   GolferResponse,
+  JoinCrewResponse,
   JoinRoundResponse,
   RemoveCountedRoundResponse,
   SeasonStandingsResponse,
@@ -280,6 +283,24 @@ export const createCrewDirect = async (httpUrl: string, token: string, name: str
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`POST /crews -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(createCrewResponseSchema, json);
+};
+
+// POST /crews/join — the self-service counterpart to the deleted add-a-ghost-by-name path
+// (joinCrewByCode.ts's own doc comment): adds the CALLER's own account golfer as a member
+// (role "member"), never a ghost. crewSeason.spec.ts's step 8 (mid-season claim continuity)
+// uses this to prove membership is pure aggregation scope: V, having just claimed Bo's ghost,
+// joins the crew by its own join code and Bo's standings rows materialize on the very next
+// read — nothing about them was lost while Bo was a non-member.
+export const joinCrewDirect = async (httpUrl: string, token: string, code: string): Promise<JoinCrewResponse> => {
+  const body = parse(joinCrewRequestSchema, { code });
+  const response = await fetch(`${httpUrl}/crews/join`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /crews/join -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(joinCrewResponseSchema, json);
 };
 
 // The old addCrewMemberDirect (add-a-ghost-by-name) and saveStandingGameDirect are GONE with

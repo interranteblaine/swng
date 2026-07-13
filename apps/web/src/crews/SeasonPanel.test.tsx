@@ -297,4 +297,45 @@ describe("SeasonPanel — count a round", () => {
     expect(alert.textContent).toBe("Already counted for this season.");
     expect(document.body.textContent).not.toMatch(/is already counted in season season-1 of crew crew-1/);
   });
+
+  it("409 season-closed surfaces as 'This season is closed.' — never raw error text (M9 discipline)", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
+    mockedGetMyRounds.mockResolvedValue({ rounds: myRounds });
+    mockedAppendCountedRound.mockRejectedValue(new ApiError("season-closed", 409, "season season-1 of crew crew-1 is closed"));
+
+    renderPanel();
+    await screen.findByText(/standings build as rounds are counted/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /count a round/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /casa verde gc/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("This season is closed.");
+    expect(document.body.textContent).not.toMatch(/season season-1 of crew crew-1/);
+  });
+
+  it("a closed season renders with a closed badge in the heading", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({
+      seasonId: "season-1",
+      name: "2026",
+      status: "closed",
+      rounds: [
+        { roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, appendedBy: ANN },
+      ],
+      ledger: [
+        { golferId: ANN, rounds: 1, wins: 0, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann", member: true },
+      ],
+      headToHead: [],
+    });
+
+    renderPanel();
+
+    const heading = await screen.findByRole("heading", { level: 3 });
+    expect(heading.textContent).toContain("2026");
+    expect(within(heading).getByText(/closed/i)).toBeTruthy();
+  });
 });

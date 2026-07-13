@@ -291,6 +291,24 @@ describe("CrewPage — seasons", () => {
     expect(await screen.findByText(/standings build as rounds are counted/i)).toBeTruthy();
   });
 
+  it("a season list containing a closed season renders its closed badge", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetCrew.mockResolvedValue({ crew });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+    const closedSeason: CrewSeasonView = { seasonId: "season-closed", name: "2025", status: "closed", createdAtMs: 1_000 };
+    mockedListSeasons.mockResolvedValue({ seasons: [seasonB, closedSeason] });
+
+    renderPage();
+    await screen.findByText("CRW123");
+
+    const seasonsList = await screen.findByRole("list", { name: /seasons/i });
+    const items = within(seasonsList).getAllByRole("button");
+    const closedItem = items.find((button) => button.textContent.includes("2025"))!;
+    expect(closedItem.textContent).toContain("closed");
+  });
+
+
   it("creates a season with the typed name, POSTs it, and adds it to the list", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });

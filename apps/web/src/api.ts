@@ -291,9 +291,8 @@ export const terminateGame = async (roundId: RoundId, token: string, gameId: Gam
 };
 
 // GET /crews/{crewId} (M8 Task 5): "golfer"-gated, member-only (a non-member 403s "not-a-member",
-// application-side). SetupPanel's own "Add player" quick-add is the only caller in this
-// milestone — a failed fetch (non-member, signed-out device, network) is a nicety it degrades
-// silently from, never a gate (JoinRoundPage's peek-fallback precedent).
+// application-side). CrewPage is the sole caller — a failed fetch (non-member, signed-out device,
+// network) is a nicety it degrades silently from, never a gate (JoinRoundPage's peek-fallback precedent).
 export const getCrew = async (token: string, id: CrewId): Promise<GetCrewResponse> => {
   const json = await requestJson(`/crews/${id}`, { token });
   return parse(getCrewResponseSchema, json);

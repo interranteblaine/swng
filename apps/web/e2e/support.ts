@@ -303,12 +303,10 @@ export const joinCrewDirect = async (httpUrl: string, token: string, code: strin
   return parse(joinCrewResponseSchema, json);
 };
 
-// The old addCrewMemberDirect (add-a-ghost-by-name) and saveStandingGameDirect are GONE with
-// the M8 crew model they exercised: membership is real accounts only now (addCrewMember takes
-// an EXISTING account golfer's golferId — application/src/crews/addCrewMember.ts's
-// ghost-not-addable), and a standing game may only reference roster members
-// (saveStandingGame.ts's unknown-preset-player), so crewSeason.spec.ts's season ghosts are
-// round-minted instead (StartRound `players`, ids read back via getRoundEventsDirect above).
+// The old addCrewMemberDirect (add-a-ghost-by-name) is GONE: crews are now accounts-only
+// rosters (membership resolved via application/src/crews/addCrewMember.ts's ghost-not-addable).
+// Ghost golfers in crewSeason.spec.ts are never added to crews — they play inside rounds only
+// (StartRound `players`, ids read back via getRoundEventsDirect above).
 //
 // Architecture-realignment Task 12: crew seasons + counted rounds + standings-on-read replace
 // the deleted GET /crews/{id}/records projection surface (Task 9). Every helper below is

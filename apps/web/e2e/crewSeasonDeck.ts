@@ -143,8 +143,8 @@ export const roundScoresByGolfer = (ids: SeasonGolferIds, roundNumber: number): 
   return { [ids.al]: byRole.al, [ids.bo]: byRole.bo, [ids.cy]: byRole.cy, [ids.dee]: byRole.dee };
 };
 
-// The three standing games, wire shape (id-less — POST /rounds/{roundId}/games's own
-// GameConfigInput, and the SAME shape saved as the crew's standing-game preset) — singles
+// The three season games, wire shape (id-less — POST /rounds/{roundId}/games's own
+// GameConfigInput) — singles
 // Al-Bo at allowance 1 (inconsequential here: both course handicaps are 0 all season, so the
 // match-strokes diff is 0 regardless of allowance), 4-way skins (carryover is NOT a config
 // knob — scoreSkins always carries a tied/undecided hole's pot forward, packages/domain/src/

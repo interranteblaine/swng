@@ -112,7 +112,7 @@ describe("SeasonPanel — standings", () => {
   // dead regardless of a ledger line's `member` flag — this pins the negative for BOTH values
   // (the wire field itself only dies in a later task; the point here is the web never renders
   // off it, whatever it happens to carry).
-  it("never renders a guest label, whatever the ledger line's own member flag says", async () => {
+  it("never renders a guest label for any ledger row", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({

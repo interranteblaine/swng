@@ -22,7 +22,7 @@ export interface SetupPanelProps {
   readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
 }
 
-export const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
+const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
   "stroke-play": "Stroke play",
   "singles-match": "Singles match",
   stableford: "Stableford",
@@ -190,7 +190,7 @@ export interface AddGameFormProps {
 
 // One flat form covering all five kinds — only the fields relevant to the chosen kind render,
 // matching this task's "functional clarity, not the Task 5 pad" styling bar (brief).
-export function AddGameForm({ participants, onAddGame }: AddGameFormProps) {
+function AddGameForm({ participants, onAddGame }: AddGameFormProps) {
   const [kind, setKind] = useState<Kind>("stableford");
   const [scoring, setScoring] = useState<"gross" | "net">("net");
   const [players, setPlayers] = useState<readonly GolferId[]>([]);

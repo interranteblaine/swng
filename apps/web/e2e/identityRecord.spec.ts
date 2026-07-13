@@ -248,7 +248,7 @@ test.describe.serial("M7 identity/record gate — claim mid-season, live index, 
     await page.screenshot({ path: screenshotPath("profile-with-record.png"), fullPage: true });
   });
 
-  test("6: rebuild parity — wiping and replaying every projection reproduces the identical record", async () => {
+  test("6: rebuild parity — the paged snapshot backfill reproduces the identical record", async () => {
     test.setTimeout(360_000); // the rebuild lambda replays every finalized round on beta (5-minute CDK timeout) — comfortably slower than every other step here
 
     const summary = await invokeRebuild();

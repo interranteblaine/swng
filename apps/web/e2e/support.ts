@@ -12,15 +12,18 @@ import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page, WebSocketRoute } from "@playwright/test";
 import {
-  addCrewMemberRequestSchema,
-  addCrewMemberResponseSchema,
   addGameRequestSchema,
   addGameResponseSchema,
+  appendCountedRoundRequestSchema,
+  appendCountedRoundResponseSchema,
   claimGolferRequestSchema,
   createCourseRequestSchema,
   createCourseResponseSchema,
   createCrewRequestSchema,
   createCrewResponseSchema,
+  createSeasonRequestSchema,
+  createSeasonResponseSchema,
+  eventsResponseSchema,
   finalizeRoundResponseSchema,
   getMyRecordResponseSchema,
   golferResponseSchema,
@@ -29,27 +32,29 @@ import {
   parse,
   recordScoreRequestSchema,
   recordScoreResponseSchema,
-  saveStandingGameRequestSchema,
-  saveStandingGameResponseSchema,
+  removeCountedRoundResponseSchema,
   searchCoursesResponseSchema,
+  seasonStandingsResponseSchema,
   shareLinkResponseSchema,
   startRoundRequestSchema,
   startRoundResponseSchema,
   updateMeRequestSchema,
 } from "@swng/contracts";
 import type {
-  AddCrewMemberResponse,
   AddGameResponse,
+  AppendCountedRoundResponse,
   ClaimGolferRequest,
   CreateCrewResponse,
+  CreateSeasonResponse,
+  EventsResponse,
   FinalizeRoundResponse,
   GameConfigInput,
   GetMyRecordResponse,
   GolferResponse,
   JoinRoundResponse,
-  SaveStandingGameResponse,
+  RemoveCountedRoundResponse,
+  SeasonStandingsResponse,
   ShareLinkResponse,
-  StandingGameView,
   StartRoundRequest,
   StartRoundResponse,
   UpdateMeRequest,
@@ -175,16 +180,17 @@ export const joinRoundDirect = async (
 // calling api.ts's joinRound — these three follow the identical *Direct idiom for the same
 // reason, not out of not knowing api.ts exists.
 // `token` (M8 Task 7): StartRound is "optional-golfer" auth (routes.ts) — a Bearer ID token is
-// what enables the as-self (`golferId`) and crew-tag (`crewId`) fields below; every prior
-// caller (identityRecord.spec.ts's anonymous ghost-hosted rounds) omits it and gets the exact
-// same anonymous-start behavior as before this parameter existed.
+// what enables the as-self (`golferId`) field below; every prior caller (identityRecord.
+// spec.ts's anonymous ghost-hosted rounds) omits it and gets the exact same anonymous-start
+// behavior as before this parameter existed. No crewId here: round-is-a-sealed-leaf
+// (architecture realignment) — a round never tags itself with a crew; a crew counts a
+// FINISHED round into one of its seasons by roundId instead (appendCountedRoundDirect below).
 export const startRoundDirect = async (
   httpUrl: string,
   input: {
     readonly card: CourseCard;
     readonly host: { readonly name: string; readonly tee: string; readonly courseHandicap: number };
     readonly golferId?: GolferId;
-    readonly crewId?: CrewId;
     readonly players?: StartRoundRequest["players"];
   },
   token?: string,
@@ -220,6 +226,18 @@ export const finalizeRoundDirect = async (httpUrl: string, id: RoundId, token: s
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`POST /rounds/${id}/finalize -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(finalizeRoundResponseSchema, json);
+};
+
+// GET /rounds/{roundId}/events, out-of-browser ("round-read" auth — a participant token; no
+// `since` sent, the route's own absent-default is 0). crewSeason.spec.ts reads round 1's
+// participant-joined events to learn the golferIds StartRound minted for its NAMED ghost
+// players — StartRoundResponse only carries the HOST's own golferId, and the round's own log
+// is the same source any real client folds for the roster, never a second source of truth.
+export const getRoundEventsDirect = async (httpUrl: string, id: RoundId, token: string): Promise<EventsResponse> => {
+  const response = await fetch(`${httpUrl}/rounds/${id}/events`, { headers: { authorization: `Bearer ${token}` } });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`GET /rounds/${id}/events -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(eventsResponseSchema, json);
 };
 
 export const getMyRecordDirect = async (httpUrl: string, token: string): Promise<GetMyRecordResponse> => {
@@ -264,38 +282,60 @@ export const createCrewDirect = async (httpUrl: string, token: string, name: str
   return parse(createCrewResponseSchema, json);
 };
 
-// Mints a stable ghost golfer on the crew's own roster (addCrewMember.ts) — the SAME golferId
-// recurs across every round this crew plays, which is exactly what lets crewSeason.spec.ts
-// reuse Bo/Cy/Dee's ids across all 12 rounds.
-export const addCrewMemberDirect = async (httpUrl: string, token: string, id: CrewId, name: string): Promise<AddCrewMemberResponse> => {
-  const body = parse(addCrewMemberRequestSchema, { name });
-  const response = await fetch(`${httpUrl}/crews/${id}/members`, {
+// The old addCrewMemberDirect (add-a-ghost-by-name) and saveStandingGameDirect are GONE with
+// the M8 crew model they exercised: membership is real accounts only now (addCrewMember takes
+// an EXISTING account golfer's golferId — application/src/crews/addCrewMember.ts's
+// ghost-not-addable), and a standing game may only reference roster members
+// (saveStandingGame.ts's unknown-preset-player), so crewSeason.spec.ts's season ghosts are
+// round-minted instead (StartRound `players`, ids read back via getRoundEventsDirect above).
+//
+// Architecture-realignment Task 12: crew seasons + counted rounds + standings-on-read replace
+// the deleted GET /crews/{id}/records projection surface (Task 9). Every helper below is
+// "golfer"-gated on the wire (routes.ts) — the Bearer must be a crew MEMBER's ID token — and
+// append/remove additionally require the caller to have PLAYED the round (did-not-play) /
+// APPENDED the entry (not-the-appender): application/src/crews/appendCountedRound.ts and
+// removeCountedRound.ts hold those guards.
+
+export const createSeasonDirect = async (httpUrl: string, token: string, id: CrewId, name: string): Promise<CreateSeasonResponse> => {
+  const body = parse(createSeasonRequestSchema, { name });
+  const response = await fetch(`${httpUrl}/crews/${id}/seasons`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
   const json: unknown = await response.json();
-  if (!response.ok) throw new Error(`POST /crews/${id}/members -> ${response.status}: ${JSON.stringify(json)}`);
-  return parse(addCrewMemberResponseSchema, json);
+  if (!response.ok) throw new Error(`POST /crews/${id}/seasons -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(createSeasonResponseSchema, json);
 };
 
-export const saveStandingGameDirect = async (httpUrl: string, token: string, id: CrewId, standingGame: StandingGameView): Promise<SaveStandingGameResponse> => {
-  const body = parse(saveStandingGameRequestSchema, { standingGame });
-  const response = await fetch(`${httpUrl}/crews/${id}/standing-game`, {
-    method: "PUT",
+export const appendCountedRoundDirect = async (httpUrl: string, token: string, id: CrewId, seasonId: string, round: RoundId): Promise<AppendCountedRoundResponse> => {
+  const body = parse(appendCountedRoundRequestSchema, { roundId: round });
+  const response = await fetch(`${httpUrl}/crews/${id}/seasons/${seasonId}/rounds`, {
+    method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
   const json: unknown = await response.json();
-  if (!response.ok) throw new Error(`PUT /crews/${id}/standing-game -> ${response.status}: ${JSON.stringify(json)}`);
-  return parse(saveStandingGameResponseSchema, json);
+  if (!response.ok) throw new Error(`POST /crews/${id}/seasons/${seasonId}/rounds -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(appendCountedRoundResponseSchema, json);
 };
 
-// getCrewRecordsDirect (GET /crews/{id}/records) is GONE — the route itself was deleted in
-// architecture-realignment Task 9 (standings-on-read replaced the crew projection layer
-// entirely), and its wire schema followed in Task 11. crewSeason.spec.ts's own season-record
-// assertions are quarantined below (test.skip) pending Task 12's rewrite against
-// GET /crews/{crewId}/seasons/{seasonId}/standings.
+export const removeCountedRoundDirect = async (httpUrl: string, token: string, id: CrewId, seasonId: string, round: RoundId): Promise<RemoveCountedRoundResponse> => {
+  const response = await fetch(`${httpUrl}/crews/${id}/seasons/${seasonId}/rounds/${round}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`DELETE /crews/${id}/seasons/${seasonId}/rounds/${round} -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(removeCountedRoundResponseSchema, json);
+};
+
+export const getSeasonStandingsDirect = async (httpUrl: string, token: string, id: CrewId, seasonId: string): Promise<SeasonStandingsResponse> => {
+  const response = await fetch(`${httpUrl}/crews/${id}/seasons/${seasonId}/standings`, { headers: { authorization: `Bearer ${token}` } });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`GET /crews/${id}/seasons/${seasonId}/standings -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(seasonStandingsResponseSchema, json);
+};
 
 export const claimGolferDirect = async (httpUrl: string, token: string, input: ClaimGolferRequest): Promise<GolferResponse> => {
   const body = parse(claimGolferRequestSchema, input);
@@ -310,9 +350,10 @@ export const claimGolferDirect = async (httpUrl: string, token: string, input: C
 };
 
 // Generic "keep reading until an asynchronous projector catches up" poller — identityRecord.
-// spec.ts's own pollRecord (M7 Task 8) hand-rolled exactly this shape for GET /me/record; M8
-// Task 7 needs the identical shape for GET /crews/{id}/records too, so this is the one
-// implementation both specs' polling can share instead of a second hand-rolled copy.
+// spec.ts's own pollRecord (M7 Task 8) hand-rolled exactly this shape for GET /me/record;
+// crewSeason.spec.ts needs the identical shape for its own post-claim GET /me/record reads,
+// so this is the one implementation both specs' polling can share instead of a second
+// hand-rolled copy. (Season standings need no polling at all — they're computed on read.)
 export const pollUntil = async <T>(fetchOnce: () => Promise<T>, ready: (value: T) => boolean, timeoutMs = 60_000, label = "poll"): Promise<T> => {
   const deadline = Date.now() + timeoutMs;
   for (;;) {

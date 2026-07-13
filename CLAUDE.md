@@ -225,6 +225,47 @@ exists for the user-triggered M10 Saturday. Prod deployment and the field test i
 explicitly out of M9 (owner decision, 2026-07-11) and form M10; M9's own gate (`pnpm
 validate`, `pnpm e2e:beta` ×2, `pnpm e2e:field` ×3 consecutive, a controller flow-walk on six
 real-browser flows) is the milestone's separate close-out step.
+The snapshot realignment (post-M9, 2026-07-12/13, commits `04b4caf..9a7815f`) closed a
+16-task, 4-phase correction titled by its own rule: **the round is a sealed leaf** — every
+derived store now references it inbound by `roundId`; the round points at nothing. Phase 1,
+the atom: a dedicated `snapshots` table (pk-only, RETAIN, PITR, its own `NEW_IMAGE` stream)
+holds one immutable `RoundArchive` per finished round; finalize commits the `round-finalized`
+event and its snapshot together in ONE cross-table `TransactWriteItems` (rounds + snapshots),
+so "finalized but no archive" is unrepresentable and M9's repair-on-replay branch is deleted
+with its reason; the projector's event source moved to the snapshots stream (every record is
+a snapshot — no filter); the Scan-based `ArchiveSource` and the rounds table's
+`ARCHIVE`/`putArchive` are gone; 752 beta archives were one-time-copied via
+`migrateSnapshots.mjs` (idempotent, run twice). Phase 2, the record: the golfer projection
+moved to stable keys (`ROUND#<roundId>` lines, `INDEX`, `LIVE#<roundId>` presence — keys are
+identities, time is an attribute, closing the documented year-boundary bug class);
+`rebuildProjections` became a paged, cursor-resumable backfill over the snapshots table
+(`{cursor?, maxSnapshots?}` in, `{processed, cursor?}` out) — no buffer, no global sort, no
+wipe; a full rebuild reprocessed all 754 snapshots and matched the pre-migration state exactly
+across 1,111 golfers (zero mismatches), after which `dropOldProjectionItems.mjs` deleted 2,697
+retired `HISTORY#`/`CREWROUNDS#`/`RECORDS#` items; `GET /me/rounds`, `GET
+/rounds/{roundId}/archive`, and an archived-round web page made the snapshot first-class.
+Phase 3, the crew correction: crews became accounts-only rosters (ghosts play inside rounds
+only, never added to a crew) that define named seasons and COUNT a member's own finalized
+rounds into them by `roundId` from the crew's side, never touching the round; standings and
+head-to-head are computed on read (`aggregateSeason` over `crewContribution`, folded over
+batch-fetched snapshots) and stored nowhere; the entire crew projection layer
+(`putCrewRound`/`putSeasonRecords`/`getSeasonRecords`/`wipeCrew`, the
+`CREWROUNDS#`/`RECORDS#` keyspaces, `seasonOf = getUTCFullYear`) is deleted, and so is
+`crewId` from `round-created`/`RoundState`/`RoundArchive`/`StartRoundRequest` — old stored
+events carrying a `crewId` tolerate-and-strip clean across all four deserialization paths;
+`crewSeason.spec.ts` was rewritten against the same frozen 12-round deck under the
+counted-rounds model (byte-identical standings, plus a new un-count/re-count test). Phase 4,
+identity presence & capability: `LIVE#<roundId>` presence items (36h TTL) are written for
+every seated golfer, ghosts included, and cleared by the projector at finalize, so "your
+rounds" on home is presence by identity, not a device-token list; `POST
+/rounds/{roundId}/token` (golfer auth) re-mints a byte-identical scoring token on a new device
+for a participant who's already seated; `round-abandoned` is a real terminal — dominant in the
+fold, structurally snapshot-free (`settleRound` throws on it before round-not-final), and
+head-seq-guarded against a finalize racing the same round (a Critical caught in review and
+fixed same-task, `9a7815f`). Four beta deploys landed the whole arc on `swng-beta` (no new
+stack, no prod); gates: `pnpm e2e:beta` 16/16 ×2, `pnpm e2e:field` 53 ×2 consecutive, and the
+crewSeason rewrite above.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

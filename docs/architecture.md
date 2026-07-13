@@ -78,14 +78,17 @@ The licensing buy-vs-build stays open (roadmap); the entity models either source
 
 A `Round` is: a frozen `CourseCard`, participants (with tee and course handicap frozen at
 join — you play at the handicap you started with), attached games, and its event log.
-Lifecycle is an explicit enum: `setup → live → final` (plus `abandoned`); no null states.
+Lifecycle is an explicit enum: `setup → live → final`, plus `abandoned` — a real terminal
+reached via `round-abandoned`, mirroring `round-finalized`'s fold semantics but producing **no
+archive**: an abandoned round aggregates nowhere and is excluded from every downstream view
+(presence, projections, crew season counting). No null states.
 
 ```ts
 type RoundEvent =
   | RoundCreated | ParticipantJoined | GameAdded
   | ScoreRecorded      // { golferId, hole, result: strokes | 'picked-up' | 'conceded', recordedBy, opId, hlc }
   | PressOpened | ConcessionGiven | PartnerPicked   // game decisions live in the same log
-  | RoundFinalized | RoundReopened
+  | RoundFinalized | RoundReopened | RoundAbandoned
 ```
 
 - Two clocks, two jobs. **`seq`** is server-assigned and gapless — the canonical log order
@@ -137,11 +140,19 @@ Index history is a projection of `IndexSnapshot`s recomputed at each finalize.
 
 ### Crew — plain entity, no event sourcing
 
-Roster (members with role and status; ghosts welcome), standing-game presets (bundles of
-`GameConfig`s plus course/tee defaults — *"play the usual"* is a preset applied at round
-creation). A round is a crew round via an optional `crewId` tag at creation. The ledger,
-head-to-head records, and season boards are projections keyed by that tag — the Crew entity
-itself stores no results.
+A roster of real accounts — membership requires a bound identity; ghosts play inside rounds
+only (onboarding stays play-as-ghost → claim in-round → account → optionally join a crew) —
+plus standing-game presets (bundles of `GameConfig`s plus course/tee defaults — *"play the
+usual"* is a preset applied at round creation) and named **seasons** (`"2026"`,
+`"Summer Cup"`, open | closed; a season is a thing a member creates, never a calendar
+computation). A member counts one of their own finalized rounds into a season by appending
+`{ roundId }` from the crew's side — the round itself is never tagged, read-modified, or
+touched. Standings and head-to-head are **computed on read, stored nowhere**: Query a
+season's counted `roundId`s, batch-fetch those rounds' archives, and run a pure fold
+(`aggregateSeason` over `crewContribution`) in the request — a re-finalized round is correct
+at the next look with zero recompute machinery. This is the Competition principle below
+(**Competitions never own scoring — they reference rounds**) applied to Crew too: one
+reference direction everywhere, outside → round, by id.
 
 ### Competition — plain entity (v2/v3), referencing rounds
 
@@ -164,18 +175,23 @@ phones / big screens (web app)
    ▼                                     │
 API Gateway (HTTP + WS) ──── lambda (one package, per-trigger entry points)
    ▼
-DynamoDB:  rounds (log + snapshot) │ core (entities) │ projections │ connections
-                └── streams ──► projector entry ──► projections + channel fan-out
+DynamoDB:  rounds │ snapshots │ core │ projections │ connections
+                       └── stream ──► projector entry ──► golfer records + presence cleanup
 ```
 
-- **Commands** validate against current state and append events; **queries** read snapshots
-  and projections. Contracts are Zod schemas in `@swng/contracts`, parsed once by the
-  dispatcher table (conventions §3).
-- **Realtime:** an append broadcasts to the round's channel. Finalization flows through the
-  DynamoDB stream to the projector, which updates ledgers/standings/index and broadcasts to
-  projection channels — the trip's Cup board and the outing's banquet leaderboard are just
-  big-screen subscribers to a standings channel. Spectator mode is the round channel with a
-  read-only token.
+- **Commands** validate against current state and append events; **queries** read the live
+  round cache, the `snapshots` table, and projections. Contracts are Zod schemas in
+  `@swng/contracts`, parsed once by the dispatcher table (conventions §3).
+- **Realtime:** an append broadcasts to the round's channel. Finalize commits the
+  `round-finalized` event and the round's archive together in **one cross-table transaction**
+  (rounds + snapshots) — "finalized but no archive" is unrepresentable. The `snapshots`
+  table's own stream invokes the projector on every write (every stream record is a
+  snapshot — no filter, no branching), which updates each participant's golfer record —
+  history lines + index — and clears their live-round presence, then broadcasts to
+  projection channels — the trip's Cup board and the outing's banquet leaderboard (v2/v3) are
+  just big-screen subscribers to a standings channel. Rebuild is a paged, cursor-resumable
+  backfill over the `snapshots` table — no scan, no wipe. Spectator mode is the round channel
+  with a read-only token.
 - **Offline sync** is owned by the client SDK: a durable outbox (IndexedDB behind a storage
   port) + last-seen `seq`; the sync loop pushes queued events (deduped by `opId`) and pulls
   since `seq`, and the HLC merge makes rebasing free — stale pushes can't clobber newer
@@ -188,14 +204,21 @@ DynamoDB:  rounds (log + snapshot) │ core (entities) │ projections │ conne
   identity mapping links them, which is exactly what makes ghost-claiming a one-row operation.
 - Join code → exchanged for a round-scoped participant token (score without an account).
 - Share link → read-only spectator token. Same mechanism, narrower capability.
+- `POST /rounds/{roundId}/token` (golfer auth): a signed-in participant re-mints a scoring
+  token on any device — new phone, or seated by a friend, taps the round on home and scores;
+  no re-join, no separate token model.
+- Home's "your rounds" is presence by identity (`LIVE#<roundId>` in the golfer's own
+  projection partition, TTL-backed), not device-held tokens — the device-token list remains
+  only for anonymous ghost sessions, which have no identity to query by.
 
 ### Persistence sketch (DynamoDB)
 
 | Table | Keys | Holds |
 | --- | --- | --- |
-| `rounds` | `ROUND#id` / `EVT#seq`, `SNAPSHOT`, `ARCHIVE`, `META` | the log (conditional put on seq enforces order) and the immutable archive |
-| `core` | `GOLFER#id`, `CREW#id` (+member items), `COURSE#id`, `COMP#id` (+fixtures) | entities; GSIs: join code, cognito sub, golfer→crews |
-| `projections` | `INDEX#golfer`, `LEDGER#crew#season`, `H2H#crew#a#b`, `STANDINGS#comp`, `HISTORY#golfer` | versioned, rebuildable by replay (a rebuild entry point replays finalized rounds) |
+| `rounds` | `ROUND#id` / `EVT#seq`, `SNAPSHOT`, `META` | the log (conditional put on seq enforces order) and a live read-cache snapshot (never truth — see §2) |
+| `snapshots` | `<roundId>` (single item) | one immutable `RoundArchive` per finished round — the atom; system of record for everything downstream |
+| `core` | `GOLFER#id`, `CREW#id` (+member items, `SEASON#id`, `SEASON#id#ROUND#roundId` counted-round items), `COURSE#id`, `COMP#id` (+fixtures) | entities; GSIs: join code, cognito sub, golfer→crews |
+| `projections` | `GOLFER#id` / `ROUND#roundId` (a line), `INDEX`, `LIVE#roundId` (presence, TTL attribute); `STANDINGS#comp` (v2/v3) | derived, rebuildable by a paged, cursor-resumable backfill over `snapshots` — keys are identities, time is an attribute, never embedded in a key |
 | `connections` | `connectionId` → subscriptions | WS fan-out |
 
 Scale check: an outing is ~144 players ≈ 36 concurrent rounds ≈ a few thousand events across

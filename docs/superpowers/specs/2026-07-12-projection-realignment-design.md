@@ -1,9 +1,11 @@
 # The snapshot realignment — target design
 
-> **Status:** approved design (2026-07-12, converged in review with the owner). Supersedes the
+> **Status:** implemented (2026-07-13). Approved design (2026-07-12, converged in review with
+> the owner); executed via `docs/superpowers/plans/2026-07-12-snapshot-realignment.md` (16
+> tasks, 4 phases, 4 beta deploys, commits `04b4caf..9a7815f`) — see
+> `.superpowers/sdd/progress.md`'s Realignment entries for the execution record. Supersedes the
 > earlier correction-only version of this document; the drift record it captured is condensed
-> in §8. This is the system as it should be; implementation follows via an implementation
-> plan. `docs/architecture.md` §Crew and the persistence sketch are corrected as part of this
+> in §8. `docs/architecture.md` §Crew and the persistence sketch are corrected as part of this
 > work.
 
 ## 0. The rule

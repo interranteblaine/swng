@@ -26,7 +26,6 @@ import {
   parse,
   peekRoundResponseSchema,
   removeCountedRoundResponseSchema,
-  saveStandingGameResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
   shareLinkResponseSchema,
@@ -71,8 +70,6 @@ import type {
   ListSeasonsResponse,
   PeekRoundResponse,
   RemoveCountedRoundResponse,
-  SaveStandingGameRequest,
-  SaveStandingGameResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
   ShareLinkResponse,
@@ -302,9 +299,9 @@ export const getCrew = async (token: string, id: CrewId): Promise<GetCrewRespons
   return parse(getCrewResponseSchema, json);
 };
 
-// M8 Task 6: the crew home + "play the usual" surface — the remaining six crew routes, same
-// requestJson + per-endpoint idiom as every call above. Every one is "golfer"-gated (a Bearer
-// token is never optional here, unlike createRound/joinRound's anonymous path).
+// M8 Task 6: the crew home surface — the remaining crew routes, same requestJson + per-endpoint
+// idiom as every call above. Every one is "golfer"-gated (a Bearer token is never optional here,
+// unlike createRound/joinRound's anonymous path).
 export const createCrew = async (token: string, input: CreateCrewRequest): Promise<CreateCrewResponse> => {
   const json = await requestJson("/crews", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
   return parse(createCrewResponseSchema, json);
@@ -323,11 +320,6 @@ export const listMyCrews = async (token: string): Promise<ListMyCrewsResponse> =
 export const addCrewMember = async (token: string, id: CrewId, input: AddCrewMemberRequest): Promise<AddCrewMemberResponse> => {
   const json = await requestJson(`/crews/${id}/members`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
   return parse(addCrewMemberResponseSchema, json);
-};
-
-export const saveStandingGame = async (token: string, id: CrewId, input: SaveStandingGameRequest): Promise<SaveStandingGameResponse> => {
-  const json = await requestJson(`/crews/${id}/standing-game`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
-  return parse(saveStandingGameResponseSchema, json);
 };
 
 // Architecture-realignment Task 11: crew seasons + counted rounds + standings-on-read + leave —

@@ -2,11 +2,10 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { crewId as makeCrewId } from "@swng/domain";
-import type { CrewSeasonView, CrewView, StandingGameView } from "@swng/contracts";
-import { ApiError, createSeason, getCrew, leaveCrew, listSeasons, saveStandingGame } from "../api";
+import type { CrewSeasonView, CrewView } from "@swng/contracts";
+import { ApiError, createSeason, getCrew, leaveCrew, listSeasons } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { SeasonPanel } from "./SeasonPanel";
-import { StandingGameEditor } from "./StandingGameEditor";
 
 // A crew load can fail two honest ways the wire names (errorMapping.ts) — both get human
 // copy, never the raw server text (the M7 discipline: raw messages carry internal ids).
@@ -108,22 +107,6 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
     );
   }
 
-  const save = async (standingGame: StandingGameView) => {
-    // Rethrows into StandingGameEditor's own error display — this seam only owns the wire
-    // call and the crew refresh from its response.
-    const response = await withAuth((token) => saveStandingGame(token, id, { standingGame }));
-    setCrew(response.crew);
-  };
-
-  const playTheUsual = () => {
-    if (!crew.standingGame) return;
-    // Router-state hand-off (resolution 2, the EditCoursePage return precedent): CreateRoundPage
-    // reads crewPreset out of location.state and renders it as its normal editable form state.
-    // No crewId in the preset: round-is-a-sealed-leaf — the created round never names the crew —
-    // the preset is pure client-side prefill (roster + standing game), nothing more.
-    navigate("/create", { state: { crewPreset: { members: crew.members, standingGame: crew.standingGame } } });
-  };
-
   const submitNewSeason = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = newSeasonName.trim();
@@ -164,21 +147,6 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-slate-950 p-6 text-slate-100">
       <h1 className="text-2xl font-bold">{crew.name}</h1>
 
-      {/* Papercut 5 (M9 hardening): always rendered now — disabled with an explainer when the
-          crew has no preset yet, instead of vanishing outright, so a first-time visitor sees
-          the affordance exists and knows exactly what unlocks it. */}
-      <div className="flex flex-col gap-1">
-        <button
-          type="button"
-          onClick={playTheUsual}
-          disabled={!crew.standingGame}
-          className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50"
-        >
-          Play the usual
-        </button>
-        {!crew.standingGame && <p className="text-xs text-slate-500">Save a standing game first.</p>}
-      </div>
-
       {/* The round-page join-code idiom (SetupPanel's own card) — this is how account-holding
           friends get into the crew. Architecture-realignment Task 9/11 (de-ghost): a free-text
           ghost add no longer exists anywhere — the join code (here) and a claimed golfer joining
@@ -200,8 +168,6 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
           ))}
         </ul>
       </section>
-
-      <StandingGameEditor members={crew.members} standingGame={crew.standingGame} onSave={save} />
 
       {/* Architecture-realignment Task 11: seasons + counted rounds + standings-on-read replace
           the old "Season records" ledger table entirely — a season list here, SeasonPanel does
@@ -253,8 +219,7 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
         </form>
 
         {/* key={selectedSeasonId}: a fresh mount per season selection is the simplest correct
-            reset (StandingGameEditor's own "fresh instance per crew" precedent) — no
-            seasonId-changed effect dance needed inside SeasonPanel itself. */}
+            reset — no seasonId-changed effect dance needed inside SeasonPanel itself. */}
         {selectedSeasonId && <SeasonPanel key={selectedSeasonId} crewId={id} seasonId={selectedSeasonId} myGolferId={auth.golfer?.golferId} />}
       </section>
 

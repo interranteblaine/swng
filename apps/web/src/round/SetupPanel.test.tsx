@@ -449,10 +449,9 @@ describe("SetupPanel — Add player", () => {
     expect(document.body.textContent).not.toMatch(/Cannot read properties/);
   });
 
-  // Round-is-a-sealed-leaf (Task 10) deleted the M8 "From your crew" quick-add outright, since
-  // it read the round's own (now-gone) crewId. Rebuilt identity-side (architecture-realignment
-  // Task 11, controller decision): the round is NEVER consulted — the source is the SIGNED-IN
-  // golfer's own crews, listMyCrews -> getCrew on the first one. Signed-out stays free-text-only.
+  // Crews are a grouping/competition only (spec §11a, owner ruling) — the M8-era "From your
+  // crew" quick-add is gone for good, in every auth state, and the round-setup form never even
+  // asks the crew endpoints a question. Signed-out pins the rendering half.
   it("signed out: free-text form only, no crew fetch at all", () => {
     renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
 
@@ -460,100 +459,25 @@ describe("SetupPanel — Add player", () => {
     expect(screen.getByLabelText(/^name$/i)).toBeTruthy();
   });
 
-  it("signed in with a crew: fetches listMyCrews (never round state) then that crew's roster, and renders its not-yet-in-round members as one-tap quick-adds", async () => {
+  // The no-crew-fetch pin: even a signed-in golfer with a real account never causes any crew
+  // endpoint to be requested — "Add player" reads no identity beyond the free-text fields
+  // themselves.
+  it("signed in with an account golfer: still the free-text form only — the crew endpoints are never fetched", async () => {
     signIn();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
-        if (path === "/me/crews") return fakeResponse(200, { crews: [{ crewId: "crew-1", name: "Saturday Boys", memberCount: 5 }] });
-        if (path === "/crews/crew-1") {
-          return fakeResponse(200, {
-            crew: {
-              crewId: "crew-1",
-              name: "Saturday Boys",
-              joinCode: "ABC999",
-              // Ann is already an in-round participant (baseState) — she must NOT appear as a
-              // quick-add candidate. Erin is new — a fifth crew member not yet in this round.
-              members: [
-                { golferId: "ann", name: "Ann", role: "organizer", claimed: true },
-                { golferId: "erin", name: "Erin", role: "member", claimed: false },
-              ],
-            },
-          });
-        }
-        throw new Error(`unexpected fetch ${path}`);
-      }),
-    );
-    // The round itself carries no crew field at all (RoundState has none post-Task 10) — this
-    // renders straight off baseState(), pinning that the quick-add source is genuinely
-    // identity-side, never anything the round would have to know.
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+      throw new Error(`unexpected fetch ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
     renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
 
-    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringContaining("/me/crews"), expect.anything()));
-    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringContaining("/crews/crew-1"), expect.anything()));
+    // Let the AuthProvider's own GET /me settle before asserting the negative.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/me"), expect.anything()));
 
-    expect(await screen.findByText(/from your crew/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Erin" })).toBeTruthy();
-    // Ann is already seated in this round — not offered as a quick-add of herself.
-    expect(screen.queryByRole("button", { name: "Ann" })).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Erin" }));
-    expect(screen.getByText(/adding erin/i)).toBeTruthy();
-    // Quick-added players still need a tee/CH (the shared fields below the picker) — the
-    // golferId comes from the selection, never re-typed.
-    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
-    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "5" } });
-    fireEvent.click(screen.getByRole("button", { name: /^add player$/i }));
-
-    await waitFor(() => expect(noopAddParticipant).toHaveBeenCalledTimes(1));
-    expect(noopAddParticipant.mock.calls[0]![0]).toEqual({ golferId: "erin", name: "Erin", tee: "white", courseHandicap: 5 });
-  });
-
-  it("signed in with no crews: degrades silently to the free-text form (a nicety, not a gate)", async () => {
-    signIn();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
-        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        throw new Error(`unexpected fetch ${path}`);
-      }),
-    );
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
-
-    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringContaining("/me/crews"), expect.anything()));
-    // No crews -> nothing to fetch a roster from -> never hits GET /crews/{id}.
-    expect(vi.mocked(fetch)).not.toHaveBeenCalledWith(expect.stringContaining("/crews/crew"), expect.anything());
     expect(screen.queryByText(/from your crew/i)).toBeNull();
     expect(screen.getByLabelText(/^name$/i)).toBeTruthy();
-  });
-
-  it("a failed listMyCrews degrades silently to the free-text form, never a thrown render", async () => {
-    signIn();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
-        if (path === "/me/crews") return fakeResponse(500, { code: "http-500", message: "boom" });
-        throw new Error(`unexpected fetch ${path}`);
-      }),
-    );
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onAddParticipant: noopAddParticipant });
-
-    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringContaining("/me/crews"), expect.anything()));
-    expect(screen.queryByText(/from your crew/i)).toBeNull();
-    expect(screen.getByLabelText(/^name$/i)).toBeTruthy();
-
-    // The free-text add still works end to end even after the degraded crew fetch.
-    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Fran" } });
-    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "blue" } });
-    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "3" } });
-    fireEvent.click(screen.getByRole("button", { name: /^add player$/i }));
-
-    await waitFor(() => expect(noopAddParticipant).toHaveBeenCalledWith({ name: "Fran", tee: "blue", courseHandicap: 3 }));
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/me/crews"), expect.anything());
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/crews/"), expect.anything());
   });
 });

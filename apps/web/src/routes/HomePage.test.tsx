@@ -1,21 +1,19 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GetMeResponse } from "@swng/contracts";
-import { crewId, golferId, roundId } from "@swng/domain";
+import { golferId, roundId } from "@swng/domain";
 import { credentialStore } from "../identity";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
-// M8 Task 6: HomePage now composes useAuth (the crews surface is golfer-gated), so the api.ts
-// module boundary is faked here too — getMe for the AuthProvider, listMyCrews/joinCrew for the
-// "Your crews" section. Realignment Task 13 adds getMyLiveRounds for the signed-in-with-a-
-// golfer "Your rounds" section (presence, not the device credentialStore list). Task 14 adds
+// M8 Task 6: HomePage composes useAuth, so the api.ts module boundary is faked here too — getMe
+// for the AuthProvider. Realignment Task 13 adds getMyLiveRounds for the signed-in-with-a-golfer
+// "Your rounds" section (presence, not the device credentialStore list). Task 14 adds
 // mintParticipantToken — the tap-to-enter re-mint for a live round this device holds no local
-// credential for.
+// credential for. Crews are a grouping/competition only (spec §11a, owner ruling) and moved off
+// this page entirely — HomePage never calls a crew endpoint at all anymore.
 vi.mock("../api", () => ({
   getMe: vi.fn(),
-  listMyCrews: vi.fn(),
-  joinCrew: vi.fn(),
   getMyLiveRounds: vi.fn(),
   mintParticipantToken: vi.fn(),
   ApiError: class ApiError extends Error {
@@ -30,14 +28,12 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, getMe, getMyLiveRounds, joinCrew, listMyCrews, mintParticipantToken } from "../api";
+import { ApiError, getMe, getMyLiveRounds, mintParticipantToken } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { HomePage } from "./HomePage";
 
 const mockedGetMe = vi.mocked(getMe);
-const mockedListMyCrews = vi.mocked(listMyCrews);
-const mockedJoinCrew = vi.mocked(joinCrew);
 const mockedGetMyLiveRounds = vi.mocked(getMyLiveRounds);
 const mockedMintParticipantToken = vi.mocked(mintParticipantToken);
 
@@ -49,13 +45,8 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
   vi.stubGlobal("sessionStorage", createMemoryStorage());
   mockedGetMe.mockReset();
-  mockedListMyCrews.mockReset();
-  mockedJoinCrew.mockReset();
   mockedGetMyLiveRounds.mockReset();
   mockedMintParticipantToken.mockReset();
-  // Default: no live rounds — the crews-focused suite below never sets this itself, so this
-  // keeps that suite's assertions (about "Your crews", not "Your rounds") from tripping over
-  // an unhandled mock return.
   mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
 });
 
@@ -82,7 +73,6 @@ const renderHome = () =>
       <MemoryRouter initialEntries={["/"]}>
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/crews/:crewId" element={<div>crew page probe</div>} />
           <Route path="/round/:roundId" element={<div>round page probe</div>} />
         </Routes>
       </MemoryRouter>
@@ -134,7 +124,6 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
     credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
 
     renderHome();
@@ -149,13 +138,11 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
     credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
 
     renderHome();
-    await screen.findByText(/your crews/i); // wait for the signed-in render to settle
 
-    expect(screen.getByText(/no rounds yet/i)).toBeTruthy();
+    expect(await screen.findByText(/no rounds yet/i)).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
   });
 
@@ -163,7 +150,6 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
     credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: null });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
 
     renderHome();
 
@@ -181,7 +167,6 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
   it("no local credential: mints a token, stores it via credentialStore, and enters — no raw Link navigation", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
     mockedMintParticipantToken.mockResolvedValue({ roundId: roundId("live-1"), token: "fresh-token", golferId: golferId("ann-g") });
 
@@ -200,7 +185,6 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
     credentialStore.save(roundId("live-1"), { token: "existing-token", golferId: golferId("ann-g"), name: "Ann G", joinCode: "XYZ123" });
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
 
     renderHome();
@@ -217,7 +201,6 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
   it("a 403 not-a-participant surfaces human copy, never the raw server text", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
     mockedMintParticipantToken.mockRejectedValue(new ApiError("not-a-participant", 403, "golfer ann-g is not a participant in round live-1"));
 
@@ -236,7 +219,6 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
   it("a 409 round-final surfaces finished copy with an archive link and removes the row from live rounds", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
     mockedMintParticipantToken.mockRejectedValue(new ApiError("round-final", 409, "round live-1 is finalized"));
 
@@ -268,7 +250,6 @@ describe("HomePage — GET /me loading window never flashes the device list (fix
     credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
     signIn();
     mockedGetMe.mockReturnValue(new Promise<GetMeResponse>(() => {})); // the loading window itself — never resolves
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
 
     renderHome();
 
@@ -289,7 +270,6 @@ describe("HomePage — GET /me loading window never flashes the device list (fix
         resolveGetMe = resolve;
       }),
     );
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
 
     renderHome();
@@ -313,7 +293,6 @@ describe("HomePage — GET /me loading window never flashes the device list (fix
         resolveGetMe = resolve;
       }),
     );
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
 
     renderHome();
     expect(screen.getByRole("status", { name: /loading your rounds/i })).toBeTruthy();
@@ -327,114 +306,46 @@ describe("HomePage — GET /me loading window never flashes the device list (fix
   });
 });
 
-// M8 Task 6: the signed-in home gains "Your crews" (GET /me/crews), "New crew", and
-// "Join a crew" — none of which exist signed out (every crew route is golfer-gated).
-describe("HomePage — crews", () => {
-  it("signed out: no crews section, no crew fetch", () => {
+// Owner ruling (spec §11a): a crew is a grouping/competition only — home is start a round, join
+// by code, your rounds, full stop. "Your crews"/"New crew"/crew join-by-code lived on this page
+// through M8; this pins the negative directly, in every auth state HomePage can render, not just
+// the signed-out case the untouched suites above happen to exercise.
+describe("HomePage — no crews section, in any auth state (spec §11a)", () => {
+  const queryAnyCrewText = (): boolean => screen.queryByText(/your crews|new crew|crew code|join crew/i) !== null;
+
+  it("signed out: no crews section anywhere on the page", () => {
     renderHome();
 
-    expect(screen.queryByText(/your crews/i)).toBeNull();
-    expect(mockedListMyCrews).not.toHaveBeenCalled();
+    expect(queryAnyCrewText()).toBe(false);
   });
 
-  it("signed in: lists crews from GET /me/crews, each linking to its crew page", async () => {
-    const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedListMyCrews.mockResolvedValue({
-      crews: [
-        { crewId: crewId("crew-1"), name: "Sunday crew", memberCount: 4 },
-        { crewId: crewId("crew-2"), name: "Work league", memberCount: 8 },
-      ],
-    });
+  it("signed in, GET /me still loading: no crews section anywhere on the page", () => {
+    signIn();
+    mockedGetMe.mockReturnValue(new Promise<GetMeResponse>(() => {})); // never resolves — the loading window itself
 
     renderHome();
 
-    const sundayLink = await screen.findByRole("link", { name: /sunday crew/i });
-    expect(sundayLink.getAttribute("href")).toBe("/crews/crew-1");
-    expect(screen.getByRole("link", { name: /work league/i }).getAttribute("href")).toBe("/crews/crew-2");
-    expect(mockedListMyCrews).toHaveBeenCalledWith(idToken);
+    expect(queryAnyCrewText()).toBe(false);
   });
 
-  it("signed in: offers a New crew link to /crews/new", async () => {
+  it("signed in, no golfer row yet: no crews section anywhere on the page", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: null });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
 
     renderHome();
+    await screen.findByText(/no rounds yet/i); // let the signed-in render settle
 
-    const link = await screen.findByRole("link", { name: /new crew/i });
-    expect(link.getAttribute("href")).toBe("/crews/new");
+    expect(queryAnyCrewText()).toBe(false);
   });
 
-  it("join a crew: code entry → POST /crews/join → navigates to the crew page", async () => {
-    const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
-    mockedJoinCrew.mockResolvedValue({ crew: { crewId: crewId("crew-9"), name: "Saturday crew", joinCode: "CRW999", members: [] } });
-
-    renderHome();
-    await screen.findByText(/your crews/i);
-
-    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "crw999" } });
-    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
-
-    await waitFor(() => expect(mockedJoinCrew).toHaveBeenCalledTimes(1));
-    // Uppercased before it rides the wire (joinCrewRequestSchema's canonical 6-char form —
-    // JoinRoundPage's own code-input precedent).
-    expect(mockedJoinCrew).toHaveBeenCalledWith(idToken, { code: "CRW999" });
-    await screen.findByText("crew page probe");
-  });
-
-  it("an unknown code surfaces humanized copy, never the raw server text", async () => {
+  it("signed in with a real account golfer: no crews section anywhere on the page", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
-    mockedJoinCrew.mockRejectedValue(new ApiError("unknown-crew", 404, 'no crew for join code "ZZZZZZ"'));
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
 
     renderHome();
-    await screen.findByText(/your crews/i);
+    await screen.findByText(/no rounds yet/i); // let the signed-in render settle
 
-    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "ZZZZZZ" } });
-    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/no crew found with that code/i);
-    expect(screen.queryByText(/no crew for join code/i)).toBeNull();
-  });
-
-  // M8 close-out fix #2: golfer-required means the signed-in account has no golfer profile
-  // yet — the join-code form collects no name, so retrying can never fix it. This arm points
-  // at the ONE place that fixes it instead of a dead-end "try again".
-  it("golfer-required points at the profile page instead of a dead-end retry", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: null });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
-    mockedJoinCrew.mockRejectedValue(new ApiError("golfer-required", 400, "golfer row required for sub sub-1"));
-
-    renderHome();
-    await screen.findByText(/your crews/i);
-
-    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "CRW999" } });
-    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/set your name on your profile/i);
-    expect(screen.queryByText(/sub sub-1/)).toBeNull();
-    const link = screen.getByRole("link", { name: /profile/i });
-    expect(link.getAttribute("href")).toBe("/profile");
-  });
-
-  it("a short code never submits", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: null });
-    mockedListMyCrews.mockResolvedValue({ crews: [] });
-
-    renderHome();
-    await screen.findByText(/your crews/i);
-
-    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "ABC" } });
-    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
-
-    expect(mockedJoinCrew).not.toHaveBeenCalled();
+    expect(queryAnyCrewText()).toBe(false);
   });
 });

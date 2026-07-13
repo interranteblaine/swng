@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 import { defaultAllowance, golferId } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
-import type { AddParticipantRequest, CrewMemberView, GameConfigInput } from "@swng/contracts";
-import { ApiError, getCrew, listMyCrews } from "../api";
-import { useAuth } from "../auth/useAuth";
+import type { AddParticipantRequest, GameConfigInput } from "@swng/contracts";
+import { ApiError } from "../api";
 import { ClaimAffordance } from "./ClaimAffordance";
 import { gameDots, gamePlayers, totalDots } from "./dots";
 
@@ -23,9 +22,6 @@ export interface SetupPanelProps {
   readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
 }
 
-// Exported (M8 Task 6): StandingGameEditor reuses this SAME label map + AddGameForm below
-// verbatim — a crew's standing-game preset editor needs the identical five-kind game-config
-// idiom this round-setup panel already has, not a second copy of it (conventions §0).
 export const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
   "stroke-play": "Stroke play",
   "singles-match": "Singles match",
@@ -100,7 +96,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onAddParticipant }: Set
         </ul>
       </div>
 
-      <AddPlayerForm existingGolferIds={new Set(state.participants.map((p) => p.golferId))} onAddParticipant={onAddParticipant} />
+      <AddPlayerForm onAddParticipant={onAddParticipant} />
 
       <AddGameForm participants={state.participants} onAddGame={onAddGame} />
     </section>
@@ -108,70 +104,36 @@ export function SetupPanel({ state, joinCode, onAddGame, onAddParticipant }: Set
 }
 
 interface AddPlayerFormProps {
-  readonly existingGolferIds: ReadonlySet<GolferId>;
   readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
 }
 
 // "Add player" (M8 Task 5, "host types Dave in", rebuilt architecture-realignment Task 11): name
-// + tee + courseHandicap -> POST /rounds/{roundId}/players, a free-text ghost seat by default.
-//
-// Round-is-a-sealed-leaf (Task 10) deleted the M8 "From your crew" one-tap quick-add outright —
-// it read the round's OWN (now-gone) RoundState.crewId, which no longer exists to read. Rebuilt
-// here identity-side instead (controller decision, task-11-brief.md): the round is NEVER
-// consulted — the source is the SIGNED-IN golfer's own crews (GET /me/crews via listMyCrews),
-// the first one's roster (GET /crews/{id} via getCrew), members not already seated in THIS round
-// rendered as one-tap quick-adds ahead of the free-text form below, exactly the M8 UX. A golfer
-// signed into more than one crew only sees the first — no picker exists yet (same "don't invent
-// one" restraint CrewPage's own add-member surface takes). Both fetches are a nicety, not a
-// gate, same JoinRoundPage peek-fallback precedent the M8 version already followed: signed out,
-// no crews, or any failure all degrade silently to the free-text form alone.
-function AddPlayerForm({ existingGolferIds, onAddParticipant }: AddPlayerFormProps) {
-  const { withAuth, signedIn } = useAuth();
-  const [crewMembers, setCrewMembers] = useState<readonly CrewMemberView[] | undefined>(undefined);
-  const [selected, setSelected] = useState<{ readonly golferId: GolferId; readonly name: string } | undefined>(undefined);
+// + tee + courseHandicap -> POST /rounds/{roundId}/players, a free-text ghost seat. Crews are a
+// grouping/competition only (spec §11a) — there is no crew-sourced quick-add here, and this form
+// never consults the round's or the signed-in golfer's crews at all.
+function AddPlayerForm({ onAddParticipant }: AddPlayerFormProps) {
   const [name, setName] = useState("");
   const [tee, setTee] = useState("");
   const [courseHandicap, setCourseHandicap] = useState("0");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  useEffect(() => {
-    setCrewMembers(undefined);
-    if (!signedIn) return; // nothing to prove crew membership with — free text only
-    void withAuth((token) => listMyCrews(token))
-      .then((response) => {
-        const first = response.crews[0];
-        if (!first) return undefined;
-        return withAuth((token) => getCrew(token, first.crewId));
-      })
-      .then((response) => setCrewMembers(response?.crew.members))
-      .catch(() => {}); // degrade silently — see the function's own doc comment
-  }, [signedIn, withAuth]);
-
-  const quickAddCandidates = (crewMembers ?? []).filter((m) => !existingGolferIds.has(m.golferId));
-
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const parsedHandicap = Number.parseInt(courseHandicap, 10);
-    const effectiveName = selected ? selected.name : name.trim();
+    const effectiveName = name.trim();
     if (!effectiveName || !tee.trim() || !Number.isInteger(parsedHandicap)) return;
 
     setSubmitting(true);
     setError(undefined);
     try {
-      await onAddParticipant({
-        name: effectiveName,
-        tee: tee.trim(),
-        courseHandicap: parsedHandicap,
-        ...(selected ? { golferId: selected.golferId } : {}),
-      });
+      await onAddParticipant({ name: effectiveName, tee: tee.trim(), courseHandicap: parsedHandicap });
       // No optimistic insert (SetupPanel's own precedent, same as AddGameForm below): the new
       // roster row appears once participant-joined round-trips through the session's fold.
       // Papercut 3 (M9 hardening): tee/courseHandicap deliberately survive a successful add —
       // a Saturday roster is almost always the same tee, so retyping it for every player added
-      // in a row is exactly the papercut this fixes. Only the identity fields (name/selection)
-      // reset, since the NEXT player is a different person by definition.
-      setSelected(undefined);
+      // in a row is exactly the papercut this fixes. Only the identity field (name) resets,
+      // since the NEXT player is a different person by definition.
       setName("");
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not add the player — try again.");
@@ -184,37 +146,10 @@ function AddPlayerForm({ existingGolferIds, onAddParticipant }: AddPlayerFormPro
     <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4 rounded-lg bg-slate-900 p-4">
       <h2 className="text-lg font-semibold">Add player</h2>
 
-      {quickAddCandidates.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <span className="text-sm text-slate-400">From your crew</span>
-          <div className="flex flex-wrap gap-2">
-            {quickAddCandidates.map((m) => (
-              <button
-                key={m.golferId}
-                type="button"
-                onClick={() => setSelected({ golferId: m.golferId, name: m.name })}
-                className="rounded-full bg-slate-800 px-3 py-1 text-sm font-medium text-emerald-400"
-              >
-                {m.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {selected ? (
-        <p className="flex items-center gap-2">
-          <span>Adding {selected.name}</span>
-          <button type="button" onClick={() => setSelected(undefined)} className="text-sm text-emerald-400 underline">
-            Change
-          </button>
-        </p>
-      ) : (
-        <label className="flex flex-col gap-1">
-          Name
-          <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
-        </label>
-      )}
+      <label className="flex flex-col gap-1">
+        Name
+        <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+      </label>
 
       <label className="flex flex-col gap-1">
         Tee
@@ -254,10 +189,7 @@ export interface AddGameFormProps {
 }
 
 // One flat form covering all five kinds — only the fields relevant to the chosen kind render,
-// matching this task's "functional clarity, not the Task 5 pad" styling bar (brief). Exported
-// (M8 Task 6): StandingGameEditor reuses this directly for the crew preset's game-config idiom
-// — `onAddGame` there just appends to the preset's local array instead of firing a request, the
-// same participants-in/GameConfigInput-out shape either way.
+// matching this task's "functional clarity, not the Task 5 pad" styling bar (brief).
 export function AddGameForm({ participants, onAddGame }: AddGameFormProps) {
   const [kind, setKind] = useState<Kind>("stableford");
   const [scoring, setScoring] = useState<"gross" | "net">("net");

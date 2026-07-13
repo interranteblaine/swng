@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { roundId } from "@swng/domain";
 import type { GolferRoundLine } from "@swng/domain";
@@ -12,12 +12,21 @@ const fakeResponse = (status: number, body: unknown): Response => ({ ok: status 
 
 // ProfilePage's history lines are now react-router <Link>s (projection-realignment Task 6) —
 // every render needs a Router ancestor, same MemoryRouter-wrapping idiom WatchPage.test.tsx's
-// own renderWithAuth uses.
+// own renderWithAuth uses. A `/crews/:crewId` probe route is registered too (the crews section
+// moved here from HomePage — spec §11a) so the join-crew success hand-off can be asserted the
+// same "read the outgoing navigation via a stub" way HomePage.test.tsx's own crews suite did.
+function CrewProbe() {
+  return <div data-testid="crew-probe">crew page probe</div>;
+}
+
 const renderProfilePage = () =>
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={["/profile"]}>
       <AuthProvider>
-        <ProfilePage />
+        <Routes>
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/crews/:crewId" element={<CrewProbe />} />
+        </Routes>
       </AuthProvider>
     </MemoryRouter>,
   );
@@ -69,6 +78,7 @@ describe("ProfilePage — signed in", () => {
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: null });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") return fakeResponse(200, { history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -90,6 +100,7 @@ describe("ProfilePage — signed in", () => {
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", declared: 15 } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") return fakeResponse(200, { index: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 1 }, history });
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -123,6 +134,7 @@ describe("ProfilePage — signed in", () => {
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", declared: 15 } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") return fakeResponse(200, { history });
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -153,6 +165,7 @@ describe("ProfilePage — signed in", () => {
           meCallCount += 1;
           return fakeResponse(200, meCallCount === 1 ? { golfer: null } : { golfer: { golferId: "ann", name: "Ann Updated", declared: 12 } });
         }
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") return fakeResponse(200, { history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -185,6 +198,7 @@ describe("ProfilePage — signed in", () => {
           } as unknown as Response;
         }
         if (path === "/me") return fakeResponse(200, { golfer: null });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") return fakeResponse(200, { history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -199,5 +213,169 @@ describe("ProfilePage — signed in", () => {
     expect(screen.getByRole("alert").textContent).toBe("Could not save your profile — try again.");
     expect(document.body.textContent).not.toMatch(/revision mismatch/);
     expect(document.body.textContent).not.toMatch(/g-abc123/);
+  });
+});
+
+// Moved here from HomePage (spec §11a, owner ruling: a crew is a grouping/competition only, off
+// the play surface) — same list/New-crew-link/join-by-code behavior and error copy HomePage's
+// own crews suite pinned before this move.
+describe("ProfilePage — crews", () => {
+  it("signed in: lists crews from GET /me/crews, each linking to its crew page", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/crews") {
+          return fakeResponse(200, {
+            crews: [
+              { crewId: "crew-1", name: "Sunday crew", memberCount: 4 },
+              { crewId: "crew-2", name: "Work league", memberCount: 8 },
+            ],
+          });
+        }
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    const sundayLink = await screen.findByRole("link", { name: /sunday crew/i });
+    expect(sundayLink.getAttribute("href")).toBe("/crews/crew-1");
+    expect(screen.getByRole("link", { name: /work league/i }).getAttribute("href")).toBe("/crews/crew-2");
+  });
+
+  it("offers a New crew link to /crews/new", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: null });
+        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    const link = await screen.findByRole("link", { name: /new crew/i });
+    expect(link.getAttribute("href")).toBe("/crews/new");
+  });
+
+  it("join a crew: code entry → POST /crews/join → navigates to the crew page", async () => {
+    signIn();
+    let joinBody: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/crews/join") {
+          joinBody = JSON.parse(String(init?.body));
+          return fakeResponse(200, { crew: { crewId: "crew-9", name: "Saturday crew", joinCode: "CRW999", members: [] } });
+        }
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+    await screen.findByText(/your crews/i);
+
+    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "crw999" } });
+    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
+
+    // Uppercased before it rides the wire (joinCrewRequestSchema's canonical 6-char form —
+    // JoinRoundPage's own code-input precedent).
+    await waitFor(() => expect(joinBody).toEqual({ code: "CRW999" }));
+    await screen.findByTestId("crew-probe");
+  });
+
+  it("an unknown code surfaces humanized copy, never the raw server text", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/crews/join") return fakeResponse(404, { code: "unknown-crew", message: 'no crew for join code "ZZZZZZ"' });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+    await screen.findByText(/your crews/i);
+
+    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "ZZZZZZ" } });
+    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/no crew found with that code/i);
+    expect(screen.queryByText(/no crew for join code/i)).toBeNull();
+  });
+
+  // M8 close-out fix #2: golfer-required means the signed-in account has no golfer profile yet
+  // — the join-code form collects no name, so retrying can never fix it. This arm points at the
+  // fix (a "Go to profile" link) even though we're already on Profile — byte-identical copy to
+  // the HomePage-era behavior this section carries forward.
+  it("golfer-required points at the profile page instead of a dead-end retry", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: null });
+        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/crews/join") return fakeResponse(400, { code: "golfer-required", message: "golfer row required for sub sub-1" });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+    await screen.findByText(/your crews/i);
+
+    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "CRW999" } });
+    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/set your name on your profile/i);
+    expect(screen.queryByText(/sub sub-1/)).toBeNull();
+    const link = screen.getByRole("link", { name: /go to profile/i });
+    expect(link.getAttribute("href")).toBe("/profile");
+  });
+
+  it("a short code never submits", async () => {
+    signIn();
+    let joinCalled = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: null });
+        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/crews/join") {
+          joinCalled = true;
+          return fakeResponse(200, { crew: { crewId: "crew-9", name: "Saturday crew", joinCode: "CRW999", members: [] } });
+        }
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+    await screen.findByText(/your crews/i);
+
+    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "ABC" } });
+    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
+
+    expect(joinCalled).toBe(false);
   });
 });

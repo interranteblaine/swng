@@ -12,7 +12,6 @@ import type {
   CreateSeasonRequest,
   JoinCrewRequest,
   JoinRoundRequest,
-  SaveStandingGameRequest,
   StartRoundRequest,
   UpdateMeRequest,
   VerifyTeeSetRequest,
@@ -46,7 +45,6 @@ import {
   mintParticipantToken,
   peekRound,
   removeCountedRound,
-  saveStandingGame,
   searchCourses,
   shareRound,
   terminateGame,
@@ -259,8 +257,8 @@ describe("getCrew", () => {
   });
 });
 
-// M8 Task 6: the crew home + "play the usual" surface — same requestJson + bearer-token idiom
-// as every golfer-gated call above.
+// M8 Task 6: the crew home surface — same requestJson + bearer-token idiom as every
+// golfer-gated call above.
 describe("createCrew", () => {
   it("POSTs { name } to /crews with the bearer token and parses a CreateCrewResponse", async () => {
     let seenUrl: string | undefined;
@@ -346,26 +344,6 @@ describe("addCrewMember", () => {
     expect(seenInit?.method).toBe("POST");
     expect(JSON.parse(String(seenInit?.body))).toEqual(input);
     expect(result.crew.members).toEqual([{ golferId: golferId("dave-g"), name: "Dave", role: "member", claimed: true }]);
-  });
-});
-
-describe("saveStandingGame", () => {
-  it("PUTs { standingGame } to /crews/{crewId}/standing-game with the bearer token and parses a SaveStandingGameResponse", async () => {
-    let seenUrl: string | undefined;
-    let seenInit: RequestInit | undefined;
-    stubFetch(async (url, init) => {
-      seenUrl = String(url);
-      seenInit = init;
-      return fakeResponse(200, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [] } });
-    });
-
-    const input: SaveStandingGameRequest = { standingGame: { courseId: courseId("course-1"), tee: "white", games: [] } };
-    const result = await saveStandingGame("tok-crew", crewId("crew-1"), input);
-
-    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/standing-game`);
-    expect(seenInit?.method).toBe("PUT");
-    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
-    expect(result.crew.crewId).toBe(crewId("crew-1"));
   });
 });
 

@@ -103,11 +103,12 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
   }
 
   // A ledger line's `name` is already server-resolved (getSeasonStandings.ts) — head-to-head
-  // still only carries raw golferIds, so this is the lookup from one to the other, same
-  // "Former member" honest-fallback idiom the old records ledger used (practically unreachable:
-  // every golferId in headToHead is also in ledger, both built from the same fold).
+  // still only carries raw golferIds, so this is the lookup from one to the other. Every
+  // golferId in headToHead is also a ledger line (both built from the same fold), so the raw id
+  // fallback below is unreachable in practice (crews are members-only now: standings only ever
+  // aggregate this season's own crew members).
   const nameByGolfer = new Map(standings.ledger.map((line) => [line.golferId, line.name]));
-  const nameOf = (id: GolferId): string => nameByGolfer.get(id) ?? "Former member";
+  const nameOf = (id: GolferId): string => nameByGolfer.get(id) ?? id;
 
   // Wins first, then points, both descending — the same standings order CrewPage's own (now
   // deleted) records table used.
@@ -140,13 +141,7 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
             <tbody>
               {sortedLedger.map((line) => (
                 <tr key={line.golferId} className="border-t border-slate-800">
-                  <td className="py-2 pr-2">
-                    {line.name}
-                    {/* A departed-or-never-a-member golfer still aggregates (standings never
-                        depend on membership history, getSeasonStandings.ts's own doc comment) —
-                        labeled "guest" rather than silently blending into the roster. */}
-                    {!line.member && <span className="ml-1 rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400">guest</span>}
-                  </td>
+                  <td className="py-2 pr-2">{line.name}</td>
                   <td className="py-2 pr-2">{line.rounds}</td>
                   <td className="py-2 pr-2">{`${line.wins}–${line.losses}–${line.halves}`}</td>
                   <td className="py-2 pr-2">{line.points}</td>

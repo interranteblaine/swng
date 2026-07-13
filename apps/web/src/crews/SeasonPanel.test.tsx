@@ -86,7 +86,7 @@ const renderPanel = (myGolferId = ANN) =>
   );
 
 describe("SeasonPanel — standings", () => {
-  it("renders the ledger sorted by wins then points (both descending), guest label for non-members", async () => {
+  it("renders the ledger sorted by wins then points (both descending)", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
@@ -106,9 +106,31 @@ describe("SeasonPanel — standings", () => {
     const table = await screen.findByRole("table");
     const rows = within(table).getAllByRole("row").slice(1); // drop the header row
     expect(rows.map((row) => within(row).getAllByRole("cell")[0]!.textContent)).toEqual([expect.stringContaining("Bo"), expect.stringContaining("Ann")]);
-    // Bo is not a current member — labeled "guest"; Ann (a current member) isn't.
-    expect(within(rows[0]!).getByText(/guest/i)).toBeTruthy();
-    expect(within(rows[1]!).queryByText(/guest/i)).toBeNull();
+  });
+
+  // Crews became accounts-only rosters (architecture-realignment Phase 3): the guest label is
+  // dead regardless of a ledger line's `member` flag — this pins the negative for BOTH values
+  // (the wire field itself only dies in a later task; the point here is the web never renders
+  // off it, whatever it happens to carry).
+  it("never renders a guest label, whatever the ledger line's own member flag says", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({
+      seasonId: "season-1",
+      name: "2026",
+      status: "open",
+      rounds: [],
+      ledger: [
+        { golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann", member: true },
+        { golferId: BO, rounds: 10, wins: 6, losses: 3, halves: 1, points: 180, skins: 7, name: "Bo", member: false },
+      ],
+      headToHead: [],
+    });
+
+    renderPanel();
+
+    await screen.findByRole("table");
+    expect(screen.queryByText(/guest/i)).toBeNull();
   });
 
   it("renders head-to-head as 'Ann 5–5–2 vs Bo', names resolved from the ledger", async () => {

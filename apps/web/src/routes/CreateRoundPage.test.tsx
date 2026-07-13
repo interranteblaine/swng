@@ -1,9 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { courseId, fixtureLinks18, fixtureWhite18, gameId, golferId, roundId } from "@swng/domain";
+import { courseId, fixtureLinks18, fixtureWhite18, golferId, roundId } from "@swng/domain";
 import { startRoundRequestSchema } from "@swng/contracts";
-import type { CourseView, CrewMemberView, GetMeResponse, StandingGameView } from "@swng/contracts";
+import type { CourseView, GetMeResponse } from "@swng/contracts";
 import { credentialStore } from "../identity";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
@@ -14,7 +14,6 @@ import { createMemoryStorage } from "../testSupport/memoryStorage";
 // "signed-in-with-no-golfer" as-self path calls it to mint a golfer before creating the round.
 vi.mock("../api", () => ({
   createRound: vi.fn(),
-  addGame: vi.fn(),
   getCourse: vi.fn(),
   searchCourses: vi.fn(),
   verifyTeeSet: vi.fn(),
@@ -32,13 +31,12 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { addGame, ApiError, createRound, getCourse, getMe, searchCourses, updateMe, verifyTeeSet } from "../api";
+import { ApiError, createRound, getCourse, getMe, searchCourses, updateMe, verifyTeeSet } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { CreateRoundPage } from "./CreateRoundPage";
 
 const mockedCreateRound = vi.mocked(createRound);
-const mockedAddGame = vi.mocked(addGame);
 const mockedGetCourse = vi.mocked(getCourse);
 const mockedSearchCourses = vi.mocked(searchCourses);
 const mockedVerifyTeeSet = vi.mocked(verifyTeeSet);
@@ -56,7 +54,6 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
   vi.stubGlobal("sessionStorage", createMemoryStorage());
   mockedCreateRound.mockReset();
-  mockedAddGame.mockReset();
   mockedGetCourse.mockReset();
   mockedSearchCourses.mockReset();
   mockedVerifyTeeSet.mockReset();
@@ -85,25 +82,12 @@ const signIn = (): string => {
   return idToken;
 };
 
-// Reads back whatever CreateRoundPage's own post-create navigate() hands the round page (the
+// A plain probe standing in for the real RoundPage (and its own session/transport machinery),
+// so these tests only assert that navigation landed on /round/:roundId (the
 // AddCoursePage/EditCoursePage "read the outgoing hand-off via a stub" precedent — see
-// AddCoursePage.test.tsx's own CreateStub), so this file can assert the seed-failure router
-// state's SHAPE without pulling the real RoundPage (and its own session/transport machinery)
-// into these tests. "round view" is kept as its own element with no sibling text so the
-// pre-existing `screen.getByText("round view")` assertions keep matching unchanged.
+// AddCoursePage.test.tsx's own CreateStub).
 function RoundStub() {
-  const location = useLocation();
-  const state = location.state as { seedFailures?: { total: number; failedLabels: readonly string[] } } | null;
-  return (
-    <div>
-      <p>round view</p>
-      {state?.seedFailures && (
-        <p>
-          seed failures: {state.seedFailures.failedLabels.length} of {state.seedFailures.total} — {state.seedFailures.failedLabels.join("; ")}
-        </p>
-      )}
-    </div>
-  );
+  return <p>round view</p>;
 }
 
 const renderCreate = (initialEntry: string | { pathname: string; state?: unknown } = "/create") =>
@@ -382,228 +366,3 @@ describe("CreateRoundPage — play as yourself", () => {
   });
 });
 
-// M8 Task 6, the product moment this milestone exists for: "Play the usual" lands here with the
-// crew's id + members + preset in router state (CrewPage's hand-off), and ONE further tap
-// (Create round) starts Saturday — every crew member seated, the preset's games seeded, nothing
-// retyped.
-describe("CreateRoundPage — play the usual (crew preset)", () => {
-  // A second tee on the card ("blue", the preset's own) so honoring the PRESET's tee is
-  // distinguishable from the page's default first-tee selection.
-  const blueTee = { ...fixtureWhite18, name: "blue" };
-  const twoTeeCard = { ...fixtureLinks18, teeSets: [fixtureWhite18, blueTee] };
-  const twoTeeCourseView: CourseView = {
-    courseId: courseId("course-18"),
-    name: fixtureLinks18.courseName,
-    card: twoTeeCard,
-    teeSets: [
-      { name: "white", version: 1, provenance: "community", enteredBy: "Ann", verifiedBy: [] },
-      { name: "blue", version: 1, provenance: "community", enteredBy: "Ann", verifiedBy: [] },
-    ],
-  };
-
-  const members: readonly CrewMemberView[] = [
-    { golferId: golferId("ann-g"), name: "Ann G", role: "organizer", claimed: true },
-    { golferId: golferId("bo-g"), name: "Bo", role: "member", claimed: false },
-    { golferId: golferId("cy-g"), name: "Cy", role: "member", claimed: false },
-  ];
-
-  const standingGame: StandingGameView = {
-    courseId: courseId("course-18"),
-    tee: "blue",
-    games: [
-      { kind: "singles-match", a: golferId("ann-g"), b: golferId("bo-g"), allowance: 1 },
-      { kind: "stableford", players: [golferId("ann-g"), golferId("cy-g")], allowance: 0.95 },
-    ],
-  };
-
-  const crewPreset = { members, standingGame };
-
-  const arrange = (): string => {
-    const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedGetCourse.mockResolvedValue({ course: twoTeeCourseView });
-    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-usual"), joinCode: "USUAL1", token: "tok-usual", golferId: golferId("ann-g") });
-    mockedAddGame.mockResolvedValue({ gameId: gameId("game-x"), seq: 5 });
-    return idToken;
-  };
-
-  it("one remaining tap: pre-filled from the preset, a single Create-round click sends the full crew request and seeds the preset's games", async () => {
-    const idToken = arrange();
-
-    renderCreate({ pathname: "/create", state: { crewPreset } });
-    await screen.findByText(fixtureLinks18.courseName);
-    await screen.findByText(/playing as/i);
-
-    // The prefill is all on screen before any interaction: both preset games described by name.
-    expect(screen.getByText(/singles match — ann g vs bo/i)).toBeTruthy();
-    expect(screen.getByText(/stableford — ann g, cy/i)).toBeTruthy();
-
-    // The ONE remaining tap — no other input touched first.
-    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
-
-    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
-    const [body, token] = mockedCreateRound.mock.calls[0]!;
-    expect(body).toEqual({
-      card: twoTeeCard, // the fetched card verbatim (the freeze source), preset course honored
-      host: { name: "Ann G", tee: "blue", courseHandicap: 0 }, // you as-self; preset tee; CH prefill 0
-      golferId: golferId("ann-g"),
-      // No crewId: round-is-a-sealed-leaf — the created round never names the crew.
-      players: [
-        { name: "Bo", tee: "blue", courseHandicap: 0, golferId: golferId("bo-g") },
-        { name: "Cy", tee: "blue", courseHandicap: 0, golferId: golferId("cy-g") },
-      ],
-    });
-    expect(token).toBe(idToken);
-    expect(() => startRoundRequestSchema.parse(body)).not.toThrow();
-
-    // Games arrive without retyping: addGame per surviving preset game, with the create
-    // response's own participant token, in preset order.
-    await waitFor(() => expect(mockedAddGame).toHaveBeenCalledTimes(2));
-    expect(mockedAddGame).toHaveBeenNthCalledWith(1, roundId("round-usual"), "tok-usual", standingGame.games[0]);
-    expect(mockedAddGame).toHaveBeenNthCalledWith(2, roundId("round-usual"), "tok-usual", standingGame.games[1]);
-
-    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
-    expect(credentialStore.load(roundId("round-usual"))).toEqual({ token: "tok-usual", golferId: golferId("ann-g"), name: "Ann G", joinCode: "USUAL1" });
-  });
-
-  it("removing a player before creating reactively drops the games that reference them (applyStandingGame over the CURRENT roster)", async () => {
-    arrange();
-
-    renderCreate({ pathname: "/create", state: { crewPreset } });
-    await screen.findByText(fixtureLinks18.courseName);
-    await screen.findByText(/playing as/i);
-    expect(screen.getByText(/singles match — ann g vs bo/i)).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Remove Bo" }));
-
-    // The singles match referencing Bo disappears from the games list; the stableford
-    // (Ann G + Cy, both still present) stays.
-    expect(screen.queryByText(/singles match — ann g vs bo/i)).toBeNull();
-    expect(screen.getByText(/stableford — ann g, cy/i)).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
-
-    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
-    const [body] = mockedCreateRound.mock.calls[0]!;
-    expect(body.players).toEqual([{ name: "Cy", tee: "blue", courseHandicap: 0, golferId: golferId("cy-g") }]);
-
-    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
-    // Only the surviving game was seeded — never a renumbered/partial singles match.
-    expect(mockedAddGame).toHaveBeenCalledTimes(1);
-    expect(mockedAddGame).toHaveBeenCalledWith(roundId("round-usual"), "tok-usual", standingGame.games[1]);
-  });
-
-  it("prefilled tees and handicaps stay editable per player before the tap", async () => {
-    arrange();
-
-    renderCreate({ pathname: "/create", state: { crewPreset } });
-    await screen.findByText(fixtureLinks18.courseName);
-    await screen.findByText(/playing as/i);
-
-    fireEvent.change(screen.getByLabelText("Tee for Cy"), { target: { value: "white" } });
-    fireEvent.change(screen.getByLabelText("Course handicap for Cy"), { target: { value: "7" } });
-    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
-
-    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
-    const [body] = mockedCreateRound.mock.calls[0]!;
-    expect(body.players).toEqual([
-      { name: "Bo", tee: "blue", courseHandicap: 0, golferId: golferId("bo-g") },
-      { name: "Cy", tee: "white", courseHandicap: 7, golferId: golferId("cy-g") },
-    ]);
-  });
-
-  it("a preset with no tee falls back to free-text player tees (empty until typed) and blocks the tap until they're filled", async () => {
-    arrange();
-    const tvNoTee: StandingGameView = { courseId: courseId("course-18"), games: standingGame.games };
-
-    renderCreate({ pathname: "/create", state: { crewPreset: { ...crewPreset, standingGame: tvNoTee } } });
-    await screen.findByText(fixtureLinks18.courseName);
-    await screen.findByText(/playing as/i);
-
-    // Host tee fell back to the card's first tee (the page's own default); player tees are
-    // empty free text, so the submit guard holds until they're typed.
-    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
-    expect(mockedCreateRound).not.toHaveBeenCalled();
-
-    fireEvent.change(screen.getByLabelText("Tee for Bo"), { target: { value: "white" } });
-    fireEvent.change(screen.getByLabelText("Tee for Cy"), { target: { value: "white" } });
-    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
-
-    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
-    const [body] = mockedCreateRound.mock.calls[0]!;
-    expect(body.host.tee).toBe("white");
-    expect(body.players).toEqual([
-      { name: "Bo", tee: "white", courseHandicap: 0, golferId: golferId("bo-g") },
-      { name: "Cy", tee: "white", courseHandicap: 0, golferId: golferId("cy-g") },
-    ]);
-  });
-
-  // The review finding this fix closes: a per-game addGame failure in the seed loop used to be
-  // caught and dropped with nothing to show for it — exactly wrong for "one-tap Saturday",
-  // where the golfer is least likely to double-check Setup on their own. Three games (not the
-  // usual two) so this arm can distinguish "the one that failed" from "the two that didn't",
-  // same shape as the fix's own "2 of 3" style copy.
-  it("a mid-loop addGame rejection still navigates to the round, carrying the failed game's own label as router state (never a raw server string)", async () => {
-    arrange();
-    const threeGameStandingGame: StandingGameView = {
-      ...standingGame,
-      games: [...standingGame.games, { kind: "skins", players: [golferId("ann-g"), golferId("bo-g"), golferId("cy-g")], allowance: 1 }],
-    };
-    // Second of three addGame calls rejects — the singles-match (1st) and skins (3rd) seed
-    // cleanly; only the stableford (2nd) fails.
-    mockedAddGame
-      .mockResolvedValueOnce({ gameId: gameId("game-1"), seq: 5 })
-      .mockRejectedValueOnce(new ApiError("internal", 500, "raw db failure xyz"))
-      .mockResolvedValueOnce({ gameId: gameId("game-3"), seq: 7 });
-
-    renderCreate({ pathname: "/create", state: { crewPreset: { ...crewPreset, standingGame: threeGameStandingGame } } });
-    await screen.findByText(fixtureLinks18.courseName);
-    await screen.findByText(/playing as/i);
-
-    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
-
-    // Navigation happens regardless of the failure — a dropped preset game must never strand
-    // the golfer on this page (a re-submit would mint a SECOND round).
-    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
-    await waitFor(() => expect(mockedAddGame).toHaveBeenCalledTimes(3));
-
-    // The count, and the failed game's own describeStandingGame label — the SAME text the
-    // prefill Games list renders — carried through router state; never the raw ApiError text
-    // ("raw db failure xyz") from the rejection above.
-    expect(screen.getByText(/seed failures: 1 of 3/i)).toBeTruthy();
-    expect(screen.getByText(/stableford — ann g, cy/i)).toBeTruthy();
-    expect(screen.queryByText(/raw db failure/i)).toBeNull();
-  });
-
-  // Papercut 1 (M9 hardening): a corrupted preset naming the SAME golferId twice (defensive —
-  // the normal "remove a player" UI can never actually produce this) must never reach the
-  // network; the tap stays disabled with an honest inline reason.
-  it("a preset naming the SAME golferId twice: submit stays disabled with inline copy, never reaches the network", async () => {
-    arrange();
-    const dupedMembers: readonly CrewMemberView[] = [...members, { golferId: golferId("bo-g"), name: "Bo (duplicate)", role: "member", claimed: false }];
-
-    renderCreate({ pathname: "/create", state: { crewPreset: { ...crewPreset, members: dupedMembers } } });
-    await screen.findByText(fixtureLinks18.courseName);
-    await screen.findByText(/playing as/i);
-
-    expect(screen.getByRole("alert").textContent).toMatch(/appears twice/i);
-    const submitButton = screen.getByRole("button", { name: /create round/i });
-    expect(submitButton.hasAttribute("disabled")).toBe(true);
-
-    fireEvent.click(submitButton);
-    expect(mockedCreateRound).not.toHaveBeenCalled();
-  });
-
-  it("no addGame failures: no seed-failure router state is sent at all", async () => {
-    arrange();
-
-    renderCreate({ pathname: "/create", state: { crewPreset } });
-    await screen.findByText(fixtureLinks18.courseName);
-    await screen.findByText(/playing as/i);
-
-    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
-
-    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
-    expect(screen.queryByText(/seed failures/i)).toBeNull();
-  });
-});

@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router";
-import type { GetMyRecordResponse } from "@swng/contracts";
+import { Link, useNavigate } from "react-router";
+import type { GetMyRecordResponse, ListMyCrewsResponse } from "@swng/contracts";
 import type { CourseId, GolferRoundLine } from "@swng/domain";
 import { effectiveIndex } from "@swng/domain";
-import { getCourse, getMyRecord, updateMe } from "../api";
+import { ApiError, getCourse, getMyRecord, joinCrew, listMyCrews, updateMe } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 
@@ -84,6 +84,7 @@ function DistributionBars({ history }: { readonly history: readonly GolferRoundL
 // brand-new sub, via updateMe.
 export function ProfilePage() {
   const auth = useAuth();
+  const navigate = useNavigate();
   // Destructured so the record-fetch effect below lists a stable function reference as its
   // dep (withAuth's own useCallback identity, useAuth.ts) rather than the whole `auth` object,
   // which is a fresh literal every AuthProvider render (session/useRoundSession.ts's `sync`/
@@ -99,6 +100,21 @@ export function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+
+  // Crews section (moved here from HomePage — spec §11a, owner ruling: a crew is a
+  // grouping/competition only, so it lives on the profile, not the play surface). Same shape as
+  // HomePage's own crews block before this move: undefined = signed out / not loaded (yet or
+  // failed) — the list renders only from a real response. The fetch is a nicety: a transient
+  // failure just leaves the section's list empty rather than blocking the "New crew"/"Join a
+  // crew" affordances that need no data at all.
+  const [crews, setCrews] = useState<ListMyCrewsResponse["crews"] | undefined>(undefined);
+  const [joinCode, setJoinCode] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | undefined>(undefined);
+  // golfer-required is its own arm, not folded into joinError (M8 close-out fix #2): this
+  // form collects no name, so "try again" is a dead end — the honest fix is a link to /profile —
+  // moot on THIS page (we're already here), but the copy stays honest either way.
+  const [joinGolferRequired, setJoinGolferRequired] = useState(false);
 
   // Seeds the form from the golfer row exactly once it's known (undefined = still
   // loading/signed out; null or a real view both count as "known") — never re-syncs after
@@ -124,6 +140,49 @@ export function ProfilePage() {
       .then(setRecord)
       .catch(() => {}); // withAuth already handles a terminal 401 (signs out); anything else just leaves the record unset
   }, [auth.signedIn, withAuth]);
+
+  useEffect(() => {
+    if (!auth.signedIn) {
+      setCrews(undefined);
+      return;
+    }
+    void withAuth((token) => listMyCrews(token))
+      .then((response) => setCrews(response.crews))
+      .catch(() => {}); // degrade silently — see the state's own comment
+  }, [auth.signedIn, withAuth]);
+
+  // joinCrewRequestSchema expects the canonical uppercase 6-char form — uppercase here so a
+  // golfer typing lowercase never hits a validation error on something this trivial to fix
+  // (JoinRoundPage's own code-input precedent).
+  const upperCode = joinCode.trim().toUpperCase();
+
+  const submitJoin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (upperCode.length !== 6 || joining) return;
+
+    setJoining(true);
+    setJoinError(undefined);
+    setJoinGolferRequired(false);
+    try {
+      const response = await withAuth((token) => joinCrew(token, { code: upperCode }));
+      navigate(`/crews/${response.crew.crewId}`);
+    } catch (caught) {
+      // Humanized 404 copy, never the raw server text (the M7 discipline — the raw message
+      // echoes the typed code back in server vocabulary, not something a golfer acts on).
+      // golfer-required gets its own honest arm below instead of the generic retry: this form
+      // collects no name, so retrying can never fix it.
+      if (caught instanceof ApiError && caught.code === "golfer-required") {
+        setJoinGolferRequired(true);
+      } else {
+        setJoinError(
+          caught instanceof ApiError && caught.code === "unknown-crew"
+            ? "No crew found with that code — check it with whoever shared it."
+            : "Could not join the crew — try again.",
+        );
+      }
+      setJoining(false);
+    }
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -215,6 +274,59 @@ export function ProfilePage() {
           {saving ? "Saving…" : "Save"}
         </button>
       </form>
+
+      {/* Crews (moved here from HomePage — spec §11a, owner ruling: a crew is a
+          grouping/competition only, not part of the play surface). Same list/New crew/join-code
+          affordances HomePage carried, byte-identical error copy. */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-slate-300">Your crews</h2>
+        {crews && crews.length > 0 && (
+          <ul className="flex flex-col gap-2">
+            {crews.map((crew) => (
+              <li key={crew.crewId}>
+                <Link to={`/crews/${crew.crewId}`} className="flex items-center justify-between rounded-lg bg-slate-800 px-4 py-3">
+                  <span>{crew.name}</span>
+                  <span className="text-sm text-slate-400">
+                    {crew.memberCount} member{crew.memberCount === 1 ? "" : "s"}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <Link to="/crews/new" className="self-start text-emerald-400 underline">
+          New crew
+        </Link>
+
+        <form onSubmit={(event) => void submitJoin(event)} className="flex flex-col gap-2">
+          <label className="flex flex-col gap-1">
+            Crew code
+            <input
+              value={joinCode}
+              onChange={(event) => setJoinCode(event.target.value)}
+              maxLength={6}
+              className="rounded-lg bg-slate-800 p-3 text-lg uppercase tracking-widest"
+            />
+          </label>
+          {joinGolferRequired && (
+            <p role="alert" className="text-red-400">
+              Set your name on your profile before joining a crew.{" "}
+              <Link to="/profile" className="underline">
+                Go to profile
+              </Link>
+            </p>
+          )}
+          {joinError && (
+            <p role="alert" className="text-red-400">
+              {joinError}
+            </p>
+          )}
+          <button type="submit" disabled={joining} className="self-start rounded-lg bg-slate-800 px-4 py-3 font-semibold disabled:opacity-50">
+            Join crew
+          </button>
+        </form>
+      </section>
 
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Your record</h2>

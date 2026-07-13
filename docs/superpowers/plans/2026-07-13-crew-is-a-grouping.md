@@ -26,8 +26,12 @@
 - Modify: `packages/application/src/rounds/golferIdentity.ts` (co-membership arm DELETED — a claimed golfer whose sub doesn't match the caller is `golfer-claimed`, full stop; ctx stays `{ sub? }`), `startRound.ts`/`joinRound.ts`/`addParticipant.ts` (drop `crewStore`/`golfer-consent` deps if now unused), `packages/lambda/src/http/routes.ts` + `dispatch.ts` + `compositionRoot.ts` (route removed — update `HTTP_ROUTES`, routesParity, count pins DOWN by one), `packages/contracts/src/crews.ts` (Crew wire type loses `standingGame`; a stored doc WITH the attribute still round-trips — the store returns the whole doc, so pin a test that `get` on a legacy doc yields a Crew without the field and `put` never writes it back… check how the adapter maps the doc and keep it honest)
 - Tests: golferIdentity matrix rewritten (as-self and unclaimed arms byte-identical; claimed-non-self → `golfer-claimed` ALWAYS — including for crew-mates, pinned explicitly); crew slice tests lose standing-game cases; contract test: legacy crew doc with `standingGame` attribute reads clean.
 
+**Also in this task — standings aggregate the current roster ONLY (spec §11a, owner call):**
+- `packages/application/src/crews/getSeasonStandings.ts`: before the fold, filter each contribution's `lines` to golferIds on the CURRENT roster and its `headToHead` to pairs where BOTH are members; the domain fold (`aggregateSeason`) stays pure and untouched. The wire response drops the `member: boolean` flag (every row is a member by construction) — ripple the contract type + schema.
+- Tests: a counted round containing a ghost/guest yields NO row for them; a departed member's lines vanish from standings while the counted round remains listed; re-adding the member restores their lines (compute-on-read reversibility pinned).
+
 **Interfaces:**
-- Produces: `resolveSuppliedGolfer(deps: { golferStore })` — crewStore GONE from its deps. Round use cases have zero crew imports (the proof-grep).
+- Produces: `resolveSuppliedGolfer(deps: { golferStore })` — crewStore GONE from its deps. Round use cases have zero crew imports (the proof-grep). `SeasonStandingsResponse.ledger` rows are `SeasonLedgerLine & { name }` (no `member` flag).
 
 - [ ] Steps: failing tests → implement deletions → `pnpm validate` + `pnpm test:contract` → proof-grep `crewStore` in rounds/ → commit `feat(domain,contracts,application,lambda): a crew is a grouping — the standing game and crew-consent seating are deleted`
 
@@ -36,7 +40,8 @@
 **Files:**
 - Delete: `apps/web/src/crews/StandingGameEditor.tsx` (+ test)
 - Modify: `apps/web/src/crews/CrewPage.tsx` ("The standing game" section + "Play the usual" button gone; page = name, code, roster, seasons, leave), `apps/web/src/round/SetupPanel.tsx` (crew quick-add gone — ghost free-text form only; delete the listMyCrews/getCrew fetches), `apps/web/src/routes/HomePage.tsx` ("Your crews" section REMOVED — home = start a round, join by code, your rounds), `apps/web/src/routes/ProfilePage.tsx` (gains the crews section exactly as home had it: list of my crews, "New crew" link, join-by-code input), `apps/web/src/routes/CreateRoundPage.tsx` (any play-the-usual prefill plumbing gone — check `location.state`/params it consumed and the CrewPage navigation that fed it)
-- Tests: HomePage (no crews section, all states), ProfilePage (crews section renders + join works), CrewPage (no standing game/play-the-usual), SetupPanel (ghost form only, no crew fetches — pin with a no-fetch assertion).
+- Also: `apps/web/src/crews/SeasonPanel.tsx` drops the "guest" labeling entirely (every standings row is a member by construction; the wire flag is gone per Task 1).
+- Tests: HomePage (no crews section, all states), ProfilePage (crews section renders + join works), CrewPage (no standing game/play-the-usual), SeasonPanel (no guest label anywhere), SetupPanel (ghost form only, no crew fetches — pin with a no-fetch assertion).
 
 - [ ] Steps: failing tests → implement → `pnpm validate` → full proof-grep from Global Constraints → commit `feat(web): crews are a grouping — off the home page, out of round setup`
 

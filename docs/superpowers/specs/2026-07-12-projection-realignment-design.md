@@ -199,10 +199,16 @@ a grouping/competition, not a round-template.** Product coupling is coupling. Re
 - **Crews leave the home page** — home is the play surface (start, join, your rounds). Crews
   (list, create, join-by-code) live on the profile page, with the golfer's other records.
 
+- **Standings aggregate the CURRENT ROSTER ONLY** (owner call, same day, on seeing a guest in
+  a live aggregate): ledger lines for member golferIds only; head-to-head only where both are
+  members. Ghosts, guests, and departed members never appear — no "guest" labels, no "Former
+  member" copy. Because standings are computed on read this is pure aggregation scope: counted
+  rounds are untouched, leaving drops you from the display, rejoining brings every line back.
+
 What a crew is, entirely: a name, a join code, a roster of accounts, seasons, counted rounds,
-standings computed from them, leave. `docs/product.md` §5/§6 ("play the usual," "crew members
-in one tap," "a roster, a standing game, and a ledger") are corrected by this same call — the
-owner's decision supersedes the product doc's prior text.
+standings computed from them (members only), leave. `docs/product.md` §5/§6 ("play the usual,"
+"crew members in one tap," "a roster, a standing game, and a ledger") are corrected by this
+same call — the owner's decision supersedes the product doc's prior text.
 
 ## 12. Implementation path — four steps, each its own reviewed task chain
 

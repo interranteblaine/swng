@@ -11,15 +11,18 @@ import type {
   AddParticipantResponse,
   AddTeeSetRequest,
   AddTeeSetResponse,
+  AppendCountedRoundRequest,
+  AppendCountedRoundResponse,
   ClaimGolferRequest,
   CreateCourseRequest,
   CreateCourseResponse,
   CreateCrewRequest,
   CreateCrewResponse,
+  CreateSeasonRequest,
+  CreateSeasonResponse,
   EventsResponse,
   FinalizeRoundResponse,
   GetCourseResponse,
-  GetCrewRecordsResponse,
   GetCrewResponse,
   GetMeResponse,
   GetMyRecordResponse,
@@ -30,13 +33,17 @@ import type {
   JoinCrewResponse,
   JoinRoundRequest,
   JoinRoundResponse,
+  LeaveCrewResponse,
   ListMyCrewsResponse,
+  ListSeasonsResponse,
   PeekRoundResponse,
   RecordScoreRequest,
   RecordScoreResponse,
+  RemoveCountedRoundResponse,
   SaveStandingGameRequest,
   SaveStandingGameResponse,
   SearchCoursesResponse,
+  SeasonStandingsResponse,
   ShareLinkResponse,
   StartRoundRequest,
   StartRoundResponse,
@@ -51,9 +58,11 @@ import {
   addGameRequestSchema,
   addParticipantRequestSchema,
   addTeeSetRequestSchema,
+  appendCountedRoundRequestSchema,
   claimGolferRequestSchema,
   createCourseRequestSchema,
   createCrewRequestSchema,
+  createSeasonRequestSchema,
   joinCrewRequestSchema,
   joinRoundRequestSchema,
   recordScoreRequestSchema,
@@ -114,7 +123,16 @@ export interface UseCases {
   addCrewMember: (claims: AccountClaims, id: CrewId, command: AddCrewMemberRequest) => Promise<AddCrewMemberResponse>;
   saveStandingGame: (claims: AccountClaims, id: CrewId, command: SaveStandingGameRequest) => Promise<SaveStandingGameResponse>;
   joinCrewByCode: (claims: AccountClaims, command: JoinCrewRequest) => Promise<JoinCrewResponse>;
-  getCrewRecords: (claims: AccountClaims, id: CrewId, season: number) => Promise<GetCrewRecordsResponse>;
+  // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read, plus
+  // leave. Every one is "golfer"-gated with member-only authorization inside application
+  // (crews/membership.ts). `seasonId` rides in the path as an opaque string (a server-minted
+  // UUID — never branded, never parsed), unlike roundId which keeps its brand.
+  createSeason: (claims: AccountClaims, id: CrewId, command: CreateSeasonRequest) => Promise<CreateSeasonResponse>;
+  listSeasons: (claims: AccountClaims, id: CrewId) => Promise<ListSeasonsResponse>;
+  appendCountedRound: (claims: AccountClaims, id: CrewId, seasonId: string, command: AppendCountedRoundRequest) => Promise<AppendCountedRoundResponse>;
+  removeCountedRound: (claims: AccountClaims, id: CrewId, seasonId: string, roundId: RoundId) => Promise<RemoveCountedRoundResponse>;
+  getSeasonStandings: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<SeasonStandingsResponse>;
+  leaveCrew: (claims: AccountClaims, id: CrewId) => Promise<LeaveCrewResponse>;
 }
 
 // What a route handler sees once the dispatcher has matched the path, verified auth, and
@@ -136,8 +154,10 @@ export interface RouteContext {
 }
 
 export interface Route {
-  // "PUT" only backs PUT /me (M7 Task 5) — every other route in this table is GET or POST.
-  readonly method: "GET" | "POST" | "PUT";
+  // "PUT" backs PUT /me (M7 Task 5); "DELETE" backs DELETE /crews/{crewId}/seasons/{seasonId}/
+  // rounds/{roundId} (architecture-realignment Task 9, un-count a round) — every other route is
+  // GET or POST.
+  readonly method: "GET" | "POST" | "PUT" | "DELETE";
   readonly path: string; // template with `{name}` segments, e.g. "/rounds/{roundId}/games"
   readonly schema?: z.ZodType;
   // "participant" = a round-scoped token minted off a join code (no account required);
@@ -208,14 +228,6 @@ const parseJoinCode = (raw: string | undefined): string => {
   }
   return raw;
 };
-
-// GET /crews/{crewId}/records?season= (M8 Task 4): the clock stays at THIS edge, never
-// application — getCrewRecords.ts's own signature takes a required `season: number` and
-// never reads a Clock itself, so a missing (or empty, papercut 2) ?season= resolves to "now"
-// right here, once, and the use case always receives an explicit value. A supplied season
-// that isn't an integer is the same "reject the malformed shape at the boundary" discipline
-// as parseSinceSeq/parseLimit above, not a silent coercion.
-const parseSeason = (raw: string | undefined): number => parseOptionalInt(raw, "season") ?? new Date().getUTCFullYear();
 
 export const buildRoutes = (useCases: UseCases): readonly Route[] => [
   {
@@ -455,11 +467,54 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     successStatus: 200, // replaces whatever preset was there (saveStandingGame.ts's own doc comment) — an act on an existing resource, not a mint.
     handler: async (ctx, body) => useCases.saveStandingGame(ctx.account!, crewId(ctx.pathParams.crewId!), body as SaveStandingGameRequest),
   },
+  // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave.
+  // Every route is "golfer"-gated; member-only authorization lives in application
+  // (crews/membership.ts), never re-checked here. `seasonId` is an opaque path string (a
+  // server-minted UUID) — passed through verbatim, never branded/parsed the way roundId is.
+  {
+    method: "POST",
+    path: "/crews/{crewId}/seasons",
+    schema: createSeasonRequestSchema,
+    auth: "golfer",
+    successStatus: 201,
+    handler: async (ctx, body) => useCases.createSeason(ctx.account!, crewId(ctx.pathParams.crewId!), body as CreateSeasonRequest),
+  },
   {
     method: "GET",
-    path: "/crews/{crewId}/records",
+    path: "/crews/{crewId}/seasons",
     auth: "golfer",
     successStatus: 200,
-    handler: async (ctx) => useCases.getCrewRecords(ctx.account!, crewId(ctx.pathParams.crewId!), parseSeason(ctx.query.season)),
+    handler: async (ctx) => useCases.listSeasons(ctx.account!, crewId(ctx.pathParams.crewId!)),
+  },
+  {
+    method: "POST",
+    path: "/crews/{crewId}/seasons/{seasonId}/rounds",
+    schema: appendCountedRoundRequestSchema,
+    auth: "golfer",
+    successStatus: 201, // counts a new round into the season — a mint, same spirit as JoinRound/addGame.
+    handler: async (ctx, body) =>
+      useCases.appendCountedRound(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!, body as AppendCountedRoundRequest),
+  },
+  {
+    method: "DELETE",
+    path: "/crews/{crewId}/seasons/{seasonId}/rounds/{roundId}",
+    auth: "golfer",
+    successStatus: 200, // idempotent un-count (removing an uncounted round is a no-op) — an act on an existing resource, not a mint.
+    handler: async (ctx) =>
+      useCases.removeCountedRound(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!, roundId(ctx.pathParams.roundId!)),
+  },
+  {
+    method: "GET",
+    path: "/crews/{crewId}/seasons/{seasonId}/standings",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getSeasonStandings(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!),
+  },
+  {
+    method: "POST",
+    path: "/crews/{crewId}/leave",
+    auth: "golfer",
+    successStatus: 200, // removes the caller's member item — an act on an existing resource, not a mint.
+    handler: async (ctx) => useCases.leaveCrew(ctx.account!, crewId(ctx.pathParams.crewId!)),
   },
 ];

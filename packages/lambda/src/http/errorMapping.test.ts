@@ -192,3 +192,31 @@ describe("toHttpError — M9 Task 3 read-only-token", () => {
     expect(JSON.parse(result.body)).toEqual({ code: "read-only-token", message: "read-only-token" });
   });
 });
+
+// Architecture-realignment Task 8 debt (paid here per task-9-brief.md) + Task 9's own crew
+// season/counted-round/standings codes — each constructed exactly as its throw site does
+// (CrewStore.addCountedRound throws round-already-counted; the season use cases throw the rest).
+describe("toHttpError — crew seasons + counted rounds (architecture-realignment Tasks 8/9)", () => {
+  const logger = createNullLogger();
+
+  it("maps round-already-counted to 409 (Task 8 debt)", () => {
+    const result = toHttpError(new ApplicationError("round-already-counted", "round r-1 is already counted in season s-1 of crew c-1"), logger);
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body)).toEqual({ code: "round-already-counted", message: "round r-1 is already counted in season s-1 of crew c-1" });
+  });
+
+  const codeToStatus = [
+    ["invalid-season-name", 400],
+    ["season-not-found", 404],
+    ["season-closed", 409],
+    ["did-not-play", 403],
+    ["not-the-appender", 403],
+    ["ghost-not-addable", 409],
+  ] as const;
+
+  it.each(codeToStatus)("maps %s to %d", (code, status) => {
+    const result = toHttpError(new ApplicationError(code), logger);
+    expect(result.statusCode).toBe(status);
+    expect(JSON.parse(result.body)).toMatchObject({ code });
+  });
+});

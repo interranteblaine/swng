@@ -4,34 +4,26 @@ import type { Crew, GolferId } from "@swng/domain";
 import { ApplicationError } from "../errors.js";
 import type { CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
-import type { ProjectionStore } from "../ports/projectionStore.js";
-import { createInMemoryCrewStore, createInMemoryGolferStore, createInMemoryProjectionStore, createSequentialIds, putAndBindGolfer } from "../testing/fakes.js";
+import { createInMemoryCrewStore, createInMemoryGolferStore, createSequentialIds, putAndBindGolfer } from "../testing/fakes.js";
 import { addCrewMember } from "./addCrewMember.js";
 import { createCrew } from "./createCrew.js";
 import { getCrew } from "./getCrew.js";
-import { getCrewRecords } from "./getCrewRecords.js";
 import { joinCrewByCode } from "./joinCrewByCode.js";
 import { listMyCrews } from "./listMyCrews.js";
 import { saveStandingGame } from "./saveStandingGame.js";
 
-const setup = (
-  crewStore: CrewStore = createInMemoryCrewStore(),
-  golferStore: GolferStore = createInMemoryGolferStore(),
-  projectionStore: ProjectionStore = createInMemoryProjectionStore(),
-) => {
+const setup = (crewStore: CrewStore = createInMemoryCrewStore(), golferStore: GolferStore = createInMemoryGolferStore()) => {
   const ids = createSequentialIds("c");
   return {
     crewStore,
     golferStore,
-    projectionStore,
     ids,
     create: createCrew({ crewStore, golferStore, ids }),
     get: getCrew({ crewStore, golferStore }),
     list: listMyCrews({ crewStore, golferStore }),
-    addMember: addCrewMember({ crewStore, golferStore, ids }),
+    addMember: addCrewMember({ crewStore, golferStore }),
     join: joinCrewByCode({ crewStore, golferStore }),
     saveStanding: saveStandingGame({ crewStore, golferStore }),
-    getRecords: getCrewRecords({ crewStore, golferStore, projectionStore }),
   };
 };
 
@@ -161,9 +153,10 @@ describe("listMyCrews", () => {
   it("lists every crew the caller's golfer belongs to, with member counts", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const calId = await seedAccountGolfer(ctx.golferStore, "sub-cal", "Cal");
     const crewA = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
     const crewB = await ctx.create({ sub: "sub-ann" }, { name: "Wednesday Nine" });
-    await ctx.addMember({ sub: "sub-ann" }, crewA.crew.crewId, { name: "Cal" });
+    await ctx.addMember({ sub: "sub-ann" }, crewA.crew.crewId, { golferId: calId });
 
     const listed = await ctx.list({ sub: "sub-ann" });
     expect([...listed.crews].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
@@ -173,41 +166,51 @@ describe("listMyCrews", () => {
   });
 });
 
+// De-ghost (architecture-realignment Task 9, spec §4 "membership: real accounts only"):
+// addCrewMember adds an EXISTING account golfer by golferId and requires a bound sub — the M8
+// ghost-minting-from-a-name path is gone.
 describe("addCrewMember", () => {
-  it("mints a stable, unclaimed ghost golfer and seats it as a member", async () => {
+  it("adds an existing account golfer (bound sub) to the roster by golferId", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const calId = await seedAccountGolfer(ctx.golferStore, "sub-cal", "Cal"); // a real account, not yet a member
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+
+    const added = await ctx.addMember({ sub: "sub-ann" }, created.crew.crewId, { golferId: calId });
+
+    // Name comes from the golfer's OWN record (never the wire), claimed:true since it has a sub.
+    expect(added.crew.members.find((member) => member.golferId === calId)).toEqual({ golferId: calId, name: "Cal", role: "member", claimed: true });
+  });
+
+  it("a target golfer without a bound sub (an unclaimed ghost) is rejected — ghost-not-addable, nothing added", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    // A golfer row with NO sub — an unclaimed ghost (e.g. minted inside a round).
+    const ghostId = golferId("ghost-cal");
+    await ctx.golferStore.put({ id: ghostId, name: "Cal", handicap: {} }, undefined);
+
+    await expect(ctx.addMember({ sub: "sub-ann" }, created.crew.crewId, { golferId: ghostId })).rejects.toMatchObject({ code: "ghost-not-addable" });
+    const fetched = await ctx.get({ sub: "sub-ann" }, created.crew.crewId);
+    expect(fetched.crew.members.some((member) => member.golferId === ghostId)).toBe(false);
+  });
+
+  it("a target golferId with no golfer row at all is rejected — ghost-not-addable", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
     const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
 
-    const added = await ctx.addMember({ sub: "sub-ann" }, created.crew.crewId, { name: "Cal" });
-
-    const calMember = added.crew.members.find((member) => member.name === "Cal");
-    expect(calMember).toMatchObject({ name: "Cal", role: "member", claimed: false });
-
-    const stored = await ctx.golferStore.get(calMember!.golferId);
-    expect(stored?.sub).toBeUndefined(); // unclaimed
-    expect(stored?.golfer.name).toBe("Cal");
+    await expect(ctx.addMember({ sub: "sub-ann" }, created.crew.crewId, { golferId: golferId("nobody") })).rejects.toMatchObject({ code: "ghost-not-addable" });
   });
 
-  it("a non-member caller is rejected — not-a-member", async () => {
+  it("a non-member caller is rejected — not-a-member (checked before the target)", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const calId = await seedAccountGolfer(ctx.golferStore, "sub-cal", "Cal");
     const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
     await seedAccountGolfer(ctx.golferStore, "sub-stranger", "Stranger");
 
-    await expect(ctx.addMember({ sub: "sub-stranger" }, created.crew.crewId, { name: "Cal" })).rejects.toMatchObject({ code: "not-a-member" });
-  });
-
-  it("the SAME ghost golferId recurs across two separate addCrewMember calls' resulting roster reads (stability check)", async () => {
-    const ctx = setup();
-    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-
-    const added = await ctx.addMember({ sub: "sub-ann" }, created.crew.crewId, { name: "Cal" });
-    const calId = added.crew.members.find((member) => member.name === "Cal")!.golferId;
-
-    const fetched = await ctx.get({ sub: "sub-ann" }, created.crew.crewId);
-    expect(fetched.crew.members.find((member) => member.name === "Cal")?.golferId).toBe(calId);
+    await expect(ctx.addMember({ sub: "sub-stranger" }, created.crew.crewId, { golferId: calId })).rejects.toMatchObject({ code: "not-a-member" });
   });
 });
 
@@ -309,52 +312,10 @@ describe("saveStandingGame", () => {
   });
 });
 
-describe("getCrewRecords", () => {
-  it("member-only: a non-member is rejected — not-a-member", async () => {
-    const ctx = setup();
-    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-    await seedAccountGolfer(ctx.golferStore, "sub-stranger", "Stranger");
-
-    await expect(ctx.getRecords({ sub: "sub-stranger" }, created.crew.crewId, 2026)).rejects.toMatchObject({ code: "not-a-member" });
-  });
-
-  it("an unknown crewId is rejected — unknown-crew", async () => {
-    const ctx = setup();
-    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    await expect(ctx.getRecords({ sub: "sub-ann" }, crewId("nope"), 2026)).rejects.toMatchObject({ code: "unknown-crew" });
-  });
-
-  it("a member reading a season with no finalized rounds yet gets EMPTY records, not an error", async () => {
-    const ctx = setup();
-    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-
-    await expect(ctx.getRecords({ sub: "sub-ann" }, created.crew.crewId, 2026)).resolves.toEqual({ season: 2026, ledger: [], headToHead: [] });
-  });
-
-  it("a member reading a populated season gets the projected ledger/head-to-head back verbatim", async () => {
-    const ctx = setup();
-    const annId = await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const boId = await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
-    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-    await ctx.join({ sub: "sub-bo" }, { code: created.crew.joinCode });
-
-    const records = {
-      ledger: [
-        { golferId: annId, rounds: 1, wins: 1, losses: 0, halves: 0, points: 0, skins: 0 },
-        { golferId: boId, rounds: 1, wins: 0, losses: 1, halves: 0, points: 0, skins: 0 },
-      ],
-      headToHead: [{ a: annId, b: boId, aWins: 1, bWins: 0, halves: 0 }],
-    };
-    await ctx.projectionStore.putSeasonRecords(created.crew.crewId, 2026, records);
-
-    await expect(ctx.getRecords({ sub: "sub-ann" }, created.crew.crewId, 2026)).resolves.toEqual({ season: 2026, ...records });
-    // A different season for the SAME crew stays empty — records are season-scoped, not
-    // crew-wide.
-    await expect(ctx.getRecords({ sub: "sub-bo" }, created.crew.crewId, 2025)).resolves.toEqual({ season: 2025, ledger: [], headToHead: [] });
-  });
-});
+// getCrewRecords (the M8 GET /crews/{crewId}/records use case) is GONE (architecture-realignment
+// Task 9): the crew projection layer it read from is deleted. Season standings are computed on
+// read now — see seasonSlice.test.ts (createSeason/listSeasons/appendCountedRound/
+// removeCountedRound/getSeasonStandings/leaveCrew).
 
 // A CrewStore decorator that fails its first `failCount` `put` calls with a synthetic
 // "crew-conflict" before delegating to `inner` — mirrors courseSlice.test.ts's own
@@ -395,11 +356,12 @@ describe("addCrewMember conflict retry", () => {
     const inner = createInMemoryCrewStore();
     const golferStore = createInMemoryGolferStore();
     await seedAccountGolfer(golferStore, "sub-ann", "Ann");
+    const calId = await seedAccountGolfer(golferStore, "sub-cal", "Cal");
     const created = await createCrew({ crewStore: inner, golferStore, ids: createSequentialIds("c") })({ sub: "sub-ann" }, { name: "Sunday Skins" });
 
     const flaky = createFlakyCrewStore(inner, 1);
     const flakyCtx = setup(flaky, golferStore);
-    const added = await flakyCtx.addMember({ sub: "sub-ann" }, created.crew.crewId, { name: "Cal" });
+    const added = await flakyCtx.addMember({ sub: "sub-ann" }, created.crew.crewId, { golferId: calId });
 
     expect(added.crew.members.map((m) => m.name)).toEqual(expect.arrayContaining(["Ann", "Cal"]));
     // More than one put attempt is the proof the retry path actually ran, not that the first
@@ -411,12 +373,13 @@ describe("addCrewMember conflict retry", () => {
     const inner = createInMemoryCrewStore();
     const golferStore = createInMemoryGolferStore();
     await seedAccountGolfer(golferStore, "sub-ann", "Ann");
+    const calId = await seedAccountGolfer(golferStore, "sub-cal", "Cal");
     const created = await createCrew({ crewStore: inner, golferStore, ids: createSequentialIds("c") })({ sub: "sub-ann" }, { name: "Sunday Skins" });
 
     const flaky = createFlakyCrewStore(inner, Number.POSITIVE_INFINITY);
     const flakyCtx = setup(flaky, golferStore);
 
-    await expect(flakyCtx.addMember({ sub: "sub-ann" }, created.crew.crewId, { name: "Cal" })).rejects.toMatchObject({ code: "crew-conflict" });
+    await expect(flakyCtx.addMember({ sub: "sub-ann" }, created.crew.crewId, { golferId: calId })).rejects.toMatchObject({ code: "crew-conflict" });
     expect(flaky.putAttempts()).toBeGreaterThan(1);
   });
 });

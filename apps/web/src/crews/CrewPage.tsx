@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
-import { crewId as makeCrewId } from "@swng/domain";
+import { crewId as makeCrewId, golferId as makeGolferId } from "@swng/domain";
 import type { GolferId } from "@swng/domain";
 import type { CrewView, GetCrewRecordsResponse, StandingGameView } from "@swng/contracts";
 import { addCrewMember, ApiError, getCrew, getCrewRecords, saveStandingGame } from "../api";
@@ -97,7 +97,11 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
     setAddingMember(true);
     setMemberError(undefined);
     try {
-      const response = await withAuth((token) => addCrewMember(token, id, { name: trimmed }));
+      // De-ghost (architecture-realignment Task 9): addCrewMember now takes an EXISTING account
+      // golfer's golferId (the server requires a bound sub), not a free-text name — the M8
+      // add-a-ghost-by-name flow is gone. This input carries the golferId for now; Task 11
+      // rebuilds this into a proper member-picker.
+      const response = await withAuth((token) => addCrewMember(token, id, { golferId: makeGolferId(trimmed) }));
       setCrew(response.crew);
       setMemberName("");
     } catch {

@@ -606,7 +606,14 @@ describe("SwngStack", () => {
         "GET /crews/{crewId}",
         "POST /crews/{crewId}/members",
         "PUT /crews/{crewId}/standing-game",
-        "GET /crews/{crewId}/records",
+        // Architecture-realignment Task 9: crew seasons + counted rounds + standings + leave
+        // (GET /crews/{crewId}/records is gone — the crew projection layer it read is deleted).
+        "POST /crews/{crewId}/seasons",
+        "GET /crews/{crewId}/seasons",
+        "POST /crews/{crewId}/seasons/{seasonId}/rounds",
+        "DELETE /crews/{crewId}/seasons/{seasonId}/rounds/{roundId}",
+        "GET /crews/{crewId}/seasons/{seasonId}/standings",
+        "POST /crews/{crewId}/leave",
       ];
       const routes = template.findResources("AWS::ApiGatewayV2::Route");
       const routeKeys = Object.values(routes).map((route) => route.Properties.RouteKey);
@@ -615,11 +622,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (28 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (33 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 30 routes total (28 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 30);
+    it("has exactly 35 routes total (33 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 35);
     });
 
     // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route

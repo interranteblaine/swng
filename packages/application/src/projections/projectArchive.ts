@@ -1,15 +1,8 @@
 import type { RoundArchive } from "@swng/domain";
-import { aggregateSeason, archiveGolferLine, combineNineHoleDifferentials, computeIndexDetail, crewContribution } from "@swng/domain";
+import { archiveGolferLine, combineNineHoleDifferentials, computeIndexDetail } from "@swng/domain";
 import type { Clock } from "../ports/clock.js";
 import type { Logger } from "../ports/logger.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
-
-// season = the UTC calendar year a round finalized in (M8 plan) — never re-derived
-// differently in projectArchive vs. rebuildProjections, same "one definition" discipline as
-// finalizedAtMsOf itself.
-// DELETED IN REALIGNMENT TASK 9/10 alongside the crew ledger it exists for (spec §4: "Never a
-// calendar computation — seasonOf = getUTCFullYear is deleted").
-export const seasonOf = (finalizedAtMs: number): number => new Date(finalizedAtMs).getUTCFullYear();
 
 // The one place a golfer's own lines get a canonical order (projection-realignment spec §3):
 // ProjectionStore.listLines is UNORDERED by contract (ports/projectionStore.ts) — the stable
@@ -81,20 +74,9 @@ export const projectArchive =
       await deps.projectionStore.putIndex(participant.golferId, { value: detail.value, computedAtMs: deps.clock.now(), differentialsUsed: detail.differentialsUsed });
     }
 
-    // DELETED IN REALIGNMENT TASK 9 (spec §4/§9: "the projector's crew arm" is named for
-    // deletion outright — crew standings become computed-on-read, never a projection). Kept
-    // UNCHANGED for this task only. M8: a crew-tagged archive additionally feeds the season
-    // ledger. Upsert-then-recompute (never `+=`, crew/ledger.ts's own doc comment on
-    // aggregateSeason): putCrewRound upserts THIS round's contribution by roundId, then the
-    // whole (crew, season) is recomputed from every contribution on file and the result
-    // REPLACES whatever putSeasonRecords held before — so projecting the same archive twice
-    // reproduces identical records, by construction, not by a special-cased idempotence check.
-    if (archive.crewId !== undefined) {
-      const season = seasonOf(finalizedAtMs);
-      await deps.projectionStore.putCrewRound(archive.crewId, season, { ...crewContribution(archive), finalizedAtMs });
-      const rounds = await deps.projectionStore.listCrewRounds(archive.crewId, season);
-      await deps.projectionStore.putSeasonRecords(archive.crewId, season, aggregateSeason(rounds));
-    }
-
-    deps.logger.info("archive-projected", { roundId: archive.roundId, participants: archive.participants.length, crewId: archive.crewId });
+    // The crew arm is GONE (architecture-realignment Task 9, spec §4/§9): crew standings are
+    // computed on read over the snapshots table (crews/getSeasonStandings), never a projection —
+    // so a finalized round no longer touches any crew keyspace here. The projector is a
+    // golfer-record-only fold now.
+    deps.logger.info("archive-projected", { roundId: archive.roundId, participants: archive.participants.length });
   };

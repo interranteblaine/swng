@@ -320,22 +320,23 @@ describe("listMyCrews", () => {
 });
 
 describe("addCrewMember", () => {
-  it("POSTs { name } to /crews/{crewId}/members with the bearer token and parses an AddCrewMemberResponse", async () => {
+  // De-ghost (architecture-realignment Task 9): the body is now { golferId }, not { name }.
+  it("POSTs { golferId } to /crews/{crewId}/members with the bearer token and parses an AddCrewMemberResponse", async () => {
     let seenUrl: string | undefined;
     let seenInit: RequestInit | undefined;
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(201, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [{ golferId: "ghost-1", name: "Dave", role: "member", claimed: false }] } });
+      return fakeResponse(201, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [{ golferId: "dave-g", name: "Dave", role: "member", claimed: true }] } });
     });
 
-    const input: AddCrewMemberRequest = { name: "Dave" };
+    const input: AddCrewMemberRequest = { golferId: golferId("dave-g") };
     const result = await addCrewMember("tok-crew", crewId("crew-1"), input);
 
     expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/members`);
     expect(seenInit?.method).toBe("POST");
     expect(JSON.parse(String(seenInit?.body))).toEqual(input);
-    expect(result.crew.members).toEqual([{ golferId: golferId("ghost-1"), name: "Dave", role: "member", claimed: false }]);
+    expect(result.crew.members).toEqual([{ golferId: golferId("dave-g"), name: "Dave", role: "member", claimed: true }]);
   });
 });
 

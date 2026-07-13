@@ -36,11 +36,12 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
 });
 
 // Wraps the real in-memory ProjectionStore, recording every WRITE method it sees (never the
-// reads — listLines/getIndex/listCrewRounds/getSeasonRecords tell you nothing about whether a
-// wipe happened). Exists to prove the one negative fact a passing test suite can't show any
-// other way: rebuildProjections' new loop (Task 5) has no code path that can call a wipe method
-// at all, not merely "didn't happen to in this fixture" — this fake is how a regression that
-// reintroduced one would get caught.
+// reads — listLines/getIndex tell you nothing about whether a wipe happened). Exists to prove
+// the one negative fact a passing test suite can't show any other way: rebuildProjections' loop
+// (Task 5) has no code path that can call a wipe method at all, not merely "didn't happen to in
+// this fixture" — this fake is how a regression that reintroduced one would get caught. (The
+// crew ledger and its wipe are gone entirely as of Task 9, so the only write surface left to
+// guard is the golfer-record one.)
 const createRecordingProjectionStore = (): ProjectionStore & { readonly writeCalls: readonly string[] } => {
   const inner = createInMemoryProjectionStore();
   const writeCalls: string[] = [];
@@ -65,20 +66,6 @@ const createRecordingProjectionStore = (): ProjectionStore & { readonly writeCal
       return inner.deleteLive(...args);
     },
     listLive: (...args) => inner.listLive(...args),
-    putCrewRound: async (...args) => {
-      writeCalls.push("putCrewRound");
-      return inner.putCrewRound(...args);
-    },
-    listCrewRounds: (...args) => inner.listCrewRounds(...args),
-    putSeasonRecords: async (...args) => {
-      writeCalls.push("putSeasonRecords");
-      return inner.putSeasonRecords(...args);
-    },
-    getSeasonRecords: (...args) => inner.getSeasonRecords(...args),
-    wipeCrew: async (...args) => {
-      writeCalls.push("wipeCrew");
-      return inner.wipeCrew(...args);
-    },
   };
 };
 

@@ -1,8 +1,8 @@
 import { z } from "zod";
-import type { CourseId, CrewId, CrewRole, GolferId, HeadToHeadRecord, SeasonLedgerLine } from "@swng/domain";
+import type { CourseId, CrewId, CrewRole, GolferId, HeadToHeadRecord, RoundId, SeasonLedgerLine } from "@swng/domain";
 import type { GameConfigInput } from "./commands.js";
 import { gameConfigInputSchema } from "./commands.js";
-import { courseIdSchema, crewIdSchema, golferIdSchema } from "./ids.js";
+import { courseIdSchema, crewIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
 
 // The wire mirror of domain's CrewRole (crew/crew.ts) — "organizer" carries no extra
 // authority in v1 (same doc comment as the domain type), recorded now so it can be
@@ -67,9 +67,12 @@ export const crewViewSchema: z.ZodType<CrewView> = z.object({
 export const createCrewRequestSchema = z.object({ name: z.string().min(1) }).strict();
 export type CreateCrewRequest = z.infer<typeof createCrewRequestSchema>;
 
-// Mints a stable ghost golfer for a person without an account — account holders never enter
-// a crew this way (they join by code, below, as their own golfer).
-export const addCrewMemberRequestSchema = z.object({ name: z.string().min(1) }).strict();
+// Architecture-realignment Task 9 (de-ghost, spec §4 "membership: real accounts only"): a crew
+// member is now an EXISTING account golfer, added by their golferId — the server requires that
+// golfer to already carry a bound sub (ghost-not-addable otherwise). The old M8 shape minted a
+// fresh ghost from a `name`; that path is gone. Ghosts still exist inside rounds (play as ghost
+// → claim in-round → account → optionally join a crew).
+export const addCrewMemberRequestSchema = z.object({ golferId: golferIdSchema }).strict();
 export type AddCrewMemberRequest = z.infer<typeof addCrewMemberRequestSchema>;
 
 // `code`'s shape mirrors joinRoundRequestSchema's own `code` field exactly (commands.ts) —
@@ -153,3 +156,107 @@ export const getCrewRecordsResponseSchema: z.ZodType<GetCrewRecordsResponse> = z
   ledger: z.array(seasonLedgerLineSchema).readonly(),
   headToHead: z.array(headToHeadRecordSchema).readonly(),
 });
+
+// Architecture-realignment Task 9 (crew seasons + counted rounds + standings-on-read). A season
+// is a named, open/closed thing a member creates ("2026", "Summer Cup"); `seasonId` is an
+// opaque server-minted id (never accepted from the wire), `createdAtMs` lets a client sort
+// newest-first (the use case sorts too — this just carries the fact).
+export interface CrewSeasonView {
+  readonly seasonId: string;
+  readonly name: string;
+  readonly status: "open" | "closed";
+  readonly createdAtMs: number;
+}
+export const crewSeasonViewSchema: z.ZodType<CrewSeasonView> = z.object({
+  seasonId: z.string(),
+  name: z.string(),
+  status: z.enum(["open", "closed"]),
+  createdAtMs: z.number().int(),
+});
+
+// `name` is `.min(1)` on the wire (the same non-empty floor createCrewRequestSchema uses); the
+// real trimmed 1-60 bound lives in createSeason (application) — the honest layer, since a
+// season isn't a domain entity.
+export const createSeasonRequestSchema = z.object({ name: z.string().min(1) }).strict();
+export type CreateSeasonRequest = z.infer<typeof createSeasonRequestSchema>;
+
+export interface CreateSeasonResponse {
+  readonly season: CrewSeasonView;
+}
+export const createSeasonResponseSchema: z.ZodType<CreateSeasonResponse> = z.object({ season: crewSeasonViewSchema });
+
+export interface ListSeasonsResponse {
+  readonly seasons: readonly CrewSeasonView[];
+}
+export const listSeasonsResponseSchema: z.ZodType<ListSeasonsResponse> = z.object({ seasons: z.array(crewSeasonViewSchema).readonly() });
+
+// One finished round counted into a season, as the wire sees it: `finalizedAt` is epoch ms (the
+// round-finalized event's own wall time), `appendedBy` is the member who counted it. Reused by
+// the append response and the standings' own `rounds` list.
+export interface CountedRoundView {
+  readonly roundId: RoundId;
+  readonly finalizedAt: number;
+  readonly appendedBy: GolferId;
+}
+export const countedRoundViewSchema: z.ZodType<CountedRoundView> = z.object({
+  roundId: roundIdSchema,
+  finalizedAt: z.number().int(),
+  appendedBy: golferIdSchema,
+});
+
+export const appendCountedRoundRequestSchema = z.object({ roundId: roundIdSchema }).strict();
+export type AppendCountedRoundRequest = z.infer<typeof appendCountedRoundRequestSchema>;
+
+export interface AppendCountedRoundResponse {
+  readonly round: CountedRoundView;
+}
+export const appendCountedRoundResponseSchema: z.ZodType<AppendCountedRoundResponse> = z.object({ round: countedRoundViewSchema });
+
+export interface RemoveCountedRoundResponse {
+  readonly roundId: RoundId;
+}
+export const removeCountedRoundResponseSchema: z.ZodType<RemoveCountedRoundResponse> = z.object({ roundId: roundIdSchema });
+
+// A season ledger line resolved for display: the pure SeasonLedgerLine (crew/ledger.ts) plus a
+// `name` (resolved from the counted snapshots' own participants — most recently finalized wins a
+// conflict) and a `member` flag (from the CURRENT roster — a departed or guest golfer shows
+// member:false but still aggregates, standings never depend on membership history).
+export interface SeasonStandingLine extends SeasonLedgerLine {
+  readonly name: string;
+  readonly member: boolean;
+}
+const seasonStandingLineSchema: z.ZodType<SeasonStandingLine> = z.object({
+  golferId: golferIdSchema,
+  rounds: z.number().int(),
+  wins: z.number().int(),
+  losses: z.number().int(),
+  halves: z.number().int(),
+  points: z.number().int(),
+  skins: z.number().int(),
+  name: z.string(),
+  member: z.boolean(),
+});
+
+// Standings are computed on read (spec §4): the counted snapshots folded through the SAME
+// domain crewContribution/aggregateSeason the M8 projector used — no stored ledger.
+export interface SeasonStandingsResponse {
+  readonly seasonId: string;
+  readonly name: string;
+  readonly status: "open" | "closed";
+  readonly rounds: readonly CountedRoundView[]; // newest-first by finalizedAt
+  readonly ledger: readonly SeasonStandingLine[];
+  readonly headToHead: readonly HeadToHeadRecord[];
+}
+export const seasonStandingsResponseSchema: z.ZodType<SeasonStandingsResponse> = z.object({
+  seasonId: z.string(),
+  name: z.string(),
+  status: z.enum(["open", "closed"]),
+  rounds: z.array(countedRoundViewSchema).readonly(),
+  ledger: z.array(seasonStandingLineSchema).readonly(),
+  headToHead: z.array(headToHeadRecordSchema).readonly(),
+});
+
+export interface LeaveCrewResponse {
+  readonly crewId: CrewId;
+}
+export const leaveCrewResponseSchema: z.ZodType<LeaveCrewResponse> = z.object({ crewId: crewIdSchema });

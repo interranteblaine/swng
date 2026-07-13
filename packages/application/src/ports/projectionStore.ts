@@ -1,12 +1,4 @@
-import type { CrewId, CrewRoundContribution, GolferId, GolferRoundLine, HeadToHeadRecord, RoundId, SeasonLedgerLine } from "@swng/domain";
-
-// DELETED IN REALIGNMENT TASK 9, alongside the crew section of ProjectionStore below (spec §4/
-// §9: crew standings become computed-on-read over the snapshots table, stored nowhere). Kept
-// UNCHANGED for this task only so the still-live crew routes don't wedge mid-realignment.
-export interface CrewSeasonRecords {
-  readonly ledger: readonly SeasonLedgerLine[];
-  readonly headToHead: readonly HeadToHeadRecord[];
-}
+import type { GolferId, GolferRoundLine, RoundId } from "@swng/domain";
 
 // The golfer record + presence surface (projection-realignment spec §3/§5) — the projections
 // table's one golfer partition (adapters-dynamodb's golferPk): a `ROUND#<roundId>` line per
@@ -16,11 +8,11 @@ export interface CrewSeasonRecords {
 // never finalizedAtMs — so a reopen-and-refinalize (a NEW round-finalized event, a DIFFERENT
 // finalizedAtMs, the SAME roundId) computes the SAME key both times and a plain unconditional
 // write replaces the prior line outright. This is the fix for the OLD scheme's own documented,
-// unrepairable bug (M8/M9's `putHistoryLine`/`putCrewRound`): a time-embedded sort key turned
-// that same correction into query-then-delete-then-put, and for the crew ledger's season-scoped
-// version of the same idiom, a stale entry that could silently survive forever across a UTC-year
-// boundary. There is no equivalent bug possible here — there is no second key to strand data
-// under.
+// unrepairable bug (M8/M9's time-embedded `putHistoryLine` and the old crew-round-contribution
+// writes): a time-embedded sort key turned that same correction into query-then-delete-then-put,
+// and for the crew ledger's season-scoped version of the same idiom, a stale entry that could
+// silently survive forever across a UTC-year boundary. There is no equivalent bug possible here —
+// there is no second key to strand data under.
 //
 // listLines is UNORDERED (createDynamoProjectionStore.ts's Query no longer sorts by time — the
 // sk carries no time to sort by) — every caller (projectArchive's index fold, getMyRecord's wire
@@ -44,22 +36,7 @@ export interface ProjectionStore {
   deleteLive(golferId: GolferId, roundId: RoundId): Promise<void>;
   listLive(golferId: GolferId): Promise<readonly { roundId: RoundId; courseName: string; joinedAtMs: number }[]>;
 
-  // Upsert by (crewId, roundId) via entry.roundId — a repeat put for the same round replaces,
-  // never accumulates.
-  /** deleted in realignment Task 9 */
-  putCrewRound(crewId: CrewId, season: number, entry: CrewRoundContribution & { readonly finalizedAtMs: number }): Promise<void>;
-  /** deleted in realignment Task 9 */
-  listCrewRounds(crewId: CrewId, season: number): Promise<readonly (CrewRoundContribution & { readonly finalizedAtMs: number })[]>;
-  /** deleted in realignment Task 9 */
-  putSeasonRecords(crewId: CrewId, season: number, records: CrewSeasonRecords): Promise<void>;
-  /** deleted in realignment Task 9 */
-  getSeasonRecords(crewId: CrewId, season: number): Promise<CrewSeasonRecords | undefined>;
-  // ORPHANED as of Task 5: wipeGolfer (this interface's own golfer-side twin) is gone outright,
-  // and rebuildProjections.ts's new paged backfill never calls THIS either (spec §9 — no wipe
-  // of any kind survives the rewrite, golfer or crew). No caller exists between here and Task 9,
-  // which deletes this method for good alongside the rest of the crew section (ProjectionStore's
-  // own top-of-file note on CrewSeasonRecords). Kept, unchanged, only because the still-live
-  // crew routes share that same removal boundary with putCrewRound/putSeasonRecords below.
-  /** deleted in realignment Task 9 */
-  wipeCrew(crewId: CrewId, seasons: readonly number[]): Promise<void>;
+  // The old crew ledger section is GONE (architecture-realignment Task 9, spec §4/§9): crew
+  // standings are computed on read over the snapshots table (crews/getSeasonStandings), stored
+  // nowhere. This is now a golfer-record + presence store only.
 }

@@ -7,7 +7,7 @@ export type { SnapshotStore } from "./ports/snapshotStore.js";
 export type { CourseStore } from "./ports/courseStore.js";
 export type { CountedRound, CrewSeason, CrewStore } from "./ports/crewStore.js";
 export type { GolferStore } from "./ports/golferStore.js";
-export type { CrewSeasonRecords, ProjectionStore } from "./ports/projectionStore.js";
+export type { ProjectionStore } from "./ports/projectionStore.js";
 export type { Broadcast } from "./ports/broadcast.js";
 export type { ParticipantClaims, SpectatorClaims, TokenClaims, TokenIssuer } from "./ports/tokenIssuer.js";
 export type { AccountClaims } from "./ports/accountClaims.js";
@@ -55,9 +55,14 @@ export { listMyCrews } from "./crews/listMyCrews.js";
 export { addCrewMember } from "./crews/addCrewMember.js";
 export { joinCrewByCode } from "./crews/joinCrewByCode.js";
 export { saveStandingGame } from "./crews/saveStandingGame.js";
-export { getCrewRecords } from "./crews/getCrewRecords.js";
+export { leaveCrew } from "./crews/leaveCrew.js";
+export { createSeason } from "./crews/createSeason.js";
+export { listSeasons } from "./crews/listSeasons.js";
+export { appendCountedRound } from "./crews/appendCountedRound.js";
+export { removeCountedRound } from "./crews/removeCountedRound.js";
+export { getSeasonStandings } from "./crews/getSeasonStandings.js";
 
-export { projectArchive, finalizedAtMsOf, seasonOf } from "./projections/projectArchive.js";
+export { projectArchive, finalizedAtMsOf } from "./projections/projectArchive.js";
 export { rebuildProjections } from "./projections/rebuildProjections.js";
 
 // In-memory ports — exported product surface for lambda/E2E unit tests (M3 Task 4+), not

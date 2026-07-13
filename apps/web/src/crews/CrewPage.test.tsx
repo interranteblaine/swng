@@ -132,23 +132,25 @@ describe("CrewPage", () => {
     expect(within(items[2]!).getByText(/account/i)).toBeTruthy();
   });
 
-  it("Add member mints a ghost via the wire and renders the refreshed roster from the response", async () => {
+  // De-ghost (architecture-realignment Task 9): addCrewMember adds an EXISTING account golfer by
+  // golferId (the input carries the golferId until Task 11's member-picker lands).
+  it("Add member adds an account golfer by golferId and renders the refreshed roster from the response", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedGetCrewRecords.mockResolvedValue(emptyRecords);
     mockedGetCourse.mockResolvedValue({ course: courseView });
-    const refreshed: CrewView = { ...crew, members: [...crew.members, { golferId: golferId("dave-g"), name: "Dave", role: "member", claimed: false }] };
+    const refreshed: CrewView = { ...crew, members: [...crew.members, { golferId: golferId("dave-g"), name: "Dave", role: "member", claimed: true }] };
     mockedAddCrewMember.mockResolvedValue({ crew: refreshed });
 
     renderPage();
     await screen.findByText("CRW123");
 
-    fireEvent.change(screen.getByLabelText(/member name/i), { target: { value: "Dave" } });
+    fireEvent.change(screen.getByLabelText(/member name/i), { target: { value: "dave-g" } });
     fireEvent.click(screen.getByRole("button", { name: /add member/i }));
 
     await waitFor(() => expect(mockedAddCrewMember).toHaveBeenCalledTimes(1));
-    expect(mockedAddCrewMember).toHaveBeenCalledWith(idToken, crewId("crew-1"), { name: "Dave" });
+    expect(mockedAddCrewMember).toHaveBeenCalledWith(idToken, crewId("crew-1"), { golferId: golferId("dave-g") });
     // Scoped to the roster list — "Dave" also lands in the StandingGameEditor's players
     // checkboxes (the refreshed members prop flows there too, by design).
     await within(screen.getByRole("list", { name: /roster/i })).findByText("Dave");

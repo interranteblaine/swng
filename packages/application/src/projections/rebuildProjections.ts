@@ -15,9 +15,9 @@ import { projectArchive } from "./projectArchive.js";
 // same archive twice, in ANY order, relative to ANY other archive, converges to identical state
 // (projectArchive.ts's own doc comment; this file's own idempotence test). A wipe-first step
 // only ever protected against a stale key a corrected replay could strand — there is no such key
-// anymore, so there is nothing for a wipe to protect against. (Crew projections still use a
-// time-embedded key and still HAVE a wipeCrew — but nothing calls it here either, per this same
-// "no wipe" rule; ProjectionStore's own doc comment tracks that as orphaned pending Task 9.)
+// anymore, so there is nothing for a wipe to protect against. (The crew ledger projections that
+// once needed their own wipe are gone entirely as of Task 9 — crew standings are computed on
+// read now — so there is no crew keyspace left for a rebuild to reconcile either.)
 //
 // Same reasoning kills the old buffer+sort: the old rebuild collected every archive into memory
 // and sorted by finalizedAt BEFORE replaying, because a time-embedded key needed writes to land

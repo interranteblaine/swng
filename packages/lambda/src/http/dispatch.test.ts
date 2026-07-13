@@ -7,6 +7,7 @@ import {
   addGame,
   addParticipant,
   addTeeSet,
+  appendCountedRound,
   claimGolfer,
   createCapturingBroadcast,
   createCourse,
@@ -20,22 +21,26 @@ import {
   createInMemoryRoundStore,
   createInMemorySnapshotStore,
   createNullLogger,
+  createSeason,
   createSequentialIds,
   finalizeRound,
   getCourse,
   getCrew,
-  getCrewRecords,
   getMyGolfer,
   getMyRecord,
   getMyRounds,
   getRoundArchive,
+  getSeasonStandings,
   getShareLink,
   joinCrewByCode,
   joinRound,
+  leaveCrew,
   listMyCrews,
+  listSeasons,
   peekRound,
   readEvents,
   recordScore,
+  removeCountedRound,
   saveStandingGame,
   searchCourses,
   startRound,
@@ -48,12 +53,13 @@ import {
   addGameResponseSchema,
   addParticipantResponseSchema,
   addTeeSetResponseSchema,
+  appendCountedRoundResponseSchema,
   createCourseResponseSchema,
   createCrewResponseSchema,
+  createSeasonResponseSchema,
   errorResponseSchema,
   finalizeRoundResponseSchema,
   getCourseResponseSchema,
-  getCrewRecordsResponseSchema,
   getCrewResponseSchema,
   getMeResponseSchema,
   getMyRecordResponseSchema,
@@ -62,11 +68,15 @@ import {
   golferResponseSchema,
   joinCrewResponseSchema,
   joinRoundResponseSchema,
+  leaveCrewResponseSchema,
   listMyCrewsResponseSchema,
+  listSeasonsResponseSchema,
   peekRoundResponseSchema,
   recordScoreResponseSchema,
+  removeCountedRoundResponseSchema,
   saveStandingGameResponseSchema,
   searchCoursesResponseSchema,
+  seasonStandingsResponseSchema,
   shareLinkResponseSchema,
   startRoundResponseSchema,
   terminateGameResponseSchema,
@@ -171,10 +181,15 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
-    addCrewMember: addCrewMember({ crewStore, golferStore, ids }),
+    addCrewMember: addCrewMember({ crewStore, golferStore }),
     saveStandingGame: saveStandingGame({ crewStore, golferStore }),
     joinCrewByCode: joinCrewByCode({ crewStore, golferStore }),
-    getCrewRecords: getCrewRecords({ crewStore, golferStore, projectionStore }),
+    createSeason: createSeason({ crewStore, golferStore, ids, clock }),
+    listSeasons: listSeasons({ crewStore, golferStore }),
+    appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
+    removeCountedRound: removeCountedRound({ crewStore, golferStore }),
+    getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots }),
+    leaveCrew: leaveCrew({ crewStore, golferStore }),
   };
 
   const dispatcher = createDispatcher(buildRoutes(useCases), tokens, verifier, logger);
@@ -1045,12 +1060,13 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it(
-    "drives create -> join -> add ghost member -> save standing game -> GET /me/crews -> " +
-      "StartRound as-self with players+crewId (a signed-in caller) -> POST .../players -> GET records (default season)",
+    "drives create -> join -> add an existing account member (de-ghost) -> save standing game -> GET /me/crews -> " +
+      "StartRound as-self with players+crewId (a signed-in caller) -> POST .../players -> create season -> list seasons",
     async () => {
       const { dispatcher } = setupCrews();
       const annGolfer = await putMe(dispatcher, ann, "Ann");
       const boGolfer = await putMe(dispatcher, bo, "Bo");
+      const calGolfer = await putMe(dispatcher, cal, "Cal"); // a third real account, added by golferId below
 
       const createResp = asStructured(
         await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
@@ -1065,13 +1081,16 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       expect(joinResp.statusCode).toBe(200); // an act on an existing resource, not a mint — see routes.ts's own comment
       joinCrewResponseSchema.parse(JSON.parse(joinResp.body!));
 
+      // De-ghost (Task 9): addCrewMember adds an EXISTING account golfer by golferId — Cal has a
+      // bound sub, so this succeeds (an unclaimed ghost golferId would 409 ghost-not-addable).
       const addMemberResp = asStructured(
         await dispatcher(
-          makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/members`, token: golferBearer(ann), body: { name: "Ghost Cal" } }),
+          makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/members`, token: golferBearer(ann), body: { golferId: calGolfer.golferId } }),
         ),
       );
       expect(addMemberResp.statusCode).toBe(201);
-      addCrewMemberResponseSchema.parse(JSON.parse(addMemberResp.body!));
+      const addedMember = addCrewMemberResponseSchema.parse(JSON.parse(addMemberResp.body!));
+      expect(addedMember.crew.members.find((member) => member.golferId === calGolfer.golferId)).toMatchObject({ name: "Cal", claimed: true });
 
       const standingResp = asStructured(
         await dispatcher(
@@ -1138,20 +1157,25 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       expect(addPlayerResp.statusCode).toBe(201);
       addParticipantResponseSchema.parse(JSON.parse(addPlayerResp.body!));
 
-      // GET /crews/{crewId}/records with NO ?season= — defaults to the current UTC year
-      // (routes.ts) — and a crew with no FINALIZED rounds yet gets the honest empty shape,
-      // not an error (this round was never finalized).
-      const recordsResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/records`, token: golferBearer(bo) })));
-      expect(recordsResp.statusCode).toBe(200);
-      const records = getCrewRecordsResponseSchema.parse(JSON.parse(recordsResp.body!));
-      expect(records).toEqual({ season: new Date().getUTCFullYear(), ledger: [], headToHead: [] });
+      // Task 9: a member creates a season, then lists the crew's seasons — the standings-on-read
+      // routes are wired (this round was never finalized, so nothing is counted yet).
+      const seasonResp = asStructured(
+        await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(bo), body: { name: "2026" } })),
+      );
+      expect(seasonResp.statusCode).toBe(201);
+      const season = createSeasonResponseSchema.parse(JSON.parse(seasonResp.body!));
+      expect(season.season).toMatchObject({ name: "2026", status: "open" });
+
+      const listResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann) })));
+      expect(listResp.statusCode).toBe(200);
+      const listed = listSeasonsResponseSchema.parse(JSON.parse(listResp.body!));
+      expect(listed.seasons.map((s) => s.seasonId)).toEqual([season.season.seasonId]);
     },
   );
 
-  // M8 close-out fix #1: the wire schema's `min(1)` doesn't trim, so a whitespace-only name
-  // reaches domain crew.ts's addMember throw (invalid-member-name) — this pins it as a 400,
-  // not the 500 it was mapped to before errorMapping.ts gained the entry.
-  it("POST /crews/{crewId}/members with a whitespace-only name is rejected — 400 invalid-member-name", async () => {
+  // De-ghost (Task 9): adding an unclaimed-ghost golferId (a golfer row with no bound sub) is
+  // rejected — ghost-not-addable (409), driven end-to-end.
+  it("POST /crews/{crewId}/members with a golferId that has no bound sub is rejected — 409 ghost-not-addable", async () => {
     const { dispatcher } = setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const createResp = asStructured(
@@ -1159,49 +1183,91 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     );
     const created = createCrewResponseSchema.parse(JSON.parse(createResp.body!));
 
+    // A golferId that was never claimed / never had a row — same "no bound sub" failure the
+    // use-case slice test pins directly.
     const resp = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/members`, token: golferBearer(ann), body: { name: "   " } }),
+        makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/members`, token: golferBearer(ann), body: { golferId: "never-an-account" } }),
       ),
     );
-    expect(resp.statusCode).toBe(400);
-    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-member-name" });
+    expect(resp.statusCode).toBe(409);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "ghost-not-addable" });
   });
 
-  it("GET /crews/{crewId}/records rejects a non-integer ?season= — 400 invalid-request", async () => {
+  // The counted-round lifecycle end-to-end (Task 9): finalize a round the caller played, count it
+  // into a season, read standings (rounds list carries it), then un-count via DELETE. Exercises
+  // POST .../rounds, GET .../standings, and the DELETE route's method wiring in one pass.
+  it("drives finalize -> create season -> append counted round -> standings -> DELETE (un-count)", async () => {
     const { dispatcher } = setupCrews();
-    await putMe(dispatcher, ann, "Ann");
-    const createResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
-    );
-    const created = createCrewResponseSchema.parse(JSON.parse(createResp.body!));
+    const annGolfer = await putMe(dispatcher, ann, "Ann");
 
-    const resp = asStructured(
-      await dispatcher(
-        makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/records`, token: golferBearer(ann), query: { season: "not-a-year" } }),
+    // A finalized round Ann played (as-self), so its snapshot exists and Ann is a participant.
+    const started = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(
+            makeEvent({
+              method: "POST",
+              path: "/rounds",
+              token: golferBearer(ann),
+              body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annGolfer.golferId },
+            }),
+          ),
+        ).body!,
       ),
     );
-    expect(resp.statusCode).toBe(400);
-    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
+    expect(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token }))).statusCode).toBe(200);
+
+    const created = createCrewResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+    );
+    const season = createSeasonResponseSchema.parse(
+      JSON.parse(
+        asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026" } }))).body!,
+      ),
+    ).season;
+
+    const seasonPath = `/crews/${created.crew.crewId}/seasons/${season.seasonId}`;
+
+    const appendResp = asStructured(
+      await dispatcher(makeEvent({ method: "POST", path: `${seasonPath}/rounds`, token: golferBearer(ann), body: { roundId: started.roundId } })),
+    );
+    expect(appendResp.statusCode).toBe(201);
+    const appended = appendCountedRoundResponseSchema.parse(JSON.parse(appendResp.body!));
+    expect(appended.round).toMatchObject({ roundId: started.roundId, appendedBy: annGolfer.golferId });
+
+    const standingsResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `${seasonPath}/standings`, token: golferBearer(ann) })));
+    expect(standingsResp.statusCode).toBe(200);
+    const standings = seasonStandingsResponseSchema.parse(JSON.parse(standingsResp.body!));
+    expect(standings.rounds.map((r) => r.roundId)).toEqual([started.roundId]);
+
+    const deleteResp = asStructured(await dispatcher(makeEvent({ method: "DELETE", path: `${seasonPath}/rounds/${started.roundId}`, token: golferBearer(ann) })));
+    expect(deleteResp.statusCode).toBe(200);
+    expect(removeCountedRoundResponseSchema.parse(JSON.parse(deleteResp.body!))).toEqual({ roundId: started.roundId });
+
+    const afterResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `${seasonPath}/standings`, token: golferBearer(ann) })));
+    expect(seasonStandingsResponseSchema.parse(JSON.parse(afterResp.body!)).rounds).toEqual([]);
   });
 
-  // Papercut 2 (M9 hardening): an EMPTY ?season= must default to the current UTC year, the
-  // SAME as an absent one — before the fix, "" parsed as 0 (Number("") === 0), a nonsense year
-  // that bypassed the default entirely.
-  it("treats an empty ?season= the same as an absent one — defaults to the current UTC year, not season 0", async () => {
+  // Leave (Task 9): a member removes themselves; POST /crews/{crewId}/leave echoes the crewId.
+  it("POST /crews/{crewId}/leave removes the caller from the roster", async () => {
     const { dispatcher } = setupCrews();
     await putMe(dispatcher, ann, "Ann");
-    const createResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
+    const boGolfer = await putMe(dispatcher, bo, "Bo");
+    const created = createCrewResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
-    const created = createCrewResponseSchema.parse(JSON.parse(createResp.body!));
+    await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { code: created.crew.joinCode } }));
 
-    const resp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/records`, token: golferBearer(ann), query: { season: "" } })),
-    );
-    expect(resp.statusCode).toBe(200);
-    const records = getCrewRecordsResponseSchema.parse(JSON.parse(resp.body!));
-    expect(records.season).toBe(new Date().getUTCFullYear());
+    const leaveResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/leave`, token: golferBearer(bo) })));
+    expect(leaveResp.statusCode).toBe(200);
+    expect(leaveCrewResponseSchema.parse(JSON.parse(leaveResp.body!))).toEqual({ crewId: created.crew.crewId });
+
+    // Bo is off the roster — GET /crews now 403s not-a-member for Bo.
+    const getResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}`, token: golferBearer(bo) })));
+    expect(getResp.statusCode).toBe(403);
+    expect(errorResponseSchema.parse(JSON.parse(getResp.body!))).toMatchObject({ code: "not-a-member" });
+    expect(boGolfer).toBeDefined();
   });
 });
 

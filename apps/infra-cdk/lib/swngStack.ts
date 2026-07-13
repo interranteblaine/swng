@@ -33,7 +33,7 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (27, as of projection-realignment Task 6) routes are declared here
+// function — but the (33, as of architecture-realignment Task 9) routes are declared here
 // explicitly (matching packages/lambda/src/http/routes.ts) rather than via a single $default
 // catch-all, so the API's shape is visible in the CloudFormation template and the AWS
 // console, not hidden inside the Lambda. Exported (not module-private) so
@@ -80,7 +80,14 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.GET, path: "/crews/{crewId}" },
   { method: HttpMethod.POST, path: "/crews/{crewId}/members" },
   { method: HttpMethod.PUT, path: "/crews/{crewId}/standing-game" },
-  { method: HttpMethod.GET, path: "/crews/{crewId}/records" },
+  // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave.
+  // GET /crews/{crewId}/records is GONE (the crew projection layer it read from is deleted).
+  { method: HttpMethod.POST, path: "/crews/{crewId}/seasons" },
+  { method: HttpMethod.GET, path: "/crews/{crewId}/seasons" },
+  { method: HttpMethod.POST, path: "/crews/{crewId}/seasons/{seasonId}/rounds" },
+  { method: HttpMethod.DELETE, path: "/crews/{crewId}/seasons/{seasonId}/rounds/{roundId}" },
+  { method: HttpMethod.GET, path: "/crews/{crewId}/seasons/{seasonId}/standings" },
+  { method: HttpMethod.POST, path: "/crews/{crewId}/leave" },
 ];
 
 // M9 Task 5 (ops): the eight routes anyone can call with NO token at all — routes.ts's own
@@ -432,7 +439,7 @@ export class SwngStack extends Stack {
         // against beta, M7 Task 5). PUT joined for PUT /me; the stack test pins this list as
         // a superset of HTTP_ROUTES' own method set so the next new method can't ship
         // browser-dead.
-        allowMethods: [CorsHttpMethod.GET, CorsHttpMethod.POST, CorsHttpMethod.PUT],
+        allowMethods: [CorsHttpMethod.GET, CorsHttpMethod.POST, CorsHttpMethod.PUT, CorsHttpMethod.DELETE],
         allowHeaders: ["content-type", "authorization"],
       },
     });

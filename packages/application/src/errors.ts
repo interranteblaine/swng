@@ -93,7 +93,31 @@ export type ApplicationErrorCode =
   // signal — the SAME roundId is already counted in THIS season of the crew. Storage-level
   // dedupe only; the SAME round counted in a DIFFERENT season of the same crew is allowed and
   // never trips this.
-  | "round-already-counted";
+  | "round-already-counted"
+  // Architecture-realignment Task 9 (crew seasons + counted rounds + standings-on-read):
+  // createSeason validates the season name inline — trimmed 1-60, the SAME bounds
+  // validateCrewName holds a crew name to, but application-layer (a season is store data, not a
+  // domain entity), so it lives here rather than in domain/crew. A bad-body precondition the
+  // caller can correct, same 400 bucket as golfer-required/unknown-golfer-in-game above.
+  | "invalid-season-name"
+  // Task 9: getSeason found nothing under (crewId, seasonId) — an unresolvable season id, the
+  // same "identified resource not found" 404 shape as unknown-crew/round-not-found above.
+  | "season-not-found"
+  // Task 9: an append or remove against a CLOSED season — a failed precondition on the season's
+  // own lifecycle, same 409 bucket as round-already-counted/crew-conflict above.
+  | "season-closed"
+  // Task 9: the appender's own golferId isn't among the counted round's snapshot participants
+  // ("you can only count a round you actually played" — spec §4). A forbidden actor, same 403
+  // bucket as not-a-member/not-a-viewer above.
+  | "did-not-play"
+  // Task 9: only the member who appended a counted round may remove it. A forbidden actor, same
+  // 403 bucket as did-not-play/not-a-member above.
+  | "not-the-appender"
+  // Task 9 (de-ghost, spec §4 "membership: real accounts only"): addCrewMember now requires the
+  // target golfer to already carry a bound sub (a real account) — adding a fresh unclaimed ghost
+  // to a crew is gone. A failed precondition on the target, same 409 bucket as crew-conflict/
+  // round-already-counted above (client-correctable: claim the ghost first, then add).
+  | "ghost-not-addable";
 
 export class ApplicationError extends Error {
   constructor(

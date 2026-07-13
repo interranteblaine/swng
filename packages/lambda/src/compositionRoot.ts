@@ -19,26 +19,31 @@ import {
   addGame,
   addParticipant,
   addTeeSet,
+  appendCountedRound,
   claimGolfer,
   createCourse,
   createCrew,
+  createSeason,
   finalizeRound,
   getCourse,
   getCrew,
-  getCrewRecords,
   getMyGolfer,
   getMyRecord,
   getMyRounds,
   getRoundArchive,
+  getSeasonStandings,
   getShareLink,
   joinCrewByCode,
   joinRound,
+  leaveCrew,
   listMyCrews,
+  listSeasons,
   peekRound,
   projectArchive,
   readEvents,
   rebuildProjections,
   recordScore,
+  removeCountedRound,
   saveStandingGame,
   searchCourses,
   startRound,
@@ -179,13 +184,8 @@ const unavailableProjectionStore = (): ProjectionStore => {
     putLive: unavailable,
     deleteLive: unavailable,
     listLive: unavailable,
-    // M8: the season ledger projections (ProjectionStore grew these — ports/projectionStore.ts)
-    // share the same optionality as the golfer projections above.
-    putCrewRound: unavailable,
-    listCrewRounds: unavailable,
-    putSeasonRecords: unavailable,
-    getSeasonRecords: unavailable,
-    wipeCrew: unavailable,
+    // The crew ledger projection methods are gone (realignment Task 9): crew standings are
+    // computed on read over the snapshots table (crews/getSeasonStandings), not stored here.
   };
 };
 
@@ -290,10 +290,18 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
-    addCrewMember: addCrewMember({ crewStore, golferStore, ids }),
+    addCrewMember: addCrewMember({ crewStore, golferStore }),
     saveStandingGame: saveStandingGame({ crewStore, golferStore }),
     joinCrewByCode: joinCrewByCode({ crewStore, golferStore }),
-    getCrewRecords: getCrewRecords({ crewStore, golferStore, projectionStore }),
+    // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave
+    // — the SAME crewStore/golferStore/snapshots/clock/ids instances the crew + finalize use
+    // cases above already share (standings fold the counted snapshots, never a stored ledger).
+    createSeason: createSeason({ crewStore, golferStore, ids, clock }),
+    listSeasons: listSeasons({ crewStore, golferStore }),
+    appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
+    removeCountedRound: removeCountedRound({ crewStore, golferStore }),
+    getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots }),
+    leaveCrew: leaveCrew({ crewStore, golferStore }),
   };
 
   const dispatcher = createDispatcher(buildRoutes(useCases), tokens, verifier, logger);

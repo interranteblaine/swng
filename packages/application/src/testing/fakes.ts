@@ -1,4 +1,4 @@
-import type { Course, CourseId, Crew, CrewId, CrewRoundContribution, Golfer, GolferId, GolferRoundLine, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import type { Course, CourseId, Crew, CrewId, Golfer, GolferId, GolferRoundLine, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
 import { courseNameKey } from "@swng/domain";
 import { ApplicationError } from "../errors.js";
 import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
@@ -9,7 +9,7 @@ import type { CountedRound, CrewSeason, CrewStore } from "../ports/crewStore.js"
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
-import type { CrewSeasonRecords, ProjectionStore } from "../ports/projectionStore.js";
+import type { ProjectionStore } from "../ports/projectionStore.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { SnapshotStore } from "../ports/snapshotStore.js";
 
@@ -333,12 +333,6 @@ export const createInMemoryProjectionStore = (): ProjectionStore => {
   const linesByGolfer = new Map<GolferId, Map<RoundId, GolferRoundLine & { finalizedAtMs: number }>>();
   const indexByGolfer = new Map<GolferId, { value: number; computedAtMs: number; differentialsUsed: number }>();
   const liveByGolfer = new Map<GolferId, Map<RoundId, { roundId: RoundId; courseName: string; joinedAtMs: number; expiresAtSec: number }>>();
-  // Keyed by "crewId#season" — mirrors the real adapter's LEDGER#crew#season sort-key shape
-  // (architecture.md) closely enough for a fake without actually building a composite-key
-  // Map type. DELETED IN REALIGNMENT TASK 9 alongside ProjectionStore's own crew section.
-  const crewRoundsByKey = new Map<string, Map<RoundId, CrewRoundContribution & { finalizedAtMs: number }>>();
-  const seasonRecordsByKey = new Map<string, CrewSeasonRecords>();
-  const crewSeasonKey = (crewId: CrewId, season: number): string => `${crewId}#${season}`;
 
   return {
     putLine: async (golferId, line) => {
@@ -361,25 +355,6 @@ export const createInMemoryProjectionStore = (): ProjectionStore => {
     },
     listLive: async (golferId) =>
       [...(liveByGolfer.get(golferId)?.values() ?? [])].map(({ roundId, courseName, joinedAtMs }) => ({ roundId, courseName, joinedAtMs })),
-    // DELETED IN REALIGNMENT TASK 9 — unchanged from before this task.
-    putCrewRound: async (crewId, season, entry) => {
-      const key = crewSeasonKey(crewId, season);
-      const rounds = crewRoundsByKey.get(key) ?? new Map<RoundId, CrewRoundContribution & { finalizedAtMs: number }>();
-      rounds.set(entry.roundId, entry); // upsert by roundId — never accumulated
-      crewRoundsByKey.set(key, rounds);
-    },
-    listCrewRounds: async (crewId, season) => [...(crewRoundsByKey.get(crewSeasonKey(crewId, season))?.values() ?? [])],
-    putSeasonRecords: async (crewId, season, records) => {
-      seasonRecordsByKey.set(crewSeasonKey(crewId, season), records);
-    },
-    getSeasonRecords: async (crewId, season) => seasonRecordsByKey.get(crewSeasonKey(crewId, season)),
-    wipeCrew: async (crewId, seasons) => {
-      for (const season of seasons) {
-        const key = crewSeasonKey(crewId, season);
-        crewRoundsByKey.delete(key);
-        seasonRecordsByKey.delete(key);
-      }
-    },
   };
 };
 

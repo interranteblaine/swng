@@ -22,10 +22,19 @@ export const getRoundArchive =
     const isParticipant = found !== undefined && archive.participants.some((participant) => participant.golferId === found.golfer.id);
     if (isParticipant) return { events: archive.events };
 
-    // TODO(Task 9): a crew-membership arm slots in here — a caller who isn't a participant
-    // but shares a crew with this round (archive.crewId, deps.crewStore.get/listByGolfer)
-    // should also be allowed to view it. Deliberately deferred (task-6-brief.md's binding
-    // resolution): until Task 9 lands, every non-participant — including a stranger with no
-    // account golfer row at all — is rejected below.
+    // The crew-view arm (architecture-realignment Task 9, spec §4 "GET /rounds/{roundId}/archive
+    // allowed for a participant, or a member of a crew that counts this round"): a signed-in
+    // caller who wasn't in the round may still view it iff SOME crew they belong to counts this
+    // round in one of its seasons. Round-is-a-sealed-leaf, so the round itself carries no crewId
+    // to check — authority flows the other way, from the crew's own counted set (countsRound),
+    // reached via the caller's crews (listByGolfer). A caller with no account golfer (found
+    // undefined) has no crews to check and falls straight through to the 403 below.
+    if (found !== undefined) {
+      const crews = await deps.crewStore.listByGolfer(found.golfer.id);
+      for (const crew of crews) {
+        if (await deps.crewStore.countsRound(crew.crewId, roundIdValue)) return { events: archive.events };
+      }
+    }
+
     throw new ApplicationError("not-a-viewer");
   };

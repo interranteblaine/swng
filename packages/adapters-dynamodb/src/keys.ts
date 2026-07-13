@@ -171,43 +171,8 @@ export const countedRoundSkMarker = "#ROUND#";
 export const countedRoundSk = (seasonId: string, roundId: RoundId): string => `${seasonSk(seasonId)}${countedRoundSkMarker}${roundId}`;
 export const countedRoundSkPrefix = (seasonId: string): string => `${seasonSk(seasonId)}${countedRoundSkMarker}`;
 
-// DELETED IN REALIGNMENT TASK 9: the crew season ledger moves fully outside the finalize chain
-// (projection-realignment spec §4/§9 — "the projector's crew arm; putCrewRound /
-// putSeasonRecords / getSeasonRecords / wipeCrew; the CREWROUNDS# / RECORDS# keyspaces" are
-// named for deletion outright) — standings become computed-on-read over the snapshots table,
-// never stored. Kept here, and on ProjectionStore/createDynamoProjectionStore, UNCHANGED for
-// this task only, so the crew routes (still live, still tested) don't wedge on a half-deleted
-// dependency mid-realignment; Task 9 deletes this block and its last consumers together.
-//
-// The `projections` table's crew-round-contribution key vocabulary (M8 Task 3;
-// architecture.md's illustrative `LEDGER#crew#season` sketch, concretized): one partition per
-// (crew, season) holding one contribution entry per finalized round that season, sk-ordered the
-// same zero-padded way lineSk's sibling scheme used to be (15 digits) purely for a deterministic
-// read order; listCrewRounds itself doesn't promise an order (aggregateSeason's fold is
-// commutative), but a stable one costs nothing and beats an arbitrary one for debugging. NOTE:
-// this scheme still has the exact unrepairable year-boundary bug lineSk's own doc comment above
-// was rewritten to eliminate (createDynamoProjectionStore.ts's putCrewRound doc comment) — left
-// as-is because the whole keyspace dies in Task 9 rather than getting patched here.
-const CREWROUNDS_PK_PREFIX = "CREWROUNDS#";
-export const crewRoundsPk = (crewId: CrewId, season: number): string => `${CREWROUNDS_PK_PREFIX}${crewId}#${season}`;
-// A DIFFERENT partition namespace than lineSk's own "ROUND#" prefix above (crewRoundsPk's
-// CREWROUNDS# pk vs. golferPk's GOLFER# pk) — the two never collide despite sharing this literal
-// prefix string.
-const CREWROUND_SK_PREFIX = "ROUND#";
-export const crewRoundSk = (finalizedAtMs: number, roundId: RoundId): string =>
-  `${CREWROUND_SK_PREFIX}${String(finalizedAtMs).padStart(15, "0")}#${roundId}`;
-export const crewRoundSkPrefix = CREWROUND_SK_PREFIX;
-
-// DELETED IN REALIGNMENT TASK 9 (same block as crewRoundsPk above — see that note).
-//
-// The season records snapshot's key vocabulary: one item per (crew, season), pk
-// `RECORDS#<crewId>#<season>` / sk fixed "RECORDS". A deliberate consolidation of
-// architecture.md's illustrative `LEDGER#`/`H2H#` keys into ONE item: `aggregateSeason`
-// (crew/ledger.ts) computes the ledger and head-to-head records from the SAME fold over the
-// SAME contributions in one call, so putSeasonRecords always writes — and getSeasonRecords
-// always reads — both together; two items that must always change in lockstep would just be
-// more ways for a partial write to desync them, with no rebuildability gained (a rebuild
-// recomputes and overwrites the whole snapshot either way).
-const RECORDS_PK_PREFIX = "RECORDS#";
-export const recordsPk = (crewId: CrewId, season: number): string => `${RECORDS_PK_PREFIX}${crewId}#${season}`;
-export const recordsSk = "RECORDS";
+// The `projections` table's old crew-round-contribution / season-records key vocabulary is GONE
+// (architecture-realignment Task 9, spec §4/§9): crew standings are computed on read over the
+// snapshots table (crews/getSeasonStandings), stored nowhere, so the projector no longer touches
+// any crew keyspace. A crew's SEASON#/counted-round keys above (its OWN entity data on the core
+// table) are unrelated and stay.

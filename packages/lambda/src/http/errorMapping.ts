@@ -84,6 +84,19 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // precondition on an append, same bucket as crew-conflict/golfer-already-in-round, not a
   // genuine-bug 500.
   "round-already-counted": 409,
+  // Architecture-realignment Task 9 (crew seasons + counted rounds + standings-on-read): the
+  // append/remove/standings/create-season use cases. Bucketed by the SAME shapes above —
+  // invalid-season-name is a bad-body 400 (like invalid-crew-name); season-not-found is an
+  // unresolvable id 404 (like unknown-crew); season-closed is a failed lifecycle precondition
+  // 409 (like round-already-counted); did-not-play and not-the-appender are forbidden actors
+  // 403 (like not-a-member/not-a-viewer); ghost-not-addable is a failed precondition on the
+  // add target 409 (like crew-conflict).
+  "invalid-season-name": 400,
+  "season-not-found": 404,
+  "season-closed": 409,
+  "did-not-play": 403,
+  "not-the-appender": 403,
+  "ghost-not-addable": 409,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`

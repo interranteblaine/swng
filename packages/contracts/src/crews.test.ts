@@ -1,16 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { courseId, crewId, golferId } from "@swng/domain";
+import { courseId, crewId, golferId, roundId } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
 import {
   addCrewMemberRequestSchema,
+  appendCountedRoundRequestSchema,
   createCrewRequestSchema,
+  createSeasonRequestSchema,
+  createSeasonResponseSchema,
   crewViewSchema,
   getCrewRecordsResponseSchema,
   getCrewResponseSchema,
   joinCrewRequestSchema,
   listMyCrewsResponseSchema,
+  listSeasonsResponseSchema,
   saveStandingGameRequestSchema,
+  seasonStandingsResponseSchema,
 } from "./crews.js";
 
 // parse(JSON.parse(JSON.stringify(x))) === x — the wire round-trip every schema here has to
@@ -34,12 +39,14 @@ describe("createCrewRequestSchema", () => {
 });
 
 describe("addCrewMemberRequestSchema", () => {
-  it("round-trips a valid add-member request", () => {
-    roundTrips(addCrewMemberRequestSchema, { name: "Cal" });
+  // De-ghost (architecture-realignment Task 9): a member is added by an EXISTING account
+  // golfer's golferId, not a free-text name.
+  it("round-trips a valid add-member request (by golferId)", () => {
+    roundTrips(addCrewMemberRequestSchema, { golferId: golferId("cal-g") });
   });
 
-  it("rejects an extra field (.strict()) — e.g. a client proposing golferId", () => {
-    expect(() => parse(addCrewMemberRequestSchema, { name: "Cal", golferId: "sneaky" })).toThrow(ContractError);
+  it("rejects an extra field (.strict()) — e.g. a client proposing a name", () => {
+    expect(() => parse(addCrewMemberRequestSchema, { golferId: "cal-g", name: "Cal" })).toThrow(ContractError);
   });
 });
 
@@ -145,5 +152,35 @@ describe("getCrewRecordsResponseSchema", () => {
 
   it("round-trips an empty season (no finalized rounds yet)", () => {
     roundTrips(getCrewRecordsResponseSchema, { season: 2026, ledger: [], headToHead: [] });
+  });
+});
+
+// Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read.
+describe("season + standings schemas", () => {
+  it("createSeasonRequestSchema rejects a server-assigned seasonId (.strict())", () => {
+    roundTrips(createSeasonRequestSchema, { name: "Summer Cup" });
+    expect(() => parse(createSeasonRequestSchema, { name: "Summer Cup", seasonId: "sneaky" })).toThrow(ContractError);
+  });
+
+  it("appendCountedRoundRequestSchema round-trips a roundId, rejects extras", () => {
+    roundTrips(appendCountedRoundRequestSchema, { roundId: roundId("round-1") });
+    expect(() => parse(appendCountedRoundRequestSchema, { roundId: "round-1", appendedBy: "sneaky" })).toThrow(ContractError);
+  });
+
+  it("createSeasonResponseSchema / listSeasonsResponseSchema round-trip a season view", () => {
+    const season = { seasonId: "s-1", name: "2026", status: "open" as const, createdAtMs: 1_700_000_000_000 };
+    roundTrips(createSeasonResponseSchema, { season });
+    roundTrips(listSeasonsResponseSchema, { seasons: [season] });
+  });
+
+  it("seasonStandingsResponseSchema round-trips ledger (with name + member) + head-to-head + rounds", () => {
+    roundTrips(seasonStandingsResponseSchema, {
+      seasonId: "s-1",
+      name: "2026",
+      status: "closed",
+      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, appendedBy: golferId("ann") }],
+      ledger: [{ golferId: golferId("ann"), rounds: 1, wins: 1, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann", member: true }],
+      headToHead: [{ a: golferId("ann"), b: golferId("bo"), aWins: 1, bWins: 0, halves: 0 }],
+    });
   });
 });

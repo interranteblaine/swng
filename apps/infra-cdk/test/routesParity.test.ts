@@ -88,7 +88,22 @@ const stubUseCases: UseCases = {
   joinCrewByCode: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
-  getCrewRecords: () => {
+  createSeason: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  listSeasons: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  appendCountedRound: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  removeCountedRound: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  getSeasonStandings: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  leaveCrew: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
 };

@@ -4,6 +4,7 @@ import type { GolferStore } from "../ports/golferStore.js";
 import { createInMemoryGolferStore, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
 import { getMyGolfer } from "./getMyGolfer.js";
 import { getMyRecord } from "./getMyRecord.js";
+import { getMyRounds } from "./getMyRounds.js";
 import { updateMyGolfer } from "./updateMyGolfer.js";
 
 // claimGolfer's own tests moved to claimGolfer.test.ts (M9 hardening): once claiming needed
@@ -20,6 +21,7 @@ const setup = (golferStore: GolferStore = createInMemoryGolferStore()) => {
     getMe: getMyGolfer({ golferStore }),
     updateMe: updateMyGolfer({ golferStore, idGenerator }),
     record: getMyRecord({ golferStore, projectionStore }),
+    myRounds: getMyRounds({ golferStore, projectionStore }),
   };
 };
 
@@ -144,5 +146,77 @@ describe("getMyRecord", () => {
     const record = await ctx.record({ sub: "sub-1" });
     expect(record.index).toEqual({ value: 7.2, computedAtMs: 9_000, differentialsUsed: 2 });
     expect(record.history.map((line) => line.roundId)).toEqual(["r2", "r1"]); // newest first
+  });
+});
+
+// GET /me/rounds (projection-realignment Task 6): "list my rounds" — same golferStore/
+// projectionStore setup as getMyRecord above, since myRounds shares its exact
+// get-or-nothing + sortLines-then-reverse discipline (getMyRounds.ts's own doc comment).
+describe("getMyRounds", () => {
+  it("returns an empty list for a sub with no golfer row at all — no throw, no create", async () => {
+    const ctx = setup();
+    expect(await ctx.myRounds({ sub: "sub-1" })).toEqual({ rounds: [] });
+  });
+
+  it("lists every finalized round newest-first, each line carrying finalizedAt (the wire name for the store's finalizedAtMs)", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    await ctx.projectionStore.putLine(golfer.golferId, {
+      roundId: roundId("r1"),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 18,
+      ags: 90,
+      differential: 9.0,
+      distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
+      finalizedAtMs: 1_000,
+    });
+    await ctx.projectionStore.putLine(golfer.golferId, {
+      roundId: roundId("r2"),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 18,
+      ags: 95,
+      differential: 14.0,
+      distribution: { eagles: 0, birdies: 0, pars: 5, bogeys: 13, doublePlus: 0 },
+      finalizedAtMs: 2_000,
+    });
+
+    const result = await ctx.myRounds({ sub: "sub-1" });
+    expect(result.rounds.map((line) => line.roundId)).toEqual(["r2", "r1"]); // newest first
+    expect(result.rounds.map((line) => line.finalizedAt)).toEqual([2_000, 1_000]);
+    // Never the store's own internal field name leaking onto the wire.
+    expect(result.rounds.every((line) => !("finalizedAtMs" in line))).toBe(true);
+  });
+
+  // Same ordering the sibling getMyRecord assertion above pins — the two responses must never
+  // silently disagree on "what order is my history in" (both go through sortLines).
+  it("orders identically to GET /me/record's own history for the same golfer", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    await ctx.projectionStore.putLine(golfer.golferId, {
+      roundId: roundId("r1"),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 18,
+      ags: 90,
+      differential: 9.0,
+      distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
+      finalizedAtMs: 1_000,
+    });
+    await ctx.projectionStore.putLine(golfer.golferId, {
+      roundId: roundId("r2"),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 18,
+      ags: 95,
+      differential: 14.0,
+      distribution: { eagles: 0, birdies: 0, pars: 5, bogeys: 13, doublePlus: 0 },
+      finalizedAtMs: 2_000,
+    });
+
+    const record = await ctx.record({ sub: "sub-1" });
+    const rounds = await ctx.myRounds({ sub: "sub-1" });
+    expect(rounds.rounds.map((line) => line.roundId)).toEqual(record.history.map((line) => line.roundId));
   });
 });

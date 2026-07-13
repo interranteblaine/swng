@@ -81,7 +81,14 @@ export type ApplicationErrorCode =
   // no longer) on the crew's own roster — a bad-body precondition the caller can correct (drop
   // or re-add the player), same bucket as unknown-golfer-in-game/duplicate-tee-name, not a
   // genuine-bug 500.
-  | "unknown-preset-player";
+  | "unknown-preset-player"
+  // Projection-realignment Task 6: getRoundArchive's authorization check — the caller's
+  // account golfer (if any) isn't among archive.participants. A forbidden ACTOR, same shape as
+  // not-a-participant/not-a-member above — 403, never a 404 (round-not-found already covers
+  // "no snapshot exists at all"; this is "it exists, you may not see it"). Task 9 adds a
+  // crew-membership arm ahead of this rejection (see getRoundArchive.ts's own TODO); until
+  // then every non-participant, including a stranger with no golfer row at all, lands here.
+  | "not-a-viewer";
 
 export class ApplicationError extends Error {
   constructor(

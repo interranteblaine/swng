@@ -61,6 +61,12 @@ const stubUseCases: UseCases = {
   getMyRecord: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
+  getMyRounds: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  getRoundArchive: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
   addParticipant: () => {
     throw new Error("not implemented: parity test never dispatches");
   },

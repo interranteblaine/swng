@@ -33,12 +33,13 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (25, as of M8 Task 4) routes are declared here explicitly (matching
-// packages/lambda/src/http/routes.ts) rather than via a single $default catch-all, so the
-// API's shape is visible in the CloudFormation template and the AWS console, not hidden
-// inside the Lambda. Exported (not module-private) so test/routesParity.test.ts can pin
-// this table against buildRoutes' own {method, path} set — infra depends on lambda, the
-// correct direction, so that guard lives here rather than in packages/lambda.
+// function — but the (27, as of projection-realignment Task 6) routes are declared here
+// explicitly (matching packages/lambda/src/http/routes.ts) rather than via a single $default
+// catch-all, so the API's shape is visible in the CloudFormation template and the AWS
+// console, not hidden inside the Lambda. Exported (not module-private) so
+// test/routesParity.test.ts can pin this table against buildRoutes' own {method, path} set —
+// infra depends on lambda, the correct direction, so that guard lives here rather than in
+// packages/lambda.
 export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly path: string }> = [
   { method: HttpMethod.POST, path: "/rounds" },
   { method: HttpMethod.POST, path: "/rounds/join" },
@@ -49,6 +50,10 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // M9 Task 3 (share): mints this round's immortal spectator link — participant-gated, same
   // tier as finalize/terminate above.
   { method: HttpMethod.POST, path: "/rounds/{roundId}/share" },
+  // Projection-realignment Task 6: the settled snapshot's own event log — "golfer"-gated
+  // (routes.ts's own doc comment on why this differs from GET /rounds/{roundId}/events'
+  // round-scoped "round-read" tier just above).
+  { method: HttpMethod.GET, path: "/rounds/{roundId}/archive" },
   // M6 Task 4: peek + the course CRUD/search surface.
   { method: HttpMethod.GET, path: "/rounds/peek" },
   { method: HttpMethod.POST, path: "/courses" },
@@ -62,6 +67,8 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.PUT, path: "/me" },
   { method: HttpMethod.POST, path: "/golfers/claim" },
   { method: HttpMethod.GET, path: "/me/record" },
+  // Projection-realignment Task 6: "list my rounds" — same golfer tier as GET /me/record.
+  { method: HttpMethod.GET, path: "/me/rounds" },
   // M8 Task 4: crews + rounds played as yourself. POST /rounds and POST /rounds/join above
   // are unchanged PATHS — only their auth tier moved (routes.ts's own "optional-golfer" —
   // API Gateway forwards every method/path here identically regardless of auth tier, so this

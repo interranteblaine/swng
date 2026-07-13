@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { Link } from "react-router";
 import type { GetMyRecordResponse } from "@swng/contracts";
 import type { CourseId, GolferRoundLine } from "@swng/domain";
 import { effectiveIndex } from "@swng/domain";
@@ -238,7 +239,12 @@ export function ProfilePage() {
             <ul className="flex flex-col gap-1">
               {history.map((line) => (
                 <li key={line.roundId} className="text-sm text-slate-300">
-                  {line.courseName} — {line.tee} — AGS {line.ags ?? "—"} — differential {line.differential !== undefined ? line.differential.toFixed(1) : "—"}
+                  {/* Projection-realignment Task 6: every history line opens its own
+                      ArchivedRoundPage — the "open one finalized round" half of this task,
+                      reached from the "list my rounds" half already rendered here. */}
+                  <Link to={`/rounds/${line.roundId}/archive`} className="underline decoration-slate-600 underline-offset-2 hover:decoration-slate-400">
+                    {line.courseName} — {line.tee} — AGS {line.ags ?? "—"} — differential {line.differential !== undefined ? line.differential.toFixed(1) : "—"}
+                  </Link>
                 </li>
               ))}
             </ul>

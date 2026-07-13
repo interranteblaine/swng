@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { roundId } from "@swng/domain";
 import type { GolferRoundLine } from "@swng/domain";
@@ -8,6 +9,18 @@ import { createMemoryStorage } from "../testSupport/memoryStorage";
 import { ProfilePage } from "./ProfilePage";
 
 const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
+
+// ProfilePage's history lines are now react-router <Link>s (projection-realignment Task 6) —
+// every render needs a Router ancestor, same MemoryRouter-wrapping idiom WatchPage.test.tsx's
+// own renderWithAuth uses.
+const renderProfilePage = () =>
+  render(
+    <MemoryRouter>
+      <AuthProvider>
+        <ProfilePage />
+      </AuthProvider>
+    </MemoryRouter>,
+  );
 
 const lineWithDifferential = (roundIdSuffix: string, differential: number): GolferRoundLine => ({
   roundId: roundId(`round-${roundIdSuffix}`),
@@ -41,11 +54,7 @@ const signIn = () => {
 
 describe("ProfilePage — signed out", () => {
   it("shows a sign-in prompt, never renders the form", () => {
-    render(
-      <AuthProvider>
-        <ProfilePage />
-      </AuthProvider>,
-    );
+    renderProfilePage();
 
     expect(screen.getByText(/sign in to see your profile/i)).toBeTruthy();
     expect(screen.queryByLabelText("Name")).toBeNull();
@@ -65,11 +74,7 @@ describe("ProfilePage — signed in", () => {
       }),
     );
 
-    render(
-      <AuthProvider>
-        <ProfilePage />
-      </AuthProvider>,
-    );
+    renderProfilePage();
 
     await waitFor(() => expect(screen.getByText(/computes after 3 posted/i)).toBeTruthy());
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
@@ -90,11 +95,7 @@ describe("ProfilePage — signed in", () => {
       }),
     );
 
-    render(
-      <AuthProvider>
-        <ProfilePage />
-      </AuthProvider>,
-    );
+    renderProfilePage();
 
     await waitFor(() => expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Ann"));
     expect((screen.getByLabelText("Declared index") as HTMLInputElement).value).toBe("15");
@@ -109,6 +110,31 @@ describe("ProfilePage — signed in", () => {
     expect(historyItems[0]?.textContent).toMatch(/differential 9.2/);
     expect(historyItems[1]?.textContent).toMatch(/differential 11.8/);
     expect(historyItems[2]?.textContent).toMatch(/differential 14.5/);
+  });
+
+  // Projection-realignment Task 6 (Step 1's own structural pin): every history line is a
+  // real link to its own ArchivedRoundPage, keyed by the wire response's own roundId — never
+  // plain unlinked text.
+  it("renders each history line as a link to its own /rounds/:roundId/archive", async () => {
+    signIn();
+    const history: GolferRoundLine[] = [lineWithDifferential("1", 9.2), lineWithDifferential("2", 11.8)];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", declared: 15 } });
+        if (path === "/me/record") return fakeResponse(200, { history });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    const firstLink = await waitFor(() => screen.getByRole("link", { name: /Pebble Beach — white — AGS 82 — differential 9.2/ }));
+    expect(firstLink.getAttribute("href")).toBe(`/rounds/${history[0]!.roundId}/archive`);
+
+    const secondLink = screen.getByRole("link", { name: /differential 11.8/ });
+    expect(secondLink.getAttribute("href")).toBe(`/rounds/${history[1]!.roundId}/archive`);
   });
 
   it("saving the form PUTs /me, then re-fetches /me", async () => {
@@ -132,11 +158,7 @@ describe("ProfilePage — signed in", () => {
       }),
     );
 
-    render(
-      <AuthProvider>
-        <ProfilePage />
-      </AuthProvider>,
-    );
+    renderProfilePage();
     await waitFor(() => expect(screen.getByText(/computes after 3 posted/i)).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ann Updated" } });
@@ -168,11 +190,7 @@ describe("ProfilePage — signed in", () => {
       }),
     );
 
-    render(
-      <AuthProvider>
-        <ProfilePage />
-      </AuthProvider>,
-    );
+    renderProfilePage();
     await waitFor(() => expect(screen.getByText(/computes after 3 posted/i)).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

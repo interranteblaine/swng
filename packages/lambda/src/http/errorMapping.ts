@@ -75,6 +75,9 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // roster) the caller can correct, same bucket as unknown-golfer-in-game/golfer-required
   // above.
   "unknown-preset-player": 400,
+  // Projection-realignment Task 6: getRoundArchive's own forbidden-actor code — same 403
+  // bucket as not-a-participant/not-a-member/claim-proof-required above.
+  "not-a-viewer": 403,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`

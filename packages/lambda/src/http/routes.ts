@@ -23,6 +23,8 @@ import type {
   GetCrewResponse,
   GetMeResponse,
   GetMyRecordResponse,
+  GetMyRoundsResponse,
+  GetRoundArchiveResponse,
   GolferResponse,
   JoinCrewRequest,
   JoinCrewResponse,
@@ -81,6 +83,10 @@ export interface UseCases {
   // M9 Task 3 (share): mints (deterministically) this round's own spectator link — participant-
   // gated, same claims shape addGame/recordScore/finalizeRound already take.
   getShareLink: (claims: ParticipantClaims) => Promise<ShareLinkResponse>;
+  // Projection-realignment Task 6: the snapshot's own event log, "golfer"-gated (a signed-in
+  // account, never a round-scoped participant token — the archive outlives any one device's
+  // credential) — getRoundArchive.ts's own doc comment covers the participant/stranger split.
+  getRoundArchive: (claims: AccountClaims, id: RoundId) => Promise<GetRoundArchiveResponse>;
   // M8 Task 4: POST /rounds/{roundId}/players — an already-seated participant adds someone
   // else to the roster, the crew one-tap flow's mid-round counterpart to StartRound's own
   // `players` array. "participant"-gated, same tier as addGame/recordScore/finalizeRound.
@@ -99,6 +105,8 @@ export interface UseCases {
   updateMyGolfer: (claims: AccountClaims, command: UpdateMeRequest) => Promise<GolferResponse>;
   claimGolfer: (claims: AccountClaims, command: ClaimGolferRequest) => Promise<GolferResponse>;
   getMyRecord: (claims: AccountClaims) => Promise<GetMyRecordResponse>;
+  // Projection-realignment Task 6: "list my rounds" — same golfer-tier auth as getMyRecord.
+  getMyRounds: (claims: AccountClaims) => Promise<GetMyRoundsResponse>;
   // M8 Task 4: crews — every route below is "golfer"-gated (routes.ts's table).
   createCrew: (claims: AccountClaims, command: CreateCrewRequest) => Promise<CreateCrewResponse>;
   getCrew: (claims: AccountClaims, id: CrewId) => Promise<GetCrewResponse>;
@@ -298,6 +306,18 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     successStatus: 200, // deterministic + idempotent (same round -> same link) — an act on an existing resource, not a mint, same status-code spirit as finalize/terminate.
     handler: async (ctx) => useCases.getShareLink(ctx.claims!),
   },
+  // Projection-realignment Task 6: the settled snapshot's own event log — "golfer"-gated
+  // (unlike GET /rounds/{roundId}/events' "round-read" tier, which trusts a round-scoped
+  // token): an archive outlives any one device's participant/spectator credential, so this
+  // route authorizes by the caller's ACCOUNT instead (getRoundArchive.ts's own participant/
+  // stranger split).
+  {
+    method: "GET",
+    path: "/rounds/{roundId}/archive",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getRoundArchive(ctx.account!, roundId(ctx.pathParams.roundId!)),
+  },
   {
     method: "POST",
     path: "/rounds/{roundId}/games/{gameId}/terminate",
@@ -376,6 +396,15 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 200,
     handler: async (ctx) => useCases.getMyRecord(ctx.account!),
+  },
+  // Projection-realignment Task 6: "list my rounds" — same golfer tier, same shape of call as
+  // GET /me/record just above.
+  {
+    method: "GET",
+    path: "/me/rounds",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getMyRounds(ctx.account!),
   },
   // M8 Task 4: crews — every route below is "golfer"-gated (a signed-in Cognito identity,
   // same tier as the /me* surface above). Member-only authorization (not-a-member 403) lives

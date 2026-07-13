@@ -1,0 +1,103 @@
+import { useEffect, useState } from "react";
+import { useParams } from "react-router";
+import { reduceRound, roundId as makeRoundId, scoreGame } from "@swng/domain";
+import type { GameConfig, GameState, RoundEvent, RoundId, RoundState } from "@swng/domain";
+import { ApiError, getRoundArchive } from "../api";
+import { useAuth } from "../auth/useAuth";
+import { ResultsView } from "./ResultsView";
+
+// Same forward-compat guard as watch/useWatchRound.ts's own KNOWN_GAME_KINDS (its doc comment
+// explains why this small, five-literal set is duplicated locally rather than exported from
+// @swng/client) — a finalized round holding a future game kind must not crash this read-only
+// page.
+const KNOWN_GAME_KINDS: ReadonlySet<GameConfig["kind"]> = new Set(["stroke-play", "singles-match", "stableford", "fourball-match", "skins"]);
+
+// The settling event's own wallMs, searched from the raw log — the SAME "search the log,
+// never re-derive" discipline application's finalizedAtMsOf (projections/projectArchive.ts)
+// applies server-side, mirrored here rather than imported (the web app may only import
+// client/contracts/domain — layer law, eslint.config.mjs).
+const finalizedAtMsOf = (events: readonly RoundEvent[]): number | undefined => events.find((event) => event.kind === "round-finalized")?.hlc.wallMs;
+
+interface ArchiveView {
+  readonly state: RoundState;
+  readonly games: readonly GameState[];
+  readonly finalizedAtMs: number | undefined;
+}
+
+// GET /rounds/{roundId}/archive (projection-realignment Task 6): a read-only page for ONE
+// finalized round, reached from ProfilePage's own history links — "golfer"-gated (the
+// caller's account Bearer, via useAuth's withAuth), never a round-scoped participant/
+// spectator credential the way RoundPage/WatchPage are. No session, no outbox, no edit
+// affordances: this fetches the archive's event log exactly once, folds it via the domain
+// `reduceRound` (mirroring WatchPage.tsx's own fold-then-ResultsView composition, not a new
+// one), and renders ResultsView over the result — the fold never mutates and nothing here
+// ever calls a write endpoint.
+export function ArchivedRoundPage() {
+  const { roundId: param } = useParams<{ roundId: string }>();
+  const { withAuth } = useAuth();
+  const [view, setView] = useState<ArchiveView | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!param) return;
+    const id: RoundId = makeRoundId(param);
+    setView(undefined);
+    setError(undefined);
+
+    void withAuth((token) => getRoundArchive(token, id))
+      .then(({ events }) => {
+        const state = reduceRound(events);
+        const games = state.games.filter((gameConfig) => KNOWN_GAME_KINDS.has(gameConfig.kind)).map((gameConfig) => scoreGame(gameConfig, state));
+        setView({ state, games, finalizedAtMs: finalizedAtMsOf(events) });
+      })
+      .catch((caught) => {
+        // Never the raw server text (RoundPage.tsx's finalize error / ProfilePage.tsx's save
+        // error are the same discipline) — a 404 (never finalized/never existed) and a 403
+        // (a stranger's account) both read the same honestly to a golfer who followed a link
+        // to a round they can't open.
+        setError(caught instanceof ApiError && caught.code === "round-not-found" ? "This round couldn't be found." : "Could not open this round — try again.");
+      });
+  }, [param, withAuth]);
+
+  if (!param) {
+    return (
+      <div role="status" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+        This link looks incomplete.
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div role="status" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+        {error}
+      </div>
+    );
+  }
+
+  if (!view) {
+    return (
+      <div role="status" aria-label="Loading round" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+        Loading round…
+      </div>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-950">
+      <div className="p-4 text-slate-100">
+        <p className="text-sm text-slate-400">
+          {view.state.card.courseName}
+          {view.finalizedAtMs !== undefined && ` — ${new Date(view.finalizedAtMs).toLocaleDateString()}`}
+        </p>
+      </div>
+      {/* joinCode="" + no shareToken: this page's viewer holds only their own golfer Bearer —
+          never a round-scoped participant token to mint a NEW share link with, nor a round
+          join code to satisfy ClaimAffordance's proof-of-context check — same reasoning as
+          WatchPage's own reuse of ResultsView (WatchPage.tsx's own doc comment). An empty
+          joinCode still can't be abused: claimGolfer.ts's own proof-of-context check rejects
+          an empty/wrong code with claim-proof-required. */}
+      <ResultsView state={view.state} games={view.games} response={undefined} joinCode="" />
+    </main>
+  );
+}

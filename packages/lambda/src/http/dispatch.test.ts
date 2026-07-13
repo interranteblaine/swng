@@ -27,6 +27,8 @@ import {
   getCrewRecords,
   getMyGolfer,
   getMyRecord,
+  getMyRounds,
+  getRoundArchive,
   getShareLink,
   joinCrewByCode,
   joinRound,
@@ -55,6 +57,8 @@ import {
   getCrewResponseSchema,
   getMeResponseSchema,
   getMyRecordResponseSchema,
+  getMyRoundsResponseSchema,
+  getRoundArchiveResponseSchema,
   golferResponseSchema,
   joinCrewResponseSchema,
   joinRoundResponseSchema,
@@ -151,6 +155,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
+    getRoundArchive: getRoundArchive({ snapshots, golferStore, crewStore }),
     addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore }),
     createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
     addTeeSet: addTeeSet({ courseStore, clock, logger }),
@@ -162,6 +167,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
     claimGolfer: claimGolfer({ golferStore, roundStore: store, journal, crewStore }),
     getMyRecord: getMyRecord({ golferStore, projectionStore }),
+    getMyRounds: getMyRounds({ golferStore, projectionStore }),
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
@@ -1401,5 +1407,127 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     );
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "token-round-mismatch" });
+  });
+});
+
+// Projection-realignment Task 6: GET /me/rounds and GET /rounds/{roundId}/archive, both
+// "golfer"-gated (unlike GET /rounds/{roundId}/events' round-scoped "round-read" tier) — the
+// routes-table pin the brief's own Step 1 asks for. Mirrors the M7 golfer-routes suite's own
+// ann/bo + golferBearer/stubVerifier idiom.
+describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{roundId}/archive (projection-realignment Task 6)", () => {
+  const ann: AccountClaims = { sub: "cognito-sub-ann-archive", email: "ann-archive@example.com" };
+  const bo: AccountClaims = { sub: "cognito-sub-bo-archive", email: "bo-archive@example.com" };
+  const golferBearer = (account: AccountClaims): string => `golfer-token-${account.sub}`;
+
+  const stubVerifier: AccountVerifier = {
+    verify: async (bearer: string) => {
+      const account = [ann, bo].find((candidate) => golferBearer(candidate) === bearer);
+      if (!account) throw new Error("stubVerifier: unknown token");
+      return account;
+    },
+  };
+
+  const setupArchive = () => setup(stubVerifier);
+
+  // Seeds ann's own account golfer, starts a round AS ANN (StartRound's own-golferId arm, M8
+  // — same idiom as the "optional-golfer tier" suite's own arm-2 test above), then finalizes
+  // it with no games configured (nothing left unresolved) — the smallest real finalized round
+  // with a real account-golfer participant this suite needs.
+  const seedAnnsFinalizedRound = async (dispatcher: ReturnType<typeof createDispatcher>) => {
+    const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
+    const annGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
+
+    const started = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(
+            makeEvent({
+              method: "POST",
+              path: "/rounds",
+              token: golferBearer(ann),
+              body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annGolfer.golfer.golferId },
+            }),
+          ),
+        ).body!,
+      ),
+    );
+
+    const finalizeResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })));
+    expect(finalizeResp.statusCode).toBe(200);
+
+    return started;
+  };
+
+  describe("GET /rounds/{roundId}/archive", () => {
+    it("404s round-not-found for a roundId with no snapshot at all", async () => {
+      const { dispatcher } = setupArchive();
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/never-started/archive", token: golferBearer(ann) })));
+      expect(resp.statusCode).toBe(404);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "round-not-found" });
+    });
+
+    it("404s round-not-found for a round that's still LIVE — the snapshot only lands at finalize", async () => {
+      const { dispatcher } = setupArchive();
+      const started = startRoundResponseSchema.parse(
+        JSON.parse(
+          asStructured(
+            await dispatcher(
+              makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Host", tee: "white", courseHandicap: 8 } } }),
+            ),
+          ).body!,
+        ),
+      );
+
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(ann) })));
+      expect(resp.statusCode).toBe(404);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "round-not-found" });
+    });
+
+    it("returns the archive's own event log for the participant who played it", async () => {
+      const { dispatcher } = setupArchive();
+      const started = await seedAnnsFinalizedRound(dispatcher);
+
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(ann) })));
+      expect(resp.statusCode).toBe(200);
+      const { events } = getRoundArchiveResponseSchema.parse(JSON.parse(resp.body!));
+      expect(events.length).toBeGreaterThan(0);
+      expect(events.some((event) => event.kind === "round-finalized")).toBe(true);
+    });
+
+    // The stranger-403 pin (task-6-brief.md's binding resolution — Task 9's crew-membership
+    // arm is explicitly deferred): a signed-in golfer who simply never played this round.
+    it("403s not-a-viewer for a signed-in golfer who never played this round — a stranger", async () => {
+      const { dispatcher } = setupArchive();
+      const started = await seedAnnsFinalizedRound(dispatcher);
+
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(bo) })));
+      expect(resp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-a-viewer" });
+    });
+
+    it("401s with no bearer token at all — golfer-tier auth, never the round-scoped participant/spectator tier", async () => {
+      const { dispatcher } = setupArchive();
+      const started = await seedAnnsFinalizedRound(dispatcher);
+
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive` })));
+      expect(resp.statusCode).toBe(401);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+    });
+  });
+
+  describe("GET /me/rounds", () => {
+    it("returns an empty list for a golfer who has never played a finalized round", async () => {
+      const { dispatcher } = setupArchive();
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds", token: golferBearer(bo) })));
+      expect(resp.statusCode).toBe(200);
+      expect(getMyRoundsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: [] });
+    });
+
+    it("401s with no bearer token at all", async () => {
+      const { dispatcher } = setupArchive();
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds" })));
+      expect(resp.statusCode).toBe(401);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+    });
   });
 });

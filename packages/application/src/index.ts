@@ -33,6 +33,7 @@ export { terminateGame } from "./rounds/terminateGame.js";
 export { readEvents } from "./rounds/readEvents.js";
 export { peekRound } from "./rounds/peekRound.js";
 export { getShareLink } from "./rounds/getShareLink.js";
+export { getRoundArchive } from "./rounds/getRoundArchive.js";
 export { resolveSuppliedGolfer } from "./rounds/golferIdentity.js";
 export type { GolferIdentityContext } from "./rounds/golferIdentity.js";
 
@@ -46,6 +47,7 @@ export { getMyGolfer } from "./golfers/getMyGolfer.js";
 export { updateMyGolfer } from "./golfers/updateMyGolfer.js";
 export { claimGolfer } from "./golfers/claimGolfer.js";
 export { getMyRecord } from "./golfers/getMyRecord.js";
+export { getMyRounds } from "./golfers/getMyRounds.js";
 
 export { createCrew } from "./crews/createCrew.js";
 export { getCrew } from "./crews/getCrew.js";

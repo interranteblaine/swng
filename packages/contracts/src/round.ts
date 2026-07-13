@@ -205,3 +205,17 @@ export interface ShareLinkResponse {
 export const shareLinkResponseSchema: z.ZodType<ShareLinkResponse> = z.object({
   url: z.string(),
 });
+
+// GET /rounds/{roundId}/archive (projection-realignment Task 6): the settled snapshot's own
+// event log, verbatim — the SAME shape family as EventsResponse (commands.ts), but deliberately
+// its own type rather than a reuse: EventsResponse carries `nextSeq` (a live-log catch-up
+// cursor), which a frozen archive has no use for — a caller folding this via the domain
+// `reduceRound` needs only `events` (apps/web's ArchivedRoundPage mirrors WatchPage's own
+// fold-then-ResultsView composition).
+export interface GetRoundArchiveResponse {
+  readonly events: readonly RoundEvent[];
+}
+
+export const getRoundArchiveResponseSchema: z.ZodType<GetRoundArchiveResponse> = z.object({
+  events: z.array(roundEventSchema).readonly(),
+});

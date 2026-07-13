@@ -12,6 +12,8 @@ import {
   getCrewResponseSchema,
   getMeResponseSchema,
   getMyRecordResponseSchema,
+  getMyRoundsResponseSchema,
+  getRoundArchiveResponseSchema,
   golferResponseSchema,
   joinCrewResponseSchema,
   joinRoundResponseSchema,
@@ -45,6 +47,8 @@ import type {
   GetCrewResponse,
   GetMeResponse,
   GetMyRecordResponse,
+  GetMyRoundsResponse,
+  GetRoundArchiveResponse,
   GolferResponse,
   JoinCrewRequest,
   JoinCrewResponse,
@@ -223,6 +227,22 @@ export const claimGolfer = async (token: string, input: ClaimGolferRequest): Pro
 export const getMyRecord = async (token: string): Promise<GetMyRecordResponse> => {
   const json = await requestJson("/me/record", { token });
   return parse(getMyRecordResponseSchema, json);
+};
+
+// Projection-realignment Task 6: "list my rounds" — same requestJson + per-endpoint idiom as
+// getMyRecord above, "golfer"-gated the same way.
+export const getMyRounds = async (token: string): Promise<GetMyRoundsResponse> => {
+  const json = await requestJson("/me/rounds", { token });
+  return parse(getMyRoundsResponseSchema, json);
+};
+
+// Projection-realignment Task 6: opens one finalized round's own event log — "golfer"-gated
+// (a signed-in account's Bearer, never a round-scoped participant/spectator token; the archive
+// outlives any one device's credential). ArchivedRoundPage folds the result via the domain
+// `reduceRound`, mirroring WatchPage's own composition.
+export const getRoundArchive = async (token: string, id: RoundId): Promise<GetRoundArchiveResponse> => {
+  const json = await requestJson(`/rounds/${id}/archive`, { token });
+  return parse(getRoundArchiveResponseSchema, json);
 };
 
 export const terminateGame = async (roundId: RoundId, token: string, gameId: GameId): Promise<TerminateGameResponse> => {

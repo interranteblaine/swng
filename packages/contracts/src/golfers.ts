@@ -77,8 +77,11 @@ export const claimGolferRequestSchema = z.object({ golferId: golferIdSchema, nam
 export type ClaimGolferRequest = z.infer<typeof claimGolferRequestSchema>;
 
 // The wire mirror of domain's GolferRoundLine (golfer/record.ts) — structurally identical,
-// same as round.ts's participantSchema mirroring Participant.
-const golferRoundLineSchema: z.ZodType<GolferRoundLine> = z.object({
+// same as round.ts's participantSchema mirroring Participant. Field object, not just the
+// finished schema, so GetMyRoundsResponse below can extend it with `finalizedAt` (same
+// "shared fields object" idiom as round.ts's gameConfigFields) rather than duplicating five
+// field declarations a second time.
+const golferRoundLineFields = {
   roundId: roundIdSchema,
   courseName: z.string(),
   tee: z.string(),
@@ -92,7 +95,9 @@ const golferRoundLineSchema: z.ZodType<GolferRoundLine> = z.object({
     bogeys: z.number().int(),
     doublePlus: z.number().int(),
   }),
-});
+} as const;
+
+const golferRoundLineSchema: z.ZodType<GolferRoundLine> = z.object(golferRoundLineFields);
 
 export interface GetMyRecordResponse {
   // differentialsUsed: WHS Rule 5.2a's `use` count (domain's computeIndexDetail, whs.ts) —
@@ -104,4 +109,19 @@ export interface GetMyRecordResponse {
 export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.object({
   index: z.object({ value: z.number(), computedAtMs: z.number().int(), differentialsUsed: z.number().int() }).optional(),
   history: z.array(golferRoundLineSchema).readonly(),
+});
+
+// GET /me/rounds (projection-realignment Task 6): "list my rounds" — every finalized round
+// the caller played, newest first (application/src/golfers/getMyRounds.ts, the SAME sortLines-
+// then-reverse discipline getMyRecord's own `history` already uses). Each entry is a
+// GolferRoundLine PLUS `finalizedAt` (the wire name for the projection store's own internal
+// `finalizedAtMs`) — the one piece a "my rounds" list needs that the index/trend-focused
+// GetMyRecordResponse never had to expose: WHEN each round was played, not just what it says
+// about the index.
+export interface GetMyRoundsResponse {
+  readonly rounds: readonly (GolferRoundLine & { readonly finalizedAt: number })[];
+}
+
+export const getMyRoundsResponseSchema: z.ZodType<GetMyRoundsResponse> = z.object({
+  rounds: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int() })).readonly(),
 });

@@ -31,6 +31,8 @@ import {
   getCrewRecords,
   getMe,
   getMyRecord,
+  getMyRounds,
+  getRoundArchive,
   joinCrew,
   joinRound,
   listMyCrews,
@@ -670,6 +672,42 @@ describe("getMyRecord", () => {
     expect(seenUrl).toBe(`${HTTP_URL}/me/record`);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
     expect(result).toEqual({ history: [] });
+  });
+});
+
+describe("getMyRounds", () => {
+  it("GETs /me/rounds with the bearer token and parses a GetMyRoundsResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { rounds: [] });
+    });
+
+    const result = await getMyRounds("tok-me");
+
+    expect(seenUrl).toBe(`${HTTP_URL}/me/rounds`);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
+    expect(result).toEqual({ rounds: [] });
+  });
+});
+
+describe("getRoundArchive", () => {
+  it("GETs /rounds/{roundId}/archive with the bearer token and parses a GetRoundArchiveResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { events: [] });
+    });
+
+    const result = await getRoundArchive("tok-archive", roundId("round-1"));
+
+    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/archive`);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-archive");
+    expect(result).toEqual({ events: [] });
   });
 });
 

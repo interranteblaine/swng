@@ -5,6 +5,7 @@ import { AddCoursePage } from "./courses/AddCoursePage";
 import { EditCoursePage } from "./courses/EditCoursePage";
 import { CrewCreatePage } from "./crews/CrewCreatePage";
 import { CrewPage } from "./crews/CrewPage";
+import { ArchivedRoundPage } from "./round/ArchivedRoundPage";
 import { AuthCallbackPage } from "./routes/AuthCallbackPage";
 import { CreateRoundPage } from "./routes/CreateRoundPage";
 import { HomePage } from "./routes/HomePage";
@@ -66,6 +67,11 @@ export function App() {
             <Route path="/crews/:crewId" element={<CrewPage />} />
             <Route path="/join" element={<JoinRoundPage />} />
             <Route path="/round/:roundId" element={<RoundPage />} />
+            {/* Projection-realignment Task 6: INSIDE Layout, unlike /watch/:roundId below —
+                this route needs the golfer Bearer (useAuth's withAuth), which only exists
+                signed in, and the header chrome is exactly what a signed-in golfer expects
+                browsing from their own Profile. */}
+            <Route path="/rounds/:roundId/archive" element={<ArchivedRoundPage />} />
             <Route path="/profile" element={<ProfilePage />} />
           </Route>
           {/* Outside Layout on purpose: mid-redirect from the Hosted UI is a bare transitional

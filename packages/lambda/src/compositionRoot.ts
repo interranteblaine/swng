@@ -28,6 +28,8 @@ import {
   getCrewRecords,
   getMyGolfer,
   getMyRecord,
+  getMyRounds,
+  getRoundArchive,
   getShareLink,
   joinCrewByCode,
   joinRound,
@@ -255,6 +257,9 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
+    // snapshots/golferStore/crewStore (projection-realignment Task 6): the SAME instances the
+    // finalize/crew use cases above already share.
+    getRoundArchive: getRoundArchive({ snapshots, golferStore, crewStore }),
     addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore }),
     createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
     addTeeSet: addTeeSet({ courseStore, clock, logger }),
@@ -269,6 +274,7 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // SAME journal/store/crewStore instances every round/crew use case above already shares.
     claimGolfer: claimGolfer({ golferStore, roundStore: store, journal, crewStore }),
     getMyRecord: getMyRecord({ golferStore, projectionStore }),
+    getMyRounds: getMyRounds({ golferStore, projectionStore }),
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),

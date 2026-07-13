@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
-import { deviceId, fixtureLinks, fixtureWhite, opId } from "@swng/domain";
+import { deviceId, fixtureLinks, fixtureWhite, opId, placeholderName } from "@swng/domain";
 import type { AccountClaims, AccountVerifier } from "@swng/application";
 import {
   abandonRound,
@@ -37,6 +37,7 @@ import {
   joinCrewByCode,
   joinRound,
   leaveCrew,
+  leaveRound,
   listMyCrews,
   listSeasons,
   mintParticipantToken,
@@ -165,6 +166,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
     abandonRound: abandonRound({ journal, broadcast, clock, ids, projectionStore, logger }),
+    leaveRound: leaveRound({ journal, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
@@ -177,12 +179,12 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     getCourse: getCourse({ courseStore }),
     searchCourses: searchCourses({ courseStore }),
     terminateGame: terminateGame({ journal, broadcast, clock, ids }),
-    getMyGolfer: getMyGolfer({ golferStore }),
+    getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
     claimGolfer: claimGolfer({ golferStore, roundStore: store, journal, crewStore }),
     getMyRecord: getMyRecord({ golferStore, projectionStore }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
-    getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore }),
+    getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
@@ -592,7 +594,7 @@ describe("createDispatcher — course routes + peek (M6 Task 4)", () => {
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek", query: { code: started.joinCode } })));
     expect(resp.statusCode).toBe(200);
     const peeked = peekRoundResponseSchema.parse(JSON.parse(resp.body!));
-    expect(Object.keys(peeked).sort()).toEqual(["courseName", "teeSets"]);
+    expect(Object.keys(peeked).sort()).toEqual(["courseName", "createdAt", "teeSets"]); // createdAt: accounts-only identity spec §5
   });
 });
 
@@ -769,20 +771,24 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
 
-  // The amended sequence (controller-adjudicated, supersedes the plan's original "GET /me
-  // get-or-creates"): GET /me NEVER creates — a fresh sub gets `{golfer: null}` TWICE (proving
-  // the first call didn't silently bind it), PUT /me is the one create path, and a claim on a
-  // still-unbound sub proceeds straight through (no "already bound elsewhere" collision).
-  it("GET /me (null, null) -> PUT /me (create) -> GET /me (same golferId) -> claim a ghost (200) -> re-claim as a third user (409)", async () => {
+  // Accounts-only identity spec §2 (controller ruling — DELIBERATELY reverses the M7 "GET /me never
+  // creates" this test used to pin): GET /me now MINTS on first touch (placeholderName(sub) +
+  // namePlaceholder true), and a second GET returns the SAME minted golfer. PUT /me with a real
+  // name renames it in place and drops the flag. The claim arms below still work: Bo and Cal claim
+  // WITHOUT ever calling GET /me, so their subs stay unbound and the proof-then-collision ordering
+  // is unchanged (claim itself is untouched until N-T6).
+  it("GET /me (mints, same on re-get) -> PUT /me (renames, drops flag) -> claim a ghost (200) -> re-claim as a third user (409)", async () => {
     const { dispatcher } = setupGolfer();
 
     const firstGet = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: golferBearer(ann) })));
     expect(firstGet.statusCode).toBe(200);
-    expect(getMeResponseSchema.parse(JSON.parse(firstGet.body!))).toEqual({ golfer: null });
+    const firstGolfer = getMeResponseSchema.parse(JSON.parse(firstGet.body!)).golfer;
+    expect(firstGolfer?.name).toBe(placeholderName(ann.sub));
+    expect(firstGolfer?.namePlaceholder).toBe(true);
 
     const secondGet = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: golferBearer(ann) })));
     expect(secondGet.statusCode).toBe(200);
-    expect(getMeResponseSchema.parse(JSON.parse(secondGet.body!))).toEqual({ golfer: null }); // still null — GET never created a row
+    expect(getMeResponseSchema.parse(JSON.parse(secondGet.body!)).golfer?.golferId).toBe(firstGolfer?.golferId); // same minted golfer, not a second row
 
     const putResp = asStructured(
       await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann Golfer" } })),
@@ -790,11 +796,14 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
     expect(putResp.statusCode).toBe(200);
     const created = golferResponseSchema.parse(JSON.parse(putResp.body!));
     expect(created.golfer.name).toBe("Ann Golfer");
+    expect(created.golfer.golferId).toBe(firstGolfer?.golferId); // renamed in place — the mint's own id
+    expect(created.golfer).not.toHaveProperty("namePlaceholder"); // real name dropped the flag
 
     const thirdGet = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: golferBearer(ann) })));
     expect(thirdGet.statusCode).toBe(200);
     const fetched = getMeResponseSchema.parse(JSON.parse(thirdGet.body!));
     expect(fetched.golfer?.golferId).toBe(created.golfer.golferId);
+    expect(fetched.golfer).not.toHaveProperty("namePlaceholder");
 
     // A ghost — a golferId a round already knows a player by, but with no golfer item and no
     // bound sub — created by Bo starting a throwaway round and never signing in as that
@@ -1621,7 +1630,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       expect(getMyLiveRoundsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: [] });
     });
 
-    it("lists a round the golfer just started, by identity — courseName + joinedAt on the wire", async () => {
+    it("lists a round the golfer just started, by identity — courseName + joinedAt + createdAt on the wire", async () => {
       const { dispatcher } = setupArchive();
       const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
       const annGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
@@ -1644,7 +1653,10 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds/live", token: golferBearer(ann) })));
       expect(resp.statusCode).toBe(200);
       const parsed = getMyLiveRoundsResponseSchema.parse(JSON.parse(resp.body!));
-      expect(parsed.rounds).toEqual([{ roundId: started.roundId, courseName: fixtureLinks.courseName, joinedAt: expect.any(Number) }]);
+      // createdAt (accounts-only identity spec §5) — derived from the round's genesis at read time.
+      expect(parsed.rounds).toEqual([
+        { roundId: started.roundId, courseName: fixtureLinks.courseName, joinedAt: expect.any(Number), createdAt: expect.any(Number) },
+      ]);
     });
 
     it("401s with no bearer token at all", async () => {

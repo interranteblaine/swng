@@ -31,6 +31,7 @@ export { recordScore } from "./rounds/recordScore.js";
 export { finalizeRound } from "./rounds/finalizeRound.js";
 export { abandonRound } from "./rounds/abandonRound.js";
 export { terminateGame } from "./rounds/terminateGame.js";
+export { leaveRound } from "./rounds/leaveRound.js";
 export { readEvents } from "./rounds/readEvents.js";
 export { peekRound } from "./rounds/peekRound.js";
 export { getShareLink } from "./rounds/getShareLink.js";
@@ -47,6 +48,7 @@ export { verifyTeeSet } from "./courses/verifyTeeSet.js";
 export { getCourse } from "./courses/getCourse.js";
 export { searchCourses } from "./courses/searchCourses.js";
 
+export { ensureGolfer } from "./golfers/ensureGolfer.js";
 export { getMyGolfer } from "./golfers/getMyGolfer.js";
 export { updateMyGolfer } from "./golfers/updateMyGolfer.js";
 export { claimGolfer } from "./golfers/claimGolfer.js";

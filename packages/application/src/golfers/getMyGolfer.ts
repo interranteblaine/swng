@@ -5,6 +5,7 @@ import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
+import { ensureGolfer } from "./ensureGolfer.js";
 import { toGolferView } from "./golferView.js";
 
 // A brand-new golfer's starting name — used both here (fresh GET /me) and by claimGolfer's
@@ -52,17 +53,17 @@ export const getOrCreateGolfer = async (
   return { golfer: bound!.golfer, sub: claims.sub, revision: bound!.revision };
 };
 
-// GET /me NEVER creates (plan amendment, controller-decided — supersedes the plan's original
-// "get-or-create"): a get-or-create here would bind the sub the moment ANY screen calls
-// GET /me (e.g. on sign-in), so by the time a golfer reaches a claim button their sub is
-// already bound to their own freshly-minted golfer — every claimGolfer call would then hit
-// the "sub already bound elsewhere" collision arm and the plan's own headline scenario
-// ("claim the ghost you've been all season") could never succeed. Read-only fixes that:
-// an unbound sub gets `golfer: null`; updateMyGolfer (PUT /me) is the one create path, and
-// claimGolfer creates the target ghost's row directly via `put` + `bindSub` (claimGolfer.ts).
+// GET /me get-or-creates (accounts-only identity spec §2, controller ruling — this DELIBERATELY
+// reverses the M7 "GET /me never creates" rule). That old rule existed only to protect claimable
+// ghosts: an auto-create bound the sub before a later claim could run, wedging the claim flow. The
+// spec kills ghosts, so the ambiguity that motivated the rule is gone — the first authenticated
+// request that needs the caller's golfer now mints it (ensureGolfer: placeholderName(sub) +
+// namePlaceholder: true, via the M9 SUB# transaction). The response's `golfer` is therefore never
+// null in practice, but the type stays nullable — it's the shared GetMeResponse the wire already
+// speaks, and tightening it is out of this additive task's scope.
 export const getMyGolfer =
-  (deps: { golferStore: GolferStore }) =>
+  (deps: { golferStore: GolferStore; idGenerator: IdGenerator }) =>
   async (claims: AccountClaims): Promise<GetMeResponse> => {
-    const found = await deps.golferStore.getBySub(claims.sub);
-    return { golfer: found ? toGolferView(found.golfer) : null };
+    const golfer = await ensureGolfer(deps)(claims);
+    return { golfer: toGolferView(golfer) };
   };

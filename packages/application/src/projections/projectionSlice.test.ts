@@ -26,7 +26,13 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
   participants: entries.map((e): Participant => ({ golferId: e.golferId, name: e.golferId, tee: "white", courseHandicap: 8 })),
   games: [],
   cells: {},
-  events: [finalizedEvent(wallMs)],
+  // A real archive's log always opens with round-created (its genesis) — carried here so
+  // createdAtMsOf (accounts-only identity spec §5) resolves; its wall time (1) is arbitrary,
+  // no test below asserts it, only its PRESENCE matters.
+  events: [
+    { kind: "round-created", roundId: roundId(id), card: fixtureLinks18, opId: opId(`created-${id}`), hlc: { wallMs: 1, counter: 0, deviceId: deviceId("server") }, authorId: ann },
+    finalizedEvent(wallMs),
+  ],
   results: [],
   terminatedGameIds: [],
   handicapping: entries.map((e) =>

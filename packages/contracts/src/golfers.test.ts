@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { courseId, golferId, roundId } from "@swng/domain";
 import type { GolferRoundLine } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
-import { claimGolferRequestSchema, getMeResponseSchema, getMyRecordResponseSchema, updateMeRequestSchema } from "./golfers.js";
+import { claimGolferRequestSchema, getMeResponseSchema, getMyLiveRoundsResponseSchema, getMyRecordResponseSchema, getMyRoundsResponseSchema, updateMeRequestSchema } from "./golfers.js";
 
 // parse(JSON.parse(JSON.stringify(x))) === x — the wire round-trip every schema here has to
 // survive unchanged, same pattern as courses.test.ts / round.test.ts.
@@ -28,9 +28,15 @@ describe("golferViewSchema (via getMeResponseSchema)", () => {
     });
   });
 
-  // GET /me never creates (plan amendment) — an unbound sub's response carries golfer: null.
+  // GET /me get-or-creates now (accounts-only identity spec §2), but the wire type stays nullable —
+  // the null case still round-trips.
   it("round-trips an unbound sub: golfer null", () => {
     roundTrips(getMeResponseSchema, { golfer: null });
+  });
+
+  // accounts-only identity spec §2: namePlaceholder rides the view, emitted only when true.
+  it("round-trips a golfer carrying namePlaceholder: true", () => {
+    roundTrips(getMeResponseSchema, { golfer: { golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } });
   });
 });
 
@@ -111,5 +117,29 @@ describe("getMyRecordResponseSchema", () => {
 
   it("round-trips an entirely empty record", () => {
     roundTrips(getMyRecordResponseSchema, { history: [] });
+  });
+});
+
+// accounts-only identity spec §5: createdAt (the "course + date" designation) is OPTIONAL on both
+// list responses — old projection lines / stale presence pointers carry none, tolerated as absent.
+describe("getMyRoundsResponseSchema", () => {
+  const line = { roundId: roundId("r1"), courseName: "Casa Verde GC", tee: "white", holes: 18 as const, distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 } };
+
+  it("round-trips a round line carrying createdAt", () => {
+    roundTrips(getMyRoundsResponseSchema, { rounds: [{ ...line, finalizedAt: 2_000, createdAt: 1_500 }] });
+  });
+
+  it("round-trips a legacy round line with no createdAt", () => {
+    roundTrips(getMyRoundsResponseSchema, { rounds: [{ ...line, finalizedAt: 2_000 }] });
+  });
+});
+
+describe("getMyLiveRoundsResponseSchema", () => {
+  it("round-trips a live round carrying createdAt", () => {
+    roundTrips(getMyLiveRoundsResponseSchema, { rounds: [{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000, createdAt: 900 }] });
+  });
+
+  it("round-trips a live round with no createdAt (a stale pointer)", () => {
+    roundTrips(getMyLiveRoundsResponseSchema, { rounds: [{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000 }] });
   });
 });

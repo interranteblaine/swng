@@ -57,6 +57,20 @@ describe("createDynamoProjectionStore", () => {
       expect(await store.listLines(golfer)).toEqual([line]);
     });
 
+    it("round-trips createdAtMs on a line (accounts-only identity spec §5); a line written without it reads back without it", async () => {
+      const store = newStore();
+      const golfer = golferId(randomUUID());
+      const withCreated = { ...makeLine(roundId(randomUUID()), 2_000), createdAtMs: 1_500 };
+      const withoutCreated = makeLine(roundId(randomUUID()), 3_000);
+
+      await store.putLine(golfer, withCreated);
+      await store.putLine(golfer, withoutCreated);
+
+      const back = new Map((await store.listLines(golfer)).map((line) => [line.roundId, line]));
+      expect(back.get(withCreated.roundId)?.createdAtMs).toBe(1_500);
+      expect(back.get(withoutCreated.roundId)).not.toHaveProperty("createdAtMs");
+    });
+
     it("listLines on a golfer with no lines returns []", async () => {
       const store = newStore();
       expect(await store.listLines(golferId(randomUUID()))).toEqual([]);

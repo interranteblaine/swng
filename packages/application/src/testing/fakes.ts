@@ -330,13 +330,13 @@ export const createInMemoryCrewStore = (): CrewStore => {
 // (projections/projectArchive.ts's sortLines) imposes order itself, and a fake that quietly
 // sorted here would let a caller that forgot to sort pass anyway.
 export const createInMemoryProjectionStore = (): ProjectionStore => {
-  const linesByGolfer = new Map<GolferId, Map<RoundId, GolferRoundLine & { finalizedAtMs: number }>>();
+  const linesByGolfer = new Map<GolferId, Map<RoundId, GolferRoundLine & { finalizedAtMs: number; createdAtMs?: number }>>();
   const indexByGolfer = new Map<GolferId, { value: number; computedAtMs: number; differentialsUsed: number }>();
   const liveByGolfer = new Map<GolferId, Map<RoundId, { roundId: RoundId; courseName: string; joinedAtMs: number; expiresAtSec: number }>>();
 
   return {
     putLine: async (golferId, line) => {
-      const lines = linesByGolfer.get(golferId) ?? new Map<RoundId, GolferRoundLine & { finalizedAtMs: number }>();
+      const lines = linesByGolfer.get(golferId) ?? new Map<RoundId, GolferRoundLine & { finalizedAtMs: number; createdAtMs?: number }>();
       lines.set(line.roundId, line); // upsert by roundId — REPLACES on a reopen-and-refinalize, never adds a second entry
       linesByGolfer.set(golferId, lines);
     },

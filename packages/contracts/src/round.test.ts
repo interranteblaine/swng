@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { deviceId, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { CourseCard, GameConfig, GameResult, RoundEvent } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
-import { gameConfigSchemaImpl, gameResultSchemaImpl, roundEventSchema, roundEventSchemaImpl, shareLinkResponseSchema, terminateGameResponseSchema } from "./round.js";
+import { gameConfigSchemaImpl, gameResultSchemaImpl, leaveRoundResponseSchema, roundEventSchema, roundEventSchemaImpl, shareLinkResponseSchema, terminateGameResponseSchema } from "./round.js";
 
 const baseHlc = { wallMs: 1_000, counter: 0, deviceId: deviceId("device-1") };
 
@@ -129,6 +129,14 @@ describe("terminateGameResponseSchema", () => {
   it("round-trips the idempotent no-op response — an empty events array", () => {
     const response = { events: [] };
     expect(parse(terminateGameResponseSchema, response)).toEqual(response);
+  });
+});
+
+describe("leaveRoundResponseSchema", () => {
+  it("round-trips a response carrying the appended participant-left event", () => {
+    const event: RoundEvent = { kind: "participant-left", golferId: golferId("bo"), opId: opId("op-leave"), hlc: baseHlc, authorId: golferId("bo"), seq: 9 };
+    const response = { events: [event] };
+    expect(parse(leaveRoundResponseSchema, JSON.parse(JSON.stringify(response)) as unknown)).toEqual(response);
   });
 });
 

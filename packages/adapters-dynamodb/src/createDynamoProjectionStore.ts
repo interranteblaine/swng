@@ -5,7 +5,10 @@ import type { ProjectionStore } from "@swng/application";
 import { golferPk, lineSk, lineSkPrefix, liveSk, liveSkPrefix, projectionIndexSk } from "./keys.js";
 import { queryAllPages } from "./paginate.js";
 
-type Line = GolferRoundLine & { readonly finalizedAtMs: number };
+// `createdAtMs` (accounts-only identity spec §5) rides inside the stored `line` map like every
+// other line field — putLine writes the whole object and listLines reads it back, so no per-field
+// marshalling is needed. Optional: lines written before the field existed simply lack it on read.
+type Line = GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number };
 type IndexSnapshot = { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number };
 type LiveEntry = { readonly roundId: RoundId; readonly courseName: string; readonly joinedAtMs: number; readonly expiresAtSec: number };
 

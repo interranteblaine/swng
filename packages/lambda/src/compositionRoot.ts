@@ -38,6 +38,7 @@ import {
   joinCrewByCode,
   joinRound,
   leaveCrew,
+  leaveRound,
   listMyCrews,
   listSeasons,
   mintParticipantToken,
@@ -280,6 +281,9 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // itself — no snapshot is written, so the projector never runs the finalize-time deleteLive
     // loop for a scrapped round. Same projectionStore/logger instances startRound/joinRound share.
     abandonRound: abandonRound({ journal, broadcast, clock, ids, projectionStore, logger }),
+    // accounts-only identity spec §4: a participant walks off — same journal/broadcast/clock/ids
+    // instances the other participant round acts above already share.
+    leaveRound: leaveRound({ journal, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
@@ -297,7 +301,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     getCourse: getCourse({ courseStore }),
     searchCourses: searchCourses({ courseStore }),
     terminateGame: terminateGame({ journal, broadcast, clock, ids }),
-    getMyGolfer: getMyGolfer({ golferStore }),
+    // idGenerator (accounts-only identity spec §2): GET /me now get-or-creates (ensureGolfer),
+    // which mints a fresh golferId when the sub has none — the same `ids` every other minting use
+    // case above shares.
+    getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
     // roundStore/journal/crewStore (M9 hardening): claim proof-of-context needs to resolve
     // `code` as either a round join code (participants) or a crew join code (members) — the
@@ -305,7 +312,9 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     claimGolfer: claimGolfer({ golferStore, roundStore: store, journal, crewStore }),
     getMyRecord: getMyRecord({ golferStore, projectionStore }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
-    getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore }),
+    // journal (accounts-only identity spec §5): the live list derives each round's created-at from
+    // its genesis at read time — the SAME journal every round use case above shares.
+    getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),

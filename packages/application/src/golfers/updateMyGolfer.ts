@@ -22,10 +22,16 @@ export const updateMyGolfer =
   async (claims: AccountClaims, command: UpdateMeRequest): Promise<GolferResponse> => {
     const found = await getOrCreateGolfer(deps, claims);
 
+    // A PUT that lands a real name replaces the sub-derived placeholder, so the flag is DROPPED
+    // (accounts-only identity spec §2, absent = false — never rewritten to `false`): destructure it
+    // off, then re-add it only when this PUT leaves the name untouched (e.g. a declared-index-only
+    // edit before the funnel's name prompt) and the golfer was still on the placeholder.
+    const { namePlaceholder: wasPlaceholder, ...golferBase } = found.golfer;
     const patched: Golfer = {
-      ...found.golfer,
+      ...golferBase,
       ...(command.name !== undefined ? { name: command.name } : {}),
       ...(command.homeCourseId !== undefined ? { homeCourseId: command.homeCourseId } : {}),
+      ...(command.name === undefined && wasPlaceholder ? { namePlaceholder: true } : {}),
       handicap: {
         ...found.golfer.handicap,
         ...(command.declared !== undefined ? { declared: command.declared } : {}),

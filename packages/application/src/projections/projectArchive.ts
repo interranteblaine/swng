@@ -28,6 +28,17 @@ export const finalizedAtMsOf = (archive: RoundArchive): number => {
   return finalizedEvent.hlc.wallMs;
 };
 
+// createdAt (accounts-only identity spec §5, the "course + date" designation): the round-created
+// event's own wall time. round-created is the genesis of every archive's log, so its absence means
+// the archive is corrupt — mirrors finalizedAtMsOf's own stance, never a silent 0.
+export const createdAtMsOf = (archive: RoundArchive): number => {
+  const createdEvent = archive.events.find((event) => event.kind === "round-created");
+  if (!createdEvent) {
+    throw new Error(`createdAtMsOf: archive for round ${archive.roundId} has no round-created event — a settled archive without one is corrupt`);
+  }
+  return createdEvent.hlc.wallMs;
+};
+
 // THE one projector implementation (M7 plan): both the DynamoDB stream trigger (Task 4) and
 // rebuildProjections (below) call this exact function — never two independent
 // implementations of "what a finalized round does to a golfer's record."
@@ -51,10 +62,11 @@ export const projectArchive =
   (deps: { projectionStore: ProjectionStore; clock: Clock; logger: Logger }) =>
   async (archive: RoundArchive): Promise<void> => {
     const finalizedAtMs = finalizedAtMsOf(archive);
+    const createdAtMs = createdAtMsOf(archive);
 
     for (const participant of archive.participants) {
       const line = archiveGolferLine(archive, participant.golferId);
-      await deps.projectionStore.putLine(participant.golferId, { ...line, finalizedAtMs });
+      await deps.projectionStore.putLine(participant.golferId, { ...line, finalizedAtMs, createdAtMs });
 
       // Presence cleanup (spec §5, Task 13): the finalized archive's own participant list IS
       // the seated roster — the same one startRound/joinRound/addParticipant wrote a LIVE

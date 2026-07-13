@@ -129,7 +129,7 @@ describe("searchCoursesResponseSchema", () => {
 
 describe("peekRoundResponseSchema", () => {
   it("round-trips a valid peek-round response", () => {
-    roundTrips(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white", rating: 71.2, slope: 128 }] });
+    roundTrips(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white", rating: 71.2, slope: 128 }], createdAt: 1_700_000_000_000 });
   });
 
   it("rejects a payload missing teeSets", () => {

@@ -222,7 +222,13 @@ describe("createProjectorHandler", () => {
     participants: [{ golferId: participantId, name: participantId, tee: "white", courseHandicap: 8 }],
     games: [],
     cells: {},
-    events: [finalizedEvent(wallMs, roundKey)],
+    // A real archive's log always opens with round-created (its genesis) — carried so the
+    // projector's createdAtMsOf (accounts-only identity spec §5) resolves; its wall time (1) is
+    // arbitrary here, only its PRESENCE matters.
+    events: [
+      { kind: "round-created", roundId: roundId(roundKey), card: fixtureLinks18, opId: opId(`created-${roundKey}`), hlc: { wallMs: 1, counter: 0, deviceId: deviceId("server") }, authorId: ann },
+      finalizedEvent(wallMs, roundKey),
+    ],
     results: [],
     terminatedGameIds: [],
     handicapping: [{ golferId: participantId, kind: "complete", ags: 90, differential: 9.0 }],

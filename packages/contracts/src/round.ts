@@ -201,6 +201,20 @@ export const terminateGameResponseSchema: z.ZodType<TerminateGameResponse> = z.o
   events: z.array(roundEventSchema).readonly(),
 });
 
+// POST /rounds/{roundId}/leave (accounts-only identity spec §4): no request body — the leaver is
+// the participant token's OWN golferId (leaving is self-only by construction). Response mirrors
+// terminateGame's append idiom: `events` carries exactly what THIS call appended (the one
+// participant-left), seq-stamped. NOT deduped the way terminate's idempotent no-op is — leaving
+// twice appends twice (two events, same fold result: the golfer is departed either way), so a
+// repeat leave still returns its freshly-appended event, never [].
+export interface LeaveRoundResponse {
+  readonly events: readonly RoundEvent[];
+}
+
+export const leaveRoundResponseSchema: z.ZodType<LeaveRoundResponse> = z.object({
+  events: z.array(roundEventSchema).readonly(),
+});
+
 // POST /rounds/{roundId}/share (M9 Task 3): `url` is deterministic (same round -> the same
 // byte-identical spectator token, hence the same url) and is a PATH+FRAGMENT, not an absolute
 // URL — getShareLink.ts has no web-origin config seam to build one from, so the web app

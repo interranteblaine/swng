@@ -91,6 +91,10 @@ export interface SearchCoursesResponse {
 export interface PeekRoundResponse {
   readonly courseName: string;
   readonly teeSets: readonly { readonly name: string; readonly rating: number; readonly slope: number }[];
+  // accounts-only identity spec §5: the round-created event's own wall time, so the join-link
+  // sign-up framing can render the round the SAME way ("Casa Verde GC · Sat, Jul 12") the home list
+  // and archive do. Required — a peek always reads a live round, whose log always has round-created.
+  readonly createdAt: number;
 }
 
 export const createCourseResponseSchema: z.ZodType<CreateCourseResponse> = z.object({ course: courseViewSchema });
@@ -105,4 +109,5 @@ export const searchCoursesResponseSchema: z.ZodType<SearchCoursesResponse> = z.o
 export const peekRoundResponseSchema: z.ZodType<PeekRoundResponse> = z.object({
   courseName: z.string(),
   teeSets: z.array(z.object({ name: z.string(), rating: z.number(), slope: z.number() })).readonly(),
+  createdAt: z.number().int(),
 });

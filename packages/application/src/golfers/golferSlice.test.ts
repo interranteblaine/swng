@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { roundId } from "@swng/domain";
+import { deviceId, fixtureLinks, golferId, opId, placeholderName, roundId } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
-import { createInMemoryGolferStore, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
+import { createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
 import { getMyGolfer } from "./getMyGolfer.js";
 import { getMyLiveRounds } from "./getMyLiveRounds.js";
 import { getMyRecord } from "./getMyRecord.js";
@@ -16,31 +16,37 @@ import { updateMyGolfer } from "./updateMyGolfer.js";
 const setup = (golferStore: GolferStore = createInMemoryGolferStore()) => {
   const idGenerator = createSequentialIds("g");
   const projectionStore = createInMemoryProjectionStore();
+  const journal = createInMemoryJournal();
   return {
     golferStore,
     projectionStore,
-    getMe: getMyGolfer({ golferStore }),
+    journal,
+    getMe: getMyGolfer({ golferStore, idGenerator }),
     updateMe: updateMyGolfer({ golferStore, idGenerator }),
     record: getMyRecord({ golferStore, projectionStore }),
     myRounds: getMyRounds({ golferStore, projectionStore }),
-    myLiveRounds: getMyLiveRounds({ golferStore, projectionStore }),
+    myLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
   };
 };
 
-// GET /me plan amendment (controller-decided): the plan's original "get-or-create" deadlocked
-// claiming — the auto-created golfer binds the sub before any later claimGolfer call, so
-// every claim would hit "sub already bound elsewhere". getMyGolfer.ts is now read-only;
-// updateMyGolfer (PUT /me) is the one create path.
-describe("getMyGolfer — never creates", () => {
-  it("a fresh sub gets golfer: null, twice, without ever creating a row", async () => {
+// GET /me get-or-creates (accounts-only identity spec §2, controller ruling — DELIBERATELY reverses
+// the M7 "GET /me never creates" rule this block used to pin). That rule existed only to protect
+// claimable ghosts (an auto-create bound the sub before a later claim could run); the spec kills
+// ghosts, so the first authenticated GET /me now mints the caller's golfer.
+describe("getMyGolfer — get-or-creates", () => {
+  it("a fresh sub MINTS a golfer named f(sub) with namePlaceholder: true, and a second GET returns the SAME golfer", async () => {
     const ctx = setup();
     const first = await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
-    expect(first.golfer).toBeNull();
+    expect(first.golfer).not.toBeNull();
+    expect(first.golfer?.name).toBe(placeholderName("sub-1"));
+    expect(first.golfer?.namePlaceholder).toBe(true);
+    // Cognito is a pure authenticator — the name is f(sub), never the email localpart.
+    expect(first.golfer?.name).not.toBe("ann");
 
     const second = await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
-    expect(second.golfer).toBeNull();
-
-    expect(await ctx.golferStore.getBySub("sub-1")).toBeUndefined();
+    expect(second.golfer?.golferId).toBe(first.golfer?.golferId);
+    // Exactly one row, bound to the sub — the second GET read it, never minted a second.
+    expect((await ctx.golferStore.getBySub("sub-1"))?.golfer.id).toBe(first.golfer?.golferId);
   });
 
   it("PUT /me then GET /me returns the same golferId", async () => {
@@ -50,6 +56,32 @@ describe("getMyGolfer — never creates", () => {
     const found = await ctx.getMe({ sub: "sub-1" });
 
     expect(found.golfer?.golferId).toBe(created.golfer.golferId);
+  });
+});
+
+// The placeholder is the invariant's backstop, not the UX (accounts-only identity spec §2): a real
+// name via PUT /me drops the flag; a PUT that never touches the name preserves it.
+describe("namePlaceholder lifecycle", () => {
+  it("a real-name PUT /me DROPS the flag (absent = false, never rewritten to false), and it stays dropped on re-read", async () => {
+    const ctx = setup();
+    const minted = await ctx.getMe({ sub: "sub-1" });
+    expect(minted.golfer?.namePlaceholder).toBe(true);
+
+    const renamed = await ctx.updateMe({ sub: "sub-1" }, { name: "Annika" });
+    expect(renamed.golfer.name).toBe("Annika");
+    expect(renamed.golfer).not.toHaveProperty("namePlaceholder");
+
+    const reread = await ctx.getMe({ sub: "sub-1" });
+    expect(reread.golfer).not.toHaveProperty("namePlaceholder");
+  });
+
+  it("a PUT /me that leaves the name untouched (a declared-index-only edit) PRESERVES the flag", async () => {
+    const ctx = setup();
+    await ctx.getMe({ sub: "sub-1" }); // mint with the flag
+
+    const patched = await ctx.updateMe({ sub: "sub-1" }, { declared: 12.0 });
+    expect(patched.golfer.namePlaceholder).toBe(true);
+    expect(patched.golfer.declared).toBe(12.0);
   });
 });
 
@@ -191,6 +223,36 @@ describe("getMyRounds", () => {
     expect(result.rounds.every((line) => !("finalizedAtMs" in line))).toBe(true);
   });
 
+  // createdAt (accounts-only identity spec §5, the "course + date" designation): carried when the
+  // line has it, omitted for legacy lines written before the field existed (tolerated, no migration).
+  it("carries createdAt (the round-created wall time) when the line has it, omitting it for a legacy line", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    await ctx.projectionStore.putLine(golfer.golferId, {
+      roundId: roundId("r1"),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 18,
+      distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
+      finalizedAtMs: 2_000,
+      createdAtMs: 1_500,
+    });
+    // A legacy line: no createdAtMs at all (an older projection write).
+    await ctx.projectionStore.putLine(golfer.golferId, {
+      roundId: roundId("r0"),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 18,
+      distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
+      finalizedAtMs: 1_000,
+    });
+
+    const result = await ctx.myRounds({ sub: "sub-1" });
+    expect(result.rounds.map((line) => line.roundId)).toEqual(["r1", "r0"]); // newest first
+    expect(result.rounds[0]!.createdAt).toBe(1_500);
+    expect(result.rounds[1]).not.toHaveProperty("createdAt");
+  });
+
   // Same ordering the sibling getMyRecord assertion above pins — the two responses must never
   // silently disagree on "what order is my history in" (both go through sortLines).
   it("orders identically to GET /me/record's own history for the same golfer", async () => {
@@ -253,5 +315,26 @@ describe("getMyLiveRounds", () => {
     ]);
     // Never the store's own internal field name leaking onto the wire.
     expect(result.rounds.every((entry) => !("joinedAtMs" in entry))).toBe(true);
+  });
+
+  // createdAt (accounts-only identity spec §5): derived at read time from the round's genesis, a
+  // round-level fact — carried when the round exists, omitted for a stale pointer (the 36h TTL
+  // backstop outliving a vanished round).
+  it("carries createdAt derived from the round's genesis, omitting it for a stale pointer with no round behind it", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    // A real live round's genesis on the journal (wall time 7_777).
+    await ctx.journal.append(roundId("r1"), [
+      { kind: "round-created", roundId: roundId("r1"), card: fixtureLinks, opId: opId("g1"), hlc: { wallMs: 7_777, counter: 0, deviceId: deviceId("test") }, authorId: golferId("author") },
+    ]);
+    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
+    // A stale presence pointer whose round never existed / has vanished.
+    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r2"), courseName: "Ghost Course", joinedAtMs: 2_000, expiresAtSec: 9_999_999_999 });
+
+    const result = await ctx.myLiveRounds({ sub: "sub-1" });
+    const r1 = result.rounds.find((entry) => entry.roundId === roundId("r1"))!;
+    const r2 = result.rounds.find((entry) => entry.roundId === roundId("r2"))!;
+    expect(r1.createdAt).toBe(7_777);
+    expect(r2).not.toHaveProperty("createdAt");
   });
 });

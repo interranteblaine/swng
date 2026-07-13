@@ -8,7 +8,9 @@ import { sortLines } from "../projections/projectArchive.js";
 // GET /me/rounds's own line shape: GolferRoundLine plus `finalizedAt` (the wire name for the
 // projection store's internal `finalizedAtMs`) — same field-by-field wire-shaping discipline
 // as getMyRecord.ts's own toWireLine (never spreads the store's internal shape as-is).
-const toWireLine = (line: GolferRoundLine & { readonly finalizedAtMs: number }): GolferRoundLine & { readonly finalizedAt: number } => ({
+const toWireLine = (
+  line: GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number },
+): GolferRoundLine & { readonly finalizedAt: number; readonly createdAt?: number } => ({
   roundId: line.roundId,
   courseName: line.courseName,
   tee: line.tee,
@@ -17,6 +19,9 @@ const toWireLine = (line: GolferRoundLine & { readonly finalizedAtMs: number }):
   ...(line.differential !== undefined ? { differential: line.differential } : {}),
   distribution: line.distribution,
   finalizedAt: line.finalizedAtMs,
+  // createdAt (spec §5, the "course + date" designation) — omitted for lines written before the
+  // field existed (tolerated as absent, no migration; a rebuild backfills it).
+  ...(line.createdAtMs !== undefined ? { createdAt: line.createdAtMs } : {}),
 });
 
 // "List my rounds" (projection-realignment Task 6): every finalized round the caller played,

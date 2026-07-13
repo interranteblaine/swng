@@ -22,6 +22,9 @@ interface GolferItem {
   readonly homeCourseId?: string;
   readonly declared?: number;
   readonly official?: number;
+  // accounts-only identity spec §2: true iff `name` is the sub-derived placeholder a mint used.
+  // Written only when true, tolerated as absent on read — old rows never carry it, no migration.
+  readonly namePlaceholder?: boolean;
   readonly sub?: string;
   readonly gsi2pk?: string;
   readonly gsi2sk?: string;
@@ -39,6 +42,7 @@ const golferOf = (item: GolferItem): Golfer => ({
   id: golferIdFromPk(item.pk),
   name: item.name,
   ...(item.homeCourseId !== undefined ? { homeCourseId: courseId(item.homeCourseId) } : {}),
+  ...(item.namePlaceholder === true ? { namePlaceholder: true } : {}),
   handicap: {
     ...(item.declared !== undefined ? { declared: item.declared } : {}),
     ...(item.official !== undefined ? { official: item.official } : {}),
@@ -79,6 +83,9 @@ export const createDynamoGolferStore = (config: { client: DynamoDBDocumentClient
         revision,
         name: golfer.name,
         ...(golfer.homeCourseId !== undefined ? { homeCourseId: golfer.homeCourseId } : {}),
+        // Written only when true (spec §2, absent = false) — a real-name PUT drops it by NOT
+        // re-including it here, never by writing `false`.
+        ...(golfer.namePlaceholder === true ? { namePlaceholder: true } : {}),
         ...(golfer.handicap.declared !== undefined ? { declared: golfer.handicap.declared } : {}),
         ...(golfer.handicap.official !== undefined ? { official: golfer.handicap.official } : {}),
         // put's `sub` is a plain overwrite, not conditional — it mirrors the caller's OWN

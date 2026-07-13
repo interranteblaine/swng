@@ -118,7 +118,7 @@ describe("JoinRoundPage", () => {
 
   it("once the code is 6 chars, debounces a peek that swaps the free-text tee for a picker of the round's tee names", async () => {
     vi.useFakeTimers();
-    mockedPeekRound.mockResolvedValue({ courseName: "Fixture Links 18", teeSets: [{ name: "white", rating: 71.6, slope: 128 }, { name: "blue", rating: 74.0, slope: 140 }] });
+    mockedPeekRound.mockResolvedValue({ courseName: "Fixture Links 18", teeSets: [{ name: "white", rating: 71.6, slope: 128 }, { name: "blue", rating: 74.0, slope: 140 }], createdAt: 1_700_000_000_000 });
 
     renderJoin();
     fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });

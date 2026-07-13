@@ -25,6 +25,9 @@ const stubUseCases: UseCases = {
   abandonRound: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
+  leaveRound: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
   readEvents: () => {
     throw new Error("not implemented: parity test never dispatches");
   },

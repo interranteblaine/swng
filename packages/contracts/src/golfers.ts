@@ -18,6 +18,11 @@ export interface GolferView {
   readonly homeCourseId?: CourseId;
   readonly declared?: number;
   readonly official?: number;
+  // accounts-only identity spec §2: true iff `name` is the deterministic sub-derived backstop a
+  // get-or-create mint used (placeholderName(sub)), not a name the golfer chose — the web prompts
+  // for a real one while it's true. Absent means false (old golfers never carry it; a PUT /me with
+  // a real name drops it): omitted rather than sent `false`, matching the spread idiom below.
+  readonly namePlaceholder?: boolean;
 }
 
 export const golferViewSchema: z.ZodType<GolferView> = z.object({
@@ -26,6 +31,7 @@ export const golferViewSchema: z.ZodType<GolferView> = z.object({
   homeCourseId: courseIdSchema.optional(),
   declared: z.number().optional(),
   official: z.number().optional(),
+  namePlaceholder: z.boolean().optional(),
 });
 
 // golfer is null for an unbound sub — GET /me NEVER creates (plan amendment: the original
@@ -118,12 +124,18 @@ export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.objec
 // `finalizedAtMs`) — the one piece a "my rounds" list needs that the index/trend-focused
 // GetMyRecordResponse never had to expose: WHEN each round was played, not just what it says
 // about the index.
+// `createdAt` (accounts-only identity spec §5, the derived "course + date" designation) is the
+// round-created event's own wall time — added here alongside `finalizedAt` because the web renders
+// each round as "Casa Verde GC · Sat, Jul 12" from course name + created-at, identically across the
+// home list, the archive, and the join link. OPTIONAL: old projection lines (written before this
+// task) carry no created-at, tolerated on read as absent — a rebuild backfills it, never a
+// migration.
 export interface GetMyRoundsResponse {
-  readonly rounds: readonly (GolferRoundLine & { readonly finalizedAt: number })[];
+  readonly rounds: readonly (GolferRoundLine & { readonly finalizedAt: number; readonly createdAt?: number })[];
 }
 
 export const getMyRoundsResponseSchema: z.ZodType<GetMyRoundsResponse> = z.object({
-  rounds: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int() })).readonly(),
+  rounds: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int(), createdAt: z.number().int().optional() })).readonly(),
 });
 
 // GET /me/rounds/live (projection-realignment Task 13): "your rounds, right now" — presence
@@ -133,10 +145,15 @@ export const getMyRoundsResponseSchema: z.ZodType<GetMyRoundsResponse> = z.objec
 // (that one is finalized-round HISTORY). `joinedAt` is the wire name for the projection
 // store's own `joinedAtMs` (same rename discipline as GetMyRoundsResponse's `finalizedAt`).
 // Sorted newest-joined first (application/src/golfers/getMyLiveRounds.ts).
+// `createdAt` (accounts-only identity spec §5, the derived "course + date" designation): the
+// round-created event's own wall time, so the home list can render a live round the SAME way the
+// archive/join-link render it ("Casa Verde GC · Sat, Jul 12") — a round-level fact, unlike the
+// per-golfer `joinedAt`. OPTIONAL: best-effort at read time (getMyLiveRounds derives it from the
+// round's genesis), omitted if that lookup can't resolve it.
 export interface GetMyLiveRoundsResponse {
-  readonly rounds: readonly { readonly roundId: RoundId; readonly courseName: string; readonly joinedAt: number }[];
+  readonly rounds: readonly { readonly roundId: RoundId; readonly courseName: string; readonly joinedAt: number; readonly createdAt?: number }[];
 }
 
 export const getMyLiveRoundsResponseSchema: z.ZodType<GetMyLiveRoundsResponse> = z.object({
-  rounds: z.array(z.object({ roundId: roundIdSchema, courseName: z.string(), joinedAt: z.number().int() })).readonly(),
+  rounds: z.array(z.object({ roundId: roundIdSchema, courseName: z.string(), joinedAt: z.number().int(), createdAt: z.number().int().optional() })).readonly(),
 });

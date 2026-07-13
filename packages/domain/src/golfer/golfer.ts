@@ -16,6 +16,12 @@ export interface Golfer {
   readonly name: string;
   readonly homeCourseId?: CourseId;
   readonly handicap: HandicapProfile;
+  // accounts-only identity spec §2: set true when `name` is the deterministic sub-derived
+  // backstop (placeholderName(sub)) a get-or-create mint uses, not something the golfer chose.
+  // The web prompts for a real name while it's true; PUT /me with a real name drops it. Absent
+  // means false — old stored golfers (pre-spec) simply never carry it, tolerated on read, never
+  // migrated. Emitted only when true; cleared by DROPPING it, never by writing `false`.
+  readonly namePlaceholder?: boolean;
 }
 
 // Precedence: official (manually maintained) always wins > computed (takes over

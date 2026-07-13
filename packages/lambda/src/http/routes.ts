@@ -36,6 +36,7 @@ import type {
   JoinRoundRequest,
   JoinRoundResponse,
   LeaveCrewResponse,
+  LeaveRoundResponse,
   ListMyCrewsResponse,
   ListSeasonsResponse,
   PeekRoundResponse,
@@ -89,6 +90,9 @@ export interface UseCases {
   // task-15: scrap a round — a terminal event that produces NO snapshot, so the round counts
   // nowhere. "participant"-gated, same tier as addGame/recordScore/finalizeRound above.
   abandonRound: (claims: ParticipantClaims) => Promise<AbandonRoundResponse>;
+  // accounts-only identity spec §4: a participant walks off — appends participant-left for the
+  // token's OWN golferId (self-only, no body). "participant"-gated, same tier as the acts above.
+  leaveRound: (claims: ParticipantClaims) => Promise<LeaveRoundResponse>;
   readEvents: (id: RoundId, sinceSeq: number) => Promise<EventsResponse>;
   peekRound: (code: string) => Promise<PeekRoundResponse>;
   // M9 Task 3 (share): mints (deterministically) this round's own spectator link — participant-
@@ -299,6 +303,13 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "participant", // task-15: any participant may scrap the round, same tier as finalize/terminate.
     successStatus: 200, // idempotent (abandoning an abandoned round is a no-op success) + an act on an existing round, not a mint — same 200 spirit as finalize/terminate.
     handler: async (ctx) => useCases.abandonRound(ctx.claims!),
+  },
+  {
+    method: "POST",
+    path: "/rounds/{roundId}/leave",
+    auth: "participant", // accounts-only identity spec §4: the leaver is the token's own golferId — self-only by construction.
+    successStatus: 200, // an act on an existing round (appends participant-left), not a mint — same 200 spirit as finalize/abandon.
+    handler: async (ctx) => useCases.leaveRound(ctx.claims!),
   },
   // GET /rounds/peek must be matched BEFORE any /rounds/{roundId}/... template below it —
   // the dispatcher (http/dispatch.ts) walks this array in order and returns the first match,

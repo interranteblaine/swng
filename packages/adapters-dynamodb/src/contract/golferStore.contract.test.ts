@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { Golfer } from "@swng/domain";
-import { courseId, golferId } from "@swng/domain";
+import { courseId, golferId, placeholderName } from "@swng/domain";
+import { ensureGolfer } from "@swng/application";
+import { createSequentialIds } from "@swng/application";
 import { createDynamoGolferStore } from "../createDynamoGolferStore.js";
 import { golferPk, golferSk } from "../keys.js";
 import type { LocalDynamo } from "../testing/local.js";
@@ -42,6 +44,19 @@ describe("createDynamoGolferStore", () => {
       await store.put(golfer, undefined);
 
       expect(await store.get(golfer.id)).toEqual({ golfer, sub: undefined, revision: 1 });
+    });
+
+    it("round-trips namePlaceholder: true (accounts-only identity spec §2); a golfer without it reads back without it", async () => {
+      const store = newStore();
+      const placeholder = makeGolfer({ name: "Golfer 4821", namePlaceholder: true });
+      const chosen = makeGolfer({ name: "Ann" });
+
+      await store.put(placeholder, undefined);
+      await store.put(chosen, undefined);
+
+      expect((await store.get(placeholder.id))?.golfer).toEqual(placeholder);
+      expect((await store.get(chosen.id))?.golfer).toEqual(chosen);
+      expect((await store.get(chosen.id))?.golfer).not.toHaveProperty("namePlaceholder");
     });
 
     it("put (create, claimed) + get round-trip — a sub set directly on create is honored on the golfer row (no bindSub needed for THIS narrow round-trip)", async () => {
@@ -210,6 +225,35 @@ describe("createDynamoGolferStore", () => {
       expect((await seedStore.get(winner.id))?.sub).toBe(sub);
       expect((await seedStore.get(loser.id))?.sub).toBeUndefined();
       expect(await seedStore.getBySub(sub)).toEqual({ golfer: winner, sub, revision: 2 });
+    });
+  });
+
+  // accounts-only identity spec §2: the concurrent-first-request mint race. ensureGolfer is the
+  // application use case (get-or-create on first touch); this exercises it against the REAL store's
+  // SUB# transaction — the whole reason the mint routes through bindSub. Two parallel ensures for
+  // the SAME fresh sub (separate store instances, both calls fired before either is awaited —
+  // genuine concurrency, the same construction the bindSub race above uses) must converge on ONE
+  // bound golfer: the race's loser re-reads and returns the winner. f(sub) makes the name identical
+  // no matter which won.
+  describe("ensureGolfer — concurrent-first-request race (accounts-only identity spec §2)", () => {
+    it("two parallel ensures for one fresh sub converge on ONE bound golfer, both returning it", async () => {
+      const seedStore = newStore();
+      const idGenerator = createSequentialIds(`g-${randomUUID()}`);
+      const sub = `sub-${randomUUID()}`;
+      const claims = { sub };
+
+      const results = await Promise.all([
+        ensureGolfer({ golferStore: newStore(), idGenerator })(claims),
+        ensureGolfer({ golferStore: newStore(), idGenerator })(claims),
+      ]);
+
+      // Both calls return the SAME golfer — the one actually bound to the sub.
+      expect(results[0]!.id).toBe(results[1]!.id);
+      const bound = await seedStore.getBySub(sub);
+      expect(bound?.golfer.id).toBe(results[0]!.id);
+      // Minted with the deterministic placeholder + flag, whichever call won.
+      expect(bound?.golfer.name).toBe(placeholderName(sub));
+      expect(bound?.golfer.namePlaceholder).toBe(true);
     });
   });
 });

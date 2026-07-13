@@ -245,16 +245,21 @@ describe("round use cases — golden path over in-memory ports", () => {
   // rating/slope summaries — nothing about the round's identity, participants, or scoring.
   // Asserting the exact key set (not just "has these fields") is what pins that a field
   // can't be silently added later without this test catching it.
-  it("peekRound returns courseName + tee summaries and nothing else", async () => {
+  it("peekRound returns courseName + tee summaries + createdAt and nothing else", async () => {
     const round = await freshLiveRound();
     const peeked = await round.peek(round.host.joinCode);
 
-    expect(Object.keys(peeked).sort()).toEqual(["courseName", "teeSets"]);
+    // createdAt (accounts-only identity spec §5, the "course + date" designation) joins the set —
+    // still nothing about the round's identity, participants, or scoring. Asserting the exact key
+    // set keeps the next field from being added silently.
+    expect(Object.keys(peeked).sort()).toEqual(["courseName", "createdAt", "teeSets"]);
     expect(peeked.courseName).toBe(fixtureLinks.courseName);
     expect(peeked.teeSets).toEqual(fixtureLinks.teeSets.map((tee) => ({ name: tee.name, rating: tee.rating, slope: tee.slope })));
     for (const teeSet of peeked.teeSets) {
       expect(Object.keys(teeSet).sort()).toEqual(["name", "rating", "slope"]);
     }
+    // The genesis event's own wall time (peekRound reads it off the round-created event).
+    expect(typeof peeked.createdAt).toBe("number");
   });
 
   it("rejects peekRound with an unknown join code — bad-join-code, same shape as join's", async () => {

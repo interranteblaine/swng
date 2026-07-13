@@ -20,9 +20,15 @@ export const peekRound =
     const id = await deps.store.findByJoinCode(code);
     if (!id) throw new ApplicationError("bad-join-code"); // unknown code — same shape as joinRound's
 
-    const { state } = await loadRoundState(deps.journal, id);
+    const { state, events } = await loadRoundState(deps.journal, id);
+    // createdAt (accounts-only identity spec §5, the "course + date" designation): the round-created
+    // event's own wall time. round-created is the genesis of every non-empty log (loadRoundState
+    // already threw on an empty one), so it is always present — the `!` is that invariant, not a
+    // guess, mirroring finalizedAtMsOf's own "a settled archive without one is corrupt" stance.
+    const genesis = events.find((event) => event.kind === "round-created")!;
     return {
       courseName: state.card.courseName,
       teeSets: state.card.teeSets.map((tee) => ({ name: tee.name, rating: tee.rating, slope: tee.slope })),
+      createdAt: genesis.hlc.wallMs,
     };
   };

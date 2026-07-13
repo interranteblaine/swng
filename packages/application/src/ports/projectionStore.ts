@@ -20,8 +20,12 @@ import type { GolferId, GolferRoundLine, RoundId } from "@swng/domain";
 // always a small, whole-career result set. This is deliberate, not a gap: the alternative
 // (embedding order in the key) is exactly the bug this rewrite removes.
 export interface ProjectionStore {
-  putLine(golferId: GolferId, line: GolferRoundLine & { readonly finalizedAtMs: number }): Promise<void>;
-  listLines(golferId: GolferId): Promise<readonly (GolferRoundLine & { readonly finalizedAtMs: number })[]>;
+  // `createdAtMs` (accounts-only identity spec §5): the round-created event's own wall time, carried
+  // on the line so getMyRounds can render the "course + date" designation without re-reading each
+  // round's log. OPTIONAL: lines written before the field existed carry no created-at (tolerated on
+  // read as absent — a rebuild backfills it, never a migration); projectArchive always provides it.
+  putLine(golferId: GolferId, line: GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number }): Promise<void>;
+  listLines(golferId: GolferId): Promise<readonly (GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number })[]>;
   putIndex(golferId: GolferId, snapshot: { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number }): Promise<void>;
   getIndex(golferId: GolferId): Promise<{ value: number; computedAtMs: number; differentialsUsed: number } | undefined>;
 

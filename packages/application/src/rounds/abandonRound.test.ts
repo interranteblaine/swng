@@ -8,7 +8,6 @@ import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/token
 import {
   createCapturingBroadcast,
   createFixedClock,
-  createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryProjectionStore,
@@ -60,7 +59,6 @@ const setup = (overrides?: { journal?: EventJournal; store?: RoundStore; snapsho
   const clock = createFixedClock(1_000);
   const ids = createSequentialIds("t");
   const golferStore = createInMemoryGolferStore();
-  const crewStore = createInMemoryCrewStore();
   const projectionStore = createInMemoryProjectionStore();
   const logger = createNullLogger();
 
@@ -69,8 +67,8 @@ const setup = (overrides?: { journal?: EventJournal; store?: RoundStore; snapsho
     snapshots,
     broadcast,
     projectionStore,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
-    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),

@@ -611,7 +611,6 @@ describe("SwngStack", () => {
         "GET /me/crews",
         "GET /crews/{crewId}",
         "POST /crews/{crewId}/members",
-        "PUT /crews/{crewId}/standing-game",
         // Architecture-realignment Task 9: crew seasons + counted rounds + standings + leave
         // (GET /crews/{crewId}/records is gone — the crew projection layer it read is deleted).
         "POST /crews/{crewId}/seasons",
@@ -628,11 +627,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (36 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (35 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 38 routes total (36 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 38);
+    it("has exactly 37 routes total (35 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 37);
     });
 
     // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route

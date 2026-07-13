@@ -7,10 +7,12 @@ import { retryOnConflict } from "../retryOnConflict.js";
 import { requireCrewMember } from "./membership.js";
 
 // POST /crews/{crewId}/leave (architecture-realignment Task 9): the caller removes their OWN
-// member item from the roster (spec §4). Past counted rounds they appended REMAIN counted —
-// standings never depend on membership history, and applyStandingGame already tolerates absent
-// golfers, so a departed member simply shows member:false in future standings reads. A
-// non-member (or a sub with no account golfer) leaving is not-a-member (requireCrewMember).
+// member item from the roster (spec §4). Past counted rounds they appended REMAIN counted — but
+// a crew is members-only (owner ruling, spec §11a): getSeasonStandings.ts filters every
+// contribution to the CURRENT roster before folding, so a departed member's own rows simply
+// vanish from future standings reads (nothing is stored — re-joining restores them on the next
+// read). A non-member (or a sub with no account golfer) leaving is not-a-member
+// (requireCrewMember).
 export const leaveCrew =
   (deps: { crewStore: CrewStore; golferStore: GolferStore }) =>
   async (claims: AccountClaims, id: CrewId): Promise<LeaveCrewResponse> => {

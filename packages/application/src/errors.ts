@@ -43,9 +43,9 @@ export type ApplicationErrorCode =
   // M8: no crew exists under the given crewId, or the given join code names no crew.
   | "unknown-crew"
   // M8: the caller's account golfer isn't on this crew's roster (GetCrew/AddCrewMember/
-  // SaveStandingGame/StartRound-with-crewId) — folds "no account golfer at all" and "a real
-  // golfer who just isn't a member of THIS crew" into the one 403 the wire exposes, since
-  // only a real GolferId ever lands in crew.members.
+  // getSeasonStandings) — folds "no account golfer at all" and "a real golfer who just isn't a
+  // member of THIS crew" into the one 403 the wire exposes, since only a real GolferId ever
+  // lands in crew.members.
   | "not-a-member"
   // M8: CreateCrew (and JoinCrewByCode) need the caller's OWN account golfer to seat as a
   // member — a sub with no golfer yet (never PUT /me) gets this wire-honesty 400 rather than
@@ -77,11 +77,6 @@ export type ApplicationErrorCode =
   // not-a-participant above (403, not 401: the bearer verified fine, it just isn't allowed to
   // do this).
   | "read-only-token"
-  // M9 hardening (papercut 8): saveStandingGame.ts's preset names a golferId that isn't (or is
-  // no longer) on the crew's own roster — a bad-body precondition the caller can correct (drop
-  // or re-add the player), same bucket as unknown-golfer-in-game/duplicate-tee-name, not a
-  // genuine-bug 500.
-  | "unknown-preset-player"
   // Projection-realignment Task 6: getRoundArchive's authorization check — the caller's
   // account golfer (if any) isn't among archive.participants. A forbidden ACTOR, same shape as
   // not-a-participant/not-a-member above — 403, never a 404 (round-not-found already covers

@@ -4,7 +4,6 @@ import type { TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
   createFixedClock,
-  createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryProjectionStore,
@@ -44,7 +43,6 @@ const setup = () => {
   const clock = createFixedClock(1_000);
   const ids = createSequentialIds("t");
   const golferStore = createInMemoryGolferStore();
-  const crewStore = createInMemoryCrewStore();
   const projectionStore = createInMemoryProjectionStore();
   const logger = createNullLogger();
 
@@ -52,8 +50,8 @@ const setup = () => {
     journal,
     golferStore,
     tokens,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
-    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
     mint: mintParticipantToken({ journal, golferStore, tokens }),
   };

@@ -95,8 +95,8 @@ describe("SeasonPanel — standings", () => {
       status: "open",
       rounds: [],
       ledger: [
-        { golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann", member: true },
-        { golferId: BO, rounds: 10, wins: 6, losses: 3, halves: 1, points: 180, skins: 7, name: "Bo", member: false },
+        { golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann" },
+        { golferId: BO, rounds: 10, wins: 6, losses: 3, halves: 1, points: 180, skins: 7, name: "Bo" },
       ],
       headToHead: [],
     });
@@ -121,8 +121,8 @@ describe("SeasonPanel — standings", () => {
       status: "open",
       rounds: [],
       ledger: [
-        { golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann", member: true },
-        { golferId: BO, rounds: 10, wins: 6, losses: 3, halves: 1, points: 180, skins: 7, name: "Bo", member: false },
+        { golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann" },
+        { golferId: BO, rounds: 10, wins: 6, losses: 3, halves: 1, points: 180, skins: 7, name: "Bo" },
       ],
       headToHead: [],
     });
@@ -142,8 +142,8 @@ describe("SeasonPanel — standings", () => {
       status: "open",
       rounds: [],
       ledger: [
-        { golferId: ANN, rounds: 12, wins: 5, losses: 5, halves: 2, points: 0, skins: 0, name: "Ann", member: true },
-        { golferId: BO, rounds: 12, wins: 5, losses: 5, halves: 2, points: 0, skins: 0, name: "Bo", member: true },
+        { golferId: ANN, rounds: 12, wins: 5, losses: 5, halves: 2, points: 0, skins: 0, name: "Ann" },
+        { golferId: BO, rounds: 12, wins: 5, losses: 5, halves: 2, points: 0, skins: 0, name: "Bo" },
       ],
       headToHead: [{ a: ANN, b: BO, aWins: 5, bWins: 5, halves: 2 }],
     });
@@ -349,7 +349,7 @@ describe("SeasonPanel — count a round", () => {
         { roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, appendedBy: ANN },
       ],
       ledger: [
-        { golferId: ANN, rounds: 1, wins: 0, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann", member: true },
+        { golferId: ANN, rounds: 1, wins: 0, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann" },
       ],
       headToHead: [],
     });

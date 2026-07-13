@@ -1,6 +1,5 @@
 import { DomainError } from "../errors.js";
-import type { CourseId, CrewId, GolferId } from "../ids.js";
-import type { GameConfigDraft } from "../scoring/game.js";
+import type { CrewId, GolferId } from "../ids.js";
 
 // A crew is a boring, non-event-sourced entity (architecture.md §"Crew — plain entity, no
 // event sourcing") — no fold, no log, just direct mutation-as-a-new-value the way
@@ -15,21 +14,16 @@ export interface CrewMember {
   readonly role: CrewRole;
 }
 
-// The crew's "play the usual" preset (product.md §6). courseId/tee are optional because a
-// crew can save just the game shapes before ever pinning a home course. `games` holds
-// GameConfigDraft, not GameConfig — a standing game is a template with no GameId yet; the
-// server mints ids when it actually seeds a round from the preset.
-export interface StandingGame {
-  readonly courseId?: CourseId;
-  readonly tee?: string;
-  readonly games: readonly GameConfigDraft[];
-}
-
+// A crew is a grouping/competition ONLY (owner ruling, spec §11a, 2026-07-13) — no standing
+// game, no crew-consent seating. The old "play the usual" preset (StandingGame,
+// applyStandingGame, referencedGolferIds) is deleted outright, not deprecated: a crew's own
+// stored document on beta may still carry a stray `standingGame` attribute from before this
+// change (adapters-dynamodb's createDynamoCrewStore.ts tolerates it on read — never a
+// migration script), but nothing in this codebase reads or writes one anymore.
 export interface Crew {
   readonly id: CrewId;
   readonly name: string;
   readonly members: readonly CrewMember[];
-  readonly standingGame?: StandingGame;
 }
 
 const MIN_MEMBER_NAME_LENGTH = 1;
@@ -60,33 +54,3 @@ export const addMember = (crew: Crew, member: CrewMember): Crew => {
   }
   return { ...crew, members: [...crew.members, member] };
 };
-
-// Mirrors game.ts's scoreGame dispatch: one entry per GameConfig kind, kept in sync with
-// that union by the same exhaustiveness discipline (a runtime DomainError, not just a
-// compile-time check, guards inputs that bypass the type system).
-// Exported (M9 hardening, papercut 8): saveStandingGame.ts (application) reuses this SAME
-// per-game extraction to validate a preset's golferIds against the crew's roster before
-// saving — never a second, hand-rolled copy of this switch.
-export const referencedGolferIds = (game: GameConfigDraft): readonly GolferId[] => {
-  switch (game.kind) {
-    case "stroke-play":
-    case "stableford":
-    case "skins":
-      return game.players;
-    case "singles-match":
-      return [game.a, game.b];
-    case "fourball-match":
-      return [...game.a, ...game.b];
-    default:
-      throw new DomainError("unknown-game-kind", `no referenced-golfer extraction for game kind "${(game as { kind: string }).kind}"`);
-  }
-};
-
-// "Play the usual" (product.md §6): a preset built for the crew's regular roster doesn't
-// always match who actually showed up. A game survives iff EVERY golfer it references made
-// it into today's round — a singles match missing its opponent, or a fourball missing one of
-// its four, can't silently renumber itself into something the crew didn't configure; it's
-// just dropped, in preset order, for the round's setup screen to reconcile (add manually,
-// or leave out) rather than a partial/reassigned game landing on the card unasked.
-export const applyStandingGame = (preset: StandingGame, presentGolferIds: ReadonlySet<GolferId>): readonly GameConfigDraft[] =>
-  preset.games.filter((game) => referencedGolferIds(game).every((golferId) => presentGolferIds.has(golferId)));

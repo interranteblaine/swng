@@ -47,7 +47,6 @@ import {
   rebuildProjections,
   recordScore,
   removeCountedRound,
-  saveStandingGame,
   searchCourses,
   startRound,
   terminateGame,
@@ -264,15 +263,16 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const tokens = createHmacTokenIssuer({ secret: tokenSecret, clock });
 
   const useCases: UseCases = {
-    // golferStore/crewStore threaded through for the shared claimed-golferId resolver
-    // (rounds/golferIdentity.ts, M8) — the SAME golferStore/crewStore instances the crew
-    // routes below also share.
+    // golferStore threaded through for the shared claimed-golferId resolver
+    // (rounds/golferIdentity.ts) — a crew is a grouping/competition ONLY (owner ruling, spec
+    // §11a): the resolver no longer takes a crewStore dependency (there is no crew-consent arm
+    // left to derive from it).
     // projectionStore/logger (projection-realignment Task 13): every seated participant gets a
     // best-effort presence write (rounds/presence.ts) — the SAME projectionStore instance
     // getMyRecord/getMyRounds/getMyLiveRounds already share, and the SAME logger every other
     // use case in this table does.
-    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
-    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
@@ -290,7 +290,7 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // instances startRound/joinRound above already share, plus the SAME golferStore
     // getRoundArchive above shares.
     mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
-    addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, projectionStore, logger }),
     createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
     addTeeSet: addTeeSet({ courseStore, clock, logger }),
     verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
@@ -310,7 +310,6 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
     addCrewMember: addCrewMember({ crewStore, golferStore }),
-    saveStandingGame: saveStandingGame({ crewStore, golferStore }),
     joinCrewByCode: joinCrewByCode({ crewStore, golferStore }),
     // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave
     // — the SAME crewStore/golferStore/snapshots/clock/ids instances the crew + finalize use

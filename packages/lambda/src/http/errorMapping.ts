@@ -71,10 +71,6 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // route accepts — same "forbidden actor" 403 bucket as claim-proof-required/not-a-participant
   // above, never a 401 (401 means "no usable identity at all", which a spectator token isn't).
   "read-only-token": 403,
-  // M9 hardening (papercut 8): a bad-body precondition (the preset names someone off the
-  // roster) the caller can correct, same bucket as unknown-golfer-in-game/golfer-required
-  // above.
-  "unknown-preset-player": 400,
   // Projection-realignment Task 6: getRoundArchive's own forbidden-actor code — same 403
   // bucket as not-a-participant/not-a-member/claim-proof-required above.
   "not-a-viewer": 403,

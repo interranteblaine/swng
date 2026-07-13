@@ -49,8 +49,8 @@ const setup = () => {
     roundStore,
     crewStore,
     journal,
-    start: startRound({ journal, store: roundStore, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
-    join: joinRound({ journal, store: roundStore, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    start: startRound({ journal, store: roundStore, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    join: joinRound({ journal, store: roundStore, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     claim: claimGolfer({ golferStore, roundStore, journal, crewStore }),
   };
 };
@@ -66,9 +66,9 @@ const seedRoundWithParticipant = async (ctx: Ctx, ghost: ReturnType<typeof golfe
 };
 
 // Seeds a crew with `ghost` on its roster directly — crewStore.put over domain's own
-// addMember, the same direct-construction idiom golferIdentity.test.ts's "standing consent"
-// arm already uses — no need to drive the full createCrew/addCrewMember flow (which requires
-// its own account-golfer setup) just to prove membership.
+// addMember, the same direct-construction idiom golferIdentity.test.ts's own crew fixtures
+// use — no need to drive the full createCrew/addCrewMember flow (which requires its own
+// account-golfer setup) just to prove membership.
 const seedCrewWithMember = async (ctx: Ctx, ghost: ReturnType<typeof golferId>, code = "CREWCD"): Promise<string> => {
   const crew = addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: ghost, name: "Cal", role: "member" });
   await ctx.crewStore.put(crew, code, undefined);

@@ -14,11 +14,10 @@ export const requireAccountGolfer = async (deps: { golferStore: GolferStore }, c
   return found.golfer;
 };
 
-// GetCrew/AddCrewMember/SaveStandingGame's shared authorization gate, and startRound's own
-// crew-tag check (rounds/startRound.ts) — the caller's account golfer must already be on the
-// crew's roster. A sub with no golfer at all can't be a member by construction (only a real
-// GolferId ever lands in crew.members), so "no account golfer" and "a real golfer who isn't
-// on THIS crew" collapse into the one not-a-member 403 the wire exposes.
+// GetCrew/AddCrewMember/getSeasonStandings's shared authorization gate — the caller's account
+// golfer must already be on the crew's roster. A sub with no golfer at all can't be a member by
+// construction (only a real GolferId ever lands in crew.members), so "no account golfer" and "a
+// real golfer who isn't on THIS crew" collapse into the one not-a-member 403 the wire exposes.
 export const requireCrewMember = async (
   deps: { golferStore: GolferStore; crewStore: CrewStore },
   claims: AccountClaims,

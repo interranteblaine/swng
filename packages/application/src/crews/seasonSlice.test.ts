@@ -268,14 +268,18 @@ describe("getSeasonStandings", () => {
     expect(standings.rounds.map((r) => r.roundId)).toEqual([roundId("r2"), roundId("r1")]); // newest-first
     expect(standings.ledger).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ golferId: ann, wins: 1, losses: 1, member: true }),
-        expect.objectContaining({ golferId: bo, wins: 1, losses: 1, member: true }),
+        expect.objectContaining({ golferId: ann, wins: 1, losses: 1 }),
+        expect.objectContaining({ golferId: bo, wins: 1, losses: 1 }),
       ]),
     );
     expect(standings.headToHead).toEqual([expect.objectContaining({ aWins: 1, bWins: 1, halves: 0 })]);
   });
 
-  it("a golfer in a counted round who is NOT on the roster appears with member:false (guest labeling), name from the snapshot", async () => {
+  // Architecture-realignment Phase 3 correction (spec §11a, 2026-07-13, owner ruling): a crew
+  // is a grouping/competition ONLY — standings aggregate the CURRENT roster, full stop. A
+  // golfer in a counted round who never made the roster contributes no row and no
+  // head-to-head pair; a roster member's OWN row in that same round is untouched.
+  it("a golfer in a counted round who is NOT on the roster yields no row for them and no head-to-head pair", async () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
     const guest = golferId("gus"); // never a crew member, never a golfer row
@@ -285,19 +289,51 @@ describe("getSeasonStandings", () => {
     expect(bo).toBeDefined();
 
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
-    const guestLine = standings.ledger.find((line) => line.golferId === guest);
-    expect(guestLine).toMatchObject({ member: false, name: "Gus the Guest" });
-    expect(standings.ledger.find((line) => line.golferId === ann)).toMatchObject({ member: true });
+    expect(standings.ledger.find((line) => line.golferId === guest)).toBeUndefined();
+    expect(standings.ledger.find((line) => line.golferId === ann)).toMatchObject({ wins: 1 }); // Ann's own row is untouched
+    expect(standings.headToHead).toEqual([]); // the guest half of the pair can't stand alone
   });
 
-  it("the most recently finalized counted snapshot wins a name conflict", async () => {
+  // Compute-on-read reversibility: nothing is stored, so a departed member's rows disappear on
+  // the very next read and a re-added member's rows reappear on the read after THAT — no stale
+  // membership history anywhere.
+  it("a departed member's rows vanish from standings while their counted round stays listed; re-adding them restores the rows", async () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    // Earlier round spells Ann "Ann"; later round (higher finalizedAt) spells her "Annie".
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, { [ann]: "Ann" }));
-    ctx.snapshots.record(singlesArchive("r2", 9_000, ann, bo, ann, { [ann]: "Annie" }));
+    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
     await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
-    await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r2") });
+
+    const before = await ctx.standings(asClaims("ann"), crewId, seasonId);
+    expect(before.ledger.find((line) => line.golferId === bo)).toBeDefined();
+    expect(before.headToHead).toHaveLength(1);
+
+    await ctx.leave(asClaims("bo"), crewId);
+    const afterLeave = await ctx.standings(asClaims("ann"), crewId, seasonId);
+    expect(afterLeave.rounds.map((r) => r.roundId)).toEqual([roundId("r1")]); // the round stays counted
+    expect(afterLeave.ledger.find((line) => line.golferId === bo)).toBeUndefined(); // Bo's row vanished
+    expect(afterLeave.ledger.find((line) => line.golferId === ann)).toBeDefined(); // Ann's own row remains
+    expect(afterLeave.headToHead).toEqual([]); // Bo is half the pair now — the pair goes too
+
+    const crew = await ctx.crewStore.get(crewId);
+    await ctx.join(asClaims("bo"), { code: crew!.joinCode });
+    const afterRejoin = await ctx.standings(asClaims("ann"), crewId, seasonId);
+    expect(afterRejoin.ledger.find((line) => line.golferId === bo)).toBeDefined(); // restored
+    expect(afterRejoin.headToHead).toHaveLength(1); // restored
+  });
+
+  it("names are sourced from the CURRENT roster, never the counted snapshot's own participant name", async () => {
+    const ctx = setup();
+    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
+    // The snapshot spells Ann "Ann From The Round" — irrelevant now; standings show whatever
+    // the roster says, not whatever a round happened to carry.
+    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, { [ann]: "Ann From The Round" }));
+    await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
+
+    // Rename Ann on the roster directly — there is no rename-member use case yet, so this
+    // mirrors the contract test's own "changed name/role" idiom (a direct store mutation).
+    const found = await ctx.crewStore.get(crewId);
+    const renamed = { ...found!.crew, members: found!.crew.members.map((member) => (member.golferId === ann ? { ...member, name: "Annie" } : member)) };
+    await ctx.crewStore.put(renamed, found!.joinCode, found!.revision);
 
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
     expect(standings.ledger.find((line) => line.golferId === ann)?.name).toBe("Annie");
@@ -324,7 +360,7 @@ describe("getSeasonStandings", () => {
 });
 
 describe("leaveCrew", () => {
-  it("removes the caller's own member item; their past counted rounds REMAIN and standings still include them as member:false", async () => {
+  it("removes the caller's own member item; their past counted rounds REMAIN counted, but their standings rows vanish (members-only, compute-on-read)", async () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
     ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
@@ -336,10 +372,13 @@ describe("leaveCrew", () => {
     // Bo is off the roster now...
     const crew = await ctx.crewStore.get(crewId);
     expect(crew!.crew.members.some((member) => member.golferId === bo)).toBe(false);
-    // ...but the round Bo counted is still counted, and standings still show Bo (member:false).
+    // ...but the round Bo counted is still counted (nothing about a counted round is deleted),
+    // and standings no longer show Bo's own row — a members-only read-time filter, not stored
+    // membership history.
     expect(await ctx.crewStore.listCountedRounds(crewId, seasonId)).toHaveLength(1);
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
-    expect(standings.ledger.find((line) => line.golferId === bo)).toMatchObject({ member: false });
+    expect(standings.rounds).toHaveLength(1);
+    expect(standings.ledger.find((line) => line.golferId === bo)).toBeUndefined();
   });
 
   it("a non-member (or a sub with no account golfer) leaving is rejected — not-a-member", async () => {

@@ -5,7 +5,6 @@ import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { Broadcast } from "../ports/broadcast.js";
 import type { Clock } from "../ports/clock.js";
-import type { CrewStore } from "../ports/crewStore.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
@@ -30,7 +29,6 @@ export const startRound =
     clock: Clock;
     ids: IdGenerator;
     golferStore: GolferStore;
-    crewStore: CrewStore;
     projectionStore: ProjectionStore;
     logger: Logger;
   }) =>
@@ -57,10 +55,11 @@ export const startRound =
     }
 
     // Round-is-a-sealed-leaf: a round no longer tags itself with a crew, so there's no crew
-    // membership to check at creation. A signed-in caller may still seat a claimed fellow crew
-    // member — that consent now flows from co-membership inside the shared resolver (it derives
-    // the caller's own crews from claims.sub), not from a tag on the round.
-    const resolveGolfer = resolveSuppliedGolfer({ golferStore: deps.golferStore, crewStore: deps.crewStore });
+    // membership to check at creation. A crew is a grouping/competition ONLY (owner ruling,
+    // spec §11a) — a signed-in caller may seat their OWN claimed golferId (as-self), but a
+    // claimed golfer belonging to someone else is ALWAYS golfer-claimed, crew-mate or not; the
+    // old co-membership consent arm is gone.
+    const resolveGolfer = resolveSuppliedGolfer({ golferStore: deps.golferStore });
     const identityCtx = { sub: claims?.sub };
 
     const id = roundId(deps.ids.newId());
@@ -92,10 +91,11 @@ export const startRound =
     // second pass and a kind-narrowing filter for one array that's cheap to build inline).
     const seatedGolferIds: GolferId[] = [host];
 
-    // Crew one-tap: seed the round with a whole roster in one call. Every player's optional
-    // golferId goes through the SAME resolver as the host's, including its co-membership arm (a
-    // signed-in host seating a claimed fellow crew member) — appended in request order, right
-    // after the host, all authored by the host (this whole batch is the host's own setup act).
+    // Seed the round with a whole roster in one call. Every player's optional golferId goes
+    // through the SAME resolver as the host's — a supplied golferId claimed by anyone other
+    // than the host is ALWAYS golfer-claimed now (no crew-consent path) — appended in request
+    // order, right after the host, all authored by the host (this whole batch is the host's own
+    // setup act).
     for (const player of command.players ?? []) {
       const playerGolfer: GolferId = player.golferId !== undefined ? await resolveGolfer(player.golferId, identityCtx) : golferId(deps.ids.newId());
       const participant: Participant = { golferId: playerGolfer, name: player.name, tee: player.tee, courseHandicap: player.courseHandicap };

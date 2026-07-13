@@ -4,7 +4,6 @@ import type { AddParticipantRequest, AddParticipantResponse } from "@swng/contra
 import { ApplicationError } from "../errors.js";
 import type { Broadcast } from "../ports/broadcast.js";
 import type { Clock } from "../ports/clock.js";
-import type { CrewStore } from "../ports/crewStore.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
@@ -18,20 +17,17 @@ import { writePresence } from "./presence.js";
 import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 
 // POST /rounds/{roundId}/players (participant auth, M8 plan): an ALREADY-seated participant
-// adds someone else to the roster — the crew one-tap flow's mid-round/mid-setup counterpart
-// to StartRound's own `players` array (for a crew member who wasn't there at creation time).
-// Any participant may add another, same "any participant may X" authorization as addGame/
-// terminateGame — no extra gate beyond requireParticipant.
+// adds someone else to the roster — StartRound's own `players` array's mid-round/mid-setup
+// counterpart (for a player who wasn't there at creation time). Any participant may add
+// another, same "any participant may X" authorization as addGame/terminateGame — no extra gate
+// beyond requireParticipant.
 //
 // A participant TOKEN never carries a Cognito sub (tokenIssuer.ts: "GolferId is deliberately
 // not the Cognito sub... a participant token is issued off a join code, no account
-// required"), so the shared resolver's ctx here always passes sub: undefined. That disables
-// BOTH sub-gated arms through this surface: as-self AND co-membership consent (which now
-// derives the caller's crews from their sub — golferIdentity.ts). Only the unclaimed arm and
-// the claimed-stranger rejection are reachable here; seating a CLAIMED fellow crew member
-// happens on startRound/joinRound instead, which do carry an optional AccountClaims. This is a
-// deliberate narrowing under round-is-a-sealed-leaf: the round no longer names a crew, so a
-// bare participant token can't stand in for proof of who the caller is.
+// required"), so the shared resolver's ctx here always passes sub: undefined. That disables the
+// as-self arm through this surface — only the unclaimed arm and the claimed rejection are
+// reachable here (there is no crew-consent arm left anywhere; a claimed golfer can only be
+// seated as themselves, via startRound/joinRound's own optional AccountClaims).
 export const addParticipant =
   (deps: {
     journal: EventJournal;
@@ -39,7 +35,6 @@ export const addParticipant =
     clock: Clock;
     ids: IdGenerator;
     golferStore: GolferStore;
-    crewStore: CrewStore;
     projectionStore: ProjectionStore;
     logger: Logger;
   }) =>
@@ -51,7 +46,7 @@ export const addParticipant =
 
     let golfer: GolferId;
     if (command.golferId !== undefined) {
-      golfer = await resolveSuppliedGolfer({ golferStore: deps.golferStore, crewStore: deps.crewStore })(command.golferId, {
+      golfer = await resolveSuppliedGolfer({ golferStore: deps.golferStore })(command.golferId, {
         sub: undefined,
       });
       // UX guard, same as joinRound's own: a duplicate participant-joined is harmless at the

@@ -44,7 +44,6 @@ import {
   readEvents,
   recordScore,
   removeCountedRound,
-  saveStandingGame,
   searchCourses,
   startRound,
   terminateGame,
@@ -78,7 +77,6 @@ import {
   peekRoundResponseSchema,
   recordScoreResponseSchema,
   removeCountedRoundResponseSchema,
-  saveStandingGameResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
   shareLinkResponseSchema,
@@ -161,8 +159,8 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
   const logger = createNullLogger();
 
   const useCases: UseCases = {
-    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
-    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
@@ -172,7 +170,7 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     getShareLink: getShareLink({ tokens }),
     getRoundArchive: getRoundArchive({ snapshots, golferStore, crewStore }),
     mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
-    addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, projectionStore, logger }),
     createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
     addTeeSet: addTeeSet({ courseStore, clock, logger }),
     verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
@@ -189,7 +187,6 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
     addCrewMember: addCrewMember({ crewStore, golferStore }),
-    saveStandingGame: saveStandingGame({ crewStore, golferStore }),
     joinCrewByCode: joinCrewByCode({ crewStore, golferStore }),
     createSeason: createSeason({ crewStore, golferStore, ids, clock }),
     listSeasons: listSeasons({ crewStore, golferStore }),
@@ -1067,8 +1064,9 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it(
-    "drives create -> join -> add an existing account member (de-ghost) -> save standing game -> GET /me/crews -> " +
-      "StartRound as-self with players (co-membership seats a claimed crew-mate) -> POST .../players -> create season -> list seasons",
+    "drives create -> join -> add an existing account member (de-ghost) -> GET /me/crews -> " +
+      "StartRound: seating a claimed crew-mate via players[] is rejected (golfer-claimed, no crew exception) -> " +
+      "StartRound as-self with a ghost player -> POST .../players -> create season -> list seasons",
     async () => {
       const { dispatcher } = setupCrews();
       const annGolfer = await putMe(dispatcher, ann, "Ann");
@@ -1099,31 +1097,17 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const addedMember = addCrewMemberResponseSchema.parse(JSON.parse(addMemberResp.body!));
       expect(addedMember.crew.members.find((member) => member.golferId === calGolfer.golferId)).toMatchObject({ name: "Cal", claimed: true });
 
-      const standingResp = asStructured(
-        await dispatcher(
-          makeEvent({
-            method: "PUT",
-            path: `/crews/${created.crew.crewId}/standing-game`,
-            token: golferBearer(ann),
-            body: { standingGame: { tee: "white", games: [{ kind: "stableford", players: [annGolfer.golferId, boGolfer.golferId] }] } },
-          }),
-        ),
-      );
-      expect(standingResp.statusCode).toBe(200);
-      const standing = saveStandingGameResponseSchema.parse(JSON.parse(standingResp.body!));
-      expect(standing.crew.standingGame?.tee).toBe("white");
-
       const myCrewsResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/crews", token: golferBearer(bo) })));
       expect(myCrewsResp.statusCode).toBe(200);
       const myCrews = listMyCrewsResponseSchema.parse(JSON.parse(myCrewsResp.body!));
       expect(myCrews.crews).toEqual(expect.arrayContaining([{ crewId: created.crew.crewId, name: "Sunday Skins", memberCount: 3 }]));
 
-      // StartRound as-self, with players, under a signed-in caller (ann): the host's OWN
-      // golferId (as-self arm) plus a `players` entry for Bo's own claimed golferId. Bo is
-      // authorized by CO-MEMBERSHIP — ann and Bo share this crew — not by any tag on the round
-      // (round-is-a-sealed-leaf: the request carries no crewId and the round names no crew).
-      // Never a fresh ghost id for either.
-      const startResp = asStructured(
+      // A crew is a grouping/competition ONLY (owner ruling, spec §11a): the old co-membership
+      // consent arm is deleted — seating Bo's OWN claimed golferId via `players[]` is rejected
+      // even though ann and Bo genuinely share this crew, driven end-to-end through the real
+      // dispatcher. Round-is-a-sealed-leaf: the request carries no crewId and the round names
+      // no crew either way.
+      const rejectedStartResp = asStructured(
         await dispatcher(
           makeEvent({
             method: "POST",
@@ -1138,6 +1122,27 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
           }),
         ),
       );
+      expect(rejectedStartResp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(rejectedStartResp.body!))).toMatchObject({ code: "golfer-claimed" });
+
+      // StartRound as-self, with an initial ghost player (no golferId — a fresh id is minted,
+      // the ONLY way anyone but the host lands on this roster via `players[]` now, short of
+      // seating themselves).
+      const startResp = asStructured(
+        await dispatcher(
+          makeEvent({
+            method: "POST",
+            path: "/rounds",
+            token: golferBearer(ann),
+            body: {
+              card: fixtureLinks,
+              host: { name: "Ann", tee: "white", courseHandicap: 8 },
+              golferId: annGolfer.golferId,
+              players: [{ name: "Bo Guest", tee: "white", courseHandicap: 2 }],
+            },
+          }),
+        ),
+      );
       expect(startResp.statusCode).toBe(201);
       const started = startRoundResponseSchema.parse(JSON.parse(startResp.body!));
       expect(started.golferId).toBe(annGolfer.golferId); // the host resolved to ann's OWN golfer, not a fresh ghost
@@ -1145,12 +1150,14 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const eventsResp = asStructured(
         await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
       );
-      const events = JSON.parse(eventsResp.body!) as { events: readonly { kind: string; participant?: { golferId: string } }[] };
-      const participantIds = events.events.filter((e) => e.kind === "participant-joined").map((e) => e.participant?.golferId);
-      expect(participantIds).toEqual(expect.arrayContaining([annGolfer.golferId, boGolfer.golferId]));
+      const events = JSON.parse(eventsResp.body!) as { events: readonly { kind: string; participant?: { golferId: string; name: string } }[] };
+      const joins = events.events.filter((e) => e.kind === "participant-joined");
+      expect(joins).toHaveLength(2); // Ann (as-self) + the ghost "Bo Guest"
+      expect(joins.map((e) => e.participant?.golferId)).toContain(annGolfer.golferId);
+      expect(joins.map((e) => e.participant?.name)).toEqual(expect.arrayContaining(["Ann", "Bo Guest"]));
 
-      // POST /rounds/{roundId}/players — the mid-round crew one-tap counterpart, adding a
-      // fresh ghost (Cal, unclaimed) as a THIRD participant.
+      // POST /rounds/{roundId}/players — adding a fresh ghost (Cal, unclaimed) as a THIRD
+      // participant, mid-round.
       const addPlayerResp = asStructured(
         await dispatcher(
           makeEvent({

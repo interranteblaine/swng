@@ -59,7 +59,6 @@ export { getCrew } from "./crews/getCrew.js";
 export { listMyCrews } from "./crews/listMyCrews.js";
 export { addCrewMember } from "./crews/addCrewMember.js";
 export { joinCrewByCode } from "./crews/joinCrewByCode.js";
-export { saveStandingGame } from "./crews/saveStandingGame.js";
 export { leaveCrew } from "./crews/leaveCrew.js";
 export { createSeason } from "./crews/createSeason.js";
 export { listSeasons } from "./crews/listSeasons.js";

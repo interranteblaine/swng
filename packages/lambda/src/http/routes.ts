@@ -42,8 +42,6 @@ import type {
   RecordScoreRequest,
   RecordScoreResponse,
   RemoveCountedRoundResponse,
-  SaveStandingGameRequest,
-  SaveStandingGameResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
   ShareLinkResponse,
@@ -68,7 +66,6 @@ import {
   joinCrewRequestSchema,
   joinRoundRequestSchema,
   recordScoreRequestSchema,
-  saveStandingGameRequestSchema,
   startRoundRequestSchema,
   updateMeRequestSchema,
   verifyTeeSetRequestSchema,
@@ -135,7 +132,6 @@ export interface UseCases {
   getCrew: (claims: AccountClaims, id: CrewId) => Promise<GetCrewResponse>;
   listMyCrews: (claims: AccountClaims) => Promise<ListMyCrewsResponse>;
   addCrewMember: (claims: AccountClaims, id: CrewId, command: AddCrewMemberRequest) => Promise<AddCrewMemberResponse>;
-  saveStandingGame: (claims: AccountClaims, id: CrewId, command: SaveStandingGameRequest) => Promise<SaveStandingGameResponse>;
   joinCrewByCode: (claims: AccountClaims, command: JoinCrewRequest) => Promise<JoinCrewResponse>;
   // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read, plus
   // leave. Every one is "golfer"-gated with member-only authorization inside application
@@ -500,14 +496,6 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 201, // mints a new (ghost) member, same status-code spirit as JoinRound/addGame.
     handler: async (ctx, body) => useCases.addCrewMember(ctx.account!, crewId(ctx.pathParams.crewId!), body as AddCrewMemberRequest),
-  },
-  {
-    method: "PUT",
-    path: "/crews/{crewId}/standing-game",
-    schema: saveStandingGameRequestSchema,
-    auth: "golfer",
-    successStatus: 200, // replaces whatever preset was there (saveStandingGame.ts's own doc comment) — an act on an existing resource, not a mint.
-    handler: async (ctx, body) => useCases.saveStandingGame(ctx.account!, crewId(ctx.pathParams.crewId!), body as SaveStandingGameRequest),
   },
   // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave.
   // Every route is "golfer"-gated; member-only authorization lives in application

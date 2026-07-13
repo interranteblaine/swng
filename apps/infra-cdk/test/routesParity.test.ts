@@ -91,9 +91,6 @@ const stubUseCases: UseCases = {
   addCrewMember: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
-  saveStandingGame: () => {
-    throw new Error("not implemented: parity test never dispatches");
-  },
   joinCrewByCode: () => {
     throw new Error("not implemented: parity test never dispatches");
   },

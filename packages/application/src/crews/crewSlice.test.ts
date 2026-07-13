@@ -10,7 +10,6 @@ import { createCrew } from "./createCrew.js";
 import { getCrew } from "./getCrew.js";
 import { joinCrewByCode } from "./joinCrewByCode.js";
 import { listMyCrews } from "./listMyCrews.js";
-import { saveStandingGame } from "./saveStandingGame.js";
 
 const setup = (crewStore: CrewStore = createInMemoryCrewStore(), golferStore: GolferStore = createInMemoryGolferStore()) => {
   const ids = createSequentialIds("c");
@@ -23,7 +22,6 @@ const setup = (crewStore: CrewStore = createInMemoryCrewStore(), golferStore: Go
     list: listMyCrews({ crewStore, golferStore }),
     addMember: addCrewMember({ crewStore, golferStore }),
     join: joinCrewByCode({ crewStore, golferStore }),
-    saveStanding: saveStandingGame({ crewStore, golferStore }),
   };
 };
 
@@ -251,64 +249,6 @@ describe("joinCrewByCode", () => {
     const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
 
     await expect(ctx.join({ sub: "sub-nobody" }, { code: created.crew.joinCode })).rejects.toMatchObject({ code: "golfer-required" });
-  });
-});
-
-describe("saveStandingGame", () => {
-  it("member-only: sets the preset wholesale and it round-trips through getCrew", async () => {
-    const ctx = setup();
-    const annId = await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const boId = await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
-    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-    await ctx.join({ sub: "sub-bo" }, { code: created.crew.joinCode });
-
-    const standingGame = { tee: "white", games: [{ kind: "stableford" as const, players: [annId, boId] }] };
-    const saved = await ctx.saveStanding({ sub: "sub-ann" }, created.crew.crewId, { standingGame });
-
-    expect(saved.crew.standingGame).toEqual(standingGame);
-    const fetched = await ctx.get({ sub: "sub-bo" }, created.crew.crewId);
-    expect(fetched.crew.standingGame).toEqual(standingGame);
-  });
-
-  it("a non-member is rejected — not-a-member", async () => {
-    const ctx = setup();
-    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-    await seedAccountGolfer(ctx.golferStore, "sub-stranger", "Stranger");
-
-    await expect(ctx.saveStanding({ sub: "sub-stranger" }, created.crew.crewId, { standingGame: { games: [] } })).rejects.toMatchObject({
-      code: "not-a-member",
-    });
-  });
-
-  // Papercut 8 (M9 hardening): a preset naming a golfer who isn't on the crew's own roster —
-  // rejected before anything is written (never a silently-seeded "play the usual" round with a
-  // stray, unresolvable player).
-  it("a preset naming a golferId off the roster is rejected — unknown-preset-player, nothing saved", async () => {
-    const ctx = setup();
-    const annId = await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-    const stranger = golferId("never-a-member");
-
-    await expect(
-      ctx.saveStanding({ sub: "sub-ann" }, created.crew.crewId, { standingGame: { games: [{ kind: "singles-match", a: annId, b: stranger }] } }),
-    ).rejects.toMatchObject({ code: "unknown-preset-player" });
-
-    const fetched = await ctx.get({ sub: "sub-ann" }, created.crew.crewId);
-    expect(fetched.crew.standingGame).toBeUndefined(); // never saved
-  });
-
-  it("a preset whose every referenced golfer IS on the roster saves cleanly", async () => {
-    const ctx = setup();
-    const annId = await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const boId = await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
-    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-    await ctx.join({ sub: "sub-bo" }, { code: created.crew.joinCode });
-
-    const standingGame = { games: [{ kind: "singles-match" as const, a: annId, b: boId }] };
-    await expect(ctx.saveStanding({ sub: "sub-ann" }, created.crew.crewId, { standingGame })).resolves.toMatchObject({
-      crew: { standingGame },
-    });
   });
 });
 

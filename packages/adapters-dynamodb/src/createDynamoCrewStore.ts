@@ -42,9 +42,14 @@ interface CountedRoundItem {
 
 // A crew root item's shape on the core table (keys.ts's crewPk/crewSk): unlike
 // createDynamoGolferStore's flattened attrs, the WHOLE domain Crew is nested under `crew` —
-// same idiom as createDynamoCourseStore's `course` attribute — because Crew's shape (a
-// members array, an optional nested StandingGame with per-kind GameConfigDraft unions) has
-// nothing to gain from hand-flattening the way Golfer's two scalar handicap fields did.
+// same idiom as createDynamoCourseStore's `course` attribute — because Crew's shape (just a
+// members array) has nothing to gain from hand-flattening the way Golfer's two scalar handicap
+// fields did. A crew is a grouping/competition ONLY (owner ruling, spec §11a): stored items on
+// beta may still carry a stray `standingGame` attribute from before that ruling — `get` below
+// tolerates it (reconstructs a clean `Crew` from only the fields the current type declares,
+// never spreads the raw stored value), so it never leaks into anything this store returns, and
+// the next `put` (a whole-document write of a caller-supplied Crew, which can no longer even
+// TYPE a standingGame field) naturally never writes it back. Never a migration script.
 interface CrewItem {
   readonly pk: string;
   readonly sk: string;
@@ -162,7 +167,13 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
         }),
       );
       const item = result.Item as CrewItem | undefined;
-      return item ? { crew: item.crew, joinCode: item.joinCode, revision: item.revision } : undefined;
+      if (!item) return undefined;
+      // Reconstructed field-by-field (never `item.crew` spread verbatim): a legacy item may
+      // still carry a stray `standingGame` attribute (this interface's own doc comment above) —
+      // this is where that gets tolerated-and-ignored, so every caller of this store only ever
+      // sees a clean Crew, no matter what the stored document actually holds.
+      const crew: Crew = { id: item.crew.id, name: item.crew.name, members: item.crew.members };
+      return { crew, joinCode: item.joinCode, revision: item.revision };
     },
 
     findByJoinCode: async (joinCode: string) => {

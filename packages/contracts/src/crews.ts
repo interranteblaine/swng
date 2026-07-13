@@ -1,8 +1,6 @@
 import { z } from "zod";
-import type { CourseId, CrewId, CrewRole, GolferId, HeadToHeadRecord, RoundId, SeasonLedgerLine } from "@swng/domain";
-import type { GameConfigInput } from "./commands.js";
-import { gameConfigInputSchema } from "./commands.js";
-import { courseIdSchema, crewIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
+import type { CrewId, CrewRole, GolferId, HeadToHeadRecord, RoundId, SeasonLedgerLine } from "@swng/domain";
+import { crewIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
 
 // The wire mirror of domain's CrewRole (crew/crew.ts) — "organizer" carries no extra
 // authority in v1 (same doc comment as the domain type), recorded now so it can be
@@ -25,32 +23,15 @@ export const crewMemberViewSchema: z.ZodType<CrewMemberView> = z.object({
   claimed: z.boolean(),
 });
 
-// The wire mirror of domain's StandingGame (crew/crew.ts): `games` reuses commands.ts'
-// GameConfigInput (id-less, client-submitted game shapes) rather than a crews-local schema —
-// it is structurally the SAME shape as domain's GameConfigDraft (a standing game's preset
-// games have no GameId yet either), so one schema serves both StartRound's `game` field and
-// a crew's standing preset.
-export interface StandingGameView {
-  readonly courseId?: CourseId;
-  readonly tee?: string;
-  readonly games: readonly GameConfigInput[];
-}
-
-export const standingGameViewSchema: z.ZodType<StandingGameView> = z.object({
-  courseId: courseIdSchema.optional(),
-  tee: z.string().optional(),
-  games: z.array(gameConfigInputSchema).readonly(),
-});
-
 // The wire projection of a Crew aggregate (application/src/crews/crewView.ts builds it):
 // `joinCode` is store-level metadata (mirrors RoundStore's join-code split — the domain Crew
 // type itself carries no joinCode field, same reason RoundState carries no joinCode either).
+// A crew is a grouping/competition ONLY (owner ruling, spec §11a) — no standing game.
 export interface CrewView {
   readonly crewId: CrewId;
   readonly name: string;
   readonly joinCode: string;
   readonly members: readonly CrewMemberView[];
-  readonly standingGame?: StandingGameView;
 }
 
 export const crewViewSchema: z.ZodType<CrewView> = z.object({
@@ -58,7 +39,6 @@ export const crewViewSchema: z.ZodType<CrewView> = z.object({
   name: z.string(),
   joinCode: z.string(),
   members: z.array(crewMemberViewSchema).readonly(),
-  standingGame: standingGameViewSchema.optional(),
 });
 
 // Request bodies are `.strict()` (courses.ts' house style): every server-assigned field
@@ -81,12 +61,6 @@ export type AddCrewMemberRequest = z.infer<typeof addCrewMemberRequestSchema>;
 export const joinCrewRequestSchema = z.object({ code: z.string().length(6) }).strict();
 export type JoinCrewRequest = z.infer<typeof joinCrewRequestSchema>;
 
-// standingGame's shape is exactly StandingGameView (standingGameViewSchema above) — same
-// wire shape reused for both a crew's read-back view and this write body, not a second,
-// independently-maintained copy of its three fields (conventions §0).
-export const saveStandingGameRequestSchema = z.object({ standingGame: standingGameViewSchema }).strict();
-export type SaveStandingGameRequest = z.infer<typeof saveStandingGameRequestSchema>;
-
 // One response shape, `{ crew }`, for every crew mutation/read — named per endpoint (courses.ts'
 // house style: CreateCourseResponse/AddTeeSetResponse/... are all `{ course }` too, each with
 // its own name for route-level clarity even though the shape repeats).
@@ -99,9 +73,6 @@ export interface AddCrewMemberResponse {
 export interface JoinCrewResponse {
   readonly crew: CrewView;
 }
-export interface SaveStandingGameResponse {
-  readonly crew: CrewView;
-}
 export interface GetCrewResponse {
   readonly crew: CrewView;
 }
@@ -109,7 +80,6 @@ export interface GetCrewResponse {
 export const createCrewResponseSchema: z.ZodType<CreateCrewResponse> = z.object({ crew: crewViewSchema });
 export const addCrewMemberResponseSchema: z.ZodType<AddCrewMemberResponse> = z.object({ crew: crewViewSchema });
 export const joinCrewResponseSchema: z.ZodType<JoinCrewResponse> = z.object({ crew: crewViewSchema });
-export const saveStandingGameResponseSchema: z.ZodType<SaveStandingGameResponse> = z.object({ crew: crewViewSchema });
 export const getCrewResponseSchema: z.ZodType<GetCrewResponse> = z.object({ crew: crewViewSchema });
 
 export interface ListMyCrewsResponse {
@@ -194,12 +164,12 @@ export interface RemoveCountedRoundResponse {
 export const removeCountedRoundResponseSchema: z.ZodType<RemoveCountedRoundResponse> = z.object({ roundId: roundIdSchema });
 
 // A season ledger line resolved for display: the pure SeasonLedgerLine (crew/ledger.ts) plus a
-// `name` (resolved from the counted snapshots' own participants — most recently finalized wins a
-// conflict) and a `member` flag (from the CURRENT roster — a departed or guest golfer shows
-// member:false but still aggregates, standings never depend on membership history).
+// `name` resolved from the CURRENT roster's own CrewMember.name (getSeasonStandings.ts) — a
+// crew is members-only (owner ruling, spec §11a): the ledger and head-to-head are ALREADY
+// filtered to golferIds on the current roster before this line is ever built, so every row here
+// is, by construction, a member — there is no separate flag to carry.
 export interface SeasonStandingLine extends SeasonLedgerLine {
   readonly name: string;
-  readonly member: boolean;
 }
 const seasonStandingLineSchema: z.ZodType<SeasonStandingLine> = z.object({
   golferId: golferIdSchema,
@@ -210,7 +180,6 @@ const seasonStandingLineSchema: z.ZodType<SeasonStandingLine> = z.object({
   points: z.number().int(),
   skins: z.number().int(),
   name: z.string(),
-  member: z.boolean(),
 });
 
 // Standings are computed on read (spec §4): the counted snapshots folded through the SAME

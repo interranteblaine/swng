@@ -5,7 +5,6 @@ import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { Broadcast } from "../ports/broadcast.js";
 import type { Clock } from "../ports/clock.js";
-import type { CrewStore } from "../ports/crewStore.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
@@ -27,7 +26,6 @@ export const joinRound =
     clock: Clock;
     ids: IdGenerator;
     golferStore: GolferStore;
-    crewStore: CrewStore;
     projectionStore: ProjectionStore;
     logger: Logger;
   }) =>
@@ -54,7 +52,7 @@ export const joinRound =
       // narrow, exploiting it requires knowing the golferId mid-claim, and it grants nothing
       // beyond what an unclaimed ghost's participant token already carries (M4: ghost tokens
       // have no auth). M8/M9 identity hardening revisits this. Deliberate, not an oversight.
-      golfer = await resolveSuppliedGolfer({ golferStore: deps.golferStore, crewStore: deps.crewStore })(command.golferId, {
+      golfer = await resolveSuppliedGolfer({ golferStore: deps.golferStore })(command.golferId, {
         sub: claims?.sub,
       });
       // UX guard: a duplicate participant-joined is harmless at the domain layer (last-write-wins

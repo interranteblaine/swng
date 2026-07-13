@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Crew, CrewMember } from "@swng/domain";
 import { addMember, crewId, golferId, roundId } from "@swng/domain";
 import type { CountedRound, CrewSeason } from "@swng/application";
 import { createDynamoCrewStore } from "../createDynamoCrewStore.js";
-import { crewGsi1pk, crewPk, memberSk } from "../keys.js";
+import { crewGsi1pk, crewPk, crewSk, memberSk } from "../keys.js";
 import type { LocalDynamo } from "../testing/local.js";
 import { startLocalDynamo } from "../testing/local.js";
 
@@ -76,16 +76,45 @@ describe("createDynamoCrewStore", () => {
       expect(await store.get(crew.id)).toEqual({ crew: renamed, joinCode, revision: 2 });
     });
 
-    it("standingGame round-trips through put/get untouched", async () => {
+    // A crew is a grouping/competition ONLY (owner ruling, spec §11a, 2026-07-13) — the old
+    // "standing game" preset is deleted from the domain Crew type outright. Stored crew
+    // documents on beta may still carry a `standingGame` attribute from before that ruling;
+    // this proves the tolerate-and-ignore contract end to end against real DynamoDB: a legacy
+    // document reads back clean (no such property survives `get`), and the very next `put` (a
+    // whole-document write of that now-clean Crew) leaves no trace of it in storage either —
+    // never a migration script.
+    it("a legacy stored crew carrying a stray standingGame attribute reads back clean, and the next put drops it from storage too", async () => {
       const store = newStore();
-      const p1 = member("Ann");
-      const p2 = member("Bo");
-      const base = makeCrew("Standing Game Crew", [p1, p2]);
-      const crew: Crew = { ...base, standingGame: { tee: "white", games: [{ kind: "skins", players: [p1.golferId, p2.golferId] }] } };
+      const crew = makeCrew("Legacy Crew", [member("Ann", "organizer")]);
+      const joinCode = newJoinCode();
 
-      await store.put(crew, newJoinCode(), undefined);
+      // Seed the LEGACY shape directly with a raw PutCommand — never through the store API,
+      // which can no longer even TYPE a standingGame field.
+      await local.client.send(
+        new PutCommand({
+          TableName: local.coreTable,
+          Item: {
+            pk: crewPk(crew.id),
+            sk: crewSk,
+            revision: 1,
+            joinCode,
+            gsi1pk: crewGsi1pk,
+            gsi1sk: joinCode,
+            crew: { ...crew, standingGame: { tee: "white", games: [{ kind: "skins", players: [crew.members[0]!.golferId] }] } },
+          },
+        }),
+      );
 
-      expect((await store.get(crew.id))?.crew).toEqual(crew);
+      const found = await store.get(crew.id);
+      expect(found?.crew).toEqual(crew); // clean — no standingGame property survives the read
+      expect(found?.crew).not.toHaveProperty("standingGame");
+
+      // The next put is a WHOLE-DOCUMENT write of that now-clean Crew — the attribute is gone
+      // from storage too, proven with a raw GetCommand (not the store's own `get`, which would
+      // tolerate it either way).
+      await store.put(found!.crew, joinCode, found!.revision);
+      const raw = await local.client.send(new GetCommand({ TableName: local.coreTable, Key: { pk: crewPk(crew.id), sk: crewSk } }));
+      expect(raw.Item?.crew).not.toHaveProperty("standingGame");
     });
   });
 

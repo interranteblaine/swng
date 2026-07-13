@@ -151,14 +151,16 @@ describe("CrewPage", () => {
 
   // Owner ruling (spec §11a): a crew is a grouping/competition only — no standing game, no
   // "Play the usual." This pins the negative directly: none of the deleted feature's strings
-  // render anywhere on the page, for a crew whose CrewView still happens to carry a
-  // `standingGame` (the wire field itself only dies in the backend task that follows this one —
-  // the point here is that the WEB never reads or renders it even when it's present).
-  it("no standing-game or play-the-usual remnants render, even when the crew's own view still carries a standingGame field", async () => {
+  // render anywhere on the page, even for a crew whose STORED wire payload still happens to
+  // carry a stray `standingGame` (a legacy server response, or a stale field the wire type no
+  // longer declares at all now that the backend has deleted it too — `as unknown as CrewView`
+  // is the deliberate escape hatch, since a real `CrewView` literal can no longer even type
+  // this shape) — the point here is that the WEB never reads or renders it even when present.
+  it("no standing-game or play-the-usual remnants render, even when the crew's own payload still carries a stray standingGame field", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({
-      crew: { ...crew, standingGame: { tee: "white", games: [] } },
+      crew: { ...crew, standingGame: { tee: "white", games: [] } } as unknown as CrewView,
     });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 

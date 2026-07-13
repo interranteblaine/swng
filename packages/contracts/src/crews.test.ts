@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { courseId, crewId, golferId, roundId } from "@swng/domain";
+import { crewId, golferId, roundId } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
 import {
   addCrewMemberRequestSchema,
@@ -13,7 +13,6 @@ import {
   joinCrewRequestSchema,
   listMyCrewsResponseSchema,
   listSeasonsResponseSchema,
-  saveStandingGameRequestSchema,
   seasonStandingsResponseSchema,
 } from "./crews.js";
 
@@ -59,37 +58,8 @@ describe("joinCrewRequestSchema", () => {
   });
 });
 
-describe("saveStandingGameRequestSchema", () => {
-  it("round-trips a standing game with courseId/tee and a mixed set of id-less game configs", () => {
-    roundTrips(saveStandingGameRequestSchema, {
-      standingGame: {
-        courseId: courseId("course-1"),
-        tee: "white",
-        games: [
-          { kind: "stableford", players: [golferId("ann"), golferId("bo")] },
-          { kind: "singles-match", a: golferId("ann"), b: golferId("bo") },
-        ],
-      },
-    });
-  });
-
-  it("round-trips a bare standing game — no courseId/tee, no games yet", () => {
-    roundTrips(saveStandingGameRequestSchema, { standingGame: { games: [] } });
-  });
-
-  it("rejects a game config carrying an id (.strict() reuse of gameConfigInputSchema) — the server assigns it", () => {
-    expect(() =>
-      parse(saveStandingGameRequestSchema, { standingGame: { games: [{ kind: "singles-match", id: "sneaky", a: "ann", b: "bo" }] } }),
-    ).toThrow(ContractError);
-  });
-
-  it("rejects an extra top-level field (.strict())", () => {
-    expect(() => parse(saveStandingGameRequestSchema, { standingGame: { games: [] }, crewId: "sneaky" })).toThrow(ContractError);
-  });
-});
-
 describe("crewViewSchema (via getCrewResponseSchema)", () => {
-  it("round-trips a crew with a mix of claimed/unclaimed members and no standing game", () => {
+  it("round-trips a crew with a mix of claimed/unclaimed members", () => {
     roundTrips(getCrewResponseSchema, {
       crew: {
         crewId: crewId("crew-1"),
@@ -99,18 +69,6 @@ describe("crewViewSchema (via getCrewResponseSchema)", () => {
           { golferId: golferId("ann"), name: "Ann", role: "organizer", claimed: true },
           { golferId: golferId("ghost-1"), name: "Cal", role: "member", claimed: false },
         ],
-      },
-    });
-  });
-
-  it("round-trips a crew carrying a standing game", () => {
-    roundTrips(getCrewResponseSchema, {
-      crew: {
-        crewId: crewId("crew-1"),
-        name: "Sunday Skins",
-        joinCode: "ABC123",
-        members: [{ golferId: golferId("ann"), name: "Ann", role: "organizer", claimed: true }],
-        standingGame: { tee: "white", games: [{ kind: "skins", players: [golferId("ann"), golferId("bo")] }] },
       },
     });
   });
@@ -157,13 +115,13 @@ describe("season + standings schemas", () => {
     roundTrips(listSeasonsResponseSchema, { seasons: [season] });
   });
 
-  it("seasonStandingsResponseSchema round-trips ledger (with name + member) + head-to-head + rounds", () => {
+  it("seasonStandingsResponseSchema round-trips ledger (with name) + head-to-head + rounds", () => {
     roundTrips(seasonStandingsResponseSchema, {
       seasonId: "s-1",
       name: "2026",
       status: "closed",
       rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, appendedBy: golferId("ann") }],
-      ledger: [{ golferId: golferId("ann"), rounds: 1, wins: 1, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann", member: true }],
+      ledger: [{ golferId: golferId("ann"), rounds: 1, wins: 1, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann" }],
       headToHead: [{ a: golferId("ann"), b: golferId("bo"), aWins: 1, bWins: 0, halves: 0 }],
     });
   });

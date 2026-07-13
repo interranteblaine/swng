@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { addMember, crewId, fixtureLinks, golferId } from "@swng/domain";
+import { fixtureLinks, golferId } from "@swng/domain";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import {
   createCapturingBroadcast,
   createCapturingLogger,
   createFixedClock,
-  createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryProjectionStore,
@@ -44,18 +43,16 @@ const setup = () => {
   const clock = createFixedClock(1_000);
   const ids = createSequentialIds("t");
   const golferStore = createInMemoryGolferStore();
-  const crewStore = createInMemoryCrewStore();
   const projectionStore = createInMemoryProjectionStore();
   const logger = createNullLogger();
 
   return {
     broadcast,
     golferStore,
-    crewStore,
     projectionStore,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
-    addPlayer: addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore, projectionStore, logger }),
+    addPlayer: addParticipant({ journal, broadcast, clock, ids, golferStore, projectionStore, logger }),
   };
 };
 
@@ -83,35 +80,7 @@ describe("addParticipant", () => {
     expect(joined && joined.kind === "participant-joined" ? joined.participant.golferId : undefined).not.toBe(host.golferId);
   });
 
-  // Round-is-a-sealed-leaf narrowing: co-membership consent now derives from the CALLER's sub
-  // (golferIdentity.ts), and a participant token carries none. So even a claimed golfer who is a
-  // crew-mate of the round's host can NOT be seated through this surface — it rejects
-  // golfer-claimed. (Seating a claimed crew-mate lives on startRound/joinRound, which carry an
-  // optional AccountClaims.)
-  it("a claimed crew-mate is NOT seatable through the participant-token surface — golfer-claimed (no sub for co-membership)", async () => {
-    const ctx = setup();
-    const annId = golferId("ann-account");
-    const boId = golferId("bo-account");
-    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
-    await putAndBindGolfer(ctx.golferStore, boId, "sub-bo", "Bo");
-    const crew = addMember(
-      addMember({ id: crewId("crew-1"), name: "Sunday Skins", members: [] }, { golferId: annId, name: "Ann", role: "organizer" }),
-      { golferId: boId, name: "Bo", role: "member" },
-    );
-    await ctx.crewStore.put(crew, "JOINCD", undefined);
-
-    const host = await ctx.start(
-      { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId },
-      { sub: "sub-ann" },
-    );
-    const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: annId };
-
-    await expect(ctx.addPlayer(hostClaims, { name: "Bo", tee: "white", courseHandicap: 2, golferId: boId })).rejects.toMatchObject({
-      code: "golfer-claimed",
-    });
-  });
-
-  it("a claimed golferId with no crew consent available is rejected — golfer-claimed (arm 4; as-self is structurally unreachable through this participant-token surface)", async () => {
+  it("a claimed golferId is rejected — golfer-claimed (arm 3; as-self is structurally unreachable through this participant-token surface, and there is no crew-consent arm left anywhere)", async () => {
     const ctx = setup();
     const host = await ctx.start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
     const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
@@ -184,7 +153,6 @@ describe("addParticipant", () => {
     const clock = createFixedClock(1_000);
     const ids = createSequentialIds("t");
     const golferStore = createInMemoryGolferStore();
-    const crewStore = createInMemoryCrewStore();
     const logger = createCapturingLogger();
     const throwingStore: ProjectionStore = {
       ...createInMemoryProjectionStore(),
@@ -192,8 +160,8 @@ describe("addParticipant", () => {
         throw new Error("presence table unavailable");
       },
     };
-    const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, crewStore, projectionStore: throwingStore, logger });
-    const addPlayer = addParticipant({ journal, broadcast, clock, ids, golferStore, crewStore, projectionStore: throwingStore, logger });
+    const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore: throwingStore, logger });
+    const addPlayer = addParticipant({ journal, broadcast, clock, ids, golferStore, projectionStore: throwingStore, logger });
 
     const host = await start({ card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
     const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };

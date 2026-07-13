@@ -266,6 +266,28 @@ fixed same-task, `9a7815f`). Four beta deploys landed the whole arc on `swng-bet
 stack, no prod); gates: `pnpm e2e:beta` 16/16 ×2, `pnpm e2e:field` 53 ×2 consecutive, and the
 crewSeason rewrite above.
 
+The crew-is-a-grouping amendment is real (post-realignment, 2026-07-13, commits
+`6baf36c..656bdc1` + a docs commit): the owner's call — **a crew is a grouping, not a
+preset** — deleted every path by which a crew helped run a round. Gone: `StandingGame`/
+`applyStandingGame` and the standing-game route (36→35 HTTP routes), "Play the usual" and
+the setup-screen crew quick-add, and golferIdentity's co-membership consent arm — a claimed
+golfer gets onto a card exactly one way, the person joining as themselves; crew-mates get
+`golfer-claimed` like anyone else (pinned at four layers down to a dispatcher 403). Season
+standings aggregate the CURRENT ROSTER ONLY: per-contribution lines filtered to roster
+golferIds, head-to-head to both-member pairs, names from `CrewMember.name` (the
+snapshot-name-recency machinery, the `member` wire flag, and the guest/"Former member"
+labels are all deleted); leaving drops your rows at the next read, rejoining restores them —
+pure aggregation scope, stored nowhere. Crews moved off the home page onto the profile.
+Stored crew docs' legacy `standingGame` attribute is tolerate-and-ignored (contract-tested;
+the next whole-document put drops it — never a migration). Deletion landed web-first so
+every commit stayed validate-green. Deployed in place as beta deploy #5 (route removal
+only, nothing stateful); gates: e2e:beta 16/16 ×2, crewSeason live ×2 on the unchanged
+frozen deck with test 8 extended (V claims Bo's ghost → joins the crew by code → Bo's
+frozen rows and the Al–Bo head-to-head materialize: membership is aggregation scope,
+nothing lost while he was a non-member), and the full e2e:field suite. `getRoundArchive`'s
+crew-membership read-authorization (view an archive your crew counts) survives by design —
+it references the round inbound by id, the sealed-leaf direction.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

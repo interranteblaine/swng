@@ -48,7 +48,7 @@ The POC's live multi-phone scorecard survives as the innermost kernel of the Rou
 
 The live engine. Phone-first, shared, and — the key move — **format-aware and handicap-aware**.
 
-**Starting a round.** Pick the course and tees, add players — crew members in one tap, strangers by join code or link, no account required. Pick the game(s), or hit *"play the usual"* to load the crew's standing game. Handicaps are already known, so strokes are computed and the dots are on the card before anyone tees off. *The first-tee negotiation is over before it starts.*
+**Starting a round.** Pick the course and tees, add players — by join code or link, no account required. Pick the game(s). Handicaps are already known, so strokes are computed and the dots are on the card before anyone tees off. *The first-tee negotiation is over before it starts.* (A round never draws on a crew — no crew rosters, presets, or memberships at setup; owner call, 2026-07-13.)
 
 **Scoring.** Two taps to post a score, for yourself or anyone in your group (one person can keep the whole card — that's how real groups work). "Picked up" and "conceded" are first-class scores, not errors: match play concessions, Stableford pickups, and net-double-bogey caps are all normal golf. Optional one-tap tags per hole — putts, fairway, penalty, sand save — for those who want stats; invisible for those who don't.
 
@@ -79,10 +79,9 @@ The permanent record of a playing life.
 
 ## 6. The Crew
 
-The atomic social unit of golf, made first-class. A crew is a persistent named group — *The Saturday Boys* — with a roster, a standing game, and a ledger.
+The atomic social unit of golf, made first-class. A crew is a persistent named group — *The Saturday Boys* — a roster of members and a ledger. **A crew is a grouping, not a preset** (owner call, 2026-07-13): it never configures, seeds, or runs a round; it groups finished rounds into seasons and keeps what they mean.
 
-- **Everyone's in, even the holdout.** Crew members can be full accounts or **ghost profiles** — the guy who won't download apps still gets his scores kept, his index computed, his place in the ledger. He can claim his profile whenever he comes around. No group is blocked by its least-online member.
-- **The standing game.** The crew's usual format, saved: *two-man matches, skins, junk — the usual.* Saturday morning is one tap.
+- **Everyone plays, even the holdout.** Crew membership is real accounts, but rounds aren't: the guy who won't download apps plays as a **ghost profile** in any round — scores kept, index computed. He can claim his profile whenever he comes around, and join the crew as himself. No group is blocked by its least-online member.
 - **Crew handicaps.** Every member has a current swng Index computed from real rounds — the end of the sandbagging argument, or at least the beginning of a fair fight. Crews can pin an override where crew lore demands it.
 - **The ledger.** All-time and per-season records: head-to-head match results between any two members (*you're 7–6 lifetime against Dave, and swng reminds you both on the first tee*), partner records (*you and Mike are 9–2 in four-ball*), skins won, points leaderboards, lowest net average, most improved.
 - **The feed.** Rounds played, records broken, streaks alive and dead — the raw material of the group chat, generated automatically.

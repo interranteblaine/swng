@@ -142,14 +142,18 @@ Index history is a projection of `IndexSnapshot`s recomputed at each finalize.
 
 A roster of real accounts — membership requires a bound identity; ghosts play inside rounds
 only (onboarding stays play-as-ghost → claim in-round → account → optionally join a crew) —
-plus standing-game presets (bundles of `GameConfig`s plus course/tee defaults — *"play the
-usual"* is a preset applied at round creation) and named **seasons** (`"2026"`,
-`"Summer Cup"`, open | closed; a season is a thing a member creates, never a calendar
-computation). A member counts one of their own finalized rounds into a season by appending
+plus named **seasons** (`"2026"`, `"Summer Cup"`, open | closed; a season is a thing a
+member creates, never a calendar computation). **A crew is a grouping, not a preset**
+(owner call, 2026-07-13): nothing about a crew configures, seeds, or runs a round — no
+standing games, no crew-sourced quick-adds at setup, no membership-based seating consent.
+A claimed account gets onto a card exactly one way: the person joins as themselves.
+A member counts one of their own finalized rounds into a season by appending
 `{ roundId }` from the crew's side — the round itself is never tagged, read-modified, or
 touched. Standings and head-to-head are **computed on read, stored nowhere**: Query a
 season's counted `roundId`s, batch-fetch those rounds' archives, and run a pure fold
-(`aggregateSeason` over `crewContribution`) in the request — a re-finalized round is correct
+(`aggregateSeason` over `crewContribution`) scoped to the **current roster** — ledger lines
+for members only, head-to-head where both sides are members, names from the roster; leaving
+drops your rows at the next read, rejoining restores them — a re-finalized round is correct
 at the next look with zero recompute machinery. This is the Competition principle below
 (**Competitions never own scoring — they reference rounds**) applied to Crew too: one
 reference direction everywhere, outside → round, by id.

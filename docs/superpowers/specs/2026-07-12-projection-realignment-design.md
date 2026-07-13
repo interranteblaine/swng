@@ -182,6 +182,28 @@ as a sync-correctness id.
 - M8 crew-ledger data: no migration — beta test data; dogfood rounds get re-appended by hand.
 - `swng-beta` only, `pnpm deploy:beta` only, never the `InfraCdkStack-*` names.
 
+## 11a. Amendment (2026-07-13, owner call): a crew is a grouping — ONLY
+
+The realignment above cleaned the data model but preserved M8's preset machinery, which is the
+same coupling in product clothes. The owner's original correction said it plainly: **a crew is
+a grouping/competition, not a round-template.** Product coupling is coupling. Removed:
+
+- **The standing game** — the course/tee/games template stored on the crew, its editor, its
+  save route, `applyStandingGame`/`referencedGolferIds`. A crew carries no round setup.
+- **"Play the usual"** — the one-tap prefill from that template.
+- **The setup-screen crew quick-add** — round setup sources no names from crews. Ghost
+  free-text add stays (ghosts are the round's own onboarding concept).
+- **The co-membership consent arm** — crew membership authorizes nothing in a round. A claimed
+  account gets onto a card exactly one way: the person joins as themselves. After this, round
+  use cases read zero crew data — the grouping is invisible to rounds in code AND in product.
+- **Crews leave the home page** — home is the play surface (start, join, your rounds). Crews
+  (list, create, join-by-code) live on the profile page, with the golfer's other records.
+
+What a crew is, entirely: a name, a join code, a roster of accounts, seasons, counted rounds,
+standings computed from them, leave. `docs/product.md` §5/§6 ("play the usual," "crew members
+in one tap," "a roster, a standing game, and a ledger") are corrected by this same call — the
+owner's decision supersedes the product doc's prior text.
+
 ## 12. Implementation path — four steps, each its own reviewed task chain
 
 1. **The atom**: snapshots table; transactional finalize; projector source move; beta archive

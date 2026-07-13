@@ -101,7 +101,17 @@ export const createInMemoryRoundStore = (): RoundStore => {
 export interface InMemorySnapshotStore extends SnapshotStore {
   readonly record: (archive: RoundArchive) => void;
 }
-export const createInMemorySnapshotStore = (): InMemorySnapshotStore => {
+// `pageSize` mirrors createDynamoSnapshotStore's own `pageLimit` test injection (adapters-
+// dynamodb): omitted, `page()` hands back the whole table in one shot (every OTHER caller of
+// this fake needs no pagination at all); set it and `page()` walks insertion order in fixed-
+// size chunks, cursor-driven — the ONE caller that needs this is rebuildProjections.test.ts
+// (realignment Task 5), forcing its paged-backfill loop across several real pages the same way
+// the Dynamo contract suite forces createDynamoSnapshotStore across several real Scan pages.
+// The cursor itself is just the next start index, stringified — opaque to callers exactly like
+// the real adapter's base64url LastEvaluatedKey (SnapshotStore's port doc promises opacity,
+// never a shape), and stable across repeat calls with the SAME cursor as long as nothing new
+// is `record`ed in between (insertion order into a Map never reshuffles).
+export const createInMemorySnapshotStore = (config?: { readonly pageSize?: number }): InMemorySnapshotStore => {
   const byRoundId = new Map<RoundId, RoundArchive>();
   return {
     record: (archive) => {
@@ -115,9 +125,14 @@ export const createInMemorySnapshotStore = (): InMemorySnapshotStore => {
         const archive = byRoundId.get(id);
         return archive ? [archive] : [];
       }),
-    // The whole table in one page — real pagination is the adapter's concern (contract-tested);
-    // a fake at test scale never needs a cursor.
-    page: async () => ({ snapshots: [...byRoundId.values()] }),
+    page: async (cursor) => {
+      const all = [...byRoundId.values()];
+      const pageSize = config?.pageSize ?? all.length;
+      const start = cursor !== undefined ? Number(cursor) : 0;
+      const snapshots = pageSize > 0 ? all.slice(start, start + pageSize) : all.slice(start);
+      const next = start + snapshots.length;
+      return { snapshots, cursor: next < all.length ? String(next) : undefined };
+    },
   };
 };
 
@@ -298,12 +313,6 @@ export const createInMemoryProjectionStore = (): ProjectionStore => {
     },
     listLive: async (golferId) =>
       [...(liveByGolfer.get(golferId)?.values() ?? [])].map(({ roundId, courseName, joinedAtMs }) => ({ roundId, courseName, joinedAtMs })),
-    // DELETED IN REALIGNMENT TASK 5 alongside its one remaining caller (rebuildProjections.ts).
-    wipeGolfer: async (golferId) => {
-      linesByGolfer.delete(golferId);
-      indexByGolfer.delete(golferId);
-      liveByGolfer.delete(golferId);
-    },
     // DELETED IN REALIGNMENT TASK 9 — unchanged from before this task.
     putCrewRound: async (crewId, season, entry) => {
       const key = crewSeasonKey(crewId, season);

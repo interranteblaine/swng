@@ -4,8 +4,6 @@ import type { CrewId, GolferId, GolferRoundLine, Participant, RoundArchive, Roun
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import { createFrozenClock, createInMemoryProjectionStore, createNullLogger } from "../testing/fakes.js";
 import { finalizedAtMsOf, projectArchive, seasonOf } from "./projectArchive.js";
-import type { ArchiveSource } from "./rebuildProjections.js";
-import { rebuildProjections } from "./rebuildProjections.js";
 
 const ann = golferId("ann");
 const bo = golferId("bo");
@@ -203,7 +201,6 @@ describe("projectArchive sorts listLines before the index fold (order, not just 
       putLive: async () => {},
       deleteLive: async () => {},
       listLive: async () => [],
-      wipeGolfer: async () => {},
       putCrewRound: async () => {},
       listCrewRounds: async () => [],
       putSeasonRecords: async () => {},
@@ -220,69 +217,6 @@ describe("projectArchive sorts listLines before the index fold (order, not just 
     expect(putIndexCall).toBeDefined();
     expect(putIndexCall?.value).toEqual(computeIndex([3, 7, 11]));
     expect(putIndexCall?.differentialsUsed).toBe(1);
-  });
-});
-
-const createArchiveSource = (archives: readonly RoundArchive[]): ArchiveSource => ({
-  listArchives: async function* () {
-    for (const archive of archives) yield archive;
-  },
-});
-
-describe("rebuildProjections", () => {
-  it("wipe-then-replay reproduces the same store contents as incremental projectArchive calls, and wipes stale data first", async () => {
-    const archives = [
-      archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]),
-      archiveAt("r2", 2_000, [{ golferId: ann, differential: 10.0 }]),
-      archiveAt("r3", 3_000, [{ golferId: ann, differential: 11.0 }]),
-    ];
-
-    // Path A: the "live" incremental build — 3 sequential projectArchive calls in
-    // chronological order, exactly as they'd really happen one finalize at a time.
-    const incrementalStore = createInMemoryProjectionStore();
-    const incrementalProject = projectArchive({ projectionStore: incrementalStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
-    for (const archive of archives) await incrementalProject(archive);
-
-    // Path B: rebuildProjections, fed the archives in a DIFFERENT (unsorted) order — it
-    // must sort by finalizedAt itself — and pre-seeded with a stray line/index from a
-    // round that no longer belongs (proving the wipe-first step, not just an upsert-over).
-    const rebuiltStore = createInMemoryProjectionStore();
-    await rebuiltStore.putLine(ann, {
-      roundId: roundId("stale-round"),
-      courseName: "Nowhere GC",
-      tee: "white",
-      holes: 18,
-      differential: 99,
-      distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
-      finalizedAtMs: 500,
-    });
-    await rebuiltStore.putIndex(ann, { value: 36, computedAtMs: 1, differentialsUsed: 1 });
-
-    const rebuild = rebuildProjections({
-      archiveSource: createArchiveSource([archives[2]!, archives[0]!, archives[1]!]),
-      projectionStore: rebuiltStore,
-      clock: createFrozenClock(9_000),
-      logger: createNullLogger(),
-    });
-    const summary = await rebuild();
-
-    expect(summary).toEqual({ rounds: 3, golfers: 1 });
-    expect(await rebuiltStore.listLines(ann)).toEqual(await incrementalStore.listLines(ann));
-    expect(await rebuiltStore.getIndex(ann)).toEqual(await incrementalStore.getIndex(ann));
-    // The stale line is gone, not merely joined by the 3 real ones.
-    expect((await rebuiltStore.listLines(ann)).some((line) => line.roundId === roundId("stale-round"))).toBe(false);
-  });
-
-  it("wipes and replays every golfer touched across the archive set, independently", async () => {
-    const archives = [archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo, differential: 20.0 }])];
-    const store = createInMemoryProjectionStore();
-
-    const rebuild = rebuildProjections({ archiveSource: createArchiveSource(archives), projectionStore: store, clock: createFrozenClock(9_000), logger: createNullLogger() });
-    const summary = await rebuild();
-
-    expect(summary).toEqual({ rounds: 1, golfers: 2 });
-    expect(await store.listLines(ann)).toHaveLength(1);
-    expect(await store.listLines(bo)).toHaveLength(1);
   });
 });
 
@@ -359,68 +293,5 @@ describe("projectArchive — the crew season ledger extension (M8)", () => {
     const recordsB = await ctx.projectionStore.getSeasonRecords(crewB, seasonOf(2_000));
     expect(recordsA?.ledger.map((l) => l.golferId).sort()).toEqual([ann, bo].sort());
     expect(recordsB?.ledger.map((l) => l.golferId).sort()).toEqual([ann, cal].sort());
-  });
-});
-
-describe("rebuildProjections — the crew season ledger extension (M8)", () => {
-  it("rebuild-equals-incremental for a crew's season ledger, and wipes a stale season's records first (mirrors the golfer-history test construction above)", async () => {
-    const crew = crewId("crew-1");
-    const archives = [crewArchiveAt("r1", 1_000, crew, ann, bo, ann), crewArchiveAt("r2", 2_000, crew, ann, bo, bo)];
-    const season = seasonOf(1_000);
-
-    // Path A: the "live" incremental build.
-    const incrementalStore = createInMemoryProjectionStore();
-    const incrementalProject = projectArchive({ projectionStore: incrementalStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
-    for (const archive of archives) await incrementalProject(archive);
-
-    // Path B: rebuildProjections, unsorted input, pre-seeded with a stray ROUND CONTRIBUTION
-    // (not just a stale season record — putSeasonRecords is already a full replace every
-    // projectArchive call, so seeding one there proves nothing about wipeCrew specifically;
-    // putCrewRound's map is what actually needs wiping, since listCrewRounds would otherwise
-    // keep returning this stale entry forever, folded into every future recompute) from a
-    // round that no longer belongs to this replay — proving the wipe-first step, not just an
-    // upsert-over (same construction as the golfer-history rebuild test above, which seeds a
-    // stale putLine for the identical reason).
-    const rebuiltStore = createInMemoryProjectionStore();
-    await rebuiltStore.putCrewRound(crew, season, {
-      roundId: roundId("stale-round"),
-      lines: [{ golferId: golferId("ghost-of-a-stale-round"), wins: 1, losses: 0, halves: 0, points: 0, skins: 0 }],
-      headToHead: [],
-      finalizedAtMs: 500,
-    });
-
-    const rebuild = rebuildProjections({
-      archiveSource: createArchiveSource([archives[1]!, archives[0]!]),
-      projectionStore: rebuiltStore,
-      clock: createFrozenClock(9_000),
-      logger: createNullLogger(),
-    });
-    await rebuild();
-
-    expect(await rebuiltStore.getSeasonRecords(crew, season)).toEqual(await incrementalStore.getSeasonRecords(crew, season));
-    // The stale contribution is gone, not merely joined by the 2 real ones.
-    const rebuiltLedger = await rebuiltStore.getSeasonRecords(crew, season);
-    expect(rebuiltLedger?.ledger.some((line) => line.golferId === golferId("ghost-of-a-stale-round"))).toBe(false);
-    expect((await rebuiltStore.listCrewRounds(crew, season)).some((round) => round.roundId === roundId("stale-round"))).toBe(false);
-  });
-
-  it("wipes and replays every (crew, season) touched across the archive set, independently — including two seasons for the SAME crew", async () => {
-    const crew = crewId("crew-1");
-    // wallMs values chosen to land in different UTC years, so this exercises TWO separate
-    // season buckets for one crew, not just two crews.
-    const earlySeasonMs = Date.UTC(2024, 0, 1);
-    const laterSeasonMs = Date.UTC(2025, 0, 1);
-    const archives = [crewArchiveAt("r1", earlySeasonMs, crew, ann, bo, ann), crewArchiveAt("r2", laterSeasonMs, crew, ann, bo, bo)];
-    const store = createInMemoryProjectionStore();
-
-    const rebuild = rebuildProjections({ archiveSource: createArchiveSource(archives), projectionStore: store, clock: createFrozenClock(9_000), logger: createNullLogger() });
-    await rebuild();
-
-    const early = await store.getSeasonRecords(crew, seasonOf(earlySeasonMs));
-    const later = await store.getSeasonRecords(crew, seasonOf(laterSeasonMs));
-    expect(early?.ledger.find((l) => l.golferId === ann)?.wins).toBe(1);
-    expect(early?.ledger.find((l) => l.golferId === ann)?.losses).toBe(0);
-    expect(later?.ledger.find((l) => l.golferId === ann)?.wins).toBe(0);
-    expect(later?.ledger.find((l) => l.golferId === ann)?.losses).toBe(1);
   });
 });

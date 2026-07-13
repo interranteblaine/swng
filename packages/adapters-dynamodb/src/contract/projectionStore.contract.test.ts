@@ -223,33 +223,6 @@ describe("createDynamoProjectionStore", () => {
     });
   });
 
-  describe("wipeGolfer", () => {
-    it("wipes a golfer's lines AND index, leaving other golfers' projections untouched", async () => {
-      const store = newStore();
-      const golferA = golferId(randomUUID());
-      const golferB = golferId(randomUUID());
-      const lineA = makeLine(roundId(randomUUID()), 1_000);
-      const lineB = makeLine(roundId(randomUUID()), 1_000);
-
-      await store.putLine(golferA, lineA);
-      await store.putIndex(golferA, { value: 12.3, computedAtMs: 1_000, differentialsUsed: 3 });
-      await store.putLine(golferB, lineB);
-      await store.putIndex(golferB, { value: 9.4, computedAtMs: 1_000, differentialsUsed: 3 });
-
-      await store.wipeGolfer(golferA);
-
-      expect(await store.listLines(golferA)).toEqual([]);
-      expect(await store.getIndex(golferA)).toBeUndefined();
-      expect(await store.listLines(golferB)).toEqual([lineB]);
-      expect(await store.getIndex(golferB)).toEqual({ value: 9.4, computedAtMs: 1_000, differentialsUsed: 3 });
-    });
-
-    it("wipeGolfer on a golfer with no projections at all is a no-op, not an error", async () => {
-      const store = newStore();
-      await expect(store.wipeGolfer(golferId(randomUUID()))).resolves.toBeUndefined();
-    });
-  });
-
   // DELETED IN REALIGNMENT TASK 9 alongside ProjectionStore's own crew section — kept here,
   // UNCHANGED, only because the adapter's crew methods stay alive until then.
   describe("putCrewRound / listCrewRounds", () => {

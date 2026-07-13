@@ -57,7 +57,6 @@ export { getCrewRecords } from "./crews/getCrewRecords.js";
 
 export { projectArchive, finalizedAtMsOf, seasonOf } from "./projections/projectArchive.js";
 export { rebuildProjections } from "./projections/rebuildProjections.js";
-export type { ArchiveSource } from "./projections/rebuildProjections.js";
 
 // In-memory ports — exported product surface for lambda/E2E unit tests (M3 Task 4+), not
 // just this package's own tests.

@@ -44,13 +44,6 @@ export interface ProjectionStore {
   deleteLive(golferId: GolferId, roundId: RoundId): Promise<void>;
   listLive(golferId: GolferId): Promise<readonly { roundId: RoundId; courseName: string; joinedAtMs: number }[]>;
 
-  // DELETED IN REALIGNMENT TASK 5: the buffered, globally-sorted, wipe-then-replay rebuild this
-  // exists for dies with it (spec §9) — the paged backfill Task 5 ships instead never wipes
-  // anything (every write here is already an idempotent upsert/replace, so replaying a snapshot
-  // twice reproduces identical state with no wipe step required). Kept here, unchanged, only
-  // because rebuildProjections.ts still calls it as of this task.
-  wipeGolfer(golferId: GolferId): Promise<void>;
-
   // Upsert by (crewId, roundId) via entry.roundId — a repeat put for the same round replaces,
   // never accumulates.
   /** deleted in realignment Task 9 */
@@ -61,9 +54,12 @@ export interface ProjectionStore {
   putSeasonRecords(crewId: CrewId, season: number, records: CrewSeasonRecords): Promise<void>;
   /** deleted in realignment Task 9 */
   getSeasonRecords(crewId: CrewId, season: number): Promise<CrewSeasonRecords | undefined>;
-  // rebuildProjections' first step for every crew TOUCHED by the archive set (mirrors
-  // wipeGolfer above) — `seasons` is supplied by the caller, so this store never has to
-  // discover its own keyspace.
+  // ORPHANED as of Task 5: wipeGolfer (this interface's own golfer-side twin) is gone outright,
+  // and rebuildProjections.ts's new paged backfill never calls THIS either (spec §9 — no wipe
+  // of any kind survives the rewrite, golfer or crew). No caller exists between here and Task 9,
+  // which deletes this method for good alongside the rest of the crew section (ProjectionStore's
+  // own top-of-file note on CrewSeasonRecords). Kept, unchanged, only because the still-live
+  // crew routes share that same removal boundary with putCrewRound/putSeasonRecords below.
   /** deleted in realignment Task 9 */
   wipeCrew(crewId: CrewId, seasons: readonly number[]): Promise<void>;
 }

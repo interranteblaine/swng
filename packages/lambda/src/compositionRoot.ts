@@ -3,7 +3,6 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, DynamoDBStreamEve
 import type { RoundArchive } from "@swng/domain";
 import type {
   AccountVerifier,
-  ArchiveSource,
   Clock,
   ConnectionRegistry,
   CourseStore,
@@ -166,7 +165,6 @@ const unavailableProjectionStore = (): ProjectionStore => {
     putLive: unavailable,
     deleteLive: unavailable,
     listLive: unavailable,
-    wipeGolfer: unavailable,
     // M8: the season ledger projections (ProjectionStore grew these — ports/projectionStore.ts)
     // share the same optionality as the golfer projections above.
     putCrewRound: unavailable,
@@ -339,14 +337,21 @@ export const buildProjector = (env: NodeJS.ProcessEnv): ProjectorApp => {
   return { handler: createProjectorHandler({ parseArchive: parseSnapshotStreamImage, project, logger }) };
 };
 
-// --- Rebuild (M7 Task 4; projection-realignment Task 2): manual-invoke only, replays every
-// snapshot through the SAME projectArchive the stream trigger uses (rebuildProjections' own doc
-// comment: "no forked math") -------------------------------------------------------------
+// --- Rebuild (M7 Task 4; rewritten as a paged backfill in projection-realignment Task 5):
+// manual-invoke only, replays every snapshot through the SAME projectArchive the stream trigger
+// uses (rebuildProjections' own doc comment: "no forked math") ---------------------------------
 
+// The handler's event/response IS the use case's input/output, verbatim (Task 5 brief) — an
+// operator (or a future step-function/retry wrapper) invokes this with `{ cursor, maxSnapshots }`
+// to resume a prior capped run, and reads `{ processed, cursor }` back to decide whether to
+// invoke again. No shape translation happens in this composition layer.
 export interface RebuildApp {
-  readonly handler: () => Promise<{ rounds: number; golfers: number }>;
+  readonly handler: (input?: { readonly cursor?: string; readonly maxSnapshots?: number }) => Promise<{ processed: number; cursor?: string }>;
 }
 
+// Only TABLE_SNAPSHOTS + TABLE_PROJECTIONS (swngStack.ts's RebuildFunction env) — the paged
+// backfill reads snapshots directly via SnapshotStore.page(), never the rounds table, so there
+// is no TABLE_ROUNDS here to mirror buildApp's.
 export const buildRebuild = (env: NodeJS.ProcessEnv): RebuildApp => {
   const tableSnapshots = requireEnv(env, "TABLE_SNAPSHOTS");
   const tableProjections = requireEnv(env, "TABLE_PROJECTIONS");
@@ -357,20 +362,5 @@ export const buildRebuild = (env: NodeJS.ProcessEnv): RebuildApp => {
   const projectionStore = createDynamoProjectionStore({ client: documentClient, tableName: tableProjections });
   const snapshots = createDynamoSnapshotStore({ client: documentClient, tableName: tableSnapshots });
 
-  // DYING IN TASK 5: rebuildProjections still consumes the old ArchiveSource (an AsyncIterable
-  // of archives). Until Task 5 rewrites rebuild to page the snapshots table directly, adapt
-  // SnapshotStore.page() into that shape inline — the snapshots table replaced the rounds-table
-  // Scan the old createDynamoArchiveSource did, but the replay itself is unchanged.
-  const archiveSource: ArchiveSource = {
-    listArchives: async function* () {
-      let cursor: string | undefined;
-      do {
-        const { snapshots: page, cursor: next } = await snapshots.page(cursor);
-        for (const archive of page) yield archive;
-        cursor = next;
-      } while (cursor);
-    },
-  };
-
-  return { handler: rebuildProjections({ archiveSource, projectionStore, clock, logger }) };
+  return { handler: rebuildProjections({ snapshots, projectionStore, clock, logger }) };
 };

@@ -95,22 +95,6 @@ export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentCl
         (item) => item.live as { roundId: RoundId; courseName: string; joinedAtMs: number },
       ),
 
-    // DELETED IN REALIGNMENT TASK 5 alongside its one remaining caller (rebuildProjections.ts) —
-    // see ProjectionStore's own doc comment.
-    wipeGolfer: async (golferId: GolferId) => {
-      const pk = golferPk(golferId);
-      // One pk-wide Query catches ROUND# lines, the INDEX snapshot, and (once Task 13 starts
-      // writing them) LIVE# rows too — the wipe-then-replay contract this exists for is
-      // "nothing golfer-scoped survives a wipe," and this task doesn't need to special-case
-      // presence out of that since nothing writes a LIVE# item yet.
-      const sks = await queryAllPages(
-        client,
-        { TableName: tableName, KeyConditionExpression: "pk = :pk", ExpressionAttributeValues: { ":pk": pk }, ConsistentRead: true },
-        (item) => item.sk as string,
-      );
-      await Promise.all(sks.map((sk) => client.send(new DeleteCommand({ TableName: tableName, Key: { pk, sk } }))));
-    },
-
     // DELETED IN REALIGNMENT TASK 9 — UNCHANGED from before this task (ProjectionStore's own
     // doc comment: kept alive only so the still-live crew routes don't wedge mid-realignment).
     putCrewRound: async (crewId: CrewId, season: number, entry: CrewRoundEntry) => {

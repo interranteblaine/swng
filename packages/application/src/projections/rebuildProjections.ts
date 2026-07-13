@@ -1,66 +1,57 @@
-import type { CrewId, GolferId, RoundArchive } from "@swng/domain";
 import type { Clock } from "../ports/clock.js";
 import type { Logger } from "../ports/logger.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
-import { finalizedAtMsOf, projectArchive, seasonOf } from "./projectArchive.js";
+import type { SnapshotStore } from "../ports/snapshotStore.js";
+import { projectArchive } from "./projectArchive.js";
 
-// A source of every finalized archive to replay — the real adapter (M7 Task 3/4) scans the
-// rounds table for ARCHIVE items; kept as this narrow, inline-shaped interface (rather than
-// a full port) since rebuildProjections is its only consumer.
-export interface ArchiveSource {
-  listArchives(): AsyncIterable<RoundArchive>;
-}
-
-// Same projector, second trigger (M7 plan: "no forked math") — wipes every golfer TOUCHED
-// by the archive set FIRST (a stale history line or index snapshot from data that no longer
-// belongs must never survive alongside the replay), THEN replays projectArchive over every
-// archive in finalizedAt order, so the replay reproduces the exact same incremental history
-// the live stream trigger built up one finalize at a time.
+// Paged backfill over the snapshots table (projection-realignment spec §9, Task 5) — replaces
+// the old buffer-everything/sort/wipe-then-replay rebuild outright, not just its data source.
 //
-// ACCEPTED RACE (wipe-replay window): `archives` above is collected from a full-table walk
-// (the snapshots-table page() shim, projection-realignment) that necessarily takes some time to finish; the wipe loop only
-// runs once that enumeration is done. A round that finalizes — and lands its own live
-// projectArchive call via the stream trigger — AFTER the Scan has already passed (or started)
-// but BEFORE the wipe step touches that same golfer will have its freshly-written history
-// line/index wiped and then never restored, because that archive was never captured in
-// `archives` (the Scan predates it). The golfer's projection is then missing that round's
-// contribution until the NEXT rebuild re-scans and picks it up — a later, unrelated finalize
-// for a different round does not repair it (projectArchive only appends off of what
-// listLines already returns). Operator note: don't run this rebuild while rounds are
-// actively finalizing; if one might have raced it, just re-run rebuild once more.
+// There is nothing left to wipe. The old rebuild wiped a golfer (and a crew/season) before
+// replaying because its keys were time-embedded — a stale sk from data that no longer belonged
+// could otherwise survive forever. Task 4 moved every golfer-projection write onto a STABLE key
+// (`ROUND#<roundId>`, never a time-embedded one) and made projectArchive fully recompute a
+// golfer's whole index from every line already on file, every time it runs — so projecting the
+// same archive twice, in ANY order, relative to ANY other archive, converges to identical state
+// (projectArchive.ts's own doc comment; this file's own idempotence test). A wipe-first step
+// only ever protected against a stale key a corrected replay could strand — there is no such key
+// anymore, so there is nothing for a wipe to protect against. (Crew projections still use a
+// time-embedded key and still HAVE a wipeCrew — but nothing calls it here either, per this same
+// "no wipe" rule; ProjectionStore's own doc comment tracks that as orphaned pending Task 9.)
+//
+// Same reasoning kills the old buffer+sort: the old rebuild collected every archive into memory
+// and sorted by finalizedAt BEFORE replaying, because a time-embedded key needed writes to land
+// in chronological order to converge correctly. projectArchive doesn't care what order it sees
+// archives in — order-independence is its own tested property — so this loop streams straight
+// off the snapshots table's own page cursor, one page at a time, and never buffers the table.
+//
+// A partial run (interrupted, or deliberately capped by `maxSnapshots`) leaves the projection
+// store simply MISSING whatever wasn't reached yet — never wrong, never wiped — the same
+// "eventually consistent, always converges on the next pass" shape the live stream trigger
+// already has for a golfer whose finalize hasn't landed yet. Calling this again with the
+// returned cursor (or from scratch, with none) always makes forward progress toward "every
+// snapshot has been projected at least once," never backward.
 export const rebuildProjections =
-  (deps: { archiveSource: ArchiveSource; projectionStore: ProjectionStore; clock: Clock; logger: Logger }) =>
-  async (): Promise<{ rounds: number; golfers: number }> => {
-    const archives: RoundArchive[] = [];
-    const touchedGolfers = new Set<GolferId>();
-    // Which (crew, season) buckets this replay is about to touch — collected from the
-    // archives themselves (crewId + finalizedAtMs's season), same "the store never
-    // discovers its own keyspace" reasoning as touchedGolfers above: the caller always knows
-    // what it's about to replay before it wipes anything.
-    const touchedCrewSeasons = new Map<CrewId, Set<number>>();
-    for await (const archive of deps.archiveSource.listArchives()) {
-      archives.push(archive);
-      for (const participant of archive.participants) touchedGolfers.add(participant.golferId);
-      if (archive.crewId !== undefined) {
-        const seasons = touchedCrewSeasons.get(archive.crewId) ?? new Set<number>();
-        seasons.add(seasonOf(finalizedAtMsOf(archive)));
-        touchedCrewSeasons.set(archive.crewId, seasons);
-      }
-    }
-
-    for (const golferId of touchedGolfers) {
-      await deps.projectionStore.wipeGolfer(golferId);
-    }
-    for (const [crewId, seasons] of touchedCrewSeasons) {
-      await deps.projectionStore.wipeCrew(crewId, [...seasons]);
-    }
-
-    const ordered = [...archives].sort((a, b) => finalizedAtMsOf(a) - finalizedAtMsOf(b));
+  (deps: { snapshots: SnapshotStore; projectionStore: ProjectionStore; clock: Clock; logger: Logger }) =>
+  async (input?: { readonly cursor?: string; readonly maxSnapshots?: number }): Promise<{ processed: number; cursor?: string }> => {
     const project = projectArchive({ projectionStore: deps.projectionStore, clock: deps.clock, logger: deps.logger });
-    for (const archive of ordered) {
-      await project(archive);
-    }
+    const maxSnapshots = input?.maxSnapshots ?? 500;
 
-    deps.logger.info("projections-rebuilt", { rounds: ordered.length, golfers: touchedGolfers.size, crews: touchedCrewSeasons.size });
-    return { rounds: ordered.length, golfers: touchedGolfers.size };
+    // The loop (Task 5 brief, verbatim). The maxSnapshots check runs BETWEEN pages, not
+    // per-item — SnapshotStore.page's own items are never partially consumed, so one call can
+    // finish slightly over budget (a page that pushes `processed` past maxSnapshots still runs
+    // every item it already fetched) but never leaves a page half-projected.
+    let cursor = input?.cursor;
+    let processed = 0;
+    do {
+      const page = await deps.snapshots.page(cursor);
+      for (const archive of page.snapshots) {
+        await project(archive);
+        processed += 1;
+      }
+      cursor = page.cursor;
+    } while (cursor !== undefined && processed < maxSnapshots);
+
+    deps.logger.info("projections-rebuilt", { processed, cursor });
+    return { processed, ...(cursor !== undefined ? { cursor } : {}) };
   };

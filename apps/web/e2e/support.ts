@@ -128,8 +128,8 @@ export const loadWebEnv = (): WebEnv => {
 // (courseNameKey's prefix-match GSI — createDynamoCourseStore.ts's own normalization, the same
 // one createCourse's write uses), and only creates when no exact match comes back, so the
 // gate's three consecutive `pnpm e2e:field` runs (brief) seed the course once, not three times.
-// Returns the seeded course's own CourseId (M8 Task 7: crewSeason.spec.ts's standing game
-// wants a real courseId/tee to pin, not just a name the UI can search for) — every prior
+// Returns the seeded course's own CourseId (crewSeason.spec.ts wants a real courseId/tee to
+// pin, not just a name the UI can search for) — every prior
 // caller (courseEntry/fieldTest/identityRecord) already only used this for its side effect and
 // never read a return value, so widening void -> Promise<CourseId> is additive, not breaking.
 export const ensureCourse = async (name: string, card: CourseCard): Promise<CourseId> => {

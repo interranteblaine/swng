@@ -267,7 +267,7 @@ stack, no prod); gates: `pnpm e2e:beta` 16/16 ×2, `pnpm e2e:field` 53 ×2 conse
 crewSeason rewrite above.
 
 The crew-is-a-grouping amendment is real (post-realignment, 2026-07-13, commits
-`6baf36c..656bdc1` + a docs commit): the owner's call — **a crew is a grouping, not a
+`6baf36c..` through the close-out sweep): the owner's call — **a crew is a grouping, not a
 preset** — deleted every path by which a crew helped run a round. Gone: `StandingGame`/
 `applyStandingGame` and the standing-game route (36→35 HTTP routes), "Play the usual" and
 the setup-screen crew quick-add, and golferIdentity's co-membership consent arm — a claimed

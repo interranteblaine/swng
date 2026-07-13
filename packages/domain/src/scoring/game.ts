@@ -17,8 +17,8 @@ export type GameConfig =
   | { readonly kind: "fourball-match"; readonly id: GameId; readonly a: readonly [GolferId, GolferId]; readonly b: readonly [GolferId, GolferId]; readonly allowance?: number }
   | { readonly kind: "skins"; readonly id: GameId; readonly players: readonly GolferId[]; readonly allowance?: number };
 
-// A game as configured before the server assigns its GameId — what a crew's standing game
-// stores (crew/crew.ts) and what a client sends when adding a game to a round. Distributive
+// A game as configured before the server assigns its GameId — what a client sends when
+// adding a game to a round. Distributive
 // (via the `G extends GameConfig` indirection) so it stays a 5-arm union of id-less variants
 // rather than collapsing to the common-fields-only shape a plain `Omit<GameConfig, "id">`
 // would produce over a discriminated union.

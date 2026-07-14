@@ -37,7 +37,7 @@ const buildServerLog = (roundIdValue: RoundId, golferIdValue: GolferId, name: st
 };
 
 // Two participants + two games (a singles-match and a gross stroke-play) — buildServerLog
-// above only ever joins ONE participant, which the standings-chip and hole-digest tests below
+// above only ever joins ONE participant, which the standings-chip and digest-absence tests below
 // both need more than one of to be meaningful (a hole can't "complete" with only one cell
 // needed, and dots can't differ between games with only one player in each).
 const buildTwoPlayerServerLog = (roundIdValue: RoundId, ann: GolferId, bo: GolferId): RoundEvent[] => {
@@ -274,7 +274,10 @@ describe("RoundPage", () => {
     expect(singlesTab.getAttribute("aria-selected")).toBe("false");
   });
 
-  it("completing a hole fires the between-holes digest exactly once, dismissible by tap", async () => {
+  // The between-holes digest is deleted (accounts-only identity spec §6) — the proof-of-negative:
+  // the exact transition that used to fire it (every participant scores hole 1, completing it)
+  // now surfaces NO digest push-card at all (the card that used to read "After N").
+  it("completing a hole produces NO between-holes digest (deleted, spec §6)", async () => {
     const id = roundId("round-digest");
     const ann = golferId("ann");
     const bo = golferId("bo");
@@ -298,20 +301,83 @@ describe("RoundPage", () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(screen.getByText("DIG001")).toBeTruthy());
-    expect(screen.queryByText("After 1")).toBeNull();
 
-    // Ann posts hole 1 alone — Bo hasn't, so hole 1 isn't complete yet: no digest.
+    // Ann then Bo both post hole 1 — every participant now has a cell for it, the exact
+    // incomplete→complete transition that used to open the digest.
     fireEvent.click(screen.getByRole("button", { name: "Ann hole 1" }));
     fireEvent.click(screen.getByRole("button", { name: "5" }));
-    expect(screen.queryByText("After 1")).toBeNull();
-
-    // Bo posts hole 1 too — every participant now has a cell for it: the digest fires.
     fireEvent.click(screen.getByRole("button", { name: "Bo hole 1" }));
     fireEvent.click(screen.getByRole("button", { name: "4" }));
-    await waitFor(() => expect(screen.getByText("After 1")).toBeTruthy());
 
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    // Both scores landed in the fold ...
+    await waitFor(() => expect(screen.getByRole("button", { name: "Bo hole 1" }).textContent).toContain("4"));
+    // ... and the digest that used to open here is gone: no "After N" card (its old header text),
+    // and no Dismiss affordance that only the digest ever rendered.
     expect(screen.queryByText("After 1")).toBeNull();
+    expect(screen.queryByText(/^after \d/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+  });
+
+  // accounts-only identity spec §4: the leave flow, wired end to end — "Leave round" → confirm →
+  // POST /rounds/{id}/leave → navigate home. Leaving is ONE POST then navigation (no sync(), no
+  // credential/presence touch), so departure is "reflected" by this tab landing back on Home; the
+  // participant-left event lands server-side for everyone else's fold.
+  it("leave flow: 'Leave round' → confirm → POST /leave → navigates home", async () => {
+    const id = roundId("round-leave-flow");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-leave", golferId: ann, name: "Ann", joinCode: "LVE001" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    let leaveCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        expect(String(url)).toBe(`https://api.example.test/rounds/${id}/leave`);
+        expect(init?.method).toBe("POST");
+        expect((init?.headers as Record<string, string>).authorization).toBe("Bearer tok-leave");
+        leaveCalls += 1;
+        const event: RoundEvent = {
+          kind: "participant-left",
+          golferId: ann,
+          authorId: ann,
+          opId: opId("srv-leave"),
+          hlc: { wallMs: 9_900, counter: 0, deviceId: SERVER_DEVICE },
+          seq: transport.log.length + 1,
+        };
+        (transport.log as RoundEvent[]).push(event);
+        return { ok: true, status: 200, json: async () => ({ events: [event] }) } as unknown as Response;
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+          <Route path="/" element={<div>home probe</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("LVE001")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Leave round" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm leave" });
+    // Copy distinct from Scrap: personal, non-destructive (rejoin framing), never "counts nowhere".
+    expect(dialog.textContent).toMatch(/rejoin/i);
+    expect(dialog.textContent).not.toMatch(/counts nowhere/i);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Leave" }));
+
+    await waitFor(() => expect(screen.getByText("home probe")).toBeTruthy());
+    expect(leaveCalls).toBe(1);
   });
 
   it("a round that's already final (a rejoining/refreshed client) renders ResultsView directly, locked — no finalize call needed", async () => {

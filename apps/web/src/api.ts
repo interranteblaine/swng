@@ -20,6 +20,7 @@ import {
   joinCrewResponseSchema,
   joinRoundResponseSchema,
   leaveCrewResponseSchema,
+  leaveRoundResponseSchema,
   listMyCrewsResponseSchema,
   listSeasonsResponseSchema,
   parse,
@@ -62,6 +63,7 @@ import type {
   JoinRoundRequest,
   JoinRoundResponse,
   LeaveCrewResponse,
+  LeaveRoundResponse,
   ListMyCrewsResponse,
   ListSeasonsResponse,
   PeekRoundResponse,
@@ -164,6 +166,17 @@ export const finalizeRound = async (roundId: RoundId, token: string): Promise<Fi
 export const abandonRound = async (roundId: RoundId, token: string): Promise<AbandonRoundResponse> => {
   const json = await requestJson(`/rounds/${roundId}/abandon`, { method: "POST", token });
   return parse(abandonRoundResponseSchema, json);
+};
+
+// POST /rounds/{roundId}/leave (accounts-only identity spec §4): the caller walks off the round —
+// "participant"-gated, the SAME round-scoped token finalize/abandon/terminate attach, no request
+// body (the leaver is the token's OWN golferId, by construction). Appends a participant-left event
+// and returns exactly what it appended (LeaveRoundResponse.events), same append idiom as
+// terminateGame; leaving twice appends twice (never deduped), so a repeat leave still returns a
+// fresh event.
+export const leaveRound = async (roundId: RoundId, token: string): Promise<LeaveRoundResponse> => {
+  const json = await requestJson(`/rounds/${roundId}/leave`, { method: "POST", token });
+  return parse(leaveRoundResponseSchema, json);
 };
 
 // M9 Task 3 (share): mints this round's own immortal spectator link. `url` is a path+fragment

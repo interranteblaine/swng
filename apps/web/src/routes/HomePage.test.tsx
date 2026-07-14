@@ -146,6 +146,47 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
     expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
   });
 
+  // The canonical designation (spec §5): the home list renders course + date, appending the tee
+  // time to tell apart two rounds that share course and day — the "two indistinguishable Walker
+  // rounds" bug the bare course name produced.
+  it("gives two same-course same-day rounds distinct labels (course · date · time)", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMyLiveRounds.mockResolvedValue({
+      rounds: [
+        { roundId: roundId("walker-1"), courseName: "Walker", joinedAt: 5_000, createdAt: Date.UTC(2025, 6, 12, 7, 58) },
+        { roundId: roundId("walker-2"), courseName: "Walker", joinedAt: 6_000, createdAt: Date.UTC(2025, 6, 12, 13, 12) },
+      ],
+    });
+
+    renderHome();
+
+    const morning = await screen.findByRole("link", { name: "Walker · Sat, Jul 12 · 7:58a" });
+    const afternoon = screen.getByRole("link", { name: "Walker · Sat, Jul 12 · 1:12p" });
+    expect(morning.getAttribute("href")).toBe("/round/walker-1");
+    expect(afternoon.getAttribute("href")).toBe("/round/walker-2");
+    // The old ambiguous bare "Walker" label appears for neither.
+    expect(screen.queryByRole("link", { name: "Walker" })).toBeNull();
+  });
+
+  it("distinguishes same-course rounds on DIFFERENT days by date alone — no tee time appended", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMyLiveRounds.mockResolvedValue({
+      rounds: [
+        { roundId: roundId("walker-sat"), courseName: "Walker", joinedAt: 5_000, createdAt: Date.UTC(2025, 6, 12, 7, 58) },
+        { roundId: roundId("walker-sun"), courseName: "Walker", joinedAt: 6_000, createdAt: Date.UTC(2025, 6, 13, 7, 58) },
+      ],
+    });
+
+    renderHome();
+
+    const saturday = await screen.findByRole("link", { name: "Walker · Sat, Jul 12" });
+    const sunday = screen.getByRole("link", { name: "Walker · Sun, Jul 13" });
+    expect(saturday.getAttribute("href")).toBe("/round/walker-sat");
+    expect(sunday.getAttribute("href")).toBe("/round/walker-sun");
+  });
+
   it("signed in with a golfer but no live rounds: shows the empty state, never falling back to the device credential list", async () => {
     credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
     signIn();

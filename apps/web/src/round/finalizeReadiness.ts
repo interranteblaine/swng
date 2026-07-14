@@ -9,8 +9,8 @@ export interface UnresolvedGame {
   readonly missing: string; // e.g. "holes 2–18 unscored for Pat"
 }
 
-// Same convention as ScorecardGrid.tsx/HoleDigest.tsx's own canonicalHoles — the first tee
-// set's hole numbering, shared by every tee at a course (only yardage/rating/slope vary).
+// Same convention as ScorecardGrid.tsx's own canonicalHoles — the first tee set's hole
+// numbering, shared by every tee at a course (only yardage/rating/slope vary).
 const canonicalHoles = (state: RoundState) => state.card.teeSets[0]?.holes ?? [];
 
 const missingHolesFor = (state: RoundState, golfer: GolferId): readonly number[] =>

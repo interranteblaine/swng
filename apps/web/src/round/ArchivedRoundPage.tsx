@@ -4,6 +4,7 @@ import { reduceRound, roundId as makeRoundId, scoreGame } from "@swng/domain";
 import type { GameConfig, GameState, RoundEvent, RoundId, RoundState } from "@swng/domain";
 import { ApiError, getRoundArchive } from "../api";
 import { useAuth } from "../auth/useAuth";
+import { roundLabel } from "../roundLabel";
 import { ResultsView } from "./ResultsView";
 
 // Same forward-compat guard as watch/useWatchRound.ts's own KNOWN_GAME_KINDS (its doc comment
@@ -12,16 +13,18 @@ import { ResultsView } from "./ResultsView";
 // page.
 const KNOWN_GAME_KINDS: ReadonlySet<GameConfig["kind"]> = new Set(["stroke-play", "singles-match", "stableford", "fourball-match", "skins"]);
 
-// The settling event's own wallMs, searched from the raw log — the SAME "search the log,
-// never re-derive" discipline application's finalizedAtMsOf (projections/projectArchive.ts)
-// applies server-side, mirrored here rather than imported (the web app may only import
-// client/contracts/domain — layer law, eslint.config.mjs).
-const finalizedAtMsOf = (events: readonly RoundEvent[]): number | undefined => events.find((event) => event.kind === "round-finalized")?.hlc.wallMs;
+// The genesis event's own wallMs, searched from the raw log — the round's created-at, which the
+// canonical designation (accounts-only identity spec §5) renders the round by everywhere. The
+// SAME "search the log, never re-derive" discipline the server-side projector applies, mirrored
+// here rather than imported (the web app may only import client/contracts/domain — layer law,
+// eslint.config.mjs); RoundState itself carries no created timestamp, so it is derived from the
+// round-created event on hand (spec §5's own "derive it in the web layer" resolution).
+const createdAtMsOf = (events: readonly RoundEvent[]): number | undefined => events.find((event) => event.kind === "round-created")?.hlc.wallMs;
 
 interface ArchiveView {
   readonly state: RoundState;
   readonly games: readonly GameState[];
-  readonly finalizedAtMs: number | undefined;
+  readonly createdAtMs: number | undefined;
 }
 
 // GET /rounds/{roundId}/archive (projection-realignment Task 6): a read-only page for ONE
@@ -48,7 +51,7 @@ export function ArchivedRoundPage() {
       .then(({ events }) => {
         const state = reduceRound(events);
         const games = state.games.filter((gameConfig) => KNOWN_GAME_KINDS.has(gameConfig.kind)).map((gameConfig) => scoreGame(gameConfig, state));
-        setView({ state, games, finalizedAtMs: finalizedAtMsOf(events) });
+        setView({ state, games, createdAtMs: createdAtMsOf(events) });
       })
       .catch((caught) => {
         // Never the raw server text (RoundPage.tsx's finalize error / ProfilePage.tsx's save
@@ -86,10 +89,9 @@ export function ArchivedRoundPage() {
   return (
     <main className="min-h-screen bg-slate-950">
       <div className="p-4 text-slate-100">
-        <p className="text-sm text-slate-400">
-          {view.state.card.courseName}
-          {view.finalizedAtMs !== undefined && ` — ${new Date(view.finalizedAtMs).toLocaleDateString()}`}
-        </p>
+        {/* The canonical designation (spec §5): course + date, rendered the one way it is on the
+            home list and the join link. */}
+        <p className="text-sm text-slate-400">{roundLabel({ courseName: view.state.card.courseName, createdAt: view.createdAtMs })}</p>
       </div>
       {/* No shareToken: this page's viewer holds only their own golfer Bearer — never a
           round-scoped participant token to mint a NEW share link with (same reasoning as

@@ -76,6 +76,24 @@ describe("SetupPanel", () => {
     expect(screen.queryByText(/^Games/)).toBeNull(); // no games section before any game exists
   });
 
+  // accounts-only identity spec §4: a departed participant is NOT removed from the roster — they
+  // keep their seat data (their played holes are facts) and gain a "left" marker a present
+  // participant never shows.
+  it("marks a departed participant with a 'left' marker, keeping their seat data on the roster", () => {
+    const state = baseState({
+      participants: [participant(ANN, "Ann", "white", 8), { ...participant(BO, "Bo", "white", 4), departed: true }],
+    });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+
+    const boRow = screen.getAllByRole("listitem").find((li) => /Bo — white — CH 4/.test(li.textContent ?? ""));
+    expect(boRow).toBeTruthy(); // still on the roster, seat data intact
+    expect(within(boRow!).getByText(/^left$/i)).toBeTruthy();
+
+    // A present participant carries no such marker.
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann — white — CH 8/.test(li.textContent ?? ""));
+    expect(within(annRow!).queryByText(/^left$/i)).toBeNull();
+  });
+
   it("shows per-game dots once a game exists, on the same roster row as name/tee/CH", () => {
     const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
     const state = baseState({ games: [stableford] });

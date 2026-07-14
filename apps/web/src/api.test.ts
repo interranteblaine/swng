@@ -36,6 +36,7 @@ import {
   joinCrew,
   joinRound,
   leaveCrew,
+  leaveRound,
   listMyCrews,
   listSeasons,
   mintParticipantToken,
@@ -792,6 +793,28 @@ describe("mintParticipantToken", () => {
     expect(seenInit?.method).toBe("POST");
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-mint");
     expect(result).toEqual({ roundId: roundId("round-1"), token: "fresh-token", golferId: golferId("golfer-1") });
+  });
+});
+
+// accounts-only identity spec §4: same POST + bearer-token (participant) idiom as terminateGame
+// below — no body, and the appended participant-left events come back for the caller to fold.
+describe("leaveRound", () => {
+  it("POSTs to /rounds/{roundId}/leave with the bearer token and parses a LeaveRoundResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { events: [] });
+    });
+
+    const result = await leaveRound(roundId("round-1"), "tok-leave");
+
+    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/leave`);
+    expect(seenInit?.method).toBe("POST");
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-leave");
+    expect(seenInit).not.toHaveProperty("token");
+    expect(result).toEqual({ events: [] });
   });
 });
 

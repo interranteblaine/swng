@@ -7,6 +7,7 @@ import { ApiError, getMyLiveRounds, mintParticipantToken } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { credentialStore } from "../identity";
+import { roundDayKey, roundLabel } from "../roundLabel";
 
 // Reads localStorage directly on render rather than through useRoundSession/state — Home
 // never opens a live session (that's per-round, from RoundPage), it only needs the flat list
@@ -95,6 +96,20 @@ export function HomePage() {
     void enterLiveRound(id);
   };
 
+  // The canonical designation (spec §5): each live round renders as course + date, with the tee
+  // time appended ONLY to tell apart two rounds that share course and day (the "two
+  // indistinguishable Walker rounds" bug). Collisions are computed across exactly the rounds this
+  // list is rendering, by the shared roundDayKey.
+  const dayKeyCounts = new Map<string, number>();
+  for (const round of liveRounds ?? []) {
+    const key = roundDayKey({ courseName: round.courseName, createdAt: round.createdAt });
+    if (key !== undefined) dayKeyCounts.set(key, (dayKeyCounts.get(key) ?? 0) + 1);
+  }
+  const collidesOnDay = (round: GetMyLiveRoundsResponse["rounds"][number]): boolean => {
+    const key = roundDayKey({ courseName: round.courseName, createdAt: round.createdAt });
+    return key !== undefined && (dayKeyCounts.get(key) ?? 0) > 1;
+  };
+
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-slate-950 p-6 text-slate-100">
       <h1 className="text-3xl font-bold">swng</h1>
@@ -155,7 +170,7 @@ export function HomePage() {
                       aria-busy={enteringRoundId === round.roundId}
                       className="block rounded-lg bg-slate-800 px-4 py-3"
                     >
-                      {round.courseName}
+                      {roundLabel({ courseName: round.courseName, createdAt: round.createdAt }, { withTime: collidesOnDay(round) })}
                     </Link>
                   </li>
                 ))}

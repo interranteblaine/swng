@@ -27,6 +27,11 @@ export interface WatchRoundView {
   readonly error: boolean;
   readonly state: RoundState | undefined;
   readonly games: readonly GameState[];
+  // The round's created-at (the round-created event's own wallMs), so WatchPage can render the
+  // canonical course + date designation (accounts-only identity spec §5). Derived here because
+  // the hook already holds the raw events and RoundState itself carries no created timestamp;
+  // `undefined` until genesis has been pulled (same window as `state`).
+  readonly createdAt: number | undefined;
 }
 
 // What useWatchRound needs to talk to ONE round, read-only — deliberately narrower than
@@ -141,8 +146,9 @@ export const createUseWatchRound = (
     // hydrated() check does.
     const state = events.length > 0 ? reduceRound(events) : undefined;
     const games = state ? state.games.filter((gameConfig) => KNOWN_GAME_KINDS.has(gameConfig.kind)).map((gameConfig) => scoreGame(gameConfig, state)) : EMPTY_GAMES;
+    const createdAt = events.find((event) => event.kind === "round-created")?.hlc.wallMs;
 
-    return { hydrated: pulledOnce && state !== undefined, error: pullError, state, games };
+    return { hydrated: pulledOnce && state !== undefined, error: pullError, state, games, createdAt };
   };
 };
 

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation, useParams } from "react-router";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { GameId, RoundId } from "@swng/domain";
+import { roundLabel } from "../roundLabel";
 import { ResultsView } from "../round/ResultsView";
 import { ScorecardGrid } from "../round/ScorecardGrid";
 import { StandingsHeader } from "../round/StandingsHeader";
@@ -13,7 +14,7 @@ type UseWatchRound = (roundId: RoundId, token: string) => WatchRoundView;
 // Everything that's only ever rendered pre-finalize, its own component for the same reason
 // RoundPage's own LiveRound is one (chip-selection state shouldn't have to survive the
 // live -> final swap). Deliberately NOT RoundPage's LiveRound reused wholesale: that component
-// wires SetupPanel/FinalizeControl/HoleDigest/recordScore — every one of those IS an edit
+// wires SetupPanel/FinalizeControl/recordScore — every one of those IS an edit
 // affordance (add a game, add a player, finalize, score) — so this is its own, narrower
 // composition of just the two READ-ONLY presentational pieces a spectator needs:
 // StandingsHeader (no onTerminate — omitting it is what hides the "End game…" overflow, same
@@ -84,6 +85,12 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
 
     return (
       <main className="min-h-screen bg-slate-950">
+        {/* The canonical designation (accounts-only identity spec §5): the spectator sees WHICH
+            round this is — course + date, rendered the one way the home list and archive render
+            it, replacing the bare course name. */}
+        <div className="p-4 text-slate-100">
+          <p className="text-sm text-slate-400">{roundLabel({ courseName: view.state.card.courseName, createdAt: view.createdAt })}</p>
+        </div>
         {/* No shareToken: a spectator holds no participant token to mint a NEW share link with —
             ResultsView.tsx's own doc comment explains why shareToken is optional and omitted
             here. */}

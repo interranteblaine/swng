@@ -57,6 +57,9 @@ describe("useWatchRound", () => {
     expect(result.current.state?.participants).toHaveLength(2);
     expect(result.current.games).toHaveLength(1);
     expect(result.current.games[0]?.kind).toBe("stableford");
+    // The round's created-at (buildServerLog's genesis wallMs) is exposed for WatchPage's
+    // canonical course + date header (accounts-only identity spec §5).
+    expect(result.current.createdAt).toBe(1_000);
   });
 
   it("never calls transport.push — a spectator authors nothing", async () => {

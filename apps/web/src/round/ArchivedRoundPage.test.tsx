@@ -5,6 +5,7 @@ import { deviceId, fixtureLinks, golferId, opId, roundId } from "@swng/domain";
 import type { OpId, RoundEvent } from "@swng/domain";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
+import { roundLabel } from "../roundLabel";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 import { ArchivedRoundPage } from "./ArchivedRoundPage";
 
@@ -66,7 +67,7 @@ const renderArchivedRoundPage = (path: string) =>
   );
 
 describe("ArchivedRoundPage", () => {
-  it("loads via the golfer Bearer, folds the archive's events (the domain reduceRound, mirroring WatchPage's own composition), and renders ResultsView with a course/date header", async () => {
+  it("loads via the golfer Bearer, folds the archive's events (the domain reduceRound, mirroring WatchPage's own composition), and renders ResultsView with the canonical course + date header", async () => {
     signIn();
     vi.stubGlobal(
       "fetch",
@@ -88,9 +89,10 @@ describe("ArchivedRoundPage", () => {
     expect(screen.getByRole("status", { name: "Loading round" })).toBeTruthy();
 
     await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
-    // The course/date header — fixtureLinks' own courseName plus the round-finalized event's
-    // own wallMs (9_000ms since epoch), formatted as a date.
-    expect(screen.getByText(new RegExp(`Fixture Links.*${new Date(9_000).toLocaleDateString()}`))).toBeTruthy();
+    // The canonical designation (spec §5): fixtureLinks' courseName plus the round-CREATED event's
+    // own wallMs (1_000ms since epoch — the round's created-at, not the finalize time), rendered
+    // the one way roundLabel renders it everywhere.
+    expect(screen.getByText(roundLabel({ courseName: "Fixture Links", createdAt: 1_000 }))).toBeTruthy();
 
     // Ann's roster row and hole-1 score render from the real fold (a genuine ResultsView, not
     // a stub) — same disabled-cell assertion WatchPage.test.tsx's own archived-card case pins.

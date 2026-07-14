@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { GameConfig, OpId, RoundEvent, RoundId } from "@swng/domain";
 import { AuthProvider } from "../auth/useAuth";
+import { roundLabel } from "../roundLabel";
 import type { WatchRoundView } from "./useWatchRound";
 import { createWatchPage } from "./WatchPage";
 
@@ -67,7 +68,7 @@ const renderWatchPage = (path: string, useWatchRound: (roundId: RoundId, token: 
 
 describe("WatchPage", () => {
   it("shows a loading skeleton before hydration, using the token from the URL FRAGMENT (not a query param)", () => {
-    const idle: WatchRoundView = { hydrated: false, error: false, state: undefined, games: [] };
+    const idle: WatchRoundView = { hydrated: false, error: false, state: undefined, games: [], createdAt: undefined };
     let seenToken: string | undefined;
     renderWatchPage(`/watch/${ROUND_ID}#spectator-tok-1`, (_roundId, token) => {
       seenToken = token;
@@ -81,7 +82,7 @@ describe("WatchPage", () => {
   // Papercut 14 (M9 hardening): a mistyped/dead link surfaces an honest message instead of
   // spinning "Loading round…" forever — never the raw error/exception text.
   it("shows an honest 'not valid' message (not perpetual loading) when useWatchRound surfaces a terminal error", () => {
-    const errored: WatchRoundView = { hydrated: false, error: true, state: undefined, games: [] };
+    const errored: WatchRoundView = { hydrated: false, error: true, state: undefined, games: [], createdAt: undefined };
     renderWatchPage(`/watch/${ROUND_ID}#dead-token`, () => errored);
 
     expect(screen.getByText(/isn.t valid/i)).toBeTruthy();
@@ -101,10 +102,15 @@ describe("WatchPage", () => {
     const events = buildLiveLog();
     const state = reduceRound(events);
     const games = state.games.map((g) => scoreGame(g, state));
-    const view: WatchRoundView = { hydrated: true, error: false, state, games };
+    // buildLiveLog's genesis carries wallMs 1_000 — the round's created-at, which WatchPage's
+    // header renders via the canonical designation (spec §5).
+    const view: WatchRoundView = { hydrated: true, error: false, state, games, createdAt: 1_000 };
 
     renderWatchPage(`/watch/${ROUND_ID}#spectator-tok-2`, fixedUseWatchRound(view));
 
+    // The canonical course + date header identifies WHICH round the spectator is watching
+    // (fixtureLinks' courseName + created-at 1_000ms), replacing the bare course name.
+    expect(await screen.findByText(roundLabel({ courseName: "Fixture Links", createdAt: 1_000 }))).toBeTruthy();
     // The live grid + standings actually render (a real spectator sees the scorecard).
     await waitFor(() => expect(screen.getByRole("tab", { name: /Stableford/ })).toBeTruthy());
     expect(screen.getByRole("columnheader", { name: "Ann" })).toBeTruthy();
@@ -134,7 +140,7 @@ describe("WatchPage", () => {
     const events = buildFinalLog();
     const state = reduceRound(events);
     const games = state.games.map((g) => scoreGame(g, state));
-    const view: WatchRoundView = { hydrated: true, error: false, state, games };
+    const view: WatchRoundView = { hydrated: true, error: false, state, games, createdAt: 1_000 };
 
     renderWatchPage(`/watch/${ROUND_ID}#spectator-tok-3`, fixedUseWatchRound(view));
 
@@ -154,7 +160,7 @@ describe("WatchPage", () => {
     const events = buildAbandonedLog();
     const state = reduceRound(events);
     const games = state.games.map((g) => scoreGame(g, state));
-    const view: WatchRoundView = { hydrated: true, error: false, state, games };
+    const view: WatchRoundView = { hydrated: true, error: false, state, games, createdAt: 1_000 };
 
     renderWatchPage(`/watch/${ROUND_ID}#spectator-tok-abandoned`, fixedUseWatchRound(view));
 

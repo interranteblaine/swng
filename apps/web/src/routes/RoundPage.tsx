@@ -1,13 +1,12 @@
 import { useCallback, useState } from "react";
-import { Navigate, useParams } from "react-router";
+import { Navigate, useNavigate, useParams } from "react-router";
 import type { FinalizeRoundResponse, GameConfigInput } from "@swng/contracts";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { GameId, GameState, GolferId, HoleResult, RoundId, RoundState } from "@swng/domain";
-import { abandonRound, addGame, finalizeRound, terminateGame } from "../api";
+import { abandonRound, addGame, finalizeRound, leaveRound, terminateGame } from "../api";
 import { credentialStore } from "../identity";
 import type { RoundCredential } from "../identity";
 import { unresolvedGames } from "../round/finalizeReadiness";
-import { HoleDigest, useHoleDigest } from "../round/HoleDigest";
 import { ResultsView } from "../round/ResultsView";
 import { ScorecardGrid } from "../round/ScorecardGrid";
 import { ShareButton } from "../round/ShareButton";
@@ -214,6 +213,77 @@ function ScrapControl({ onAbandon }: { readonly onAbandon: () => Promise<void> }
   );
 }
 
+// "Leave round" (accounts-only identity spec §4): a participant walks off. DELIBERATELY distinct
+// from ScrapControl above — leaving is PERSONAL and NON-DESTRUCTIVE: the round plays on for
+// everyone else, the golfer's scored holes stay facts in the game, and they can rejoin with the
+// same code anytime. So the copy never says "counts nowhere" (that language belongs to Scrap
+// alone), and this styles quiet/secondary like Scrap so it never competes with Finalize for a
+// tap. On confirm it's one POST then navigation home (onLeave's own impl below) — no presence
+// tampering, no outbox/credential touch, no sync(): the leaver simply leaves the page.
+function LeaveControl({ onLeave }: { readonly onLeave: () => Promise<void> }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  const leaveNow = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await onLeave();
+      // No local "done" state on success: onLeave navigates home (RoundPage's own impl), so this
+      // component just unmounts — same "let the outcome unmount me" precedent as ScrapControl.
+    } catch {
+      // The dialog stays open (retry one tap away); a human line, never a raw server message.
+      setError("Could not leave the round — try again.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="px-3 pb-3">
+      <button
+        type="button"
+        onClick={() => {
+          setError(undefined);
+          setConfirming(true);
+        }}
+        className="min-h-12 w-full rounded-lg bg-slate-900 px-4 text-sm font-medium text-slate-500 active:bg-slate-800"
+      >
+        Leave round
+      </button>
+
+      {confirming && (
+        <div role="dialog" aria-label="Confirm leave" className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 rounded-t-2xl bg-slate-900 p-4 shadow-2xl">
+          <p className="text-sm text-slate-300">
+            Leave this round? Your scored holes stay in the game — you just stop scoring. You can rejoin anytime with the round code.
+          </p>
+          <button
+            type="button"
+            onClick={() => void leaveNow()}
+            disabled={busy}
+            className="min-h-14 rounded-lg bg-slate-700 px-4 text-base font-semibold text-slate-100 disabled:opacity-50"
+          >
+            {busy ? "Leaving…" : "Leave"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            disabled={busy}
+            className="min-h-14 rounded-lg bg-slate-800 px-4 text-base font-medium text-slate-300 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          {error && (
+            <p role="alert" className="text-red-400">
+              {error}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // The honest terminal treatment for a scrapped round (task-15): NOT ResultsView — there are no
 // results — just a plain statement that the round counts nowhere. Rendered for anyone who lands
 // on an abandoned round, whether they scrapped it themselves or only observed the status flip via
@@ -239,15 +309,15 @@ interface LiveRoundProps {
   readonly onFinalize: () => Promise<void>;
   readonly onTerminate: (gameId: GameId) => Promise<void>;
   readonly onAbandon: () => Promise<void>;
+  readonly onLeave: () => Promise<void>;
 }
 
 // Everything that's only ever rendered pre-finalize, as its OWN component (not an inline
-// branch of RoundPageContent) so its hooks — chip selection, the digest's transition
-// tracking — only ever run while a live round is actually mounted: they'd otherwise have to
-// tolerate `state` swapping in and out across the live/final boundary, which useHoleDigest's
-// prev-snapshot ref isn't built to do (and doesn't need to — this component simply unmounts
-// once status flips to "final" and RoundPageContent renders ResultsView instead).
-function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon }: LiveRoundProps) {
+// branch of RoundPageContent) so its chip-selection state only ever runs while a live round is
+// actually mounted: it'd otherwise have to tolerate `state` swapping in and out across the
+// live/final boundary — this component simply unmounts once status flips to "final" and
+// RoundPageContent renders ResultsView instead.
+function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave }: LiveRoundProps) {
   const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
   // Falls back to the first game until a chip is tapped (Task 5's fixed default-first-game
   // decision) — also the correct fallback if a previously-active id ever stopped matching. A
@@ -255,17 +325,16 @@ function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFi
   // is one of the downstream filters) — an explicit chip tap can still land on one (its chip
   // stays, with an "ended" badge), just never the silent default.
   const activeGame = games.find((g) => g.id === activeGameId) ?? games.find((g) => !state.terminatedGameIds.has(g.id));
-  const { digest, dismiss } = useHoleDigest(state, games);
 
   return (
     <>
       <ShareButton roundId={state.id} token={token} />
       <StandingsHeader state={state} games={games} activeGameId={activeGame?.id} onSelect={setActiveGameId} onTerminate={onTerminate} />
       <ScorecardGrid state={state} activeGame={activeGame} recordScore={recordScore} />
-      {digest && <HoleDigest digest={digest} onDismiss={dismiss} />}
       <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
       <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} />
       <ScrapControl onAbandon={onAbandon} />
+      <LeaveControl onLeave={onLeave} />
     </>
   );
 }
@@ -276,6 +345,7 @@ function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFi
 export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRoundSession) => {
   function RoundPageContent({ roundId, credential }: { roundId: RoundId; credential: RoundCredential }) {
     const session = useRoundSession(roundId);
+    const navigate = useNavigate();
     // Present only once THIS tab has called finalize itself — a tab that only observes the
     // status flip via WS/pull (another participant finalized) never sets this, and
     // ResultsView must render fully either way (its own contract; see its doc comment).
@@ -329,6 +399,17 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
       // matching onFinalize/onTerminate's own explicit sync().
       await sync();
     }, [roundId, credential.token, sync]);
+
+    // accounts-only identity spec §4: leaving is one POST then navigation home — deliberately NOT
+    // the sync()-then-let-the-fold-swap-the-view pattern the mutations above use. Leaving is
+    // personal, not a round state this tab keeps showing: no sync(), and no presence/outbox/
+    // credential touch (presence clearing is the server's policy at finalize, not ours). The
+    // participant-left event still lands server-side for everyone else's fold; this tab just
+    // leaves the page.
+    const onLeave = useCallback(async () => {
+      await leaveRound(roundId, credential.token);
+      navigate("/");
+    }, [roundId, credential.token, navigate]);
 
     // StatusChrome's "Sync now" button: connect() re-opens the socket if it dropped (a no-op
     // otherwise — session.ts's own idempotency), then sync() explicitly pushes+pulls once,
@@ -389,6 +470,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
             onFinalize={onFinalize}
             onTerminate={onTerminate}
             onAbandon={onAbandon}
+            onLeave={onLeave}
           />
         )}
       </main>

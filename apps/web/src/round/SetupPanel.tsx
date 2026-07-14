@@ -75,6 +75,11 @@ export function SetupPanel({ state, joinCode, onAddGame }: SetupPanelProps) {
                   <span>
                     {p.name} — {p.tee} — CH {p.courseHandicap}
                   </span>
+                  {/* A departed participant (accounts-only identity spec §4) stays on the roster
+                      WITH their seat data — their played holes are facts — plus this "left"
+                      marker. `departed` is set only when true in the fold (RosterEntry's optional
+                      flag), so a present participant renders exactly as before. */}
+                  {p.departed && <span className="rounded bg-slate-700 px-1.5 py-0.5 text-xs font-medium text-slate-300">left</span>}
                 </span>
                 {hasGames && (
                   <span className="flex flex-wrap gap-2 text-sm text-slate-400">

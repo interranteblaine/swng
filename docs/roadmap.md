@@ -24,9 +24,10 @@ Why this slice and not another:
 - **It exercises the entire spine.** Round engine, handicap engine, crew, course data —
   nothing built for v1 is throwaway, and v2/v3 are configurations of this spine, not new
   systems.
-- **It recruits by itself.** Every round pulls the rest of the crew in through join codes and
-  ghost profiles. The trip captain and league runner we want for v2/v3 are already in
-  somebody's Saturday game.
+- **It recruits by itself.** Every round pulls the rest of the crew in through the join link —
+  the invite and the sign-up funnel in one (a first-timer signs up once, in thirty seconds,
+  on the way onto the card). The trip captain and league runner we want for v2/v3 are already
+  in somebody's Saturday game.
 
 ## v1 — The Saturday Game
 
@@ -41,10 +42,12 @@ Why this slice and not another:
   allowances applied automatically, adjustable by the group.
 - **Scoring:** two taps; anyone can score for anyone (one person can keep the whole card);
   "picked up" and "conceded" are first-class scores.
-- **Game state, always:** current standing of every game at a glance, and a between-holes
-  digest. *2 UP with 4 to play, Dave strokes here, three skins carrying.*
-- **Golf's realities:** offline-first (dead zones never block entry), join by code or link
-  with no account, 9-hole rounds first-class.
+- **Game state, always:** current standing of every game at a glance, pulled up per game from
+  the card's own chips (the between-holes digest popup is deliberately gone; owner call,
+  2026-07-13). *2 UP with 4 to play, Dave strokes here, three skins carrying.*
+- **Golf's realities:** offline-first (dead zones never block entry), join by the round's link
+  or code (a first-timer signs up on the way in, once; owner call, 2026-07-13), 9-hole rounds
+  first-class.
 - **After the round:** the card archives permanently, results write to the ledger, handicap
   differentials post, and the round has a shareable link (spectator live view uses the same
   mechanism). Rendered card *images* for the group chat are v1.1.
@@ -62,10 +65,13 @@ Why this slice and not another:
 
 ### The Crew
 
-- Named persistent crew with a roster. Members are full accounts or **ghost profiles** —
-  scores kept, index computed, claimable later. The holdout is fully represented from day one.
-- **The standing game:** the crew's usual format saved as a preset — *"play the usual"* is
-  one tap.
+- Named persistent crew with a roster of **full accounts only** (owner call, 2026-07-13: a
+  crew is a grouping of accounts; ghosts play inside rounds and are never added to a crew).
+  The holdout signs up once through a round's join link and is fully present from that round
+  on.
+- **The crew's games are chosen fresh each round** (owner call, 2026-07-13: a crew is a
+  grouping, not a preset — there is no saved standing game and no "play the usual"; the crew
+  instead defines named seasons that count members' finalized rounds).
 - **The ledger, core cut:** every crew round recorded; head-to-head match records between any
   two members; season leaderboard (wins, points, skins).
 - **Not in v1:** the feed, partner records, crew handicap overrides.
@@ -86,7 +92,9 @@ v1 is done when this is true, not when the features exist:
 - A crew of 8 runs its standing game for a month with **zero paper and zero spreadsheet**.
 - The app earns **≤ 20 seconds per hole** and never makes the group wait.
 - Handicaps are trusted enough that **the first-tee negotiation actually ends**.
-- The member who never installed the app is **fully present** in every card and ledger.
+- The member who'd never installed the app signs up once on the first tee (the join link is
+  the funnel; owner call, 2026-07-13) and is **fully present** in every card and ledger from
+  that round on.
 
 ## v1.1 — fast follows
 

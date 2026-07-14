@@ -30,7 +30,7 @@ The golfer who plays *with people*. Ten to sixty rounds a year, most of them wit
 - **The regular** — has a Saturday game, a usual crew, a usual format, opinions about who's sandbagging.
 - **The trip captain** — organizes the annual buddies trip: rosters, teams, formats, and the sacred trophy. Today runs it on a spreadsheet and sheer will.
 - **The league runner** — keeps a 9-hole work or bar league alive: schedule, subs, standings, playoffs. Today: paper and Excel.
-- **Everyone they play with** — because joining a round in swng takes a code, not a signup, every round played recruits the rest of the group.
+- **Everyone they play with** — because joining a round takes the round's link (or code) plus, for a first-timer, a one-time thirty-second sign-up — one tap forever after — every round played recruits the rest of the group.
 
 Who it is *not* for: the solo stats obsessive (Arccos has him), the tee-time bargain hunter (GolfNow has him), the golf-content scroller. swng is for people who already have people.
 

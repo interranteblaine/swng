@@ -21,10 +21,12 @@ Print it, or pull it up on a phone before you leave the house — either works.
 
 - **A crew.** The v1 bar (below) is written against a crew of 8 running its standing game for
   a month; any real group is worth testing with, but bigger and more repeated is more honest.
-  Include at least one person who plays the role of `product.md`'s "the holdout" — someone
-  who does not install the app and gets scored by someone else all round. If nobody in the
-  crew fits that naturally, assign it: score one player's whole card from a teammate's phone,
-  never their own.
+  Include at least one first-timer who plays the role of `product.md`'s "the holdout" —
+  someone who has never used swng and signs up on the first tee through the round's join link
+  (owner call, 2026-07-13: everyone on a card is a real account — there are no ghosts). Time
+  that: tap the link, create the account, answer the one name prompt, land on the card. After
+  that a teammate can keep their whole card (anyone scores for anyone), so the holdout never
+  has to touch their phone again all round if they don't want to.
 - **Phones, not laptops.** The hosted beta URL is **https://d5qqgppnyb7y1.cloudfront.net/** —
   no dev server, no `pnpm -F @swng/web dev`, no laptop on the cart. Everyone brings their own
   phone, or one person keeps the whole card — both are supported; test both if the crew is
@@ -35,16 +37,17 @@ Print it, or pull it up on a phone before you leave the house — either works.
   yourself. Doing this the night before is fine; doing it live on the first tee is the harder,
   more honest test.
 - **A crew already exists, or create one.** If this is the first real Saturday, create the
-  crew and save a standing game before you go, so "play the usual" has something to load.
+  crew, add its members (accounts only), and set up a season for the round to count into. A
+  crew has no saved standing game (owner call, 2026-07-13: a crew is a grouping, not a preset)
+  — each round's games are chosen fresh at setup.
 - **Charge phones.** Obvious, but a dead phone mid-round is the one failure mode this kit
   can't distinguish from an app problem.
 
 ## Pre-round checklist
 
 - [ ] Course found by search (or added + verified from the paper card — note the time it took)
-- [ ] Crew exists with the right roster, including the holdout as a ghost
-- [ ] "Play the usual" loads the standing game in one tap, or games are set up fresh without
-      a fight
+- [ ] Crew exists with the right roster (accounts only — the holdout signs up on the first tee)
+- [ ] Games are set up fresh at the card without a fight (there is no "play the usual" preset)
 - [ ] Every player has a tee and a course handicap assigned before the first tee shot
 - [ ] Dots are visible on the card before anyone swings — the first-tee negotiation should
       already be over
@@ -61,13 +64,13 @@ for 18 holes with a group standing around, not whether they work once in a demo.
       if any hole blows past that because of the app (not the golf), write it down
 - [ ] Game state is legible at a glance — everyone can answer "where do things stand right
       now?" without asking a teammate or opening a menu
-- [ ] The between-holes digest shows up and is actually useful, not something everyone
-      swipes past
+- [ ] Each game's standing is one tap away on its own chip on the card — pulled up when
+      someone wants it, never pushed as a popup (there is no between-holes digest)
 - [ ] **Offline stretch:** deliberately go offline for a hole or two (a real dead cell zone
       counts double) — scoring keeps working, and it converges cleanly once signal returns,
       with nothing lost or duplicated
-- [ ] The holdout's scores, entered by someone else the whole round, post and look right —
-      their ghost card should be indistinguishable from a real account's
+- [ ] The holdout's scores, entered by a teammate the whole round, post and look right — once
+      they've signed up on the first tee they're a real account like everyone else on the card
 
 ## After the round
 
@@ -90,7 +93,7 @@ bar is met:
 1. **A crew of 8 runs its standing game for a month with zero paper and zero spreadsheet.**
 2. **The app earns ≤ 20 seconds per hole and never makes the group wait.**
 3. **Handicaps are trusted enough that the first-tee negotiation actually ends.**
-4. **The member who never installed the app is fully present in every card and ledger.**
+4. **The member who'd never installed the app signs up once on the first tee and is fully present in every card and ledger from that round on.**
 
 If a Saturday (or a month of them) doesn't clear these, that's the finding — not a reason to
 call the app done anyway.

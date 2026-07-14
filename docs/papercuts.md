@@ -209,3 +209,31 @@ departure) and self-healing (anyone rejoining restores their rows at the next re
 shape: distinguish "no rounds counted yet" from "no current members appear in this season's
 rounds." Surfacing site: `SeasonPanel.tsx`'s empty-ledger branch beside the counted-rounds
 list, which already shows the rounds and makes the mismatch visible.
+
+### 10. Home's signed-out device-credential list can only ever surface pre-wall relic tokens
+
+Observed 2026-07-14 (accounts-only "the wall" final review). `HomePage.tsx` still renders a
+list built from `credentialStore.list()` — the per-device scoring tokens the old anonymous/ghost
+join path saved to localStorage. Post-wall nothing writes new device credentials from the join
+flow (every seat is an account, and a signed-in golfer's "Your rounds" comes from
+`GET /me/rounds/live` by identity), so this list can only ever show tokens left over from before
+the wall. Worse, those rows render as bare names with no course or date (they predate the
+`roundLabel` designation), and the one thing the list still technically enables — re-entering a
+live round on this device without signing back in — now has a straight product answer: sign in.
+Wanted shape: delete the signed-out device-credential list outright and render `SignInCta` in
+its place (the join-link funnel is the one way onto a card). Surfacing site: `HomePage.tsx`'s
+`credentialStore.list()` block and its signed-out branch.
+
+### 11. A settle-omitted departed participant keeps their LIVE# presence pointer until the 36h TTL
+
+Observed 2026-07-14 (accounts-only "the wall" final review). A golfer who seats a round (which
+writes a `LIVE#<roundId>` presence pointer, `rounds/presence.ts`) but then leaves it with zero
+scores and zero games can be omitted from `archive.participants` at finalize. `projectArchive`'s
+presence-cleanup loop iterates `archive.participants`, so a participant not in the settled archive
+never gets their pointer cleared — it survives on the round until its 36h TTL. Effect: their home
+"Your rounds" (`getMyLiveRounds`, keyed off the LIVE# pointer) lists a round that is already
+finished, and opening it 403s them (they aren't in the archive the round now points at). Bounded
+and self-healing — the TTL reclaims the pointer within 36 hours — but confusing while it lasts.
+Wanted shape: clear presence over the round STATE's full seated roster rather than the settled
+archive's participants, so a settle-omitted seat's pointer is still removed at finalize. Surfacing
+site: `projectArchive.ts`'s `deleteLive` loop (iterates `archive.participants`).

@@ -685,7 +685,8 @@ says the app has stopped being a toy — it is never entered by default.
 2. Remaining security hardening judged prod-blocking at that time (token-storage redesign,
    share-link revocation, whatever the M9 re-acceptance records say).
 3. **Field test against the v1 bar:** a real crew, real course, a real Saturday — zero paper,
-   ≤20s/hole, handicaps trusted, ghost fully represented. Fix list burned down; bar re-run.
+   ≤20s/hole, handicaps trusted, the never-installed member signed up on the first tee (via
+   the join link) and fully present from that round on. Fix list burned down; bar re-run.
 
 **Gate:** the four v1-bar bullets verified in the field, not in test.
 

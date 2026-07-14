@@ -96,7 +96,8 @@ manual.
 
 **Decision:** standard consumer hygiene, all config-level — `bisectBatchOnError` (isolate
 the poison record from its batchmates), bounded `retryAttempts` (10), an `onFailure` SQS
-dead-letter queue, and a paged alarm on DLQ depth > 0 (alarm count 12 → 13). A DLQ'd record
+dead-letter queue, and a paged alarm on DLQ depth > 0 (alarm count 13 → 14 — this spec's
+original "12 → 13" baseline had missed the post-M9 RebuildDurationAlarm). A DLQ'd record
 is recovered by `rebuildProjections` (already paged/cursor-resumable) after the bug that
 poisoned it is fixed.
 

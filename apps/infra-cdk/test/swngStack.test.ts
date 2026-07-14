@@ -809,10 +809,17 @@ describe("SwngStack", () => {
     // ANY depth above zero, not a batch-sized threshold, since one message already means the
     // fix-then-rebuildProjections cycle above is needed.
     it("a non-empty projector DLQ pages: threshold 0, strictly greater-than, description mentions the DLQ", () => {
+      // Metric identity pinned too (the file's own single-metric bar, same as the
+      // IteratorAge/Duration alarms above): a future edit repointing this alarm at a
+      // different metric — or a Sum where a gauge needs Maximum — must fail here, not
+      // page-silently-never in production.
       template.hasResourceProperties(
         "AWS::CloudWatch::Alarm",
         Match.objectLike({
           AlarmDescription: Match.stringLikeRegexp("DLQ"),
+          Namespace: "AWS/SQS",
+          MetricName: "ApproximateNumberOfMessagesVisible",
+          Statistic: "Maximum",
           Threshold: 0,
           ComparisonOperator: "GreaterThanThreshold",
         }),

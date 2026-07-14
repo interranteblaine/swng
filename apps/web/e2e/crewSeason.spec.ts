@@ -283,9 +283,9 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
     // Deep-equal on history: archiveGolferLine is a pure recompute from the SAME stored
     // archives before and after the backfill — no wall-clock or randomness in it. computedAtMs
-    // is the one deliberate exception (projectArchive stamps clock.now() on every index
-    // recompute) — asserting it CHANGED is honest proof the rebuild actually recomputed this
-    // golfer rather than reading a stale record back untouched.
+    // is the one deliberate exception: since pre-prod hardening D4a it's getMyRecord's
+    // read-time stamp, so two reads always differ and it says nothing about the rebuild — the
+    // rebuild proof is the history deep-equal plus value/differentialsUsed equality below.
     const post = await getMyRecordDirect(httpUrl, al.tokens.idToken);
     expect(post.history).toEqual(pre.history);
     expect(post.index?.value).toBe(pre.index?.value);

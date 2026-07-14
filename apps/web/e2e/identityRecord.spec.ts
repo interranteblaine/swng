@@ -199,11 +199,11 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     expect(postRebuildRecord.index?.value).toBe(preRebuildRecord.index?.value);
     expect(postRebuildRecord.index?.differentialsUsed).toBe(preRebuildRecord.index?.differentialsUsed);
 
-    // computedAtMs is deliberately EXCLUDED from the equality above — projectArchive.ts's own
-    // doc comment: `computedAtMs: deps.clock.now()`, a fresh wall-clock stamp taken every time
-    // the index is (re)computed. Asserting it CHANGED is the positive half of that same fact:
-    // honest proof the rebuild actually recomputed this golfer's index rather than reading a
-    // stale snapshot back untouched.
+    // computedAtMs is deliberately EXCLUDED from the equality above — since pre-prod
+    // hardening D4a it's getMyRecord's read-time stamp (`deps.clock.now()` at each GET), so
+    // two reads at different instants ALWAYS differ; it proves nothing about the rebuild. The
+    // real parity proof is the history deep-equal plus the value/differentialsUsed equality
+    // just above — the index recomputed from rebuilt lines landing identical.
     expect(postRebuildRecord.index?.computedAtMs).not.toBe(preRebuildRecord.index?.computedAtMs);
   });
 });

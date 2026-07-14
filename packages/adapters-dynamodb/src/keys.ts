@@ -100,17 +100,22 @@ export const golferSubSk = "GOLFER";
 // key is an identity, time is an attribute" — replaces M7 Task 3's time-embedded
 // `HISTORY#<15-digit-ms>#<roundId>` scheme): one partition per golfer (golferPk — shared
 // id format with the core table's golfer item, but a different table), holding one ROUND# line
-// per finalized round the golfer played, one INDEX snapshot, and LIVE# presence rows (spec §5;
-// written starting realignment Task 13 — the key format lives here now so the store's shape
-// changes exactly once). `lineSk`/`liveSk` embed ONLY the roundId — never finalizedAtMs — so a
-// reopen-and-refinalize (a NEW finalizedAtMs for the SAME roundId) computes the SAME sk both
-// times: a plain unconditional Put replaces the prior line outright, no query-then-delete
-// dance. `listLines` makes no order promise (createDynamoProjectionStore.ts's own doc comment);
-// every reader sorts by the `finalizedAtMs` attribute itself.
+// per finalized round the golfer played and LIVE# presence rows (spec §5; written starting
+// realignment Task 13 — the key format lives here now so the store's shape changes exactly
+// once). There is no stored-handicap-index key anymore: the pre-prod hardening spec (D4a)
+// deletes that snapshot outright — the handicap index is computed at read time from the ROUND#
+// lines (golfers/getMyRecord.ts), never written to this table at all. A live table may still
+// carry old rows from before that change under their former sort key; they are dead data
+// nothing reads (the `ROUND#`-prefixed query below never returns them), cleaned up by a separate
+// one-time script, never a migration here. `lineSk`/`liveSk` embed ONLY the roundId — never
+// finalizedAtMs — so a reopen-and-
+// refinalize (a NEW finalizedAtMs for the SAME roundId) computes the SAME sk both times: a plain
+// unconditional Put replaces the prior line outright, no query-then-delete dance. `listLines`
+// makes no order promise (createDynamoProjectionStore.ts's own doc comment); every reader sorts
+// by the `finalizedAtMs` attribute itself.
 const LINE_SK_PREFIX = "ROUND#";
 export const lineSk = (roundId: RoundId): string => `${LINE_SK_PREFIX}${roundId}`;
 export const lineSkPrefix = LINE_SK_PREFIX;
-export const projectionIndexSk = "INDEX";
 const LIVE_SK_PREFIX = "LIVE#";
 export const liveSk = (roundId: RoundId): string => `${LIVE_SK_PREFIX}${roundId}`;
 export const liveSkPrefix = LIVE_SK_PREFIX;

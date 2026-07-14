@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { GetCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import type { GolferRoundLine, RoundId } from "@swng/domain";
 import { golferId, roundId } from "@swng/domain";
 import { createDynamoProjectionStore } from "../createDynamoProjectionStore.js";
+import { golferPk } from "../keys.js";
 import type { LocalDynamo } from "../testing/local.js";
 import { startLocalDynamo } from "../testing/local.js";
 
@@ -130,20 +131,29 @@ describe("createDynamoProjectionStore", () => {
     });
   });
 
-  describe("putIndex / getIndex", () => {
-    it("put + get round-trip, and unconditionally overwrites on re-put", async () => {
+  // The stored handicap-index snapshot and its putIndex/getIndex methods are GONE (pre-prod
+  // hardening D4a): the index is computed at read time from listLines' own lines
+  // (golfers/getMyRecord.ts), never stored on this table. A live table can still carry rows
+  // written under the OLD sort key ("INDEX") from before this change — this pin proves they are
+  // genuinely dead data, not just unread by the deleted methods: a raw item seeded directly under
+  // that legacy sk (bypassing the port entirely, since the port has no way to write one anymore)
+  // must be INVISIBLE to listLines' `ROUND#`-prefixed begins_with query, never surfacing as a
+  // phantom "round" line.
+  describe("a legacy INDEX row (pre-D4a data) is invisible to listLines", () => {
+    it("a raw item seeded under the old 'INDEX' sort key never appears in listLines' ROUND#-prefixed query", async () => {
       const store = newStore();
       const golfer = golferId(randomUUID());
+      const line = makeLine(roundId(randomUUID()), 1_000);
+      await store.putLine(golfer, line);
+      // Seeded directly via the raw client — the port itself no longer has a way to write this.
+      await local.client.send(
+        new PutCommand({
+          TableName: local.projectionsTable,
+          Item: { pk: golferPk(golfer), sk: "INDEX", snapshot: { value: 12.3, computedAtMs: 1_000, differentialsUsed: 3 } },
+        }),
+      );
 
-      await store.putIndex(golfer, { value: 12.3, computedAtMs: 1_000, differentialsUsed: 3 });
-      await store.putIndex(golfer, { value: 11.8, computedAtMs: 2_000, differentialsUsed: 4 });
-
-      expect(await store.getIndex(golfer)).toEqual({ value: 11.8, computedAtMs: 2_000, differentialsUsed: 4 });
-    });
-
-    it("getIndex on a golfer with no snapshot returns undefined", async () => {
-      const store = newStore();
-      expect(await store.getIndex(golferId(randomUUID()))).toBeUndefined();
+      expect(await store.listLines(golfer)).toEqual([line]);
     });
   });
 

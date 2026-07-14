@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { deviceId, fixtureLinks, golferId, opId, placeholderName, roundId } from "@swng/domain";
+import { combineNineHoleDifferentials, computeIndexDetail, deviceId, fixtureLinks, golferId, opId, placeholderName, roundId } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
-import { createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
+import type { ProjectionStore } from "../ports/projectionStore.js";
+import { createFrozenClock, createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
 import { getMyGolfer } from "./getMyGolfer.js";
 import { getMyLiveRounds } from "./getMyLiveRounds.js";
 import { getMyRecord } from "./getMyRecord.js";
 import { getMyRounds } from "./getMyRounds.js";
 import { updateMyGolfer } from "./updateMyGolfer.js";
+
+// getMyRecord's read-time index fold (pre-prod hardening D4a) needs a frozen clock so
+// computedAtMs is a known, assertable value rather than a live Date.now() read.
+const FROZEN_NOW = 9_999;
 
 // Accounts-only identity (spec §1): there are no ghosts and nothing to claim, so this file's
 // golfer surface is get-or-create (GET /me / PUT /me via ensureGolfer) plus the record/rounds
@@ -15,13 +20,14 @@ const setup = (golferStore: GolferStore = createInMemoryGolferStore()) => {
   const idGenerator = createSequentialIds("g");
   const projectionStore = createInMemoryProjectionStore();
   const journal = createInMemoryJournal();
+  const clock = createFrozenClock(FROZEN_NOW);
   return {
     golferStore,
     projectionStore,
     journal,
     getMe: getMyGolfer({ golferStore, idGenerator }),
     updateMe: updateMyGolfer({ golferStore, idGenerator }),
-    record: getMyRecord({ golferStore, projectionStore }),
+    record: getMyRecord({ golferStore, projectionStore, clock }),
     myRounds: getMyRounds({ golferStore, projectionStore }),
     myLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
   };
@@ -155,9 +161,13 @@ describe("getMyRecord", () => {
     expect(record.history).toHaveLength(1);
   });
 
-  it("assembles index + history newest-first once the projection store has them", async () => {
+  // Below the 3-differential bootstrap (Rule 5.2a's own minimum), the index is ABSENT, not
+  // zero — computeIndexDetail itself returns undefined under 3 (whs.ts), and getMyRecord
+  // must pass that absence straight through, never coercing it into a 0 the wire schema
+  // could mistake for a real (if unlikely) index value.
+  it("below the 3-differential bootstrap the index is ABSENT, not zero", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "bo@example.com" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
@@ -178,11 +188,93 @@ describe("getMyRecord", () => {
       distribution: { eagles: 0, birdies: 0, pars: 5, bogeys: 13, doublePlus: 0 },
       finalizedAtMs: 2_000,
     });
-    await ctx.projectionStore.putIndex(golfer.golferId, { value: 7.2, computedAtMs: 9_000, differentialsUsed: 2 });
 
     const record = await ctx.record({ sub: "sub-1" });
-    expect(record.index).toEqual({ value: 7.2, computedAtMs: 9_000, differentialsUsed: 2 });
-    expect(record.history.map((line) => line.roundId)).toEqual(["r2", "r1"]); // newest first
+    expect(record.index).toBeUndefined();
+    expect(record.history).toHaveLength(2);
+  });
+
+  // The pre-prod hardening headline pin (D4a): the index is computed HERE, at read time, from
+  // the SAME lines this response already carries — never a stored snapshot (no putIndex call
+  // anywhere in this test). The oracle is the identical domain fold projectArchive used to run
+  // (sortLines -> combineNineHoleDifferentials -> computeIndexDetail), proving getMyRecord's
+  // wire index agrees with it byte-for-byte, with computedAtMs pinned to this setup's frozen
+  // clock rather than a live wall-clock read.
+  it("computes the index at read time from the history lines — no stored snapshot is consulted", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const seededCompleteLines = [
+      { roundId: roundId("r1"), ags: 90, differential: 9.0, finalizedAtMs: 1_000 },
+      { roundId: roundId("r2"), ags: 95, differential: 14.0, finalizedAtMs: 2_000 },
+      { roundId: roundId("r3"), ags: 92, differential: 11.0, finalizedAtMs: 3_000 },
+    ];
+    for (const line of seededCompleteLines) {
+      await ctx.projectionStore.putLine(golfer.golferId, {
+        roundId: line.roundId,
+        courseName: "Casa Verde GC",
+        tee: "white",
+        holes: 18,
+        ags: line.ags,
+        differential: line.differential,
+        distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
+        finalizedAtMs: line.finalizedAtMs,
+      });
+    }
+
+    const response = await ctx.record({ sub: "sub-1" });
+
+    const expected = computeIndexDetail(combineNineHoleDifferentials(seededCompleteLines.map((l) => ({ differential: l.differential, holes: 18 }))))!;
+    expect(response.index).toEqual({ value: expected.value, computedAtMs: FROZEN_NOW, differentialsUsed: expected.differentialsUsed });
+    expect(response.history.map((line) => line.roundId)).toEqual(["r3", "r2", "r1"]); // newest first
+  });
+
+  // ProjectionStore.listLines is UNORDERED by contract (ports/projectionStore.ts) — the stable
+  // ROUND# sk carries no time to sort by. This proves getMyRecord itself imposes the
+  // (finalizedAtMs, roundId) order BEFORE the index fold (the fold moved here from the
+  // projector with D4a — this pin replaces projectArchive's own former version of the same
+  // proof), via a fake store whose listLines returns lines in the OPPOSITE order from how they
+  // were logically produced. combineNineHoleDifferentials pairs ADJACENT entries positionally
+  // (its own doc comment) — feeding it unsorted mispairs everyone, not just reorders the same
+  // pairs: 7 nine-hole lines, chronological r1..r7, sorted ascending pairs (r1,r2)=1+2=3,
+  // (r3,r4)=3+4=7, (r5,r6)=5+6=11, r7 pending → combined=[3,7,11]. A wrong implementation that
+  // skips the sort would fold the REVERSED feed into a DIFFERENT value entirely, not just a
+  // reordering of the same one.
+  it("sorts lines by finalizedAtMs before folding — an out-of-order store never mispairs 9-hole differentials", async () => {
+    const nineHoleLine = (id: string, finalizedAtMs: number, differential: number) => ({
+      roundId: roundId(id),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 9 as const,
+      differential,
+      distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+      finalizedAtMs,
+    });
+    const chronological = [
+      nineHoleLine("r1", 1_000, 1),
+      nineHoleLine("r2", 2_000, 2),
+      nineHoleLine("r3", 3_000, 3),
+      nineHoleLine("r4", 4_000, 4),
+      nineHoleLine("r5", 5_000, 5),
+      nineHoleLine("r6", 6_000, 6),
+      nineHoleLine("r7", 7_000, 7),
+    ];
+    const reversed = [...chronological].reverse();
+    const outOfOrderStore: ProjectionStore = {
+      putLine: async () => {},
+      listLines: async () => reversed,
+      putLive: async () => {},
+      deleteLive: async () => {},
+      listLive: async () => [],
+    };
+    const golferStore = createInMemoryGolferStore();
+    await golferStore.put({ id: golferId("ann"), name: "Ann", handicap: {} }, undefined);
+    await golferStore.bindSub(golferId("ann"), "sub-ann");
+    const record = getMyRecord({ golferStore, projectionStore: outOfOrderStore, clock: createFrozenClock(FROZEN_NOW) });
+
+    const response = await record({ sub: "sub-ann" });
+
+    const expected = computeIndexDetail(combineNineHoleDifferentials([3, 7, 11].map((differential) => ({ differential, holes: 18 }))))!;
+    expect(response.index).toEqual({ value: expected.value, computedAtMs: FROZEN_NOW, differentialsUsed: expected.differentialsUsed });
   });
 });
 

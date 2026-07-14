@@ -1,6 +1,5 @@
 import type { GolferId, RoundArchive } from "@swng/domain";
-import { archiveGolferLine, combineNineHoleDifferentials, computeIndexDetail } from "@swng/domain";
-import type { Clock } from "../ports/clock.js";
+import { archiveGolferLine } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { Logger } from "../ports/logger.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
@@ -43,24 +42,8 @@ export const createdAtMsOf = (archive: RoundArchive): number => {
 // THE one projector implementation (M7 plan): both the DynamoDB stream trigger (Task 4) and
 // rebuildProjections (below) call this exact function — never two independent
 // implementations of "what a finalized round does to a golfer's record."
-//
-// differentialsUsed is Rule 5.2a's `use` count — how many differentials were actually
-// AVERAGED, not how many were in the window (e.g. 3 available → uses the lowest 1). Sourced
-// straight from domain's computeIndexDetail (whs.ts), which owns the one small-sample table
-// — never re-derived here (conventions §4: scoring math exists exactly once, in domain).
-//
-// ACCEPTED RACE (per-shard, not per-golfer, serialization): DynamoDB Streams only guarantee
-// ordering per shard, and shards partition by the STREAM'S own key (the round, here) — not by
-// golfer. Two rounds that finalize at nearly the same moment and share a participant can land
-// on different shards and invoke this function concurrently for that golfer. Each call's
-// putLine (below) is independent and safe, but the immediately-following listLines +
-// computeIndexDetail can race: one call's listLines can run before the OTHER call's
-// putLine has landed, so the index it computes and stores is momentarily short one
-// differential. Self-heals the next time this golfer's projection is touched — either their
-// next finalize (a fresh listLines sees everything written so far) or a rebuild pass over the
-// snapshots table.
 export const projectArchive =
-  (deps: { projectionStore: ProjectionStore; golferStore: GolferStore; clock: Clock; logger: Logger }) =>
+  (deps: { projectionStore: ProjectionStore; golferStore: GolferStore; logger: Logger }) =>
   async (archive: RoundArchive): Promise<void> => {
     const finalizedAtMs = finalizedAtMsOf(archive);
     const createdAtMs = createdAtMsOf(archive);
@@ -76,30 +59,15 @@ export const projectArchive =
 
     for (const participant of archive.participants) {
       // Sub-less (a ghost) or no golfer row at all: not an account, so nothing about this round
-      // enters their record — no history line, no index recompute. Presence IS still cleared for
-      // them (below, unconditionally over the ever-seated roster) — that's identity housekeeping,
-      // not projection policy, and needs no account read.
+      // enters their record — no history line. Presence IS still cleared for them (below,
+      // unconditionally over the ever-seated roster) — identity housekeeping, not projection
+      // policy. The handicap index is NOT computed here at all: it is derived at read time in
+      // golfers/getMyRecord.ts (pre-prod hardening D4a), so the projector is a pure per-round
+      // idempotent upsert with no read-modify-write left to race.
       if (!accountBound.has(participant.golferId)) continue;
 
       const line = archiveGolferLine(archive, participant.golferId);
       await deps.projectionStore.putLine(participant.golferId, { ...line, finalizedAtMs, createdAtMs });
-
-      // listLines is UNORDERED (ports/projectionStore.ts) — sortLines imposes the
-      // (finalizedAtMs, roundId) order combineNineHoleDifferentials/computeIndexDetail need
-      // BEFORE the fold runs, so this fold's result never depends on the store's own,
-      // unspecified iteration order (a real DynamoDB Query vs. an in-memory fake's Map could
-      // otherwise disagree).
-      const lines = sortLines(await deps.projectionStore.listLines(participant.golferId));
-      const complete = lines.filter((entry) => entry.differential !== undefined);
-      const combined = combineNineHoleDifferentials(complete.map((entry) => ({ differential: entry.differential!, holes: entry.holes })));
-      const detail = computeIndexDetail(combined);
-      // Bootstrap not met yet (computeIndexDetail returns undefined below 3 differentials) —
-      // skip, never clear a prior snapshot (there isn't one to clear: differentials only grow
-      // within one incremental build, and a rebuild replay hits this same skip at the same
-      // relative position it did the first time).
-      if (detail === undefined) continue;
-
-      await deps.projectionStore.putIndex(participant.golferId, { value: detail.value, computedAtMs: deps.clock.now(), differentialsUsed: detail.differentialsUsed });
     }
 
     // Presence-cleanup is identity housekeeping, not projection policy: every golfer who ever

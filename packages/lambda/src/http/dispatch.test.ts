@@ -175,7 +175,7 @@ const setup = (verifier: AccountVerifier = subVerifier) => {
     terminateGame: terminateGame({ journal, broadcast, clock, ids }),
     getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
-    getMyRecord: getMyRecord({ golferStore, projectionStore }),
+    getMyRecord: getMyRecord({ golferStore, projectionStore, clock }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
     getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
     createCrew: createCrew({ crewStore, golferStore, ids }),

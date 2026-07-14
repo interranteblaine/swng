@@ -1,15 +1,14 @@
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { DeleteCommand, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { DeleteCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import type { GolferId, GolferRoundLine, RoundId } from "@swng/domain";
 import type { ProjectionStore } from "@swng/application";
-import { golferPk, lineSk, lineSkPrefix, liveSk, liveSkPrefix, projectionIndexSk } from "./keys.js";
+import { golferPk, lineSk, lineSkPrefix, liveSk, liveSkPrefix } from "./keys.js";
 import { queryAllPages } from "./paginate.js";
 
 // `createdAtMs` (accounts-only identity spec §5) rides inside the stored `line` map like every
 // other line field — putLine writes the whole object and listLines reads it back, so no per-field
 // marshalling is needed. Optional: lines written before the field existed simply lack it on read.
 type Line = GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number };
-type IndexSnapshot = { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number };
 type LiveEntry = { readonly roundId: RoundId; readonly courseName: string; readonly joinedAtMs: number; readonly expiresAtSec: number };
 
 export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentClient; tableName: string }): ProjectionStore => {
@@ -39,23 +38,6 @@ export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentCl
         },
         (item) => item.line as Line,
       ),
-
-    putIndex: async (golferId: GolferId, snapshot: IndexSnapshot) => {
-      // Unconditional upsert: each finalize recomputes the whole snapshot from every line on
-      // file, never patches it incrementally.
-      await client.send(new PutCommand({ TableName: tableName, Item: { pk: golferPk(golferId), sk: projectionIndexSk, snapshot } }));
-    },
-
-    getIndex: async (golferId: GolferId) => {
-      const result = await client.send(
-        new GetCommand({
-          TableName: tableName,
-          Key: { pk: golferPk(golferId), sk: projectionIndexSk },
-          ConsistentRead: true,
-        }),
-      );
-      return result.Item?.snapshot as IndexSnapshot | undefined;
-    },
 
     // Presence (spec §5) — a register, not a projection: no rebuild path, none needed. `ttl` is
     // the item's OWN top-level attribute (DynamoDB TTL requires a top-level Number), set to

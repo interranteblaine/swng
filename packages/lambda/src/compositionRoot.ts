@@ -181,8 +181,6 @@ const unavailableProjectionStore = (): ProjectionStore => {
   return {
     putLine: unavailable,
     listLines: unavailable,
-    putIndex: unavailable,
-    getIndex: unavailable,
     // Presence (realignment Task 13): real callers as of this task — ports/projectionStore.ts's
     // own doc comment.
     putLive: unavailable,
@@ -302,7 +300,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // case above shares.
     getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
-    getMyRecord: getMyRecord({ golferStore, projectionStore }),
+    // clock (pre-prod hardening D4a): the handicap index is computed HERE, at read time, from
+    // the SAME lines the response already carries — never a stored snapshot. The SAME system
+    // clock every other use case above shares.
+    getMyRecord: getMyRecord({ golferStore, projectionStore, clock }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
     // journal (accounts-only identity spec §5): the live list derives each round's created-at from
     // its genesis at read time — the SAME journal every round use case above shares.
@@ -376,12 +377,13 @@ export const buildProjector = (env: NodeJS.ProcessEnv): ProjectorApp => {
   const tableProjections = requireEnv(env, "TABLE_PROJECTIONS");
   const tableCore = requireEnv(env, "TABLE_CORE");
 
-  const clock = createSystemClock();
   const logger = createConsoleLogger();
   const documentClient = createDocumentClient();
   const projectionStore = createDynamoProjectionStore({ client: documentClient, tableName: tableProjections });
   const golferStore = createDynamoGolferStore({ client: documentClient, tableName: tableCore });
-  const project = projectArchive({ projectionStore, golferStore, clock, logger });
+  // No clock (pre-prod hardening D4a): the projector no longer computes or writes a handicap
+  // index at all — it's a pure per-round line upsert, with nothing left needing a wall-clock read.
+  const project = projectArchive({ projectionStore, golferStore, logger });
 
   return { handler: createProjectorHandler({ parseArchive: parseSnapshotStreamImage, project, logger }) };
 };
@@ -408,12 +410,13 @@ export const buildRebuild = (env: NodeJS.ProcessEnv): RebuildApp => {
   const tableProjections = requireEnv(env, "TABLE_PROJECTIONS");
   const tableCore = requireEnv(env, "TABLE_CORE");
 
-  const clock = createSystemClock();
   const logger = createConsoleLogger();
   const documentClient = createDocumentClient();
   const projectionStore = createDynamoProjectionStore({ client: documentClient, tableName: tableProjections });
   const snapshots = createDynamoSnapshotStore({ client: documentClient, tableName: tableSnapshots });
   const golferStore = createDynamoGolferStore({ client: documentClient, tableName: tableCore });
 
-  return { handler: rebuildProjections({ snapshots, projectionStore, golferStore, clock, logger }) };
+  // No clock (pre-prod hardening D4a): the replay goes through the SAME projectArchive the
+  // stream trigger uses, which no longer computes or writes a handicap index at all.
+  return { handler: rebuildProjections({ snapshots, projectionStore, golferStore, logger }) };
 };

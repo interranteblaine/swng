@@ -329,15 +329,16 @@ export const createInMemoryCrewStore = (): CrewStore => {
 
 // ProjectionStore's real adapter (M7 Task 3, extended M8, keys stabilized in the
 // projection-realignment) lives on the `projections` table, one golfer partition holding
-// ROUND#/INDEX/LIVE# items — this fake mirrors it with one Map per golfer keyed by roundId
+// ROUND#/LIVE# items — this fake mirrors it with one Map per golfer keyed by roundId
 // (upsert-by-roundId is the whole point of the stable-key rewrite: a repeat putLine for the
 // same round REPLACES the Map entry, never adds a second one). listLines deliberately does NOT
 // sort — the port's own contract is UNORDERED (ports/projectionStore.ts); every caller
-// (projections/projectArchive.ts's sortLines) imposes order itself, and a fake that quietly
-// sorted here would let a caller that forgot to sort pass anyway.
+// (getMyRecord.ts's own sortLines use) imposes order itself, and a fake that quietly sorted
+// here would let a caller that forgot to sort pass anyway. There is no index Map: the handicap
+// index is computed at read time (pre-prod hardening D4a, golfers/getMyRecord.ts), never
+// stored by anything this fake needs to model.
 export const createInMemoryProjectionStore = (): ProjectionStore => {
   const linesByGolfer = new Map<GolferId, Map<RoundId, GolferRoundLine & { finalizedAtMs: number; createdAtMs?: number }>>();
-  const indexByGolfer = new Map<GolferId, { value: number; computedAtMs: number; differentialsUsed: number }>();
   const liveByGolfer = new Map<GolferId, Map<RoundId, { roundId: RoundId; courseName: string; joinedAtMs: number; expiresAtSec: number }>>();
 
   return {
@@ -347,10 +348,6 @@ export const createInMemoryProjectionStore = (): ProjectionStore => {
       linesByGolfer.set(golferId, lines);
     },
     listLines: async (golferId) => [...(linesByGolfer.get(golferId)?.values() ?? [])],
-    putIndex: async (golferId, snapshot) => {
-      indexByGolfer.set(golferId, snapshot);
-    },
-    getIndex: async (golferId) => indexByGolfer.get(golferId),
     putLive: async (golferId, entry) => {
       const live = liveByGolfer.get(golferId) ?? new Map<RoundId, { roundId: RoundId; courseName: string; joinedAtMs: number; expiresAtSec: number }>();
       live.set(entry.roundId, entry); // upsert by roundId

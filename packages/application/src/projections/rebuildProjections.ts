@@ -1,4 +1,3 @@
-import type { Clock } from "../ports/clock.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { Logger } from "../ports/logger.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
@@ -33,9 +32,9 @@ import { projectArchive } from "./projectArchive.js";
 // returned cursor (or from scratch, with none) always makes forward progress toward "every
 // snapshot has been projected at least once," never backward.
 export const rebuildProjections =
-  (deps: { snapshots: SnapshotStore; projectionStore: ProjectionStore; golferStore: GolferStore; clock: Clock; logger: Logger }) =>
+  (deps: { snapshots: SnapshotStore; projectionStore: ProjectionStore; golferStore: GolferStore; logger: Logger }) =>
   async (input?: { readonly cursor?: string; readonly maxSnapshots?: number }): Promise<{ processed: number; cursor?: string }> => {
-    const project = projectArchive({ projectionStore: deps.projectionStore, golferStore: deps.golferStore, clock: deps.clock, logger: deps.logger });
+    const project = projectArchive({ projectionStore: deps.projectionStore, golferStore: deps.golferStore, logger: deps.logger });
     const maxSnapshots = input?.maxSnapshots ?? 500;
 
     // The loop (Task 5 brief, verbatim). The maxSnapshots check runs BETWEEN pages, not

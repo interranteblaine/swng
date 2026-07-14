@@ -2,7 +2,10 @@ import type { GolferId, GolferRoundLine, RoundId } from "@swng/domain";
 
 // The golfer record + presence surface (projection-realignment spec §3/§5) — the projections
 // table's one golfer partition (adapters-dynamodb's golferPk): a `ROUND#<roundId>` line per
-// finalized round the golfer played, one `INDEX` snapshot, and `LIVE#<roundId>` presence rows.
+// finalized round the golfer played, and `LIVE#<roundId>` presence rows. There is no stored
+// index snapshot (pre-prod hardening D4a): the handicap index is computed at read time from
+// these same lines (golfers/getMyRecord.ts), never written here — the projector's own
+// read-modify-write aggregate, and the cross-shard race it could lose, are both deleted with it.
 //
 // KEYS ARE IDENTITIES, TIME IS AN ATTRIBUTE (spec §0/§3): putLine's key is `roundId` alone —
 // never finalizedAtMs — so a reopen-and-refinalize (a NEW round-finalized event, a DIFFERENT
@@ -15,10 +18,10 @@ import type { GolferId, GolferRoundLine, RoundId } from "@swng/domain";
 // there is no second key to strand data under.
 //
 // listLines is UNORDERED (createDynamoProjectionStore.ts's Query no longer sorts by time — the
-// sk carries no time to sort by) — every caller (projectArchive's index fold, getMyRecord's wire
-// response) sorts by the `finalizedAtMs` each line carries itself, at read time, over what is
-// always a small, whole-career result set. This is deliberate, not a gap: the alternative
-// (embedding order in the key) is exactly the bug this rewrite removes.
+// sk carries no time to sort by) — every caller (getMyRecord's index fold and wire response)
+// sorts by the `finalizedAtMs` each line carries itself, at read time, over what is always a
+// small, whole-career result set. This is deliberate, not a gap: the alternative (embedding
+// order in the key) is exactly the bug this rewrite removes.
 export interface ProjectionStore {
   // `createdAtMs` (accounts-only identity spec §5): the round-created event's own wall time, carried
   // on the line so getMyRounds can render the "course + date" designation without re-reading each
@@ -26,8 +29,6 @@ export interface ProjectionStore {
   // read as absent — a rebuild backfills it, never a migration); projectArchive always provides it.
   putLine(golferId: GolferId, line: GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number }): Promise<void>;
   listLines(golferId: GolferId): Promise<readonly (GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number })[]>;
-  putIndex(golferId: GolferId, snapshot: { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number }): Promise<void>;
-  getIndex(golferId: GolferId): Promise<{ value: number; computedAtMs: number; differentialsUsed: number } | undefined>;
 
   // Presence (spec §5). Implemented here — ahead of any real writer — so the store's shape
   // rewrites exactly once rather than growing a second time when realignment Task 13 (the

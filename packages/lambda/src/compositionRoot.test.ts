@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, DynamoDBStreamEvent } from "aws-lambda";
 import { deviceId, fixtureLinks18, fixtureWhite, golferId, opId, roundId } from "@swng/domain";
 import type { RoundArchive, RoundEvent } from "@swng/domain";
-import { createFixedClock, createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, projectArchive, putAndBindGolfer } from "@swng/application";
+import { createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, projectArchive, putAndBindGolfer } from "@swng/application";
 import { buildApp, buildProjector, buildRebuild, createConsoleLogger, createProjectorHandler } from "./compositionRoot.js";
 
 // Pin for the M3-deferred fix (task-6-brief.md item 5): consoleLogger used to spread `data`
@@ -269,7 +269,7 @@ describe("createProjectorHandler", () => {
     const golferStore = createInMemoryGolferStore();
     await putAndBindGolfer(golferStore, ann, "sub-ann", "Ann");
     await putAndBindGolfer(golferStore, bo, "sub-bo", "Bo");
-    const project = projectArchive({ projectionStore, golferStore, clock: createFixedClock(9_000), logger: createNullLogger() });
+    const project = projectArchive({ projectionStore, golferStore, logger: createNullLogger() });
     return { projectionStore, golferStore, project, logger: createNullLogger() };
   };
 

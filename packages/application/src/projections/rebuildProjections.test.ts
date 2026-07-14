@@ -3,7 +3,7 @@ import { deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain"
 import type { GolferId, Participant, RoundArchive, RoundEvent } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
-import { createFrozenClock, createInMemoryGolferStore, createInMemoryProjectionStore, createInMemorySnapshotStore, createNullLogger, putAndBindGolfer } from "../testing/fakes.js";
+import { createInMemoryGolferStore, createInMemoryProjectionStore, createInMemorySnapshotStore, createNullLogger, putAndBindGolfer } from "../testing/fakes.js";
 import { rebuildProjections } from "./rebuildProjections.js";
 
 const ann = golferId("ann");
@@ -65,13 +65,15 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
 });
 
 // Wraps the real in-memory ProjectionStore, recording every WRITE method it sees (never the
-// reads — listLines/getIndex tell you nothing about whether a wipe happened). Exists to prove
-// the one negative fact a passing test suite can't show any other way: rebuildProjections' loop
-// (Task 5) has no code path that can call a DESTRUCTIVE wipe method at all, not merely "didn't
-// happen to in this fixture" — this fake is how a regression that reintroduced one would get
-// caught. (The crew ledger and its wipe are gone entirely as of Task 9. deleteLive — added
-// Task 13 — is recorded here too, but it's projectArchive's own idempotent presence cleanup,
-// not a destructive wipe; see the "touches exactly {putLine, putIndex, deleteLive}" test below.)
+// reads — listLines tells you nothing about whether a wipe happened). Exists to prove the one
+// negative fact a passing test suite can't show any other way: rebuildProjections' loop (Task 5)
+// has no code path that can call a DESTRUCTIVE wipe method at all, not merely "didn't happen to
+// in this fixture" — this fake is how a regression that reintroduced one would get caught. (The
+// crew ledger and its wipe are gone entirely as of Task 9. deleteLive — added Task 13 — is
+// recorded here too, but it's projectArchive's own idempotent presence cleanup, not a
+// destructive wipe; see the "touches exactly {putLine, deleteLive}" test below. putIndex is gone
+// too, pre-prod hardening D4a: the index is computed at read time in getMyRecord.ts, never
+// written by this projector at all.)
 const createRecordingProjectionStore = (): ProjectionStore & { readonly writeCalls: readonly string[] } => {
   const inner = createInMemoryProjectionStore();
   const writeCalls: string[] = [];
@@ -82,11 +84,6 @@ const createRecordingProjectionStore = (): ProjectionStore & { readonly writeCal
       return inner.putLine(...args);
     },
     listLines: (...args) => inner.listLines(...args),
-    putIndex: async (...args) => {
-      writeCalls.push("putIndex");
-      return inner.putIndex(...args);
-    },
-    getIndex: (...args) => inner.getIndex(...args),
     putLive: async (...args) => {
       writeCalls.push("putLive");
       return inner.putLive(...args);
@@ -107,7 +104,7 @@ describe("rebuildProjections", () => {
     for (const archive of archives) snapshots.record(archive);
     const projectionStore = createInMemoryProjectionStore();
     const golferStore = await seededGolferStore();
-    const rebuild = rebuildProjections({ snapshots, projectionStore, golferStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
+    const rebuild = rebuildProjections({ snapshots, projectionStore, golferStore, logger: createNullLogger() });
 
     const result = await rebuild();
 
@@ -125,7 +122,7 @@ describe("rebuildProjections", () => {
     for (const archive of archives) snapshots.record(archive);
     const projectionStore = createInMemoryProjectionStore();
     const golferStore = await seededGolferStore();
-    const rebuild = rebuildProjections({ snapshots, projectionStore, golferStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
+    const rebuild = rebuildProjections({ snapshots, projectionStore, golferStore, logger: createNullLogger() });
 
     const first = await rebuild({ maxSnapshots: 4 });
     expect(first.processed).toBe(4);
@@ -148,13 +145,14 @@ describe("rebuildProjections", () => {
   // projector makes at finalize time. A rebuild replaying an already-finalized archive calls
   // deleteLive on a pointer that's already gone (a no-op, per its own port doc) — this test's
   // job is narrower than its name once was: prove the write surface is EXACTLY
-  // {putLine, putIndex, deleteLive}, nothing beyond what projectArchive itself does for every
-  // archive it's handed.
-  it("touches exactly {putLine, putIndex, deleteLive} — no OTHER write surface (no destructive wipe)", async () => {
+  // {putLine, deleteLive}, nothing beyond what projectArchive itself does for every archive
+  // it's handed. putIndex is gone from that surface entirely (pre-prod hardening D4a): the
+  // index is computed at read time in getMyRecord.ts, so even the 3rd archive here — which
+  // crosses the bootstrap — writes nothing beyond its own line.
+  it("touches exactly {putLine, deleteLive} — no OTHER write surface (no destructive wipe, no index write)", async () => {
     // 3 archives for the SAME golfer, ascending differentials — the 3rd crosses the bootstrap
-    // (computeIndexDetail needs 3+), so putIndex fires too and this isn't just "putLine never
-    // wipes," it's "the whole write surface this run touches is exactly {putLine, putIndex,
-    // deleteLive}."
+    // (computeIndexDetail needs 3+), which is exactly the case that USED to also fire putIndex;
+    // proving the write surface stays {putLine, deleteLive} here is the regression pin for that.
     const archives = [
       archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]),
       archiveAt("r2", 2_000, [{ golferId: ann, differential: 10.0 }]),
@@ -164,11 +162,11 @@ describe("rebuildProjections", () => {
     for (const archive of archives) snapshots.record(archive);
     const recording = createRecordingProjectionStore();
     const golferStore = await seededGolferStore();
-    const rebuild = rebuildProjections({ snapshots, projectionStore: recording, golferStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
+    const rebuild = rebuildProjections({ snapshots, projectionStore: recording, golferStore, logger: createNullLogger() });
 
     await rebuild();
 
-    expect(new Set(recording.writeCalls)).toEqual(new Set(["putLine", "putIndex", "deleteLive"]));
+    expect(new Set(recording.writeCalls)).toEqual(new Set(["putLine", "deleteLive"]));
   });
 
   it("replaying the same page(s) twice yields identical store state (idempotence — no wipe means a repeat pass is always safe)", async () => {
@@ -184,19 +182,17 @@ describe("rebuildProjections", () => {
     for (const archive of archives) snapshots.record(archive);
     const projectionStore = createInMemoryProjectionStore();
     const golferStore = await seededGolferStore();
-    const rebuild = rebuildProjections({ snapshots, projectionStore, golferStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
+    const rebuild = rebuildProjections({ snapshots, projectionStore, golferStore, logger: createNullLogger() });
 
     await rebuild();
     const afterFirst = {
       ann: await projectionStore.listLines(ann),
-      annIndex: await projectionStore.getIndex(ann),
       bo: await projectionStore.listLines(bo),
     };
 
     await rebuild(); // the exact same snapshots table, replayed a second full pass — cursor unset, starts over
 
     expect(await projectionStore.listLines(ann)).toEqual(afterFirst.ann);
-    expect(await projectionStore.getIndex(ann)).toEqual(afterFirst.annIndex);
     expect(await projectionStore.listLines(bo)).toEqual(afterFirst.bo);
   });
 });

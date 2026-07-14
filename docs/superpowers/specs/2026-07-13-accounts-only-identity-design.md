@@ -1,6 +1,6 @@
 # Accounts-Only Identity — Design
 
-**Status:** draft for owner review (rulings dated 2026-07-13, this session).
+**Status:** implemented (2026-07-14, commits `515baac..db6b5df` + the N-T7 close; owner approved in-chat 2026-07-13).
 **Supersedes:** product.md's ghost/holdout pillar (§4 "no account required", §6 "Everyone plays, even the holdout"), the M7 claim flow and its M9 hardening, M7 Task 5b ghost continuity, papercut 8's recorded fix direction.
 **Preserves:** the sealed leaf, the event log + commutative fold, settle-once, crews as groupings, members-only standings, delegated scoring (product.md §9), the read-only share link.
 

@@ -288,6 +288,43 @@ nothing lost while he was a non-member), and the full e2e:field suite. `getRound
 crew-membership read-authorization (view an archive your crew counts) survives by design —
 it references the round inbound by id, the sealed-leaf direction.
 
+Accounts-only identity is real (post-amendment, 2026-07-13/14, commits `515baac..` — **the
+wall**): every round participant is a signed-in account; ghosts, claims, and anonymous
+rounds are deleted outright. `@swng/domain` gains `participant-left` (presence per golfer =
+HLC-latest of {join, leave}, the same mechanism as score cells — commutative incl.
+leave-before-join arrival; rejoin is just a later join whose seat data applies; leaving
+stops the future and never rewrites the past) with settle-once departure rules
+(`settleRound`: departed + zero scored holes + zero game membership → omitted from the
+archive entirely; otherwise settles normally with `departed: true`; other players' results
+never change) and `placeholderName(sub)` (FNV-1a mod 10000 → "Golfer NNNN"). Identity is
+get-or-create on first authenticated touch: `ensureGolfer` mints through the M9 `SUB#`
+`attribute_not_exists` transaction (the race's loser re-reads the winner — contract-tested
+with real parallelism), placeholder name f(sub), `namePlaceholder: true` until a real-name
+PUT /me clears it; **GET /me now ensures** (the M7 "never creates" rule existed to protect
+claimable ghosts and died with them); Cognito is a pure authenticator (sub only — nothing
+reads `claims.email` into a golfer). Join is always yourself: `POST /rounds` seats its
+creator only, `POST /rounds/join` is as-self `{code, tee, courseHandicap}` with the golfer
+record's name frozen into the event at join (renames never rewrite cards);
+`claimGolfer`/`golferIdentity.ts`/addParticipant/`players[]`/host-`name`/wire-`golferId`
+and the `optional-golfer` tier are deleted (routes 35→34 HTTP/36 total: −claim, −players,
++`POST /rounds/{roundId}/leave`); the projector projects lines/index/presence-clears ONLY
+for account-bound golfers (missing golfer row = skip, never throw) via a batched `getMany`.
+Old data tolerates forever: stored rounds with ghost golferIds fold and render exactly as
+written — the sealed leaf is the identity of record for its own participants. `@swng/web`:
+JoinRoundPage is the funnel (signed-out → sign-in CTA preserving the code across the PKCE
+round-trip via a single-use `returnToStore`; placeholder golfer → one required "What should
+the card call you?" prompt, then straight into the join form; no free-text name input
+exists anywhere), CreateRoundPage is sign-in-gated, SetupPanel's ghost form is replaced by
+a share-the-code panel, all claim UI is gone, RoundPage has "Leave round" (one POST, rejoin
+framing distinct from Scrap) and a departed roster marker, the between-holes digest is
+deleted outright (owner call — standings are pulled via chips, never pushed), and
+home/archive/watch render the canonical derived designation `roundLabel` ("Casa Verde GC ·
+Sat, Jul 12", tee time appended on same-course-same-day collision; timezone is an explicit
+input, local by default). Both e2e surfaces are accounts-only (root e2e mints via
+`USER_PASSWORD_AUTH` with ndjson-tracked teardown; the crewSeason frozen deck's numbers
+unchanged under account seeding; fieldTest browser B drives the real funnel; identityRecord
+is one account, three rounds as-self, claim arc gone).
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

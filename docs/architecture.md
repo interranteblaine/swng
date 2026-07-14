@@ -44,10 +44,13 @@ is an auth-layer word; names must tell the truth).
 
 ### Golfer
 
-One identity for a playing life. **Ghost vs. account is an authentication fact, not a domain
-distinction** — the domain treats every golfer identically (scores, index, ledger). Claiming a
-ghost attaches credentials to the existing `GolferId`; nothing else moves, so history is
-continuous by construction.
+One identity for a playing life. **Account and golfer are born together** (owner call,
+2026-07-13 — ghosts and claims are deleted): the first authenticated request that needs the
+caller's golfer mints it, with a deterministic placeholder name derived from the sub
+("Golfer 4821" — f(sub), so the concurrent-first-request race cannot generate two names),
+through the sub-binding's own `attribute_not_exists` transaction; the race's loser re-reads
+the winner. Cognito is a pure authenticator — it contributes a `sub` and nothing else; the
+name is a domain display attribute, editable forever, and nothing keys on it (`GolferId`s do).
 
 ```ts
 interface Golfer {
@@ -59,9 +62,10 @@ interface Golfer {
 ```
 
 The computed swng Index takes over automatically once 54 holes are archived (roadmap's
-bootstrap rule); an official index, if maintained, always wins. If a claim collides with an
-existing account, `GolferMerged { fromId, toId }` is a recorded fact: the old id becomes a
-permanent alias and projections rebuild with alias resolution — a script, not a crisis.
+bootstrap rule); an official index, if maintained, always wins. Old stored rounds still
+contain ghost golferIds that never had and never will have accounts — they fold and render
+exactly as written (the sealed leaf is the identity of record for its own participants);
+only account-bound golfers are projected forward into records and presence.
 
 ### Course
 
@@ -140,9 +144,8 @@ Index history is a projection of `IndexSnapshot`s recomputed at each finalize.
 
 ### Crew — plain entity, no event sourcing
 
-A roster of real accounts — membership requires a bound identity; ghosts play inside rounds
-only (onboarding stays play-as-ghost → claim in-round → account → optionally join a crew) —
-plus named **seasons** (`"2026"`, `"Summer Cup"`, open | closed; a season is a thing a
+A roster of real accounts — like everything else now: every round participant is an account,
+and the round's join link is the sign-up funnel for whoever lacks one — plus named **seasons** (`"2026"`, `"Summer Cup"`, open | closed; a season is a thing a
 member creates, never a calendar computation). **A crew is a grouping, not a preset**
 (owner call, 2026-07-13): nothing about a crew configures, seeds, or runs a round — no
 standing games, no crew-sourced quick-adds at setup, no membership-based seating consent.
@@ -204,16 +207,19 @@ DynamoDB:  rounds │ snapshots │ core │ projections │ connections
 
 ### Identity & access
 
-- Cognito (email + social sign-in) behind a JWT authorizer. **`GolferId` ≠ Cognito sub** — an
-  identity mapping links them, which is exactly what makes ghost-claiming a one-row operation.
-- Join code → exchanged for a round-scoped participant token (score without an account).
-- Share link → read-only spectator token. Same mechanism, narrower capability.
+- Cognito (email + social sign-in) behind a JWT authorizer, contributing a `sub` and nothing
+  else. **`GolferId` ≠ Cognito sub** — an identity mapping (the sub-binding row) links them,
+  minted get-or-create on first authenticated touch.
+- Join is always yourself: `POST /rounds` and `POST /rounds/join` are golfer-authed (there is
+  no anonymous round path); a successful join yields the round-scoped participant token that
+  scores. Any participant scores for any participant — delegation is capability inside the
+  round, never identity.
+- Share link → read-only spectator token. Same signing mechanism, narrower capability.
 - `POST /rounds/{roundId}/token` (golfer auth): a signed-in participant re-mints a scoring
-  token on any device — new phone, or seated by a friend, taps the round on home and scores;
-  no re-join, no separate token model.
+  token on any device — new phone taps the round on home and scores; no re-join, no separate
+  token model.
 - Home's "your rounds" is presence by identity (`LIVE#<roundId>` in the golfer's own
-  projection partition, TTL-backed), not device-held tokens — the device-token list remains
-  only for anonymous ghost sessions, which have no identity to query by.
+  projection partition, TTL-backed), never device-held tokens.
 
 ### Persistence sketch (DynamoDB)
 
@@ -232,7 +238,7 @@ an afternoon — trivial for this shape. Nothing here is provisioned for imagina
 
 ```
 domain            scoring/ handicap/ round/ golfer/ crew/ course/ competition/ — pure, zero deps
-application       use cases (StartRound, RecordScore, FinalizeRound, ClaimGhost, …)
+application       use cases (StartRound, RecordScore, FinalizeRound, LeaveRound, …)
                   ports/: RoundStore, EventJournal, Broadcast, IdentityProvider, Clock, IdGenerator, Logger
 contracts         Zod schemas for HTTP + WS wire types (client depends on these, never on application)
 adapters-dynamodb createDynamoRoundStore, createDynamoEventJournal, …

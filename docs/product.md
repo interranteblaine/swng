@@ -48,7 +48,7 @@ The POC's live multi-phone scorecard survives as the innermost kernel of the Rou
 
 The live engine. Phone-first, shared, and — the key move — **format-aware and handicap-aware**.
 
-**Starting a round.** Pick the course and tees, add players — by join code or link, no account required. Pick the game(s). Handicaps are already known, so strokes are computed and the dots are on the card before anyone tees off. *The first-tee negotiation is over before it starts.* (A round never draws on a crew — no crew rosters, presets, or memberships at setup; owner call, 2026-07-13.)
+**Starting a round.** Pick the course and tees; the join code or link brings the players — it is both the invite and the sign-up funnel. Everyone on a card is a signed-in account (owner call, 2026-07-13): a player who has swng joins in one tap, a first-timer signs up on the way and lands on the card in about thirty seconds. Nobody puts anyone else on a card. Pick the game(s). Handicaps are already known, so strokes are computed and the dots are on the card before anyone tees off. *The first-tee negotiation is over before it starts.* (A round never draws on a crew — no crew rosters, presets, or memberships at setup; owner call, 2026-07-13.)
 
 **Scoring.** Two taps to post a score, for yourself or anyone in your group (one person can keep the whole card — that's how real groups work). "Picked up" and "conceded" are first-class scores, not errors: match play concessions, Stableford pickups, and net-double-bogey caps are all normal golf. Optional one-tap tags per hole — putts, fairway, penalty, sand save — for those who want stats; invisible for those who don't.
 
@@ -61,7 +61,7 @@ The live engine. Phone-first, shared, and — the key move — **format-aware an
 
 Handicap math is done silently and correctly: strokes allocated by the course's stroke index, format-correct allowances applied automatically (adjustable by the group). Nobody does arithmetic on a cart.
 
-**Game state, always.** The card's job is to answer, at a glance, *"where does everything stand right now?"* — *You're 2 UP with 4 to play. Dave gets a stroke here. Skins: three carrying into 14. The press is all square.* A between-holes digest keeps the group current without anyone asking. This is the on-course magic moment: the app is the one member of the group who always knows the state of every game.
+**Game state, always.** The card's job is to answer, at a glance, *"where does everything stand right now?"* — *You're 2 UP with 4 to play. Dave gets a stroke here. Skins: three carrying into 14. The press is all square.* Every game's standing is one tap away on the card's own chips — pulled when wanted, never pushed as an interruption (the between-holes digest popup is deliberately gone; owner call, 2026-07-13). This is the on-course magic moment: the app is the one member of the group who always knows the state of every game.
 
 **Built for golf's realities.** Offline-first — dead zones never block score entry; everything syncs when signal returns. Glare-readable, big targets, usable in twenty seconds on a tee box. Nine-hole rounds are first-class citizens (leagues, twilight nines). A spectator link lets people at home watch the match live.
 
@@ -81,7 +81,7 @@ The permanent record of a playing life.
 
 The atomic social unit of golf, made first-class. A crew is a persistent named group — *The Saturday Boys* — a roster of members and a ledger. **A crew is a grouping, not a preset** (owner call, 2026-07-13): it never configures, seeds, or runs a round; it groups finished rounds into seasons and keeps what they mean.
 
-- **Everyone plays, even the holdout.** Crew membership is real accounts, but rounds aren't: the guy who won't download apps plays as a **ghost profile** in any round — scores kept, index computed. He can claim his profile whenever he comes around, and join the crew as himself. No group is blocked by its least-online member.
+- **One tap and you're on the card** (owner call, 2026-07-13 — this replaces the ghost-profile pillar). Everyone in a round, like everyone in a crew, is a real account: swng scores games between people who exist. Ghost profiles and claim-later identity are gone — maintaining a fake party to a rivalry was the system's steadiest source of identity bugs and attack surface. The join link in the group chat is the whole onboarding: sign up once, ever, in thirty seconds; every round after is one tap. The holdout's first Saturday costs him a sign-up — until then his side bets live on cardboard, and that trade is accepted knowingly.
 - **Crew handicaps.** Every member has a current swng Index computed from real rounds — the end of the sandbagging argument, or at least the beginning of a fair fight. Crews can pin an override where crew lore demands it.
 - **The ledger.** All-time and per-season records: head-to-head match results between any two members (*you're 7–6 lifetime against Dave, and swng reminds you both on the first tee*), partner records (*you and Mike are 9–2 in four-ball*), skins won, points leaderboards, lowest net average, most improved.
 - **The feed.** Rounds played, records broken, streaks alive and dead — the raw material of the group chat, generated automatically.
@@ -104,7 +104,7 @@ The quiet layer everything stands on: a course database with real scorecard data
 
 - **Heads-up golf.** The app earns about twenty seconds per hole and no more. Nothing swng does may slow play; pace is a design constraint, not a nicety.
 - **Two taps.** The common action — post a score, check the games — is never more than two taps from pocket.
-- **Nobody left out.** Join by code, no account walls, ghost profiles, claim-later identity. The product works for the whole group on day one, not just its early adopters.
+- **One link, whole group.** The round's join link is invite and onboarding in one: sign in once, then every round after is a single tap. The wall is real — everyone on a card is an account — but it is thirty seconds high, and it buys the whole group a trustworthy ledger.
 - **The card is sacred.** Finished rounds look like scorecards — the familiar grid, dots for strokes given, match results written *3&2*. The trip board looks like a Ryder Cup board. swng speaks golf's visual language instead of inventing one.
 - **Works where golf happens.** Offline-tolerant, sunlight-readable, glove-friendly.
 

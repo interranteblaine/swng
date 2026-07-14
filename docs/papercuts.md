@@ -186,7 +186,7 @@ created (M8 Task 5's as-self flow, `CreateRoundPage`'s `asSelf` branch) or a cre
 ghost that any one claim adopts whole (`crewSeason.spec.ts`'s mid-season claim step, Task 7) —
 so this exact gap cannot recur for anything played from M8 onward.
 
-### 8. Profile's set-your-name alert offers "Go to profile" from the profile itself
+### 8. Profile's set-your-name alert offers "Go to profile" from the profile itself — ADDRESSED (papercut batch, 2026-07-14)
 
 Observed 2026-07-13 (crew-is-a-grouping final review). When the crews section moved from
 HomePage to ProfilePage, the join-by-code `golfer-required` alert kept its copy byte-identical
@@ -198,7 +198,15 @@ for its new home. Wanted shape: on /profile the alert should say "set your name 
 above" (or focus the name input); the link phrasing only ever made sense from elsewhere.
 Surfacing site: `ProfilePage.tsx`'s crews join-by-code error branch.
 
-### 9. A season whose contributors all left the crew reads "Standings build as rounds are counted"
+**Landed (papercut batch, commit `77af0c6`):** the alert now reads "Save your name in the
+form above first, then join the crew." — the self-link is gone (`grep "Go to profile"` on the
+file returns zero). Web-copy-only by design: post-wall this arm is defensive-only anyway,
+since AuthProvider's GET /me get-or-creates a golfer before the join form is usable, and the
+backend's `membership.ts` rule (a crew mutation never lazily mints someone's own profile) is
+a recorded position this batch deliberately did not overturn. CrewCreatePage's sibling arm
+was left alone — its link points there from a *different* page, which was always correct.
+
+### 9. A season whose contributors all left the crew reads "Standings build as rounds are counted" — ADDRESSED (papercut batch, 2026-07-14)
 
 Observed 2026-07-13 (crew-is-a-grouping final review). Members-only aggregation (spec §11a:
 lines for current roster members only) means a season can hold counted rounds whose every
@@ -210,7 +218,12 @@ shape: distinguish "no rounds counted yet" from "no current members appear in th
 rounds." Surfacing site: `SeasonPanel.tsx`'s empty-ledger branch beside the counted-rounds
 list, which already shows the rounds and makes the mismatch visible.
 
-### 10. Home's signed-out device-credential list can only ever surface pre-wall relic tokens
+**Landed (papercut batch, commit `77af0c6`):** the empty-ledger branch now splits on
+`standings.rounds.length` — zero counted rounds keeps "Standings build as rounds are
+counted."; counted rounds with an empty ledger renders "No current members appear in this
+season's counted rounds." beside the round list that makes the mismatch visible.
+
+### 10. Home's signed-out device-credential list can only ever surface pre-wall relic tokens — ADDRESSED (papercut batch, 2026-07-14)
 
 Observed 2026-07-14 (accounts-only "the wall" final review). `HomePage.tsx` still renders a
 list built from `credentialStore.list()` — the per-device scoring tokens the old anonymous/ghost
@@ -224,7 +237,13 @@ Wanted shape: delete the signed-out device-credential list outright and render `
 its place (the join-link funnel is the one way onto a card). Surfacing site: `HomePage.tsx`'s
 `credentialStore.list()` block and its signed-out branch.
 
-### 11. A settle-omitted departed participant keeps their LIVE# presence pointer until the 36h TTL
+**Landed (papercut batch, commit `77af0c6`):** the wanted shape exactly — the device list,
+its `credentialStore.list()` read, and the `list()` method itself (HomePage was its last
+consumer) are deleted; the signed-out "Your rounds" section renders
+`SignInCta` ("Sign in to see your rounds."). The per-round credential `load`/`save` survive —
+RoundPage's scoring token and home's re-mint path still use them.
+
+### 11. A settle-omitted departed participant keeps their LIVE# presence pointer until the 36h TTL — ADDRESSED (papercut batch, 2026-07-14)
 
 Observed 2026-07-14 (accounts-only "the wall" final review). A golfer who seats a round (which
 writes a `LIVE#<roundId>` presence pointer, `rounds/presence.ts`) but then leaves it with zero
@@ -237,3 +256,13 @@ and self-healing — the TTL reclaims the pointer within 36 hours — but confus
 Wanted shape: clear presence over the round STATE's full seated roster rather than the settled
 archive's participants, so a settle-omitted seat's pointer is still removed at finalize. Surfacing
 site: `projectArchive.ts`'s `deleteLive` loop (iterates `archive.participants`).
+
+**Landed (papercut batch, commit `86f7e5d`):** presence-cleanup is now its own pass in
+`projectArchive` over the ever-seated roster — every golferId with a `participant-joined`
+event in `archive.events` (the archive's canonical replay source, equivalent to the state's
+seated roster) gets `deleteLive`, unconditionally: no account-boundness check (deleting a
+never-written pointer is a no-op needing no golfer read) and no dependence on
+`archive.participants`. Lines/index projection is untouched — still account-bound over the
+settled participants. Pinned by a test that drives the real `settleRound` through the
+omitted-departure case (Bo joins, leaves scoreless and gameless, is omitted from the archive,
+and his pointer is still cleared).

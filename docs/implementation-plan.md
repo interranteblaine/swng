@@ -770,6 +770,12 @@ cited spot, this is just the one consolidated list Task 2 works from.
   same crew/season — same self-heal path (next finalize or rebuild).
   **RE-ACCEPTED WITH RECORD (2026-07-11):** untouched by M9; the self-heal-on-next-finalize-or-
   rebuild path stands as the mitigation.
+  **LANDED (pre-prod hardening D4a, 2026-07-14):** the race class is deleted, not managed —
+  the stored INDEX snapshot is gone and the index is computed at read time in `getMyRecord`
+  from the history lines the same response already fetches (zero added reads; wire shape
+  unchanged), so no read-modify-write remains to race. The crew half of this entry had already
+  died with the realignment's compute-on-read standings. Old INDEX rows were dropped by the
+  one-time `scripts/dropIndexProjectionItems.mjs` (131 deleted, idempotent rerun 0).
 - **Rebuild-vs-live-finalize wipe window** (`rebuildProjections.ts`): the manual rebuild's
   archive Scan (`createDynamoArchiveSource`) necessarily predates its own wipe step; a round
   that finalizes (and runs the live stream-triggered `projectArchive`) after the Scan but before
@@ -785,6 +791,12 @@ cited spot, this is just the one consolidated list Task 2 works from.
   general-purpose repair path); would need real atomicity if projections ever became a source
   of truth.
   **RE-ACCEPTED WITH RECORD (2026-07-11):** untouched by M9.
+  **CORRECTED & CLOSED (pre-prod hardening D4c/D4a, 2026-07-14):** this entry's own framing
+  was wrong — a crash between the writes fails the Lambda invocation and DynamoDB Streams
+  redelivers the batch (at-least-once), so the idempotent upserts rerun and the window heals
+  in seconds via the stream contract, never waiting on a manual rebuild. And with the INDEX
+  snapshot deleted (D4a) the putIndex half of the sequence no longer exists at all; the
+  projector is a pure per-round upsert fold.
 - **`RebuildFunction`'s global full-table replay** (`packages/lambda/src/entries/rebuild.ts`):
   no pagination or partial-range replay — every invocation Scans and replays every archive in
   the table, unconditionally. Fine at today's "a few thousand events across an afternoon" scale
@@ -844,6 +856,18 @@ cited spot, this is just the one consolidated list Task 2 works from.
   `findByJoinCode` (bounded, 5 attempts), exhaustion throws `join-code-exhausted` — a genuine
   uniqueness condition at mint time. (The consent-boundary point — a leaked code still joins
   that crew forever — is unchanged and was never in scope of the uniqueness fix.)
+  **SUPERSEDED AS A HARDENING ITEM (2026-07-14):** the pre-prod hardening session judged the
+  real flaw to be the membership model itself (permanent code + no removal path — the only
+  exit is `leaveCrew`, self-only), not the code mechanism. Recorded as an OPEN product design
+  question (`docs/superpowers/specs/2026-07-14-pre-prod-hardening-design.md` D3) that blocks
+  the prod deployment; gets its own owner-driven design session.
+- **Projector stream poison-record handling** (identified & landed same day — pre-prod
+  hardening D4b, 2026-07-14): the snapshots-stream event source previously carried only
+  defaults, so a deterministically-throwing record would block its shard for 24h of retries
+  and then vanish with its batchmates. Landed: `bisectBatchOnError`, `retryAttempts: 10`, an
+  SQS DLQ (`ProjectorDlq` — the message is stream metadata, a signal + bookmark;
+  `rebuildProjections` is the re-drive after the poisoning bug is fixed), and a paged
+  DLQ-depth alarm (stack alarm count 13 → 14).
 - **Triaged-M9 web/UX papercuts** (full detail in the M8 close-out review, not reproduced
   here): `startRound`'s `players[]` roster has no duplicate-golfer guard; the `parseSeason`
   family parses an empty string as if it were a real season (`Number("")` is 0, an integer, so

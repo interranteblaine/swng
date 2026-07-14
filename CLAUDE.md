@@ -325,6 +325,21 @@ input, local by default). Both e2e surfaces are accounts-only (root e2e mints vi
 unchanged under account seeding; fieldTest browser B drives the real funnel; identityRecord
 is one account, three rounds as-self, claim arc gone).
 
+Pre-prod hardening D4a/D4b is real (2026-07-14, spec
+`docs/superpowers/specs/2026-07-14-pre-prod-hardening-design.md` — the owner session that
+dispositioned the whole M10 hardening ledger): the handicap index is **computed on read** in
+`getMyRecord` from the history lines the same response already fetches — the stored `INDEX`
+snapshot, the `putIndex`/`getIndex` port methods, and the accepted cross-shard
+read-modify-write race are deleted whole (old INDEX rows dropped by one-time script, 131
+items); and the projector's snapshots-stream event source gained real poison-record handling
+(`bisectBatchOnError`, `retryAttempts: 10`, an SQS DLQ that is a metadata bookmark — rebuild
+is the re-drive — and a paged DLQ-depth alarm, 14 total). Deployed as beta deploy #8. The
+spec also records the standing decisions: tokens stay localStorage+CSP (tripwire: any
+third-party script), share-link permanence is the feature (tripwire: private data on
+rounds), stage config becomes a typed per-stage props table with the prod stack, and the
+crew membership model (permanent join code + no removal path) is an **OPEN design question
+that blocks prod** — owner-driven session pending.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

@@ -4,7 +4,7 @@ import type { GolferView } from "@swng/contracts";
 import { ApiError, getMe } from "../api";
 import { authConfig, buildAuthorizeUrl, buildLogoutUrl, computeCodeChallenge, generateCodeVerifier, tokenEndpoint } from "./authConfig";
 import type { AuthTokens } from "./tokenStore";
-import { pkceVerifierStore, tokenStore } from "./tokenStore";
+import { pkceVerifierStore, returnToStore, tokenStore } from "./tokenStore";
 
 export interface AuthContextValue {
   // undefined: signed out. null: signed in, but GET /me found no golfer row yet (the plan's
@@ -17,8 +17,9 @@ export interface AuthContextValue {
   readonly signIn: () => void;
   readonly signOut: () => void;
   // Re-runs GET /me and replaces `golfer` — the explicit escape hatch for a caller that just
-  // changed the golfer row itself (ProfilePage's PUT /me, RoundPage's claim) and needs the
-  // context to reflect it immediately, without waiting for a future remount's one-shot fetch.
+  // changed the golfer row itself (ProfilePage's PUT /me, the join funnel's name prompt) and
+  // needs the context to reflect it immediately, without waiting for a future remount's one-shot
+  // fetch.
   readonly refetch: () => Promise<void>;
   // Every other golfer-tier call (updateMe/getMyRecord/…) goes through this instead of pulling
   // the raw token — the ONE place "401 anywhere -> one silent refresh-token retry, then
@@ -145,6 +146,11 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   }, [tokens, refetch]);
 
   const signIn = useCallback(() => {
+    // Clear any stale returnTo at the START of initiation — synchronously, before the async
+    // redirect and before the SignInCta gets its turn to stash its own (it saves right AFTER
+    // calling this). A leftover from an abandoned funnel attempt must never redirect this,
+    // unrelated, sign-in (see returnToStore's own doc comment for the full guarantee).
+    returnToStore.clear();
     void (async () => {
       const verifier = generateCodeVerifier();
       pkceVerifierStore.save(verifier);

@@ -6,6 +6,7 @@ import type { GetMeResponse } from "@swng/contracts";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { credentialStore } from "../identity";
+import { roundLabel } from "../roundLabel";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
 // Faking the api.ts module boundary, same idiom as CreateRoundPage.test.tsx — JoinRoundPage
@@ -215,6 +216,11 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
     await waitFor(() => expect(mockedPeekRound).toHaveBeenCalledWith("ABC123"));
     const select = (await screen.findByLabelText(/^tee$/i)) as HTMLSelectElement;
     expect([...select.options].map((o) => o.value)).toEqual(["white", "blue"]);
+
+    // The join-link framing carries the round's full designation (course + date), not a bare
+    // course name (spec §5) — computed via roundLabel from the peek's own createdAt, local zone,
+    // the same way HomePage/WatchPage's own label tests do.
+    expect(screen.getByText(`Joining ${roundLabel({ courseName: "Fixture Links 18", createdAt: 1_700_000_000_000 })}`)).toBeTruthy();
   });
 
   it("a failed peek falls back to free text with a note — joining is never blocked by it", async () => {

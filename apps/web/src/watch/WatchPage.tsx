@@ -15,7 +15,7 @@ type UseWatchRound = (roundId: RoundId, token: string) => WatchRoundView;
 // RoundPage's own LiveRound is one (chip-selection state shouldn't have to survive the
 // live -> final swap). Deliberately NOT RoundPage's LiveRound reused wholesale: that component
 // wires SetupPanel/FinalizeControl/recordScore — every one of those IS an edit
-// affordance (add a game, add a player, finalize, score) — so this is its own, narrower
+// affordance (add a game, finalize, score) — so this is its own, narrower
 // composition of just the two READ-ONLY presentational pieces a spectator needs:
 // StandingsHeader (no onTerminate — omitting it is what hides the "End game…" overflow, same
 // contract ResultsView's own reuse of StandingsHeader already relies on) and ScorecardGrid in

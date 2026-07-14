@@ -79,9 +79,10 @@ function DistributionBars({ history }: { readonly history: readonly GolferRoundL
 }
 
 // Name + home course + declared index (PUT /me), the computed record (index, bootstrap
-// explainer, trend, distribution, history) — brief's full ProfilePage contract. GET /me never
-// creates (controller amendment 1): this page's first Save IS the create path for a
-// brand-new sub, via updateMe.
+// explainer, trend, distribution, history) — brief's full ProfilePage contract. Since the wall
+// (accounts-only identity spec §2) GET /me get-or-creates the caller's golfer on first touch
+// (ensureGolfer), so this page always edits an EXISTING golfer — Save (updateMe) is an update,
+// never the create path.
 export function ProfilePage() {
   const auth = useAuth();
   const navigate = useNavigate();

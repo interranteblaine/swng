@@ -42,6 +42,7 @@ export const ensureGolfer =
     }
 
     const bound = await deps.golferStore.get(golfer.id);
-    // bindSub just succeeded, so the item is guaranteed to exist now (mirrors getOrCreateGolfer).
+    // bindSub just succeeded against the row we put above, so the item is guaranteed to exist
+    // now (the SUB# bind transaction wrote it) — the non-null assertion is safe.
     return bound!.golfer;
   };

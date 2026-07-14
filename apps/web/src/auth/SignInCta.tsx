@@ -21,8 +21,12 @@ export function SignInCta({ message, returnTo }: SignInCtaProps) {
   const auth = useAuth();
 
   const signIn = () => {
-    if (returnTo) returnToStore.save(returnTo);
+    // Order matters: auth.signIn() clears any stale returnTo synchronously at the top of its own
+    // body (before its async redirect), so stash AFTER it — this CTA's own returnTo then survives
+    // its own redirect, while a leftover from an earlier, abandoned attempt is gone. (See
+    // returnToStore's doc comment for the guarantee.)
     auth.signIn();
+    if (returnTo) returnToStore.save(returnTo);
   };
 
   return (

@@ -48,10 +48,11 @@ export const createCrewRequestSchema = z.object({ name: z.string().min(1) }).str
 export type CreateCrewRequest = z.infer<typeof createCrewRequestSchema>;
 
 // Architecture-realignment Task 9 (de-ghost, spec §4 "membership: real accounts only"): a crew
-// member is now an EXISTING account golfer, added by their golferId — the server requires that
-// golfer to already carry a bound sub (ghost-not-addable otherwise). The old M8 shape minted a
-// fresh ghost from a `name`; that path is gone. Ghosts still exist inside rounds (play as ghost
-// → claim in-round → account → optionally join a crew).
+// member is an EXISTING account golfer, added by their golferId — the server requires that
+// golfer to already carry a bound sub (a sub-less golfer is not addable). The old M8 shape minted
+// a fresh ghost from a `name`; that path is gone. Since the wall (accounts-only identity) every
+// round participant is a real account too — sub-less golferIds survive only inside pre-wall stored
+// rounds, never minted anew.
 export const addCrewMemberRequestSchema = z.object({ golferId: golferIdSchema }).strict();
 export type AddCrewMemberRequest = z.infer<typeof addCrewMemberRequestSchema>;
 

@@ -25,9 +25,9 @@ const setup = (crewStore: CrewStore = createInMemoryCrewStore(), golferStore: Go
   };
 };
 
-// Seeds an account golfer directly on the store (mirrors getOrCreateGolfer's own shape) —
-// the crew use cases resolve "who is calling" via golferStore.getBySub, so every test needs
-// a real bound row before it can act as a crew member.
+// Seeds an account golfer directly on the store (the same put-then-bindSub shape ensureGolfer
+// uses) — the crew use cases resolve "who is calling" via golferStore.getBySub, so every test
+// needs a real bound row before it can act as a crew member.
 const seedAccountGolfer = async (golferStore: GolferStore, sub: string, name: string): Promise<GolferId> => {
   const id = golferId(`golfer-${sub}`);
   await putAndBindGolfer(golferStore, id, sub, name);

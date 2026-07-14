@@ -57,4 +57,11 @@ describe("returnToStore", () => {
   it("returns undefined when nothing was ever stashed", () => {
     expect(returnToStore.take()).toBeUndefined();
   });
+
+  it("clear() removes a stashed path (used at sign-in initiation to drop a stale entry)", () => {
+    returnToStore.save("/join?code=ABC123");
+    returnToStore.clear();
+
+    expect(returnToStore.take()).toBeUndefined();
+  });
 });

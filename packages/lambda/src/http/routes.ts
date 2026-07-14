@@ -471,7 +471,7 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     path: "/crews/{crewId}/members",
     schema: addCrewMemberRequestSchema,
     auth: "golfer",
-    successStatus: 201, // mints a new (ghost) member, same status-code spirit as JoinRound/addGame.
+    successStatus: 201, // adds an existing account golfer to the roster (rejects a sub-less golfer), same status-code spirit as JoinRound/addGame.
     handler: async (ctx, body) => useCases.addCrewMember(ctx.account!, crewId(ctx.pathParams.crewId!), body as AddCrewMemberRequest),
   },
   // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave.

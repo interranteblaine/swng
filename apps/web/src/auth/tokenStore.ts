@@ -52,13 +52,17 @@ export const pkceVerifierStore = {
 };
 
 // The path to land on after a Hosted-UI round trip (accounts-only identity spec §3, the join
-// funnel): the join page stashes `/join?code=ABC123` here before redirecting to sign up, and
+// funnel): the SignInCta stashes `/join?code=ABC123` here as it initiates its own sign-in, and
 // AuthCallbackPage consumes it on return so the code survives the trip — without this, a
 // signed-out tap on a join link would always dump the new account back on the home page,
 // stranding the round it was invited to. Same sessionStorage lifetime and single-use
-// (read-and-remove) contract as pkceVerifierStore above: it only needs to survive this tab's
-// one trip to Cognito and back; a leftover from an abandoned sign-in must never redirect a
-// later, unrelated one.
+// (read-and-remove) contract as pkceVerifierStore above.
+//
+// GUARANTEE: cleared at the START of every sign-in initiation (useAuth.ts's signIn()), so only
+// the sign-in that stashed a returnTo can ever consume it. The SignInCta clears-then-stashes —
+// it saves right AFTER calling signIn(), so its own returnTo survives its own redirect — while
+// a plain header signIn() just clears; a leftover from an abandoned funnel attempt can never
+// redirect a later, unrelated sign-in.
 const RETURN_TO_KEY = "swng:returnTo";
 
 export const returnToStore = {
@@ -70,5 +74,9 @@ export const returnToStore = {
     const path = sessionStorage.getItem(RETURN_TO_KEY);
     sessionStorage.removeItem(RETURN_TO_KEY);
     return path ?? undefined;
+  },
+
+  clear: (): void => {
+    sessionStorage.removeItem(RETURN_TO_KEY);
   },
 };

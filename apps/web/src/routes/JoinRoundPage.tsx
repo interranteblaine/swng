@@ -5,6 +5,7 @@ import { ApiError, joinRound, peekRound, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { credentialStore } from "../identity";
+import { roundLabel } from "../roundLabel";
 
 // >=250ms, same debounce window as CourseSearch's own — long enough that a fast typist never
 // fires one request per keystroke.
@@ -37,6 +38,9 @@ export function JoinRoundPage() {
   const [error, setError] = useState<string | undefined>(undefined);
 
   const [courseName, setCourseName] = useState<string | undefined>(undefined);
+  // The round-created wall time from the peek — feeds roundLabel so the join-link framing carries
+  // the SAME designation (course + date) as home/archive/watch (accounts-only identity spec §5).
+  const [createdAt, setCreatedAt] = useState<number | undefined>(undefined);
   const [teeOptions, setTeeOptions] = useState<readonly string[] | undefined>(undefined);
   // Only ever true after a peek actually rejected — gates the fallback NOTE (not the fallback
   // input itself, which is simply whatever renders whenever teeOptions is absent).
@@ -48,6 +52,7 @@ export function JoinRoundPage() {
 
   useEffect(() => {
     setCourseName(undefined);
+    setCreatedAt(undefined);
     setTeeOptions(undefined);
     setPeekFailed(false);
     if (upperCode.length !== 6) return undefined; // peek only once the code looks complete
@@ -56,6 +61,7 @@ export function JoinRoundPage() {
       peekRound(upperCode)
         .then((response) => {
           setCourseName(response.courseName);
+          setCreatedAt(response.createdAt);
           setTeeOptions(response.teeSets.map((t) => t.name));
           setTee(response.teeSets[0]?.name ?? "");
         })
@@ -112,7 +118,7 @@ export function JoinRoundPage() {
         />
       </label>
 
-      {courseName && <p className="text-sm text-slate-400">Joining {courseName}</p>}
+      {courseName && <p className="text-sm text-slate-400">Joining {roundLabel({ courseName, createdAt })}</p>}
 
       {!auth.signedIn ? (
         // The join link IS the sign-up funnel (spec §3): signing in through the stock Hosted UI

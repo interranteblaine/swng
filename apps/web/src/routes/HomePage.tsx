@@ -11,9 +11,10 @@ import { roundDayKey, roundLabel } from "../roundLabel";
 
 // Reads localStorage directly on render rather than through useRoundSession/state — Home
 // never opens a live session (that's per-round, from RoundPage), it only needs the flat list
-// of rounds this device already holds a credential for. This is now the ANONYMOUS/ghost path
-// only (architecture-realignment Task 13, spec §5) — a signed-in golfer's "Your rounds"
-// instead reads live rounds by IDENTITY (GET /me/rounds/live), below.
+// of rounds this device already holds a credential for. Post-wall (accounts-only identity)
+// nothing writes new device credentials, so this list can only ever surface pre-wall relic
+// tokens — deleting it outright in favor of the SignInCta is papercut 10. A signed-in golfer's
+// "Your rounds" already reads live rounds by IDENTITY (GET /me/rounds/live), below.
 export function HomePage() {
   const rounds = credentialStore.list();
   const { withAuth, signedIn, golfer } = useAuth();

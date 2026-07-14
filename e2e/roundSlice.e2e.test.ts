@@ -10,13 +10,18 @@ import {
 import type { FinalizeRoundResponse, RecordScoreRequest } from "@swng/contracts";
 import { fixtureLinks, reduceRound, resultOf, scoreGame } from "@swng/domain";
 import type { GameResult, GolferId, HoleResult, RoundEvent, RoundId } from "@swng/domain";
-import { apiUrl, connectWs, createClientOps, get, loadEndpoints, post, waitUntil } from "./support/client.js";
+import { apiUrl, connectWs, createClientOps, get, loadEndpoints, mintAccountGolfer, post, waitUntil } from "./support/client.js";
 import type { ClientOps, WsClient } from "./support/client.js";
 
 // The M2 golden concurrency deck, reproduced verbatim (packages/domain/src/scoring/concurrent.test.ts)
 // — same players, same handicaps, same nine-hole cards, same correction, same hand-verified
 // post-correction numbers. This suite's whole point is proving the deployed server (not just
 // the domain library) reaches those exact numbers over the wire.
+//
+// Accounts-only (the wall): all three golfers are signed-in accounts — Ann/Bo/Cal each mint a
+// throwaway Cognito user, name themselves via PUT /me, and start/join with their own Bearers
+// (self-join is the only way onto a card). Everything AFTER the seeding is unchanged: two
+// "phones" (client op streams + sockets), score-for-anyone, the same golden numbers.
 const ANN_CARD: readonly (number | "picked-up")[] = [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"];
 const BO_CARD: readonly number[] = [4, 5, 3, 6, 4, 4, 4, 5, 4];
 const CAL_CARD: readonly number[] = [6, 7, 4, 8, 6, 5, 6, 7, 6];
@@ -63,26 +68,52 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
     ws2?.close();
   });
 
-  // Step 1: client 1 (Ann's phone) starts the round and opens its socket.
-  it("1: client 1 starts the round", async () => {
-    const started = await post(rounds(), { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } }, startRoundResponseSchema);
+  // Step 1: Ann signs up, then client 1 (her phone) starts the round as herself and opens its
+  // socket. The host seat is her account's own golfer — startRound's identity fields still on
+  // the wire (host.name/golferId, until N-T6 drops them) are sourced from her RECORD.
+  it("1: Ann's account starts the round as herself", async () => {
+    const ann = await mintAccountGolfer(httpUrl, "slice-ann", "Ann");
+    const started = await post(
+      rounds(),
+      { card: fixtureLinks, host: { name: ann.name, tee: "white", courseHandicap: 8 }, golferId: ann.golferId },
+      startRoundResponseSchema,
+      ann.idToken,
+    );
     roundId = started.roundId;
     joinCode = started.joinCode;
     token1 = started.token;
     annId = started.golferId;
+    expect(annId).toBe(ann.golferId); // as-self: the host seat IS the account's golfer, never a fresh id
 
     ws1 = await connectWs(wsUrl, token1);
   });
 
-  // Step 2: client 2 (Bo's phone) joins by code, then joins again as Cal — two golfers, one
-  // phone, one socket — and opens its socket.
-  it("2: client 2 joins as Bo, then again as Cal, and opens its socket", async () => {
-    const bo = await post(rounds("/join"), { code: joinCode, name: "Bo", tee: "white", courseHandicap: 2 }, joinRoundResponseSchema);
+  // Step 2: Bo and Cal each sign up and join as THEMSELVES (self-join is the only way onto a
+  // card), but client 2 is still ONE phone with ONE socket — Bo's — which scores for both of
+  // them from step 4 on (score-for-anyone). Cal's own join exists to hold his seat, nothing
+  // more; his participant token is never used.
+  it("2: Bo and Cal join as themselves; client 2 (Bo's phone) opens its one socket", async () => {
+    const boAccount = await mintAccountGolfer(httpUrl, "slice-bo", "Bo");
+    const calAccount = await mintAccountGolfer(httpUrl, "slice-cal", "Cal");
+
+    const bo = await post(
+      rounds("/join"),
+      { code: joinCode, name: boAccount.name, tee: "white", courseHandicap: 2, golferId: boAccount.golferId },
+      joinRoundResponseSchema,
+      boAccount.idToken,
+    );
     token2 = bo.token;
     boId = bo.golferId;
+    expect(boId).toBe(boAccount.golferId);
 
-    const cal = await post(rounds("/join"), { code: joinCode, name: "Cal", tee: "white", courseHandicap: 12 }, joinRoundResponseSchema);
+    const cal = await post(
+      rounds("/join"),
+      { code: joinCode, name: calAccount.name, tee: "white", courseHandicap: 12, golferId: calAccount.golferId },
+      joinRoundResponseSchema,
+      calAccount.idToken,
+    );
     calId = cal.golferId;
+    expect(calId).toBe(calAccount.golferId);
 
     ws2 = await connectWs(wsUrl, token2);
 

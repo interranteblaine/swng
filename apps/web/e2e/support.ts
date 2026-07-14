@@ -16,14 +16,12 @@ import {
   addGameResponseSchema,
   appendCountedRoundRequestSchema,
   appendCountedRoundResponseSchema,
-  claimGolferRequestSchema,
   createCourseRequestSchema,
   createCourseResponseSchema,
   createCrewRequestSchema,
   createCrewResponseSchema,
   createSeasonRequestSchema,
   createSeasonResponseSchema,
-  eventsResponseSchema,
   finalizeRoundResponseSchema,
   getMyRecordResponseSchema,
   golferResponseSchema,
@@ -45,20 +43,18 @@ import {
 import type {
   AddGameResponse,
   AppendCountedRoundResponse,
-  ClaimGolferRequest,
   CreateCrewResponse,
   CreateSeasonResponse,
-  EventsResponse,
   FinalizeRoundResponse,
   GameConfigInput,
   GetMyRecordResponse,
   GolferResponse,
+  GolferView,
   JoinCrewResponse,
   JoinRoundResponse,
   RemoveCountedRoundResponse,
   SeasonStandingsResponse,
   ShareLinkResponse,
-  StartRoundRequest,
   StartRoundResponse,
   UpdateMeRequest,
 } from "@swng/contracts";
@@ -152,20 +148,32 @@ export const ensureCourse = async (name: string, card: CourseCard): Promise<Cour
   return parse(createCourseResponseSchema, createJson).course.courseId;
 };
 
-// --- Cal/Dee's out-of-browser joins ---------------------------------------------------------
+// --- Out-of-browser joins (always as an account, always as yourself) -----------------------
 
 // Joins the round the same way JoinRoundPage's own submit handler does, but via a direct
-// fetch instead of a browser (brief step 2: joining Cal/Dee through context A would overwrite
-// Ann's localStorage credential for the round — `swng:credential:<roundId>` is one key per
-// round per browser, not per golfer). `golferId` is optional (Task 5b ghost continuity) —
-// identityRecord.spec.ts is the first caller to pass one, reusing the SAME ghost GolferId
-// across three separate rounds' joins.
+// fetch instead of a browser (fieldTest's Cal/Dee: joining them through context A would
+// overwrite Ann's localStorage credential for the round — `swng:credential:<roundId>` is one
+// key per round per browser, not per golfer). Accounts-only (the wall): the caller IS an
+// account, the Bearer rides along, and the identity fields still on the wire until N-T6
+// drops them (`name`/`golferId`) are sourced from the account's golfer RECORD — never from
+// story-local free text — so N-T6's shape change is a mechanical field-drop here.
 export const joinRoundDirect = async (
   httpUrl: string,
-  input: { readonly code: string; readonly name: string; readonly tee: string; readonly courseHandicap: number; readonly golferId?: GolferId },
+  account: AccountGolfer,
+  input: { readonly code: string; readonly tee: string; readonly courseHandicap: number },
 ): Promise<JoinRoundResponse> => {
-  const body = parse(joinRoundRequestSchema, input);
-  const response = await fetch(`${httpUrl}/rounds/join`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const body = parse(joinRoundRequestSchema, {
+    code: input.code,
+    name: account.golfer.name,
+    tee: input.tee,
+    courseHandicap: input.courseHandicap,
+    golferId: account.golfer.golferId,
+  });
+  const response = await fetch(`${httpUrl}/rounds/join`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${account.tokens.idToken}` },
+    body: JSON.stringify(body),
+  });
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`POST /rounds/join -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(joinRoundResponseSchema, json);
@@ -182,26 +190,25 @@ export const joinRoundDirect = async (
 // This is exactly why joinRoundDirect above already hand-rolls its own fetch instead of
 // calling api.ts's joinRound — these three follow the identical *Direct idiom for the same
 // reason, not out of not knowing api.ts exists.
-// `token` (M8 Task 7): StartRound is "optional-golfer" auth (routes.ts) — a Bearer ID token is
-// what enables the as-self (`golferId`) field below; every prior caller (identityRecord.
-// spec.ts's anonymous ghost-hosted rounds) omits it and gets the exact same anonymous-start
-// behavior as before this parameter existed. No crewId here: round-is-a-sealed-leaf
-// (architecture realignment) — a round never tags itself with a crew; a crew counts a
-// FINISHED round into one of its seasons by roundId instead (appendCountedRoundDirect below).
+// Accounts-only (the wall): the creator IS an account and the round seats them alone —
+// StartRound's deleted `players[]` ghost seeding has no support here; extra participants
+// join as themselves (joinRoundDirect above). The identity fields still on the wire until
+// N-T6 (host.name/golferId) are sourced from the account's golfer RECORD. No crewId here:
+// round-is-a-sealed-leaf — a crew counts a FINISHED round into a season by roundId instead
+// (appendCountedRoundDirect below).
 export const startRoundDirect = async (
   httpUrl: string,
-  input: {
-    readonly card: CourseCard;
-    readonly host: { readonly name: string; readonly tee: string; readonly courseHandicap: number };
-    readonly golferId?: GolferId;
-    readonly players?: StartRoundRequest["players"];
-  },
-  token?: string,
+  account: AccountGolfer,
+  input: { readonly card: CourseCard; readonly tee: string; readonly courseHandicap: number },
 ): Promise<StartRoundResponse> => {
-  const body = parse(startRoundRequestSchema, input);
+  const body = parse(startRoundRequestSchema, {
+    card: input.card,
+    host: { name: account.golfer.name, tee: input.tee, courseHandicap: input.courseHandicap },
+    golferId: account.golfer.golferId,
+  });
   const response = await fetch(`${httpUrl}/rounds`, {
     method: "POST",
-    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: { "content-type": "application/json", authorization: `Bearer ${account.tokens.idToken}` },
     body: JSON.stringify(body),
   });
   const json: unknown = await response.json();
@@ -229,18 +236,6 @@ export const finalizeRoundDirect = async (httpUrl: string, id: RoundId, token: s
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`POST /rounds/${id}/finalize -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(finalizeRoundResponseSchema, json);
-};
-
-// GET /rounds/{roundId}/events, out-of-browser ("round-read" auth — a participant token; no
-// `since` sent, the route's own absent-default is 0). crewSeason.spec.ts reads round 1's
-// participant-joined events to learn the golferIds StartRound minted for its NAMED ghost
-// players — StartRoundResponse only carries the HOST's own golferId, and the round's own log
-// is the same source any real client folds for the roster, never a second source of truth.
-export const getRoundEventsDirect = async (httpUrl: string, id: RoundId, token: string): Promise<EventsResponse> => {
-  const response = await fetch(`${httpUrl}/rounds/${id}/events`, { headers: { authorization: `Bearer ${token}` } });
-  const json: unknown = await response.json();
-  if (!response.ok) throw new Error(`GET /rounds/${id}/events -> ${response.status}: ${JSON.stringify(json)}`);
-  return parse(eventsResponseSchema, json);
 };
 
 export const getMyRecordDirect = async (httpUrl: string, token: string): Promise<GetMyRecordResponse> => {
@@ -287,10 +282,10 @@ export const createCrewDirect = async (httpUrl: string, token: string, name: str
 
 // POST /crews/join — the self-service counterpart to the deleted add-a-ghost-by-name path
 // (joinCrewByCode.ts's own doc comment): adds the CALLER's own account golfer as a member
-// (role "member"), never a ghost. crewSeason.spec.ts's step 8 (mid-season claim continuity)
-// uses this to prove membership is pure aggregation scope: V, having just claimed Bo's ghost,
-// joins the crew by its own join code and Bo's standings rows materialize on the very next
-// read — nothing about them was lost while Bo was a non-member.
+// (role "member"). crewSeason.spec.ts's step 8 (the late crew join) uses this to prove
+// membership is pure aggregation scope: Bo, a season-long non-member whose rounds were all
+// counted anyway, joins the crew by its own join code and his standings rows materialize on
+// the very next read — nothing about them was lost while he was a non-member.
 export const joinCrewDirect = async (httpUrl: string, token: string, code: string): Promise<JoinCrewResponse> => {
   const body = parse(joinCrewRequestSchema, { code });
   const response = await fetch(`${httpUrl}/crews/join`, {
@@ -303,11 +298,6 @@ export const joinCrewDirect = async (httpUrl: string, token: string, code: strin
   return parse(joinCrewResponseSchema, json);
 };
 
-// The old addCrewMemberDirect (add-a-ghost-by-name) is GONE: crews are now accounts-only
-// rosters (membership resolved via application/src/crews/addCrewMember.ts's ghost-not-addable).
-// Ghost golfers in crewSeason.spec.ts are never added to crews — they play inside rounds only
-// (StartRound `players`, ids read back via getRoundEventsDirect above).
-//
 // Architecture-realignment Task 12: crew seasons + counted rounds + standings-on-read replace
 // the deleted GET /crews/{id}/records projection surface (Task 9). Every helper below is
 // "golfer"-gated on the wire (routes.ts) — the Bearer must be a crew MEMBER's ID token — and
@@ -356,23 +346,11 @@ export const getSeasonStandingsDirect = async (httpUrl: string, token: string, i
   return parse(seasonStandingsResponseSchema, json);
 };
 
-export const claimGolferDirect = async (httpUrl: string, token: string, input: ClaimGolferRequest): Promise<GolferResponse> => {
-  const body = parse(claimGolferRequestSchema, input);
-  const response = await fetch(`${httpUrl}/golfers/claim`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-  });
-  const json: unknown = await response.json();
-  if (!response.ok) throw new Error(`POST /golfers/claim -> ${response.status}: ${JSON.stringify(json)}`);
-  return parse(golferResponseSchema, json);
-};
-
 // Generic "keep reading until an asynchronous projector catches up" poller — identityRecord.
 // spec.ts's own pollRecord (M7 Task 8) hand-rolled exactly this shape for GET /me/record;
-// crewSeason.spec.ts needs the identical shape for its own post-claim GET /me/record reads,
-// so this is the one implementation both specs' polling can share instead of a second
-// hand-rolled copy. (Season standings need no polling at all — they're computed on read.)
+// crewSeason.spec.ts needs the identical shape for its own GET /me/record reads, so this is
+// the one implementation both specs' polling can share instead of a second hand-rolled copy.
+// (Season standings need no polling at all — they're computed on read.)
 export const pollUntil = async <T>(fetchOnce: () => Promise<T>, ready: (value: T) => boolean, timeoutMs = 60_000, label = "poll"): Promise<T> => {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -410,10 +388,10 @@ export const createScoreOps = (device: string): ScoreOps => {
   };
 };
 
-// identityRecord.spec.ts's own three API-played rounds need real "strokes" scores posted for
-// a ghost golfer with no browser at all — score/pull is deliberately absent from api.ts
-// ("score/pull go through the session instead, never through here"), so this is the direct-
-// fetch counterpart, matching every other *Direct helper in this file (joinRoundDirect above).
+// identityRecord.spec.ts's own three API-played rounds need real "strokes" scores posted
+// with no browser at all — score/pull is deliberately absent from api.ts ("score/pull go
+// through the session instead, never through here"), so this is the direct-fetch
+// counterpart, matching every other *Direct helper in this file (joinRoundDirect above).
 export const recordScoreDirect = async (
   httpUrl: string,
   id: RoundId,
@@ -517,6 +495,30 @@ export const mintThrowawayUser = async (label: string): Promise<AuthTokens> => {
   return { idToken: result.IdToken, refreshToken: result.RefreshToken, expiresAt: Date.now() + result.ExpiresIn * 1000 };
 };
 
+// A signed-in account bound to its own golfer record — the ONE identity shape every *Direct
+// round call above takes (accounts-only identity spec §1-2: every person on a card is an
+// account; there are no ghosts, no claims, no anonymous rounds). `golfer` is the record
+// PUT /me returned, so the identity fields StartRound/JoinRound still carry on the wire
+// until N-T6 drops them (host.name / name / golferId) are sourced from the RECORD, never
+// from story-local free text — N-T6's shape change is a mechanical field-drop at the two
+// body-construction sites above.
+export interface AccountGolfer {
+  readonly tokens: AuthTokens;
+  readonly golfer: GolferView;
+}
+
+// mintThrowawayUser + one PUT /me — the account signs up and names itself, the same two acts
+// a real golfer performs (Hosted-UI sign-up, then the funnel's name prompt), collapsed to
+// their API shape for stories where the naming itself isn't the thing under test. Specs that
+// DO cover the funnel prompt (fieldTest's browser B, primaryPath) call mintThrowawayUser
+// alone and leave the placeholder name in place for the browser to replace.
+export const mintAccountGolfer = async (label: string, name: string): Promise<AccountGolfer> => {
+  const tokens = await mintThrowawayUser(label);
+  const { httpUrl } = loadWebEnv();
+  const { golfer } = await updateMeDirect(httpUrl, tokens.idToken, { name });
+  return { tokens, golfer };
+};
+
 // Injects tokenStore.ts's own AUTH_KEY ("swng:auth") — duplicated here as a literal because
 // this runs in Node, outside the page, and can't import a browser-only module's runtime
 // constant; the key string must match tokenStore.ts EXACTLY (the context brief's own
@@ -609,14 +611,14 @@ const roundThru = (n: number, withCorrection: boolean): RoundState => {
   return reduceRound(events);
 };
 
-// The fourball-match chip/digest line at hole n (with or without the h9 correction folded in).
+// The fourball-match chip line at hole n (with or without the h9 correction folded in).
 export const describeFourballAt = (n: number, withCorrection: boolean): string => {
   const round = roundThru(n, withCorrection);
   return describeGame(scoreGame(fourball, round), round).line;
 };
 
-// The skins chip/digest line at hole n (with or without the h9 correction folded in) — this
-// is what lets the spec assert B's stale offline view (thru 12, correction withheld, since B
+// The skins chip line at hole n (with or without the h9 correction folded in) — this is
+// what lets the spec assert B's stale offline view (thru 12, correction withheld, since B
 // never received it) and A's/B's post-reconnect refold (thru 12, correction applied) without
 // either being a hand-typed string.
 export const describeSkinsAt = (n: number, withCorrection: boolean): string => {
@@ -652,28 +654,14 @@ export const PLAYER_NAMES = ["Ann", "Bo", "Cal", "Dee"] as const;
 const scoreButtonText = (score: number | "picked-up" | "conceded"): string =>
   score === "picked-up" ? "Picked up" : score === "conceded" ? "Conceded" : String(score);
 
-// A hole-complete digest overlay (role="status", fixed at the bottom of the viewport, z-40)
-// sits ABOVE the scorecard grid in stacking order — the grid itself only auto-dismisses it on
-// the NEXT score entry (a cells change), never on merely opening a cell's pad, so a lingering
-// digest can block the very next tap. Dismissed here before every entry, not just where a
-// digest is expected, since exactly which hole a batch collapses onto (Task 6: highest newly-
-// completed hole) isn't always the caller's to predict.
-const clearDigestIfPresent = async (page: Page): Promise<void> => {
-  const digest = page.getByRole("status", { name: /^After hole / });
-  if ((await digest.count()) === 0) return;
-  if (await digest.first().isVisible()) {
-    await digest.first().getByRole("button", { name: "Dismiss" }).click();
-  }
-};
-
 // The two-tap contract (product.md §9), literally: exactly two `.click()` calls take the grid
 // from idle to a posted score, and the pad closes on the second one — no separate confirm
 // step. Every score entry in the spec goes through this one function, so the M5 Task 7 brief's
 // "assert exactly two click() calls on one representative entry" holds for every entry, not
-// just the one the spec calls out explicitly.
+// just the one the spec calls out explicitly. (The between-holes digest overlay this helper
+// once had to dismiss before every entry is deleted outright — accounts-only identity spec §6
+// — so nothing can sit above the grid between taps anymore.)
 export const enterScore = async (page: Page, golferName: string, hole: number, score: number | "picked-up" | "conceded"): Promise<void> => {
-  await clearDigestIfPresent(page);
-
   // exact: true throughout — "hole 1" is a substring of "hole 10".."hole 18" (and the dialog's
   // "hole 1" likewise), so a non-exact name match would resolve to every one of them at once.
   const cell = page.getByRole("button", { name: `${golferName} hole ${hole}`, exact: true });
@@ -738,8 +726,8 @@ export const waitForParticipant = async (page: Page, name: string): Promise<void
 // INFER a dead socket from receive silence — a debounced inactivity timer that force-closed a
 // connection after N seconds without an upstream message. That turned out to be a design flaw,
 // not a tuning problem: a receive-only socket has LEGITIMATE multi-second silence between
-// scoring bursts, and especially during a recovery wait itself (a 10s digest wait carries zero
-// traffic by design), so the watchdog could force-close a perfectly healthy socket mid-recovery —
+// scoring bursts, and especially during a recovery wait itself (a long assertion wait carries
+// zero traffic by design), so the watchdog could force-close a perfectly healthy socket mid-recovery —
 // racing a fresh reconnect against an in-flight pull and burning the bounded retry on a false
 // positive (m6-gate-field-3.log: step 7's recovery fired and passed; step 8's fired but the
 // re-assert still failed; total run 47.6s vs ~19s baseline — two 10s recovery waits, the
@@ -829,17 +817,6 @@ export const expectOrRecover = async (page: Page, label: string, assert: () => P
 export const waitForFinalOrRecover = async (page: Page, routeHandle: WsRouteHandle): Promise<void> => {
   const finalHeading = page.getByRole("heading", { name: "Final results" });
   await expectOrRecover(page, "Final results", () => expect(finalHeading).toBeVisible({ timeout: 45_000 }), routeHandle);
-};
-
-// Same recovery pattern as waitForFinalOrRecover just above, for a mid-round hole-complete
-// digest instead of the finalize heading — the same delivery-loss risk (WS proxy note above) can
-// just as easily strand a digest push as a finalize push; step 7's hole-16 digest wait had no
-// fallback until this was added, unlike steps 6/9. `digestName` is a substring match against the
-// digest's own accessible name (e.g. "After hole 16"), same as the bare locator step 7 used
-// before this helper existed.
-export const waitForDigestOrRecover = async (page: Page, digestName: string, routeHandle: WsRouteHandle): Promise<void> => {
-  const digest = page.getByRole("status", { name: digestName });
-  await expectOrRecover(page, `"${digestName}" digest`, () => expect(digest).toBeVisible({ timeout: 10_000 }), routeHandle);
 };
 
 // <select>s only, never getByLabel — Playwright's getByLabel match text for a <label> wrapping

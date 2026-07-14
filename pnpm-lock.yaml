@@ -217,6 +217,9 @@ importers:
 
   e2e:
     dependencies:
+      '@aws-sdk/client-cognito-identity-provider':
+        specifier: 'catalog:'
+        version: 3.1085.0
       '@swng/client':
         specifier: workspace:*
         version: link:../packages/client

@@ -12,5 +12,10 @@ export default defineConfig({
     // each later step needs the earlier one's state) — stop at the first failure instead of
     // running the rest against a round that never got where it needed to be.
     bail: 1,
+    // Run-scoped Cognito-user cleanup (accounts-only identity): clears the minted-user
+    // tracking file before any test file runs, best-effort AdminDeleteUsers every tracked
+    // user after all of them finish — the same pattern apps/web/e2e's own
+    // globalSetup/globalTeardown pair establishes.
+    globalSetup: ["./support/globalSetup.ts"],
   },
 });

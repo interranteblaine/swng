@@ -1,10 +1,17 @@
-import { readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import {
+  AdminCreateUserCommand,
+  AdminDeleteUserCommand,
+  AdminSetUserPasswordCommand,
+  CognitoIdentityProviderClient,
+  InitiateAuthCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
 import WebSocket from "ws";
 import type { z } from "zod";
-import { parse, wsEnvelopeSchema } from "@swng/contracts";
+import { golferResponseSchema, parse, updateMeRequestSchema, wsEnvelopeSchema } from "@swng/contracts";
 import type { WsEnvelope } from "@swng/contracts";
-import type { DeviceId, Hlc, OpId, RoundEvent } from "@swng/domain";
+import type { DeviceId, GolferId, Hlc, OpId, RoundEvent } from "@swng/domain";
 import { deviceId as toDeviceId, opId as toOpId } from "@swng/domain";
 
 // --- Endpoints ---------------------------------------------------------------------------
@@ -14,29 +21,58 @@ export interface Endpoints {
   readonly wsUrl: string;
 }
 
-// E2E_HTTP_URL / E2E_WS_URL win when both are set; otherwise fall back to whatever
-// `cdk deploy` last wrote to apps/infra-cdk/cdk-outputs.json (gitignored — one entry keyed
-// by stack name, e.g. "swng-beta").
-export const loadEndpoints = (): Endpoints => {
-  const envHttp = process.env["E2E_HTTP_URL"];
-  const envWs = process.env["E2E_WS_URL"];
-  if (envHttp && envWs) return { httpUrl: envHttp, wsUrl: envWs };
+// The subset of the swng-beta stack's outputs these suites read — the same cdk-outputs.json
+// entry `pnpm deploy:beta` writes and apps/web/scripts/webEnv.mjs reads (one entry keyed by
+// stack name, e.g. "swng-beta").
+interface StackOutputs {
+  readonly HttpApiUrl: string;
+  readonly WsApiUrl: string;
+  readonly UserPoolId: string;
+  readonly UserPoolClientId: string;
+}
 
+const readStackOutputs = (unsetEnvHint: string): StackOutputs => {
   const outputsPath = fileURLToPath(new URL("../../apps/infra-cdk/cdk-outputs.json", import.meta.url));
-  let outputs: Record<string, { HttpApiUrl: string; WsApiUrl: string }>;
+  let outputs: Record<string, StackOutputs>;
   try {
-    outputs = JSON.parse(readFileSync(outputsPath, "utf8")) as Record<string, { HttpApiUrl: string; WsApiUrl: string }>;
+    outputs = JSON.parse(readFileSync(outputsPath, "utf8")) as Record<string, StackOutputs>;
   } catch (error) {
     throw new Error(
-      `E2E_HTTP_URL/E2E_WS_URL are unset and ${outputsPath} could not be read (run \`pnpm deploy:beta\` first, or set both env vars): ${
+      `${unsetEnvHint} and ${outputsPath} could not be read (run \`pnpm deploy:beta\` first, or set the env vars): ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
   }
   const [stackOutputs] = Object.values(outputs);
   if (!stackOutputs) throw new Error(`no stack outputs found in ${outputsPath}`);
+  return stackOutputs;
+};
 
+// E2E_HTTP_URL / E2E_WS_URL win when both are set; otherwise fall back to whatever
+// `cdk deploy` last wrote to apps/infra-cdk/cdk-outputs.json (gitignored).
+export const loadEndpoints = (): Endpoints => {
+  const envHttp = process.env["E2E_HTTP_URL"];
+  const envWs = process.env["E2E_WS_URL"];
+  if (envHttp && envWs) return { httpUrl: envHttp, wsUrl: envWs };
+
+  const stackOutputs = readStackOutputs("E2E_HTTP_URL/E2E_WS_URL are unset");
   return { httpUrl: envHttp ?? stackOutputs.HttpApiUrl, wsUrl: envWs ?? stackOutputs.WsApiUrl };
+};
+
+// Same env-override-then-outputs-file convention as loadEndpoints above, for the Cognito pool
+// mintAccountGolfer (below) mints its throwaway users in.
+export interface CognitoPool {
+  readonly userPoolId: string;
+  readonly userPoolClientId: string;
+}
+
+export const loadCognitoPool = (): CognitoPool => {
+  const envPool = process.env["E2E_USER_POOL_ID"];
+  const envClient = process.env["E2E_USER_POOL_CLIENT_ID"];
+  if (envPool && envClient) return { userPoolId: envPool, userPoolClientId: envClient };
+
+  const stackOutputs = readStackOutputs("E2E_USER_POOL_ID/E2E_USER_POOL_CLIENT_ID are unset");
+  return { userPoolId: envPool ?? stackOutputs.UserPoolId, userPoolClientId: envClient ?? stackOutputs.UserPoolClientId };
 };
 
 // Joins a base URL (with or without a trailing slash — HttpApiUrl carries one, E2E_HTTP_URL
@@ -73,6 +109,115 @@ export const get = async <S extends z.ZodType>(url: string, schema: S, token?: s
   const json: unknown = await res.json();
   if (!res.ok) throw httpError("GET", url, res.status, json);
   return parse(schema, json);
+};
+
+export const put = async <S extends z.ZodType>(url: string, body: unknown, schema: S, token?: string): Promise<z.infer<S>> => {
+  const res = await fetch(url, { method: "PUT", headers: jsonHeaders(token), body: JSON.stringify(body) });
+  const json: unknown = await res.json();
+  if (!res.ok) throw httpError("PUT", url, res.status, json);
+  return parse(schema, json);
+};
+
+// --- Identity: throwaway Cognito accounts (accounts-only identity) -------------------------
+
+// Fixed by the same repo-wide convention apps/web/e2e/support.ts documents for its own copy:
+// every AWS-touching spot hardcodes us-east-1; credentials come from the caller's shell
+// (AWS_PROFILE=swng or equivalent), never from source.
+export const AWS_REGION = "us-east-1";
+
+// Run-scoped, cross-process record of every Cognito user THIS run has minted — the same
+// on-disk pattern apps/web/e2e's globalSetup/globalTeardown pair uses (see that support.ts's
+// trackMintedUser writeup for why a plain file and not a module binding: test files run in
+// separate worker processes, so an in-memory array would only ever hold one file's mints).
+// support/globalSetup.ts clears this at run start and deletes every listed user after the
+// run. A DISTINCT filename from the web harness's e2e-minted-users.ndjson, so a `pnpm
+// e2e:beta` run can never clobber a concurrently-running `pnpm e2e:field`'s own list.
+const MINTED_USERS_DIR = fileURLToPath(new URL("../../.superpowers/sdd/", import.meta.url));
+export const MINTED_USERS_FILE = `${MINTED_USERS_DIR}e2e-beta-minted-users.ndjson`;
+
+const trackMintedUser = (userPoolId: string, username: string): void => {
+  mkdirSync(MINTED_USERS_DIR, { recursive: true });
+  appendFileSync(MINTED_USERS_FILE, `${JSON.stringify({ userPoolId, username })}\n`);
+};
+
+// Best-effort and NON-FATAL throughout (globalSetup.ts's teardown is the only caller): a
+// delete failure — throttling, a user already gone — must never fail a run whose tests have
+// all already reported their own pass/fail. Mirrors apps/web/e2e/globalTeardown.ts exactly.
+export const deleteMintedUsers = async (): Promise<void> => {
+  if (!existsSync(MINTED_USERS_FILE)) return; // nothing was ever minted this run
+
+  const lines = readFileSync(MINTED_USERS_FILE, "utf8")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  const cognito = new CognitoIdentityProviderClient({ region: AWS_REGION });
+  for (const line of lines) {
+    let username: string | undefined;
+    try {
+      const parsed = JSON.parse(line) as { userPoolId: string; username: string };
+      username = parsed.username;
+      await cognito.send(new AdminDeleteUserCommand({ UserPoolId: parsed.userPoolId, Username: parsed.username }));
+    } catch (error) {
+      console.warn(`[e2e cleanup] AdminDeleteUser failed for ${username ?? line} (best-effort, not fatal): ${String(error)}`);
+    }
+  }
+
+  rmSync(MINTED_USERS_FILE, { force: true });
+};
+
+// A signed-in account bound to its own golfer record — the ONE identity shape every
+// authenticated call in these suites uses (accounts-only identity spec §1-2: every person on
+// a card is an account; there are no ghosts and no anonymous rounds). Minted via the admin
+// APIs (AdminCreateUser + AdminSetUserPassword, MessageAction SUPPRESS so no email ever
+// sends) and exchanged for a real ID token via USER_PASSWORD_AUTH — the beta-grade flow
+// enabled exactly so e2e can mint JWTs without driving the Hosted UI — then named once
+// through PUT /me. `golferId`/`name` here ARE the account's golfer RECORD, so the identity
+// fields StartRound/JoinRound still carry on the wire until N-T6 drops them (host.name /
+// name / golferId) are sourced from the record, never from story-local free text — N-T6's
+// shape change is a mechanical field-drop at the call sites.
+export interface AccountGolfer {
+  readonly idToken: string;
+  readonly golferId: GolferId;
+  readonly name: string;
+}
+
+export const mintAccountGolfer = async (httpUrl: string, label: string, name: string): Promise<AccountGolfer> => {
+  const { userPoolId, userPoolClientId } = loadCognitoPool();
+  const cognito = new CognitoIdentityProviderClient({ region: AWS_REGION });
+  const username = `e2e-${label}-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}@example.com`;
+  const password = `Sw!ng-${Math.random().toString(36).slice(2)}-Aa1`; // meets the pool's default complexity policy
+
+  await cognito.send(
+    new AdminCreateUserCommand({
+      UserPoolId: userPoolId,
+      Username: username,
+      UserAttributes: [
+        { Name: "email", Value: username },
+        { Name: "email_verified", Value: "true" },
+      ],
+      MessageAction: "SUPPRESS",
+      TemporaryPassword: password,
+    }),
+  );
+  // Tracked only once the user actually exists — a failed AdminCreateUser throws before this
+  // line, so teardown never attempts to delete a user that was never minted.
+  trackMintedUser(userPoolId, username);
+  // FORCE_CHANGE_PASSWORD -> CONFIRMED, Permanent: true — USER_PASSWORD_AUTH below rejects a
+  // still-temporary password with a NEW_PASSWORD_REQUIRED challenge nothing here can answer.
+  await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId: userPoolId, Username: username, Password: password, Permanent: true }));
+
+  const auth = await cognito.send(
+    new InitiateAuthCommand({ AuthFlow: "USER_PASSWORD_AUTH", ClientId: userPoolClientId, AuthParameters: { USERNAME: username, PASSWORD: password } }),
+  );
+  const idToken = auth.AuthenticationResult?.IdToken;
+  if (!idToken) throw new Error(`InitiateAuth for ${username} returned no IdToken: ${JSON.stringify(auth)}`);
+
+  // PUT /me is the one name-write path (GET /me mints a placeholder-named golfer on first
+  // touch; a real name here clears the flag) — the returned record is what the caller's
+  // Start/Join bodies source their identity fields from.
+  const { golfer } = await put(apiUrl(httpUrl, "/me"), parse(updateMeRequestSchema, { name }), golferResponseSchema, idToken);
+  return { idToken, golferId: golfer.golferId, name: golfer.name };
 };
 
 // --- Client-side op identity (deviceId, opId, hlc) ----------------------------------------

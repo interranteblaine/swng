@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { chip, gameKindSelect, joinRoundDirect, loadWebEnv, readJoinCode, waitForParticipant } from "./support.js";
+import { chip, gameKindSelect, injectAuthTokens, joinRoundDirect, loadWebEnv, mintAccountGolfer, readJoinCode, waitForParticipant } from "./support.js";
+import type { AccountGolfer } from "./support.js";
 
 // The M6 gate (docs/implementation-plan.md M6; docs/superpowers/plans/2026-07-09-m6-courses.md
 // Task 6): a golfer enters a REAL course from its paper scorecard — search comes up empty,
@@ -11,7 +12,10 @@ import { chip, gameKindSelect, joinRoundDirect, loadWebEnv, readJoinCode, waitFo
 // engines happen to compute; a disagreement is BLOCKED, not fudged). One Playwright context
 // (unlike fieldTest.spec.ts's two) — the second player, Quinn, joins over a direct HTTP fetch
 // exactly like fieldTest.spec.ts's Cal/Dee, so there's nothing here that needs a second
-// browser.
+// browser. Accounts-only (the wall): Pat and Quinn are both signed-in accounts, minted and
+// named by the harness — round creation is sign-in-gated now and there is no name field on
+// the create form, so Pat's page runs signed in from its very first navigation and Quinn's
+// join carries his own Bearer.
 
 // "Casa Verde GC", white tees, rating 71.1, slope 129 — the gate card, hand-verified in the
 // plan (checks recorded there: stroke index is a permutation of 1..18, odd 1..17 on the front
@@ -49,10 +53,17 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
   let page: Page;
   const courseName = `Casa Verde GC ${Date.now()}`; // per-run unique — a throwaway course on beta
   let joinCode = "";
+  let quinn: AccountGolfer;
 
   test.beforeAll(async ({ browser }) => {
+    // Pat's tokens are injected before the page's first navigation (CreateRoundPage is
+    // sign-in-gated); Quinn's account exists purely for his own out-of-browser self-join in
+    // test 4. Both named via PUT /me — the record, not free text, is what lands on the card.
+    const pat = await mintAccountGolfer("course-pat", "Pat");
+    quinn = await mintAccountGolfer("course-quinn", "Quinn");
     const context = await browser.newContext();
     page = await context.newPage();
+    await injectAuthTokens(page, pat.tokens);
   });
 
   test.afterAll(async () => {
@@ -127,8 +138,10 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     await expect(page.getByText(/✓ 1 verified/)).toBeVisible();
   });
 
-  test("4: Pat creates the round on the new course (white, ch 21); Quinn joins over a direct HTTP fetch (ch 2)", async () => {
-    await page.getByLabel("Your name", { exact: true }).fill("Pat");
+  test("4: Pat creates the round on the new course (white, ch 21); Quinn joins as himself over a direct HTTP fetch (ch 2)", async () => {
+    // No name entry here: CreateRoundPage renders "Playing as Pat" from the signed-in
+    // account's own record — the create form has no name field to fill anymore.
+    await expect(page.getByText("Playing as", { exact: true })).toBeVisible();
     await page.getByLabel("Course handicap", { exact: true }).fill("21");
     await page.getByRole("button", { name: "Create round", exact: true }).click();
 
@@ -137,9 +150,9 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
 
     // Quinn joins over the wire, not a second browser — score-for-anyone (and this spec never
     // scores for Quinn) makes a second tab unnecessary, same precedent as fieldTest.spec.ts's
-    // Cal/Dee.
+    // Cal/Dee — but as HIMSELF, with his own Bearer (self-join is the only way onto a card).
     const { httpUrl } = loadWebEnv();
-    await joinRoundDirect(httpUrl, { code: joinCode, name: "Quinn", tee: "white", courseHandicap: 2 });
+    await joinRoundDirect(httpUrl, quinn, { code: joinCode, tee: "white", courseHandicap: 2 });
     await waitForParticipant(page, "Quinn");
   });
 

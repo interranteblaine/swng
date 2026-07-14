@@ -2,18 +2,20 @@ import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
 import { fixtureLinks } from "@swng/domain";
 import type { GolferId, RoundId } from "@swng/domain";
-import { createScoreOps, finalizeRoundDirect, loadWebEnv, recordScoreDirect, shareRoundDirect, startRoundDirect } from "./support.js";
+import { createScoreOps, finalizeRoundDirect, loadWebEnv, mintAccountGolfer, recordScoreDirect, shareRoundDirect, startRoundDirect } from "./support.js";
 
 // M9 Task 3 (share): the round has a link. The participant side is driven entirely over the
-// API (score-for-anyone/API-only, the SAME idiom identityRecord.spec.ts's own ghost-hosted
+// API (score-for-anyone/API-only, the SAME idiom identityRecord.spec.ts's own API-played
 // rounds already use — a browser adds nothing to "did the participant score a hole"); the
-// spectator side is the one REAL browser this spec drives, deliberately with NO auth at all
-// (no injectAuthTokens, no saved credential — a fresh, untouched context) to prove the
-// brief's own headline claim: a spectator needs nothing but the link. Kept deliberately
-// minimal on the round itself (no extra participants, no games) — a share link works
-// identically regardless of what's being scored, and zero games means finalize resolves
-// trivially, keeping this spec about SHARE, not about a scoring engine already gated by
-// fieldTest.spec.ts/courseEntry.spec.ts.
+// participant is a signed-in ACCOUNT (accounts-only identity: the wall), minted and named by
+// the harness, since anonymous round creation is gone. The spectator side is the one REAL
+// browser this spec drives, deliberately with NO auth at all (no injectAuthTokens, no saved
+// credential — a fresh, untouched context) to prove the brief's own headline claim: a
+// spectator needs nothing but the link — the watch tier is the one participation lane the
+// wall deliberately leaves open. Kept deliberately minimal on the round itself (no extra
+// participants, no games) — a share link works identically regardless of what's being
+// scored, and zero games means finalize resolves trivially, keeping this spec about SHARE,
+// not about a scoring engine already gated by fieldTest.spec.ts/courseEntry.spec.ts.
 //
 // NOT run by the implementing agent (task-3-brief.md's own scope split) — the controller runs
 // `pnpm e2e:field` (all specs, this one included) against the deployed beta stack.
@@ -41,8 +43,9 @@ test.describe.serial("M9 Task 3 field test — the round has a link: live specta
     await spectatorContext?.close();
   });
 
-  test("1: a participant creates a round and scores hole 1, entirely over the API", async () => {
-    const started = await startRoundDirect(httpUrl, { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } });
+  test("1: a signed-in participant creates a round as herself and scores hole 1, entirely over the API", async () => {
+    const ann = await mintAccountGolfer("share-ann", "Ann");
+    const started = await startRoundDirect(httpUrl, ann, { card: fixtureLinks, tee: "white", courseHandicap: 8 });
     roundIdValue = started.roundId;
     hostToken = started.token;
     hostGolferId = started.golferId;

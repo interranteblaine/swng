@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
 import { fixtureLinks } from "@swng/domain";
-import { ensureCourse, enterScore, expectOrRecover, installWsProxy, waitForParticipant } from "./support.js";
+import { ensureCourse, enterScore, expectOrRecover, injectAuthTokens, installWsProxy, mintAccountGolfer, waitForParticipant } from "./support.js";
 import type { WsRouteHandle } from "./support.js";
 
 // M9 Task 4 (task-4-brief.md, Step 2 — reconnect QA): three named arms —
@@ -38,12 +38,19 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
 
   test.beforeAll(async ({ browser }) => {
     await ensureCourse(fixtureLinks.courseName, fixtureLinks);
+    // Accounts-only (the wall): Ann and Bo are signed-in accounts, minted and named by the
+    // harness (the funnel's own name prompt is fieldTest/primaryPath's coverage, not this
+    // reconnect-seam file's), injected before either page's first navigation.
+    const ann = await mintAccountGolfer("kn-ann", "Ann");
+    const bo = await mintAccountGolfer("kn-bo", "Bo");
     contextA = await browser.newContext();
     contextB = await browser.newContext();
     await installWsProxy(contextA, aRoute);
     await installWsProxy(contextB, bRoute);
     pageA = await contextA.newPage();
     pageB = await contextB.newPage();
+    await injectAuthTokens(pageA, ann.tokens);
+    await injectAuthTokens(pageB, bo.tokens);
   });
 
   test.afterAll(async () => {
@@ -57,7 +64,7 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     const result = pageA.getByRole("button", { name: fixtureLinks.courseName, exact: true }).first();
     await expect(result).toBeVisible();
     await result.click();
-    await pageA.getByLabel("Your name").fill("Ann");
+    // No name entry: the create form renders "Playing as Ann" from the account's own record.
     await pageA.getByLabel("Course handicap").fill("8");
     await pageA.getByRole("button", { name: "Create round" }).click();
     await expect(pageA).toHaveURL(/\/round\//);
@@ -69,7 +76,8 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
 
     await pageB.goto("/join");
     await pageB.getByLabel("Code").fill(joinCode);
-    await pageB.getByLabel("Your name").fill("Bo");
+    // Signed in with a real name, so the funnel renders the join form directly — no name
+    // prompt, no name field, "Playing as Bo" from the record.
     await expect(pageB.getByText(`Joining ${fixtureLinks.courseName}`)).toBeVisible();
     await pageB.getByLabel("Tee").selectOption("white");
     await pageB.getByLabel("Course handicap").fill("4");
@@ -141,9 +149,13 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
 
   test.beforeAll(async ({ browser }) => {
     await ensureCourse(fixtureLinks.courseName, fixtureLinks);
+    // Accounts-only: this arm's solo Ann is her own separate throwaway account (arm 1's Ann
+    // belongs to a context that's already closed by the time this describe runs).
+    const ann = await mintAccountGolfer("kn-solo-ann", "Ann");
     context = await browser.newContext();
     await installWsProxy(context, route);
     page = await context.newPage();
+    await injectAuthTokens(page, ann.tokens);
   });
 
   test.afterAll(async () => {
@@ -156,7 +168,7 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     const result = page.getByRole("button", { name: fixtureLinks.courseName, exact: true }).first();
     await expect(result).toBeVisible();
     await result.click();
-    await page.getByLabel("Your name").fill("Ann");
+    // No name entry: "Playing as Ann" comes from the account's own record.
     await page.getByLabel("Course handicap").fill("8");
     await page.getByRole("button", { name: "Create round" }).click();
     await expect(page).toHaveURL(/\/round\//);
@@ -251,9 +263,9 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
 // describe("AuthProvider / useAuth — 401 anywhere: one silent refresh retry, then signed out")
 // (pre-existing, not added by this task) asserts both arms end to end — a 401 that refreshes and
 // retries successfully, and a 401 whose refresh itself fails, signing the golfer out — via the
-// SAME withAuth() seam every real golfer-tier call (getMe/updateMe/claimGolfer/getMyRecord/every
-// crew call) goes through, so this is not a narrower guarantee than a live token-expiry run would
-// give — only a faster, deterministic one.
+// SAME withAuth() seam every real golfer-tier call (getMe/updateMe/getMyRecord/every crew call)
+// goes through, so this is not a narrower guarantee than a live token-expiry run would give —
+// only a faster, deterministic one.
 test.describe("M9 reconnect QA — arm 3: token expiring mid-round (documented, not run)", () => {
   test.skip(
     true,

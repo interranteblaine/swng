@@ -14,18 +14,21 @@ import {
   enterScore,
   expectOrRecover,
   gameKindSelect,
+  injectAuthTokens,
   installWsProxy,
   joinRoundDirect,
   loadWebEnv,
+  mintAccountGolfer,
+  mintThrowawayUser,
   PLAYER_NAMES,
   readJoinCode,
   screenshotPath,
   scoreFor,
-  waitForDigestOrRecover,
   waitForFinalOrRecover,
   waitForParticipant,
 } from "./support.js";
-import type { WsRouteHandle } from "./support.js";
+import type { AccountGolfer, WsRouteHandle } from "./support.js";
+import type { AuthTokens } from "../src/auth/tokenStore.js";
 
 // The M5 gate (docs/implementation-plan.md M5 Task 7): a full 18-hole round of fourball match
 // + skins, played through the REAL UI in two Chromium contexts against the deployed swng-beta
@@ -36,6 +39,13 @@ import type { WsRouteHandle } from "./support.js";
 // the brief's own scenario. Kept out of `pnpm validate`/`pnpm -r test` entirely: it has its
 // own script (`pnpm e2e:field`, playwright.config.ts) and vitest.config.ts's own "e2e/**"
 // exclude means the default `vitest run` never even sees this file.
+//
+// Accounts-only (the wall): all four golfers are signed-in accounts. Ann/Cal/Dee are minted
+// AND named by the harness (their naming isn't what this deck gates); Bo is minted with his
+// placeholder name left in place, because step 2 drives the REAL funnel — sign-in CTA, the
+// one required "What should the card call you?" prompt, then the join form — the join link's
+// whole sign-up story, in the browser (only Cognito's stock hosted form itself is skipped;
+// that's the controller's live spot-walk).
 test.describe.serial("M5 field test — two browsers, offline mid-round, the full 18 of fourball + skins", () => {
   let contextA: BrowserContext;
   let contextB: BrowserContext;
@@ -56,6 +66,10 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
   const aRoute: WsRouteHandle = { current: undefined };
   const bRoute: WsRouteHandle = { current: undefined };
 
+  let boTokens: AuthTokens; // deliberately NOT named at mint — step 2's funnel prompt is where "Bo" gets typed
+  let calAccount: AccountGolfer;
+  let deeAccount: AccountGolfer;
+
   test.beforeAll(async ({ browser }) => {
     // M6: the web app's create flow dropped bundled fixtures entirely (search is the only
     // picker now) — this deck needs a REAL course record to search for and pick in step 1
@@ -63,12 +77,21 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // own doc comment) — idempotent across the gate's three consecutive runs.
     await ensureCourse(fixtureLinks18.courseName, fixtureLinks18);
 
+    // Four accounts, one per deck golfer (see this file's header). Ann's tokens are injected
+    // before pageA's first navigation (CreateRoundPage is sign-in-gated); Bo's are injected
+    // mid-step-2, AFTER his signed-out funnel landing has been asserted.
+    const annAccount = await mintAccountGolfer("field-ann", "Ann");
+    boTokens = await mintThrowawayUser("field-bo");
+    calAccount = await mintAccountGolfer("field-cal", "Cal");
+    deeAccount = await mintAccountGolfer("field-dee", "Dee");
+
     contextA = await browser.newContext();
     contextB = await browser.newContext();
     await installWsProxy(contextA, aRoute);
     await installWsProxy(contextB, bRoute);
     pageA = await contextA.newPage();
     pageB = await contextB.newPage();
+    await injectAuthTokens(pageA, annAccount.tokens);
   });
 
   test.afterAll(async () => {
@@ -78,7 +101,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await contextB?.close();
   });
 
-  test("1: context A creates the round on fixtureLinks18 as Ann (white, ch 8); reads the join code from SetupPanel", async () => {
+  test("1: context A, signed in as Ann, creates the round on fixtureLinks18 (white, ch 8); reads the join code from SetupPanel", async () => {
     await pageA.goto("/create");
     // M6: CourseSearch replaced the old fixture <select> — search by name (ensureCourse above
     // guarantees exactly one real course record answers to it) and tap the one result.
@@ -86,7 +109,9 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     const result = pageA.getByRole("button", { name: fixtureLinks18.courseName, exact: true }).first();
     await expect(result).toBeVisible();
     await result.click();
-    await pageA.getByLabel("Your name").fill("Ann");
+    // No name entry: the create form renders "Playing as Ann" from the account's own record —
+    // there is no name field to fill anymore.
+    await expect(pageA.getByText("Playing as", { exact: true })).toBeVisible();
     await pageA.getByLabel("Course handicap").fill("8");
     await pageA.getByRole("button", { name: "Create round" }).click();
 
@@ -103,18 +128,37 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     expect(joinCode).toMatch(/^[A-Z0-9]{6}$/);
   });
 
-  test("2: context B joins as Bo through the join UI (uppercased code); Cal and Dee join over HTTP directly", async () => {
-    await pageB.goto("/join");
-    await pageB.getByLabel("Code").fill(joinCode);
-    await pageB.getByLabel("Your name").fill("Bo");
+  test("2: context B joins as Bo through the REAL funnel — sign-in CTA, the name prompt, then the join form; Cal and Dee join as themselves over HTTP", async () => {
+    // The join link's signed-out landing IS the sign-up funnel's front door (accounts-only
+    // identity spec §3): the code rides the URL, and the page offers exactly one way forward —
+    // the sign-in CTA (scoped to <main>; the header chrome carries its own compact Sign in).
+    await pageB.goto(`/join?code=${joinCode}`);
+    await expect(pageB.getByRole("main").getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+
+    // The Hosted-UI round trip itself is Cognito's stock form — the controller's live
+    // spot-walk covers it, not this automated gate — so the harness injects Bo's minted
+    // tokens and re-lands on the SAME funnel URL, exactly where AuthCallbackPage's returnTo
+    // would drop a real golfer after sign-up.
+    await injectAuthTokens(pageB, boTokens);
+    await pageB.goto(`/join?code=${joinCode}`);
+
+    // Bo's account was minted WITHOUT a name: his first GET /me minted a placeholder-named
+    // golfer, so the funnel asks its one required question before any join form renders —
+    // this is where "Bo" gets typed, the only name entry in his whole story.
+    await pageB.getByLabel("What should the card call you?").fill("Bo");
+    await pageB.getByRole("button", { name: "Continue", exact: true }).click();
+
+    // The prompt resolves into the join form on the same visit — "Playing as Bo" from the
+    // record, the code preserved through the whole trip.
+    await expect(pageB.getByText("Playing as", { exact: true })).toBeVisible();
+    await expect(pageB.getByRole("main").getByText("Bo", { exact: true })).toBeVisible();
 
     // M6 (M-a fix): JoinRoundPage fires a debounced (250ms) peek once the 6-char code is
     // complete and, on success, swaps the free-text Tee <input> for a <select> pre-populated
     // from the round's frozen card, alongside a "Joining <courseName>" line. Waiting for that
     // line (rather than racing the debounce with a free-text fill()) makes this deterministic
-    // AND actually exercises the M6 peek tee picker end-to-end for the first time — it was
-    // previously component-tested only. The free-text fallback path (peek failure) stays
-    // covered there, not here.
+    // AND actually exercises the M6 peek tee picker end-to-end. The free-text fallback path
+    // (peek failure) stays covered at the component level, not here.
     await expect(pageB.getByText(`Joining ${fixtureLinks18.courseName}`)).toBeVisible();
     await pageB.getByLabel("Tee").selectOption("white");
 
@@ -125,10 +169,12 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // Cal and Dee join via a direct fetch, not a browser — score-for-anyone makes their own
     // browsers unnecessary, and joining them through context A would overwrite Ann's
     // localStorage credential for this round (one `swng:credential:<roundId>` key per round
-    // per browser, not per golfer).
+    // per browser, not per golfer) — but as THEMSELVES, each with their own Bearer (self-join
+    // is the only way onto a card; the deleted players[]/addParticipant seeding has no
+    // harness support anymore).
     const { httpUrl } = loadWebEnv();
-    await joinRoundDirect(httpUrl, { code: joinCode, name: "Cal", tee: "white", courseHandicap: 15 });
-    await joinRoundDirect(httpUrl, { code: joinCode, name: "Dee", tee: "white", courseHandicap: 5 });
+    await joinRoundDirect(httpUrl, calAccount, { code: joinCode, tee: "white", courseHandicap: 15 });
+    await joinRoundDirect(httpUrl, deeAccount, { code: joinCode, tee: "white", courseHandicap: 5 });
 
     // Both already-live contexts must observe the full 4-person roster (via WS/pull) before
     // Step 3 drives AddGameForm's participant-derived <select>s.
@@ -228,7 +274,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     );
   });
 
-  test("7: A scores holes 13-16 (two-tap proven structurally on one entry); the h16 digest fires on both contexts", async () => {
+  test("7: A scores holes 13-16 (two-tap proven structurally on one entry); both contexts' chips read the deck's thru-16 lines", async () => {
     test.setTimeout(120_000);
 
     // The two-tap contract, made explicit: exactly two click() calls take the grid from an
@@ -255,26 +301,20 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     }
 
     // Dormie at 16, fourball 2 up; the h16 skin still riding into 17 — the deck's own thru-16
-    // pin, via the app's own describeGame.
+    // pin, via the app's own describeGame. The between-holes digest is DELETED (accounts-only
+    // identity spec §6: standings are pullable via the chips, never a push-interruption), so
+    // the same cross-context thru-16 convergence this step used to read off the digest is
+    // asserted on the chips themselves — the very surface a real golfer now checks between
+    // holes. A's own entries are same-page local state (its optimistic fold) and stay bare;
+    // B only learns holes 13-16 via WS broadcast from A — cross-context, WS-dependent — so
+    // B's pair gets the announced force-close + Sync-now recovery, same as steps 4/6/8.
     const expectedFourball = describeFourballAt(16, true);
     const expectedSkins = describeSkinsAt(16, true);
 
-    for (const { page, route } of [
-      { page: pageA, route: aRoute },
-      { page: pageB, route: bRoute },
-    ]) {
-      // waitForDigestOrRecover force-closes THIS page's own proxied socket on an assertion
-      // timeout (announced via console.log + a "ws-fallback" annotation) exactly like step 9's
-      // waitForFinalOrRecover — deterministic, not inferred: a delivery hiccup on either page's
-      // WS strands this digest wait with nothing to recover from otherwise.
-      await waitForDigestOrRecover(page, "After hole 16", route);
-      const digest = page.getByRole("status", { name: "After hole 16" });
-      await expect(digest).toContainText(expectedFourball);
-      await expect(digest).toContainText(expectedSkins);
-      // Dismiss now (rather than relying solely on the next entry's auto-dismiss) — a digest
-      // overlay sits above the grid and must never block the next tap (brief).
-      await digest.getByRole("button", { name: "Dismiss" }).click();
-    }
+    await expect(chip(pageA, "Fourball match")).toContainText(expectedFourball);
+    await expect(chip(pageA, "Skins")).toContainText(expectedSkins);
+    await expectOrRecover(pageB, "B's Fourball thru 16 (step 7)", () => expect(chip(pageB, "Fourball match")).toContainText(expectedFourball), bRoute);
+    await expectOrRecover(pageB, "B's Skins thru 16 (step 7)", () => expect(chip(pageB, "Skins")).toContainText(expectedSkins), bRoute);
   });
 
   test("8: A scores hole 17 (Ann picked up; Bo/Cal/Dee strokes) and hole 18 for all four; fourball closes 2&1", async () => {
@@ -356,6 +396,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 // cheapest way to guarantee that (fixtureLinks18 is idempotently re-seeded either way).
 test.describe.serial("M7 termination coverage — end an unresolved game, finalize the rest", () => {
   let page: Page;
+  let quinnAccount: AccountGolfer;
   // Single context (Pat) — Quinn joins over a direct HTTP fetch (score-for-anyone, same
   // precedent as Cal/Dee in the M5 describe above), so Pat's OWN page only ever learns of
   // Quinn's join via WS broadcast/pull — the same cross-context WS-liveness seam the M5 describe
@@ -365,22 +406,27 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
 
   test.beforeAll(async ({ browser }) => {
     await ensureCourse(fixtureLinks18.courseName, fixtureLinks18); // idempotent — already seeded by the M5 block above when both run in the same pnpm e2e:field invocation
+    // Accounts-only: Pat drives the browser signed in; Quinn's account exists purely for his
+    // own out-of-browser self-join in test 1.
+    const patAccount = await mintAccountGolfer("field-pat", "Pat");
+    quinnAccount = await mintAccountGolfer("field-quinn", "Quinn");
     const context = await browser.newContext();
     await installWsProxy(context, route);
     page = await context.newPage();
+    await injectAuthTokens(page, patAccount.tokens);
   });
 
   test.afterAll(async () => {
     await page?.context().close();
   });
 
-  test("1: Pat creates a throwaway round on fixtureLinks18; Quinn joins over a direct HTTP fetch", async () => {
+  test("1: Pat creates a throwaway round on fixtureLinks18; Quinn joins as himself over a direct HTTP fetch", async () => {
     await page.goto("/create");
     await page.getByLabel("Course", { exact: true }).fill(fixtureLinks18.courseName);
     const result = page.getByRole("button", { name: fixtureLinks18.courseName, exact: true }).first();
     await expect(result).toBeVisible();
     await result.click();
-    await page.getByLabel("Your name").fill("Pat");
+    // No name entry: "Playing as Pat" renders from the account's own record.
     await page.getByLabel("Course handicap").fill("0");
     await page.getByRole("button", { name: "Create round" }).click();
 
@@ -388,9 +434,9 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
     const joinCode = await readJoinCode(page);
 
     // Score-for-anyone precedent (Cal/Dee, Quinn elsewhere in this file) — Quinn's own tab
-    // adds nothing this scenario needs.
+    // adds nothing this scenario needs; his join carries his own Bearer (self-join only).
     const { httpUrl } = loadWebEnv();
-    await joinRoundDirect(httpUrl, { code: joinCode, name: "Quinn", tee: "white", courseHandicap: 0 });
+    await joinRoundDirect(httpUrl, quinnAccount, { code: joinCode, tee: "white", courseHandicap: 0 });
     // Quinn's join is a direct HTTP fetch, not a browser — Pat's page only ever learns of it via
     // WS broadcast/pull, cross-context and WS-dependent (same seam as the M5 describe's own
     // waitForParticipant loop), so it gets the announced force-close + Sync-now recovery instead

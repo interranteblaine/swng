@@ -6,7 +6,7 @@ import { createHttpTransport, createRoundSession } from "@swng/client";
 import type { RoundSession } from "@swng/client";
 import { cellKey, deviceId, fixtureLinks, resultOf } from "@swng/domain";
 import type { GameResult, GameState, GolferId, HoleResult, RoundId } from "@swng/domain";
-import { apiUrl, loadEndpoints, post, waitUntil } from "./support/client.js";
+import { apiUrl, loadEndpoints, mintAccountGolfer, post, waitUntil } from "./support/client.js";
 
 // The M2 golden stableford deck for two golfers — reproduced verbatim from
 // packages/domain/src/scoring/stableford.test.ts. The card and its 15/19 lines are pinned by the domain golden fixture
@@ -83,15 +83,33 @@ describe("kill-network sync gate: two real createRoundSessions over the deployed
 
   // Step 1: create the round + join, entirely through the existing HTTP e2e harness (no
   // session involved yet) — Ann host ch 8, Bo ch 2, white tees, one stableford game.
-  it("1: creates the round, joins Bo, and adds the stableford game via the HTTP harness", async () => {
-    const started = await post(rounds(), { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } }, startRoundResponseSchema);
+  // Accounts-only (the wall): Ann and Bo are both signed-in accounts — minted, named via
+  // PUT /me, starting/joining as themselves with their own Bearers; the identity fields
+  // still on the wire until N-T6 (host.name / name / golferId) come from their records.
+  it("1: Ann and Bo sign up; Ann starts the round as herself, Bo joins as himself; the stableford game is added", async () => {
+    const annAccount = await mintAccountGolfer(httpUrl, "sync-ann", "Ann");
+    const boAccount = await mintAccountGolfer(httpUrl, "sync-bo", "Bo");
+
+    const started = await post(
+      rounds(),
+      { card: fixtureLinks, host: { name: annAccount.name, tee: "white", courseHandicap: 8 }, golferId: annAccount.golferId },
+      startRoundResponseSchema,
+      annAccount.idToken,
+    );
     roundId = started.roundId;
     annId = started.golferId;
     tokenAnn = started.token;
+    expect(annId).toBe(annAccount.golferId); // as-self: the host seat is the account's own golfer
 
-    const joined = await post(rounds("/join"), { code: started.joinCode, name: "Bo", tee: "white", courseHandicap: 2 }, joinRoundResponseSchema);
+    const joined = await post(
+      rounds("/join"),
+      { code: started.joinCode, name: boAccount.name, tee: "white", courseHandicap: 2, golferId: boAccount.golferId },
+      joinRoundResponseSchema,
+      boAccount.idToken,
+    );
     boId = joined.golferId;
     tokenBo = joined.token;
+    expect(boId).toBe(boAccount.golferId);
 
     const added = await post(rounds(`/${roundId}/games`), { game: { kind: "stableford", players: [annId, boId] } }, addGameResponseSchema, tokenAnn);
     expect(added.gameId).toBeDefined();

@@ -2,56 +2,58 @@ import { expect, test } from "@playwright/test";
 import type { GetMyRecordResponse, SeasonStandingLine } from "@swng/contracts";
 import { golferId } from "@swng/domain";
 import type { CrewId, GolferId, HeadToHeadRecord, RoundId, SeasonLedgerLine } from "@swng/domain";
-import type { AuthTokens } from "../src/auth/tokenStore.js";
 import {
   addGameDirect,
   appendCountedRoundDirect,
-  claimGolferDirect,
   createCrewDirect,
   createScoreOps,
   createSeasonDirect,
   finalizeRoundDirect,
   getMyRecordDirect,
-  getRoundEventsDirect,
   getSeasonStandingsDirect,
   invokeRebuild,
   joinCrewDirect,
+  joinRoundDirect,
   loadWebEnv,
-  mintThrowawayUser,
+  mintAccountGolfer,
   pollUntil,
   recordScoreDirect,
   removeCountedRoundDirect,
   startRoundDirect,
-  updateMeDirect,
 } from "./support.js";
+import type { AccountGolfer } from "./support.js";
 import type { SeasonGolferIds } from "./crewSeasonDeck.js";
 import { HOLES, SEASON_ROUNDS, buildCourseCard, computeLocalSeason, frozenSeasonExpectation, roundScoresByGolfer, seasonGames } from "./crewSeasonDeck.js";
 
-// The golden season gate, rewritten for the realigned crew model (architecture-realignment
-// Task 12; M8 Task 7 minted the FROZEN deck this still plays byte-for-byte): rounds are
-// sealed leaves — never crew-tagged — and a crew instead creates a named SEASON and counts
-// finished rounds into it by roundId (POST /crews/{crewId}/seasons/{seasonId}/rounds), with
-// standings COMPUTED ON READ from the counted snapshots (no season projection to poll or
-// rebuild). The deck's math is model-independent, so every frozen expectation
-// (crewSeasonDeck.ts: singles H2H 5W-5L-2H, skins 54 each, stableford 430/430/435/435) is
-// asserted unchanged against the new standings endpoint. Entirely API-driven (task-7-brief.md's
-// own parenthetical: "browser only where the thing gated is UI") — nothing in this scenario
-// (crew setup, playing 12 rounds, seasons, standings, rebuild parity, a mid-season claim) is
-// itself a UI behavior; the UI half is CrewPage/SeasonPanel's own component coverage, not this
-// spec's. One long describe.serial, like identityRecord.spec.ts's own M7 gate — later steps
-// depend on state (crew id, golferIds, roundIds, seasonId) earlier steps mint.
-test.describe.serial("golden season gate — counted rounds, standings-on-read, rebuild parity, claim continuity", () => {
+// The golden season gate, rewritten accounts-only (accounts-only identity spec §1-3; the
+// FROZEN deck M8 Task 7 minted is still played byte-for-byte): rounds are sealed leaves —
+// never crew-tagged — and a crew creates a named SEASON and counts finished rounds into it
+// by roundId (POST /crews/{crewId}/seasons/{seasonId}/rounds), with standings COMPUTED ON
+// READ from the counted snapshots (no season projection to poll or rebuild). The deck's four
+// players are now four minted ACCOUNTS — Al starts every round as himself and Bo/Cy/Dee join
+// each round as themselves with their own Bearers (the per-account joins that replaced
+// StartRound's deleted players[] ghost seeding) — and the deck's math is seeding-independent,
+// so every frozen expectation (crewSeasonDeck.ts: singles H2H 5W-5L-2H, skins 54 each,
+// stableford 430/430/435/435) is asserted UNCHANGED against the same standings endpoint.
+// Entirely API-driven (task-7-brief.md's own parenthetical: "browser only where the thing
+// gated is UI") — nothing in this scenario (crew setup, playing 12 rounds, seasons,
+// standings, rebuild parity, a late crew join) is itself a UI behavior; the UI half is
+// CrewPage/SeasonPanel's own component coverage, not this spec's. One long describe.serial,
+// like identityRecord.spec.ts's own gate — later steps depend on state (crew id, golferIds,
+// roundIds, seasonId) earlier steps mint.
+test.describe.serial("golden season gate — counted rounds, standings-on-read, rebuild parity, late-join aggregation scope", () => {
   const courseName = `Saturday Boys Muni ${Date.now()}`;
   const card = buildCourseCard(courseName);
   const SEASON_NAME = "The Golden Dozen";
 
-  let hostU: AuthTokens;
-  let alId: GolferId;
+  let al: AccountGolfer;
+  let bo: AccountGolfer;
+  let cy: AccountGolfer;
+  let dee: AccountGolfer;
   let crewId: CrewId;
-  let crewJoinCode = ""; // V's route into the roster in step 8, minted at crew creation (step 2)
+  let crewJoinCode = ""; // Bo's route into the roster in step 8, minted at crew creation (step 2)
   let ids: SeasonGolferIds;
   let seasonId = "";
-  let roundOneJoinCode = ""; // V's claim proof in step 8: a round Bo verifiably played in
   const roundIds: RoundId[] = [];
 
   // The frozen ledger, resolved to the wire's SeasonStandingLine shape: a crew is a
@@ -59,8 +61,8 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
   // roster only, `name` comes from the roster's own CrewMember.name, and there is no `member`
   // flag on the wire (getSeasonStandings.ts's own doc comment: every row that reaches here is,
   // by construction, a member). `memberIds` is the roster AT THE POINT OF THE CALL — Al alone
-  // through steps 5-7 (Bo/Cy/Dee stay round-minted ghosts, never crew members, all season), Al
-  // + Bo once V claims Bo's ghost and joins the crew in step 8.
+  // through steps 5-7 (Bo/Cy/Dee hold accounts all season but join no roster), Al + Bo once
+  // Bo joins the crew late in step 8.
   const nameOf = (id: GolferId): string => (id === ids.al ? "Al" : id === ids.bo ? "Bo" : id === ids.cy ? "Cy" : "Dee");
 
   const expectedStandingLines = (lines: readonly SeasonLedgerLine[], memberIds: ReadonlySet<GolferId>): readonly SeasonStandingLine[] =>
@@ -88,22 +90,25 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(computeLocalSeason(placeholderIds)).toEqual(frozenSeasonExpectation(placeholderIds));
   });
 
-  test("2: U signs up and creates 'The Saturday Boys' as-self (Al) — a roster of real accounts only", async () => {
-    test.setTimeout(60_000);
+  test("2: four accounts sign up (Al/Bo/Cy/Dee); Al creates 'The Saturday Boys' — its only member for now", async () => {
+    test.setTimeout(120_000);
     const { httpUrl } = loadWebEnv();
 
-    hostU = await mintThrowawayUser("crew-u");
-    const al = await updateMeDirect(httpUrl, hostU.idToken, { name: "Al" });
-    alId = al.golfer.golferId;
+    // Accounts-only (the wall): every seat in every deck round below is a signed-in account.
+    // All four sign up NOW; only Al joins the crew's roster until step 8 — membership
+    // (aggregation scope) is the thing steps 5-8 prove, so it must stay independent of merely
+    // HAVING an account. The golferIds the whole deck plays under are the accounts' own,
+    // known before a single round starts.
+    al = await mintAccountGolfer("crew-al", "Al");
+    bo = await mintAccountGolfer("crew-bo", "Bo");
+    cy = await mintAccountGolfer("crew-cy", "Cy");
+    dee = await mintAccountGolfer("crew-dee", "Dee");
+    ids = { al: al.golfer.golferId, bo: bo.golfer.golferId, cy: cy.golfer.golferId, dee: dee.golfer.golferId };
 
-    // De-ghost (architecture realignment): the M8 add-a-ghost-by-name roster path is GONE — a
-    // crew member must be an existing ACCOUNT golfer (addCrewMember.ts's ghost-not-addable),
-    // so the crew stays Al alone and Bo/Cy/Dee live as round-minted ghosts (step 3), exactly
-    // the "ghosts still exist inside rounds" arm the realignment kept.
-    const created = await createCrewDirect(httpUrl, hostU.idToken, "The Saturday Boys");
+    const created = await createCrewDirect(httpUrl, al.tokens.idToken, "The Saturday Boys");
     crewId = created.crew.crewId;
     crewJoinCode = created.crew.joinCode;
-    expect(created.crew.members).toEqual([{ golferId: alId, name: "Al", role: "organizer", claimed: true }]);
+    expect(created.crew.members).toEqual([{ golferId: ids.al, name: "Al", role: "organizer", claimed: true }]);
   });
 
   // One deck round, played entirely via the API: the season's three games added, all 18 holes
@@ -132,63 +137,24 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     await finalizeRoundDirect(httpUrl, id, token);
   };
 
-  test("3: 12 rounds are played via the API, scripted to the frozen deck — no crew tag anywhere", async () => {
-    test.setTimeout(900_000); // 12 rounds x (1 start + 3 games + 18 hole-batches + 1 finalize) against real beta latency
+  test("3: 12 rounds are played via the API, scripted to the frozen deck — every seat a self-join, no crew tag anywhere", async () => {
+    test.setTimeout(900_000); // 12 rounds x (1 start + 3 self-joins + 3 games + 18 hole-batches + 1 finalize) against real beta latency
     const { httpUrl } = loadWebEnv();
 
-    // Round 1 MINTS the ghosts: StartRound as-self (Al's account golferId) seats Bo/Cy/Dee by
-    // name alone and the server mints each a fresh GolferId. StartRoundResponse only carries
-    // the HOST's id, so the minted three are read back from the round's own participant-joined
-    // events — the same log any real client folds for its roster.
-    const first = await startRoundDirect(
-      httpUrl,
-      {
-        card,
-        host: { name: "Al", tee: "member", courseHandicap: 0 },
-        golferId: alId,
-        players: [
-          { name: "Bo", tee: "member", courseHandicap: 0 },
-          { name: "Cy", tee: "member", courseHandicap: 0 },
-          { name: "Dee", tee: "member", courseHandicap: 0 },
-        ],
-      },
-      hostU.idToken,
-    );
-    roundIds.push(first.roundId);
-    roundOneJoinCode = first.joinCode;
-    expect(first.golferId).toBe(alId); // as-self: the host seat reuses Al's account golferId, no fresh ghost
+    // Every round has the same shape: Al starts as himself, then Bo/Cy/Dee each JOIN as
+    // themselves with their own Bearers — the per-account joins that replaced StartRound's
+    // deleted players[] ghost seeding. The same four golferIds recur across all 12 rounds
+    // because they ARE the accounts' own ids (asserted per join below) — season-long
+    // continuity is just identity now, not a reused ghost mint.
+    for (let roundNumber = 1; roundNumber <= SEASON_ROUNDS; roundNumber += 1) {
+      const started = await startRoundDirect(httpUrl, al, { card, tee: "member", courseHandicap: 0 });
+      expect(started.golferId).toBe(ids.al); // as-self: the host seat is Al's account golfer, never a fresh id
 
-    const { events } = await getRoundEventsDirect(httpUrl, first.roundId, first.token);
-    const seated = events.flatMap((event) => (event.kind === "participant-joined" ? [event.participant] : []));
-    const mintedIdOf = (name: string): GolferId => {
-      const found = seated.find((participant) => participant.name === name);
-      if (!found) throw new Error(`round 1 seated no participant named "${name}"`);
-      return found.golferId;
-    };
-    ids = { al: alId, bo: mintedIdOf("Bo"), cy: mintedIdOf("Cy"), dee: mintedIdOf("Dee") };
-    expect(mintedIdOf("Al")).toBe(alId);
+      for (const account of [bo, cy, dee]) {
+        const joined = await joinRoundDirect(httpUrl, account, { code: started.joinCode, tee: "member", courseHandicap: 0 });
+        expect(joined.golferId).toBe(account.golfer.golferId); // self-join: the seat is the joiner's own account golfer
+      }
 
-    await playRoundToTheDeck(httpUrl, first.roundId, first.token, 1);
-
-    // Rounds 2-12 REUSE the minted ids (players[].golferId — the unclaimed-reuse arm of the
-    // one shared golferIdentity resolver): Task 5b's "one ghost plays the whole season under
-    // one GolferId" continuity, now anchored in the rounds themselves rather than a crew
-    // roster.
-    for (let roundNumber = 2; roundNumber <= SEASON_ROUNDS; roundNumber += 1) {
-      const started = await startRoundDirect(
-        httpUrl,
-        {
-          card,
-          host: { name: "Al", tee: "member", courseHandicap: 0 },
-          golferId: ids.al,
-          players: [
-            { name: "Bo", tee: "member", courseHandicap: 0, golferId: ids.bo },
-            { name: "Cy", tee: "member", courseHandicap: 0, golferId: ids.cy },
-            { name: "Dee", tee: "member", courseHandicap: 0, golferId: ids.dee },
-          ],
-        },
-        hostU.idToken,
-      );
       roundIds.push(started.roundId);
       await playRoundToTheDeck(httpUrl, started.roundId, started.token, roundNumber);
     }
@@ -200,18 +166,17 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     test.setTimeout(180_000);
     const { httpUrl } = loadWebEnv();
 
-    const created = await createSeasonDirect(httpUrl, hostU.idToken, crewId, SEASON_NAME);
+    const created = await createSeasonDirect(httpUrl, al.tokens.idToken, crewId, SEASON_NAME);
     seasonId = created.season.seasonId;
     expect(created.season.name).toBe(SEASON_NAME);
     expect(created.season.status).toBe("open");
 
     // appendCountedRound's did-not-play guard: the appender must be a signed-in crew member
     // who is a PARTICIPANT of the round being counted. Al is in every one of the deck's 12
-    // rounds (the host seat, as-self) and is the crew's only account member, so Al counts them
-    // all — each response echoing appendedBy as Al's own golferId is that guard's positive
-    // half.
+    // rounds (the host seat, as-self) and is the crew's only member, so Al counts them all —
+    // each response echoing appendedBy as Al's own golferId is that guard's positive half.
     for (const id of roundIds) {
-      const appended = await appendCountedRoundDirect(httpUrl, hostU.idToken, crewId, seasonId, id);
+      const appended = await appendCountedRoundDirect(httpUrl, al.tokens.idToken, crewId, seasonId, id);
       expect(appended.round.roundId).toBe(id);
       expect(appended.round.appendedBy).toBe(ids.al);
     }
@@ -219,7 +184,7 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
   test("5: season standings equal the frozen ledger exactly — computed on read from the counted rounds", async () => {
     const { httpUrl } = loadWebEnv();
-    const standings = await getSeasonStandingsDirect(httpUrl, hostU.idToken, crewId, seasonId);
+    const standings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
     const frozen = frozenSeasonExpectation(ids);
 
     expect(standings.seasonId).toBe(seasonId);
@@ -238,10 +203,10 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // 430/430/435/435 — identical to what the M8 projector once served from the deleted
     // GET /crews/{id}/records, now folded on read. A mismatch is a PRODUCT defect
     // (BLOCKED-don't-fudge), never an assertion to bend. Membership is Al ALONE at this point
-    // (Bo/Cy/Dee are round-participants, never crew members) — a members-only aggregation
-    // (owner ruling, spec §11a) surfaces only Al's row and an EMPTY head-to-head (no pair has
-    // two members yet). The ghosts' frozen numbers stay pinned in crewSeasonDeck.ts as
-    // constants; they resurface once Bo joins the roster in step 8.
+    // (Bo/Cy/Dee hold accounts and played every round, but joined no roster) — a members-only
+    // aggregation (owner ruling, spec §11a) surfaces only Al's row and an EMPTY head-to-head
+    // (no pair has two members yet). The others' frozen numbers stay pinned in
+    // crewSeasonDeck.ts as constants; Bo's resurface once he joins the roster in step 8.
     const memberIds = new Set<GolferId>([ids.al]);
     expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
     expect(standings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
@@ -254,10 +219,10 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
     // DELETE by the appender (Al) — removeCountedRound's not-the-appender guard is why nobody
     // else could.
-    const removed = await removeCountedRoundDirect(httpUrl, hostU.idToken, crewId, seasonId, roundOne);
+    const removed = await removeCountedRoundDirect(httpUrl, al.tokens.idToken, crewId, seasonId, roundOne);
     expect(removed.roundId).toBe(roundOne);
 
-    const without = await getSeasonStandingsDirect(httpUrl, hostU.idToken, crewId, seasonId);
+    const without = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
     expect(without.rounds).toHaveLength(SEASON_ROUNDS - 1);
     expect(without.rounds.map((round) => round.roundId)).not.toContain(roundOne);
 
@@ -288,10 +253,10 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
     // Re-count it — standings return to the frozen values exactly (counting is a pure inbound
     // reference; nothing about the round itself changed while it was uncounted).
-    const reappended = await appendCountedRoundDirect(httpUrl, hostU.idToken, crewId, seasonId, roundOne);
+    const reappended = await appendCountedRoundDirect(httpUrl, al.tokens.idToken, crewId, seasonId, roundOne);
     expect(reappended.round.roundId).toBe(roundOne);
 
-    const restored = await getSeasonStandingsDirect(httpUrl, hostU.idToken, crewId, seasonId);
+    const restored = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
     expect([...restored.rounds.map((round) => round.roundId)].sort()).toEqual([...roundIds].sort());
     expect(restored.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
     expect(restored.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
@@ -304,7 +269,7 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // Al's record is the projector's output (async, hence the poll): 12 as-self rounds →
     // 12 history lines.
     const pre = await pollUntil(
-      () => getMyRecordDirect(httpUrl, hostU.idToken),
+      () => getMyRecordDirect(httpUrl, al.tokens.idToken),
       (record) => record.history.length >= SEASON_ROUNDS,
       120_000,
       "Al's record",
@@ -321,7 +286,7 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // is the one deliberate exception (projectArchive stamps clock.now() on every index
     // recompute) — asserting it CHANGED is honest proof the rebuild actually recomputed this
     // golfer rather than reading a stale record back untouched.
-    const post = await getMyRecordDirect(httpUrl, hostU.idToken);
+    const post = await getMyRecordDirect(httpUrl, al.tokens.idToken);
     expect(post.history).toEqual(pre.history);
     expect(post.index?.value).toBe(pre.index?.value);
     expect(post.index?.differentialsUsed).toBe(pre.index?.differentialsUsed);
@@ -331,51 +296,37 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // season projection for a rebuild to touch, and the frozen ledger must hold verbatim,
     // still filtered to the same Al-alone roster as steps 5-6 (membership itself is untouched
     // by a rebuild — it lives on the crew, not the snapshots).
-    const standings = await getSeasonStandingsDirect(httpUrl, hostU.idToken, crewId, seasonId);
+    const standings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
     const frozen = frozenSeasonExpectation(ids);
     const memberIds = new Set<GolferId>([ids.al]);
     expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
     expect(standings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
   });
 
-  test("8: mid-season claim continuity — V claims Bo's ghost and inherits all 12 history lines", async () => {
+  test("8: Bo joins the crew late — his frozen rows and the Al-Bo head-to-head materialize; membership is pure aggregation scope", async () => {
     test.setTimeout(120_000);
     const { httpUrl } = loadWebEnv();
 
-    const userV = await mintThrowawayUser("crew-v");
-    // M9 hardening (claim proof-of-context): rosters are real accounts only now, so Bo's
-    // ghost belongs to NO crew — the proof is a ROUND join code instead: round 1's, the very
-    // round whose participant-joined event minted Bo's golferId (claimGolfer.ts's round arm
-    // loads that round's state and finds Bo among its participants; a finalized round's code
-    // still resolves).
-    const claimed = await claimGolferDirect(httpUrl, userV.idToken, { golferId: ids.bo, name: "Bo", code: roundOneJoinCode });
-    expect(claimed.golfer.golferId).toBe(ids.bo);
-    // Ghost golfer rows are lazy — StartRound minted Bo's id without ever writing a row, so
-    // the claim seeds a fresh row under that SAME id (named from this request), then binds
-    // V's sub to it.
-    expect(claimed.golfer.name).toBe("Bo");
-
-    // The stable-ghost promise, now round-anchored: every round seated Bo by the SAME golferId
-    // (players[].golferId reusing round 1's mint), so ONE claim adopts Bo's whole season — all
-    // 12 history lines, not just whichever round happened to be live at claim time (nothing
-    // here is still live to claim FROM; the claim is a bare API call against the
-    // already-finalized ghost).
+    // Bo's own record accrued all season with NO claim step — every round seated him by his
+    // account's own golferId (test 3's self-joins), so all 12 history lines are simply his.
+    // This is the accounts-only replacement for the deleted claim-continuity arc: continuity
+    // is identity itself now, not a claim that adopts a ghost's history after the fact.
     const record: GetMyRecordResponse = await pollUntil(
-      () => getMyRecordDirect(httpUrl, userV.idToken),
+      () => getMyRecordDirect(httpUrl, bo.tokens.idToken),
       (r) => r.history.length >= SEASON_ROUNDS,
       120_000,
-      "V's record",
+      "Bo's record",
     );
     expect(record.history).toHaveLength(SEASON_ROUNDS);
     expect([...record.history.map((line) => line.roundId)].sort()).toEqual([...roundIds].sort());
 
-    // The live proof that membership is pure aggregation scope: V, now bound to Bo's golferId,
-    // joins the crew by its own join code (minted at creation, step 2) — the self-service arm
-    // (joinCrewByCode.ts) that adds the CALLER's own account golfer, never a ghost. Bo's row
-    // name comes from the roster entry this write creates, sourced from V's own account golfer
-    // name (set at claim time, above) — asserted directly off the live join response before
-    // trusting it in the standings comparison below.
-    const joined = await joinCrewDirect(httpUrl, userV.idToken, crewJoinCode);
+    // The live proof that membership is pure aggregation scope: Bo — a season-long
+    // NON-member whose rounds were all counted anyway — joins the crew by its own join code
+    // (minted at creation, step 2), the self-service arm (joinCrewByCode.ts) that adds the
+    // CALLER's own account golfer. His roster-row name comes from his account golfer record —
+    // asserted directly off the live join response before trusting it in the standings
+    // comparison below.
+    const joined = await joinCrewDirect(httpUrl, bo.tokens.idToken, crewJoinCode);
     expect(joined.crew.members.map((member) => member.golferId).sort()).toEqual([ids.al, ids.bo].sort());
     const boMember = joined.crew.members.find((member) => member.golferId === ids.bo);
     expect(boMember?.name).toBe("Bo");
@@ -385,7 +336,7 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // Standings, re-fetched: Bo's frozen rows and the Al-Bo head-to-head materialize on the
     // very next read — nothing was lost while Bo was a non-member, since the counted rounds
     // themselves never changed, only the roster this read filters against.
-    const standings = await getSeasonStandingsDirect(httpUrl, hostU.idToken, crewId, seasonId);
+    const standings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
     const frozen = frozenSeasonExpectation(ids);
     const memberIds = new Set<GolferId>([ids.al, ids.bo]);
     expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));

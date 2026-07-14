@@ -8,6 +8,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "catalog:",
     "@swng/client": "workspace:*",
     "@swng/contracts": "workspace:*",
     "@swng/domain": "workspace:*",

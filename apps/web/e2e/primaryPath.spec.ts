@@ -4,24 +4,23 @@ import type { CourseCard } from "@swng/domain";
 import type { AuthTokens } from "../src/auth/tokenStore.js";
 import { enterScore, ensureCourse, injectAuthTokens, mintThrowawayUser, screenshotPath } from "./support.js";
 
-// The M8 gate's own headline (task-7-brief.md: "the user's manual smoke ... the flow that
-// failed M7's smoke, now the headline"): a fresh golfer, signed in, plays a round AS THEMSELVES
-// with no ghost, no ceremony, no typed name at round-creation — end to end through the REAL
-// UI. Process law from M7's close (papercuts.md §4): every step after sign-in goes through
-// rendered UI, no *Direct API substitutions anywhere in this file — the two allowed non-UI
-// shortcuts are minting the JWT itself (USER_PASSWORD_AUTH, exactly like identityRecord.spec.ts's
-// own precedent), since the Hosted UI form is the user's own separate manual smoke, not
-// something this automated gate re-drives, and seeding the course via the public API
-// (ensureCourse, below) — test-fixture setup, the same precedent every other spec's step 1
-// already follows, not a step a golfer takes.
+// The primary path, accounts-only (the original M8 headline, rewritten for the wall): a fresh
+// golfer signs in, names themselves ONCE at the funnel's own prompt, and plays a round as
+// themselves — end to end through the REAL UI. Process law from M7's close (papercuts.md §4):
+// every step after sign-in goes through rendered UI, no *Direct API substitutions anywhere in
+// this file — the two allowed non-UI shortcuts are minting the JWT itself
+// (USER_PASSWORD_AUTH; Cognito's stock Hosted-UI sign-up form is the controller's own live
+// spot-walk, not something this automated gate re-drives) and seeding the course via the
+// public API (ensureCourse, below) — test-fixture setup, the same precedent every other
+// spec's step 1 already follows, not a step a golfer takes.
 //
-// "Playing as ... no name typed anywhere" (brief) is scoped to the round-creation step
-// specifically: CreateRoundPage.tsx only shows the free-text "Your name" field for a
-// signed-in golfer with NO account golfer yet (asSelf === false). A brand-new Cognito user
-// has no golfer row at all (GET /me never creates — M7's own plan amendment), so this spec's
-// own step 1 sets the golfer's name once, through ProfilePage's real form (PUT /me) — the one
-// name entry in the whole file, and it happens before "Start a round" is ever visited, so
-// THAT step genuinely never sees a name typed, matching the brief's own parenthetical exactly.
+// "One name typed once" now lives at the funnel prompt (accounts-only identity spec §2): a
+// brand-new account's first GET /me MINTS a placeholder-named golfer ("Golfer NNNN"), and the
+// join funnel — most people's first landing — asks its one required question, "What should
+// the card call you?", a PUT of the name at the highest-motivation moment. Step 1 drives
+// exactly that: the fresh golfer lands on /join, is asked, answers once. Every later step
+// renders the name from the record — CreateRoundPage has no name field at all (step 2's
+// structural pin), so no other step COULD type one.
 const buildPrimaryPathCourseCard = (courseName: string): CourseCard => ({
   courseName,
   teeSets: [
@@ -36,7 +35,7 @@ const buildPrimaryPathCourseCard = (courseName: string): CourseCard => ({
 
 const GOLFER_NAME = "Primary Path Golfer";
 
-test.describe.serial("M8 primary path — the unmodified primary path, all-browser", () => {
+test.describe.serial("primary path — sign in, one name at the funnel prompt, a round as yourself, all-browser", () => {
   let page: Page;
   const courseName = `Primary Path GC ${Date.now()}`;
   const card = buildPrimaryPathCourseCard(courseName);
@@ -56,11 +55,20 @@ test.describe.serial("M8 primary path — the unmodified primary path, all-brows
     await page?.context().close();
   });
 
-  test("1: the fresh golfer names themselves once, through the real Profile form", async () => {
-    await page.goto("/profile");
-    await page.getByLabel("Name", { exact: true }).fill(GOLFER_NAME);
-    await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Saved.");
+  test("1: the fresh golfer names themselves once, at the funnel's own name prompt", async () => {
+    // The funnel is the first landing (spec §2: "for most people the join-link funnel") — the
+    // account's very first GET /me mints a placeholder golfer, so /join renders the one
+    // required question before any join form. Answering it is the ONE name entry in this file.
+    await page.goto("/join");
+    await page.getByLabel("What should the card call you?").fill(GOLFER_NAME);
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+
+    // The prompt resolves into the join form on the same visit (no navigation hop) — proof the
+    // PUT landed and the account now renders by its real name, straight from the record.
+    await expect(page.getByText("Playing as", { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByText(GOLFER_NAME, { exact: true })).toBeVisible();
+
+    await page.screenshot({ path: screenshotPath("primary-path-funnel-named.png"), fullPage: true });
   });
 
   test("2: signed-in home -> Start a round shows 'Playing as' — no name field anywhere", async () => {

@@ -1,40 +1,37 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import type { GetMyRecordResponse } from "@swng/contracts";
-import { golferId, roundId } from "@swng/domain";
-import type { CourseCard, GolferId, RoundId } from "@swng/domain";
-import type { AuthTokens } from "../src/auth/tokenStore.js";
+import type { CourseCard, RoundId } from "@swng/domain";
 import {
   createScoreOps,
-  ensureCourse,
   finalizeRoundDirect,
   getMyRecordDirect,
   injectAuthTokens,
   invokeRebuild,
-  joinRoundDirect,
   loadWebEnv,
-  mintThrowawayUser,
-  readJoinCode,
+  mintAccountGolfer,
   recordScoreDirect,
   screenshotPath,
   startRoundDirect,
 } from "./support.js";
+import type { AccountGolfer } from "./support.js";
 
-// The M7 gate (docs/implementation-plan.md M7; docs/superpowers/plans/2026-07-10-m7-identity.md
-// Task 8): finalizing a round updates a golfer's history and index LIVE, claiming a ghost
-// mid-season leaves the record unbroken, and a projections wipe+rebuild reproduces the exact
-// same values. One Playwright context (the claim/finalize/profile steps genuinely need a
-// browser — SetupPanel's roster and ProfilePage are real UI), everything else (playing ghost
-// g's three rounds, the pre/post-rebuild record fetches) goes straight over the API via
-// support.ts's *Direct helpers — the same "browser only where the story needs one" precedent
-// as fieldTest.spec.ts's Cal/Dee and courseEntry.spec.ts's Quinn.
+// The record gate, rewritten accounts-only (accounts-only identity spec §1-2): the old
+// play-as-ghost-then-claim arc is DELETED, not stubbed — nothing exists to claim anymore, so
+// the story is the product's own instead: one account signs up, names itself once, plays
+// three rounds AS ITSELF, and its history/index accrue live; then a projections rebuild
+// reproduces the identical record. The oracle discipline is unchanged from the M7 original:
+// every expected number below was hand-pinned BEFORE any live call, never computed from the
+// system under test (BLOCKED-don't-fudge). Everything is API-driven except test 3 —
+// ProfilePage is real UI, so it gets the one browser step ("browser only where the story
+// needs one", the same precedent as fieldTest.spec.ts's Cal/Dee).
 //
 // Course: a throwaway 18-hole, all-par-4 (par 72) card at rating 71.6 / slope 128 — chosen so
-// every hole's net-double-bogey cap (par+2, or par+3 on g's 8 stroke-index-1..8 holes) sits
-// comfortably above the worst score this deck ever posts (bogey, +1), so AGS == gross exactly
-// regardless of which specific holes land the "extra" strokes (the brief's own note: "no
-// net-double-bogey caps bite"). A single flat tee keeps the composition arithmetic (bogeys ×
-// (par+1) + pars × par) trivial to hand-verify against the brief's pinned table.
+// every hole's net-double-bogey cap (par+2, or par+3 on the 8 stroke-index-1..8 holes where
+// the account's ch-8 strokes land) sits comfortably above the worst score this deck ever
+// posts (bogey, +1), so AGS == gross exactly regardless of which specific holes land the
+// "extra" strokes. A single flat tee keeps the composition arithmetic (bogeys × (par+1) +
+// pars × par) trivial to hand-verify against the pinned table.
 const buildIdentityCourseCard = (courseName: string): CourseCard => ({
   courseName,
   teeSets: [
@@ -48,32 +45,31 @@ const buildIdentityCourseCard = (courseName: string): CourseCard => ({
 });
 
 // Round n's hole-by-hole gross composition, oldest-first: `bogeys` holes score par+1, the rest
-// score par — every hole here is par 4, so this is just fives-then-fours. The brief's own
-// table: 10/13/16 bogeys -> gross 82/85/88 (par 72 + bogeys, since every non-bogey hole is a
+// score par — every hole here is par 4, so this is just fives-then-fours. The pinned table:
+// 10/13/16 bogeys -> gross 82/85/88 (par 72 + bogeys, since every non-bogey hole is a
 // scratch par).
 const holeScoresFor = (bogeys: number): readonly number[] => Array.from({ length: 18 }, (_, i) => (i < bogeys ? 5 : 4));
 
-// Hand-pinned in the brief (BLOCKED-don't-fudge territory): differential = (113/128)*(AGS-71.6)
-// for AGS 82/85/88. Unrounded (scoreDifferential's own contract) — asserted via toBeCloseTo
-// below, the SAME convention packages/domain/src/handicap/whs.test.ts itself uses for raw
+// Hand-pinned (BLOCKED-don't-fudge territory): differential = (113/128)*(AGS-71.6) for AGS
+// 82/85/88. Unrounded (scoreDifferential's own contract) — asserted via toBeCloseTo below,
+// the SAME convention packages/domain/src/handicap/whs.test.ts itself uses for raw
 // (pre-tenth-rounding) differential values, never a brittle exact toBe on a float.
 const PINNED_DIFFERENTIALS = [9.18125, 11.8296875, 14.478125] as const;
 const PINNED_INDEX = 7.2;
 const PINNED_DIFFERENTIALS_USED = 1;
 
-// Playing rounds 2 and 3 is pure API — no browser, no story reason for one (score-for-anyone,
-// same precedent as joinRoundDirect's own doc comment). Round 1 is different: it's the round
-// the browser opens live to claim g on, so it's created through the real UI (test 1) and
-// finalized through the real UI (test 4) — everything else about it (joining g, scoring g)
-// is API, identical in shape to this helper.
-const playApiRound = async (httpUrl: string, card: CourseCard, hostLabel: string, ghost: GolferId, bogeys: number): Promise<void> => {
-  const started = await startRoundDirect(httpUrl, { card, host: { name: `Host-${hostLabel}`, tee: "white", courseHandicap: 0 } });
-  const joined = await joinRoundDirect(httpUrl, { code: started.joinCode, name: "Ghost G", tee: "white", courseHandicap: 8, golferId: ghost });
-  const ops = createScoreOps(`ghost-${hostLabel}`);
+// One deck round, played entirely as the account itself: start as-self (Bearer + the
+// account's own golferId — startRoundDirect sources both from the record), 18 scores via the
+// round's own participant token, finalize. Pure API — nothing in "a finalized round lands on
+// the record" is UI behavior (the UI half is test 3's ProfilePage read).
+const playRecordRound = async (httpUrl: string, account: AccountGolfer, card: CourseCard, label: string, bogeys: number): Promise<RoundId> => {
+  const started = await startRoundDirect(httpUrl, account, { card, tee: "white", courseHandicap: 8 });
+  const ops = createScoreOps(`record-${label}`);
   for (const [i, strokes] of holeScoresFor(bogeys).entries()) {
-    await recordScoreDirect(httpUrl, started.roundId, joined.token, { golferId: ghost, hole: i + 1, strokes }, ops);
+    await recordScoreDirect(httpUrl, started.roundId, started.token, { golferId: account.golfer.golferId, hole: i + 1, strokes }, ops);
   }
-  await finalizeRoundDirect(httpUrl, started.roundId, joined.token);
+  await finalizeRoundDirect(httpUrl, started.roundId, started.token);
+  return started.roundId;
 };
 
 // getMyRecord's history is populated by the DynamoDB Streams projector (packages/lambda/src/
@@ -99,136 +95,76 @@ const pollRecord = async (httpUrl: string, token: string, minHistory: number, ti
   }
 };
 
-test.describe.serial("M7 identity/record gate — claim mid-season, live index, rebuild parity", () => {
+test.describe.serial("identity/record gate — one account, three rounds as self, live index, rebuild parity", () => {
   let page: Page;
-  const ghostGolferId: GolferId = golferId(crypto.randomUUID());
   const courseName = `Identity Record Course ${Date.now()}`;
   const card = buildIdentityCourseCard(courseName);
-  let userA: AuthTokens;
-  let roundId1: RoundId;
-  let joinCode1 = "";
-  let ghostToken1 = "";
+  let account: AccountGolfer;
+  const roundIds: RoundId[] = [];
   let preRebuildRecord: GetMyRecordResponse;
 
   test.beforeAll(async ({ browser }) => {
-    // Minted here, but NOT injected yet — see test 3's own comment. userA is created early
-    // only so its throwaway Cognito user exists before anything needs it.
-    userA = await mintThrowawayUser("user-a");
+    // The one sign-up: minted via the admin APIs (Cognito's stock hosted sign-up form is the
+    // controller's live spot-walk, not this gate's) and named once through PUT /me — the
+    // account golfer this whole record accrues to. Injected before the context's first
+    // navigation so the one browser step (ProfilePage, test 3) runs signed in.
+    account = await mintAccountGolfer("record-account", "Rae");
     const context = await browser.newContext();
     page = await context.newPage();
+    await injectAuthTokens(page, account.tokens);
   });
 
   test.afterAll(async () => {
     await page?.context().close();
   });
 
-  test("1: Host1 creates round 1 through the real UI, on a fresh throwaway course", async () => {
-    await ensureCourse(courseName, card);
-
-    await page.goto("/create");
-    await page.getByLabel("Course", { exact: true }).fill(courseName);
-    const result = page.getByRole("button", { name: courseName, exact: true }).first();
-    await expect(result).toBeVisible();
-    await result.click();
-    await page.getByLabel("Your name").fill("Host1");
-    await page.getByLabel("Course handicap").fill("0");
-    await page.getByRole("button", { name: "Create round" }).click();
-
-    await expect(page).toHaveURL(/\/round\//);
-    roundId1 = roundId(new URL(page.url()).pathname.replace("/round/", ""));
-    joinCode1 = await readJoinCode(page);
-  });
-
-  test("2: ghost g plays rounds 1–3 via the API — the pinned gross totals (82/85/88)", async () => {
-    test.setTimeout(120_000);
-
-    // Round 1 stays LIVE (not finalized) — the browser needs to open it live in test 3 to
-    // claim g; SetupPanel's roster only renders pre-finalize (ResultsView has no roster at
-    // all), so the claim MUST happen before this round finalizes. g's own token comes back
-    // from THIS join, reused for both scoring and (test 4) finalizing round 1.
+  test("1: the account plays rounds 1-3 as itself via the API — the pinned gross totals (82/85/88)", async () => {
+    test.setTimeout(180_000);
     const { httpUrl } = loadWebEnv();
-    const joined1 = await joinRoundDirect(httpUrl, { code: joinCode1, name: "Ghost G", tee: "white", courseHandicap: 8, golferId: ghostGolferId });
-    ghostToken1 = joined1.token;
-    const ops1 = createScoreOps("ghost-r1");
-    for (const [i, strokes] of holeScoresFor(10).entries()) {
-      await recordScoreDirect(httpUrl, roundId1, ghostToken1, { golferId: ghostGolferId, hole: i + 1, strokes }, ops1);
-    }
 
-    // Rounds 2 and 3 reuse g's SAME golferId (Task 5b: unclaimed reuse) and finalize
-    // immediately — they MUST both join (and thereby lock in that reuse) before the claim
-    // below binds a sub to g, since a claimed g's golferStore row rejects further reuse.
-    await playApiRound(httpUrl, card, "2", ghostGolferId, 13);
-    await playApiRound(httpUrl, card, "3", ghostGolferId, 16);
+    // Strictly in deck order, each finalized before the next starts — test 2's newest-first
+    // expectation depends on exactly this sequence. The same account golferId seats every
+    // round because it IS the account's own id; season-long continuity needs no claim step
+    // and no ghost reuse, it's just identity.
+    roundIds.push(await playRecordRound(httpUrl, account, card, "r1", 10));
+    roundIds.push(await playRecordRound(httpUrl, account, card, "r2", 13));
+    roundIds.push(await playRecordRound(httpUrl, account, card, "r3", 16));
   });
 
-  test("3: signed-in user A claims ghost g on round 1's still-live roster", async () => {
-    // Signed in HERE, not in beforeAll (M8 Task 7 field finding): M8's own "play as yourself"
-    // CreateRoundPage (commit 236809c) auto-binds ANY signed-in caller's account to whatever
-    // name they type at round-creation time (PUT /me + as-self StartRound) — this test predates
-    // that behavior (9f02cd6) and its whole story depends on Host1 (test 1) staying a SEPARATE
-    // identity from user A, who arrives later to claim ghost g. Injecting the token before test
-    // 1 would silently consume userA's one-account-one-golfer slot on "Host1" instead of
-    // leaving it free, so every claim attempt below would legitimately 409
-    // "golfer-already-claimed" — reproduced directly against beta (bypassing the UI, raw fetch)
-    // before this fix: a fresh ghost claims cleanly in isolation, but replaying this describe
-    // block's OWN sequence (sign in before test 1, type "Host1", then claim ghost g) 409s every
-    // time. addInitScript takes effect on the reload right after it, and on every navigation
-    // after that (test 4/5 need no second injection).
-    await injectAuthTokens(page, userA);
-    await page.reload();
-
-    const rosterRow = page.locator("li", { hasText: "Ghost G" });
-    await expect(rosterRow).toBeVisible();
-    await rosterRow.getByRole("button", { name: "This is me", exact: true }).click();
-    await rosterRow.getByRole("dialog", { name: "Confirm claim" }).getByRole("button", { name: "Confirm", exact: true }).click();
-    await expect(rosterRow.getByRole("status")).toContainText("Linked to your account");
-
-    // Legibility walk (papercuts.md §4): signed-in header chrome (name + Sign out, top of
-    // every page via App.tsx's Layout) alongside the fresh claim confirmation — one screenshot
-    // for both surfaces at once, still live (pre-finalize).
-    await page.screenshot({ path: screenshotPath("signed-in-chrome-and-claim.png"), fullPage: true });
-  });
-
-  test("4: round 1 finalizes through the real UI; /me/record settles to 3 lines and the pinned index", async () => {
+  test("2: /me/record settles to 3 lines and the pinned index, live", async () => {
     test.setTimeout(90_000);
-    await page.getByRole("button", { name: "Finalize round" }).click();
-    await page.getByRole("dialog", { name: "Confirm finalize" }).getByRole("button", { name: "Finalize", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Final results" })).toBeVisible();
-
     const { httpUrl } = loadWebEnv();
-    const record = await pollRecord(httpUrl, userA.idToken, 3);
+    const record = await pollRecord(httpUrl, account.tokens.idToken, 3);
     expect(record.history).toHaveLength(3);
 
     // history is newest-first (packages/contracts/src/golfers.ts's own doc comment;
-    // getMyRecord.ts implements it via sortLines + reverse, oldest->newest then flipped) — and this
-    // describe block's own control flow makes the finalize order, and therefore the position
-    // of each differential, deterministic: round 2 finalizes inside test 2's playApiRound call
-    // (bogeys 13 -> AGS 85), then round 3 (bogeys 16 -> AGS 88), then round 1 finalizes LAST
-    // here in test 4 (bogeys 10 -> AGS 82, after the claim). Newest-first is therefore
-    // [round1 (82), round3 (88), round2 (85)]. Derived from PINNED_DIFFERENTIALS (itself
-    // ordered by AGS 82/85/88, see the constant's own comment) rather than re-typed literals,
-    // so a future re-ordering of this test's own finalize sequence fails this assertion loudly
+    // getMyRecord.ts implements it via sortLines + reverse) — and test 1's own control flow
+    // finalizes strictly in deck order: round 1 (AGS 82), round 2 (85), round 3 (88).
+    // Newest-first is therefore [round3 (88), round2 (85), round1 (82)] —
+    // PINNED_DIFFERENTIALS reversed. Derived from the pinned constant rather than re-typed
+    // literals, so a future re-ordering of the play sequence fails this assertion loudly
     // instead of silently passing a stale expectation.
-    const expectedNewestFirst = [PINNED_DIFFERENTIALS[0], PINNED_DIFFERENTIALS[2], PINNED_DIFFERENTIALS[1]];
+    const expectedNewestFirst = [PINNED_DIFFERENTIALS[2], PINNED_DIFFERENTIALS[1], PINNED_DIFFERENTIALS[0]];
     for (const [i, value] of record.history.map((line) => line.differential).entries()) {
       expect(value, `history[${i}].differential`).toBeCloseTo(expectedNewestFirst[i]!, 6);
     }
 
-    // round 1 finalizes last (test 4, after the claim) -> newest -> history[0].
-    expect(record.history[0]?.roundId).toBe(roundId1);
+    // Round 3 finalized last -> newest -> history[0]; round 1 first -> oldest -> history[2].
+    expect(record.history[0]?.roundId).toBe(roundIds[2]);
+    expect(record.history[2]?.roundId).toBe(roundIds[0]);
 
     // Three differentials -> WHS small-sample table row (<=3: use 1, adjustment -2.0) -> lowest
-    // 9.18125 - 2.0 = 7.18125 -> tenth-rounded -> 7.2, differentialsUsed 1 (brief's own
-    // computation, packages/domain/src/handicap/whs.ts's smallSampleTable). If the live system
-    // disagrees with either pinned number, this assertion fails loudly rather than being
-    // adjusted to match — the brief's own BLOCKED-don't-fudge instruction.
+    // 9.18125 - 2.0 = 7.18125 -> tenth-rounded -> 7.2, differentialsUsed 1 (packages/domain/
+    // src/handicap/whs.ts's smallSampleTable). If the live system disagrees with either pinned
+    // number, this assertion fails loudly rather than being adjusted to match — the
+    // BLOCKED-don't-fudge instruction.
     expect(record.index?.value).toBe(PINNED_INDEX);
     expect(record.index?.differentialsUsed).toBe(PINNED_DIFFERENTIALS_USED);
 
     preRebuildRecord = record;
   });
 
-  test("5: ProfilePage renders the same live record for the signed-in golfer", async () => {
+  test("3: ProfilePage renders the same live record for the signed-in golfer", async () => {
     await page.goto("/profile");
 
     const indexParagraph = page.getByText(/swng Index/);
@@ -248,7 +184,7 @@ test.describe.serial("M7 identity/record gate — claim mid-season, live index, 
     await page.screenshot({ path: screenshotPath("profile-with-record.png"), fullPage: true });
   });
 
-  test("6: rebuild parity — the paged snapshot backfill reproduces the identical record", async () => {
+  test("4: rebuild parity — the paged snapshot backfill reproduces the identical record", async () => {
     test.setTimeout(360_000); // the rebuild lambda replays every finalized round on beta (5-minute CDK timeout) — comfortably slower than every other step here
 
     const summary = await invokeRebuild();
@@ -256,7 +192,7 @@ test.describe.serial("M7 identity/record gate — claim mid-season, live index, 
     expect(summary.processed).toBeGreaterThanOrEqual(3); // at least this run's own 3 rounds
 
     const { httpUrl } = loadWebEnv();
-    const postRebuildRecord = await getMyRecordDirect(httpUrl, userA.idToken);
+    const postRebuildRecord = await getMyRecordDirect(httpUrl, account.tokens.idToken);
 
     // Deep-equal on history: archiveGolferLine is a pure recompute from the SAME stored
     // archive both before and after rebuild — no wall-clock or randomness anywhere in it, so

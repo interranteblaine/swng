@@ -153,14 +153,36 @@ describe("SeasonPanel — standings", () => {
     expect(await screen.findByText("Ann 5–5–2 vs Bo")).toBeTruthy();
   });
 
-  it("empty standings show the explainer, not an empty table", async () => {
+  // Papercut 9: the empty-ledger copy distinguishes two different truths — no counted rounds
+  // at all (standings genuinely haven't started building) vs. counted rounds exist but every
+  // contributor is off the current roster (the ledger is empty for a DIFFERENT reason).
+  it("zero counted rounds: shows the build-up explainer, not an empty table", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
 
     renderPanel();
 
-    expect(await screen.findByText(/standings build as rounds are counted/i)).toBeTruthy();
+    expect(await screen.findByText("Standings build as rounds are counted.")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("counted rounds exist but an empty ledger (every contributor off the roster): tells the truth instead of the build-up copy", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({
+      seasonId: "season-1",
+      name: "2026",
+      status: "open",
+      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, appendedBy: ANN }],
+      ledger: [],
+      headToHead: [],
+    });
+
+    renderPanel();
+
+    expect(await screen.findByText("No current members appear in this season's counted rounds.")).toBeTruthy();
+    expect(screen.queryByText("Standings build as rounds are counted.")).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();
   });
 

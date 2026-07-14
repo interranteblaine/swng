@@ -321,11 +321,12 @@ describe("ProfilePage — crews", () => {
     expect(screen.queryByText(/no crew for join code/i)).toBeNull();
   });
 
-  // M8 close-out fix #2: golfer-required means the signed-in account has no golfer profile yet
-  // — the join-code form collects no name, so retrying can never fix it. This arm points at the
-  // fix (a "Go to profile" link) even though we're already on Profile — byte-identical copy to
-  // the HomePage-era behavior this section carries forward.
-  it("golfer-required points at the profile page instead of a dead-end retry", async () => {
+  // Papercut 8: golfer-required means the signed-in account has no golfer profile yet — the
+  // join-code form collects no name, so retrying can never fix it. Post-wall this is a
+  // defensive arm only (AuthProvider's GET /me mints a golfer before the join form is usable),
+  // and it stops linking to the page it's already on — a "Go to profile" link from Profile
+  // itself was the self-link papercut. Instead it tells the caller to use the form above.
+  it("golfer-required tells the caller to save their name above — no link back to the page it's already on", async () => {
     signIn();
     vi.stubGlobal(
       "fetch",
@@ -346,10 +347,9 @@ describe("ProfilePage — crews", () => {
     fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
 
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/set your name on your profile/i);
+    expect(alert.textContent).toBe("Save your name in the form above first, then join the crew.");
     expect(screen.queryByText(/sub sub-1/)).toBeNull();
-    const link = screen.getByRole("link", { name: /go to profile/i });
-    expect(link.getAttribute("href")).toBe("/profile");
+    expect(screen.queryByRole("link", { name: /go to profile/i })).toBeNull();
   });
 
   it("a short code never submits", async () => {

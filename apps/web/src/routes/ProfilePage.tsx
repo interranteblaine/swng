@@ -112,9 +112,11 @@ export function ProfilePage() {
   const [joinCode, setJoinCode] = useState("");
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | undefined>(undefined);
-  // golfer-required is its own arm, not folded into joinError (M8 close-out fix #2): this
-  // form collects no name, so "try again" is a dead end — the honest fix is a link to /profile —
-  // moot on THIS page (we're already here), but the copy stays honest either way.
+  // golfer-required is its own arm, not folded into joinError (M8 close-out fix #2): this form
+  // collects no name, so "try again" is a dead end. Papercut 8: this page IS /profile, so a
+  // link back to this same page here was the self-link bug — the copy now points at the name
+  // form directly above instead. Post-wall this fires only defensively (AuthProvider's GET /me
+  // mints a golfer before the form is usable).
   const [joinGolferRequired, setJoinGolferRequired] = useState(false);
 
   // Seeds the form from the golfer row exactly once it's known (undefined = still
@@ -312,10 +314,7 @@ export function ProfilePage() {
           </label>
           {joinGolferRequired && (
             <p role="alert" className="text-red-400">
-              Set your name on your profile before joining a crew.{" "}
-              <Link to="/profile" className="underline">
-                Go to profile
-              </Link>
+              Save your name in the form above first, then join the crew.
             </p>
           )}
           {joinError && (

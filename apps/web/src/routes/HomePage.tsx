@@ -9,21 +9,14 @@ import { useAuth } from "../auth/useAuth";
 import { credentialStore } from "../identity";
 import { roundDayKey, roundLabel } from "../roundLabel";
 
-// Reads localStorage directly on render rather than through useRoundSession/state — Home
-// never opens a live session (that's per-round, from RoundPage), it only needs the flat list
-// of rounds this device already holds a credential for. Post-wall (accounts-only identity)
-// nothing writes new device credentials, so this list can only ever surface pre-wall relic
-// tokens — deleting it outright in favor of the SignInCta is papercut 10. A signed-in golfer's
-// "Your rounds" already reads live rounds by IDENTITY (GET /me/rounds/live), below.
 export function HomePage() {
-  const rounds = credentialStore.list();
   const { withAuth, signedIn, golfer } = useAuth();
   const navigate = useNavigate();
 
   // A real account golfer (not undefined = signed out, not null = signed in but no golfer row
   // yet — useAuth.ts's own three-state doc comment) is the ONE condition for the identity-based
-  // "Your rounds" list; every other state keeps the device credentialStore list exactly as
-  // before this task (spec §5's own binding resolution).
+  // "Your rounds" list; every other state shows the sign-in CTA instead (spec §5's own binding
+  // resolution — papercut 10 deletes the pre-wall device-credential round list entirely).
   const hasGolferIdentity = Boolean(golfer);
   // Same isIdentityLoading idiom CreateRoundPage/JoinRoundPage already use:
   // `golfer` stays undefined ONLY while signed in and the initial (or a later) GET /me hasn't
@@ -178,18 +171,12 @@ export function HomePage() {
               </ul>
             )}
           </>
-        ) : rounds.length === 0 ? (
-          <p className="text-slate-400">No rounds yet</p>
         ) : (
-          <ul className="flex flex-col gap-2">
-            {rounds.map((round) => (
-              <li key={round.roundId}>
-                <Link to={`/round/${round.roundId}`} className="block rounded-lg bg-slate-800 px-4 py-3">
-                  {round.name}
-                </Link>
-              </li>
-            ))}
-          </ul>
+          // Papercut 10: post-wall (accounts-only identity), nothing writes new device
+          // credentials, so the old device-list branch here could only ever surface pre-wall
+          // relic localStorage tokens. Signed out — or the dead golfer===null defensive case
+          // above `hasGolferIdentity` already excludes — the funnel is the one way onto a card.
+          <SignInCta message="Sign in to see your rounds." returnTo="/" />
         )}
       </section>
     </main>

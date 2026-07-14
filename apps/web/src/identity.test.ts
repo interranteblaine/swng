@@ -62,23 +62,4 @@ describe("credentialStore", () => {
   it("returns undefined for a round with no saved credential", () => {
     expect(credentialStore.load(roundId("nope"))).toBeUndefined();
   });
-
-  it("lists every saved round's id and name, and nothing else", () => {
-    credentialStore.save(roundId("round-1"), { token: "t1", golferId: golferId("ann"), name: "Ann", joinCode: "AAA111" });
-    credentialStore.save(roundId("round-2"), { token: "t2", golferId: golferId("bo"), name: "Bo", joinCode: "BBB222" });
-
-    const list = credentialStore.list();
-
-    expect(list).toHaveLength(2);
-    expect(list).toEqual(
-      expect.arrayContaining([
-        { roundId: roundId("round-1"), name: "Ann" },
-        { roundId: roundId("round-2"), name: "Bo" },
-      ]),
-    );
-  });
-
-  it("lists nothing when no credential has been saved", () => {
-    expect(credentialStore.list()).toEqual([]);
-  });
 });

@@ -9,7 +9,7 @@ import { createMemoryStorage } from "../testSupport/memoryStorage";
 
 // M8 Task 6: HomePage composes useAuth, so the api.ts module boundary is faked here too — getMe
 // for the AuthProvider. Realignment Task 13 adds getMyLiveRounds for the signed-in-with-a-golfer
-// "Your rounds" section (presence, not the device credentialStore list). Task 14 adds
+// "Your rounds" section (presence, not the pre-wall device-credential round list). Task 14 adds
 // mintParticipantToken — the tap-to-enter re-mint for a live round this device holds no local
 // credential for. Crews are a grouping/competition only (spec §11a, owner ruling) and moved off
 // this page entirely — HomePage never calls a crew endpoint at all anymore.
@@ -83,10 +83,12 @@ const renderHome = () =>
 describe("HomePage", () => {
   // The wall (accounts-only identity spec §3): no anonymous "start a round" — signed out, that
   // action is a sign-in CTA, and the whole page is sign-in / join-by-code / watch links only.
+  // Papercut 10 adds a SECOND sign-in CTA (the "Your rounds" section, replacing the device
+  // list) — both are asserted present rather than picking one with getByRole's single-match.
   it("signed out: shows a sign-in CTA instead of an anonymous Start a round link", () => {
     renderHome();
 
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Sign in" }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "Start a round" })).toBeNull();
   });
 
@@ -107,29 +109,24 @@ describe("HomePage", () => {
     expect(link.getAttribute("href")).toBe("/join");
   });
 
-  it("lists saved rounds from credentialStore.list(), each linking to /round/:id", () => {
-    credentialStore.save(roundId("round-1"), { token: "t1", golferId: golferId("ann"), name: "Ann", joinCode: "AAA111" });
-    credentialStore.save(roundId("round-2"), { token: "t2", golferId: golferId("bo"), name: "Bo", joinCode: "BBB222" });
+  // Papercut 10: post-wall, nothing writes new device credentials, so a saved credential can
+  // only ever be a pre-wall relic token — the device-list render arm is deleted outright in
+  // favor of the sign-in CTA, the funnel being the one way onto a card.
+  it("signed out, a device holding pre-wall relic credentials shows NO round list — only the sign-in CTA", () => {
+    credentialStore.save(roundId("round-1"), { token: "t1", golferId: golferId("ann"), name: "Walker", joinCode: "AAA111" });
+    credentialStore.save(roundId("round-2"), { token: "t2", golferId: golferId("bo"), name: "Walker", joinCode: "BBB222" });
 
     renderHome();
 
-    const annLink = screen.getByRole("link", { name: "Ann" });
-    const boLink = screen.getByRole("link", { name: "Bo" });
-    expect(annLink.getAttribute("href")).toBe("/round/round-1");
-    expect(boLink.getAttribute("href")).toBe("/round/round-2");
-  });
-
-  it("shows an empty state when no rounds are saved", () => {
-    renderHome();
-
-    expect(screen.getByText(/no rounds yet/i)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /walker/i })).toBeNull();
+    expect(screen.getByText("Sign in to see your rounds.")).toBeTruthy();
   });
 });
 
 // Architecture-realignment Task 13 (spec §5): "Your rounds" follows IDENTITY once a real
-// account golfer exists — GET /me/rounds/live, never the device credentialStore list. Every
-// OTHER state (signed out, or signed in with no golfer row yet) keeps the device list exactly
-// as the untouched suite above pins.
+// account golfer exists — GET /me/rounds/live, never the pre-wall device-credential round
+// list. Every OTHER state (signed out, or signed in with no golfer row yet) shows the sign-in
+// CTA instead (papercut 10 deleted the device list outright — see the signed-out suite above).
 describe("HomePage — your rounds by identity (Task 13)", () => {
   it("signed in with a golfer: lists live rounds from GET /me/rounds/live, not the device credential list", async () => {
     // A device credential exists too — proves the identity list wins, not merely "renders
@@ -211,15 +208,15 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
     expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
   });
 
-  it("signed in but no golfer row yet: keeps the device credential list and never calls GET /me/rounds/live", async () => {
+  it("signed in but no golfer row yet: shows the sign-in CTA, never the device credential list, and never calls GET /me/rounds/live", async () => {
     credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: null });
 
     renderHome();
 
-    const link = await screen.findByRole("link", { name: "Device Round" });
-    expect(link.getAttribute("href")).toBe("/round/device-round");
+    expect(await screen.findByText("Sign in to see your rounds.")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
     expect(mockedGetMyLiveRounds).not.toHaveBeenCalled();
   });
 });
@@ -349,7 +346,7 @@ describe("HomePage — GET /me loading window never flashes the device list (fix
     expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
   });
 
-  it("once the deferred GET /me resolves to no golfer row, the loading placeholder gives way to the device list", async () => {
+  it("once the deferred GET /me resolves to no golfer row, the loading placeholder gives way to the sign-in CTA", async () => {
     credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
     signIn();
     let resolveGetMe: (value: GetMeResponse) => void = () => {};
@@ -364,9 +361,9 @@ describe("HomePage — GET /me loading window never flashes the device list (fix
 
     resolveGetMe({ golfer: null });
 
-    const link = await screen.findByRole("link", { name: "Device Round" });
-    expect(link.getAttribute("href")).toBe("/round/device-round");
+    expect(await screen.findByText("Sign in to see your rounds.")).toBeTruthy();
     expect(screen.queryByRole("status", { name: /loading your rounds/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
     expect(mockedGetMyLiveRounds).not.toHaveBeenCalled();
   });
 });
@@ -398,7 +395,7 @@ describe("HomePage — no crews section, in any auth state (spec §11a)", () => 
     mockedGetMe.mockResolvedValue({ golfer: null });
 
     renderHome();
-    await screen.findByText(/no rounds yet/i); // let the signed-in render settle
+    await screen.findByText("Sign in to see your rounds."); // let the signed-in render settle
 
     expect(queryAnyCrewText()).toBe(false);
   });

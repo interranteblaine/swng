@@ -125,7 +125,11 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
       </h3>
 
       {sortedLedger.length === 0 ? (
-        <p className="text-slate-400">Standings build as rounds are counted.</p>
+        <p className="text-slate-400">
+          {standings.rounds.length === 0
+            ? "Standings build as rounds are counted."
+            : "No current members appear in this season's counted rounds."}
+        </p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">

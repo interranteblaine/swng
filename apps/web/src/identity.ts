@@ -1,4 +1,4 @@
-import { deviceId, roundId } from "@swng/domain";
+import { deviceId } from "@swng/domain";
 import type { DeviceId, GolferId, RoundId } from "@swng/domain";
 
 const TAB_DEVICE_ID_KEY = "swng:tabDeviceId";
@@ -28,8 +28,8 @@ const CREDENTIAL_KEY_PREFIX = "swng:credential:";
 const credentialKey = (id: RoundId): string => `${CREDENTIAL_KEY_PREFIX}${id}`;
 
 // localStorage, not sessionStorage: a round credential must survive a reload AND outlive the
-// tab it was created in — that's the whole point of Home's "your rounds" list — the opposite
-// lifetime from tabDeviceId's per-tab isolation above.
+// tab it was created in — RoundPage and the join flow both depend on that survival to resume
+// scoring on this device — the opposite lifetime from tabDeviceId's per-tab isolation above.
 export const credentialStore = {
   load: (id: RoundId): RoundCredential | undefined => {
     const raw = localStorage.getItem(credentialKey(id));
@@ -43,24 +43,5 @@ export const credentialStore = {
 
   save: (id: RoundId, credential: RoundCredential): void => {
     localStorage.setItem(credentialKey(id), JSON.stringify(credential));
-  },
-
-  // Scans localStorage rather than keeping a separate index — one source of truth, and a
-  // crew's worth of rounds is small enough that a linear scan is free.
-  list: (): { roundId: RoundId; name: string }[] => {
-    const rounds: { roundId: RoundId; name: string }[] = [];
-    for (let index = 0; index < localStorage.length; index += 1) {
-      const key = localStorage.key(index);
-      if (!key?.startsWith(CREDENTIAL_KEY_PREFIX)) continue;
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      try {
-        const credential = JSON.parse(raw) as RoundCredential;
-        rounds.push({ roundId: roundId(key.slice(CREDENTIAL_KEY_PREFIX.length)), name: credential.name });
-      } catch {
-        continue; // corrupted entry: skip rather than throwing
-      }
-    }
-    return rounds;
   },
 };

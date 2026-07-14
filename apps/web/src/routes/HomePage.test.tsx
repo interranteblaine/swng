@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GetMeResponse } from "@swng/contracts";
 import { golferId, roundId } from "@swng/domain";
 import { credentialStore } from "../identity";
+import { roundLabel } from "../roundLabel";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
 // M8 Task 6: HomePage composes useAuth, so the api.ts module boundary is faked here too — getMe
@@ -148,43 +149,54 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
 
   // The canonical designation (spec §5): the home list renders course + date, appending the tee
   // time to tell apart two rounds that share course and day — the "two indistinguishable Walker
-  // rounds" bug the bare course name produced.
+  // rounds" bug the bare course name produced. HomePage passes NO timeZone (the product default
+  // is the viewer's local clock), so the expected labels are computed with roundLabel's own
+  // default too — the assertion stays hermetic regardless of the worker's TZ, and never re-pins a
+  // UTC-only string.
   it("gives two same-course same-day rounds distinct labels (course · date · time)", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    const morningAt = Date.UTC(2025, 6, 12, 12, 0);
+    const afternoonAt = Date.UTC(2025, 6, 12, 18, 0);
     mockedGetMyLiveRounds.mockResolvedValue({
       rounds: [
-        { roundId: roundId("walker-1"), courseName: "Walker", joinedAt: 5_000, createdAt: Date.UTC(2025, 6, 12, 7, 58) },
-        { roundId: roundId("walker-2"), courseName: "Walker", joinedAt: 6_000, createdAt: Date.UTC(2025, 6, 12, 13, 12) },
+        { roundId: roundId("walker-1"), courseName: "Walker", joinedAt: 5_000, createdAt: morningAt },
+        { roundId: roundId("walker-2"), courseName: "Walker", joinedAt: 6_000, createdAt: afternoonAt },
       ],
     });
 
     renderHome();
 
-    const morning = await screen.findByRole("link", { name: "Walker · Sat, Jul 12 · 7:58a" });
-    const afternoon = screen.getByRole("link", { name: "Walker · Sat, Jul 12 · 1:12p" });
+    const morning = await screen.findByRole("link", { name: roundLabel({ courseName: "Walker", createdAt: morningAt }, { withTime: true }) });
+    const afternoon = screen.getByRole("link", { name: roundLabel({ courseName: "Walker", createdAt: afternoonAt }, { withTime: true }) });
     expect(morning.getAttribute("href")).toBe("/round/walker-1");
     expect(afternoon.getAttribute("href")).toBe("/round/walker-2");
-    // The old ambiguous bare "Walker" label appears for neither.
+    // The two labels are genuinely distinct (the tee time did its disambiguating job)...
+    expect(morning.textContent).not.toBe(afternoon.textContent);
+    // ...and the old ambiguous bare "Walker" label appears for neither.
     expect(screen.queryByRole("link", { name: "Walker" })).toBeNull();
   });
 
   it("distinguishes same-course rounds on DIFFERENT days by date alone — no tee time appended", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    const day1At = Date.UTC(2025, 6, 12, 12, 0);
+    const day2At = Date.UTC(2025, 6, 13, 12, 0);
     mockedGetMyLiveRounds.mockResolvedValue({
       rounds: [
-        { roundId: roundId("walker-sat"), courseName: "Walker", joinedAt: 5_000, createdAt: Date.UTC(2025, 6, 12, 7, 58) },
-        { roundId: roundId("walker-sun"), courseName: "Walker", joinedAt: 6_000, createdAt: Date.UTC(2025, 6, 13, 7, 58) },
+        { roundId: roundId("walker-day1"), courseName: "Walker", joinedAt: 5_000, createdAt: day1At },
+        { roundId: roundId("walker-day2"), courseName: "Walker", joinedAt: 6_000, createdAt: day2At },
       ],
     });
 
     renderHome();
 
-    const saturday = await screen.findByRole("link", { name: "Walker · Sat, Jul 12" });
-    const sunday = screen.getByRole("link", { name: "Walker · Sun, Jul 13" });
-    expect(saturday.getAttribute("href")).toBe("/round/walker-sat");
-    expect(sunday.getAttribute("href")).toBe("/round/walker-sun");
+    // Different days → distinguished by date alone, no tee time (roundLabel with no withTime).
+    const day1 = await screen.findByRole("link", { name: roundLabel({ courseName: "Walker", createdAt: day1At }) });
+    const day2 = screen.getByRole("link", { name: roundLabel({ courseName: "Walker", createdAt: day2At }) });
+    expect(day1.getAttribute("href")).toBe("/round/walker-day1");
+    expect(day2.getAttribute("href")).toBe("/round/walker-day2");
+    expect(day1.textContent).not.toBe(day2.textContent);
   });
 
   it("signed in with a golfer but no live rounds: shows the empty state, never falling back to the device credential list", async () => {

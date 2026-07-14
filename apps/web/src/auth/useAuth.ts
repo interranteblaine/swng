@@ -7,11 +7,12 @@ import type { AuthTokens } from "./tokenStore";
 import { pkceVerifierStore, returnToStore, tokenStore } from "./tokenStore";
 
 export interface AuthContextValue {
-  // undefined: signed out. null: signed in, but GET /me found no golfer row yet (the plan's
-  // amendment — GET /me NEVER creates). A GolferView: signed in with a real golfer.
+  // undefined: signed out. null: signed in but this session's GET /me hasn't resolved a golfer
+  // yet — transient only, since the wall's GET /me get-or-creates (a fresh account lands as
+  // "Golfer NNNN" + namePlaceholder). A GolferView: signed in with the golfer record.
   readonly golfer: GolferView | null | undefined;
-  // Decoded straight from the ID token's own claims (no network) — the header-chrome/auto-fill
-  // fallback for exactly the `golfer === null` case above (brief's controller amendment 1).
+  // Decoded straight from the ID token's own claims (no network) — header-chrome fallback for
+  // exactly the transient `golfer === null` window above. Display only; never written to a golfer.
   readonly email: string | undefined;
   readonly signedIn: boolean;
   readonly signIn: () => void;

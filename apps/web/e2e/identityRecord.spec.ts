@@ -76,13 +76,11 @@ const playRecordRound = async (httpUrl: string, account: AccountGolfer, card: Co
 // entries/projector.ts) — asynchronous relative to finalizeRound's own HTTP response, so a
 // bare single fetch right after finalize is a race. Polls the SAME endpoint finalize's own doc
 // comment already treats as the authoritative read, not a fixed sleep.
-// projectArchive.ts's own two writes per golfer (putLine, THEN — a separate later
-// await in the SAME call — putIndex once the bootstrap is met) are not transactional: a poll
-// gated on history.length alone can observe the gap between them, where the 3rd line has
-// landed but the index it unblocks hasn't yet (caught by this gate's own run 3: "Received:
-// undefined" for index.value with history already at 3). Gating on BOTH conditions is the
-// fix, not a longer timeout or a retry — the underlying race is real and instantaneous, not
-// slow.
+// Since the pre-prod hardening (D4a) the index is computed at read time from the very lines
+// this response carries — once history.length crosses the bootstrap, index is present in the
+// SAME response by construction (the projector's old putLine-then-store-the-index write gap,
+// which this gate's dual condition was originally built to ride out, no longer exists). The
+// dual gate stays as a cheap invariant assertion, not a race fix.
 const pollRecord = async (httpUrl: string, token: string, minHistory: number, timeoutMs = 60_000): Promise<GetMyRecordResponse> => {
   const deadline = Date.now() + timeoutMs;
   for (;;) {

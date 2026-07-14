@@ -7,8 +7,9 @@ import type { ProjectionStore } from "../ports/projectionStore.js";
 // The one place a golfer's own lines get a canonical order (projection-realignment spec §3):
 // ProjectionStore.listLines is UNORDERED by contract (ports/projectionStore.ts) — the stable
 // `ROUND#<roundId>` sk carries no time to sort by — so every reader imposes this SAME order
-// itself rather than trusting insertion order, or two readers (this fold, getMyRecord's wire
-// response) silently disagreeing. Ascending by finalizedAtMs; roundId is a tiebreak for a
+// itself rather than trusting insertion order, or two readers (getMyRecord's read-time index
+// fold and its wire history, since pre-prod hardening D4a moved the fold there)
+// silently disagreeing. Ascending by finalizedAtMs; roundId is a tiebreak for a
 // same-millisecond pair (unreachable at real wall-clock resolution, but a deterministic order
 // beats an unspecified one at zero cost, and it's the exact order the old time-embedded sk gave
 // for free).

@@ -421,7 +421,9 @@ export class SwngStack extends Stack {
     // record, bounded retries hand it to the DLQ, and the DLQ alarm below pages. NOTE the DLQ
     // message is stream METADATA (shard + sequence range), not the record payload — recovery is:
     // fix the bug, then re-drive the affected range with rebuildProjections (already
-    // paged/cursor-resumable). The queue is a signal + bookmark, never a replay source.
+    // paged/cursor-resumable). The queue is a signal + bookmark, never a replay source — which
+    // is also why it keeps the default DESTROY removal policy while the stateful tables all pin
+    // RETAIN: everything in it is re-derivable.
     const projectorDlq = new Queue(this, "ProjectorDlq", {
       queueName: `swng-projector-dlq-${stage}`,
       retentionPeriod: Duration.days(14),

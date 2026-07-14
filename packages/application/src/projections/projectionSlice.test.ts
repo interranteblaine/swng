@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeIndex, deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
+import { computeIndex, deviceId, fixtureLinks, fixtureLinks18, golferId, opId, playGoldenRoundLog, roundId, settleRound } from "@swng/domain";
 import type { GolferId, GolferRoundLine, Participant, RoundArchive, RoundEvent } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
@@ -39,9 +39,21 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
   cells: {},
   // A real archive's log always opens with round-created (its genesis) — carried here so
   // createdAtMsOf (accounts-only identity spec §5) resolves; its wall time (1) is arbitrary,
-  // no test below asserts it, only its PRESENCE matters.
+  // no test below asserts it, only its PRESENCE matters. One participant-joined event per
+  // entry is carried too (PC-T1/papercut 11): presence-cleanup reads the ever-seated roster
+  // off THESE events, never off archive.participants, so any test that seeds a LIVE pointer
+  // and expects it cleared needs one here for its golferId.
   events: [
     { kind: "round-created", roundId: roundId(id), card: fixtureLinks18, opId: opId(`created-${id}`), hlc: { wallMs: 1, counter: 0, deviceId: deviceId("server") }, authorId: ann },
+    ...entries.map(
+      (e, i): RoundEvent => ({
+        kind: "participant-joined",
+        participant: { golferId: e.golferId, name: e.golferId, tee: "white", courseHandicap: 8 },
+        opId: opId(`joined-${id}-${e.golferId}`),
+        hlc: { wallMs: 1, counter: i + 1, deviceId: deviceId("server") },
+        authorId: e.golferId,
+      }),
+    ),
     finalizedEvent(wallMs),
   ],
   results: [],
@@ -154,10 +166,12 @@ describe("projectArchive", () => {
     await expect(project(corrupt)).rejects.toThrow();
   });
 
-  // Presence cleanup (projection-realignment spec §5, Task 13): the finalized archive's own
-  // participant list IS the seated roster a LIVE pointer was written for at seat-time
-  // (rounds/presence.ts) — this is the PRIMARY removal path (TTL is only a backstop for a
-  // round that never finalizes).
+  // Presence cleanup (projection-realignment spec §5, Task 13; decoupled from lines/index
+  // projection policy by PC-T1/papercut 11): a LIVE pointer is written at seat-time for every
+  // golferId that ever appears in a participant-joined event (rounds/presence.ts) — cleared
+  // here over that ever-seated roster, not archive.participants (the two coincide in THIS
+  // archive; the settle-omitted-departure test below is where they diverge) — this is the
+  // PRIMARY removal path (TTL is only a backstop for a round that never finalizes).
   it("deletes the LIVE pointer for every participant on the archive", async () => {
     const ctx = await setup();
     const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo }]);
@@ -188,28 +202,33 @@ describe("projectArchive", () => {
     expect(await ctx.projectionStore.listLive(ann)).toEqual([]);
   });
 
-  // Accounts-only identity (spec §7): only account golfers are projected. A participant whose
-  // golfer record has NO bound sub (a ghost from old data) — or NO row at all — gets no history
-  // line, no index, and NO presence clear (their presence, if any, self-expires on its own TTL).
-  it("skips a participant whose golfer record is sub-less (a ghost) — no line, no index, no presence clear", async () => {
+  // Accounts-only identity (spec §7): only account golfers get a history line or index write. A
+  // participant whose golfer record has NO bound sub (a ghost from old data) gets neither. But
+  // presence-cleanup is NOT projection policy (PC-T1/papercut 11): it runs over every golferId
+  // that ever seated the round (the events' own participant-joined roster), unconditionally — so
+  // the ghost's LIVE# pointer clears exactly like an account golfer's, even though the ghost
+  // itself is invisible to lines/index. (This pin used to assert the opposite — "no presence
+  // clear" — before PC-T1 decoupled the two; the no-line/no-index half is unchanged.)
+  it("skips a participant whose golfer record is sub-less (a ghost) for lines/index — but presence clears for every ever-seated golferId, sub or not", async () => {
     const projectionStore = createInMemoryProjectionStore();
     const logger = createNullLogger();
     // ann is a real account; bo has a golfer row but NO sub (still a ghost).
     const golferStore = await accountsFor(ann);
     await golferStore.put({ id: bo, name: "Bo Ghost", handicap: {} }, undefined); // sub-less row
-    // Pre-existing presence for the ghost must be LEFT ALONE (TTL is its only cleanup path).
+    // Pre-existing presence for the ghost — presence-cleanup clears it regardless of account status.
     await projectionStore.putLive(bo, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600, expiresAtSec: 9_999_999_999 });
 
     const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo, differential: 12.0 }]);
     const project = projectArchive({ projectionStore, golferStore, clock: createFrozenClock(5_000), logger });
     await project(archive);
 
-    // ann (account) is projected; bo (sub-less ghost) is entirely skipped.
+    // ann (account) is projected; bo (sub-less ghost) is entirely skipped for lines/index.
     expect(await projectionStore.listLines(ann)).toHaveLength(1);
     expect(await projectionStore.listLines(bo)).toHaveLength(0);
     expect(await projectionStore.getIndex(bo)).toBeUndefined();
-    // The ghost's presence pointer is UNTOUCHED — the projector never cleared it.
-    expect(await projectionStore.listLive(bo)).toEqual([{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600 }]);
+    // But bo DID seat this round (archiveAt gives every entry its own participant-joined event)
+    // — presence-cleanup runs over that ever-seated roster, so bo's pointer is gone too.
+    expect(await projectionStore.listLive(bo)).toEqual([]);
   });
 
   // A participant with NO golfer row at all (possible for an old ghost id) is likewise skipped —
@@ -225,8 +244,9 @@ describe("projectArchive", () => {
     expect(await projectionStore.listLines(bo)).toHaveLength(0);
   });
 
-  // And the account golfer's own presence IS cleared (the complement of the skip above) — proving
-  // the projector still clears presence for exactly the account golfers it projected.
+  // And the account golfer's own presence IS cleared too (the complement of the skip above) —
+  // presence-cleanup (PC-T1) clears for every ever-seated golferId regardless of account status,
+  // so an account golfer's own pointer is included in that set, not carved out of it.
   it("clears presence for the account golfer it projected", async () => {
     const projectionStore = createInMemoryProjectionStore();
     const golferStore = await accountsFor(ann);
@@ -237,6 +257,43 @@ describe("projectArchive", () => {
     await project(archive);
 
     expect(await projectionStore.listLive(ann)).toEqual([]);
+  });
+
+  // Papercut 11 (PC-T1): presence-cleanup is identity housekeeping, not projection policy — it
+  // must run over the EVER-SEATED roster (every golferId a participant-joined event ever named),
+  // never over the settled archive's own participants. settleRound's departure rule (domain's
+  // round/archive.test.ts "OMITS a departed participant...") drops a departed participant
+  // entirely from archive.participants when they scored nothing and joined no game — this deck
+  // reproduces exactly that via the real settleRound, not a hand-built archive, because the bug
+  // this test pins is specifically about the gap between "ever seated" and "settled".
+  it("clears the LIVE# pointer of a settle-omitted departed participant — presence cleanup runs over the ever-seated roster, not the settled archive", async () => {
+    const ctx = await setup();
+    const annP: Participant = { golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 };
+    const boP: Participant = { golferId: bo, name: "Bo", tee: "white", courseHandicap: 10 };
+    const annNine = [5, 5, 4, 6, 5, 4, 5, 6, 4];
+    const leaveBo: RoundEvent = { kind: "participant-left", golferId: bo, opId: opId("leave-bo"), hlc: { wallMs: 5_000, counter: 0, deviceId: deviceId("test") }, authorId: bo };
+    const finalize: RoundEvent = { kind: "round-finalized", opId: opId("finalize-omit"), hlc: { wallMs: 6_000, counter: 0, deviceId: deviceId("test") }, authorId: ann };
+    const archive = settleRound([
+      // Bo joins, is in no game, records no scores, then leaves; Ann plays the card and the
+      // round finalizes — the exact shape settleRound's empty-case departure rule omits.
+      ...playGoldenRoundLog(fixtureLinks, [annP, boP], [], { [ann]: annNine, [bo]: [] }, [], false),
+      leaveBo,
+      finalize,
+    ]);
+    // Precondition: settleRound really did omit Bo — nothing to settle for a departed
+    // participant with zero scored holes and zero game membership.
+    expect(archive.participants.some((p) => p.golferId === bo)).toBe(false);
+
+    await ctx.projectionStore.putLive(bo, { roundId: archive.roundId, courseName: "Fixture Links", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
+    await ctx.projectionStore.putLive(ann, { roundId: archive.roundId, courseName: "Fixture Links", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
+    const project = projectArchive({ ...ctx, clock: createFrozenClock(9_000) });
+
+    await project(archive);
+
+    // Bo's pointer is gone even though Bo is not in the archive:
+    expect(await ctx.projectionStore.listLive(bo)).toEqual([]);
+    // And Ann's normal projection is untouched by the change:
+    expect(await ctx.projectionStore.listLines(ann)).toHaveLength(1);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { RoundArchive } from "@swng/domain";
+import type { GolferId, RoundArchive } from "@swng/domain";
 import { archiveGolferLine, combineNineHoleDifferentials, computeIndexDetail } from "@swng/domain";
 import type { Clock } from "../ports/clock.js";
 import type { GolferStore } from "../ports/golferStore.js";
@@ -76,22 +76,13 @@ export const projectArchive =
 
     for (const participant of archive.participants) {
       // Sub-less (a ghost) or no golfer row at all: not an account, so nothing about this round
-      // enters their record — no history line, no index recompute, and no presence clear (the
-      // presence they may carry from an old pre-accounts join self-expires on its 36h TTL).
+      // enters their record — no history line, no index recompute. Presence IS still cleared for
+      // them (below, unconditionally over the ever-seated roster) — that's identity housekeeping,
+      // not projection policy, and needs no account read.
       if (!accountBound.has(participant.golferId)) continue;
 
       const line = archiveGolferLine(archive, participant.golferId);
       await deps.projectionStore.putLine(participant.golferId, { ...line, finalizedAtMs, createdAtMs });
-
-      // Presence cleanup (spec §5, Task 13): an account participant's LIVE pointer, written at
-      // seat-time by startRound/joinRound (rounds/presence.ts) — cleared here, the primary removal
-      // path, TTL being only a backstop for a round that never finalizes. Only account golfers
-      // reach this loop (the sub-less skip above), which is exactly who a pointer was written for
-      // now that only account golfers are ever seated. Same at-least-once
-      // idempotence reasoning as putLine just above: a re-projection of an already-projected
-      // archive (rebuildProjections' own replay, or the stream trigger's own at-least-once
-      // delivery) calls deleteLive on a pointer that's already gone — a no-op, never an error.
-      await deps.projectionStore.deleteLive(participant.golferId, archive.roundId);
 
       // listLines is UNORDERED (ports/projectionStore.ts) — sortLines imposes the
       // (finalizedAtMs, roundId) order combineNineHoleDifferentials/computeIndexDetail need
@@ -109,6 +100,20 @@ export const projectArchive =
       if (detail === undefined) continue;
 
       await deps.projectionStore.putIndex(participant.golferId, { value: detail.value, computedAtMs: deps.clock.now(), differentialsUsed: detail.differentialsUsed });
+    }
+
+    // Presence-cleanup is identity housekeeping, not projection policy: every golfer who ever
+    // SEATED this round got a LIVE# pointer at join (rounds/presence.ts), including seats the
+    // settled archive omits (a departed participant with nothing to settle) and pre-wall ghosts.
+    // So the clear runs over the ever-seated roster from the events — never archive.participants —
+    // and unconditionally: deleteLive on a pointer that was never written (or already deleted by
+    // a replayed delivery) is a no-op, and it needs no golfer-record read. Papercut 11.
+    const everSeated = new Set<GolferId>();
+    for (const event of archive.events) {
+      if (event.kind === "participant-joined") everSeated.add(event.participant.golferId);
+    }
+    for (const golferId of everSeated) {
+      await deps.projectionStore.deleteLive(golferId, archive.roundId);
     }
 
     // The crew arm is GONE (architecture-realignment Task 9, spec §4/§9): crew standings are

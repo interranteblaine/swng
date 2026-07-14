@@ -38,9 +38,21 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
   cells: {},
   // A real archive's log always opens with round-created (its genesis) — carried here so
   // createdAtMsOf (accounts-only identity spec §5) resolves; its wall time (1) is arbitrary,
-  // only its PRESENCE matters to the projector.
+  // only its PRESENCE matters to the projector. One participant-joined event per entry is
+  // carried too (PC-T1/papercut 11): presence-cleanup reads the ever-seated roster off THESE
+  // events, never off archive.participants — without one here, a rebuild replay would never
+  // call deleteLive for that golferId.
   events: [
     { kind: "round-created", roundId: roundId(id), card: fixtureLinks18, opId: opId(`created-${id}`), hlc: { wallMs: 1, counter: 0, deviceId: deviceId("server") }, authorId: ann },
+    ...entries.map(
+      (e, i): RoundEvent => ({
+        kind: "participant-joined",
+        participant: { golferId: e.golferId, name: e.golferId, tee: "white", courseHandicap: 8 },
+        opId: opId(`joined-${id}-${e.golferId}`),
+        hlc: { wallMs: 1, counter: i + 1, deviceId: deviceId("server") },
+        authorId: e.golferId,
+      }),
+    ),
     finalizedEvent(wallMs),
   ],
   results: [],

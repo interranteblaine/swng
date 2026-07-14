@@ -9,12 +9,13 @@ import { CfnUserPoolClient, OAuthScope, UserPool, UserPoolClient, UserPoolDomain
 import { Distribution, ResponseHeadersPolicy, ViewerProtocolPolicy } from "aws-cdk-lib/aws-cloudfront";
 import { S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
-import { DynamoEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
+import { DynamoEventSource, SqsDlq } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import { BlockPublicAccess, Bucket } from "aws-cdk-lib/aws-s3";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
+import { Queue } from "aws-cdk-lib/aws-sqs";
 import type { Construct } from "constructs";
 
 // The live POC stacks (deployed pre-rebuild, still holding production-shaped data) are
@@ -415,6 +416,17 @@ export class SwngStack extends Stack {
       memorySize: 512,
     });
 
+    // D4b (pre-prod hardening spec): a deterministically-throwing stream record must not block
+    // its shard retrying for 24h and then vanish with its batchmates. Bisect isolates the poison
+    // record, bounded retries hand it to the DLQ, and the DLQ alarm below pages. NOTE the DLQ
+    // message is stream METADATA (shard + sequence range), not the record payload — recovery is:
+    // fix the bug, then re-drive the affected range with rebuildProjections (already
+    // paged/cursor-resumable). The queue is a signal + bookmark, never a replay source.
+    const projectorDlq = new Queue(this, "ProjectorDlq", {
+      queueName: `swng-projector-dlq-${stage}`,
+      retentionPeriod: Duration.days(14),
+    });
+
     // Snapshot realignment Task 1 / spec §2 ("no filter, no branching"): sourced from the
     // snapshots table's own stream now, not the rounds table's — every item there already IS a
     // finished round, so the ARCHIVE-only FilterCriteria this used to carry is deleted outright,
@@ -423,6 +435,9 @@ export class SwngStack extends Stack {
       new DynamoEventSource(snapshotsTable, {
         startingPosition: StartingPosition.TRIM_HORIZON,
         batchSize: 10,
+        bisectBatchOnError: true,
+        retryAttempts: 10,
+        onFailure: new SqsDlq(projectorDlq),
       }),
     );
 
@@ -624,6 +639,21 @@ export class SwngStack extends Stack {
         threshold: FIVE_MINUTES.toMilliseconds(),
         evaluationPeriods: 1,
         comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: TreatMissingData.NOT_BREACHING,
+      }),
+    );
+
+    // D4b: a non-empty DLQ means a poisoned snapshots-stream record needs a human — page on ANY
+    // depth above zero (not a batch-sized threshold), since even one message means that record's
+    // projections are stuck until the fix-then-rebuildProjections cycle above runs.
+    paged(
+      new Alarm(this, "ProjectorDlqDepthAlarm", {
+        alarmDescription:
+          "ProjectorFunction: a poisoned snapshots-stream record landed in the DLQ — that record's projections are NOT applied until rebuildProjections re-drives them after the fix",
+        metric: projectorDlq.metricApproximateNumberOfMessagesVisible({ period: FIVE_MINUTES, statistic: "Maximum" }),
+        threshold: 0,
+        comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+        evaluationPeriods: 1,
         treatMissingData: TreatMissingData.NOT_BREACHING,
       }),
     );

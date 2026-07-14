@@ -353,6 +353,31 @@ describe("SwngStack", () => {
 
       template.hasResourceProperties("AWS::Lambda::EventSourceMapping", { FunctionName: { Ref: projectorId } });
     });
+
+    // D4b (pre-prod hardening spec): a deterministically-throwing stream record must not block
+    // its shard for 24h and then vanish with its batchmates — bisect isolates the poison
+    // record, bounded retries hand it to the DLQ instead of retrying for a full day.
+    it("the projector event source bisects on error, bounds retries, and dead-letters to SQS", () => {
+      const queues = template.findResources("AWS::SQS::Queue");
+      const dlqLogicalId = Object.keys(queues).find((id) => id.startsWith("ProjectorDlq"));
+      expect(dlqLogicalId).toBeDefined();
+
+      template.hasResourceProperties("AWS::Lambda::EventSourceMapping", {
+        BisectBatchOnFunctionError: true,
+        MaximumRetryAttempts: 10,
+        DestinationConfig: { OnFailure: { Destination: { "Fn::GetAtt": [dlqLogicalId, "Arn"] } } },
+      });
+    });
+
+    // The DLQ message is stream METADATA (shard + sequence range), not the record payload — the
+    // queue is a signal + bookmark, never a replay source (recovery is fix-the-bug then re-drive
+    // via rebuildProjections). 14-day retention just needs to outlive a normal investigation.
+    it("ProjectorDlq: named swng-projector-dlq-beta, 14-day retention", () => {
+      template.hasResourceProperties("AWS::SQS::Queue", {
+        QueueName: "swng-projector-dlq-beta",
+        MessageRetentionPeriod: 14 * 24 * 60 * 60,
+      });
+    });
   });
 
   describe("grants", () => {
@@ -702,10 +727,11 @@ describe("SwngStack", () => {
 
   // M9 Task 5: every alarm routes into the SAME SNS topic (the owner's one inbox), so this
   // suite checks the count once and the topic-wiring once across every alarm found, rather than
-  // repeating the same AlarmActions assertion by hand for all 13.
-  describe("alarms (M9 Task 5)", () => {
-    it("has exactly 13 CloudWatch alarms (5 function errors + 1 HTTP 5xx + 1 IteratorAge + 1 Rebuild Duration + 5 table throttled-requests)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 13);
+  // repeating the same AlarmActions assertion by hand for all 14. D4b (pre-prod hardening spec)
+  // adds the 14th: the projector DLQ depth alarm.
+  describe("alarms (M9 Task 5, D4b)", () => {
+    it("has exactly 14 CloudWatch alarms (5 function errors + 1 HTTP 5xx + 1 IteratorAge + 1 Rebuild Duration + 5 table throttled-requests + 1 ProjectorDlq depth)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 14);
     });
 
     it("every alarm's AlarmActions targets the one AlarmsTopic (no alarm silently rings nowhere)", () => {
@@ -715,7 +741,7 @@ describe("SwngStack", () => {
 
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const alarmEntries = Object.entries(alarms);
-      expect(alarmEntries.length).toBe(13);
+      expect(alarmEntries.length).toBe(14);
       for (const [, alarm] of alarmEntries) {
         expect(alarm.Properties.AlarmActions).toEqual([{ Ref: topicLogicalId }]);
       }
@@ -777,6 +803,20 @@ describe("SwngStack", () => {
         // rules out a future edit accidentally swapping in a single-metric (non-summed) alarm.
         expect(Array.isArray(alarm.Properties.Metrics)).toBe(true);
       }
+    });
+
+    // D4b: a non-empty DLQ means a poisoned snapshots-stream record needs a human — page on
+    // ANY depth above zero, not a batch-sized threshold, since one message already means the
+    // fix-then-rebuildProjections cycle above is needed.
+    it("a non-empty projector DLQ pages: threshold 0, strictly greater-than, description mentions the DLQ", () => {
+      template.hasResourceProperties(
+        "AWS::CloudWatch::Alarm",
+        Match.objectLike({
+          AlarmDescription: Match.stringLikeRegexp("DLQ"),
+          Threshold: 0,
+          ComparisonOperator: "GreaterThanThreshold",
+        }),
+      );
     });
   });
 

@@ -5,9 +5,9 @@ import type { CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
 
 // CreateCrew's own arm (M8 plan): the caller needs an account golfer to seat as the crew's
-// first member (the organizer). No auto-create here — unlike getOrCreateGolfer's PUT-/me
-// pattern, a crew mutation is never the right place to lazily mint someone's OWN profile;
-// the web PUTs /me first (same T5 "PUT-first" pattern GET /me's plan amendment established).
+// first member (the organizer). No auto-create here — unlike GET /me / PUT /me's own
+// ensureGolfer path, a crew mutation is never the right place to lazily mint someone's OWN
+// profile; the web PUTs /me first, so a real golfer already exists by the time this runs.
 export const requireAccountGolfer = async (deps: { golferStore: GolferStore }, claims: AccountClaims): Promise<Golfer> => {
   const found = await deps.golferStore.getBySub(claims.sub);
   if (!found) throw new ApplicationError("golfer-required");

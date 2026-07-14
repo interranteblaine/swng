@@ -26,67 +26,33 @@ export const gameConfigInputSchema = z.discriminatedUnion("kind", [
 ]);
 export type GameConfigInput = z.infer<typeof gameConfigInputSchema>;
 
-// M8: an initial roster entry beyond the host — StartRound's `players` field appends these
-// as participant-joined events, in order, right after the host's own join (the crew
-// one-tap flow: seed a round with the whole crew in one call instead of N separate joins).
-const startRoundPlayerSchema = z.object({
-  name: z.string().min(1),
-  tee: z.string().min(1),
-  courseHandicap: z.number().int(),
-  golferId: golferIdSchema.optional(),
-});
-
+// Accounts-only identity (spec §3): StartRound seats its creator ONLY, always as-self from the
+// caller's Bearer (application/src/golfers/ensureGolfer.ts resolves the account golfer by sub).
+// No `host.name` — the participant name is the golfer record's name at start time, frozen into
+// the event (sealed leaf; a later rename never rewrites the card). No `golferId` (the seat is
+// always the caller's own), no `players[]` roster seeding (nobody puts anyone on a card — the
+// join link is the one way onto it). This object is NOT `.strict()`, so an OLD client still
+// sending host.name / golferId / players / crewId isn't rejected — Zod's default strips the
+// unknown keys silently.
 export const startRoundRequestSchema = z.object({
   card: courseCardSchema,
   host: z.object({
-    name: z.string().min(1),
     tee: z.string().min(1),
     courseHandicap: z.number().int(), // may be negative (plus handicap)
   }),
-  // M8 "as-self create": the host's own existing golferId, subject to the SAME claimed-
-  // golferId rule as JoinRound's golferId (application/src/rounds/golferIdentity.ts) — a
-  // signed-in golfer can start a round playing as themselves instead of a fresh ghost.
-  golferId: golferIdSchema.optional(),
-  // No crewId: round-is-a-sealed-leaf, so a round never tags itself with a crew. This object
-  // is NOT `.strict()`, so an old client still sending `crewId` isn't rejected — Zod's default
-  // strips the unknown key. Consent to seat a claimed fellow golfer now flows from
-  // co-membership (the resolver derives it from the caller's own crews — golferIdentity.ts),
-  // not from a tag on the round.
-  // Capped well below DynamoDB's own hard limit: StartRound's whole event batch (round-
-  // created + host-joined + round-started + one participant-joined per player) rides ONE
-  // createDynamoEventJournal transaction, and DynamoDB caps a single TransactWriteItems call
-  // at 100 items — 2 items per event (EVT Put + its OPID dedup Put), so more than 50 events
-  // fails with a ValidationException (that adapter's own append() comment). 40 players is
-  // 43 events = 86 items, comfortably clear of the cap while still far beyond any realistic
-  // roster — an honest 400 here beats a 500 surfaced from deep inside the transaction.
-  players: z.array(startRoundPlayerSchema).max(40).optional(),
 });
 export type StartRoundRequest = z.infer<typeof startRoundRequestSchema>;
 
+// Accounts-only identity (spec §3): JoinRound is always as-self from the caller's Bearer — no
+// `name` (frozen from the golfer record at join time, sealed leaf) and no `golferId` (the seat
+// is always the caller's own, resolved via ensureGolfer). NOT `.strict()`, so an old client
+// still sending name / golferId strips silently rather than being rejected.
 export const joinRoundRequestSchema = z.object({
   code: z.string().length(6),
-  name: z.string().min(1),
   tee: z.string().min(1),
   courseHandicap: z.number().int(),
-  // Task 5b (ghost continuity): a joiner may present an existing GolferId so the SAME ghost
-  // recurs across rounds. application's joinRound.ts is the enforcement point (reuse allowed
-  // IFF the golfer is unclaimed) — this schema only shapes the wire, it doesn't authorize.
-  golferId: golferIdSchema.optional(),
 });
 export type JoinRoundRequest = z.infer<typeof joinRoundRequestSchema>;
-
-// POST /rounds/{roundId}/players (participant auth, M8): an already-seated participant adds
-// someone else to the roster — the crew one-tap flow's mid-round counterpart to StartRound's
-// own `players` array. Same shape as JoinRound's own fields (minus `code`: the round is
-// already known from the participant token) plus the same optional golferId, resolved by
-// the SAME shared resolver (golferIdentity.ts).
-export const addParticipantRequestSchema = z.object({
-  name: z.string().min(1),
-  tee: z.string().min(1),
-  courseHandicap: z.number().int(),
-  golferId: golferIdSchema.optional(),
-});
-export type AddParticipantRequest = z.infer<typeof addParticipantRequestSchema>;
 
 export const addGameRequestSchema = z.object({
   game: gameConfigInputSchema,
@@ -113,12 +79,6 @@ export interface JoinRoundResponse {
   readonly roundId: RoundId;
   readonly token: string;
   readonly golferId: GolferId;
-}
-
-// Mirrors round.ts' terminateGameResponseSchema: only the events THIS call actually
-// appended, seq-stamped — never a synthesized "as if" event.
-export interface AddParticipantResponse {
-  readonly events: readonly RoundEvent[];
 }
 
 export interface AddGameResponse {
@@ -161,10 +121,6 @@ export const joinRoundResponseSchema: z.ZodType<JoinRoundResponse> = z.object({
   roundId: roundIdSchema,
   token: z.string(),
   golferId: golferIdSchema,
-});
-
-export const addParticipantResponseSchema: z.ZodType<AddParticipantResponse> = z.object({
-  events: z.array(roundEventSchema).readonly(),
 });
 
 export const addGameResponseSchema: z.ZodType<AddGameResponse> = z.object({

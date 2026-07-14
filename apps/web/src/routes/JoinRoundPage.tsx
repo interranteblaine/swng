@@ -82,11 +82,11 @@ export function JoinRoundPage() {
     setSubmitting(true);
     setError(undefined);
     try {
-      // Self-join: the golferId + Bearer ride along, and the joined name is the account's own —
-      // never a typed input (the wire still carries `name` until N-T6 drops it, sourced here
-      // from the golfer record).
+      // Accounts-only identity (spec §3): join is always as-self, resolved server-side from the
+      // Bearer — the request carries no name/golferId (the server freezes the account golfer's name
+      // into the join event).
       const response = await auth.withAuth((token) =>
-        joinRound({ code: upperCode, name: golfer.name, tee: tee.trim(), courseHandicap: parsedHandicap, golferId: golfer.golferId }, token),
+        joinRound({ code: upperCode, tee: tee.trim(), courseHandicap: parsedHandicap }, token),
       );
       // JoinRoundResponse carries no joinCode (only StartRoundResponse does) — the code the
       // golfer just typed IS the round's join code, so that's what's saved.

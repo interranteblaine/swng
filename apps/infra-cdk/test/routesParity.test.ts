@@ -61,9 +61,6 @@ const stubUseCases: UseCases = {
   updateMyGolfer: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
-  claimGolfer: () => {
-    throw new Error("not implemented: parity test never dispatches");
-  },
   getMyRecord: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
@@ -77,9 +74,6 @@ const stubUseCases: UseCases = {
     throw new Error("not implemented: parity test never dispatches");
   },
   mintParticipantToken: () => {
-    throw new Error("not implemented: parity test never dispatches");
-  },
-  addParticipant: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
   createCrew: () => {

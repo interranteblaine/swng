@@ -154,9 +154,8 @@ export const ensureCourse = async (name: string, card: CourseCard): Promise<Cour
 // fetch instead of a browser (fieldTest's Cal/Dee: joining them through context A would
 // overwrite Ann's localStorage credential for the round — `swng:credential:<roundId>` is one
 // key per round per browser, not per golfer). Accounts-only (the wall): the caller IS an
-// account, the Bearer rides along, and the identity fields still on the wire until N-T6
-// drops them (`name`/`golferId`) are sourced from the account's golfer RECORD — never from
-// story-local free text — so N-T6's shape change is a mechanical field-drop here.
+// account and joins as themselves — the Bearer rides along and the seat is resolved
+// server-side (ensureGolfer), so the body carries no name/golferId.
 export const joinRoundDirect = async (
   httpUrl: string,
   account: AccountGolfer,
@@ -164,10 +163,8 @@ export const joinRoundDirect = async (
 ): Promise<JoinRoundResponse> => {
   const body = parse(joinRoundRequestSchema, {
     code: input.code,
-    name: account.golfer.name,
     tee: input.tee,
     courseHandicap: input.courseHandicap,
-    golferId: account.golfer.golferId,
   });
   const response = await fetch(`${httpUrl}/rounds/join`, {
     method: "POST",
@@ -190,12 +187,11 @@ export const joinRoundDirect = async (
 // This is exactly why joinRoundDirect above already hand-rolls its own fetch instead of
 // calling api.ts's joinRound — these three follow the identical *Direct idiom for the same
 // reason, not out of not knowing api.ts exists.
-// Accounts-only (the wall): the creator IS an account and the round seats them alone —
-// StartRound's deleted `players[]` ghost seeding has no support here; extra participants
-// join as themselves (joinRoundDirect above). The identity fields still on the wire until
-// N-T6 (host.name/golferId) are sourced from the account's golfer RECORD. No crewId here:
-// round-is-a-sealed-leaf — a crew counts a FINISHED round into a season by roundId instead
-// (appendCountedRoundDirect below).
+// Accounts-only (the wall): the creator IS an account and the round seats them alone — nobody
+// puts anyone on a card, so extra participants join as themselves (joinRoundDirect above). The
+// Bearer rides along and the seat is resolved server-side (ensureGolfer), so the body carries no
+// name/golferId. No crewId here: round-is-a-sealed-leaf — a crew counts a FINISHED round into a
+// season by roundId instead (appendCountedRoundDirect below).
 export const startRoundDirect = async (
   httpUrl: string,
   account: AccountGolfer,
@@ -203,8 +199,7 @@ export const startRoundDirect = async (
 ): Promise<StartRoundResponse> => {
   const body = parse(startRoundRequestSchema, {
     card: input.card,
-    host: { name: account.golfer.name, tee: input.tee, courseHandicap: input.courseHandicap },
-    golferId: account.golfer.golferId,
+    host: { tee: input.tee, courseHandicap: input.courseHandicap },
   });
   const response = await fetch(`${httpUrl}/rounds`, {
     method: "POST",

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, DynamoDBStreamEvent } from "aws-lambda";
 import { deviceId, fixtureLinks18, fixtureWhite, golferId, opId, roundId } from "@swng/domain";
 import type { RoundArchive, RoundEvent } from "@swng/domain";
-import { createFixedClock, createInMemoryProjectionStore, createNullLogger, projectArchive } from "@swng/application";
+import { createFixedClock, createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, projectArchive, putAndBindGolfer } from "@swng/application";
 import { buildApp, buildProjector, buildRebuild, createConsoleLogger, createProjectorHandler } from "./compositionRoot.js";
 
 // Pin for the M3-deferred fix (task-6-brief.md item 5): consoleLogger used to spread `data`
@@ -180,13 +180,20 @@ describe("buildProjector / buildRebuild — required env vars", () => {
     expect(() => buildProjector({})).toThrow(/TABLE_PROJECTIONS/);
   });
 
-  it("buildProjector does not throw when TABLE_PROJECTIONS is present", () => {
-    expect(() => buildProjector({ TABLE_PROJECTIONS: "projections-table" })).not.toThrow();
+  // Accounts-only identity (spec §7): the projector reads golfer rows on the core table to project
+  // only account-bound golfers, so TABLE_CORE is required now (matching swngStack.ts's projectorFn env).
+  it("buildProjector throws a clear error when TABLE_CORE is missing", () => {
+    expect(() => buildProjector({ TABLE_PROJECTIONS: "projections-table" })).toThrow(/TABLE_CORE/);
+  });
+
+  it("buildProjector does not throw when TABLE_PROJECTIONS + TABLE_CORE are present", () => {
+    expect(() => buildProjector({ TABLE_PROJECTIONS: "projections-table", TABLE_CORE: "core-table" })).not.toThrow();
   });
 
   // Projection-realignment Task 2: the rebuild reads the snapshots table now, not the rounds
   // table — its required env is TABLE_SNAPSHOTS + TABLE_PROJECTIONS (matching swngStack.ts's
-  // RebuildFunction env, which dropped TABLE_ROUNDS for TABLE_SNAPSHOTS).
+  // RebuildFunction env, which dropped TABLE_ROUNDS for TABLE_SNAPSHOTS). Accounts-only identity
+  // (spec §7) adds TABLE_CORE — the replay goes through the same golfer-row-reading projectArchive.
   it("buildRebuild throws a clear error when TABLE_SNAPSHOTS is missing", () => {
     expect(() => buildRebuild({ TABLE_PROJECTIONS: "projections-table" })).toThrow(/TABLE_SNAPSHOTS/);
   });
@@ -195,8 +202,12 @@ describe("buildProjector / buildRebuild — required env vars", () => {
     expect(() => buildRebuild({ TABLE_SNAPSHOTS: "snapshots-table" })).toThrow(/TABLE_PROJECTIONS/);
   });
 
-  it("buildRebuild does not throw when both required vars are present", () => {
-    expect(() => buildRebuild({ TABLE_SNAPSHOTS: "snapshots-table", TABLE_PROJECTIONS: "projections-table" })).not.toThrow();
+  it("buildRebuild throws a clear error when TABLE_CORE is missing", () => {
+    expect(() => buildRebuild({ TABLE_SNAPSHOTS: "snapshots-table", TABLE_PROJECTIONS: "projections-table" })).toThrow(/TABLE_CORE/);
+  });
+
+  it("buildRebuild does not throw when all three required vars are present", () => {
+    expect(() => buildRebuild({ TABLE_SNAPSHOTS: "snapshots-table", TABLE_PROJECTIONS: "projections-table", TABLE_CORE: "core-table" })).not.toThrow();
   });
 });
 
@@ -251,14 +262,19 @@ describe("createProjectorHandler", () => {
     return image as unknown as RoundArchive;
   };
 
-  const setup = () => {
+  // Accounts-only identity (spec §7): projectArchive projects only ACCOUNT golfers (a golfer row
+  // carrying a sub), so seed ann + bo as sub-bound rows and pass the golferStore through.
+  const setup = async () => {
     const projectionStore = createInMemoryProjectionStore();
-    const project = projectArchive({ projectionStore, clock: createFixedClock(9_000), logger: createNullLogger() });
-    return { projectionStore, project, logger: createNullLogger() };
+    const golferStore = createInMemoryGolferStore();
+    await putAndBindGolfer(golferStore, ann, "sub-ann", "Ann");
+    await putAndBindGolfer(golferStore, bo, "sub-bo", "Bo");
+    const project = projectArchive({ projectionStore, golferStore, clock: createFixedClock(9_000), logger: createNullLogger() });
+    return { projectionStore, golferStore, project, logger: createNullLogger() };
   };
 
   it("projects every record in a batch", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const handler = createProjectorHandler({ parseArchive: fakeParseArchive, project: ctx.project, logger: ctx.logger });
 
     await handler(
@@ -273,7 +289,7 @@ describe("createProjectorHandler", () => {
   });
 
   it("a poison record (unparseable NEW_IMAGE) logs and rethrows — never silently skipped", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const errorSpy = vi.fn();
     const handler = createProjectorHandler({ parseArchive: fakeParseArchive, project: ctx.project, logger: { ...ctx.logger, error: errorSpy } });
 
@@ -283,7 +299,7 @@ describe("createProjectorHandler", () => {
   });
 
   it("a poison record partway through a batch stops the batch — never proceeds past the failure", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const handler = createProjectorHandler({ parseArchive: fakeParseArchive, project: ctx.project, logger: ctx.logger });
 
     await expect(

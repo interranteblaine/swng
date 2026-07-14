@@ -201,6 +201,13 @@ export const createInMemoryGolferStore = (): GolferStore => {
       const found = byId.get(golferId);
       return found ? { golfer: found.golfer, sub: found.sub, revision: found.revision } : undefined;
     },
+    // Order isn't promised and absent ids are omitted (GolferStore's port doc) — a flatMap that
+    // drops the misses reproduces a BatchGetItem's own contract, same as the snapshot fake above.
+    getMany: async (golferIds) =>
+      golferIds.flatMap((id) => {
+        const found = byId.get(id);
+        return found ? [{ golfer: found.golfer, sub: found.sub, revision: found.revision }] : [];
+      }),
     getBySub: async (sub) => {
       for (const entry of byId.values()) {
         if (entry.sub === sub) return { golfer: entry.golfer, sub, revision: entry.revision };
@@ -226,12 +233,11 @@ export const createInMemoryGolferStore = (): GolferStore => {
   };
 };
 
-// Test convenience: seeds a FRESH, claimed golfer row in one call — `put`s it unclaimed, then
-// `bindSub`s it. Exists because GolferStore.bindSub (M9 hardening) no longer creates a row
-// itself the way the old single-call `claim` did (golferStore.ts's port doc), so every test
-// across this package that used to seed a claimed golfer with one `claim(id, sub, name)` call
-// needs the same two-step dance — collapsed back to one call here rather than copy-pasted at
-// every call site (conventions §0: three-plus call sites is exactly the extraction trigger).
+// Test convenience: seeds a FRESH account golfer (a sub-bound row) in one call — `put`s a
+// sub-less row, then `bindSub`s it. Exists because GolferStore.bindSub (M9 hardening) never
+// creates a row itself (golferStore.ts's port doc), so a test that wants an account golfer bound
+// to a sub needs the same two-step dance — collapsed back to one call here rather than
+// copy-pasted at every call site (conventions §0: three-plus call sites is the extraction trigger).
 export const putAndBindGolfer = async (store: GolferStore, id: GolferId, sub: string, name: string): Promise<void> => {
   await store.put({ id, name, handicap: {} }, undefined);
   await store.bindSub(id, sub);
@@ -434,8 +440,8 @@ export const createNullLogger = (): Logger => ({
 
 // Records every warn() call (message + data) — exists for the ONE assertion createNullLogger
 // can't make: that a caller actually DID warn (realignment Task 13's "presence write failure
-// must not fail the seating act, but it must still be logged" — startRound/joinRound/
-// addParticipant's own tests pin both halves of that with this fake).
+// must not fail the seating act, but it must still be logged" — startRound's/joinRound's own
+// tests pin both halves of that with this fake).
 export interface CapturingLogger extends Logger {
   readonly warnings: readonly { readonly message: string; readonly data?: Record<string, unknown> }[];
 }

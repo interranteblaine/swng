@@ -84,29 +84,19 @@ describe("kill-network sync gate: two real createRoundSessions over the deployed
   // Step 1: create the round + join, entirely through the existing HTTP e2e harness (no
   // session involved yet) — Ann host ch 8, Bo ch 2, white tees, one stableford game.
   // Accounts-only (the wall): Ann and Bo are both signed-in accounts — minted, named via
-  // PUT /me, starting/joining as themselves with their own Bearers; the identity fields
-  // still on the wire until N-T6 (host.name / name / golferId) come from their records.
+  // PUT /me, starting/joining as themselves with their own Bearers. The seat is resolved
+  // server-side from each Bearer (ensureGolfer), so the request carries no name/golferId.
   it("1: Ann and Bo sign up; Ann starts the round as herself, Bo joins as himself; the stableford game is added", async () => {
     const annAccount = await mintAccountGolfer(httpUrl, "sync-ann", "Ann");
     const boAccount = await mintAccountGolfer(httpUrl, "sync-bo", "Bo");
 
-    const started = await post(
-      rounds(),
-      { card: fixtureLinks, host: { name: annAccount.name, tee: "white", courseHandicap: 8 }, golferId: annAccount.golferId },
-      startRoundResponseSchema,
-      annAccount.idToken,
-    );
+    const started = await post(rounds(), { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, startRoundResponseSchema, annAccount.idToken);
     roundId = started.roundId;
     annId = started.golferId;
     tokenAnn = started.token;
     expect(annId).toBe(annAccount.golferId); // as-self: the host seat is the account's own golfer
 
-    const joined = await post(
-      rounds("/join"),
-      { code: started.joinCode, name: boAccount.name, tee: "white", courseHandicap: 2, golferId: boAccount.golferId },
-      joinRoundResponseSchema,
-      boAccount.idToken,
-    );
+    const joined = await post(rounds("/join"), { code: started.joinCode, tee: "white", courseHandicap: 2 }, joinRoundResponseSchema, boAccount.idToken);
     boId = joined.golferId;
     tokenBo = joined.token;
     expect(boId).toBe(boAccount.golferId);

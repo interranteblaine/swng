@@ -172,10 +172,11 @@ export const deleteMintedUsers = async (): Promise<void> => {
 // APIs (AdminCreateUser + AdminSetUserPassword, MessageAction SUPPRESS so no email ever
 // sends) and exchanged for a real ID token via USER_PASSWORD_AUTH — the beta-grade flow
 // enabled exactly so e2e can mint JWTs without driving the Hosted UI — then named once
-// through PUT /me. `golferId`/`name` here ARE the account's golfer RECORD, so the identity
-// fields StartRound/JoinRound still carry on the wire until N-T6 drops them (host.name /
-// name / golferId) are sourced from the record, never from story-local free text — N-T6's
-// shape change is a mechanical field-drop at the call sites.
+// through PUT /me. `golferId`/`name` here ARE the account's golfer RECORD — the identity the
+// server freezes into the round when this account starts or joins as itself. Accounts-only
+// identity (spec §3): StartRound/JoinRound resolve the seat server-side from the Bearer, so the
+// call-site bodies carry no name/golferId at all; these fields are only what a story asserts the
+// seat SHOULD be, never sent on the wire.
 export interface AccountGolfer {
   readonly idToken: string;
   readonly golferId: GolferId;

@@ -34,18 +34,19 @@ export const golferViewSchema: z.ZodType<GolferView> = z.object({
   namePlaceholder: z.boolean().optional(),
 });
 
-// golfer is null for an unbound sub — GET /me NEVER creates (plan amendment: the original
-// "get-or-create" deadlocked claiming, since the auto-created golfer binds the sub before a
-// later claimGolfer call ever runs, so every claim hit the sub-already-bound collision arm).
-// updateMyGolfer (PUT /me) is the one create path now.
+// Accounts-only identity (spec §2): GET /me ENSURES the caller's golfer (application/src/golfers/
+// getMyGolfer.ts's ensureGolfer — get-or-create on first touch, minting a placeholder-named row
+// bound to the sub when none exists yet), and PUT /me updates it. The `golfer` field is therefore
+// never null in practice, but the type stays nullable — it's the shared wire shape, and tightening
+// it isn't this task's concern.
 export interface GetMeResponse {
   readonly golfer: GolferView | null;
 }
 export const getMeResponseSchema: z.ZodType<GetMeResponse> = z.object({ golfer: golferViewSchema.nullable() });
 
-// PUT /me and POST /golfers/claim always resolve to a real golfer (both are create-or-act
-// paths, never a "does this exist" read) — a distinct, non-nullable response shape from
-// GetMeResponse so callers of updateMyGolfer/claimGolfer don't inherit GET /me's null case.
+// PUT /me always resolves to a real golfer (a create-or-act path, never a "does this exist"
+// read) — a distinct, non-nullable response shape from GetMeResponse so callers of
+// updateMyGolfer don't inherit GET /me's null case.
 export interface GolferResponse {
   readonly golfer: GolferView;
 }
@@ -66,21 +67,6 @@ export const updateMeRequestSchema = z
   })
   .strict();
 export type UpdateMeRequest = z.infer<typeof updateMeRequestSchema>;
-
-// name (papercut 5, M8 plan) is used ONLY when the claim lazily CREATES the golfer row
-// (application/src/golfers/claimGolfer.ts) — a claim binding an EXISTING row never renames,
-// same "name only seeds a fresh item" invariant golferStore.ts's port doc already states for
-// `claim`. Optional: absent falls back to defaultGolferName(claims), unchanged from before
-// this field existed.
-//
-// `code` (M9 hardening, claim proof-of-context) is REQUIRED: before this field existed, a
-// bare golferId was the entire claim capability — anyone who merely LEARNED an id (shared in
-// a text thread, visible in a URL) could claim its whole history. The server now resolves
-// `code` as a round join code (the round's own participants must include `golferId`) or else
-// a crew join code (the crew's own members must include `golferId`) before either collision
-// arm runs — see claimGolfer.ts's own doc comment for the exact ordering and why it matters.
-export const claimGolferRequestSchema = z.object({ golferId: golferIdSchema, name: z.string().min(1).optional(), code: z.string().min(1) }).strict();
-export type ClaimGolferRequest = z.infer<typeof claimGolferRequestSchema>;
 
 // The wire mirror of domain's GolferRoundLine (golfer/record.ts) — structurally identical,
 // same as round.ts's participantSchema mirroring Participant. Field object, not just the
@@ -140,7 +126,7 @@ export const getMyRoundsResponseSchema: z.ZodType<GetMyRoundsResponse> = z.objec
 
 // GET /me/rounds/live (projection-realignment Task 13): "your rounds, right now" — presence
 // pointers (application/src/rounds/presence.ts's writePresence, written at seat-time by
-// startRound/joinRound/addParticipant and removed at finalize by projections/
+// startRound/joinRound and removed at finalize by projections/
 // projectArchive.ts's deleteLive loop), a DIFFERENT surface from GetMyRoundsResponse above
 // (that one is finalized-round HISTORY). `joinedAt` is the wire name for the projection
 // store's own `joinedAtMs` (same rename discipline as GetMyRoundsResponse's `finalizedAt`).

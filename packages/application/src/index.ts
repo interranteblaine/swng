@@ -25,7 +25,6 @@ export type { ScoringPolicy } from "./scoringPolicy.js";
 
 export { startRound } from "./rounds/startRound.js";
 export { joinRound } from "./rounds/joinRound.js";
-export { addParticipant } from "./rounds/addParticipant.js";
 export { addGame } from "./rounds/addGame.js";
 export { recordScore } from "./rounds/recordScore.js";
 export { finalizeRound } from "./rounds/finalizeRound.js";
@@ -39,8 +38,6 @@ export { getRoundArchive } from "./rounds/getRoundArchive.js";
 // Architecture-realignment Task 14: the participant-token re-mint — scoring capability
 // derives from participation, not the device that joined.
 export { mintParticipantToken } from "./rounds/mintParticipantToken.js";
-export { resolveSuppliedGolfer } from "./rounds/golferIdentity.js";
-export type { GolferIdentityContext } from "./rounds/golferIdentity.js";
 
 export { createCourse } from "./courses/createCourse.js";
 export { addTeeSet } from "./courses/addTeeSet.js";
@@ -51,7 +48,6 @@ export { searchCourses } from "./courses/searchCourses.js";
 export { ensureGolfer } from "./golfers/ensureGolfer.js";
 export { getMyGolfer } from "./golfers/getMyGolfer.js";
 export { updateMyGolfer } from "./golfers/updateMyGolfer.js";
-export { claimGolfer } from "./golfers/claimGolfer.js";
 export { getMyRecord } from "./golfers/getMyRecord.js";
 export { getMyRounds } from "./golfers/getMyRounds.js";
 export { getMyLiveRounds } from "./golfers/getMyLiveRounds.js";

@@ -6,10 +6,8 @@ import {
   abandonRound,
   addCrewMember,
   addGame,
-  addParticipant,
   addTeeSet,
   appendCountedRound,
-  claimGolfer,
   createCapturingBroadcast,
   createCourse,
   createCrew,
@@ -54,7 +52,6 @@ import {
 import {
   addCrewMemberResponseSchema,
   addGameResponseSchema,
-  addParticipantResponseSchema,
   addTeeSetResponseSchema,
   appendCountedRoundResponseSchema,
   createCourseResponseSchema,
@@ -129,23 +126,21 @@ const makeEvent = (opts: {
 const asStructured = (result: Awaited<ReturnType<ReturnType<typeof createDispatcher>>>): APIGatewayProxyStructuredResultV2 =>
   result as APIGatewayProxyStructuredResultV2;
 
-// No route in buildRoutes' golden-path/course-routes suites below ever dispatches through the
-// "golfer" auth tier — this stub is only wired so createDispatcher's signature is satisfied.
-// The tier's own auth mechanics (missing/garbage/valid token) are covered by the small ad-hoc
-// route table further down (`describe("createDispatcher — golfer auth tier")`); the REAL
-// golfer/terminate routes (M7 Task 5) get their own `setup`-alike further down too
-// (`describe("createDispatcher — golfer + terminate routes (M7 Task 5)")`), which passes a
-// real stubVerifier instead of this one.
-const neverCalledVerifier: AccountVerifier = {
-  verify: async () => {
-    throw new Error("neverCalledVerifier: no route in this suite uses the golfer auth tier");
-  },
+// Accounts-only identity (spec §3): POST /rounds and POST /rounds/join are "golfer"-gated now, so
+// even the golden-path/course-routes/share suites must present a Bearer to start or join a round.
+// This default verifier maps any bearer string to a sub of the same value — ensureGolfer then mints
+// or returns the caller's golfer on first touch — so a test that just needs SOME signed-in caller
+// passes `token: "sub-ann"` and asserts against the RESPONSE golferId (never a hardcoded id). The
+// golfer/terminate/crew/snapshot/token suites below pass their own stubVerifier instead (mapping
+// golferBearer(account) = "golfer-token-<sub>"), sharing every other fake.
+const subVerifier: AccountVerifier = {
+  verify: async (bearer: string): Promise<AccountClaims> => ({ sub: bearer }),
 };
 
-// `verifier` defaults to neverCalledVerifier (this file's golden-path/course-routes suites
-// never dispatch a golfer-tier route) — the golfer/terminate describe block below passes its
-// own stubVerifier instead, sharing every other fake.
-const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
+// `verifier` defaults to subVerifier (this file's golden-path/course-routes/share suites present a
+// plain "sub-<x>" bearer); the golfer/terminate describe blocks below pass their own stubVerifier
+// instead, sharing every other fake.
+const setup = (verifier: AccountVerifier = subVerifier) => {
   const snapshots = createInMemorySnapshotStore();
   const journal = createInMemoryJournal(snapshots);
   const store = createInMemoryRoundStore();
@@ -172,7 +167,6 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     getShareLink: getShareLink({ tokens }),
     getRoundArchive: getRoundArchive({ snapshots, golferStore, crewStore }),
     mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
-    addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, projectionStore, logger }),
     createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
     addTeeSet: addTeeSet({ courseStore, clock, logger }),
     verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
@@ -181,7 +175,6 @@ const setup = (verifier: AccountVerifier = neverCalledVerifier) => {
     terminateGame: terminateGame({ journal, broadcast, clock, ids }),
     getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
-    claimGolfer: claimGolfer({ golferStore, roundStore: store, journal, crewStore }),
     getMyRecord: getMyRecord({ golferStore, projectionStore }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
     getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
@@ -211,7 +204,8 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
         makeEvent({
           method: "POST",
           path: "/rounds",
-          body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } },
+          token: "sub-ann",
+          body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
         }),
       ),
     );
@@ -220,7 +214,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
     const joinResp = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: "/rounds/join", body: { code: started.joinCode, name: "Bo", tee: "white", courseHandicap: 2 } }),
+        makeEvent({ method: "POST", path: "/rounds/join", token: "sub-bo", body: { code: started.joinCode, tee: "white", courseHandicap: 2 } }),
       ),
     );
     expect(joinResp.statusCode).toBe(201);
@@ -351,14 +345,14 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     const roundX = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } })),
         ).body!,
       ),
     );
     const roundY = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Cal", tee: "white", courseHandicap: 12 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 12 } } })),
         ).body!,
       ),
     );
@@ -372,14 +366,14 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
   it("rejects a zod-invalid body — 400 with errorResponseSchema shape", async () => {
     const { dispatcher } = setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks } })));
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks } })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
 
   it("rejects a body that isn't valid JSON at all — 400 with errorResponseSchema shape", async () => {
     const { dispatcher } = setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds", rawBody: "{not valid json" })));
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", rawBody: "{not valid json" })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
@@ -413,7 +407,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
           ),
         ).body!,
       ),
@@ -437,7 +431,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
           ),
         ).body!,
       ),
@@ -548,7 +542,7 @@ describe("createDispatcher — course routes + peek (M6 Task 4)", () => {
     const { dispatcher } = setup();
     const startResp = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+        makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
       ),
     );
     const started = startRoundResponseSchema.parse(JSON.parse(startResp.body!));
@@ -584,7 +578,7 @@ describe("createDispatcher — course routes + peek (M6 Task 4)", () => {
     const { dispatcher } = setup();
     const startResp = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+        makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
       ),
     );
     const started = startRoundResponseSchema.parse(JSON.parse(startResp.body!));
@@ -680,7 +674,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
             ),
           ).body!,
         ),
@@ -728,7 +722,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
             ),
           ).body!,
         ),
@@ -751,7 +745,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
+            makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
           ),
         ).body!,
       ),
@@ -774,10 +768,8 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
   // Accounts-only identity spec §2 (controller ruling — DELIBERATELY reverses the M7 "GET /me never
   // creates" this test used to pin): GET /me now MINTS on first touch (placeholderName(sub) +
   // namePlaceholder true), and a second GET returns the SAME minted golfer. PUT /me with a real
-  // name renames it in place and drops the flag. The claim arms below still work: Bo and Cal claim
-  // WITHOUT ever calling GET /me, so their subs stay unbound and the proof-then-collision ordering
-  // is unchanged (claim itself is untouched until N-T6).
-  it("GET /me (mints, same on re-get) -> PUT /me (renames, drops flag) -> claim a ghost (200) -> re-claim as a third user (409)", async () => {
+  // name renames it in place and drops the flag. (Claiming is gone — there are no ghosts to claim.)
+  it("GET /me (mints, same on re-get) -> PUT /me (renames, drops the placeholder flag)", async () => {
     const { dispatcher } = setupGolfer();
 
     const firstGet = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: golferBearer(ann) })));
@@ -804,54 +796,6 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
     const fetched = getMeResponseSchema.parse(JSON.parse(thirdGet.body!));
     expect(fetched.golfer?.golferId).toBe(created.golfer.golferId);
     expect(fetched.golfer).not.toHaveProperty("namePlaceholder");
-
-    // A ghost — a golferId a round already knows a player by, but with no golfer item and no
-    // bound sub — created by Bo starting a throwaway round and never signing in as that
-    // player.
-    const throwaway = startRoundResponseSchema.parse(
-      JSON.parse(
-        asStructured(
-          await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ghost", tee: "white", courseHandicap: 5 } } }),
-          ),
-        ).body!,
-      ),
-    );
-    const ghostId = throwaway.golferId;
-
-    // M9 hardening: claim proof-of-context — the throwaway round's own join code is the ONE
-    // proof token that names ghostId as a real participant (its host).
-    const claimResp = asStructured(
-      await dispatcher(
-        makeEvent({ method: "POST", path: "/golfers/claim", token: golferBearer(bo), body: { golferId: ghostId, code: throwaway.joinCode } }),
-      ),
-    );
-    expect(claimResp.statusCode).toBe(200);
-    const claimed = golferResponseSchema.parse(JSON.parse(claimResp.body!));
-    expect(claimed.golfer.golferId).toBe(ghostId);
-
-    // Cal, a third, unrelated user, tries to claim the SAME ghost Bo already has, with the
-    // SAME valid proof code — the real golfer-already-claimed error code, mapped to a REAL 409
-    // (M6 lesson: not an invented string). Proof passing but the golfer already claimed is
-    // exactly the ordering this task pins: proof first, then the collision arms.
-    const reclaimResp = asStructured(
-      await dispatcher(
-        makeEvent({ method: "POST", path: "/golfers/claim", token: golferBearer(cal), body: { golferId: ghostId, code: throwaway.joinCode } }),
-      ),
-    );
-    expect(reclaimResp.statusCode).toBe(409);
-    expect(errorResponseSchema.parse(JSON.parse(reclaimResp.body!))).toMatchObject({ code: "golfer-already-claimed" });
-
-    // A wrong code (proves nothing about ghostId) is rejected BEFORE the golfer-already-claimed
-    // 409 above would otherwise fire — claim-proof-required, mapped to 403, never leaking that
-    // ghostId is already claimed to a caller who never proved they belong in its round.
-    const wrongCodeResp = asStructured(
-      await dispatcher(
-        makeEvent({ method: "POST", path: "/golfers/claim", token: golferBearer(cal), body: { golferId: ghostId, code: "WRONGC" } }),
-      ),
-    );
-    expect(wrongCodeResp.statusCode).toBe(403);
-    expect(errorResponseSchema.parse(JSON.parse(wrongCodeResp.body!))).toMatchObject({ code: "claim-proof-required" });
   });
 
   it("GET /me/record returns an empty history for a golfer who has never played a finalized round", async () => {
@@ -862,136 +806,116 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
   });
 });
 
-// M8 Task 4: "optional-golfer" (routes.ts) — StartRound/JoinRound moved off "none" onto this
-// tier. The three arms, over the REAL routes (not an ad-hoc table, unlike the plain
-// "golfer auth tier" suite above): no token proceeds anonymously (the pre-M8 pin), a valid
-// token sets ctx.account without changing an anonymous-shaped body's outcome, and a PRESENT
-// but INVALID token still 401s — the tier never silently treats "sent a bad token" the same
-// as "sent no token at all".
-describe("createDispatcher — optional-golfer tier: StartRound/JoinRound (M8 Task 4)", () => {
+// Accounts-only identity (spec §3): StartRound/JoinRound are the "golfer" auth tier now (there is
+// no anonymous start or join). The three arms, over the REAL routes: no token 401s, an INVALID
+// token 401s, and a VALID token seats the caller's OWN account golfer (as-self, resolved via
+// ensureGolfer) — asserted against the RESPONSE golferId.
+describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only identity spec §3)", () => {
   const ann: AccountClaims = { sub: "cognito-sub-ann-og", email: "ann-og@example.com" };
+  const bo: AccountClaims = { sub: "cognito-sub-bo-og", email: "bo-og@example.com" };
   const golferBearer = (account: AccountClaims): string => `golfer-token-${account.sub}`;
   const stubVerifier: AccountVerifier = {
     verify: async (bearer: string) => {
-      if (bearer !== golferBearer(ann)) throw new Error("stubVerifier: unknown token");
-      return ann;
+      const account = [ann, bo].find((candidate) => golferBearer(candidate) === bearer);
+      if (!account) throw new Error("stubVerifier: unknown token");
+      return account;
     },
   };
-  const setupOptional = () => setup(stubVerifier);
+  const setupGolferTier = () => setup(stubVerifier);
 
   describe("POST /rounds", () => {
-    it("arm 1 — no bearer token: proceeds anonymously, 201, same as pre-M8 behavior", async () => {
-      const { dispatcher } = setupOptional();
+    it("arm 1 — no bearer token: 401 invalid-token (no anonymous start)", async () => {
+      const { dispatcher } = setupGolferTier();
       const resp = asStructured(
-        await dispatcher(
-          makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } }),
-        ),
+        await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } })),
       );
-      expect(resp.statusCode).toBe(201);
-      startRoundResponseSchema.parse(JSON.parse(resp.body!));
+      expect(resp.statusCode).toBe(401);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });
 
-    it("arm 2 — a VALID bearer token: ctx.account is set, but an anonymous-shaped body still succeeds unchanged", async () => {
-      const { dispatcher } = setupOptional();
+    it("arm 2 — an INVALID bearer token: 401 invalid-token", async () => {
+      const { dispatcher } = setupGolferTier();
       const resp = asStructured(
         await dispatcher(
-          makeEvent({
-            method: "POST",
-            path: "/rounds",
-            token: golferBearer(ann),
-            body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } },
-          }),
-        ),
-      );
-      expect(resp.statusCode).toBe(201);
-      startRoundResponseSchema.parse(JSON.parse(resp.body!));
-    });
-
-    it("arm 3 — an INVALID bearer token: 401 invalid-token, never silently treated as anonymous", async () => {
-      const { dispatcher } = setupOptional();
-      const resp = asStructured(
-        await dispatcher(
-          makeEvent({
-            method: "POST",
-            path: "/rounds",
-            token: "garbage-token",
-            body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } },
-          }),
+          makeEvent({ method: "POST", path: "/rounds", token: "garbage-token", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
         ),
       );
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });
+
+    it("arm 3 — a VALID bearer token: 201, seated as the caller's OWN account golfer (as-self)", async () => {
+      const { dispatcher } = setupGolferTier();
+      // PUT /me first so ann has a named account golfer; the round's creator seat must resolve to it.
+      const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
+      const annGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
+
+      const resp = asStructured(
+        await dispatcher(
+          makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+        ),
+      );
+      expect(resp.statusCode).toBe(201);
+      const started = startRoundResponseSchema.parse(JSON.parse(resp.body!));
+      expect(started.golferId).toBe(annGolfer.golfer.golferId); // as-self, not a fresh id
+    });
   });
 
   describe("POST /rounds/join", () => {
-    const startAnonymousRound = async (dispatcher: ReturnType<typeof createDispatcher>) =>
+    const startRoundAs = async (dispatcher: ReturnType<typeof createDispatcher>) =>
       startRoundResponseSchema.parse(
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Host", tee: "white", courseHandicap: 8 } } }),
+              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
             ),
           ).body!,
         ),
       );
 
-    it("arm 1 — no bearer token: proceeds anonymously, 201, same as pre-M8 behavior", async () => {
-      const { dispatcher } = setupOptional();
-      const started = await startAnonymousRound(dispatcher);
+    it("arm 1 — no bearer token: 401 invalid-token (no anonymous join)", async () => {
+      const { dispatcher } = setupGolferTier();
+      const started = await startRoundAs(dispatcher);
       const resp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: "/rounds/join", body: { code: started.joinCode, name: "Bo", tee: "white", courseHandicap: 2 } })),
-      );
-      expect(resp.statusCode).toBe(201);
-      joinRoundResponseSchema.parse(JSON.parse(resp.body!));
-    });
-
-    it("arm 2 — a VALID bearer token joining as-self (an already-claimed golferId matching the caller's own sub)", async () => {
-      const { dispatcher } = setupOptional();
-      // PUT /me creates ann's account golfer.
-      const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
-      const annGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
-
-      const started = await startAnonymousRound(dispatcher);
-      const resp = asStructured(
-        await dispatcher(
-          makeEvent({
-            method: "POST",
-            path: "/rounds/join",
-            token: golferBearer(ann),
-            body: { code: started.joinCode, name: "Ann", tee: "white", courseHandicap: 8, golferId: annGolfer.golfer.golferId },
-          }),
-        ),
-      );
-      expect(resp.statusCode).toBe(201);
-      const joined = joinRoundResponseSchema.parse(JSON.parse(resp.body!));
-      expect(joined.golferId).toBe(annGolfer.golfer.golferId);
-    });
-
-    it("arm 3 — an INVALID bearer token: 401 invalid-token, never silently treated as anonymous", async () => {
-      const { dispatcher } = setupOptional();
-      const started = await startAnonymousRound(dispatcher);
-      const resp = asStructured(
-        await dispatcher(
-          makeEvent({
-            method: "POST",
-            path: "/rounds/join",
-            token: "garbage-token",
-            body: { code: started.joinCode, name: "Bo", tee: "white", courseHandicap: 2 },
-          }),
-        ),
+        await dispatcher(makeEvent({ method: "POST", path: "/rounds/join", body: { code: started.joinCode, tee: "white", courseHandicap: 2 } })),
       );
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });
+
+    it("arm 2 — an INVALID bearer token: 401 invalid-token", async () => {
+      const { dispatcher } = setupGolferTier();
+      const started = await startRoundAs(dispatcher);
+      const resp = asStructured(
+        await dispatcher(makeEvent({ method: "POST", path: "/rounds/join", token: "garbage-token", body: { code: started.joinCode, tee: "white", courseHandicap: 2 } })),
+      );
+      expect(resp.statusCode).toBe(401);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+    });
+
+    it("arm 3 — a VALID bearer token: 201, joiner seated as their OWN account golfer (as-self)", async () => {
+      const { dispatcher } = setupGolferTier();
+      // bo has a named account golfer; ann creates the round, bo joins as himself.
+      const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(bo), body: { name: "Bo" } })));
+      const boGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
+
+      const started = await startRoundAs(dispatcher); // created by ann
+      const resp = asStructured(
+        await dispatcher(
+          makeEvent({ method: "POST", path: "/rounds/join", token: golferBearer(bo), body: { code: started.joinCode, tee: "white", courseHandicap: 2 } }),
+        ),
+      );
+      expect(resp.statusCode).toBe(201);
+      const joined = joinRoundResponseSchema.parse(JSON.parse(resp.body!));
+      expect(joined.golferId).toBe(boGolfer.golfer.golferId); // as-self, resolved from bo's own Bearer
+    });
   });
 });
 
-// M8 Task 4: the crew routes — POST /rounds/{roundId}/players (participant-gated) and the
-// seven "golfer"-gated crew routes buildRoutes now declares. Mirrors the M7 golfer-routes
-// suite above (its own ann/bo/cal + golferBearer/stubVerifier idiom), kept as its own
-// describe block per this file's existing "one block per milestone's route additions"
-// convention (M6 courses, M7 golfer/terminate).
+// M8 Task 4: the "golfer"-gated crew routes buildRoutes declares. Mirrors the M7 golfer-routes
+// suite above (its own ann/bo/cal + golferBearer/stubVerifier idiom), kept as its own describe
+// block per this file's existing "one block per milestone's route additions" convention (M6
+// courses, M7 golfer/terminate).
 describe("createDispatcher — crew routes (M8 Task 4)", () => {
   const ann: AccountClaims = { sub: "cognito-sub-ann-crew", email: "ann-crew@example.com" };
   const bo: AccountClaims = { sub: "cognito-sub-bo-crew", email: "bo-crew@example.com" };
@@ -1074,12 +998,11 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
 
   it(
     "drives create -> join -> add an existing account member (de-ghost) -> GET /me/crews -> " +
-      "StartRound: seating a claimed crew-mate via players[] is rejected (golfer-claimed, no crew exception) -> " +
-      "StartRound as-self with a ghost player -> POST .../players -> create season -> list seasons",
+      "StartRound as-self (creator seat only) -> create season -> list seasons",
     async () => {
       const { dispatcher } = setupCrews();
       const annGolfer = await putMe(dispatcher, ann, "Ann");
-      const boGolfer = await putMe(dispatcher, bo, "Bo");
+      await putMe(dispatcher, bo, "Bo");
       const calGolfer = await putMe(dispatcher, cal, "Cal"); // a third real account, added by golferId below
 
       const createResp = asStructured(
@@ -1096,7 +1019,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       joinCrewResponseSchema.parse(JSON.parse(joinResp.body!));
 
       // De-ghost (Task 9): addCrewMember adds an EXISTING account golfer by golferId — Cal has a
-      // bound sub, so this succeeds (an unclaimed ghost golferId would 409 ghost-not-addable).
+      // bound sub, so this succeeds (a sub-less golferId would 409 ghost-not-addable).
       const addMemberResp = asStructured(
         await dispatcher(
           makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/members`, token: golferBearer(ann), body: { golferId: calGolfer.golferId } }),
@@ -1111,74 +1034,25 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const myCrews = listMyCrewsResponseSchema.parse(JSON.parse(myCrewsResp.body!));
       expect(myCrews.crews).toEqual(expect.arrayContaining([{ crewId: created.crew.crewId, name: "Sunday Skins", memberCount: 3 }]));
 
-      // A crew is a grouping/competition ONLY (owner ruling, spec §11a): the old co-membership
-      // consent arm is deleted — seating Bo's OWN claimed golferId via `players[]` is rejected
-      // even though ann and Bo genuinely share this crew, driven end-to-end through the real
-      // dispatcher. Round-is-a-sealed-leaf: the request carries no crewId and the round names
-      // no crew either way.
-      const rejectedStartResp = asStructured(
-        await dispatcher(
-          makeEvent({
-            method: "POST",
-            path: "/rounds",
-            token: golferBearer(ann),
-            body: {
-              card: fixtureLinks,
-              host: { name: "Ann", tee: "white", courseHandicap: 8 },
-              golferId: annGolfer.golferId,
-              players: [{ name: "Bo", tee: "white", courseHandicap: 2, golferId: boGolfer.golferId }],
-            },
-          }),
-        ),
-      );
-      expect(rejectedStartResp.statusCode).toBe(403);
-      expect(errorResponseSchema.parse(JSON.parse(rejectedStartResp.body!))).toMatchObject({ code: "golfer-claimed" });
-
-      // StartRound as-self, with an initial ghost player (no golferId — a fresh id is minted,
-      // the ONLY way anyone but the host lands on this roster via `players[]` now, short of
-      // seating themselves).
+      // Accounts-only identity (spec §3): StartRound seats its CREATOR ONLY, always as-self — no
+      // players[] roster, no crewId (sealed leaf). ann's crew membership is irrelevant to the round.
       const startResp = asStructured(
         await dispatcher(
-          makeEvent({
-            method: "POST",
-            path: "/rounds",
-            token: golferBearer(ann),
-            body: {
-              card: fixtureLinks,
-              host: { name: "Ann", tee: "white", courseHandicap: 8 },
-              golferId: annGolfer.golferId,
-              players: [{ name: "Bo Guest", tee: "white", courseHandicap: 2 }],
-            },
-          }),
+          makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
         ),
       );
       expect(startResp.statusCode).toBe(201);
       const started = startRoundResponseSchema.parse(JSON.parse(startResp.body!));
-      expect(started.golferId).toBe(annGolfer.golferId); // the host resolved to ann's OWN golfer, not a fresh ghost
+      expect(started.golferId).toBe(annGolfer.golferId); // the creator resolved to ann's OWN golfer (as-self)
 
       const eventsResp = asStructured(
         await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
       );
       const events = JSON.parse(eventsResp.body!) as { events: readonly { kind: string; participant?: { golferId: string; name: string } }[] };
       const joins = events.events.filter((e) => e.kind === "participant-joined");
-      expect(joins).toHaveLength(2); // Ann (as-self) + the ghost "Bo Guest"
-      expect(joins.map((e) => e.participant?.golferId)).toContain(annGolfer.golferId);
-      expect(joins.map((e) => e.participant?.name)).toEqual(expect.arrayContaining(["Ann", "Bo Guest"]));
-
-      // POST /rounds/{roundId}/players — adding a fresh ghost (Cal, unclaimed) as a THIRD
-      // participant, mid-round.
-      const addPlayerResp = asStructured(
-        await dispatcher(
-          makeEvent({
-            method: "POST",
-            path: `/rounds/${started.roundId}/players`,
-            token: started.token,
-            body: { name: "Cal", tee: "white", courseHandicap: 5 },
-          }),
-        ),
-      );
-      expect(addPlayerResp.statusCode).toBe(201);
-      addParticipantResponseSchema.parse(JSON.parse(addPlayerResp.body!));
+      expect(joins).toHaveLength(1); // Ann only — nobody else is seeded onto a card
+      expect(joins[0]?.participant?.golferId).toBe(annGolfer.golferId);
+      expect(joins[0]?.participant?.name).toBe("Ann");
 
       // Task 9: a member creates a season, then lists the crew's seasons — the standings-on-read
       // routes are wired (this round was never finalized, so nothing is counted yet).
@@ -1196,7 +1070,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     },
   );
 
-  // De-ghost (Task 9): adding an unclaimed-ghost golferId (a golfer row with no bound sub) is
+  // De-ghost (Task 9): adding a sub-less golferId (a golfer row with no bound sub) is
   // rejected — ghost-not-addable (409), driven end-to-end.
   it("POST /crews/{crewId}/members with a golferId that has no bound sub is rejected — 409 ghost-not-addable", async () => {
     const { dispatcher } = setupCrews();
@@ -1233,7 +1107,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
               method: "POST",
               path: "/rounds",
               token: golferBearer(ann),
-              body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annGolfer.golferId },
+              body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
             }),
           ),
         ).body!,
@@ -1303,7 +1177,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } })),
         ).body!,
       ),
     );
@@ -1357,7 +1231,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     const otherRound = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Cal", tee: "white", courseHandicap: 12 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 12 } } })),
         ).body!,
       ),
     );
@@ -1440,23 +1314,6 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
     });
 
-    it("POST /rounds/{roundId}/players", async () => {
-      const { dispatcher } = setup();
-      const { started, spectatorToken } = await startAndShare(dispatcher);
-      const resp = asStructured(
-        await dispatcher(
-          makeEvent({
-            method: "POST",
-            path: `/rounds/${started.roundId}/players`,
-            token: spectatorToken,
-            body: { name: "Interloper", tee: "white", courseHandicap: 10 },
-          }),
-        ),
-      );
-      expect(resp.statusCode).toBe(403);
-      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
-    });
-
     it("POST /rounds/{roundId}/games/{gameId}/terminate", async () => {
       const { dispatcher } = setup();
       const { started, spectatorToken } = await startAndShare(dispatcher);
@@ -1486,7 +1343,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     const otherRound = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Cal", tee: "white", courseHandicap: 12 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 12 } } })),
         ).body!,
       ),
     );
@@ -1518,13 +1375,13 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
 
   const setupArchive = () => setup(stubVerifier);
 
-  // Seeds ann's own account golfer, starts a round AS ANN (StartRound's own-golferId arm, M8
-  // — same idiom as the "optional-golfer tier" suite's own arm-2 test above), then finalizes
-  // it with no games configured (nothing left unresolved) — the smallest real finalized round
-  // with a real account-golfer participant this suite needs.
+  // Seeds ann's own account golfer, starts a round as-self (accounts-only identity spec §3 — the
+  // golfer-tier StartRound suite above pins the same arm), then finalizes it with no games
+  // configured (nothing left unresolved) — the smallest real finalized round with a real
+  // account-golfer participant this suite needs.
   const seedAnnsFinalizedRound = async (dispatcher: ReturnType<typeof createDispatcher>) => {
-    const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
-    const annGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
+    // Names ann's account golfer before she starts as-self (the seat resolves from her Bearer).
+    await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
 
     const started = startRoundResponseSchema.parse(
       JSON.parse(
@@ -1534,7 +1391,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
               method: "POST",
               path: "/rounds",
               token: golferBearer(ann),
-              body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annGolfer.golfer.golferId },
+              body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
             }),
           ),
         ).body!,
@@ -1561,7 +1418,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { name: "Host", tee: "white", courseHandicap: 8 } } }),
+              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
             ),
           ).body!,
         ),
@@ -1632,8 +1489,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
 
     it("lists a round the golfer just started, by identity — courseName + joinedAt + createdAt on the wire", async () => {
       const { dispatcher } = setupArchive();
-      const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
-      const annGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
+      await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
 
       const started = startRoundResponseSchema.parse(
         JSON.parse(
@@ -1643,7 +1499,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
                 method: "POST",
                 path: "/rounds",
                 token: golferBearer(ann),
-                body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annGolfer.golfer.golferId },
+                body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
               }),
             ),
           ).body!,
@@ -1688,11 +1544,10 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
 
   const setupToken = () => setup(stubVerifier);
 
-  // Seeds ann's own account golfer and starts a LIVE round as-self (StartRound's own-golferId
-  // arm) — the smallest real round with a real account-golfer participant this suite needs.
+  // Seeds ann's own account golfer and starts a LIVE round as-self (the seat resolves from her
+  // Bearer) — the smallest real round with a real account-golfer participant this suite needs.
   const seedAnnsLiveRound = async (dispatcher: ReturnType<typeof createDispatcher>) => {
-    const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
-    const annGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
+    await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
 
     return startRoundResponseSchema.parse(
       JSON.parse(
@@ -1702,7 +1557,7 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
               method: "POST",
               path: "/rounds",
               token: golferBearer(ann),
-              body: { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annGolfer.golfer.golferId },
+              body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
             }),
           ),
         ).body!,

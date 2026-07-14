@@ -122,25 +122,19 @@ export const createDispatcher =
       }
 
       let account: AccountClaims | undefined;
-      if (route.auth === "golfer" || route.auth === "optional-golfer") {
+      if (route.auth === "golfer") {
+        // "golfer" REQUIRES a token — missing is a 401, same as "participant" above. Accounts-only
+        // identity (spec §3): StartRound/JoinRound are "golfer" now too, so an anonymous start or
+        // join lands here as invalid-token rather than proceeding — there is no anonymous path left.
         const token = bearerToken(event);
-        if (!token) {
-          // "golfer" REQUIRES a token — missing is a 401, same as "participant" above.
-          // "optional-golfer" (M8 Task 4: StartRound/JoinRound) proceeds anonymously instead
-          // — ctx.account simply stays unset, byte-identical to this route's pre-M8 behavior.
-          if (route.auth === "golfer") throw new ApplicationError("invalid-token");
-        } else {
-          // A PRESENTED token is verified on both tiers, identically — "optional-golfer" never
-          // silently swallows a bad token into "treat as anonymous" (fail loud: a client that
-          // sent a token meant it). The injected AccountVerifier rejects on a bad signature,
-          // expiry, or wrong issuer/audience (createCognitoVerifier's own doc comment) — every
-          // one of those collapses to the same 401 a missing/garbage bearer token already
-          // produces above, never a distinct error code a client could use to enumerate WHY a
-          // token failed.
-          account = await verifier.verify(token).catch(() => {
-            throw new ApplicationError("invalid-token");
-          });
-        }
+        if (!token) throw new ApplicationError("invalid-token");
+        // The injected AccountVerifier rejects on a bad signature, expiry, or wrong issuer/audience
+        // (createCognitoVerifier's own doc comment) — every one of those collapses to the same 401
+        // a missing/garbage bearer token already produces, never a distinct error code a client
+        // could use to enumerate WHY a token failed.
+        account = await verifier.verify(token).catch(() => {
+          throw new ApplicationError("invalid-token");
+        });
       }
 
       const body = route.schema ? parse(route.schema, readJsonBody(event)) : undefined;

@@ -133,12 +133,11 @@ const requestJson = async (path: string, init: (RequestInit & { token?: string }
   return response.json();
 };
 
-// `token` is optional (M8 Task 5): both routes are "optional-golfer" on the wire — an anonymous
-// call behaves byte-identically to before (no token, no golferId in the body), while a signed-in
-// "play as yourself" call attaches the caller's own Bearer alongside a `golferId` already present
-// in `input`. A route that's "optional-golfer" still 401s a PRESENT-but-invalid token
-// (dispatch.ts), so callers must only pass a token from an actually-valid auth session (e.g. via
-// useAuth's withAuth, which owns the refresh-then-signout policy) — never a stale/expired one.
+// Accounts-only identity (spec §3): both routes are "golfer"-gated on the wire — the caller is
+// always a signed-in account playing as themselves (the server resolves the seat from the Bearer;
+// the request carries no name/golferId). `token` stays typed optional here only so the ApiError
+// path stays uniform, but a real call always passes one from a valid auth session (via useAuth's
+// withAuth, which owns the refresh-then-signout policy) — an absent/invalid token 401s server-side.
 export const createRound = async (input: StartRoundRequest, token?: string): Promise<StartRoundResponse> => {
   const json = await requestJson("/rounds", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
   return parse(startRoundResponseSchema, json);

@@ -69,16 +69,11 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
   });
 
   // Step 1: Ann signs up, then client 1 (her phone) starts the round as herself and opens its
-  // socket. The host seat is her account's own golfer — startRound's identity fields still on
-  // the wire (host.name/golferId, until N-T6 drops them) are sourced from her RECORD.
+  // socket. The host seat is her account's own golfer — resolved server-side from her Bearer
+  // (ensureGolfer), so the request carries no name/golferId.
   it("1: Ann's account starts the round as herself", async () => {
     const ann = await mintAccountGolfer(httpUrl, "slice-ann", "Ann");
-    const started = await post(
-      rounds(),
-      { card: fixtureLinks, host: { name: ann.name, tee: "white", courseHandicap: 8 }, golferId: ann.golferId },
-      startRoundResponseSchema,
-      ann.idToken,
-    );
+    const started = await post(rounds(), { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, startRoundResponseSchema, ann.idToken);
     roundId = started.roundId;
     joinCode = started.joinCode;
     token1 = started.token;
@@ -96,22 +91,12 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
     const boAccount = await mintAccountGolfer(httpUrl, "slice-bo", "Bo");
     const calAccount = await mintAccountGolfer(httpUrl, "slice-cal", "Cal");
 
-    const bo = await post(
-      rounds("/join"),
-      { code: joinCode, name: boAccount.name, tee: "white", courseHandicap: 2, golferId: boAccount.golferId },
-      joinRoundResponseSchema,
-      boAccount.idToken,
-    );
+    const bo = await post(rounds("/join"), { code: joinCode, tee: "white", courseHandicap: 2 }, joinRoundResponseSchema, boAccount.idToken);
     token2 = bo.token;
     boId = bo.golferId;
     expect(boId).toBe(boAccount.golferId);
 
-    const cal = await post(
-      rounds("/join"),
-      { code: joinCode, name: calAccount.name, tee: "white", courseHandicap: 12, golferId: calAccount.golferId },
-      joinRoundResponseSchema,
-      calAccount.idToken,
-    );
+    const cal = await post(rounds("/join"), { code: joinCode, tee: "white", courseHandicap: 12 }, joinRoundResponseSchema, calAccount.idToken);
     calId = cal.golferId;
     expect(calId).toBe(calAccount.golferId);
 

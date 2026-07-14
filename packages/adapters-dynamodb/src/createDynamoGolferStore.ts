@@ -1,11 +1,15 @@
 import { ConditionalCheckFailedException, TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { GetCommand, PutCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { BatchGetCommand, GetCommand, PutCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import type { Golfer, GolferId } from "@swng/domain";
 import { courseId, golferId as toGolferId } from "@swng/domain";
 import type { GolferStore } from "@swng/application";
 import { ApplicationError } from "@swng/application";
 import { golferGsi2pk, golferGsi2sk, golferIdFromPk, golferPk, golferSk, golferSubPk, golferSubSk } from "./keys.js";
+
+// DynamoDB caps one BatchGetItem at 100 keys — getMany chunks its input to stay under it (same
+// idiom as createDynamoSnapshotStore.getMany).
+const BATCH_GET_MAX_KEYS = 100;
 
 // A raw golfer item's shape on the core table (keys.ts's golferPk/golferSk): Golfer's nested
 // `handicap: { declared?, official? }` is flattened to top-level `declared`/`official`
@@ -112,10 +116,41 @@ export const createDynamoGolferStore = (config: { client: DynamoDBDocumentClient
     },
 
     get: async (golferId: GolferId) => {
-      // Same rationale as put/getBySub below: callers (getOrCreateGolfer, updateMyGolfer)
-      // base their next mutation's expectedRevision on this read.
+      // Same rationale as put/getBySub below: callers (ensureGolfer, updateMyGolfer) base
+      // their next mutation's expectedRevision on this read.
       const item = await getGolferItem(golferId);
       return item ? { golfer: golferOf(item), sub: item.sub, revision: item.revision } : undefined;
+    },
+
+    // Batch fetch of golfer rows by id (GolferStore's port doc): order is NOT guaranteed and
+    // absent ids are omitted. The projector's one read per finalized round to decide which
+    // participants are account-bound. NOT ConsistentRead (unlike get/getBySub above): a golfer's
+    // sub binding is established at StartRound/JoinRound time, long before that round could ever
+    // finalize, so an eventually-consistent BatchGet can't miss a binding relevant to this
+    // archive. Dedupe + chunk + re-drive UnprocessedKeys, exactly as createDynamoSnapshotStore does.
+    getMany: async (golferIds: readonly GolferId[]) => {
+      const seen = new Set<string>();
+      const uniqueKeys: { pk: string; sk: string }[] = [];
+      for (const id of golferIds) {
+        const pk = golferPk(id);
+        if (seen.has(pk)) continue;
+        seen.add(pk);
+        uniqueKeys.push({ pk, sk: golferSk });
+      }
+
+      const results: { golfer: Golfer; sub?: string; revision: number }[] = [];
+      for (let i = 0; i < uniqueKeys.length; i += BATCH_GET_MAX_KEYS) {
+        let remaining: { pk: string; sk: string }[] | undefined = uniqueKeys.slice(i, i + BATCH_GET_MAX_KEYS);
+        while (remaining && remaining.length > 0) {
+          const result = await client.send(new BatchGetCommand({ RequestItems: { [tableName]: { Keys: remaining } } }));
+          for (const raw of result.Responses?.[tableName] ?? []) {
+            const item = raw as GolferItem;
+            results.push({ golfer: golferOf(item), sub: item.sub, revision: item.revision });
+          }
+          remaining = result.UnprocessedKeys?.[tableName]?.Keys as { pk: string; sk: string }[] | undefined;
+        }
+      }
+      return results;
     },
 
     // M9 hardening: resolves via the base-table SUB#<sub> pointer item bindSub maintains
@@ -168,9 +203,8 @@ export const createDynamoGolferStore = (config: { client: DynamoDBDocumentClient
           // Either item's condition failing means this exact bind cannot proceed — the sub is
           // already bound elsewhere, OR this golferId is already claimed, OR (a caller bug
           // this port doc warns against) the row doesn't exist yet. Every real caller treats
-          // this uniformly (claimGolfer.ts rethrows it as-is; getOrCreateGolfer.ts catches it
-          // and re-reads the winner), so there's no need to inspect CancellationReasons to
-          // tell the arms apart.
+          // this uniformly (ensureGolfer catches it and re-reads the winner), so there's no need
+          // to inspect CancellationReasons to tell the arms apart.
           throw new ApplicationError("golfer-already-claimed", `golfer ${golferId} could not be bound to the given sub`);
         }
         throw error;

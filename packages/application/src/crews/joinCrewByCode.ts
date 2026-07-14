@@ -10,8 +10,8 @@ import { toCrewView } from "./crewView.js";
 // POST /crews/join: adds the CALLER's own account golfer as a member (role "member") — the
 // self-service counterpart to addCrewMember (an organizer adding an EXISTING account golfer by
 // golferId; this one adds the caller themselves via a shared code). Neither mints a ghost
-// anymore — Task 9's de-ghost made addCrewMember 409 ghost-not-addable on an unclaimed
-// golferId, so every crew member is a real, claimed account golfer.
+// anymore — Task 9's de-ghost made addCrewMember 409 ghost-not-addable on a golferId with no
+// bound sub, so every crew member is a real account golfer.
 export const joinCrewByCode =
   (deps: { crewStore: CrewStore; golferStore: GolferStore }) =>
   async (claims: AccountClaims, command: JoinCrewRequest): Promise<JoinCrewResponse> => {

@@ -180,11 +180,11 @@ describe("addCrewMember", () => {
     expect(added.crew.members.find((member) => member.golferId === calId)).toEqual({ golferId: calId, name: "Cal", role: "member", claimed: true });
   });
 
-  it("a target golfer without a bound sub (an unclaimed ghost) is rejected — ghost-not-addable, nothing added", async () => {
+  it("a target golfer without a bound sub (a sub-less golfer) is rejected — ghost-not-addable, nothing added", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
     const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-    // A golfer row with NO sub — an unclaimed ghost (e.g. minted inside a round).
+    // A golfer row with NO sub — a sub-less golfer (e.g. minted inside a round).
     const ghostId = golferId("ghost-cal");
     await ctx.golferStore.put({ id: ghostId, name: "Cal", handicap: {} }, undefined);
 

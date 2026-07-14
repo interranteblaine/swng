@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { Golfer } from "@swng/domain";
 import { courseId, golferId, placeholderName } from "@swng/domain";
 import { ensureGolfer } from "@swng/application";
@@ -37,7 +37,7 @@ const makeGolfer = (overrides: Partial<Golfer> = {}): Golfer => ({
 
 describe("createDynamoGolferStore", () => {
   describe("put/get round-trip", () => {
-    it("put (create, unclaimed) + get round-trip", async () => {
+    it("put (create, sub-less) + get round-trip", async () => {
       const store = newStore();
       const golfer = makeGolfer({ handicap: { declared: 12.3 } });
 
@@ -59,7 +59,7 @@ describe("createDynamoGolferStore", () => {
       expect((await store.get(chosen.id))?.golfer).not.toHaveProperty("namePlaceholder");
     });
 
-    it("put (create, claimed) + get round-trip — a sub set directly on create is honored on the golfer row (no bindSub needed for THIS narrow round-trip)", async () => {
+    it("put (create, sub set directly) + get round-trip — a sub set on create is honored on the golfer row (no bindSub needed for THIS narrow round-trip)", async () => {
       const store = newStore();
       const golfer = makeGolfer({ homeCourseId: courseId(randomUUID()) });
       const sub = `sub-${randomUUID()}`;
@@ -72,6 +72,68 @@ describe("createDynamoGolferStore", () => {
     it("get on an unknown golferId returns undefined", async () => {
       const store = newStore();
       expect(await store.get(golferId(randomUUID()))).toBeUndefined();
+    });
+
+    // getMany (accounts-only identity spec §7): the projector's batch read to decide who is
+    // account-bound. Order isn't promised and absent ids are omitted (GolferStore's port doc) —
+    // pinned here against the real BatchGetItem, exactly as SnapshotStore.getMany's own contract
+    // test does. Also proves the sub-bound vs. sub-less split reads back correctly per row.
+    it("getMany returns present golfers (with their sub state) and silently omits absent ids", async () => {
+      const store = newStore();
+      const bound = makeGolfer({ name: "Ann" });
+      const subLess = makeGolfer({ name: "Bo" });
+      const absent = golferId(randomUUID());
+      const sub = `sub-${randomUUID()}`;
+      await store.put(bound, undefined);
+      await store.bindSub(bound.id, sub);
+      await store.put(subLess, undefined);
+
+      const found = await store.getMany([bound.id, absent, subLess.id]);
+
+      expect(found).toHaveLength(2); // the absent id is simply not returned
+      const byId = new Map(found.map((entry) => [entry.golfer.id, entry]));
+      expect(byId.get(bound.id)).toEqual({ golfer: bound, sub, revision: 2 });
+      expect(byId.get(subLess.id)).toEqual({ golfer: subLess, sub: undefined, revision: 1 });
+    });
+
+    it("getMany on an all-absent input returns an empty array (never throws on an empty batch)", async () => {
+      const store = newStore();
+      expect(await store.getMany([golferId(randomUUID()), golferId(randomUUID())])).toEqual([]);
+    });
+
+    // Old stored data tolerates forever, migrates never (accounts-only identity spec §7 / Global
+    // Constraints): a legacy golfer document carrying claim-era attributes (the gsi2 sub-projection
+    // keys, plus any stray attribute an old write left behind) reads back as a CLEAN Golfer — the
+    // adapter's golferOf only ever reads the known fields, tolerate-and-ignoring everything else,
+    // so no deserialization path changes. Written here as the RAW item a pre-accounts write would
+    // have left, not through put(), to prove the read side ignores those attributes directly.
+    it("a legacy golfer document with claim-era attributes (gsi2 keys + a stray attr) reads clean via get AND getMany", async () => {
+      const store = newStore();
+      const id = golferId(randomUUID());
+      const legacySub = `sub-${randomUUID()}`;
+      await local.client.send(
+        new PutCommand({
+          TableName: local.coreTable,
+          Item: {
+            pk: golferPk(id),
+            sk: golferSk,
+            revision: 3,
+            name: "Legacy Ghost",
+            declared: 14,
+            // Claim-era attributes an old write left on the row — never part of the domain Golfer:
+            sub: legacySub,
+            gsi2pk: `SUB#${legacySub}`,
+            gsi2sk: "GOLFER",
+            // A stray attribute from some retired code path — must be tolerate-and-ignored too.
+            legacyGhostFlag: true,
+          },
+        }),
+      );
+
+      const clean: Golfer = { id, name: "Legacy Ghost", handicap: { declared: 14 } };
+      expect(await store.get(id)).toEqual({ golfer: clean, sub: legacySub, revision: 3 });
+      const many = await store.getMany([id]);
+      expect(many).toEqual([{ golfer: clean, sub: legacySub, revision: 3 }]);
     });
 
     it("getBySub on an unknown sub returns undefined", async () => {
@@ -154,7 +216,7 @@ describe("createDynamoGolferStore", () => {
   });
 
   describe("bindSub", () => {
-    it("binds sub to an existing unclaimed row, bumping revision, resolvable via getBySub", async () => {
+    it("binds sub to an existing sub-less row, bumping revision, resolvable via getBySub", async () => {
       const store = newStore();
       const golfer = makeGolfer({ name: "Ghost Golfer", handicap: { declared: 18 } });
       await store.put(golfer, undefined);

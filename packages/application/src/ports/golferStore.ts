@@ -18,6 +18,13 @@ export interface GolferStore {
   // fixtures), but no real call site does that anymore — see bindSub's own doc below.
   put(golfer: Golfer & { readonly sub?: string }, expectedRevision: number | undefined): Promise<void>;
   get(golferId: GolferId): Promise<{ golfer: Golfer; sub?: string; revision: number } | undefined>;
+  // Batch fetch — order is NOT guaranteed and absent ids are omitted (a golferId with no row
+  // simply doesn't appear in the result), the same contract a DynamoDB BatchGetItem gives and
+  // that SnapshotStore.getMany already establishes. The projector uses this to decide, in one
+  // read per finalized round, which participants are account-bound (carry a sub): a golfer with
+  // no `sub` — or no row at all, e.g. an old ghost id — is not projected (accounts-only identity
+  // spec §7: only account golfers are projected).
+  getMany(golferIds: readonly GolferId[]): Promise<readonly { golfer: Golfer; sub?: string; revision: number }[]>;
   // M9 hardening: reads via the base-table SUB#<sub> pointer item bindSub maintains
   // (ConsistentRead in the real adapter) — gsi2's own sub→golfer projection (still written, for
   // rollback safety) is no longer read by anything. keys.ts's golferSubPk doc comment has the
@@ -31,10 +38,8 @@ export interface GolferStore {
   // bound to two different golferIds (the pointer condition — this closes the M7-era
   // gsi2-eventual-consistency duplicate-golfer race, since the pointer is a real, strongly-
   // consistent base-table key, not a GSI projection), and no golferId is ever claimed twice
-  // (the row condition, the same guarantee the old `claim`'s attribute_not_exists(sub) already
-  // gave). Requires the row to ALREADY exist — bindSub never creates one, unlike the old
-  // `claim`; a caller claiming a ghost that's never had a row yet (golfers/claimGolfer.ts) or
-  // creating a fresh account golfer (golfers/getMyGolfer.ts's getOrCreateGolfer) `put`s it
-  // first, then binds.
+  // (the row condition). Requires the row to ALREADY exist — bindSub never creates one; a caller
+  // minting a fresh account golfer (golfers/ensureGolfer.ts) `put`s a sub-less row first, then
+  // binds.
   bindSub(golferId: GolferId, sub: string): Promise<void>;
 }

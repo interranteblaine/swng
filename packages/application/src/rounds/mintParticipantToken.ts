@@ -9,9 +9,9 @@ import { loadRoundState } from "./loadRoundState.js";
 
 // POST /rounds/{roundId}/token (architecture-realignment Task 14): scoring capability derives
 // from PARTICIPATION, not the device that joined. A golfer seated in a round's own fold — via
-// startRound/joinRound/addParticipant, on ANY device, as-self or via the shared golferIdentity
-// resolver's co-membership arm — can always re-mint a fresh participant token for THIS device,
-// no join code needed. This is the call HomePage's live-rounds list (Task 13) makes when a
+// startRound (the creator) or joinRound (as-self, the only way onto a card now), on ANY device —
+// can always re-mint a fresh participant token for THIS device, no join code needed. This is the
+// call HomePage's live-rounds list (Task 13) makes when a
 // signed-in golfer taps a round they have no local device credential for (started/joined
 // elsewhere), returning the SAME wire shape joinRound's own token mint does — reused verbatim
 // (task-14-brief.md: "prefer reuse") rather than a parallel MintTokenResponse type, since the

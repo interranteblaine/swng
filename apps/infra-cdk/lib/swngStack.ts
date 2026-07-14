@@ -33,9 +33,10 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (35, as of the crew-is-a-grouping deletion — the standing-game route is
-// gone) routes are declared here explicitly (matching packages/lambda/src/http/routes.ts)
-// rather than via a single $default catch-all, so the API's shape is visible in the
+// function — but the (34, as of the accounts-only identity deletion — POST /golfers/claim and
+// POST /rounds/{roundId}/players are gone) routes are declared here explicitly (matching
+// packages/lambda/src/http/routes.ts) rather than via a single $default catch-all, so the API's
+// shape is visible in the
 // CloudFormation template and the AWS console, not hidden inside the Lambda. Exported (not
 // module-private) so test/routesParity.test.ts can pin this table against buildRoutes' own
 // {method, path} set — infra depends on lambda, the correct direction, so that guard lives
@@ -74,18 +75,16 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.POST, path: "/rounds/{roundId}/games/{gameId}/terminate" },
   { method: HttpMethod.GET, path: "/me" },
   { method: HttpMethod.PUT, path: "/me" },
-  { method: HttpMethod.POST, path: "/golfers/claim" },
   { method: HttpMethod.GET, path: "/me/record" },
   // Projection-realignment Task 6: "list my rounds" — same golfer tier as GET /me/record.
   { method: HttpMethod.GET, path: "/me/rounds" },
   // Projection-realignment Task 13: "your rounds, right now" — presence, not finalized
   // history. Same golfer tier.
   { method: HttpMethod.GET, path: "/me/rounds/live" },
-  // M8 Task 4: crews + rounds played as yourself. POST /rounds and POST /rounds/join above
-  // are unchanged PATHS — only their auth tier moved (routes.ts's own "optional-golfer" —
-  // API Gateway forwards every method/path here identically regardless of auth tier, so this
-  // table needs no edit for that part of the change.
-  { method: HttpMethod.POST, path: "/rounds/{roundId}/players" },
+  // M8 Task 4: crews. POST /rounds and POST /rounds/join above are unchanged PATHS — accounts-
+  // only identity (spec §3) moved their auth tier to "golfer" (routes.ts), but API Gateway
+  // forwards every method/path here identically regardless of auth tier, so this table needs no
+  // edit for that part of the change.
   { method: HttpMethod.POST, path: "/crews" },
   { method: HttpMethod.POST, path: "/crews/join" },
   { method: HttpMethod.GET, path: "/me/crews" },
@@ -101,16 +100,17 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.POST, path: "/crews/{crewId}/leave" },
 ];
 
-// M9 Task 5 (ops): the eight routes anyone can call with NO token at all — routes.ts's own
-// `auth` column names exactly why each one is here. POST /rounds and POST /rounds/join are
-// "optional-golfer" (an absent Bearer still proceeds anonymously); GET /rounds/peek is "none"
-// (no participant exists yet to hold a token before joining, M6 Task 4); the five course routes
-// are the whole CRUD/search surface, deliberately unauthenticated in v1 (same M6 Task 4 call).
-// Every OTHER route requires a real participant/golfer token first — minting one is already a
-// much higher bar than a bare HTTP call — so only these eight get the tighter per-route ceiling
-// below. Cross-checked against HTTP_ROUTES itself in swngStack.test.ts (every entry here must
-// also be a real route) so a typo'd path here fails loudly instead of silently throttling
-// nothing.
+// M9 Task 5 (ops): the eight highest-abuse-value routes get the tighter per-route ceiling below.
+// Six are genuinely no-token-reachable (routes.ts's `auth: "none"`): GET /rounds/peek (no
+// participant exists yet to hold a token before joining, M6 Task 4) and the five course routes
+// (the whole CRUD/search surface, deliberately unauthenticated in v1). POST /rounds and POST
+// /rounds/join are golfer-gated now (accounts-only identity spec §3 — no anonymous start or join)
+// but deliberately STAY in this set: round creation and self-join are the abuse-sensitive
+// round-entry operations, and a Cognito account is a low, free, self-service barrier, so the
+// tighter ceiling still earns its keep on them. Re-tuning the throttle set is otherwise out of
+// this task's scope. Every OTHER route requires a participant token minted off a join code first,
+// a higher bar. Cross-checked against HTTP_ROUTES itself in swngStack.test.ts (every entry here
+// must also be a real route) so a typo'd path fails loudly instead of silently throttling nothing.
 export const ANON_THROTTLED_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly path: string }> = [
   { method: HttpMethod.POST, path: "/rounds" },
   { method: HttpMethod.POST, path: "/rounds/join" },
@@ -386,10 +386,12 @@ export class SwngStack extends Stack {
       entry: entryPath("projector"),
       handler: "handler",
       runtime: Runtime.NODEJS_20_X,
-      // TABLE_SNAPSHOTS is deliberately absent: the projector reads nothing by table name — a
-      // later task's parseSnapshotStreamImage unmarshalls the archive straight out of the
-      // stream record the event source below hands it.
-      environment: { TABLE_PROJECTIONS: projectionsTable.tableName },
+      // TABLE_SNAPSHOTS is deliberately absent: the projector reads nothing by table name from
+      // the snapshots table — parseSnapshotStreamImage unmarshalls the archive straight out of
+      // the stream record the event source below hands it. TABLE_CORE, by contrast, IS needed
+      // (accounts-only identity spec §7): projectArchive reads each participant's golfer row (the
+      // golfer store lives on the core table) to project only account-bound golfers.
+      environment: { TABLE_PROJECTIONS: projectionsTable.tableName, TABLE_CORE: coreTable.tableName },
       timeout: Duration.seconds(15),
       memorySize: 512,
     });
@@ -398,9 +400,14 @@ export class SwngStack extends Stack {
       handler: "handler",
       runtime: Runtime.NODEJS_20_X,
       // Snapshot realignment Task 1: TABLE_ROUNDS is gone — the rebuild never touches the
-      // rounds table again (a later task backfills by paging the snapshots table instead of
-      // Scanning the rounds table for ARCHIVE items).
-      environment: { TABLE_PROJECTIONS: projectionsTable.tableName, TABLE_SNAPSHOTS: snapshotsTable.tableName },
+      // rounds table again (it backfills by paging the snapshots table). TABLE_CORE joins here
+      // (accounts-only identity spec §7): the backfill replays through the SAME projectArchive
+      // the stream trigger uses, which reads each participant's golfer row.
+      environment: {
+        TABLE_PROJECTIONS: projectionsTable.tableName,
+        TABLE_SNAPSHOTS: snapshotsTable.tableName,
+        TABLE_CORE: coreTable.tableName,
+      },
       // Longer than the other functions' fixed 15s budget on purpose: this replays every
       // snapshot in one invocation, not a single request — an operator-triggered job, not a
       // hot path.
@@ -536,6 +543,11 @@ export class SwngStack extends Stack {
     // table (the rebuild never touches the rounds table again — its own TABLE_ROUNDS grant and
     // env are gone, not just narrowed).
     snapshotsTable.grantReadData(rebuildFn);
+    // Accounts-only identity (spec §7): the projector and rebuild read each participant's golfer
+    // row (on the core table) to project ONLY account-bound golfers — read-only, they never write
+    // golfer/course/crew data. httpFn already has read+write on the core table (above).
+    coreTable.grantReadData(projectorFn);
+    coreTable.grantReadData(rebuildFn);
 
     // --- Alarms -> one SNS topic (M9 Task 5) -----------------------------------------------
     //

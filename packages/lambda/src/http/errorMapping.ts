@@ -37,11 +37,8 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "unknown-game": 404,
   "golfer-conflict": 409,
   "golfer-already-claimed": 409,
-  // Task 5b (.superpowers/sdd/task-5b-brief.md): joinRound's supplied-golferId reuse. A
-  // claimed identity is a forbidden ACTOR (not a conflicting write), the same shape as
-  // not-a-participant/token-round-mismatch above — 403. A golferId already seated in THIS
-  // round is a failed precondition on the roster, the same shape as golfer-conflict — 409.
-  "golfer-claimed": 403,
+  // accounts-only identity: joinRound rejects a re-tap from a golfer already seated in THIS round
+  // — a failed precondition on the roster, the same shape as golfer-conflict — 409.
   "golfer-already-in-round": 409,
   // M8 Task 2 (application/src/errors.ts) forward-provisions these ahead of M8 Task 4's
   // actual crew routes — same "the map is exhaustive by construction, so a code lands here
@@ -49,7 +46,7 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // crew-conflict is a failed optimistic-concurrency write, same bucket as course-conflict/
   // golfer-conflict; unknown-crew is an unresolvable crewId or join code, same bucket as
   // round-not-found/bad-join-code/course-not-found; not-a-member is a forbidden ACTOR, same
-  // bucket as not-a-participant/golfer-claimed; golfer-required is a bad-body precondition
+  // bucket as not-a-participant; golfer-required is a bad-body precondition
   // (the caller has no account golfer yet), same bucket as unknown-golfer-in-game.
   "crew-conflict": 409,
   "unknown-crew": 404,
@@ -62,17 +59,12 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // explicit entry: this Record is exhaustive over ApplicationErrorCode by construction.
   "sub-drop-forbidden": 500,
   "join-code-exhausted": 500,
-  // M9 hardening (claim proof-of-context): a forbidden ACTOR (the caller hasn't proven they
-  // belong to this golferId's round/crew), same bucket as golfer-claimed/not-a-member above —
-  // 403, not a 409 (this isn't a conflicting write, and it's checked before either 409 arm so
-  // it never leaks claim status).
-  "claim-proof-required": 403,
   // M9 Task 3 (share): a spectator token is a verified, real bearer — just not one this WRITE
-  // route accepts — same "forbidden actor" 403 bucket as claim-proof-required/not-a-participant
-  // above, never a 401 (401 means "no usable identity at all", which a spectator token isn't).
+  // route accepts — a "forbidden actor" 403, same bucket as not-a-participant above, never a 401
+  // (401 means "no usable identity at all", which a spectator token isn't).
   "read-only-token": 403,
   // Projection-realignment Task 6: getRoundArchive's own forbidden-actor code — same 403
-  // bucket as not-a-participant/not-a-member/claim-proof-required above.
+  // bucket as not-a-participant/not-a-member above.
   "not-a-viewer": 403,
   // Architecture-realignment Task 8 (application/src/errors.ts): CrewStore.addCountedRound's
   // collision signal, forward-provisioned ahead of any real route that calls it (same

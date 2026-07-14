@@ -64,7 +64,7 @@ describe("mintParticipantToken — new-device re-mint", () => {
     await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
 
     const host = await ctx.start(
-      { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId },
+      { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
       { sub: "sub-ann" },
     );
 
@@ -83,10 +83,10 @@ describe("mintParticipantToken — new-device re-mint", () => {
     await putAndBindGolfer(ctx.golferStore, boId, "sub-bo", "Bo");
 
     const host = await ctx.start(
-      { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId },
+      { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
       { sub: "sub-ann" },
     );
-    await ctx.join({ code: host.joinCode, name: "Bo", tee: "white", courseHandicap: 12, golferId: boId }, { sub: "sub-bo" });
+    await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 12 }, { sub: "sub-bo" });
 
     // Bo's original join-time token is discarded here on purpose — this call simulates Bo
     // opening the round from a fresh device/browser that never held it.
@@ -104,7 +104,7 @@ describe("mintParticipantToken — new-device re-mint", () => {
     await putAndBindGolfer(ctx.golferStore, strangerId, "sub-stranger", "Stranger");
 
     const host = await ctx.start(
-      { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId },
+      { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
       { sub: "sub-ann" },
     );
 
@@ -117,7 +117,7 @@ describe("mintParticipantToken — new-device re-mint", () => {
     await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
 
     const host = await ctx.start(
-      { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId },
+      { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
       { sub: "sub-ann" },
     );
 
@@ -130,7 +130,7 @@ describe("mintParticipantToken — new-device re-mint", () => {
     await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
 
     const host = await ctx.start(
-      { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 }, golferId: annId },
+      { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
       { sub: "sub-ann" },
     );
     await ctx.finalize({ roundId: host.roundId, golferId: annId });

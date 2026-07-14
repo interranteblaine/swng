@@ -1,12 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { computeIndex, deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
 import type { GolferId, GolferRoundLine, Participant, RoundArchive, RoundEvent } from "@swng/domain";
+import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
-import { createFrozenClock, createInMemoryProjectionStore, createNullLogger } from "../testing/fakes.js";
+import { createFrozenClock, createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, putAndBindGolfer } from "../testing/fakes.js";
 import { finalizedAtMsOf, projectArchive } from "./projectArchive.js";
 
 const ann = golferId("ann");
 const bo = golferId("bo");
+
+// Accounts-only identity (spec §7): the projector projects ONLY account-bound golfers (a golfer
+// row carrying a sub). Seeds a set of golferIds as account golfers on one shared store — the
+// common case where a test wants all of an archive's participants projected; a sub-less golfer
+// (or one with no row at all) is deliberately skipped by the projector.
+const accountsFor = async (...ids: GolferId[]): Promise<GolferStore> => {
+  const golferStore = createInMemoryGolferStore();
+  for (const id of ids) await putAndBindGolfer(golferStore, id, `sub-${id}`, `${id}`);
+  return golferStore;
+};
 
 const finalizedEvent = (wallMs: number): RoundEvent => ({
   kind: "round-finalized",
@@ -42,8 +53,12 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
   ),
 });
 
-const setup = () => ({
+// Seeds ann + bo as account golfers by default — the participants every projectArchive test below
+// uses — so the account-bound filter (spec §7) lets them through. Tests that assert the SKIP path
+// (a sub-less golfer) seed their own store instead.
+const setup = async () => ({
   projectionStore: createInMemoryProjectionStore(),
+  golferStore: await accountsFor(ann, bo),
   logger: createNullLogger(),
 });
 
@@ -61,7 +76,7 @@ describe("finalizedAtMsOf", () => {
 
 describe("projectArchive", () => {
   it("writes one history line per participant; index stays absent below the 3-differential bootstrap", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]);
     const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
 
@@ -74,7 +89,7 @@ describe("projectArchive", () => {
   });
 
   it("crosses the bootstrap on the 3rd differential; differentialsUsed is the WHS use-count, not the window size", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
 
     await project(archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]));
@@ -91,7 +106,7 @@ describe("projectArchive", () => {
   });
 
   it("is idempotent: re-putting the same history line doesn't duplicate it", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]);
     const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
 
@@ -103,7 +118,7 @@ describe("projectArchive", () => {
   });
 
   it("is idempotent across the bootstrap boundary: re-projecting the last archive leaves listLines/getIndex unchanged", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
     const third = archiveAt("r3", 3_000, [{ golferId: ann, differential: 11.0 }]);
 
@@ -120,7 +135,7 @@ describe("projectArchive", () => {
   });
 
   it("tracks each participant's history/index independently; an always-incomplete golfer never bootstraps", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
 
     await project(archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo }]));
@@ -133,7 +148,7 @@ describe("projectArchive", () => {
   });
 
   it("throws for a settled archive with no round-finalized event", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const corrupt: RoundArchive = { ...archiveAt("r1", 1_000, [{ golferId: ann }]), events: [] };
     const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
     await expect(project(corrupt)).rejects.toThrow();
@@ -144,7 +159,7 @@ describe("projectArchive", () => {
   // (rounds/presence.ts) — this is the PRIMARY removal path (TTL is only a backstop for a
   // round that never finalizes).
   it("deletes the LIVE pointer for every participant on the archive", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo }]);
     await ctx.projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
     await ctx.projectionStore.putLive(bo, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600, expiresAtSec: 9_999_999_999 });
@@ -162,7 +177,7 @@ describe("projectArchive", () => {
   // an already-projected archive (the stream trigger's own at-least-once delivery, or a
   // rebuild replay) calls deleteLive on a pointer that's already gone — never an error.
   it("re-projecting the same archive a second time is a no-op for presence, not an error", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]);
     await ctx.projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
     const project = projectArchive({ ...ctx, clock: createFrozenClock(5_000) });
@@ -171,6 +186,57 @@ describe("projectArchive", () => {
     await expect(project(archive)).resolves.toBeUndefined();
 
     expect(await ctx.projectionStore.listLive(ann)).toEqual([]);
+  });
+
+  // Accounts-only identity (spec §7): only account golfers are projected. A participant whose
+  // golfer record has NO bound sub (a ghost from old data) — or NO row at all — gets no history
+  // line, no index, and NO presence clear (their presence, if any, self-expires on its own TTL).
+  it("skips a participant whose golfer record is sub-less (a ghost) — no line, no index, no presence clear", async () => {
+    const projectionStore = createInMemoryProjectionStore();
+    const logger = createNullLogger();
+    // ann is a real account; bo has a golfer row but NO sub (still a ghost).
+    const golferStore = await accountsFor(ann);
+    await golferStore.put({ id: bo, name: "Bo Ghost", handicap: {} }, undefined); // sub-less row
+    // Pre-existing presence for the ghost must be LEFT ALONE (TTL is its only cleanup path).
+    await projectionStore.putLive(bo, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600, expiresAtSec: 9_999_999_999 });
+
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo, differential: 12.0 }]);
+    const project = projectArchive({ projectionStore, golferStore, clock: createFrozenClock(5_000), logger });
+    await project(archive);
+
+    // ann (account) is projected; bo (sub-less ghost) is entirely skipped.
+    expect(await projectionStore.listLines(ann)).toHaveLength(1);
+    expect(await projectionStore.listLines(bo)).toHaveLength(0);
+    expect(await projectionStore.getIndex(bo)).toBeUndefined();
+    // The ghost's presence pointer is UNTOUCHED — the projector never cleared it.
+    expect(await projectionStore.listLive(bo)).toEqual([{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600 }]);
+  });
+
+  // A participant with NO golfer row at all (possible for an old ghost id) is likewise skipped —
+  // never throwing (getMany simply omits it), same "not account-bound" outcome as a sub-less row.
+  it("skips a participant with no golfer row at all — never throws", async () => {
+    const projectionStore = createInMemoryProjectionStore();
+    const golferStore = await accountsFor(ann); // bo has no row whatsoever
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo, differential: 12.0 }]);
+    const project = projectArchive({ projectionStore, golferStore, clock: createFrozenClock(5_000), logger: createNullLogger() });
+
+    await expect(project(archive)).resolves.toBeUndefined();
+    expect(await projectionStore.listLines(ann)).toHaveLength(1);
+    expect(await projectionStore.listLines(bo)).toHaveLength(0);
+  });
+
+  // And the account golfer's own presence IS cleared (the complement of the skip above) — proving
+  // the projector still clears presence for exactly the account golfers it projected.
+  it("clears presence for the account golfer it projected", async () => {
+    const projectionStore = createInMemoryProjectionStore();
+    const golferStore = await accountsFor(ann);
+    await projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]);
+    const project = projectArchive({ projectionStore, golferStore, clock: createFrozenClock(5_000), logger: createNullLogger() });
+
+    await project(archive);
+
+    expect(await projectionStore.listLive(ann)).toEqual([]);
   });
 });
 
@@ -222,7 +288,8 @@ describe("projectArchive sorts listLines before the index fold (order, not just 
       listLive: async () => [],
     };
 
-    const project = projectArchive({ projectionStore: outOfOrderStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
+    const golferStore = await accountsFor(ann); // ann must be account-bound for the projector to fold her lines at all (spec §7)
+    const project = projectArchive({ projectionStore: outOfOrderStore, golferStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
     // The archive's own line (18-hole, from archiveAt) is irrelevant to this assertion — the
     // fake's listLines ignores whatever putLine received and always returns `reversed` — so
     // this call exists purely to trigger the fold over the 7 lines above.

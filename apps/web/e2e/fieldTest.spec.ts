@@ -170,8 +170,8 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // browsers unnecessary, and joining them through context A would overwrite Ann's
     // localStorage credential for this round (one `swng:credential:<roundId>` key per round
     // per browser, not per golfer) — but as THEMSELVES, each with their own Bearer (self-join
-    // is the only way onto a card; the deleted players[]/addParticipant seeding has no
-    // harness support anymore).
+    // is the only way onto a card now; the old roster-seeding path a host could use to add
+    // others is deleted, and this harness never had support for it).
     const { httpUrl } = loadWebEnv();
     await joinRoundDirect(httpUrl, calAccount, { code: joinCode, tee: "white", courseHandicap: 15 });
     await joinRoundDirect(httpUrl, deeAccount, { code: joinCode, tee: "white", courseHandicap: 5 });

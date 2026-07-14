@@ -8,7 +8,7 @@ import type { ProjectionStore } from "../ports/projectionStore.js";
 // The round's created-at (accounts-only identity spec §5, the "course + date" designation) — the
 // round-created genesis event's own wall time, a ROUND-level fact (unlike the per-golfer
 // `joinedAt`). Derived at read time rather than stored on the presence pointer: presence is written
-// by startRound/joinRound/addParticipant (untouched by this task), and a golfer has only a handful
+// by startRound/joinRound (the only two seat paths), and a golfer has only a handful
 // of live rounds at once, so a genesis read per live round is cheap. Best-effort — a stale presence
 // pointer (the 36h TTL backstop outliving a round that vanished) reads back nothing, so createdAt is
 // simply omitted rather than throwing.

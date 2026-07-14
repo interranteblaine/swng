@@ -168,7 +168,7 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
     expect(screen.getByRole("link", { name: /change/i }).getAttribute("href")).toBe("/profile");
   });
 
-  it("uppercases the code and joins as-self: golferId + Bearer + the account's name, never a typed one", async () => {
+  it("uppercases the code and joins as-self: code + tee/handicap + the account's Bearer (seat resolved server-side, never a typed name)", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedJoinRound.mockResolvedValue({ roundId: roundId("round-self"), token: "tok-self", golferId: golferId("bo-g") });
@@ -183,7 +183,9 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
 
     await waitFor(() => expect(mockedJoinRound).toHaveBeenCalledTimes(1));
     const [body, token] = mockedJoinRound.mock.calls[0]!;
-    expect(body).toEqual({ code: "SELF01", name: "Bo G", tee: "white", courseHandicap: 6, golferId: golferId("bo-g") });
+    // Accounts-only identity (spec §3): join is as-self — the request carries only code + tee +
+    // courseHandicap; the seat (name + golferId) is resolved server-side from the Bearer.
+    expect(body).toEqual({ code: "SELF01", tee: "white", courseHandicap: 6 });
     expect(token).toBe(idToken);
 
     await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
@@ -235,7 +237,7 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
     fireEvent.click(screen.getByRole("button", { name: /join round/i }));
 
     await waitFor(() => expect(mockedJoinRound).toHaveBeenCalledTimes(1));
-    expect(mockedJoinRound.mock.calls[0]![0]).toEqual({ code: "ZZZ999", name: "Dee", tee: "white", courseHandicap: 5, golferId: golferId("dee-g") });
+    expect(mockedJoinRound.mock.calls[0]![0]).toEqual({ code: "ZZZ999", tee: "white", courseHandicap: 5 });
   });
 });
 

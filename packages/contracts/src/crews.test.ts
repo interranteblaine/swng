@@ -59,7 +59,7 @@ describe("joinCrewRequestSchema", () => {
 });
 
 describe("crewViewSchema (via getCrewResponseSchema)", () => {
-  it("round-trips a crew with a mix of claimed/unclaimed members", () => {
+  it("round-trips a crew with members carrying claimed true and false", () => {
     roundTrips(getCrewResponseSchema, {
       crew: {
         crewId: crewId("crew-1"),

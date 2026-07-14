@@ -251,16 +251,16 @@ describe("SwngStack", () => {
       }
     });
 
-    // M6 Task 3: course routes are HTTP-only (no WS entry point ever touches the core
-    // table), unlike TABLE_ROUNDS/TABLE_CONNECTIONS/WS_ENDPOINT above which every function
-    // needs — so exactly one of the five functions (httpFn) should carry TABLE_CORE.
-    // `Environment?.Variables` (not a bare `.Environment.Variables`): the M9 Task 6 auto-
-    // delete-objects Lambda (above) carries NO Environment property at all — a bare access
+    // Accounts-only identity (spec §7): three functions carry TABLE_CORE now — httpFn (its whole
+    // golfer/course/crew surface), plus projectorFn and rebuildFn, which read each participant's
+    // golfer row (on the core table) to project only account-bound golfers. wsConnect/wsDisconnect
+    // still never touch it. `Environment?.Variables` (not a bare `.Environment.Variables`): the M9
+    // Task 6 auto-delete-objects Lambda carries NO Environment property at all — a bare access
     // would throw TypeError on it rather than just correctly reporting "no TABLE_CORE here".
-    it("exactly one function (http) carries TABLE_CORE", () => {
+    it("exactly three functions (http, projector, rebuild) carry TABLE_CORE", () => {
       const functions = template.findResources("AWS::Lambda::Function");
       const withTableCore = Object.values(functions).filter((fn) => "TABLE_CORE" in ((fn.Properties.Environment?.Variables ?? {}) as Record<string, unknown>));
-      expect(withTableCore).toHaveLength(1);
+      expect(withTableCore).toHaveLength(3);
     });
 
     // M7 Task 4: httpFn (forward-provisioned ahead of the golfer/record routes), projectorFn,
@@ -296,31 +296,31 @@ describe("SwngStack", () => {
       expect(withUserPool).toHaveLength(1);
     });
 
-    // Snapshot realignment Task 1: unchanged by this task — the projector's event source moves
-    // to the snapshots table's stream (below), but the FUNCTION's own env stays exactly
-    // TABLE_PROJECTIONS (it reads nothing by table name; it upserts the projection its stream
-    // record already carries the archive for).
-    it("ProjectorFunction: 15s/512MB, TABLE_PROJECTIONS only (no TOKEN_SECRET/WS_ENDPOINT it has no use for)", () => {
+    // Accounts-only identity (spec §7): the projector reads golfer rows on the core table to
+    // project only account-bound golfers, so its env is TABLE_PROJECTIONS + TABLE_CORE now (still
+    // no TOKEN_SECRET/WS_ENDPOINT it has no use for). Its event source (the snapshots stream) is
+    // unchanged — the archive rides in the stream record, not read by table name.
+    it("ProjectorFunction: 15s/512MB, TABLE_PROJECTIONS + TABLE_CORE (no TOKEN_SECRET/WS_ENDPOINT it has no use for)", () => {
       const functions = template.findResources("AWS::Lambda::Function");
       const id = Object.keys(functions).find((key) => key.startsWith("ProjectorFunction"));
       expect(id).toBeDefined();
       const fn = functions[id!]!;
       expect(fn.Properties.Timeout).toBe(15);
       expect(fn.Properties.MemorySize).toBe(512);
-      expect(Object.keys(fn.Properties.Environment.Variables)).toEqual(["TABLE_PROJECTIONS"]);
+      expect(Object.keys(fn.Properties.Environment.Variables).sort()).toEqual(["TABLE_CORE", "TABLE_PROJECTIONS"]);
     });
 
-    // Snapshot realignment Task 1: TABLE_ROUNDS is GONE (the rebuild never touches the rounds
-    // table again — it backfills from the snapshots table's own page() instead, a later task);
-    // TABLE_SNAPSHOTS replaces it.
-    it("RebuildFunction: a longer timeout than the request-shaped functions (a full-table replay, not a single request), TABLE_PROJECTIONS + TABLE_SNAPSHOTS only", () => {
+    // Snapshot realignment Task 1: TABLE_ROUNDS is GONE (the rebuild backfills from the snapshots
+    // table's own page() instead). Accounts-only identity (spec §7): TABLE_CORE joins TABLE_SNAPSHOTS
+    // + TABLE_PROJECTIONS — the replay goes through the SAME projectArchive that reads golfer rows.
+    it("RebuildFunction: a longer timeout than the request-shaped functions (a full-table replay, not a single request), TABLE_PROJECTIONS + TABLE_SNAPSHOTS + TABLE_CORE", () => {
       const functions = template.findResources("AWS::Lambda::Function");
       const id = Object.keys(functions).find((key) => key.startsWith("RebuildFunction"));
       expect(id).toBeDefined();
       const fn = functions[id!]!;
       expect(fn.Properties.Timeout).toBe(300);
       expect(fn.Properties.MemorySize).toBe(512);
-      expect(Object.keys(fn.Properties.Environment.Variables).sort()).toEqual(["TABLE_PROJECTIONS", "TABLE_SNAPSHOTS"]);
+      expect(Object.keys(fn.Properties.Environment.Variables).sort()).toEqual(["TABLE_CORE", "TABLE_PROJECTIONS", "TABLE_SNAPSHOTS"]);
     });
   });
 
@@ -571,7 +571,7 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "$disconnect" });
     });
 
-    it("wires all thirty-six HTTP routes (35 + POST /rounds/{roundId}/leave, accounts-only identity spec §4)", () => {
+    it("wires all thirty-four HTTP routes (36 - POST /golfers/claim - POST /rounds/{roundId}/players, accounts-only identity spec §3)", () => {
       const expectedRouteKeys = [
         "POST /rounds",
         "POST /rounds/join",
@@ -599,15 +599,13 @@ describe("SwngStack", () => {
         "POST /rounds/{roundId}/games/{gameId}/terminate",
         "GET /me",
         "PUT /me",
-        "POST /golfers/claim",
         "GET /me/record",
         // Projection-realignment Task 6: "list my rounds".
         "GET /me/rounds",
         // Projection-realignment Task 13: "your rounds, right now" — presence.
         "GET /me/rounds/live",
-        // M8 Task 4: crews + rounds played as yourself (POST /rounds, POST /rounds/join above
-        // are unchanged route keys — only their auth tier moved).
-        "POST /rounds/{roundId}/players",
+        // M8 Task 4: crews (POST /rounds, POST /rounds/join above are unchanged route keys —
+        // accounts-only identity spec §3 only moved their auth tier).
         "POST /crews",
         "POST /crews/join",
         "GET /me/crews",
@@ -629,11 +627,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (36 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (34 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 38 routes total (36 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 38);
+    it("has exactly 36 routes total (34 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 36);
     });
 
     // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route
@@ -672,10 +670,10 @@ describe("SwngStack", () => {
       });
     });
 
-    // Named anon routes get the tighter rate 5 / burst 10 ceiling — POST /rounds (an
-    // "optional-golfer" route, anonymous-reachable) and GET /courses/{courseId} (a "none"-auth
-    // course route) each pinned individually, plus a full-membership check below that every one
-    // of the 8 keys is present with the same values (a single Match.objectLike per key would
+    // The tightened routes get the tighter rate 5 / burst 10 ceiling — POST /rounds (golfer-gated
+    // now but kept in the set as an abuse-sensitive round-entry route) and GET /courses/{courseId}
+    // (a "none"-auth course route) each pinned individually, plus a full-membership check below
+    // that every one of the 8 keys is present with the same values (a single Match.objectLike would
     // pass even if the OTHER 7 routes were silently dropped from the map).
     it("POST /rounds carries the tighter per-route throttle (rate 5 / burst 10)", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
@@ -689,7 +687,7 @@ describe("SwngStack", () => {
       });
     });
 
-    it("all 8 anonymous-reachable routes carry the tighter throttle, and no others are present in RouteSettings", () => {
+    it("all 8 tightened routes carry the tighter throttle, and no others are present in RouteSettings", () => {
       const stages = template.findResources("AWS::ApiGatewayV2::Stage");
       const defaultStage = Object.values(stages).find((stage) => stage.Properties.StageName === "$default");
       expect(defaultStage).toBeDefined();

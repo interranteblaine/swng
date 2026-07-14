@@ -18,10 +18,8 @@ import {
   abandonRound,
   addCrewMember,
   addGame,
-  addParticipant,
   addTeeSet,
   appendCountedRound,
-  claimGolfer,
   createCourse,
   createCrew,
   createSeason,
@@ -143,7 +141,7 @@ const unavailableGolferStore = (): GolferStore => {
   const unavailable = (): never => {
     throw new Error("buildApp: TABLE_CORE is not set for this entry — golfer routes are HTTP-only (see swngStack.ts)");
   };
-  return { put: unavailable, get: unavailable, getBySub: unavailable, bindSub: unavailable };
+  return { put: unavailable, get: unavailable, getMany: unavailable, getBySub: unavailable, bindSub: unavailable };
 };
 
 // Same shape again, for TABLE_CORE (unavailableCourseStore's own reason: wsConnect/
@@ -173,9 +171,9 @@ const unavailableCrewStore = (): CrewStore => {
 
 // Same shape again, for TABLE_PROJECTIONS (M7 Task 5: granted + env'd onto httpFn since Task
 // 4, but unread by buildApp until now — only getMyRecord needs it; wsConnect/wsDisconnect
-// never do). Realignment Task 13 widens the real set of callers (startRound/joinRound/
-// addParticipant's own presence writes, getMyLiveRounds' own read) but the story is
-// unchanged: every one of them is HTTP-only, so wsConnect/wsDisconnect still never reach this.
+// never do). Realignment Task 13 widens the real set of callers (startRound/joinRound's own
+// presence writes, getMyLiveRounds' own read) but the story is unchanged: every one of them is
+// HTTP-only, so wsConnect/wsDisconnect still never reach this.
 const unavailableProjectionStore = (): ProjectionStore => {
   const unavailable = (): never => {
     throw new Error("buildApp: TABLE_PROJECTIONS is not set for this entry — the record route is HTTP-only (see swngStack.ts)");
@@ -264,10 +262,9 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const tokens = createHmacTokenIssuer({ secret: tokenSecret, clock });
 
   const useCases: UseCases = {
-    // golferStore threaded through for the shared claimed-golferId resolver
-    // (rounds/golferIdentity.ts) — a crew is a grouping/competition ONLY (owner ruling, spec
-    // §11a): the resolver no longer takes a crewStore dependency (there is no crew-consent arm
-    // left to derive from it).
+    // golferStore threaded through for the as-self get-or-create (golfers/ensureGolfer.ts):
+    // accounts-only identity (spec §3) — the creator/joiner seat is always the caller's own
+    // account golfer, minted on first touch if none exists yet.
     // projectionStore/logger (projection-realignment Task 13): every seated participant gets a
     // best-effort presence write (rounds/presence.ts) — the SAME projectionStore instance
     // getMyRecord/getMyRounds/getMyLiveRounds already share, and the SAME logger every other
@@ -294,7 +291,6 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // instances startRound/joinRound above already share, plus the SAME golferStore
     // getRoundArchive above shares.
     mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
-    addParticipant: addParticipant({ journal, broadcast, clock, ids, golferStore, projectionStore, logger }),
     createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
     addTeeSet: addTeeSet({ courseStore, clock, logger }),
     verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
@@ -306,10 +302,6 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // case above shares.
     getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
-    // roundStore/journal/crewStore (M9 hardening): claim proof-of-context needs to resolve
-    // `code` as either a round join code (participants) or a crew join code (members) — the
-    // SAME journal/store/crewStore instances every round/crew use case above already shares.
-    claimGolfer: claimGolfer({ golferStore, roundStore: store, journal, crewStore }),
     getMyRecord: getMyRecord({ golferStore, projectionStore }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
     // journal (accounts-only identity spec §5): the live list derives each round's created-at from
@@ -376,16 +368,20 @@ export const createProjectorHandler =
     }
   };
 
-// TABLE_PROJECTIONS is the only env this entry needs (swngStack.ts) — unlike buildApp, nothing
-// here is shared with another entry, so there's no "optional var" story to mirror.
+// TABLE_PROJECTIONS + TABLE_CORE are the envs this entry needs (swngStack.ts) — TABLE_CORE
+// because accounts-only identity (spec §7) has the projector read each participant's golfer row
+// (the golfer store lives on the core table) to decide who is account-bound before projecting.
+// Unlike buildApp, nothing here is shared with another entry, so there's no "optional var" story.
 export const buildProjector = (env: NodeJS.ProcessEnv): ProjectorApp => {
   const tableProjections = requireEnv(env, "TABLE_PROJECTIONS");
+  const tableCore = requireEnv(env, "TABLE_CORE");
 
   const clock = createSystemClock();
   const logger = createConsoleLogger();
   const documentClient = createDocumentClient();
   const projectionStore = createDynamoProjectionStore({ client: documentClient, tableName: tableProjections });
-  const project = projectArchive({ projectionStore, clock, logger });
+  const golferStore = createDynamoGolferStore({ client: documentClient, tableName: tableCore });
+  const project = projectArchive({ projectionStore, golferStore, clock, logger });
 
   return { handler: createProjectorHandler({ parseArchive: parseSnapshotStreamImage, project, logger }) };
 };
@@ -402,18 +398,22 @@ export interface RebuildApp {
   readonly handler: (input?: { readonly cursor?: string; readonly maxSnapshots?: number }) => Promise<{ processed: number; cursor?: string }>;
 }
 
-// Only TABLE_SNAPSHOTS + TABLE_PROJECTIONS (swngStack.ts's RebuildFunction env) — the paged
-// backfill reads snapshots directly via SnapshotStore.page(), never the rounds table, so there
-// is no TABLE_ROUNDS here to mirror buildApp's.
+// TABLE_SNAPSHOTS + TABLE_PROJECTIONS + TABLE_CORE (swngStack.ts's RebuildFunction env) — the
+// paged backfill reads snapshots directly via SnapshotStore.page(), never the rounds table, and
+// TABLE_CORE because it replays through the SAME projectArchive the stream trigger uses, which
+// now reads each participant's golfer row (accounts-only identity spec §7) to skip non-account
+// golfers.
 export const buildRebuild = (env: NodeJS.ProcessEnv): RebuildApp => {
   const tableSnapshots = requireEnv(env, "TABLE_SNAPSHOTS");
   const tableProjections = requireEnv(env, "TABLE_PROJECTIONS");
+  const tableCore = requireEnv(env, "TABLE_CORE");
 
   const clock = createSystemClock();
   const logger = createConsoleLogger();
   const documentClient = createDocumentClient();
   const projectionStore = createDynamoProjectionStore({ client: documentClient, tableName: tableProjections });
   const snapshots = createDynamoSnapshotStore({ client: documentClient, tableName: tableSnapshots });
+  const golferStore = createDynamoGolferStore({ client: documentClient, tableName: tableCore });
 
-  return { handler: rebuildProjections({ snapshots, projectionStore, clock, logger }) };
+  return { handler: rebuildProjections({ snapshots, projectionStore, golferStore, clock, logger }) };
 };

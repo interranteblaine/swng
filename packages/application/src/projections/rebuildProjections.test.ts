@@ -1,12 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
 import type { GolferId, Participant, RoundArchive, RoundEvent } from "@swng/domain";
+import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
-import { createFrozenClock, createInMemoryProjectionStore, createInMemorySnapshotStore, createNullLogger } from "../testing/fakes.js";
+import { createFrozenClock, createInMemoryGolferStore, createInMemoryProjectionStore, createInMemorySnapshotStore, createNullLogger, putAndBindGolfer } from "../testing/fakes.js";
 import { rebuildProjections } from "./rebuildProjections.js";
 
 const ann = golferId("ann");
 const bo = golferId("bo");
+
+// Accounts-only identity (spec §7): the projector — and the rebuild that replays through it —
+// projects ONLY account-bound golfers (a golfer row carrying a sub). Every golfer these fixtures
+// project must therefore be a real account, so seed ann + bo as sub-bound rows before each rebuild.
+const seededGolferStore = async (): Promise<GolferStore> => {
+  const golferStore = createInMemoryGolferStore();
+  await putAndBindGolfer(golferStore, ann, "sub-ann", "Ann");
+  await putAndBindGolfer(golferStore, bo, "sub-bo", "Bo");
+  return golferStore;
+};
 
 const finalizedEvent = (wallMs: number): RoundEvent => ({
   kind: "round-finalized",
@@ -83,7 +94,8 @@ describe("rebuildProjections", () => {
     const snapshots = createInMemorySnapshotStore({ pageSize: 3 });
     for (const archive of archives) snapshots.record(archive);
     const projectionStore = createInMemoryProjectionStore();
-    const rebuild = rebuildProjections({ snapshots, projectionStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
+    const golferStore = await seededGolferStore();
+    const rebuild = rebuildProjections({ snapshots, projectionStore, golferStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
 
     const result = await rebuild();
 
@@ -100,7 +112,8 @@ describe("rebuildProjections", () => {
     const snapshots = createInMemorySnapshotStore({ pageSize: 2 });
     for (const archive of archives) snapshots.record(archive);
     const projectionStore = createInMemoryProjectionStore();
-    const rebuild = rebuildProjections({ snapshots, projectionStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
+    const golferStore = await seededGolferStore();
+    const rebuild = rebuildProjections({ snapshots, projectionStore, golferStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
 
     const first = await rebuild({ maxSnapshots: 4 });
     expect(first.processed).toBe(4);
@@ -138,7 +151,8 @@ describe("rebuildProjections", () => {
     const snapshots = createInMemorySnapshotStore();
     for (const archive of archives) snapshots.record(archive);
     const recording = createRecordingProjectionStore();
-    const rebuild = rebuildProjections({ snapshots, projectionStore: recording, clock: createFrozenClock(9_000), logger: createNullLogger() });
+    const golferStore = await seededGolferStore();
+    const rebuild = rebuildProjections({ snapshots, projectionStore: recording, golferStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
 
     await rebuild();
 
@@ -157,7 +171,8 @@ describe("rebuildProjections", () => {
     const snapshots = createInMemorySnapshotStore({ pageSize: 2 }); // ≥2 pages, so a replay re-walks a page boundary too
     for (const archive of archives) snapshots.record(archive);
     const projectionStore = createInMemoryProjectionStore();
-    const rebuild = rebuildProjections({ snapshots, projectionStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
+    const golferStore = await seededGolferStore();
+    const rebuild = rebuildProjections({ snapshots, projectionStore, golferStore, clock: createFrozenClock(9_000), logger: createNullLogger() });
 
     await rebuild();
     const afterFirst = {

@@ -23,19 +23,16 @@ export type ApplicationErrorCode =
   // GolferStore is a plain CRUD store too (see courses' "conflict" precedent above): a
   // failed expectedRevision condition on a golfer put.
   | "golfer-conflict"
-  // claimGolfer's one failure code for BOTH collision arms (golferStore.ts's port doc):
-  // the target golferId already has a sub bound, OR the calling sub is already bound to a
-  // DIFFERENT golferId (the "GolferMerged" case, explicitly out of v1 scope).
+  // GolferStore.bindSub's collision code (golferStore.ts's port doc): the target golferId
+  // already has a sub bound, OR the calling sub is already bound to a DIFFERENT golferId.
+  // ensureGolfer's concurrent-first-request race handling catches this (the loser re-reads the
+  // winner's golfer) — the code still surfaces to the client only for a genuine bind conflict.
   | "golfer-already-claimed"
-  // Task 5b (ghost continuity, .superpowers/sdd/task-5b-brief.md): joinRound's supplied-
-  // golferId reuse — the target golfer's row carries a sub (claimed). A claimed identity may
-  // not be joined-as by anyone in v1; join-as-self with a matching Bearer token is deferred
-  // to M8. Distinct from golfer-already-claimed above (that's claimGolfer's OWN collision).
-  | "golfer-claimed"
-  // Task 5b: the supplied golferId is already a participant in THIS round's fold — the check
-  // exists for a clean 409 (UX), not as a data-integrity backstop. The domain fold keys
-  // participants by golferId with last-write-wins, so a duplicate append collapses
-  // harmlessly. Enforced here to avoid surprising joiners with silent participation changes.
+  // accounts-only identity: JoinRound rejects a re-tap from a golfer who is ALREADY a
+  // currently-seated participant of THIS round — a clean 409 (UX), not a data-integrity
+  // backstop (the domain fold keys participants by golferId with last-write-wins, so a
+  // duplicate append collapses harmlessly). A departed golfer is exempt (rejoining is just
+  // joining again, spec §4).
   | "golfer-already-in-round"
   // M8: CrewStore is a plain CRUD store too (courses'/golfers' "conflict" precedent above) —
   // a failed expectedRevision condition on a crew put.
@@ -65,17 +62,9 @@ export type ApplicationErrorCode =
   // can retry their way out of — deliberately mapped to 500, same reasoning as
   // sub-drop-forbidden above.
   | "join-code-exhausted"
-  // M9 hardening (claim proof-of-context, task-2-brief.md): claimGolfer.ts's `code` failed to
-  // resolve to a round or crew that actually contains the target golferId — a forbidden actor
-  // (the caller hasn't proven they belong to this golfer's history), the same shape as
-  // golfer-claimed/not-a-member above, so 403. Checked BEFORE golfer-already-claimed/
-  // golfer-conflict below so a wrong code can never be used to probe whether a golferId is
-  // already claimed.
-  | "claim-proof-required"
   // M9 Task 3 (share): a spectator token presented to a WRITE route (dispatch.ts's own
-  // "participant" tier check) — a forbidden actor, same shape as claim-proof-required/
-  // not-a-participant above (403, not 401: the bearer verified fine, it just isn't allowed to
-  // do this).
+  // "participant" tier check) — a forbidden actor, same shape as not-a-participant above (403,
+  // not 401: the bearer verified fine, it just isn't allowed to do this).
   | "read-only-token"
   // Projection-realignment Task 6: getRoundArchive's authorization check — the caller's
   // account golfer (if any) isn't among archive.participants. A forbidden ACTOR, same shape as
@@ -109,9 +98,9 @@ export type ApplicationErrorCode =
   // 403 bucket as did-not-play/not-a-member above.
   | "not-the-appender"
   // Task 9 (de-ghost, spec §4 "membership: real accounts only"): addCrewMember now requires the
-  // target golfer to already carry a bound sub (a real account) — adding a fresh unclaimed ghost
-  // to a crew is gone. A failed precondition on the target, same 409 bucket as crew-conflict/
-  // round-already-counted above (client-correctable: claim the ghost first, then add).
+  // target golfer to already carry a bound sub (a real account) — adding a fresh account-less
+  // golfer to a crew is gone. A failed precondition on the target, same 409 bucket as
+  // crew-conflict/round-already-counted above.
   | "ghost-not-addable";
 
 export class ApplicationError extends Error {

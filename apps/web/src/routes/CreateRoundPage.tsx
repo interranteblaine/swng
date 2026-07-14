@@ -97,10 +97,11 @@ export function CreateRoundPage() {
     setError(undefined);
     try {
       // courseView.card VERBATIM — exactly the fetched CourseCard, not reconstructed — because a
-      // round freezes this whole snapshot. Playing as yourself: the golferId + Bearer ride along,
-      // and host.name is the account's own name (never a typed input — there isn't one).
+      // round freezes this whole snapshot. Accounts-only identity (spec §3): the creator seat is
+      // always yourself, resolved server-side from the Bearer — the request carries no name/golferId
+      // (the server freezes the account golfer's name into the join event).
       const response: StartRoundResponse = await auth.withAuth((token) =>
-        createRound({ card: courseView.card, host: { name: golfer.name, tee, courseHandicap: parsedHandicap }, golferId: golfer.golferId }, token),
+        createRound({ card: courseView.card, host: { tee, courseHandicap: parsedHandicap } }, token),
       );
       credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer.name, joinCode: response.joinCode });
       navigate(`/round/${response.roundId}`);

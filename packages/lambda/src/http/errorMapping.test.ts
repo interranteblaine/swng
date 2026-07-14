@@ -89,9 +89,10 @@ describe("toHttpError — M7 golfer/terminate ApplicationErrors", () => {
     expect(JSON.parse(result.body)).toEqual({ code: "unknown-game", message: "unknown-game" });
   });
 
-  // createDynamoGolferStore.ts's `claim`: a ConditionalCheckFailedException on
-  // attribute_not_exists(#sub) — the target golferId already has a bound sub. Also
-  // claimGolfer.ts's own precheck (the calling sub already bound to a DIFFERENT golferId).
+  // createDynamoGolferStore.ts's bindSub: a TransactionCanceledException on
+  // attribute_not_exists(sub) — the target golferId already has a bound sub, OR the calling sub
+  // is already bound to a DIFFERENT golferId (ensureGolfer's own concurrent-mint race then
+  // re-reads the winner rather than surfacing this).
   it("maps golfer-already-claimed to 409", () => {
     const result = toHttpError(new ApplicationError("golfer-already-claimed", "golfer g-1 already claimed"), logger);
     expect(result.statusCode).toBe(409);
@@ -108,20 +109,10 @@ describe("toHttpError — M7 golfer/terminate ApplicationErrors", () => {
   });
 });
 
-// Task 5b (.superpowers/sdd/task-5b-brief.md): joinRound.ts's two new codes for supplied-
-// golferId reuse — constructed exactly as its real throw sites do (joinRound.ts), not
-// invented strings (M6 lesson).
-describe("toHttpError — Task 5b joinRound ApplicationErrors", () => {
+// accounts-only identity: joinRound rejects a re-tap from a golfer already seated in THIS round —
+// constructed exactly as its real throw site does (joinRound.ts), not an invented string (M6 lesson).
+describe("toHttpError — joinRound golfer-already-in-round", () => {
   const logger = createNullLogger();
-
-  // A claimed identity may not be joined-as by anyone in v1 (join-as-self with Bearer is
-  // deferred to M8) — a 403, distinct from the 409s above (this isn't a conflicting write,
-  // it's a forbidden actor).
-  it("maps golfer-claimed to 403", () => {
-    const result = toHttpError(new ApplicationError("golfer-claimed", "golfer g-1 is claimed"), logger);
-    expect(result.statusCode).toBe(403);
-    expect(JSON.parse(result.body)).toEqual({ code: "golfer-claimed", message: "golfer g-1 is claimed" });
-  });
 
   // A duplicate participant-joined would corrupt the roster — same "failed precondition" 409
   // shape as golfer-conflict/course-conflict above.
@@ -174,18 +165,6 @@ describe("toHttpError — M9 hardening ApplicationErrors (deliberate 500s)", () 
     const result = toHttpError(new ApplicationError("join-code-exhausted", "no unique crew join code found after 5 attempts"), logger);
     expect(result.statusCode).toBe(500);
     expect(JSON.parse(result.body)).toEqual({ code: "join-code-exhausted", message: "no unique crew join code found after 5 attempts" });
-  });
-});
-
-// M9 Task 2 (claim proof-of-context, task-2-brief.md): claimGolfer.ts's own new precheck —
-// constructed exactly as its real throw site does, not an invented string (M6 lesson).
-describe("toHttpError — M9 Task 2 claim-proof-required", () => {
-  const logger = createNullLogger();
-
-  it("maps claim-proof-required to 403", () => {
-    const result = toHttpError(new ApplicationError("claim-proof-required", 'code "NOPE99" does not prove membership for golfer g-1'), logger);
-    expect(result.statusCode).toBe(403);
-    expect(JSON.parse(result.body)).toEqual({ code: "claim-proof-required", message: 'code "NOPE99" does not prove membership for golfer g-1' });
   });
 });
 

@@ -7,9 +7,9 @@ import type { IdGenerator } from "../ports/idGenerator.js";
 
 // Get-or-create on first touch (accounts-only identity spec §2): the first authenticated request
 // that needs the caller's golfer mints it. Returns the caller's Golfer, always — minting only when
-// none exists yet. This is the mechanism GET /me uses today (getMyGolfer.ts) and the one N-T6
-// rewires StartRound/JoinRound through, so "one account = one golfer, born together" lives in
-// exactly one place.
+// none exists yet. This is the ONE place "one account = one golfer, born together" lives:
+// GET /me (getMyGolfer.ts), PUT /me (updateMyGolfer.ts), and StartRound/JoinRound's own as-self
+// seat all route through here, so no surface has its own get-or-create logic.
 //
 // Cognito is a pure authenticator (spec §2, controller ruling): this reads ONLY `claims.sub`,
 // never the email or any name claim. The mint's display name is the deterministic backstop
@@ -17,11 +17,11 @@ import type { IdGenerator } from "../ports/idGenerator.js";
 // so the concurrent-first-request race below can't even generate two different names. The web's
 // funnel PUTs a real name at the highest-motivation moment (updateMyGolfer clears the flag then).
 //
-// The mint routes through the existing M9 SUB#<sub> attribute_not_exists transaction (put a fresh
-// unclaimed row, then bindSub): the concurrent-first-request race's LOSER's bindSub throws
+// The mint routes through the existing M9 SUB#<sub> attribute_not_exists transaction (put a fresh,
+// sub-less row, then bindSub): the concurrent-first-request race's LOSER's bindSub throws
 // golfer-already-claimed, caught here and turned into "re-read by sub, return the WINNER's golfer"
 // — both requests converge on the SAME identity. (The loser's freshly-put row is left orphaned and
-// unbound, unreachable by sub — the same accepted outcome getOrCreateGolfer's own dance produces.)
+// unbound, unreachable by sub — an accepted outcome: nothing keys on a row no sub points at.)
 export const ensureGolfer =
   (deps: { golferStore: GolferStore; idGenerator: IdGenerator }) =>
   async (claims: AccountClaims): Promise<Golfer> => {

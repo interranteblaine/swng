@@ -73,8 +73,8 @@ export const golferIdFromPk = (pk: string): GolferId => golferId(pk.slice(GOLFER
 
 // gsi2's key vocabulary (M7 Task 3; architecture.md §3's core-table GSI list: "join code,
 // cognito sub, golfer→crews") — the sub→golfer lookup getBySub queries. gsi2pk is set on a
-// golfer item ONLY once claimed (createDynamoGolferStore's put/claim) — an unclaimed ghost is
-// deliberately absent from gsi2, since no sub can look it up yet. gsi2sk is a fixed constant
+// golfer item ONLY once a sub is bound (createDynamoGolferStore's put/bindSub) — a sub-less row
+// is deliberately absent from gsi2, since no sub can look it up yet. gsi2sk is a fixed constant
 // (exactly one golfer item per sub) but still a real stored attribute, not folded into gsi2pk
 // alone: a GSI's sort key, like its partition key, must be present on an item for that item to
 // be projected into the index at all, so both are set (or omitted) together.

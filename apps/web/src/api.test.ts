@@ -78,7 +78,7 @@ afterEach(() => {
 });
 
 describe("createRound", () => {
-  const input: StartRoundRequest = { card: fixtureLinks, host: { name: "Ann", tee: "white", courseHandicap: 8 } };
+  const input: StartRoundRequest = { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } };
 
   it("POSTs the request body to /rounds and parses a matching response", async () => {
     let seenUrl: string | undefined;
@@ -106,27 +106,25 @@ describe("createRound", () => {
     expect(error as ApiError).toMatchObject({ code: "invalid-request", status: 400 });
   });
 
-  // M8 Task 5 (play as yourself): an optional Bearer token, attached only when the caller
-  // passes one — "optional-golfer" on the wire, same shape-preserving idiom as the token param
-  // already on addGame/finalizeRound, just optional here since an anonymous create must stay
-  // byte-identical to the call above (no `token` arg at all).
-  it("attaches a Bearer token when one is given, alongside a golferId in the body (as-self create)", async () => {
+  // Accounts-only identity (spec §3): "golfer"-gated on the wire — the caller always attaches
+  // their own Bearer, and the seat is resolved server-side (no name/golferId in the body). Same
+  // shape-preserving token-attach idiom as addGame/finalizeRound.
+  it("attaches a Bearer token to the request (as-self create)", async () => {
     let seenInit: RequestInit | undefined;
     stubFetch(async (_url, init) => {
       seenInit = init;
       return fakeResponse(201, { roundId: "round-self", joinCode: "SELF01", token: "tok-self", golferId: "ann-g" });
     });
 
-    const selfInput: StartRoundRequest = { ...input, golferId: golferId("ann-g") };
-    await createRound(selfInput, "tok-caller");
+    await createRound(input, "tok-caller");
 
-    expect(JSON.parse(String(seenInit?.body))).toEqual(selfInput);
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-caller");
   });
 });
 
 describe("joinRound", () => {
-  const input: JoinRoundRequest = { code: "ABC123", name: "Bo", tee: "white", courseHandicap: 2 };
+  const input: JoinRoundRequest = { code: "ABC123", tee: "white", courseHandicap: 2 };
 
   it("POSTs the request body to /rounds/join and parses a matching response", async () => {
     let seenUrl: string | undefined;
@@ -153,18 +151,17 @@ describe("joinRound", () => {
     expect((error as ApiError).code).toBe("bad-join-code");
   });
 
-  // Same optional-Bearer story as createRound above (M8 Task 5).
-  it("attaches a Bearer token when one is given, alongside a golferId in the body (as-self join)", async () => {
+  // Same "golfer"-gated as-self story as createRound above (accounts-only identity spec §3).
+  it("attaches a Bearer token to the request (as-self join)", async () => {
     let seenInit: RequestInit | undefined;
     stubFetch(async (_url, init) => {
       seenInit = init;
       return fakeResponse(201, { roundId: "round-1", token: "tok-2", golferId: "bo-g" });
     });
 
-    const selfInput: JoinRoundRequest = { ...input, golferId: golferId("bo-g") };
-    await joinRound(selfInput, "tok-caller");
+    await joinRound(input, "tok-caller");
 
-    expect(JSON.parse(String(seenInit?.body))).toEqual(selfInput);
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-caller");
   });
 });

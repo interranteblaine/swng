@@ -43,8 +43,8 @@ export const validateCrewName = (name: string): void => {
   }
 };
 
-// Membership is a roster, not a set of accounts — a golferId can be a claimed account or an
-// unclaimed ghost (product.md's "even the holdout"); addMember doesn't care which.
+// Membership is a roster of golferIds — addMember is a pure roster operation and doesn't care
+// whether a sub is bound to the id (the account-only rule is enforced in application, not here).
 export const addMember = (crew: Crew, member: CrewMember): Crew => {
   if (member.name.trim().length < MIN_MEMBER_NAME_LENGTH) {
     throw new DomainError("invalid-member-name", `member name must be at least ${MIN_MEMBER_NAME_LENGTH} character(s): "${member.name}"`);

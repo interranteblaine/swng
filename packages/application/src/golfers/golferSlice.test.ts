@@ -8,11 +8,9 @@ import { getMyRecord } from "./getMyRecord.js";
 import { getMyRounds } from "./getMyRounds.js";
 import { updateMyGolfer } from "./updateMyGolfer.js";
 
-// claimGolfer's own tests moved to claimGolfer.test.ts (M9 hardening): once claiming needed
-// proof of context (a round/crew join code naming the target golferId), every claim test
-// needed a journal/roundStore/crewStore-backed setup this file's simpler golferStore-only
-// setup doesn't have — a second, purpose-built setup() was cleaner than bolting round/crew
-// machinery onto every test in this file, most of which never touch claiming at all.
+// Accounts-only identity (spec §1): there are no ghosts and nothing to claim, so this file's
+// golfer surface is get-or-create (GET /me / PUT /me via ensureGolfer) plus the record/rounds
+// reads — no claim machinery at all. A simple golferStore-backed setup covers all of it.
 const setup = (golferStore: GolferStore = createInMemoryGolferStore()) => {
   const idGenerator = createSequentialIds("g");
   const projectionStore = createInMemoryProjectionStore();
@@ -88,10 +86,13 @@ describe("namePlaceholder lifecycle", () => {
 describe("updateMyGolfer", () => {
   it("patches only the provided fields, leaving the rest as-is", async () => {
     const ctx = setup();
+    // First PUT (empty patch) get-or-creates via ensureGolfer: the create name is the sub-derived
+    // placeholder (Cognito is a pure authenticator — never the email localpart), flag preserved by
+    // the declared-only patch.
     await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
 
     const updated = await ctx.updateMe({ sub: "sub-1" }, { declared: 14.2 });
-    expect(updated.golfer.name).toBe("ann"); // untouched
+    expect(updated.golfer.name).toBe(placeholderName("sub-1")); // untouched — still the placeholder, never "ann"
     expect(updated.golfer.declared).toBe(14.2);
 
     const renamed = await ctx.updateMe({ sub: "sub-1" }, { name: "Annika" });
@@ -99,16 +100,18 @@ describe("updateMyGolfer", () => {
     expect(renamed.golfer.declared).toBe(14.2); // untouched by the second patch
   });
 
-  it("get-or-creates on the first PUT /me — the only create path now GET /me never creates", async () => {
+  it("get-or-creates on the first PUT /me — one shared ensureGolfer path (GET /me get-or-creates too)", async () => {
     const ctx = setup();
     const updated = await ctx.updateMe({ sub: "sub-1", email: "bo@example.com" }, { declared: 9.1 });
     expect(updated.golfer.declared).toBe(9.1);
   });
 
-  it("falls back to a bare default name when the JWT carries no email", async () => {
+  it("creates with the sub-derived placeholder name, NEVER the email localpart (Cognito is a pure authenticator)", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
-    expect(golfer.name).toBe("Golfer");
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    expect(golfer.name).toBe(placeholderName("sub-1"));
+    expect(golfer.name).not.toBe("ann");
+    expect(golfer.namePlaceholder).toBe(true);
   });
 
   it("carries declared and official on the wire as independent fields — no derived effective/computed (the server has no persisted computed index to derive from; the web composes effectiveIndex itself from GET /me + GET /me/record)", async () => {

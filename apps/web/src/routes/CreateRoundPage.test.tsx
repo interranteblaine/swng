@@ -117,7 +117,7 @@ describe("CreateRoundPage — signed out", () => {
 // Signed in, a round is created AS the caller's own account golfer — host.name is the account's
 // name, never a typed input (the field is gone).
 describe("CreateRoundPage — create as yourself", () => {
-  it("a preselected courseId sends startRound the fetched card verbatim + the account's name/golferId/Bearer", async () => {
+  it("a preselected courseId sends startRound the fetched card verbatim + the tee/handicap + the account's Bearer (seat resolved server-side)", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
@@ -138,8 +138,9 @@ describe("CreateRoundPage — create as yourself", () => {
     await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
     const [body, token] = mockedCreateRound.mock.calls[0]!;
     // Deep-equal against the EXACT card getCourse returned — the freeze source, not a
-    // reconstruction — with the account's own name and golferId.
-    expect(body).toEqual({ card: fixtureLinks18, host: { name: "Ann G", tee: "white", courseHandicap: 8 }, golferId: golferId("ann-g") });
+    // reconstruction. Accounts-only identity (spec §3): the request carries only card + host
+    // tee/courseHandicap — the seat (name + golferId) is resolved server-side from the Bearer.
+    expect(body).toEqual({ card: fixtureLinks18, host: { tee: "white", courseHandicap: 8 } });
     expect(token).toBe(idToken);
     expect(() => startRoundRequestSchema.parse(body)).not.toThrow();
 

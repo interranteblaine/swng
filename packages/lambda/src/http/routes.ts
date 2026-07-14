@@ -8,13 +8,10 @@ import type {
   AddCrewMemberResponse,
   AddGameRequest,
   AddGameResponse,
-  AddParticipantRequest,
-  AddParticipantResponse,
   AddTeeSetRequest,
   AddTeeSetResponse,
   AppendCountedRoundRequest,
   AppendCountedRoundResponse,
-  ClaimGolferRequest,
   CreateCourseRequest,
   CreateCourseResponse,
   CreateCrewRequest,
@@ -57,10 +54,8 @@ import {
   ContractError,
   addCrewMemberRequestSchema,
   addGameRequestSchema,
-  addParticipantRequestSchema,
   addTeeSetRequestSchema,
   appendCountedRoundRequestSchema,
-  claimGolferRequestSchema,
   createCourseRequestSchema,
   createCrewRequestSchema,
   createSeasonRequestSchema,
@@ -77,13 +72,11 @@ import {
 // so it never imports application's use cases directly; compositionRoot.ts is the only place
 // that builds one.
 export interface UseCases {
-  // M8 Task 4: StartRound/JoinRound move to "optional-golfer" — claims is undefined for an
-  // anonymous caller (byte-identical to before this parameter existed) and set for a
-  // signed-in one, enabling the as-self/crew-consent arms (application/src/rounds/
-  // golferIdentity.ts). Both use cases already accepted this optional 2nd param since M8
-  // Tasks 1/2; only the wire tier — and this interface's own signature — changes here.
-  startRound: (command: StartRoundRequest, claims?: AccountClaims) => Promise<StartRoundResponse>;
-  joinRound: (command: JoinRoundRequest, claims?: AccountClaims) => Promise<JoinRoundResponse>;
+  // Accounts-only identity (spec §3): StartRound/JoinRound are the "golfer" auth tier now — every
+  // person on a card is a signed-in account, so claims is REQUIRED (there is no anonymous start or
+  // join). The seat is always the caller's own account golfer, resolved via ensureGolfer.
+  startRound: (command: StartRoundRequest, claims: AccountClaims) => Promise<StartRoundResponse>;
+  joinRound: (command: JoinRoundRequest, claims: AccountClaims) => Promise<JoinRoundResponse>;
   addGame: (claims: ParticipantClaims, command: AddGameRequest) => Promise<AddGameResponse>;
   recordScore: (claims: ParticipantClaims, command: RecordScoreRequest) => Promise<RecordScoreResponse>;
   finalizeRound: (claims: ParticipantClaims) => Promise<FinalizeRoundResponse>;
@@ -108,10 +101,6 @@ export interface UseCases {
   // JoinRoundResponse verbatim (mintParticipantToken.ts's own doc comment: the two shapes are
   // byte-identical, and the brief prefers reuse over a parallel type).
   mintParticipantToken: (claims: AccountClaims, id: RoundId) => Promise<JoinRoundResponse>;
-  // M8 Task 4: POST /rounds/{roundId}/players — an already-seated participant adds someone
-  // else to the roster, the crew one-tap flow's mid-round counterpart to StartRound's own
-  // `players` array. "participant"-gated, same tier as addGame/recordScore/finalizeRound.
-  addParticipant: (claims: ParticipantClaims, command: AddParticipantRequest) => Promise<AddParticipantResponse>;
   createCourse: (command: CreateCourseRequest) => Promise<CreateCourseResponse>;
   addTeeSet: (id: CourseId, command: AddTeeSetRequest) => Promise<AddTeeSetResponse>;
   verifyTeeSet: (id: CourseId, command: VerifyTeeSetRequest) => Promise<VerifyTeeSetResponse>;
@@ -119,12 +108,11 @@ export interface UseCases {
   searchCourses: (query: string, limit?: number) => Promise<SearchCoursesResponse>;
   // M7 Task 5: game/round termination + the golfer identity surface. terminateGame stays
   // "participant"-gated (matches finalize — game management is a connected, online round act,
-  // not identity-scoped); the four /me* + /golfers/claim routes are "golfer"-gated, taking
-  // AccountClaims the same way the participant routes above take ParticipantClaims.
+  // not identity-scoped); the /me* routes are "golfer"-gated, taking AccountClaims the same way
+  // the participant routes above take ParticipantClaims.
   terminateGame: (claims: ParticipantClaims, targetGameId: GameId) => Promise<TerminateGameResponse>;
   getMyGolfer: (claims: AccountClaims) => Promise<GetMeResponse>;
   updateMyGolfer: (claims: AccountClaims, command: UpdateMeRequest) => Promise<GolferResponse>;
-  claimGolfer: (claims: AccountClaims, command: ClaimGolferRequest) => Promise<GolferResponse>;
   getMyRecord: (claims: AccountClaims) => Promise<GetMyRecordResponse>;
   // Projection-realignment Task 6: "list my rounds" — same golfer-tier auth as getMyRecord.
   getMyRounds: (claims: AccountClaims) => Promise<GetMyRoundsResponse>;
@@ -157,9 +145,7 @@ export interface UseCases {
 // declaring `auth: "golfer"` gets a verified Cognito identity here instead of a
 // round-scoped participant token — the two tiers are mutually exclusive per route (routes.ts,
 // by construction: no route declares both), so a handler only ever reads the one its own
-// route's `auth` promises. "optional-golfer" (M8 Task 4) shares this same field: `account` is
-// set when the caller presented a valid Bearer token and left unset for a genuinely
-// anonymous request — never a third field.
+// route's `auth` promises.
 export interface RouteContext {
   readonly claims?: ParticipantClaims;
   readonly account?: AccountClaims;
@@ -174,17 +160,15 @@ export interface Route {
   readonly method: "GET" | "POST" | "PUT" | "DELETE";
   readonly path: string; // template with `{name}` segments, e.g. "/rounds/{roundId}/games"
   readonly schema?: z.ZodType;
-  // "participant" = a round-scoped token minted off a join code (no account required);
-  // "golfer" = a signed-in Cognito identity (M7 Task 4), REQUIRED — no Bearer token 401s.
-  // "optional-golfer" (M8 Task 4: StartRound/JoinRound) = the same verified identity when a
-  // Bearer token IS presented, but a request with none proceeds anonymously (`ctx.account`
-  // simply unset) — a token that IS presented but fails verification still 401s (fail loud:
-  // a client that sent a token meant it, dispatch.ts's own comment). Every one of these is
-  // verified by the dispatcher's injected AccountVerifier, never by a route handler itself.
-  // "round-read" (M9 Task 3, share): a read-only route that accepts EITHER a participant OR a
-  // spectator token, both still round-scoped (dispatch.ts's own token-round-mismatch check
-  // applies to both) — the tier a share link's GET requests use.
-  readonly auth: "none" | "participant" | "golfer" | "optional-golfer" | "round-read";
+  // "participant" = a round-scoped token minted off a join code; "golfer" = a signed-in Cognito
+  // identity (M7 Task 4), REQUIRED — no Bearer token 401s. Accounts-only identity (spec §3):
+  // StartRound/JoinRound are "golfer" too now (there is no anonymous start or join — the third,
+  // anonymous-tolerant tier that used to back them is gone). "golfer" is verified by the
+  // dispatcher's injected AccountVerifier, never by a route handler itself. "round-read" (M9 Task 3, share): a
+  // read-only route that accepts EITHER a participant OR a spectator token, both still
+  // round-scoped (dispatch.ts's own token-round-mismatch check applies to both) — the tier a
+  // share link's GET requests use.
+  readonly auth: "none" | "participant" | "golfer" | "round-read";
   // 201 for routes that mint a new resource (round/participant/game); 200 for actions
   // that read or that may be an idempotent no-op (score, finalize, events).
   readonly successStatus: 200 | 201;
@@ -248,28 +232,19 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     method: "POST",
     path: "/rounds",
     schema: startRoundRequestSchema,
-    // M8 Task 4: "optional-golfer" — an anonymous start behaves exactly as before (ctx.account
-    // unset); a signed-in caller's verified claims thread through to startRound's own optional
-    // 2nd param, enabling the as-self/crew-consent arms.
-    auth: "optional-golfer",
+    // Accounts-only identity (spec §3): "golfer"-gated — the creator seat is always the caller's
+    // own account golfer (no anonymous start). The dispatcher guarantees ctx.account here.
+    auth: "golfer",
     successStatus: 201,
-    handler: async (ctx, body) => useCases.startRound(body as StartRoundRequest, ctx.account),
+    handler: async (ctx, body) => useCases.startRound(body as StartRoundRequest, ctx.account!),
   },
   {
     method: "POST",
     path: "/rounds/join",
     schema: joinRoundRequestSchema,
-    auth: "optional-golfer", // M8 Task 4: same optional-golfer story as POST /rounds above.
+    auth: "golfer", // accounts-only identity spec §3: as-self only, same "golfer"-gated story as POST /rounds above.
     successStatus: 201,
-    handler: async (ctx, body) => useCases.joinRound(body as JoinRoundRequest, ctx.account),
-  },
-  {
-    method: "POST",
-    path: "/rounds/{roundId}/players",
-    schema: addParticipantRequestSchema,
-    auth: "participant", // M8 Task 4: any already-seated participant may add another (matches addGame/terminateGame's own "any participant may X").
-    successStatus: 201, // mints a new participant, same status-code spirit as JoinRound/addGame.
-    handler: async (ctx, body) => useCases.addParticipant(ctx.claims!, body as AddParticipantRequest),
+    handler: async (ctx, body) => useCases.joinRound(body as JoinRoundRequest, ctx.account!),
   },
   {
     method: "POST",
@@ -416,9 +391,8 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     handler: async (ctx) => useCases.searchCourses(parseSearchQuery(ctx.query.query), parseLimit(ctx.query.limit)),
   },
   // M7 Task 5: the golfer identity surface — every route below is "golfer"-gated (a signed-in
-  // Cognito identity, never a round-scoped participant token). GET /me NEVER creates (the
-  // plan's amendment, see getMyGolfer.ts's own doc comment); PUT /me is the one get-or-create
-  // path.
+  // Cognito identity, never a round-scoped participant token). Accounts-only identity (spec §2):
+  // GET /me ENSURES (get-or-create on first touch); PUT /me updates.
   {
     method: "GET",
     path: "/me",
@@ -433,14 +407,6 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 200,
     handler: async (ctx, body) => useCases.updateMyGolfer(ctx.account!, body as UpdateMeRequest),
-  },
-  {
-    method: "POST",
-    path: "/golfers/claim",
-    schema: claimGolferRequestSchema,
-    auth: "golfer",
-    successStatus: 200, // an act on an existing (ghost) resource, not minting a new one — matches finalize/terminate's 200, not a 201.
-    handler: async (ctx, body) => useCases.claimGolfer(ctx.account!, body as ClaimGolferRequest),
   },
   {
     method: "GET",

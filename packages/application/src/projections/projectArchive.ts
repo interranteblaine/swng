@@ -1,6 +1,7 @@
 import type { RoundArchive } from "@swng/domain";
 import { archiveGolferLine, combineNineHoleDifferentials, computeIndexDetail } from "@swng/domain";
 import type { Clock } from "../ports/clock.js";
+import type { GolferStore } from "../ports/golferStore.js";
 import type { Logger } from "../ports/logger.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 
@@ -59,19 +60,34 @@ export const createdAtMsOf = (archive: RoundArchive): number => {
 // next finalize (a fresh listLines sees everything written so far) or a rebuild pass over the
 // snapshots table.
 export const projectArchive =
-  (deps: { projectionStore: ProjectionStore; clock: Clock; logger: Logger }) =>
+  (deps: { projectionStore: ProjectionStore; golferStore: GolferStore; clock: Clock; logger: Logger }) =>
   async (archive: RoundArchive): Promise<void> => {
     const finalizedAtMs = finalizedAtMsOf(archive);
     const createdAtMs = createdAtMsOf(archive);
 
+    // Accounts-only identity (spec §7): only ACCOUNT golfers are projected. One batch read of the
+    // finalized roster's golfer records decides which participants are account-bound (carry a
+    // sub) — a ghost id from old data, or any participant with no golfer row at all, is skipped
+    // entirely below (never projected, never throwing). getMany omits absent ids and promises no
+    // order (its own port doc), so this builds a Set of the account-bound golferIds to test
+    // membership against per participant, rather than relying on the returned order.
+    const golferRecords = await deps.golferStore.getMany(archive.participants.map((participant) => participant.golferId));
+    const accountBound = new Set(golferRecords.filter((record) => record.sub !== undefined).map((record) => record.golfer.id));
+
     for (const participant of archive.participants) {
+      // Sub-less (a ghost) or no golfer row at all: not an account, so nothing about this round
+      // enters their record — no history line, no index recompute, and no presence clear (the
+      // presence they may carry from an old pre-accounts join self-expires on its 36h TTL).
+      if (!accountBound.has(participant.golferId)) continue;
+
       const line = archiveGolferLine(archive, participant.golferId);
       await deps.projectionStore.putLine(participant.golferId, { ...line, finalizedAtMs, createdAtMs });
 
-      // Presence cleanup (spec §5, Task 13): the finalized archive's own participant list IS
-      // the seated roster — the same one startRound/joinRound/addParticipant wrote a LIVE
-      // pointer for at seat-time (rounds/presence.ts) — so this is the primary removal path,
-      // TTL being only a backstop for a round that never finalizes. Same at-least-once
+      // Presence cleanup (spec §5, Task 13): an account participant's LIVE pointer, written at
+      // seat-time by startRound/joinRound (rounds/presence.ts) — cleared here, the primary removal
+      // path, TTL being only a backstop for a round that never finalizes. Only account golfers
+      // reach this loop (the sub-less skip above), which is exactly who a pointer was written for
+      // now that only account golfers are ever seated. Same at-least-once
       // idempotence reasoning as putLine just above: a re-projection of an already-projected
       // archive (rebuildProjections' own replay, or the stream trigger's own at-least-once
       // delivery) calls deleteLive on a pointer that's already gone — a no-op, never an error.

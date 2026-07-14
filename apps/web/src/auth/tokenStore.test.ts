@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
-import { pkceVerifierStore, tokenStore } from "./tokenStore";
+import { pkceVerifierStore, returnToStore, tokenStore } from "./tokenStore";
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
@@ -43,5 +43,18 @@ describe("pkceVerifierStore", () => {
 
   it("returns undefined when nothing was ever stored", () => {
     expect(pkceVerifierStore.take()).toBeUndefined();
+  });
+});
+
+describe("returnToStore", () => {
+  it("take() reads and removes the stashed path in one step (single-use)", () => {
+    returnToStore.save("/join?code=ABC123");
+
+    expect(returnToStore.take()).toBe("/join?code=ABC123");
+    expect(returnToStore.take()).toBeUndefined(); // gone after the first take — a stale return can't redirect a later sign-in
+  });
+
+  it("returns undefined when nothing was ever stashed", () => {
+    expect(returnToStore.take()).toBeUndefined();
   });
 });

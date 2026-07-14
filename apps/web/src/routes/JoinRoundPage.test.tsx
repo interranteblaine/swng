@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { golferId, roundId } from "@swng/domain";
@@ -9,11 +9,9 @@ import { credentialStore } from "../identity";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
 // Faking the api.ts module boundary, same idiom as CreateRoundPage.test.tsx — JoinRoundPage
-// calls joinRound and (M6 Task 5) peekRound. peekRound defaults to a rejection so a test that
-// never explicitly stubs it exercises the same free-text fallback the page always had. getMe/
-// updateMe are M8 Task 5's own additions: getMe backs the AuthProvider wrapper below (every
-// existing, signed-out test never triggers it — no tokens are ever saved outside the new
-// "play as yourself" describe block); updateMe is the "signed-in-with-no-golfer" as-self path.
+// calls joinRound, peekRound, updateMe (the funnel's name prompt) and getMe (via the
+// AuthProvider). peekRound defaults to a rejection so a test that never explicitly stubs it
+// exercises the free-text tee fallback.
 vi.mock("../api", () => ({
   joinRound: vi.fn(),
   peekRound: vi.fn().mockRejectedValue(new Error("not stubbed")),
@@ -55,14 +53,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// Every render now needs an AuthProvider ancestor (JoinRoundPage calls useAuth(), M8 Task 5) —
-// the one place this wrapping lives, so every existing (signed-out) test below keeps its exact
-// shape: no tokens are ever saved outside the new "play as yourself" describe block, so
-// auth.signedIn stays false and asSelf stays false throughout.
-const renderJoin = () =>
+const renderJoin = (initialEntry = "/join") =>
   render(
     <AuthProvider>
-      <MemoryRouter initialEntries={["/join"]}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route path="/join" element={<JoinRoundPage />} />
           <Route path="/round/:roundId" element={<div>round view</div>} />
@@ -71,8 +65,6 @@ const renderJoin = () =>
     </AuthProvider>,
   );
 
-// M8 Task 5 (play as yourself), same base64url-JWT-shaped idiom as SetupPanel.test.tsx's own
-// local signIn().
 const base64url = (obj: unknown): string =>
   btoa(JSON.stringify(obj))
     .replace(/\+/g, "-")
@@ -85,100 +77,104 @@ const signIn = (): string => {
   return idToken;
 };
 
-describe("JoinRoundPage", () => {
-  it("uppercases a lowercase-typed code before sending it", async () => {
-    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-1"), token: "tok-1", golferId: golferId("bo") });
+// The wall (accounts-only identity spec §3): joining is self-join only. Signed out, the page is
+// a sign-in funnel, not a form — and it preserves the join code across the Hosted-UI round trip
+// so a tap on a share link lands the new account back on the round it was invited to.
+describe("JoinRoundPage — the funnel (signed out)", () => {
+  it("shows a sign-in CTA and NO join form — no name/tee/handicap fields, no anonymous join", () => {
+    renderJoin();
 
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+    expect(screen.queryByLabelText(/your name/i)).toBeNull();
+    expect(screen.queryByLabelText(/^tee$/i)).toBeNull();
+    expect(screen.queryByLabelText(/course handicap/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /join round/i })).toBeNull();
+  });
+
+  it("preserves the typed join code across the round trip: clicking Sign in stashes returnTo with the code", () => {
     renderJoin();
 
     fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });
-    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: "Bo" } });
-    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
-    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: /join round/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
-    await waitFor(() => expect(mockedJoinRound).toHaveBeenCalledTimes(1));
-    expect(mockedJoinRound).toHaveBeenCalledWith({ code: "ABC123", name: "Bo", tee: "white", courseHandicap: 2 });
+    // AuthCallbackPage consumes this on return, landing the freshly-signed-in golfer back on the
+    // join page with the code intact.
+    expect(sessionStorage.getItem("swng:returnTo")).toBe("/join?code=ABC123");
   });
 
-  it("saves the credential (with the code the golfer typed — joinRound's response carries none) and navigates to the round", async () => {
-    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-2"), token: "tok-2", golferId: golferId("cal") });
+  it("seeds the code from the URL (a join link) so the round trip's return lands ready to join", () => {
+    renderJoin("/join?code=xyz789");
 
-    renderJoin();
-
-    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "def456" } });
-    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: "Cal" } });
-    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "blue" } });
-    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "14" } });
-    fireEvent.click(screen.getByRole("button", { name: /join round/i }));
-
-    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
-    expect(credentialStore.load(roundId("round-2"))).toEqual({ token: "tok-2", golferId: golferId("cal"), name: "Cal", joinCode: "DEF456" });
-  });
-
-  it("once the code is 6 chars, debounces a peek that swaps the free-text tee for a picker of the round's tee names", async () => {
-    vi.useFakeTimers();
-    mockedPeekRound.mockResolvedValue({ courseName: "Fixture Links 18", teeSets: [{ name: "white", rating: 71.6, slope: 128 }, { name: "blue", rating: 74.0, slope: 140 }], createdAt: 1_700_000_000_000 });
-
-    renderJoin();
-    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(249);
-    });
-    expect(mockedPeekRound).not.toHaveBeenCalled();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-    expect(mockedPeekRound).toHaveBeenCalledWith("ABC123");
-    expect(screen.getByText(/joining fixture links 18/i)).toBeTruthy();
-
-    const select = screen.getByLabelText(/^tee$/i) as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(["white", "blue"]);
-  });
-
-  it("a failed peek falls back to free text with a note — joining is never blocked by it", async () => {
-    vi.useFakeTimers();
-    mockedPeekRound.mockRejectedValue(new Error("no round with that code"));
-    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-3"), token: "tok-3", golferId: golferId("dee") });
-
-    renderJoin();
-    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "zzz999" } });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(250);
-    });
-
-    // Still a free-text input, not a picker — and a note explains why.
-    const teeField = screen.getByLabelText(/^tee$/i);
-    expect(teeField.tagName).toBe("INPUT");
-    expect(screen.getByText(/could not look up/i)).toBeTruthy();
-    vi.useRealTimers(); // nothing past this point depends on the debounce — waitFor below needs real timers to poll
-
-    // And joining still works from that free-text field.
-    fireEvent.change(teeField, { target: { value: "white" } });
-    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: "Dee" } });
-    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "5" } });
-    fireEvent.click(screen.getByRole("button", { name: /join round/i }));
-
-    await waitFor(() => expect(mockedJoinRound).toHaveBeenCalledWith({ code: "ZZZ999", name: "Dee", tee: "white", courseHandicap: 5 }));
+    expect((screen.getByLabelText(/code/i) as HTMLInputElement).value).toBe("XYZ789");
+    // And the CTA preserves that same code without the golfer retyping it.
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(sessionStorage.getItem("swng:returnTo")).toBe("/join?code=XYZ789");
   });
 });
 
-// M8 Task 5, the milestone's headline behavior: a signed-in golfer joins a round AS their
-// account golfer — no ghost, no later claim step needed. Mirrors CreateRoundPage's own
-// "play as yourself" tests.
-describe("JoinRoundPage — play as yourself", () => {
-  it("signed in WITH a golfer: the name field becomes 'Playing as <name>', and the request carries golferId + Bearer", async () => {
+// Signed in, the funnel resolves identity then either prompts for a name (a placeholder golfer,
+// spec §2 — the highest-motivation moment) or drops straight into the join form.
+describe("JoinRoundPage — the name prompt (signed in, placeholder golfer)", () => {
+  it("a placeholder golfer sees 'What should the card call you?' — not the join form yet", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } });
+
+    renderJoin();
+
+    await screen.findByLabelText(/what should the card call you/i);
+    // The join form is gated behind the name prompt — no tee/handicap/Join button until named.
+    expect(screen.queryByLabelText(/^tee$/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /join round/i })).toBeNull();
+    expect(screen.queryByText(/playing as/i)).toBeNull();
+  });
+
+  it("saving the name PUTs /me and proceeds straight into the join form in the same visit (no extra hop)", async () => {
+    signIn();
+    // First GET /me finds the placeholder; the refetch after PUT /me returns the real name.
+    mockedGetMe
+      .mockResolvedValueOnce({ golfer: { golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } })
+      .mockResolvedValueOnce({ golfer: { golferId: golferId("g1"), name: "Bo Real" } });
+    mockedUpdateMe.mockResolvedValue({ golfer: { golferId: golferId("g1"), name: "Bo Real" } });
+
+    renderJoin();
+
+    const nameField = await screen.findByLabelText(/what should the card call you/i);
+    fireEvent.change(nameField, { target: { value: "Bo Real" } });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => expect(mockedUpdateMe).toHaveBeenCalledWith(expect.any(String), { name: "Bo Real" }));
+    // Same visit: the join form now renders — no navigation happened.
+    await screen.findByText(/playing as/i);
+    expect(screen.getByText("Bo Real")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /join round/i })).toBeTruthy();
+  });
+});
+
+// A real-named golfer never sees the prompt (spec §2, controller resolution 3) and joins as
+// themselves — the request carries the account's own name + golferId, never a typed input.
+describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
+  it("goes straight to the join form as 'Playing as <name>' — the name INPUT is gone (structural pin)", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
+
+    renderJoin();
+
+    await screen.findByText(/playing as/i);
+    expect(screen.getByText("Bo G")).toBeTruthy();
+    expect(screen.queryByText(/what should the card call you/i)).toBeNull();
+    // The proof-of-negative the milestone turns on: no free-text name field anywhere in the join
+    // form — the name is the account's, sourced from GET /me, never from an input.
+    expect(screen.queryByLabelText(/your name/i)).toBeNull();
+    expect(screen.getByRole("link", { name: /change/i }).getAttribute("href")).toBe("/profile");
+  });
+
+  it("uppercases the code and joins as-self: golferId + Bearer + the account's name, never a typed one", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedJoinRound.mockResolvedValue({ roundId: roundId("round-self"), token: "tok-self", golferId: golferId("bo-g") });
 
     renderJoin();
     await screen.findByText(/playing as/i);
-    expect(screen.getByText("Bo G")).toBeTruthy();
-    expect(screen.queryByLabelText(/your name/i)).toBeNull(); // the free-text field is gone
-    expect(screen.getByRole("link", { name: /change/i }).getAttribute("href")).toBe("/profile");
 
     fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "self01" } });
     fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
@@ -194,113 +190,69 @@ describe("JoinRoundPage — play as yourself", () => {
     expect(credentialStore.load(roundId("round-self"))).toEqual({ token: "tok-self", golferId: golferId("bo-g"), name: "Bo G", joinCode: "SELF01" });
   });
 
-  it("signed in with NO golfer: the typed name creates the profile (PUT /me) BEFORE joining the round — call order asserted", async () => {
-    const idToken = signIn();
-    // First GET /me (the provider's own mount-time fetch) finds no golfer; the SECOND (this
-    // fix's own auth.refetch() after PUT /me) returns the freshly-minted one — see the W1 test
-    // below, which asserts on this same sequencing.
-    mockedGetMe.mockResolvedValueOnce({ golfer: null }).mockResolvedValueOnce({ golfer: { golferId: golferId("fresh-g"), name: "Fresh" } });
-    mockedUpdateMe.mockResolvedValue({ golfer: { golferId: golferId("fresh-g"), name: "Fresh" } });
-    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-fresh"), token: "tok-fresh", golferId: golferId("fresh-g") });
+  // Real timers here (not fake): the join form only renders once the AuthProvider's async GET
+  // /me resolves, and waitFor polls comfortably past the 250ms debounce — interleaving fake
+  // timers with that async identity settle is the fiddle this avoids.
+  it("once the code is 6 chars, a peek swaps the free-text tee for a picker of the round's tee names", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
+    mockedPeekRound.mockResolvedValue({
+      courseName: "Fixture Links 18",
+      teeSets: [
+        { name: "white", rating: 71.6, slope: 128 },
+        { name: "blue", rating: 74.0, slope: 140 },
+      ],
+      createdAt: 1_700_000_000_000,
+    });
 
     renderJoin();
-    // Still the free-text field — nothing to display until PUT /me mints a golfer.
-    await waitFor(() => expect(mockedGetMe).toHaveBeenCalled());
-    expect(screen.getByLabelText(/your name/i)).toBeTruthy();
+    await screen.findByText(/playing as/i); // GET /me settled, join form rendered
 
-    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "fresh1" } });
-    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: "Fresh" } });
-    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "blue" } });
-    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "9" } });
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });
+
+    await waitFor(() => expect(mockedPeekRound).toHaveBeenCalledWith("ABC123"));
+    const select = (await screen.findByLabelText(/^tee$/i)) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(["white", "blue"]);
+  });
+
+  it("a failed peek falls back to free text with a note — joining is never blocked by it", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("dee-g"), name: "Dee" } });
+    mockedPeekRound.mockRejectedValue(new Error("no round with that code"));
+    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-3"), token: "tok-3", golferId: golferId("dee-g") });
+
+    renderJoin();
+    await screen.findByText(/playing as/i);
+
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "zzz999" } });
+    await screen.findByText(/could not look up/i); // the peek rejected; free-text fallback + note
+
+    const teeField = screen.getByLabelText(/^tee$/i);
+    expect(teeField.tagName).toBe("INPUT");
+
+    fireEvent.change(teeField, { target: { value: "white" } });
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: /join round/i }));
 
     await waitFor(() => expect(mockedJoinRound).toHaveBeenCalledTimes(1));
-    expect(mockedUpdateMe).toHaveBeenCalledWith(idToken, { name: "Fresh" });
-    const [body, token] = mockedJoinRound.mock.calls[0]!;
-    expect(body).toEqual({ code: "FRESH1", name: "Fresh", tee: "blue", courseHandicap: 9, golferId: golferId("fresh-g") });
-    expect(token).toBe(idToken);
-
-    // The headline call-order contract: PUT /me strictly before POST /rounds/join.
-    expect(mockedUpdateMe.mock.invocationCallOrder[0]!).toBeLessThan(mockedJoinRound.mock.invocationCallOrder[0]!);
-
-    expect(credentialStore.load(roundId("round-fresh"))).toEqual({ token: "tok-fresh", golferId: golferId("fresh-g"), name: "Fresh", joinCode: "FRESH1" });
+    expect(mockedJoinRound.mock.calls[0]![0]).toEqual({ code: "ZZZ999", name: "Dee", tee: "white", courseHandicap: 5, golferId: golferId("dee-g") });
   });
+});
 
-  // W1 (controller flow-walk finding, post-gate): before this fix, auth.golfer stayed null in
-  // the context after PUT /me minted a real golfer — until a full reload, the round page's own
-  // roster row for this golfer rendered "This is me" instead of "You" (ClaimAffordance's
-  // own-row check reads auth.golfer straight from context). Proven via the same seam
-  // ClaimAffordance's own claim success uses (auth.refetch -> a second GET /me): it must fire
-  // AFTER PUT /me and its result must reach the context before this page navigates away.
-  it("W1: after PUT /me mints the profile, the auth context is refetched so auth.golfer reflects it before navigating", async () => {
+// The M8 defect class the milestone must not reintroduce: a submit during the GET /me loading
+// window once silently renamed a profile with stale free text. Neither the join form nor the
+// name prompt may render until identity resolves.
+describe("JoinRoundPage — identity still loading", () => {
+  it("no join form, no name prompt, a quiet placeholder instead", async () => {
     signIn();
-    mockedGetMe.mockResolvedValueOnce({ golfer: null }).mockResolvedValueOnce({ golfer: { golferId: golferId("fresh-g"), name: "Fresh" } });
-    mockedUpdateMe.mockResolvedValue({ golfer: { golferId: golferId("fresh-g"), name: "Fresh" } });
-    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-fresh-w1"), token: "tok-fresh-w1", golferId: golferId("fresh-g") });
+    mockedGetMe.mockReturnValue(new Promise<GetMeResponse>(() => {})); // never resolves
 
     renderJoin();
     await waitFor(() => expect(mockedGetMe).toHaveBeenCalled());
 
-    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "fresh2" } });
-    fireEvent.change(screen.getByLabelText(/your name/i), { target: { value: "Fresh" } });
-    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "blue" } });
-    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "9" } });
-    fireEvent.click(screen.getByRole("button", { name: /join round/i }));
-
-    // The refetch's own GET /me — a SECOND call, after the provider's mount-time one.
-    await waitFor(() => expect(mockedGetMe).toHaveBeenCalledTimes(2));
-    expect(mockedUpdateMe.mock.invocationCallOrder[0]!).toBeLessThan(mockedGetMe.mock.invocationCallOrder[1]!);
-
-    await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
-  });
-
-  // The finding this fix closes: GET /me's own in-flight window (auth.golfer === undefined
-  // while signed in) was previously collapsed into the "signed in, no golfer yet" branch, so a
-  // submit during that window fired PUT /me with whatever the (nonexistent) free-text field
-  // held — a silent rename of a real profile that just hadn't loaded yet. Neither the free-text
-  // field nor "Playing as" may render during this window, and submit must be inert.
-  it("signed in, GET /me still in flight: no free-text field is offered, submit is disabled, and no write fires on interaction", async () => {
-    signIn();
-    mockedGetMe.mockReturnValue(new Promise<GetMeResponse>(() => {})); // the loading window itself — never resolves
-
-    renderJoin();
-    await waitFor(() => expect(mockedGetMe).toHaveBeenCalled());
-
-    // Neither today's free-text field nor "Playing as" — a quiet loading placeholder instead.
     expect(screen.queryByLabelText(/your name/i)).toBeNull();
-    expect(screen.queryByText(/playing as/i)).toBeNull();
+    expect(screen.queryByLabelText(/what should the card call you/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /join round/i })).toBeNull();
     expect(screen.getByRole("status", { name: /loading your profile/i })).toBeTruthy();
-
-    const submitButton = screen.getByRole("button", { name: /join round/i });
-    expect(submitButton.hasAttribute("disabled")).toBe(true);
-
-    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "self01" } });
-    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
-    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "6" } });
-    fireEvent.click(submitButton);
-
-    expect(mockedUpdateMe).not.toHaveBeenCalled();
-    expect(mockedJoinRound).not.toHaveBeenCalled();
-  });
-
-  it("once the deferred GET /me resolves to a golfer, the loading placeholder gives way to 'Playing as'", async () => {
-    signIn();
-    let resolveGetMe: (value: GetMeResponse) => void = () => {};
-    mockedGetMe.mockReturnValue(
-      new Promise<GetMeResponse>((resolve) => {
-        resolveGetMe = resolve;
-      }),
-    );
-
-    renderJoin();
-    await waitFor(() => expect(mockedGetMe).toHaveBeenCalled());
-    expect(screen.queryByText(/playing as/i)).toBeNull();
-    expect(screen.getByRole("button", { name: /join round/i }).hasAttribute("disabled")).toBe(true);
-
-    resolveGetMe({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
-
-    await screen.findByText(/playing as/i);
-    expect(screen.getByText("Bo G")).toBeTruthy();
-    expect(screen.queryByRole("status", { name: /loading your profile/i })).toBeNull();
   });
 });

@@ -2,9 +2,8 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { defaultAllowance, golferId } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
-import type { AddParticipantRequest, GameConfigInput } from "@swng/contracts";
+import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";
-import { ClaimAffordance } from "./ClaimAffordance";
 import { gameDots, gamePlayers, totalDots } from "./dots";
 
 export interface SetupPanelProps {
@@ -16,10 +15,6 @@ export interface SetupPanelProps {
   readonly games: readonly GameState[];
   readonly joinCode: string;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
-  // M8 Task 5: "Add player" — POST /rounds/{roundId}/players. No optimistic insert (same
-  // precedent as onAddGame): the new row appears once participant-joined round-trips through
-  // the session's own fold, never synthesized locally.
-  readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
 }
 
 const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
@@ -33,7 +28,7 @@ const GAME_KIND_LABEL: Record<GameConfig["kind"], string> = {
 // `games` (live GameState, the Task 5/6 standings seam) isn't read here — this task's dots
 // derive from state.games (the frozen GameConfig) only — but it stays in SetupPanelProps so
 // RoundPage's call site doesn't need a signature change once standings actually render.
-export function SetupPanel({ state, joinCode, onAddGame, onAddParticipant }: SetupPanelProps) {
+export function SetupPanel({ state, joinCode, onAddGame }: SetupPanelProps) {
   const hasGames = state.games.length > 0;
   // Per-game dots, computed once up front rather than per participant row below — each
   // config's gameDots() call is independent of which row is currently rendering. Terminated
@@ -49,9 +44,14 @@ export function SetupPanel({ state, joinCode, onAddGame, onAddParticipant }: Set
 
   return (
     <section className="flex flex-col gap-6 p-6 text-slate-100">
+      {/* The share-the-code panel (accounts-only identity spec §3): the join code IS the invite
+          and the sign-up funnel. Nobody adds anyone to the card — a new player joins with this
+          code and creates their account on the way, so the framing replaces the old "Add player"
+          ghost form entirely. */}
       <div className="rounded-lg bg-slate-800 p-4 text-center">
         <p className="text-sm uppercase tracking-wide text-slate-400">Join code</p>
         <p className="text-3xl font-bold tracking-widest">{joinCode}</p>
+        <p className="mt-2 text-sm text-slate-400">Players join with this code — new players create their account on the way.</p>
       </div>
 
       <div>
@@ -75,7 +75,6 @@ export function SetupPanel({ state, joinCode, onAddGame, onAddParticipant }: Set
                   <span>
                     {p.name} — {p.tee} — CH {p.courseHandicap}
                   </span>
-                  <ClaimAffordance rowGolferId={p.golferId} rowName={p.name} code={joinCode} />
                 </span>
                 {hasGames && (
                   <span className="flex flex-wrap gap-2 text-sm text-slate-400">
@@ -96,87 +95,8 @@ export function SetupPanel({ state, joinCode, onAddGame, onAddParticipant }: Set
         </ul>
       </div>
 
-      <AddPlayerForm onAddParticipant={onAddParticipant} />
-
       <AddGameForm participants={state.participants} onAddGame={onAddGame} />
     </section>
-  );
-}
-
-interface AddPlayerFormProps {
-  readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
-}
-
-// "Add player" (M8 Task 5, "host types Dave in", rebuilt architecture-realignment Task 11): name
-// + tee + courseHandicap -> POST /rounds/{roundId}/players, a free-text ghost seat. Crews are a
-// grouping/competition only (spec §11a) — there is no crew-sourced quick-add here, and this form
-// never consults the round's or the signed-in golfer's crews at all.
-function AddPlayerForm({ onAddParticipant }: AddPlayerFormProps) {
-  const [name, setName] = useState("");
-  const [tee, setTee] = useState("");
-  const [courseHandicap, setCourseHandicap] = useState("0");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const parsedHandicap = Number.parseInt(courseHandicap, 10);
-    const effectiveName = name.trim();
-    if (!effectiveName || !tee.trim() || !Number.isInteger(parsedHandicap)) return;
-
-    setSubmitting(true);
-    setError(undefined);
-    try {
-      await onAddParticipant({ name: effectiveName, tee: tee.trim(), courseHandicap: parsedHandicap });
-      // No optimistic insert (SetupPanel's own precedent, same as AddGameForm below): the new
-      // roster row appears once participant-joined round-trips through the session's fold.
-      // Papercut 3 (M9 hardening): tee/courseHandicap deliberately survive a successful add —
-      // a Saturday roster is almost always the same tee, so retyping it for every player added
-      // in a row is exactly the papercut this fixes. Only the identity field (name) resets,
-      // since the NEXT player is a different person by definition.
-      setName("");
-    } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "Could not add the player — try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4 rounded-lg bg-slate-900 p-4">
-      <h2 className="text-lg font-semibold">Add player</h2>
-
-      <label className="flex flex-col gap-1">
-        Name
-        <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
-      </label>
-
-      <label className="flex flex-col gap-1">
-        Tee
-        <input value={tee} onChange={(event) => setTee(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
-      </label>
-
-      <label className="flex flex-col gap-1">
-        Course handicap
-        <input
-          type="number"
-          step={1}
-          value={courseHandicap}
-          onChange={(event) => setCourseHandicap(event.target.value)}
-          className="rounded-lg bg-slate-800 p-3 text-lg"
-        />
-      </label>
-
-      {error && (
-        <p role="alert" className="text-red-400">
-          {error}
-        </p>
-      )}
-
-      <button type="submit" disabled={submitting} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
-        Add player
-      </button>
-    </form>
   );
 }
 

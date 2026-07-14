@@ -3,10 +3,8 @@ import { courseId, crewId, fixtureLinks, gameId, golferId, roundId } from "@swng
 import type {
   AddCrewMemberRequest,
   AddGameRequest,
-  AddParticipantRequest,
   AddTeeSetRequest,
   AppendCountedRoundRequest,
-  ClaimGolferRequest,
   CreateCourseRequest,
   CreateCrewRequest,
   CreateSeasonRequest,
@@ -19,11 +17,9 @@ import type {
 import {
   addCrewMember,
   addGame,
-  addParticipant,
   addTeeSet,
   appendCountedRound,
   ApiError,
-  claimGolfer,
   createCourse,
   createCrew,
   createRound,
@@ -193,40 +189,6 @@ describe("addGame", () => {
     // leak of a bespoke property into a standard API surface).
     expect(seenInit).not.toHaveProperty("token");
     expect(result).toEqual({ gameId: expect.anything(), seq: 5 });
-  });
-});
-
-describe("addParticipant", () => {
-  it("POSTs the request body to /rounds/{roundId}/players with the bearer token and parses the events response", async () => {
-    let seenUrl: string | undefined;
-    let seenInit: RequestInit | undefined;
-    stubFetch(async (url, init) => {
-      seenUrl = String(url);
-      seenInit = init;
-      return fakeResponse(201, { events: [] });
-    });
-
-    const input: AddParticipantRequest = { name: "Dave", tee: "white", courseHandicap: 10 };
-    const result = await addParticipant(roundId("round-1"), "tok-add", input);
-
-    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/players`);
-    expect(seenInit?.method).toBe("POST");
-    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
-    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-add");
-    expect(result).toEqual({ events: [] });
-  });
-
-  it("carries a supplied golferId (the crew quick-add's stable id) verbatim in the body", async () => {
-    let seenInit: RequestInit | undefined;
-    stubFetch(async (_url, init) => {
-      seenInit = init;
-      return fakeResponse(201, { events: [] });
-    });
-
-    const input: AddParticipantRequest = { name: "Cal", tee: "blue", courseHandicap: 5, golferId: golferId("cal-crew") };
-    await addParticipant(roundId("round-1"), "tok-add", input);
-
-    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
   });
 });
 
@@ -739,35 +701,6 @@ describe("updateMe", () => {
     expect(JSON.parse(String(seenInit?.body))).toEqual(input);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
     expect(result.golfer.name).toBe("Ann Updated");
-  });
-});
-
-describe("claimGolfer", () => {
-  it("POSTs { golferId } to /golfers/claim with the bearer token and parses a GolferResponse", async () => {
-    let seenUrl: string | undefined;
-    let seenInit: RequestInit | undefined;
-    stubFetch(async (url, init) => {
-      seenUrl = String(url);
-      seenInit = init;
-      return fakeResponse(200, { golfer: { golferId: "ghost-1", name: "Ghost" } });
-    });
-
-    const input: ClaimGolferRequest = { golferId: golferId("ghost-1"), code: "ABC123" };
-    const result = await claimGolfer("tok-me", input);
-
-    expect(seenUrl).toBe(`${HTTP_URL}/golfers/claim`);
-    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
-    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
-    expect(result).toEqual({ golfer: { golferId: golferId("ghost-1"), name: "Ghost" } });
-  });
-
-  it("throws a coded ApiError('golfer-already-claimed') on a 409", async () => {
-    stubFetch(async () => fakeResponse(409, { code: "golfer-already-claimed", message: "already claimed" }));
-
-    const error: unknown = await claimGolfer("tok-me", { golferId: golferId("ghost-1"), code: "ABC123" }).catch((caught: unknown) => caught);
-
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).code).toBe("golfer-already-claimed");
   });
 });
 

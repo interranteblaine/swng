@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router";
 import type { GetMyLiveRoundsResponse } from "@swng/contracts";
 import type { RoundId } from "@swng/domain";
 import { ApiError, getMyLiveRounds, mintParticipantToken } from "../api";
+import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { credentialStore } from "../identity";
 
@@ -22,7 +23,7 @@ export function HomePage() {
   // "Your rounds" list; every other state keeps the device credentialStore list exactly as
   // before this task (spec §5's own binding resolution).
   const hasGolferIdentity = Boolean(golfer);
-  // Same isIdentityLoading idiom CreateRoundPage/JoinRoundPage/ClaimAffordance already use:
+  // Same isIdentityLoading idiom CreateRoundPage/JoinRoundPage already use:
   // `golfer` stays undefined ONLY while signed in and the initial (or a later) GET /me hasn't
   // resolved yet — signed-out also reports golfer===undefined, but useAuth.ts's own `signedIn`
   // disambiguates the two. Fix for the review finding: `hasGolferIdentity` alone can't tell
@@ -59,9 +60,8 @@ export function HomePage() {
   // would (credentialStore.save, the SAME shape JoinRoundPage's own submit uses), then enter.
   // `joinCode: ""` — the mint response carries no join code (JoinRoundResponse's own shape),
   // same "no code known" precedent WatchPage/ArchivedRoundPage already established for a
-  // credential minted outside the join flow; ClaimAffordance's own empty-code guard already
-  // treats "" as "no claim affordance here" (harmless — this device's own row already reads
-  // as "You", never "This is me", since the caller IS this account's own golfer).
+  // credential minted outside the join flow (nothing downstream needs the code here — this
+  // device is entering a round its own account golfer already sits in).
   const enterLiveRound = async (id: RoundId) => {
     if (enteringRoundId) return; // a re-mint is already in flight — no double-tap
     setEnterError(undefined);
@@ -99,10 +99,17 @@ export function HomePage() {
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-slate-950 p-6 text-slate-100">
       <h1 className="text-3xl font-bold">swng</h1>
 
+      {/* The wall (accounts-only identity spec §3): there is no anonymous "start a round" path.
+          Signed out, that action is a sign-in CTA; join-by-code still routes into the funnel
+          (which gates its own sign-in), and a shared watch link is the only other way in. */}
       <nav className="flex flex-col gap-3">
-        <Link to="/create" className="rounded-lg bg-emerald-600 px-4 py-4 text-center text-lg font-semibold">
-          Start a round
-        </Link>
+        {signedIn ? (
+          <Link to="/create" className="rounded-lg bg-emerald-600 px-4 py-4 text-center text-lg font-semibold">
+            Start a round
+          </Link>
+        ) : (
+          <SignInCta message="Sign in to start a round." returnTo="/create" />
+        )}
         <Link to="/join" className="rounded-lg bg-slate-800 px-4 py-4 text-center text-lg font-semibold">
           Join by code
         </Link>

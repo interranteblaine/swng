@@ -1,9 +1,9 @@
 import { useCallback, useState } from "react";
 import { Navigate, useParams } from "react-router";
-import type { AddParticipantRequest, FinalizeRoundResponse, GameConfigInput } from "@swng/contracts";
+import type { FinalizeRoundResponse, GameConfigInput } from "@swng/contracts";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { GameId, GameState, GolferId, HoleResult, RoundId, RoundState } from "@swng/domain";
-import { abandonRound, addGame, addParticipant, finalizeRound, terminateGame } from "../api";
+import { abandonRound, addGame, finalizeRound, terminateGame } from "../api";
 import { credentialStore } from "../identity";
 import type { RoundCredential } from "../identity";
 import { unresolvedGames } from "../round/finalizeReadiness";
@@ -236,7 +236,6 @@ interface LiveRoundProps {
   // beyond state.id, same "credential.token" this page already threads to every write call.
   readonly token: string;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
-  readonly onAddParticipant: (input: AddParticipantRequest) => Promise<void>;
   readonly onFinalize: () => Promise<void>;
   readonly onTerminate: (gameId: GameId) => Promise<void>;
   readonly onAbandon: () => Promise<void>;
@@ -248,7 +247,7 @@ interface LiveRoundProps {
 // tolerate `state` swapping in and out across the live/final boundary, which useHoleDigest's
 // prev-snapshot ref isn't built to do (and doesn't need to — this component simply unmounts
 // once status flips to "final" and RoundPageContent renders ResultsView instead).
-function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onAddParticipant, onFinalize, onTerminate, onAbandon }: LiveRoundProps) {
+function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon }: LiveRoundProps) {
   const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
   // Falls back to the first game until a chip is tapped (Task 5's fixed default-first-game
   // decision) — also the correct fallback if a previously-active id ever stopped matching. A
@@ -265,7 +264,7 @@ function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onAd
       <ScorecardGrid state={state} activeGame={activeGame} recordScore={recordScore} />
       {digest && <HoleDigest digest={digest} onDismiss={dismiss} />}
       <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
-      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} onAddParticipant={onAddParticipant} />
+      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} />
       <ScrapControl onAbandon={onAbandon} />
     </>
   );
@@ -293,24 +292,10 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
         // No optimistic insert: the game-added event flows back through the session
         // (pull/WS) and SetupPanel renders it from state.games — game setup is rare and
         // server-authored. Papercut 4 (M9 hardening): sync() explicitly, matching every OTHER
-        // mutation on this page (onAddParticipant/onFinalize/onTerminate below) — without it,
-        // this device only sees its own new game once the NEXT unrelated sync happens to fire
-        // (there is no periodic poll timer; @swng/client's session only pulls on an explicit
-        // sync() or a WS push), which could be a long, confusing wait for the host who just
-        // added the game.
-        await sync();
-      },
-      [roundId, credential.token, sync],
-    );
-
-    const onAddParticipant = useCallback(
-      async (input: AddParticipantRequest) => {
-        await addParticipant(roundId, credential.token, input);
-        // No optimistic insert (SetupPanel's own precedent) — the new roster row appears once
-        // participant-joined round-trips back through the session and folds into
-        // state.participants. Same reasoning as onFinalize/onTerminate's sync() calls below:
-        // this device just caused the event, so pull it now instead of waiting on this tab's
-        // own WS echo — the host adding a player wants to see the row immediately.
+        // mutation on this page (onFinalize/onTerminate below) — without it, this device only
+        // sees its own new game once the NEXT unrelated sync happens to fire (there is no
+        // periodic poll timer; @swng/client's session only pulls on an explicit sync() or a WS
+        // push), which could be a long, confusing wait for the host who just added the game.
         await sync();
       },
       [roundId, credential.token, sync],
@@ -392,13 +377,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
           onReconnect={reconnect}
         />
         {isFinal ? (
-          <ResultsView
-            state={session.state}
-            games={session.games}
-            response={finalizeResponse}
-            joinCode={credential.joinCode}
-            shareToken={credential.token}
-          />
+          <ResultsView state={session.state} games={session.games} response={finalizeResponse} shareToken={credential.token} />
         ) : (
           <LiveRound
             state={session.state}
@@ -407,7 +386,6 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
             joinCode={credential.joinCode}
             token={credential.token}
             onAddGame={onAddGame}
-            onAddParticipant={onAddParticipant}
             onFinalize={onFinalize}
             onTerminate={onTerminate}
             onAbandon={onAbandon}

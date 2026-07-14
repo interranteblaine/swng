@@ -91,13 +91,10 @@ export function ArchivedRoundPage() {
           {view.finalizedAtMs !== undefined && ` — ${new Date(view.finalizedAtMs).toLocaleDateString()}`}
         </p>
       </div>
-      {/* joinCode="" + no shareToken: this page's viewer holds only their own golfer Bearer —
-          never a round-scoped participant token to mint a NEW share link with, nor a round
-          join code to satisfy ClaimAffordance's proof-of-context check — same reasoning as
-          WatchPage's own reuse of ResultsView (WatchPage.tsx's own doc comment). An empty
-          joinCode still can't be abused: claimGolfer.ts's own proof-of-context check rejects
-          an empty/wrong code with claim-proof-required. */}
-      <ResultsView state={view.state} games={view.games} response={undefined} joinCode="" />
+      {/* No shareToken: this page's viewer holds only their own golfer Bearer — never a
+          round-scoped participant token to mint a NEW share link with (same reasoning as
+          WatchPage's own reuse of ResultsView, WatchPage.tsx's doc comment). */}
+      <ResultsView state={view.state} games={view.games} response={undefined} />
     </main>
   );
 }

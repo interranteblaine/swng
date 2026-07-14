@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { authConfig, tokenEndpoint } from "../auth/authConfig";
-import { pkceVerifierStore } from "../auth/tokenStore";
+import { pkceVerifierStore, returnToStore } from "../auth/tokenStore";
 import { useAuth } from "../auth/useAuth";
 
 // The Hosted UI redirects here with ?code=... (brief: "/auth/callback exchanges the code at
@@ -48,7 +48,10 @@ export function AuthCallbackPage() {
         }
 
         auth.completeSignIn({ idToken: json.id_token, refreshToken: json.refresh_token, expiresAt: Date.now() + json.expires_in * 1000 });
-        navigate("/", { replace: true });
+        // The join funnel (accounts-only identity spec §3) stashed where to land before the
+        // redirect — consume it (single-use) so the code survives the round trip; a plain
+        // sign-in that stashed nothing falls back to home, exactly as before this seam existed.
+        navigate(returnToStore.take() ?? "/", { replace: true });
       } catch {
         setError("Could not complete sign-in — try again.");
       }

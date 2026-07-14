@@ -20,9 +20,9 @@ export interface AuthContextValue {
   // changed the golfer row itself (ProfilePage's PUT /me, RoundPage's claim) and needs the
   // context to reflect it immediately, without waiting for a future remount's one-shot fetch.
   readonly refetch: () => Promise<void>;
-  // Every other golfer-tier call (updateMe/claimGolfer/getMyRecord) goes through this instead
-  // of pulling the raw token — the ONE place "401 anywhere -> one silent refresh-token retry,
-  // then signed-out" (brief) lives, rather than every call site re-implementing it.
+  // Every other golfer-tier call (updateMe/getMyRecord/…) goes through this instead of pulling
+  // the raw token — the ONE place "401 anywhere -> one silent refresh-token retry, then
+  // signed-out" (brief) lives, rather than every call site re-implementing it.
   readonly withAuth: <T>(fn: (token: string) => Promise<T>) => Promise<T>;
   // AuthCallbackPage's own seam: hands the just-exchanged tokens to the provider once the code
   // exchange succeeds. A distinct method from `refetch` — this ALSO resets the "once per

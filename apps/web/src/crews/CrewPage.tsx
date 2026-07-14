@@ -224,8 +224,8 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
       </section>
 
       {/* Architecture-realignment Task 11: "Leave crew" — the caller's own membership only,
-          with a confirm step (ClaimAffordance's own click-to-reveal-Confirm/Cancel idiom, not a
-          native confirm() — consistent with the rest of the app's chrome). */}
+          with a confirm step (a click-to-reveal Confirm/Cancel idiom, not a native confirm() —
+          consistent with the rest of the app's chrome). */}
       <section className="flex flex-col gap-2">
         {!confirmingLeave ? (
           <button type="button" onClick={() => setConfirmingLeave(true)} className="self-start text-sm text-red-400 underline">

@@ -50,3 +50,25 @@ export const pkceVerifierStore = {
     return verifier ?? undefined;
   },
 };
+
+// The path to land on after a Hosted-UI round trip (accounts-only identity spec §3, the join
+// funnel): the join page stashes `/join?code=ABC123` here before redirecting to sign up, and
+// AuthCallbackPage consumes it on return so the code survives the trip — without this, a
+// signed-out tap on a join link would always dump the new account back on the home page,
+// stranding the round it was invited to. Same sessionStorage lifetime and single-use
+// (read-and-remove) contract as pkceVerifierStore above: it only needs to survive this tab's
+// one trip to Cognito and back; a leftover from an abandoned sign-in must never redirect a
+// later, unrelated one.
+const RETURN_TO_KEY = "swng:returnTo";
+
+export const returnToStore = {
+  save: (path: string): void => {
+    sessionStorage.setItem(RETURN_TO_KEY, path);
+  },
+
+  take: (): string | undefined => {
+    const path = sessionStorage.getItem(RETURN_TO_KEY);
+    sessionStorage.removeItem(RETURN_TO_KEY);
+    return path ?? undefined;
+  },
+};

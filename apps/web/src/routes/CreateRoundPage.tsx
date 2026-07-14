@@ -3,7 +3,8 @@ import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import type { CourseId } from "@swng/domain";
 import type { CourseView, StartRoundResponse } from "@swng/contracts";
-import { ApiError, createRound, getCourse, updateMe } from "../api";
+import { ApiError, createRound, getCourse } from "../api";
+import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 import { CourseSummaryCard } from "../courses/CourseSummaryCard";
@@ -24,19 +25,17 @@ export function CreateRoundPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuth();
-  // auth.golfer is three-state: undefined-while-signed-in is the GET /me loading window itself
-  // (isIdentityLoading) — the free-text field must NEVER render there, because typing into it
-  // and submitting would fire PUT /me with the typed text over a profile that may already be
-  // real once the fetch lands (a silent rename). null is signed-in-with-no-profile-yet (free
-  // text, same as signed out, until PUT /me mints one at submit time below). A real GolferView
-  // is asSelf: the "Playing as <name>" line replaces the free-text field entirely.
-  const isIdentityLoading = auth.signedIn && auth.golfer === undefined;
-  const asSelf = auth.signedIn && Boolean(auth.golfer);
+  // The wall (accounts-only identity spec §3): anonymous round creation is gone from the UI —
+  // starting a round means being signed in, playing AS your account golfer. `auth.golfer` being
+  // truthy is the one condition the create form renders in ("Playing as <name>"); while it's
+  // still undefined (the GET /me loading window, or the transient no-row case) the form shows a
+  // quiet placeholder and submit stays disabled — the M8 defect (a submit renaming a
+  // half-loaded profile) is structurally impossible now that no name is ever typed here.
+  const golfer = auth.golfer ?? undefined;
 
   const [courseView, setCourseView] = useState<CourseView | undefined>(undefined);
   const [tee, setTee] = useState<string>("");
   const [courseError, setCourseError] = useState<string | undefined>(undefined);
-  const [name, setName] = useState("");
   const [courseHandicap, setCourseHandicap] = useState("0");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -90,56 +89,20 @@ export function CreateRoundPage() {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const parsedHandicap = Number.parseInt(courseHandicap, 10);
-    // Playing as yourself always has a name (auth.golfer.name) — only the free-text path needs
-    // one typed. Everything else (course/tee/handicap) is required either way. isIdentityLoading
-    // blocks submission outright — the button is already disabled during this window, but this
-    // guard covers any other way the form could submit (e.g. Enter in a text field).
-    if (!courseView || !tee || !Number.isInteger(parsedHandicap) || isIdentityLoading || (!asSelf && !name.trim())) return;
+    // Only ever reachable in the signed-in-with-a-golfer state (the form isn't rendered
+    // otherwise), but guarded anyway: a course, a tee, a valid handicap, and a real golfer.
+    if (!courseView || !tee || !Number.isInteger(parsedHandicap) || !golfer) return;
 
     setSubmitting(true);
     setError(undefined);
     try {
-      // courseView.card VERBATIM — exactly the fetched CourseCard, not reconstructed —
-      // because a round freezes this whole snapshot (brief: "the freeze source swap is THE
-      // change").
-      let response: StartRoundResponse;
-      let savedName: string;
-      if (asSelf) {
-        // Playing as an existing account golfer: golferId + Bearer ride along, host.name is
-        // the account's own name (never a stale local `name` field — there isn't one to go
-        // stale, the input was replaced).
-        const golfer = auth.golfer!;
-        savedName = golfer.name;
-        response = await auth.withAuth((token) =>
-          createRound({ card: courseView.card, host: { name: golfer.name, tee, courseHandicap: parsedHandicap }, golferId: golfer.golferId }, token),
-        );
-      } else if (auth.signedIn) {
-        // Signed in with NO golfer yet: the typed name first creates the account's golfer (PUT
-        // /me), THEN the round is created as-self with the golferId that mints — strictly in
-        // this order (assert-call-order is part of this milestone's own headline behavior:
-        // "zero claiming" only holds if the round is created AS the right golfer from the
-        // start).
-        const trimmed = name.trim();
-        savedName = trimmed;
-        response = await auth.withAuth(async (token) => {
-          const created = await updateMe(token, { name: trimmed });
-          return createRound({ card: courseView.card, host: { name: trimmed, tee, courseHandicap: parsedHandicap }, golferId: created.golfer.golferId }, token);
-        });
-        // W1 (controller flow-walk finding, post-gate): PUT /me above just minted this
-        // account's golfer, but the auth context's own `golfer` field doesn't update itself —
-        // without this refetch, `auth.golfer` stays null until a full reload, so the round
-        // page's own roster row for this golfer (ClaimAffordance's own-row check) would render
-        // "This is me" instead of "You". Same refetch seam ClaimAffordance's own claim success
-        // already uses — never a parallel one.
-        await auth.refetch();
-      } else {
-        // Signed out: byte-identical to before this milestone — no golferId, no Bearer.
-        const trimmed = name.trim();
-        savedName = trimmed;
-        response = await createRound({ card: courseView.card, host: { name: trimmed, tee, courseHandicap: parsedHandicap } });
-      }
-      credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: savedName, joinCode: response.joinCode });
-
+      // courseView.card VERBATIM — exactly the fetched CourseCard, not reconstructed — because a
+      // round freezes this whole snapshot. Playing as yourself: the golferId + Bearer ride along,
+      // and host.name is the account's own name (never a typed input — there isn't one).
+      const response: StartRoundResponse = await auth.withAuth((token) =>
+        createRound({ card: courseView.card, host: { name: golfer.name, tee, courseHandicap: parsedHandicap }, golferId: golfer.golferId }, token),
+      );
+      credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer.name, joinCode: response.joinCode });
       navigate(`/round/${response.roundId}`);
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not create the round — try again.");
@@ -150,73 +113,72 @@ export function CreateRoundPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
       <h1 className="text-2xl font-bold">Start a round</h1>
-      <form onSubmit={submit} className="flex flex-col gap-4">
-        {courseView ? (
-          <CourseSummaryCard
-            course={courseView}
-            selectedTee={tee}
-            onSelectTee={setTee}
-            onChangeCourse={() => setCourseView(undefined)}
-            onCourseRefreshed={handleCourseRefreshed}
-          />
-        ) : (
-          <CourseSearch onSelect={(courseId) => selectCourse(courseId)} />
-        )}
-        {courseError && (
-          <p role="alert" className="text-red-400">
-            {courseError}
-          </p>
-        )}
 
-        {isIdentityLoading ? (
-          // A quiet placeholder, not the free-text field — see isIdentityLoading's own comment
-          // above for why the input must not appear here. Deliberately NOT "Playing as" (that
-          // label is reserved for the asSelf branch below, once a real name is known).
-          <div role="status" aria-label="Loading your profile" className="flex flex-col gap-1">
-            <div className="rounded-lg bg-slate-800 p-3 text-lg text-slate-500">Loading your profile…</div>
-          </div>
-        ) : asSelf ? (
-          <div className="flex flex-col gap-1">
-            <span className="text-sm text-slate-400">Playing as</span>
-            <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-800 p-3 text-lg">
-              <span>{auth.golfer!.name}</span>
-              <Link to="/profile" className="text-sm text-emerald-400 underline">
-                Change
-              </Link>
+      {!auth.signedIn ? (
+        <SignInCta message="Sign in to start a round." returnTo="/create" />
+      ) : (
+        <form onSubmit={submit} className="flex flex-col gap-4">
+          {courseView ? (
+            <CourseSummaryCard
+              course={courseView}
+              selectedTee={tee}
+              onSelectTee={setTee}
+              onChangeCourse={() => setCourseView(undefined)}
+              onCourseRefreshed={handleCourseRefreshed}
+            />
+          ) : (
+            <CourseSearch onSelect={(courseId) => selectCourse(courseId)} />
+          )}
+          {courseError && (
+            <p role="alert" className="text-red-400">
+              {courseError}
+            </p>
+          )}
+
+          {golfer ? (
+            <div className="flex flex-col gap-1">
+              <span className="text-sm text-slate-400">Playing as</span>
+              <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-800 p-3 text-lg">
+                <span>{golfer.name}</span>
+                <Link to="/profile" className="text-sm text-emerald-400 underline">
+                  Change
+                </Link>
+              </div>
             </div>
-          </div>
-        ) : (
+          ) : (
+            // A quiet placeholder while identity resolves — submit stays disabled, so no round
+            // is ever created before we know whose it is.
+            <div role="status" aria-label="Loading your profile" className="flex flex-col gap-1">
+              <div className="rounded-lg bg-slate-800 p-3 text-lg text-slate-500">Loading your profile…</div>
+            </div>
+          )}
+
           <label className="flex flex-col gap-1">
-            Your name
-            <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+            Course handicap
+            <input
+              type="number"
+              step={1}
+              value={courseHandicap}
+              onChange={(event) => setCourseHandicap(event.target.value)}
+              className="rounded-lg bg-slate-800 p-3 text-lg"
+            />
           </label>
-        )}
 
-        <label className="flex flex-col gap-1">
-          Course handicap
-          <input
-            type="number"
-            step={1}
-            value={courseHandicap}
-            onChange={(event) => setCourseHandicap(event.target.value)}
-            className="rounded-lg bg-slate-800 p-3 text-lg"
-          />
-        </label>
+          {error && (
+            <p role="alert" className="text-red-400">
+              {error}
+            </p>
+          )}
 
-        {error && (
-          <p role="alert" className="text-red-400">
-            {error}
-          </p>
-        )}
-
-        <button
-          type="submit"
-          disabled={submitting || !courseView || isIdentityLoading}
-          className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50"
-        >
-          Create round
-        </button>
-      </form>
+          <button
+            type="submit"
+            disabled={submitting || !courseView || !golfer}
+            className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50"
+          >
+            Create round
+          </button>
+        </form>
+      )}
     </main>
   );
 }

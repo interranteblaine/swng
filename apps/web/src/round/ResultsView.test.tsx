@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cellKey,
@@ -24,10 +24,10 @@ import { describeGame } from "../games/describeGame";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 import { ResultsView } from "./ResultsView";
 
-// ResultsView now renders a roster with ClaimAffordance too (M7 Task 6 gap 2 — claim survives
-// finalize), which calls useAuth() — every render needs an AuthProvider ancestor, same idiom as
-// RoundPage.test.tsx and SetupPanel.test.tsx. This shadowing is the only plumbing change; every
-// existing call site below keeps its exact shape and assertions.
+// ResultsView renders a plain-names roster (the claim affordance it once hosted is deleted with
+// the whole ghost/claim flow, accounts-only identity spec §3). The AuthProvider wrapper stays so
+// the signed-in proof-of-negative at the foot of this file can prove no claim button renders even
+// in the state that used to show one.
 const render = (ui: ReactElement) => rtlRender(<AuthProvider>{ui}</AuthProvider>);
 
 afterEach(() => cleanup());
@@ -70,7 +70,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   });
 
   it("ResultsView renders exactly what describeGame(games()...) renders locally — the brief's literal check", () => {
-    render(<ResultsView state={state} games={localGames} response={response} joinCode="TESTJC" />);
+    render(<ResultsView state={state} games={localGames} response={response} />);
 
     for (const game of localGames) {
       const { line } = describeGame(game, state);
@@ -82,7 +82,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   });
 
   it("handicapping rows render the server's response verbatim — no local recomputation when a response exists", () => {
-    render(<ResultsView state={state} games={localGames} response={response} joinCode="TESTJC" />);
+    render(<ResultsView state={state} games={localGames} response={response} />);
     for (const row of response.handicapping) {
       if (row.kind !== "complete") continue;
       const name = state.participants.find((p) => p.golferId === row.golferId)!.name;
@@ -91,7 +91,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   });
 
   it("the archived card reuses ScorecardGrid, read-only — a cell tap is inert", () => {
-    render(<ResultsView state={state} games={localGames} response={response} joinCode="TESTJC" />);
+    render(<ResultsView state={state} games={localGames} response={response} />);
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole 1` });
     expect(cell.hasAttribute("disabled")).toBe(true);
   });
@@ -107,7 +107,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
     const hole = [...fourballDots.keys()].find((h) => (fourballDots.get(h) ?? 0) === 0 && (skinsDots.get(h) ?? 0) > 0);
     expect(hole).toBeDefined();
 
-    render(<ResultsView state={state} games={localGames} response={response} joinCode="TESTJC" />);
+    render(<ResultsView state={state} games={localGames} response={response} />);
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole ${hole}` });
 
     // fourball is games[0] (fieldDeck18's own [fourball, skins] order) — the default active
@@ -131,12 +131,12 @@ describe("ResultsView — share affordance (M9 Task 3)", () => {
   const localGames = state.games.map((config) => scoreGame(config, state));
 
   it("renders no 'Share round' button when shareToken is omitted (the WatchPage/spectator shape)", () => {
-    render(<ResultsView state={state} games={localGames} response={undefined} joinCode="TESTJC" />);
+    render(<ResultsView state={state} games={localGames} response={undefined} />);
     expect(screen.queryByRole("button", { name: "Share round" })).toBeNull();
   });
 
   it("renders 'Share round' when shareToken is provided (RoundPage's own archived-card shape)", () => {
-    render(<ResultsView state={state} games={localGames} response={undefined} joinCode="TESTJC" shareToken="participant-token" />);
+    render(<ResultsView state={state} games={localGames} response={undefined} shareToken="participant-token" />);
     expect(screen.getByRole("button", { name: "Share round" })).toBeTruthy();
   });
 });
@@ -149,7 +149,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     const localGames = state.games.map((config) => scoreGame(config, state));
     const archive = settleRound(events); // the true source — this tab never called finalize, only settleRound did (server-side)
 
-    render(<ResultsView state={state} games={localGames} response={undefined} joinCode="TESTJC" />);
+    render(<ResultsView state={state} games={localGames} response={undefined} />);
 
     for (const row of archive.handicapping) {
       const name = state.participants.find((p) => p.golferId === row.golferId)!.name;
@@ -167,7 +167,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     const state = reduceRound(events);
     const localGames = state.games.map((config) => scoreGame(config, state));
 
-    render(<ResultsView state={state} games={localGames} response={undefined} joinCode="TESTJC" />);
+    render(<ResultsView state={state} games={localGames} response={undefined} />);
 
     expect(screen.getByText("Ann & Bo win 2&1")).toBeTruthy();
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole 1` });
@@ -196,7 +196,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     };
     const games = [scoreGame(terminatedConfig, state), scoreGame(resolvedConfig, state)];
 
-    render(<ResultsView state={state} games={games} response={undefined} joinCode="TESTJC" />);
+    render(<ResultsView state={state} games={games} response={undefined} />);
 
     expect(screen.getByRole("tab", { name: /Stableford/ }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: /Singles match/ }).getAttribute("aria-selected")).toBe("false");
@@ -217,17 +217,15 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
       terminatedGameIds: new Set(),
     };
 
-    render(<ResultsView state={state} games={[]} response={undefined} joinCode="TESTJC" />);
+    render(<ResultsView state={state} games={[]} response={undefined} />);
     expect(screen.getByText("Ann — incomplete")).toBeTruthy();
   });
 });
 
-// M7 Task 6, gap 2: a round could previously never be claimed once it finalized (the roster,
-// ClaimAffordance's only home, stopped rendering when RoundPage swapped in ResultsView) — which
-// killed the "sign in that evening and claim your round" story. ResultsView now renders its own
-// roster, additively, alongside the results it already rendered — none of the describe blocks
-// above changed behavior or assertions.
-describe("ResultsView — claim a ghost after finalize (gap 2)", () => {
+// The wall (accounts-only identity spec §3): there are no ghosts, so there is nothing to claim —
+// the "This is me" affordance is deleted. The finalized roster is a plain names list, and no
+// claim button renders in ANY auth state, including the signed-in one that used to show it.
+describe("ResultsView — no claim affordance (accounts-only)", () => {
   const ann = golferId("ann");
   const bo = golferId("bo");
 
@@ -263,73 +261,24 @@ describe("ResultsView — claim a ghost after finalize (gap 2)", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("not signed in: the finalized roster still renders (name only), with no claim affordances at all", () => {
-    render(<ResultsView state={finalState()} games={[]} response={undefined} joinCode="TESTJC" />);
+  it("not signed in: the finalized roster renders names, with no claim affordance", () => {
+    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
 
-    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
-    expect(annRow).toBeTruthy();
+    const rows = screen.getAllByRole("listitem");
+    expect(rows.find((li) => /Ann/.test(li.textContent ?? ""))).toBeTruthy();
+    expect(rows.find((li) => /Bo/.test(li.textContent ?? ""))).toBeTruthy();
     expect(screen.queryByRole("button", { name: "This is me" })).toBeNull();
   });
 
-  it("signed in + unlinked: every finalized-roster row is claimable", async () => {
+  it("signed in: still a plain names roster — no 'This is me' anywhere (proof-of-negative)", async () => {
     signIn();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => fakeResponse(200, { golfer: null })),
-    );
+    const fetchMock = vi.fn(async () => fakeResponse(200, { golfer: null }));
+    vi.stubGlobal("fetch", fetchMock);
 
-    render(<ResultsView state={finalState()} games={[]} response={undefined} joinCode="TESTJC" />);
+    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
 
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "This is me" })).toHaveLength(2)); // Ann, Bo
-  });
-
-  // M8 Task 5: the own-row arm renders a steady "You" marker (was a bare null) — the round
-  // could have been played AS this account golfer from the start (as-self create/join), so the
-  // finalized roster must say so even without ever running a claim in this session.
-  it("signed in + already this account's own golfer: that row shows 'You', not a claim button", async () => {
-    signIn();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } })),
-    );
-
-    render(<ResultsView state={finalState()} games={[]} response={undefined} joinCode="TESTJC" />);
-
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "This is me" })).toHaveLength(1)); // Bo only
-
-    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
-    expect(within(annRow!).queryByRole("button", { name: "This is me" })).toBeNull();
-    expect(within(annRow!).getByText("You")).toBeTruthy();
-  });
-
-  it("This is me -> confirm -> POST /golfers/claim -> success re-fetches /me, even after finalize", async () => {
-    signIn();
-    const calls: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string, init?: RequestInit) => {
-        const path = new URL(url).pathname;
-        calls.push(`${init?.method ?? "GET"} ${path}`);
-        if (path === "/golfers/claim") return fakeResponse(200, { golfer: { golferId: "bo", name: "Bo" } });
-        if (path === "/me") return fakeResponse(200, { golfer: calls.includes("POST /golfers/claim") ? { golferId: "bo", name: "Bo" } : null });
-        throw new Error(`unexpected fetch ${path}`);
-      }),
-    );
-
-    render(<ResultsView state={finalState()} games={[]} response={undefined} joinCode="TESTJC" />);
-
-    const boRow = await waitFor(() => {
-      const row = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
-      expect(row).toBeTruthy();
-      return row!;
-    });
-
-    fireEvent.click(within(boRow).getByRole("button", { name: "This is me" }));
-    expect(within(boRow).getByRole("dialog")).toBeTruthy();
-    fireEvent.click(within(boRow).getByRole("button", { name: "Confirm" }));
-
-    await waitFor(() => expect(within(boRow).getByRole("status")).toBeTruthy());
-    expect(calls).toContain("POST /golfers/claim");
-    expect(calls.filter((c) => c === "GET /me").length).toBeGreaterThanOrEqual(2);
+    // Let the AuthProvider's GET /me settle so a claim button, if any survived, would have shown.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "This is me" })).toBeNull();
   });
 });

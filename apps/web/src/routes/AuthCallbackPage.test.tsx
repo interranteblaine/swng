@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { pkceVerifierStore, tokenStore } from "../auth/tokenStore";
+import { pkceVerifierStore, returnToStore, tokenStore } from "../auth/tokenStore";
 import { AuthProvider } from "../auth/useAuth";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 import { AuthCallbackPage } from "./AuthCallbackPage";
@@ -25,6 +25,7 @@ const renderCallback = (initialPath: string) =>
         <Routes>
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/" element={<div>home page</div>} />
+          <Route path="/join" element={<div>join page</div>} />
         </Routes>
       </MemoryRouter>
     </AuthProvider>,
@@ -62,6 +63,24 @@ describe("AuthCallbackPage", () => {
     // Single-use: the verifier is gone after the exchange (pkceVerifierStore.take()'s own
     // read-and-remove contract) — a replayed callback can't reuse it.
     expect(sessionStorage.getItem("swng:pkceVerifier")).toBeNull();
+  });
+
+  it("consumes a stashed returnTo (the join funnel) and lands there instead of home — single-use", async () => {
+    pkceVerifierStore.save("stashed-verifier");
+    returnToStore.save("/join?code=ABC123");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/oauth2/token")) return fakeResponse(200, { id_token: "id-tok-1", refresh_token: "refresh-tok-1", expires_in: 3600 });
+        return fakeResponse(200, { golfer: null });
+      }),
+    );
+
+    renderCallback("/auth/callback?code=abc123");
+
+    await waitFor(() => expect(screen.getByText("join page")).toBeTruthy());
+    // Single-use: consumed on the way through, so a replayed callback can't reuse it.
+    expect(sessionStorage.getItem("swng:returnTo")).toBeNull();
   });
 
   it("shows a friendly error and never calls fetch when the verifier is missing (expired/foreign link)", async () => {

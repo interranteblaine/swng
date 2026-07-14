@@ -7,8 +7,10 @@ import { AuthProvider } from "../auth/useAuth";
 import type { WatchRoundView } from "./useWatchRound";
 import { createWatchPage } from "./WatchPage";
 
-// WatchPage renders ResultsView on the final path, which calls useAuth() (ClaimAffordance) —
-// same AuthProvider-ancestor requirement as RoundPage.test.tsx/ResultsView.test.tsx.
+// WatchPage renders inside the app's root AuthProvider in production (App.tsx wraps everything) —
+// this wrapper mirrors that ancestor. ResultsView no longer reads auth itself (the claim
+// affordance is gone), so it's belt-and-suspenders, but harmless and keeps parity with the other
+// page specs.
 const renderWithAuth = (ui: React.ReactElement) => render(<AuthProvider>{ui}</AuthProvider>);
 
 afterEach(() => cleanup());

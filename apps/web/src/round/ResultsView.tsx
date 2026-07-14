@@ -2,7 +2,6 @@ import { useState } from "react";
 import { handicappingFor } from "@swng/domain";
 import type { GameId, GameState, RoundState } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
-import { ClaimAffordance } from "./ClaimAffordance";
 import { ScorecardGrid } from "./ScorecardGrid";
 import { ShareButton } from "./ShareButton";
 import { StandingsHeader } from "./StandingsHeader";
@@ -14,11 +13,6 @@ export interface ResultsViewProps {
   // tab that only observes the status flip via WS (another participant finalized) never gets
   // one. ResultsView must render fully either way: see the two why-comments below.
   readonly response: FinalizeRoundResponse | undefined;
-  // M9 hardening: the round's own join code — ClaimAffordance's proof token (the claim path
-  // survives finalize, same as the roster it renders on). RoundPage's own credential carries
-  // this for every round session, live or archived — same source SetupPanel's joinCode prop
-  // already reads from.
-  readonly joinCode: string;
   // M9 Task 3 (share): the caller's OWN participant token, threaded through only so ShareButton
   // can mint a link — OPTIONAL and OMITTED by WatchPage's own reuse of this exact component for
   // a spectator's archived-card view. A spectator holds no participant token (POST .../share is
@@ -39,7 +33,7 @@ type HandicappingRow = FinalizeRoundResponse["handicapping"][number];
 const deriveHandicapping = (state: RoundState): readonly HandicappingRow[] =>
   state.participants.map((participant) => handicappingFor(participant, state.card, state.cells));
 
-export function ResultsView({ state, games, response, joinCode, shareToken }: ResultsViewProps) {
+export function ResultsView({ state, games, response, shareToken }: ResultsViewProps) {
   const handicapping = response?.handicapping ?? deriveHandicapping(state);
   // Task 5: the archive gets the same chip-selected active game as a live round (RoundPage's
   // LiveRound) instead of a fixed games[0] — StandingsHeader IS the per-game standings display
@@ -56,17 +50,11 @@ export function ResultsView({ state, games, response, joinCode, shareToken }: Re
       {shareToken && <ShareButton roundId={state.id} token={shareToken} />}
 
       <div>
-        {/* The claim path survives finalize (M7 Task 6, gap 2 — a round could previously never
-            be claimed once it ended, killing the "sign in that evening and claim your round"
-            story): the roster is the only home of ClaimAffordance, live or archived, so it
-            renders here too, additively — nothing about the results/domain-fold rendering below
-            changes. */}
         <h2 className="text-lg font-semibold">Roster</h2>
         <ul className="flex flex-col gap-2">
           {state.participants.map((p) => (
             <li key={p.golferId} className="flex items-center gap-2">
               <span>{p.name}</span>
-              <ClaimAffordance rowGolferId={p.golferId} rowName={p.name} code={joinCode} />
             </li>
           ))}
         </ul>

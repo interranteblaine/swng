@@ -80,10 +80,22 @@ const renderHome = () =>
   );
 
 describe("HomePage", () => {
-  it("links Start a round to /create", () => {
+  // The wall (accounts-only identity spec §3): no anonymous "start a round" — signed out, that
+  // action is a sign-in CTA, and the whole page is sign-in / join-by-code / watch links only.
+  it("signed out: shows a sign-in CTA instead of an anonymous Start a round link", () => {
     renderHome();
 
-    const link = screen.getByRole("link", { name: "Start a round" });
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Start a round" })).toBeNull();
+  });
+
+  it("signed in: shows the Start a round link to /create", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+
+    renderHome();
+
+    const link = await screen.findByRole("link", { name: "Start a round" });
     expect(link.getAttribute("href")).toBe("/create");
   });
 

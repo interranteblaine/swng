@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tokenStore } from "./auth/tokenStore";
 import { createMemoryStorage } from "./testSupport/memoryStorage";
@@ -21,13 +21,18 @@ describe("App", () => {
   it("renders Home at the root route", () => {
     render(<App />);
 
-    expect(screen.getByRole("link", { name: "Start a round" })).toBeTruthy();
+    // Home-specific and signed-out-stable: the anonymous "Start a round" link is gone
+    // (accounts-only), but "Join by code" still routes into the funnel.
+    expect(screen.getByRole("link", { name: "Join by code" })).toBeTruthy();
   });
 
   it("shows the Sign in header chrome when signed out", () => {
     render(<App />);
 
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+    // Scoped to the header banner: the Home body now also carries a sign-in CTA (its own
+    // "Sign in" button), so an unscoped query would match two.
+    const header = screen.getByRole("banner");
+    expect(within(header).getByRole("button", { name: "Sign in" })).toBeTruthy();
   });
 
   // Not a re-test of useAuth's own GET /me contract (useAuth.test.tsx covers that in full) —

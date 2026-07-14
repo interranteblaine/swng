@@ -2,7 +2,6 @@ import {
   abandonRoundResponseSchema,
   addCrewMemberResponseSchema,
   addGameResponseSchema,
-  addParticipantResponseSchema,
   addTeeSetResponseSchema,
   appendCountedRoundResponseSchema,
   createCourseResponseSchema,
@@ -39,13 +38,10 @@ import type {
   AddCrewMemberResponse,
   AddGameRequest,
   AddGameResponse,
-  AddParticipantRequest,
-  AddParticipantResponse,
   AddTeeSetRequest,
   AddTeeSetResponse,
   AppendCountedRoundRequest,
   AppendCountedRoundResponse,
-  ClaimGolferRequest,
   CreateCourseRequest,
   CreateCourseResponse,
   CreateCrewRequest,
@@ -157,14 +153,6 @@ export const addGame = async (roundId: RoundId, token: string, game: AddGameRequ
   return parse(addGameResponseSchema, json);
 };
 
-// POST /rounds/{roundId}/players (M8 Task 5): "participant"-gated, same tier/token as
-// addGame/recordScore/finalizeRound above — the crew one-tap quick-add and the free-text ghost
-// form (SetupPanel's own "Add player") both go through this one call.
-export const addParticipant = async (roundId: RoundId, token: string, input: AddParticipantRequest): Promise<AddParticipantResponse> => {
-  const json = await requestJson(`/rounds/${roundId}/players`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
-  return parse(addParticipantResponseSchema, json);
-};
-
 export const finalizeRound = async (roundId: RoundId, token: string): Promise<FinalizeRoundResponse> => {
   const json = await requestJson(`/rounds/${roundId}/finalize`, { method: "POST", token });
   return parse(finalizeRoundResponseSchema, json);
@@ -237,11 +225,6 @@ export const getMe = async (token: string): Promise<GetMeResponse> => {
 
 export const updateMe = async (token: string, input: UpdateMeRequest): Promise<GolferResponse> => {
   const json = await requestJson("/me", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
-  return parse(golferResponseSchema, json);
-};
-
-export const claimGolfer = async (token: string, input: ClaimGolferRequest): Promise<GolferResponse> => {
-  const json = await requestJson("/golfers/claim", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
   return parse(golferResponseSchema, json);
 };
 

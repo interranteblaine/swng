@@ -84,12 +84,10 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
 
     return (
       <main className="min-h-screen bg-slate-950">
-        {/* joinCode="" + no shareToken: a spectator holds neither a round join code (that's a
-            participant-only secret) nor a participant token to mint a NEW share link with —
+        {/* No shareToken: a spectator holds no participant token to mint a NEW share link with —
             ResultsView.tsx's own doc comment explains why shareToken is optional and omitted
-            here. An empty joinCode still can't be abused: claimGolfer.ts's own proof-of-context
-            check (M9 hardening) rejects an empty/wrong code with claim-proof-required. */}
-        {isFinal ? <ResultsView state={view.state} games={view.games} response={undefined} joinCode="" /> : <LiveWatch view={view} />}
+            here. */}
+        {isFinal ? <ResultsView state={view.state} games={view.games} response={undefined} /> : <LiveWatch view={view} />}
       </main>
     );
   }

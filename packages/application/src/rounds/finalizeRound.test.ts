@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OpId, RoundEvent } from "@swng/domain";
-import { deviceId, fixtureLinks, opId, reduceRound, settleRound } from "@swng/domain";
+import { cardId, courseId, deviceId, fixtureLinks, opId, reduceRound, settleRound } from "@swng/domain";
 import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { SnapshotStore } from "../ports/snapshotStore.js";
@@ -8,6 +8,7 @@ import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/token
 import {
   createCapturingBroadcast,
   createFixedClock,
+  createInMemoryCardStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryProjectionStore,
@@ -15,6 +16,7 @@ import {
   createInMemorySnapshotStore,
   createNullLogger,
   createSequentialIds,
+  seedCard,
 } from "../testing/fakes.js";
 import { addGame } from "./addGame.js";
 import { finalizeRound } from "./finalizeRound.js";
@@ -52,7 +54,7 @@ const createClientOps = (device: string) => {
 // store the SnapshotStore then reads (testing/fakes.ts models the real cross-table
 // transaction this way). setup pairs them by default; the carry-2 suites below pass in their
 // own already-paired pair so a race-injecting wrapper can sit over the same `inner`.
-const setup = (overrides?: { journal?: EventJournal; store?: RoundStore; snapshots?: SnapshotStore }) => {
+const setup = async (overrides?: { journal?: EventJournal; store?: RoundStore; snapshots?: SnapshotStore }) => {
   const snapshotStore = createInMemorySnapshotStore();
   const journal = overrides?.journal ?? createInMemoryJournal(snapshotStore);
   const snapshots = overrides?.snapshots ?? snapshotStore;
@@ -64,12 +66,16 @@ const setup = (overrides?: { journal?: EventJournal; store?: RoundStore; snapsho
   const golferStore = createInMemoryGolferStore();
   const projectionStore = createInMemoryProjectionStore();
   const logger = createNullLogger();
+  const cardStore = createInMemoryCardStore();
+  const cardRecord = await seedCard(cardStore, courseId("course-1"), cardId("card-1"), fixtureLinks);
+  const course = { courseId: cardRecord.courseId, cardId: cardRecord.cardId };
 
   return {
     journal,
     snapshots,
     broadcast,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    course,
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
@@ -82,8 +88,8 @@ const setup = (overrides?: { journal?: EventJournal; store?: RoundStore; snapsho
 // live but unscored, the starting point both carries' (and the atomic-commit suite's) tests
 // build on.
 const freshLiveRoundWithGame = async (overrides?: { journal?: EventJournal; store?: RoundStore; snapshots?: SnapshotStore }) => {
-  const ctx = setup(overrides);
-  const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-host" });
+  const ctx = await setup(overrides);
+  const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-host" });
   const bo = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: "sub-bo" });
   const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
   const boClaims: ParticipantClaims = { roundId: bo.roundId, golferId: bo.golferId };

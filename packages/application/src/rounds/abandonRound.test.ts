@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RoundEvent } from "@swng/domain";
-import { deviceId, fixtureLinks, opId, reduceRound } from "@swng/domain";
+import { cardId, courseId, deviceId, fixtureLinks, opId, reduceRound } from "@swng/domain";
 import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { SnapshotStore } from "../ports/snapshotStore.js";
@@ -8,6 +8,7 @@ import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/token
 import {
   createCapturingBroadcast,
   createFixedClock,
+  createInMemoryCardStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryProjectionStore,
@@ -15,6 +16,7 @@ import {
   createInMemorySnapshotStore,
   createNullLogger,
   createSequentialIds,
+  seedCard,
 } from "../testing/fakes.js";
 import { abandonRound } from "./abandonRound.js";
 import { addGame } from "./addGame.js";
@@ -49,7 +51,7 @@ const createClientOps = (device: string) => {
 // overrides let the race suites below share one `inner` journal/snapshot pair between a
 // race-injecting wrapper and a plain finalizeRound/abandonRound call — same idiom as
 // finalizeRound.test.ts's own setup().
-const setup = (overrides?: { journal?: EventJournal; store?: RoundStore; snapshots?: SnapshotStore }) => {
+const setup = async (overrides?: { journal?: EventJournal; store?: RoundStore; snapshots?: SnapshotStore }) => {
   const snapshotStore = createInMemorySnapshotStore();
   const journal = overrides?.journal ?? createInMemoryJournal(snapshotStore);
   const snapshots = overrides?.snapshots ?? snapshotStore;
@@ -61,13 +63,17 @@ const setup = (overrides?: { journal?: EventJournal; store?: RoundStore; snapsho
   const golferStore = createInMemoryGolferStore();
   const projectionStore = createInMemoryProjectionStore();
   const logger = createNullLogger();
+  const cardStore = createInMemoryCardStore();
+  const cardRecord = await seedCard(cardStore, courseId("course-1"), cardId("card-1"), fixtureLinks);
+  const course = { courseId: cardRecord.courseId, cardId: cardRecord.cardId };
 
   return {
     journal,
     snapshots,
     broadcast,
     projectionStore,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    course,
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
@@ -81,8 +87,8 @@ const setup = (overrides?: { journal?: EventJournal; store?: RoundStore; snapsho
 // each write a LIVE presence pointer for their own golfer (rounds/presence.ts), which the
 // presence-cleanup case below depends on.
 const freshLiveRoundWithGame = async (overrides?: { journal?: EventJournal; store?: RoundStore; snapshots?: SnapshotStore }) => {
-  const ctx = setup(overrides);
-  const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-host" });
+  const ctx = await setup(overrides);
+  const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-host" });
   const bo = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: "sub-bo" });
   const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
   const boClaims: ParticipantClaims = { roundId: bo.roundId, golferId: bo.golferId };

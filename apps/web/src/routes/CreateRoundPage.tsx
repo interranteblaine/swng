@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import type { CourseId } from "@swng/domain";
+import { cardId } from "@swng/domain";
 import type { CourseView, StartRoundResponse } from "@swng/contracts";
 import { ApiError, createRound, getCourse } from "../api";
 import { SignInCta } from "../auth/SignInCta";
@@ -96,16 +97,26 @@ export function CreateRoundPage() {
     setSubmitting(true);
     setError(undefined);
     try {
-      // courseView.card VERBATIM — exactly the fetched CourseCard, not reconstructed — because a
-      // round freezes this whole snapshot. Accounts-only identity (spec §3): the creator seat is
-      // always yourself, resolved server-side from the Bearer — the request carries no name/golferId
-      // (the server freezes the account golfer's name into the join event).
+      // Course-cards spec §4: a REFERENCE, never a card — the server resolves and freezes the
+      // lineage's CURRENT card itself. Accounts-only identity (spec §3): the creator seat is
+      // always yourself, resolved server-side from the Bearer — the request carries no
+      // name/golferId (the server freezes the account golfer's name into the join event).
       const response: StartRoundResponse = await auth.withAuth((token) =>
-        createRound({ card: courseView.card, host: { tee, courseHandicap: parsedHandicap } }, token),
+        createRound({ course: { courseId: courseView.courseId, cardId: cardId(courseView.cardId) }, host: { tee, courseHandicap: parsedHandicap } }, token),
       );
       credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer.name, joinCode: response.joinCode });
       navigate(`/round/${response.roundId}`);
     } catch (caught) {
+      // card-superseded (course-cards spec §4): someone else's edit landed on this course's
+      // lineage between the fetch and this submit. Re-fetch the now-current card (which also
+      // re-seeds `tee` via selectCourse) so the golfer reviews the real numbers before retrying,
+      // rather than silently starting a round on numbers they never actually saw.
+      if (caught instanceof ApiError && caught.code === "card-superseded") {
+        selectCourse(courseView.courseId);
+        setError("This card was just updated — review the numbers before starting.");
+        setSubmitting(false);
+        return;
+      }
       setError(caught instanceof ApiError ? caught.message : "Could not create the round — try again.");
       setSubmitting(false);
     }

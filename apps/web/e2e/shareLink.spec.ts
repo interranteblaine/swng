@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
 import { fixtureLinks } from "@swng/domain";
 import type { GolferId, RoundId } from "@swng/domain";
-import { createScoreOps, finalizeRoundDirect, loadWebEnv, mintAccountGolfer, recordScoreDirect, shareRoundDirect, startRoundDirect } from "./support.js";
+import { createScoreOps, ensureCourse, finalizeRoundDirect, loadWebEnv, mintAccountGolfer, recordScoreDirect, shareRoundDirect, startRoundDirect } from "./support.js";
 
 // M9 Task 3 (share): the round has a link. The participant side is driven entirely over the
 // API (score-for-anyone/API-only, the SAME idiom identityRecord.spec.ts's own API-played
@@ -45,7 +45,10 @@ test.describe.serial("M9 Task 3 field test — the round has a link: live specta
 
   test("1: a signed-in participant creates a round as herself and scores hole 1, entirely over the API", async () => {
     const ann = await mintAccountGolfer("share-ann", "Ann");
-    const started = await startRoundDirect(httpUrl, ann, { card: fixtureLinks, tee: "white", courseHandicap: 8 });
+    // Course-cards spec §4: StartRound resolves a REFERENCE now — seed the lineage once via the
+    // public course API, then pass it through.
+    const course = await ensureCourse(fixtureLinks.courseName, fixtureLinks, ann);
+    const started = await startRoundDirect(httpUrl, ann, { course, tee: "white", courseHandicap: 8 });
     roundIdValue = started.roundId;
     hostToken = started.token;
     hostGolferId = started.golferId;

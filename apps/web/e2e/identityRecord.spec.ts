@@ -4,6 +4,7 @@ import type { GetMyRecordResponse } from "@swng/contracts";
 import type { CourseCard, RoundId } from "@swng/domain";
 import {
   createScoreOps,
+  ensureCourse,
   finalizeRoundDirect,
   getMyRecordDirect,
   injectAuthTokens,
@@ -62,8 +63,17 @@ const PINNED_DIFFERENTIALS_USED = 1;
 // account's own golferId — startRoundDirect sources both from the record), 18 scores via the
 // round's own participant token, finalize. Pure API — nothing in "a finalized round lands on
 // the record" is UI behavior (the UI half is test 3's ProfilePage read).
-const playRecordRound = async (httpUrl: string, account: AccountGolfer, card: CourseCard, label: string, bogeys: number): Promise<RoundId> => {
-  const started = await startRoundDirect(httpUrl, account, { card, tee: "white", courseHandicap: 8 });
+// Course-cards spec §4: takes the already-seeded REFERENCE (course-cards spec §4), not a card —
+// the caller seeds the lineage once (test 1, below) and threads the same reference through all
+// three rounds.
+const playRecordRound = async (
+  httpUrl: string,
+  account: AccountGolfer,
+  course: Awaited<ReturnType<typeof ensureCourse>>,
+  label: string,
+  bogeys: number,
+): Promise<RoundId> => {
+  const started = await startRoundDirect(httpUrl, account, { course, tee: "white", courseHandicap: 8 });
   const ops = createScoreOps(`record-${label}`);
   for (const [i, strokes] of holeScoresFor(bogeys).entries()) {
     await recordScoreDirect(httpUrl, started.roundId, started.token, { golferId: account.golfer.golferId, hole: i + 1, strokes }, ops);
@@ -120,13 +130,17 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     test.setTimeout(180_000);
     const { httpUrl } = loadWebEnv();
 
+    // Course-cards spec §4: seed the lineage ONCE, then thread the same reference through all
+    // three rounds — StartRound resolves a reference now, never a card.
+    const course = await ensureCourse(courseName, card, account);
+
     // Strictly in deck order, each finalized before the next starts — test 2's newest-first
     // expectation depends on exactly this sequence. The same account golferId seats every
     // round because it IS the account's own id; season-long continuity needs no claim step
     // and no ghost reuse, it's just identity.
-    roundIds.push(await playRecordRound(httpUrl, account, card, "r1", 10));
-    roundIds.push(await playRecordRound(httpUrl, account, card, "r2", 13));
-    roundIds.push(await playRecordRound(httpUrl, account, card, "r3", 16));
+    roundIds.push(await playRecordRound(httpUrl, account, course, "r1", 10));
+    roundIds.push(await playRecordRound(httpUrl, account, course, "r2", 13));
+    roundIds.push(await playRecordRound(httpUrl, account, course, "r3", 16));
   });
 
   test("2: /me/record settles to 3 lines and the pinned index, live", async () => {

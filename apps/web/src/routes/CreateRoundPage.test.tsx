@@ -29,7 +29,7 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { createRound, getCourse, getMe, searchCourses } from "../api";
+import { ApiError, createRound, getCourse, getMe, searchCourses } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { CreateRoundPage } from "./CreateRoundPage";
@@ -135,10 +135,11 @@ describe("CreateRoundPage — create as yourself", () => {
 
     await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
     const [body, token] = mockedCreateRound.mock.calls[0]!;
-    // Deep-equal against the EXACT card getCourse returned — the freeze source, not a
-    // reconstruction. Accounts-only identity (spec §3): the request carries only card + host
-    // tee/courseHandicap — the seat (name + golferId) is resolved server-side from the Bearer.
-    expect(body).toEqual({ card: fixtureLinks18, host: { tee: "white", courseHandicap: 8 } });
+    // Course-cards spec §4: a REFERENCE (courseId + cardId), never a card — the server resolves
+    // and freezes the lineage's current card itself. Accounts-only identity (spec §3): the
+    // request carries only that reference + host tee/courseHandicap — the seat (name + golferId)
+    // is resolved server-side from the Bearer.
+    expect(body).toEqual({ course: { courseId: courseView.courseId, cardId: courseView.cardId }, host: { tee: "white", courseHandicap: 8 } });
     expect(token).toBe(idToken);
     expect(() => startRoundRequestSchema.parse(body)).not.toThrow();
 
@@ -218,7 +219,32 @@ describe("CreateRoundPage — create as yourself", () => {
     fireEvent.click(screen.getByRole("button", { name: /create round/i }));
 
     await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
-    expect(mockedCreateRound.mock.calls[0]![0].card).toEqual(revisedCard);
+    expect(mockedCreateRound.mock.calls[0]![0].course).toEqual({ courseId: revisedCourseView.courseId, cardId: revisedCourseView.cardId });
+  });
+
+  // Course-cards spec §4: card-superseded means someone else's edit landed on this lineage
+  // between the fetch and this submit — the page re-fetches the now-current card (so the tee
+  // picker/numbers are honest) and surfaces a notice, rather than silently starting a round on
+  // numbers the golfer never actually reviewed.
+  it("a card-superseded rejection re-fetches the course and shows a review notice", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+    mockedCreateRound.mockRejectedValueOnce(new ApiError("card-superseded", 409, "the CURRENT pointer has moved"));
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+    expect(mockedGetCourse).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
+    await screen.findByText(/just updated/i);
+    // getCourse re-called (once for the initial load, once for the card-superseded re-fetch).
+    await waitFor(() => expect(mockedGetCourse).toHaveBeenCalledTimes(2));
+    expect(mockedGetCourse).toHaveBeenLastCalledWith(courseId("course-18"));
   });
 });
 

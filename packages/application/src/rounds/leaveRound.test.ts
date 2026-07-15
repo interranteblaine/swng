@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { deviceId, fixtureLinks, golferId, opId } from "@swng/domain";
+import { cardId, courseId, deviceId, fixtureLinks, golferId, opId } from "@swng/domain";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
   createFixedClock,
+  createInMemoryCardStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryProjectionStore,
@@ -11,6 +12,7 @@ import {
   createInMemorySnapshotStore,
   createNullLogger,
   createSequentialIds,
+  seedCard,
 } from "../testing/fakes.js";
 import { finalizeRound } from "./finalizeRound.js";
 import { joinRound } from "./joinRound.js";
@@ -41,7 +43,7 @@ const createClientOps = (device: string) => {
   return () => ({ opId: opId(`${device}-op-${(opCounter += 1)}`), hlc: { wallMs: wallMs++, counter: 0, deviceId: deviceId(device) } });
 };
 
-const setup = () => {
+const setup = async () => {
   const snapshots = createInMemorySnapshotStore();
   const journal = createInMemoryJournal(snapshots);
   const store = createInMemoryRoundStore();
@@ -52,11 +54,15 @@ const setup = () => {
   const golferStore = createInMemoryGolferStore();
   const projectionStore = createInMemoryProjectionStore();
   const logger = createNullLogger();
+  const cardStore = createInMemoryCardStore();
+  const cardRecord = await seedCard(cardStore, courseId("course-1"), cardId("card-1"), fixtureLinks);
+  const course = { courseId: cardRecord.courseId, cardId: cardRecord.cardId };
 
   return {
     journal,
     broadcast,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    course,
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     record: recordScore({ journal, broadcast }),
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
@@ -67,8 +73,8 @@ const setup = () => {
 
 // A live round, Ann (host) + Bo — the starting point every case builds on.
 const freshLiveRound = async () => {
-  const ctx = setup();
-  const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-host" });
+  const ctx = await setup();
+  const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-host" });
   const bo = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: "sub-bo" });
   const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
   const boClaims: ParticipantClaims = { roundId: bo.roundId, golferId: bo.golferId };

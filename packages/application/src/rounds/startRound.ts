@@ -3,6 +3,7 @@ import { findTeeSet, roundId } from "@swng/domain";
 import type { StartRoundRequest, StartRoundResponse } from "@swng/contracts";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { Broadcast } from "../ports/broadcast.js";
+import type { CardStore } from "../ports/cardStore.js";
 import type { Clock } from "../ports/clock.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
@@ -11,6 +12,7 @@ import type { Logger } from "../ports/logger.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { TokenIssuer } from "../ports/tokenIssuer.js";
+import { ApplicationError } from "../errors.js";
 import { ensureGolfer } from "../golfers/ensureGolfer.js";
 import { writePresence } from "./presence.js";
 import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
@@ -36,12 +38,19 @@ export const startRound =
     golferStore: GolferStore;
     projectionStore: ProjectionStore;
     logger: Logger;
+    cardStore: CardStore;
   }) =>
   // claims is REQUIRED: POST /rounds is the "golfer" auth tier now (accounts-only identity spec
   // §3) — every person who appears in a round is a signed-in account, so there is no anonymous
   // start. The dispatcher guarantees a verified AccountClaims before this runs.
   async (command: StartRoundRequest, claims: AccountClaims): Promise<StartRoundResponse> => {
-    findTeeSet(command.card, command.host.tee); // unknown-tee-set (DomainError) propagates
+    // Course-cards spec §4: resolve the reference, insist on currency, freeze VERBATIM.
+    const record = await deps.cardStore.getCurrent(command.course.courseId);
+    if (!record) throw new ApplicationError("course-not-found");
+    if (record.cardId !== command.course.cardId) {
+      throw new ApplicationError("card-superseded", `course ${command.course.courseId}: current card is ${record.cardId}`);
+    }
+    findTeeSet(record.card, command.host.tee); // unknown-tee-set (DomainError) propagates
 
     // As-self, the ONLY identity path: get-or-create the caller's account golfer. The seat's
     // golferId and its frozen participant name both come straight from that record.
@@ -63,7 +72,7 @@ export const startRound =
       {
         kind: "round-created",
         roundId: id,
-        card: command.card,
+        card: record.card,
         ...serverEnvelope({ hlc, ids: deps.ids }, host),
       },
       { kind: "participant-joined", participant: hostParticipant, ...serverEnvelope({ hlc, ids: deps.ids }, host) },
@@ -83,7 +92,7 @@ export const startRound =
     // Presence (spec §5, Task 13): a LIVE pointer for the seated creator, written only after the
     // round has actually committed above — writePresence itself never throws (best-effort;
     // presence.ts's own doc comment), so this can't undo the seating that already happened.
-    await writePresence({ projectionStore: deps.projectionStore, logger: deps.logger, clock: deps.clock }, host, id, command.card.courseName);
+    await writePresence({ projectionStore: deps.projectionStore, logger: deps.logger, clock: deps.clock }, host, id, record.card.courseName);
 
     const token = deps.tokens.issue({ scope: "participant", roundId: id, golferId: host });
 

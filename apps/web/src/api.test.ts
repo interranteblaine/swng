@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { courseId, crewId, fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
+import { cardId, courseId, crewId, gameId, golferId, roundId } from "@swng/domain";
 import type {
   AddGameRequest,
   AppendCountedRoundRequest,
@@ -83,7 +83,7 @@ afterEach(() => {
 });
 
 describe("createRound", () => {
-  const input: StartRoundRequest = { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } };
+  const input: StartRoundRequest = { course: { courseId: courseId("course-1"), cardId: cardId("card-1") }, host: { tee: "white", courseHandicap: 8 } };
 
   it("POSTs the request body to /rounds and parses a matching response", async () => {
     let seenUrl: string | undefined;

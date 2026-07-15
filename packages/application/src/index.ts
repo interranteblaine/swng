@@ -94,5 +94,6 @@ export {
   createSequentialIds,
   createTestTokenIssuer,
   putAndBindGolfer,
+  seedCard,
 } from "./testing/fakes.js";
 export type { CapturingBroadcast, CapturingLogger, InMemorySnapshotStore } from "./testing/fakes.js";

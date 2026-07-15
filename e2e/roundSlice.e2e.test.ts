@@ -10,7 +10,7 @@ import {
 import type { FinalizeRoundResponse, RecordScoreRequest } from "@swng/contracts";
 import { fixtureLinks, reduceRound, resultOf, scoreGame } from "@swng/domain";
 import type { GameResult, GolferId, HoleResult, RoundEvent, RoundId } from "@swng/domain";
-import { apiUrl, connectWs, createClientOps, get, loadEndpoints, mintAccountGolfer, post, waitUntil } from "./support/client.js";
+import { apiUrl, connectWs, createClientOps, ensureCourse, get, loadEndpoints, mintAccountGolfer, post, waitUntil } from "./support/client.js";
 import type { ClientOps, WsClient } from "./support/client.js";
 
 // The M2 golden concurrency deck, reproduced verbatim (packages/domain/src/scoring/concurrent.test.ts)
@@ -73,7 +73,11 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
   // (ensureGolfer), so the request carries no name/golferId.
   it("1: Ann's account starts the round as herself", async () => {
     const ann = await mintAccountGolfer(httpUrl, "slice-ann", "Ann");
-    const started = await post(rounds(), { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, startRoundResponseSchema, ann.idToken);
+    // Course-cards spec §4: StartRound resolves a REFERENCE now — seed the lineage via the
+    // public course API (search-first, create-if-absent — apps/web/e2e/support.ts's own
+    // ensureCourse idiom, mirrored here), then pass it through.
+    const course = await ensureCourse(httpUrl, fixtureLinks.courseName, fixtureLinks, ann);
+    const started = await post(rounds(), { course, host: { tee: "white", courseHandicap: 8 } }, startRoundResponseSchema, ann.idToken);
     roundId = started.roundId;
     joinCode = started.joinCode;
     token1 = started.token;

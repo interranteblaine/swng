@@ -8,6 +8,7 @@ import {
   createCrewDirect,
   createScoreOps,
   createSeasonDirect,
+  ensureCourse,
   finalizeRoundDirect,
   getMyRecordDirect,
   getSeasonStandingsDirect,
@@ -56,6 +57,10 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
   let ids: SeasonGolferIds;
   let seasonId = "";
   const roundIds: RoundId[] = [];
+  // Course-cards spec §4: StartRound resolves a REFERENCE now — seeded ONCE (step 3, before the
+  // deck loop) via the public course API, then passed into every startRoundDirect call below.
+  // Deck DATA (card's holes/pars/tees) is untouched — only the seeding mechanics change.
+  let course: Awaited<ReturnType<typeof ensureCourse>>;
 
   // The frozen ledger, resolved to the wire's SeasonStandingLine shape: a crew is a
   // grouping/competition ONLY (owner ruling, spec §11a) — standings aggregate the CURRENT
@@ -141,13 +146,17 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     test.setTimeout(900_000); // 12 rounds x (1 start + 3 self-joins + 3 games + 18 hole-batches + 1 finalize) against real beta latency
     const { httpUrl } = loadWebEnv();
 
+    // Course-cards spec §4: seed the lineage ONCE, before the deck loop — every one of the 12
+    // rounds below resolves the SAME reference (deck data untouched, standings stay byte-identical).
+    course = await ensureCourse(courseName, card, al);
+
     // Every round has the same shape: Al starts as himself, then Bo/Cy/Dee each JOIN as
     // themselves with their own Bearers — the per-account joins that replaced StartRound's
     // deleted players[] ghost seeding. The same four golferIds recur across all 12 rounds
     // because they ARE the accounts' own ids (asserted per join below) — season-long
     // continuity is just identity now, not a reused ghost mint.
     for (let roundNumber = 1; roundNumber <= SEASON_ROUNDS; roundNumber += 1) {
-      const started = await startRoundDirect(httpUrl, al, { card, tee: "member", courseHandicap: 0 });
+      const started = await startRoundDirect(httpUrl, al, { course, tee: "member", courseHandicap: 0 });
       expect(started.golferId).toBe(ids.al); // as-self: the host seat is Al's account golfer, never a fresh id
 
       for (const account of [bo, cy, dee]) {

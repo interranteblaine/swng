@@ -215,10 +215,10 @@ export const joinRoundDirect = async (
 export const startRoundDirect = async (
   httpUrl: string,
   account: AccountGolfer,
-  input: { readonly card: CourseCard; readonly tee: string; readonly courseHandicap: number },
+  input: { readonly course: { readonly courseId: CourseId; readonly cardId: string }; readonly tee: string; readonly courseHandicap: number },
 ): Promise<StartRoundResponse> => {
   const body = parse(startRoundRequestSchema, {
-    card: input.card,
+    course: input.course,
     host: { tee: input.tee, courseHandicap: input.courseHandicap },
   });
   const response = await fetch(`${httpUrl}/rounds`, {

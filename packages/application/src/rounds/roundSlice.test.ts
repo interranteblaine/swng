@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HoleResult } from "@swng/domain";
-import { compareHlc, deviceId, fixtureLinks, golferId, opId, placeholderName, reduceRound } from "@swng/domain";
+import { cardId, compareHlc, courseId, deviceId, fixtureLinks, golferId, opId, placeholderName, reduceRound } from "@swng/domain";
 import type { Clock } from "../ports/clock.js";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
@@ -9,6 +9,7 @@ import {
   createCapturingLogger,
   createFixedClock,
   createFrozenClock,
+  createInMemoryCardStore,
   createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
@@ -18,6 +19,7 @@ import {
   createNullLogger,
   createSequentialIds,
   putAndBindGolfer,
+  seedCard,
 } from "../testing/fakes.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import { addGame } from "./addGame.js";
@@ -68,7 +70,12 @@ const seedAccounts = async (golferStore: GolferStore): Promise<void> => {
   await putAndBindGolfer(golferStore, BO.id, BO.sub, BO.name);
 };
 
-const setup = (clock: Clock = createFixedClock(1_000)) => {
+// Course-cards spec §4: StartRound resolves a card by REFERENCE now — setup seeds one lineage
+// (fixtureLinks, under CARD_REF) into a fresh CardStore per test and hands the reference back
+// so every ctx.start() call below just passes it through.
+const CARD_REF = { courseId: courseId("course-1"), cardId: cardId("card-1") };
+
+const setup = async (clock: Clock = createFixedClock(1_000)) => {
   const snapshots = createInMemorySnapshotStore();
   const journal = createInMemoryJournal(snapshots);
   const store = createInMemoryRoundStore();
@@ -79,6 +86,8 @@ const setup = (clock: Clock = createFixedClock(1_000)) => {
   const crewStore = createInMemoryCrewStore();
   const projectionStore = createInMemoryProjectionStore();
   const logger = createNullLogger();
+  const cardStore = createInMemoryCardStore();
+  const cardRecord = await seedCard(cardStore, CARD_REF.courseId, CARD_REF.cardId, fixtureLinks);
 
   return {
     broadcast,
@@ -86,7 +95,10 @@ const setup = (clock: Clock = createFixedClock(1_000)) => {
     golferStore,
     crewStore,
     projectionStore,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    cardStore,
+    cardRecord,
+    course: CARD_REF,
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     leave: leaveRound({ journal, broadcast, clock, ids }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
@@ -101,19 +113,19 @@ const setup = (clock: Clock = createFixedClock(1_000)) => {
 // focused case below needs, with no game and no scores yet. Both are account golfers seated
 // as-self from their own subs.
 const freshLiveRound = async () => {
-  const ctx = setup();
+  const ctx = await setup();
   await seedAccounts(ctx.golferStore);
-  const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+  const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
   const bo = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: BO.sub });
   return { ...ctx, host, bo };
 };
 
 describe("round use cases — golden path over in-memory ports", () => {
   it("creates, joins, scores (including score-for-anyone), dedupes, and finalizes into the M2 golden stableford numbers", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     await seedAccounts(ctx.golferStore);
 
-    const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
     // As-self: the creator seat IS Ann's own account golfer, never a fresh id.
     expect(host.golferId).toBe(ANN.id);
 
@@ -203,7 +215,7 @@ describe("round use cases — golden path over in-memory ports", () => {
   });
 
   it("rejects a join with an unknown join code — bad-join-code", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     await seedAccounts(ctx.golferStore);
     await expect(ctx.join({ code: "ZZZZZZ", tee: "white", courseHandicap: 10 }, { sub: BO.sub })).rejects.toMatchObject({ code: "bad-join-code" });
   });
@@ -288,7 +300,7 @@ describe("round use cases — golden path over in-memory ports", () => {
   });
 
   it("rejects peekRound with an unknown join code — bad-join-code, same shape as join's", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     await expect(ctx.peek("ZZZZZZ")).rejects.toMatchObject({ code: "bad-join-code" });
   });
 });
@@ -299,10 +311,10 @@ describe("round use cases — golden path over in-memory ports", () => {
 // (ensureGolfer resolves or mints it).
 describe("StartRound — as-self only", () => {
   it("seats the caller's OWN account golfer as the creator: golferId + frozen name come from the record", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
 
-    const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
 
     expect(host.golferId).toBe(ANN.id);
     const genesis = await ctx.events(host.roundId, 0);
@@ -313,9 +325,9 @@ describe("StartRound — as-self only", () => {
   });
 
   it("mints the caller's golfer on first touch when the sub has none yet — the seat carries the placeholder name f(sub)", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     // No golfer seeded for sub-new: ensureGolfer mints one with placeholderName(sub-new).
-    const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-new" });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-new" });
 
     expect(host.golferId).toBeDefined();
     // The freshly-minted account is now bound to the sub.
@@ -323,6 +335,48 @@ describe("StartRound — as-self only", () => {
     const genesis = await ctx.events(host.roundId, 0);
     const joinEvent = genesis.events.find((event) => event.kind === "participant-joined");
     expect(joinEvent).toMatchObject({ participant: { golferId: host.golferId, name: placeholderName("sub-new") } });
+  });
+});
+
+// Course-cards spec §4: StartRound resolves `command.course` (a reference) through the
+// CardStore and freezes the CURRENT card VERBATIM into round-created — no translation, the
+// no-translation invariant (spec invariant 3).
+describe("StartRound — card resolution (course-cards spec §4)", () => {
+  it("freezes the CardStore's current record.card VERBATIM into round-created — same object reference, not a copy", async () => {
+    const ctx = await setup();
+    await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
+
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+
+    const genesis = await ctx.events(host.roundId, 0);
+    const appendedRoundCreated = genesis.events[0];
+    expect(appendedRoundCreated).toMatchObject({ kind: "round-created", card: ctx.cardRecord.card });
+    // The no-translation invariant: the SAME object reference, not merely a deep-equal copy.
+    expect((appendedRoundCreated as { card: unknown }).card).toBe(ctx.cardRecord.card);
+  });
+
+  it("rejects a cardId that is no longer CURRENT — card-superseded, nothing appended", async () => {
+    const ctx = await setup();
+    await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
+    // Supersede the lineage so ctx.course.cardId (the ORIGINAL card) is now stale.
+    const superseding = { cardId: cardId("card-2"), courseId: ctx.course.courseId, card: fixtureLinks, enteredBy: ctx.cardRecord.enteredBy, enteredAtMs: 1, provenance: "community" as const, supersedes: ctx.course.cardId };
+    await ctx.cardStore.supersede(superseding);
+
+    await expect(ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub })).rejects.toMatchObject({
+      code: "card-superseded",
+    });
+    // The card check runs BEFORE any id is minted or journal append attempted — proven here by
+    // broadcast.publish (which only ever fires after a successful append) never having been called.
+    expect(ctx.broadcast.calls).toHaveLength(0);
+  });
+
+  it("rejects an unknown courseId — course-not-found", async () => {
+    const ctx = await setup();
+    await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
+
+    await expect(
+      ctx.start({ course: { courseId: courseId("nope"), cardId: cardId("nope-card") }, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub }),
+    ).rejects.toMatchObject({ code: "course-not-found" });
   });
 });
 
@@ -336,10 +390,10 @@ describe("StartRound — as-self only", () => {
 // guaranteed order) and PASS once hlcs are strictly increasing within the batch.
 describe("StartRound's batch under a frozen clock (regression: same-ms server events)", () => {
   it("stamps round-created, participant-joined, and round-started with strictly increasing hlc, and reduces to status live", async () => {
-    const ctx = setup(createFrozenClock(1_000));
+    const ctx = await setup(createFrozenClock(1_000));
     await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
 
-    const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
     const genesis = await ctx.events(host.roundId, 0);
 
     expect(genesis.events.map((event) => event.kind)).toEqual(["round-created", "participant-joined", "round-started"]);
@@ -362,9 +416,9 @@ describe("StartRound's batch under a frozen clock (regression: same-ms server ev
 // account golfer, and the join event freezes that name (sealed leaf).
 describe("JoinRound — as-self only", () => {
   it("seats the caller's OWN account golfer, freezing its name into the participant event", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     await seedAccounts(ctx.golferStore);
-    const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
 
     const joined = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: BO.sub });
     expect(joined.golferId).toBe(BO.id);
@@ -377,9 +431,9 @@ describe("JoinRound — as-self only", () => {
   // Brief Step 1: a placeholder-named account (never renamed on the profile) joins fine, and the
   // event carries the placeholder — the join is never gated on having a chosen name.
   it("a placeholder-named golfer joins fine and the event carries the placeholder", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
-    const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
 
     // Bo has only ever been minted (never PUT a real name), so his account carries the placeholder.
     const joined = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: "sub-placeholder" });
@@ -418,18 +472,18 @@ describe("JoinRound — as-self only", () => {
 // spec §3), so presence is always written under a real account golfer's identity.
 describe("StartRound/JoinRound — presence (Task 13)", () => {
   it("StartRound writes a LIVE pointer for the creator, carrying the round's own courseName", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
-    const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
 
     const live = await ctx.projectionStore.listLive(host.golferId);
     expect(live).toEqual([{ roundId: host.roundId, courseName: fixtureLinks.courseName, joinedAtMs: expect.any(Number) }]);
   });
 
   it("JoinRound writes a LIVE pointer for the joiner", async () => {
-    const ctx = setup();
+    const ctx = await setup();
     await seedAccounts(ctx.golferStore);
-    const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
     const bo = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: BO.sub });
 
     const live = await ctx.projectionStore.listLive(bo.golferId);
@@ -455,9 +509,11 @@ describe("StartRound/JoinRound — presence (Task 13)", () => {
     const ids = createSequentialIds("t");
     const golferStore = createInMemoryGolferStore();
     await putAndBindGolfer(golferStore, ANN.id, ANN.sub, ANN.name);
-    const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore: throwingStore, logger });
+    const cardStore = createInMemoryCardStore();
+    const course = await seedCard(cardStore, CARD_REF.courseId, CARD_REF.cardId, fixtureLinks);
+    const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore: throwingStore, logger, cardStore });
 
-    const host = await start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await start({ course: { courseId: course.courseId, cardId: course.cardId }, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
 
     expect(host.roundId).toBeDefined(); // the round started — presence's own failure never propagated
     expect(logger.warnings).toHaveLength(1);
@@ -481,10 +537,12 @@ describe("StartRound/JoinRound — presence (Task 13)", () => {
     const golferStore = createInMemoryGolferStore();
     await putAndBindGolfer(golferStore, ANN.id, ANN.sub, ANN.name);
     await putAndBindGolfer(golferStore, BO.id, BO.sub, BO.name);
-    const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore: throwingStore, logger });
+    const cardStore = createInMemoryCardStore();
+    const course = await seedCard(cardStore, CARD_REF.courseId, CARD_REF.cardId, fixtureLinks);
+    const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore: throwingStore, logger, cardStore });
     const join = joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore: throwingStore, logger });
 
-    const host = await start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await start({ course: { courseId: course.courseId, cardId: course.cardId }, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
     const bo = await join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: BO.sub });
 
     expect(bo.golferId).toBeDefined(); // the join succeeded — presence's own failure never propagated

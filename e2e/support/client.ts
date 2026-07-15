@@ -9,9 +9,18 @@ import {
 } from "@aws-sdk/client-cognito-identity-provider";
 import WebSocket from "ws";
 import type { z } from "zod";
-import { golferResponseSchema, parse, updateMeRequestSchema, wsEnvelopeSchema } from "@swng/contracts";
+import {
+  createCourseRequestSchema,
+  createCourseResponseSchema,
+  getCourseResponseSchema,
+  golferResponseSchema,
+  parse,
+  searchCoursesResponseSchema,
+  updateMeRequestSchema,
+  wsEnvelopeSchema,
+} from "@swng/contracts";
 import type { WsEnvelope } from "@swng/contracts";
-import type { DeviceId, GolferId, Hlc, OpId, RoundEvent } from "@swng/domain";
+import type { CourseCard, CourseId, DeviceId, GolferId, Hlc, OpId, RoundEvent } from "@swng/domain";
 import { deviceId as toDeviceId, opId as toOpId } from "@swng/domain";
 
 // --- Endpoints ---------------------------------------------------------------------------
@@ -219,6 +228,32 @@ export const mintAccountGolfer = async (httpUrl: string, label: string, name: st
   // Start/Join bodies source their identity fields from.
   const { golfer } = await put(apiUrl(httpUrl, "/me"), parse(updateMeRequestSchema, { name }), golferResponseSchema, idToken);
   return { idToken, golferId: golfer.golferId, name: golfer.name };
+};
+
+// --- Course seeding: search-first, create-if-absent, via the PUBLIC course API ---------------
+
+// Course-cards spec §4: StartRound resolves a REFERENCE now (`{courseId, cardId}`), never a
+// card — the caller can no longer author one, so a round-creation body needs a real, seeded
+// course lineage to point at. Mirrors apps/web/e2e/support.ts's own ensureCourse exactly
+// (search-first by exact name, create-if-absent so a repeat run against the same beta stack
+// doesn't mint a duplicate lineage); writes are "golfer"-gated, so the caller passes an already
+// signed-in AccountGolfer whose Bearer authorizes the POST.
+export const ensureCourse = async (httpUrl: string, name: string, card: CourseCard, account: AccountGolfer): Promise<{ courseId: CourseId; cardId: string }> => {
+  if (card.teeSets.length === 0) throw new Error(`course card "${name}" has no tee sets to seed with`);
+
+  const searched = await get(`${apiUrl(httpUrl, "/courses")}?${new URLSearchParams({ query: name }).toString()}`, searchCoursesResponseSchema);
+  const existing = searched.courses.find((c) => c.name === name);
+  if (existing) {
+    const { course } = await get(apiUrl(httpUrl, `/courses/${existing.courseId}`), getCourseResponseSchema);
+    return { courseId: course.courseId, cardId: course.cardId };
+  }
+
+  const body = parse(createCourseRequestSchema, {
+    name,
+    teeSets: card.teeSets.map((tee) => ({ name: tee.name, rating: tee.rating, slope: tee.slope, holes: tee.holes })),
+  });
+  const { course } = await post(apiUrl(httpUrl, "/courses"), body, createCourseResponseSchema, account.idToken);
+  return { courseId: course.courseId, cardId: course.cardId };
 };
 
 // --- Client-side op identity (deviceId, opId, hlc) ----------------------------------------

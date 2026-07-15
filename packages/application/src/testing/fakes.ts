@@ -1,5 +1,5 @@
-import type { CardRecord, CourseId, Crew, CrewId, Golfer, GolferId, GolferRoundLine, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
-import { courseNameKey } from "@swng/domain";
+import type { CardId, CardRecord, CourseCard, CourseId, Crew, CrewId, Golfer, GolferId, GolferRoundLine, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import { courseNameKey, golferId } from "@swng/domain";
 import { ApplicationError } from "../errors.js";
 import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
 import type { Broadcast } from "../ports/broadcast.js";
@@ -242,6 +242,25 @@ export const createInMemoryGolferStore = (): GolferStore => {
 export const putAndBindGolfer = async (store: GolferStore, id: GolferId, sub: string, name: string): Promise<void> => {
   await store.put({ id, name, handicap: {} }, undefined);
   await store.bindSub(id, sub);
+};
+
+// StartRound resolves cards by REFERENCE now (course-cards spec §4): callers no longer author a
+// card, so tests need a lineage seeded straight into the CardStore port rather than a bare
+// CourseCard value. Bypasses CreateCourse/buildCardRecord on purpose — several golden domain
+// fixtures (fixtureLinks et al.) predate teeId and buildCardRecord demands one on every tee.
+// Returns the seeded CardRecord so the caller can pass `{ courseId: record.courseId, cardId:
+// record.cardId }` straight into StartRoundRequest.course.
+export const seedCard = async (store: CardStore, courseId: CourseId, id: CardId, card: CourseCard): Promise<CardRecord> => {
+  const record: CardRecord = {
+    cardId: id,
+    courseId,
+    card,
+    enteredBy: { golferId: golferId("fixture-enterer"), name: "Fixture Enterer" },
+    enteredAtMs: 0,
+    provenance: "community",
+  };
+  await store.create(record);
+  return record;
 };
 
 // CrewStore's real adapter (M8 Task 3; the permanent join code + its gsi1 partition are GONE

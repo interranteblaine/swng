@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { deviceId, fixtureLinks, gameId, opId } from "@swng/domain";
+import { cardId, courseId, deviceId, fixtureLinks, gameId, opId } from "@swng/domain";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
   createFixedClock,
+  createInMemoryCardStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
   createInMemoryProjectionStore,
@@ -11,6 +12,7 @@ import {
   createInMemorySnapshotStore,
   createNullLogger,
   createSequentialIds,
+  seedCard,
 } from "../testing/fakes.js";
 import { addGame } from "./addGame.js";
 import { finalizeRound } from "./finalizeRound.js";
@@ -43,7 +45,7 @@ const createClientOps = (device: string) => {
   return () => ({ opId: opId(`${device}-op-${(opCounter += 1)}`), hlc: { wallMs: wallMs++, counter: 0, deviceId: deviceId(device) } });
 };
 
-const setup = () => {
+const setup = async () => {
   const snapshots = createInMemorySnapshotStore();
   const journal = createInMemoryJournal(snapshots);
   const store = createInMemoryRoundStore();
@@ -54,10 +56,14 @@ const setup = () => {
   const golferStore = createInMemoryGolferStore();
   const projectionStore = createInMemoryProjectionStore();
   const logger = createNullLogger();
+  const cardStore = createInMemoryCardStore();
+  const cardRecord = await seedCard(cardStore, courseId("course-1"), cardId("card-1"), fixtureLinks);
+  const course = { courseId: cardRecord.courseId, cardId: cardRecord.cardId };
 
   return {
     broadcast,
-    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    course,
+    start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
@@ -70,8 +76,8 @@ const setup = () => {
 // A live round, Ann (host) + Bo, with a stableford game over both already added — live but
 // unscored, the starting point every case below builds on.
 const freshLiveRoundWithGame = async () => {
-  const ctx = setup();
-  const host = await ctx.start({ card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-host" });
+  const ctx = await setup();
+  const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-host" });
   const bo = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: "sub-bo" });
   const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
   const boClaims: ParticipantClaims = { roundId: bo.roundId, golferId: bo.golferId };

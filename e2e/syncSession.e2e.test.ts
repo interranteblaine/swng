@@ -6,7 +6,7 @@ import { createHttpTransport, createRoundSession } from "@swng/client";
 import type { RoundSession } from "@swng/client";
 import { cellKey, deviceId, fixtureLinks, resultOf } from "@swng/domain";
 import type { GameResult, GameState, GolferId, HoleResult, RoundId } from "@swng/domain";
-import { apiUrl, loadEndpoints, mintAccountGolfer, post, waitUntil } from "./support/client.js";
+import { apiUrl, ensureCourse, loadEndpoints, mintAccountGolfer, post, waitUntil } from "./support/client.js";
 
 // The M2 golden stableford deck for two golfers — reproduced verbatim from
 // packages/domain/src/scoring/stableford.test.ts. The card and its 15/19 lines are pinned by the domain golden fixture
@@ -90,7 +90,10 @@ describe("kill-network sync gate: two real createRoundSessions over the deployed
     const annAccount = await mintAccountGolfer(httpUrl, "sync-ann", "Ann");
     const boAccount = await mintAccountGolfer(httpUrl, "sync-bo", "Bo");
 
-    const started = await post(rounds(), { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } }, startRoundResponseSchema, annAccount.idToken);
+    // Course-cards spec §4: StartRound resolves a REFERENCE now — seed the lineage via the
+    // public course API (search-first, create-if-absent), then pass it through.
+    const course = await ensureCourse(httpUrl, fixtureLinks.courseName, fixtureLinks, annAccount);
+    const started = await post(rounds(), { course, host: { tee: "white", courseHandicap: 8 } }, startRoundResponseSchema, annAccount.idToken);
     roundId = started.roundId;
     annId = started.golferId;
     tokenAnn = started.token;

@@ -267,8 +267,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // projectionStore/logger (projection-realignment Task 13): every seated participant gets a
     // best-effort presence write (rounds/presence.ts) — the SAME projectionStore instance
     // getMyRecord/getMyRounds/getMyLiveRounds already share, and the SAME logger every other
-    // use case in this table does.
-    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    // use case in this table does. cardStore (course-cards spec §4): StartRound resolves
+    // `command.course` by reference and freezes the CURRENT card itself — the SAME cardStore
+    // instance createCourse/supersedeCard/getCourse/searchCourses already share below.
+    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),

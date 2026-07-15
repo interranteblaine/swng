@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
-import { crewId, deviceId, fixtureLinks, fixtureWhite, golferId, opId, placeholderName } from "@swng/domain";
+import { cardId, courseId, crewId, deviceId, fixtureLinks, fixtureWhite, golferId, opId, placeholderName } from "@swng/domain";
 import type { AccountClaims, AccountVerifier } from "@swng/application";
 import {
   abandonRound,
@@ -45,6 +45,7 @@ import {
   removeCountedRound,
   removeCrewMember,
   searchCourses,
+  seedCard,
   startRound,
   supersedeCard,
   terminateGame,
@@ -142,7 +143,12 @@ const subVerifier: AccountVerifier = {
 // `verifier` defaults to subVerifier (this file's golden-path/course-routes/share suites present a
 // plain "sub-<x>" bearer); the golfer/terminate describe blocks below pass their own stubVerifier
 // instead, sharing every other fake.
-const setup = (verifier: AccountVerifier = subVerifier) => {
+// Course-cards spec §4: StartRound resolves a card by REFERENCE now — setup seeds one lineage
+// (fixtureLinks, under DEFAULT_COURSE) into a fresh CardStore per test and hands the reference
+// back so every `/rounds` POST body below just passes it through instead of authoring a card.
+const DEFAULT_COURSE = { courseId: courseId("default-course"), cardId: cardId("default-card") };
+
+const setup = async (verifier: AccountVerifier = subVerifier) => {
   const snapshots = createInMemorySnapshotStore();
   const journal = createInMemoryJournal(snapshots);
   const store = createInMemoryRoundStore();
@@ -155,9 +161,11 @@ const setup = (verifier: AccountVerifier = subVerifier) => {
   const ids = createSequentialIds("id");
   const tokens = createHmacTokenIssuer({ secret: "dispatch-test-secret", clock });
   const logger = createNullLogger();
+  const cardRecord = await seedCard(cardStore, DEFAULT_COURSE.courseId, DEFAULT_COURSE.cardId, fixtureLinks);
+  const course = { courseId: cardRecord.courseId, cardId: cardRecord.cardId };
 
   const useCases: UseCases = {
-    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
@@ -196,12 +204,12 @@ const setup = (verifier: AccountVerifier = subVerifier) => {
   };
 
   const dispatcher = createDispatcher(buildRoutes(useCases), tokens, verifier, logger);
-  return { dispatcher, tokens };
+  return { dispatcher, tokens, course, cardStore };
 };
 
 describe("createDispatcher — HTTP-shaped golden path", () => {
   it("drives create -> join -> add game -> score -> duplicate re-send -> finalize", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
 
     const startResp = asStructured(
       await dispatcher(
@@ -209,7 +217,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
           method: "POST",
           path: "/rounds",
           token: "sub-ann",
-          body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
+          body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } },
         }),
       ),
     );
@@ -328,14 +336,14 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
   });
 
   it("rejects a request with no bearer token on a participant route — 401", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds/some-round/finalize" })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
 
   it("rejects a request with a garbage bearer token on a participant route — 401", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(
       await dispatcher(makeEvent({ method: "POST", path: "/rounds/some-round/finalize", token: "not-a-real-token" })),
     );
@@ -344,19 +352,19 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
   });
 
   it("rejects a token minted for round X used on round Y's path — 403 token-round-mismatch", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
 
     const roundX = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } })),
         ).body!,
       ),
     );
     const roundY = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 12 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 12 } } })),
         ).body!,
       ),
     );
@@ -369,21 +377,21 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
   });
 
   it("rejects a zod-invalid body — 400 with errorResponseSchema shape", async () => {
-    const { dispatcher } = setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks } })));
+    const { dispatcher } = await setup();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE } })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
 
   it("rejects a body that isn't valid JSON at all — 400 with errorResponseSchema shape", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", rawBody: "{not valid json" })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
 
   it("404s an unmatched path, shaped through the same error envelope as every other error", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/not-a-real-route" })));
     expect(resp.statusCode).toBe(404);
     // The not-found body is hand-built in dispatch.ts, but it must still round-trip through
@@ -393,25 +401,25 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
   });
 
   it("404s a matched path with the wrong method", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "DELETE", path: "/rounds" })));
     expect(resp.statusCode).toBe(404);
   });
 
   it("maps a malformed percent-escape in the path to a structured 400, not a raw throw", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/%zz/scores" })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
 
   it("rejects GET events with a non-integer ?since= — 400 invalid-request, not a silently-empty page", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
           ),
         ).body!,
       ),
@@ -430,12 +438,12 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
   // value as "") must parse as absent (read from the start), not as an explicit "0" that a
   // stricter check might reject or mishandle differently from a truly-absent param.
   it("treats an empty ?since= the same as an absent one — reads from the start, not a 400", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
           ),
         ).body!,
       ),
@@ -457,7 +465,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 const courseInputTee = { name: fixtureWhite.name, rating: fixtureWhite.rating, slope: fixtureWhite.slope, holes: fixtureWhite.holes };
 describe("createDispatcher — course routes + peek (course-cards spec)", () => {
   it("drives create -> supersede (add a second tee) -> get -> search over HTTP", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
 
     const createResp = asStructured(
       await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })),
@@ -498,7 +506,7 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
   });
 
   it("409s a PUT /courses/{courseId} whose supersedes is stale — card-superseded", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const createResp = asStructured(
       await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })),
     );
@@ -514,21 +522,21 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
   });
 
   it("401s a POST /courses with no bearer — the write tier is golfer-gated now", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
 
   it("404s GET /courses/{courseId} for an unknown id — course-not-found", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses/does-not-exist" })));
     expect(resp.statusCode).toBe(404);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "course-not-found" });
   });
 
   it("400s GET /courses with no ?query= — invalid-request, never an empty-string search", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses" })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
@@ -538,13 +546,16 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
   // DEFAULT_LIMIT of 10), not as an explicit "0" — which Number("") coerces to, clamping down
   // to MIN_LIMIT (1) and silently truncating the result set before this fix.
   it("treats an empty ?limit= as absent — the default limit, not a clamped-to-1 result set", async () => {
-    const { dispatcher } = setup();
-    for (const name of ["Fixture Alpha", "Fixture Beta", "Fixture Gamma"]) {
+    const { dispatcher } = await setup();
+    // "Zeta" (not "Fixture"): setup() now also seeds DEFAULT_COURSE ("Fixture Links", the
+    // course-cards reference StartRound resolves) into the SAME cardStore this search hits — a
+    // "Fixture"-prefixed name here would pick that up as an unwanted 4th result.
+    for (const name of ["Zeta Alpha", "Zeta Beta", "Zeta Gamma"]) {
       const created = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name, teeSets: [courseInputTee] } })));
       expect(created.statusCode).toBe(201);
     }
 
-    const emptyLimitResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses", query: { query: "Fixture", limit: "" } })));
+    const emptyLimitResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses", query: { query: "Zeta", limit: "" } })));
     expect(emptyLimitResp.statusCode).toBe(200);
     const searched = searchCoursesResponseSchema.parse(JSON.parse(emptyLimitResp.body!));
     // Before the fix, limit="" parsed as 0 -> clamped to MIN_LIMIT (1) — only one of the three
@@ -553,17 +564,17 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
   });
 
   it("400s a zod-invalid POST /courses body — invalid-request", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC" } })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
 
   it("peeks a live round by join code — courseName + tee summaries, over HTTP", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const startResp = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+        makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
       ),
     );
     const started = startRoundResponseSchema.parse(JSON.parse(startResp.body!));
@@ -575,14 +586,14 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
   });
 
   it("400s GET /rounds/peek with no ?code= — invalid-request", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek" })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
 
   it("404s GET /rounds/peek with an unknown join code — bad-join-code, not a 401", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek", query: { code: "ZZZZZZ" } })));
     expect(resp.statusCode).toBe(404);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "bad-join-code" });
@@ -596,10 +607,10 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
   // all) — peek succeeding with 200 and the peekRound response shape is the proof it took
   // the unauthenticated 2-segment route, not the participant-gated 3-segment one.
   it("GET /rounds/peek never binds {roundId}=\"peek\" against the /rounds/{roundId}/events template", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const startResp = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+        makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
       ),
     );
     const started = startRoundResponseSchema.parse(JSON.parse(startResp.body!));
@@ -689,13 +700,13 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
 
   describe("terminate", () => {
     it("terminates the sole unresolved game under participant auth, then finalize succeeds over HTTP", async () => {
-      const { dispatcher } = setupGolfer();
+      const { dispatcher } = await setupGolfer();
 
       const started = startRoundResponseSchema.parse(
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
             ),
           ).body!,
         ),
@@ -737,13 +748,13 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
     });
 
     it("404s terminate for a gameId never added to this round — unknown-game, the REAL error code", async () => {
-      const { dispatcher } = setupGolfer();
+      const { dispatcher } = await setupGolfer();
 
       const started = startRoundResponseSchema.parse(
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
             ),
           ).body!,
         ),
@@ -760,13 +771,13 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
   });
 
   it("401s GET /me — a golfer-tier route — given a round-scoped participant token as the bearer", async () => {
-    const { dispatcher } = setupGolfer();
+    const { dispatcher } = await setupGolfer();
 
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+            makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
           ),
         ).body!,
       ),
@@ -780,7 +791,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
   });
 
   it("401s GET /me — a golfer-tier route — given a garbage bearer token", async () => {
-    const { dispatcher } = setupGolfer();
+    const { dispatcher } = await setupGolfer();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: "totally-not-a-real-token" })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
@@ -791,7 +802,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
   // namePlaceholder true), and a second GET returns the SAME minted golfer. PUT /me with a real
   // name renames it in place and drops the flag. (Claiming is gone — there are no ghosts to claim.)
   it("GET /me (mints, same on re-get) -> PUT /me (renames, drops the placeholder flag)", async () => {
-    const { dispatcher } = setupGolfer();
+    const { dispatcher } = await setupGolfer();
 
     const firstGet = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: golferBearer(ann) })));
     expect(firstGet.statusCode).toBe(200);
@@ -820,7 +831,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
   });
 
   it("GET /me/record returns an empty history for a golfer who has never played a finalized round", async () => {
-    const { dispatcher } = setupGolfer();
+    const { dispatcher } = await setupGolfer();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/record", token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(200);
     expect(getMyRecordResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ history: [] });
@@ -846,19 +857,19 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
 
   describe("POST /rounds", () => {
     it("arm 1 — no bearer token: 401 invalid-token (no anonymous start)", async () => {
-      const { dispatcher } = setupGolferTier();
+      const { dispatcher } = await setupGolferTier();
       const resp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } })),
+        await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } })),
       );
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });
 
     it("arm 2 — an INVALID bearer token: 401 invalid-token", async () => {
-      const { dispatcher } = setupGolferTier();
+      const { dispatcher } = await setupGolferTier();
       const resp = asStructured(
         await dispatcher(
-          makeEvent({ method: "POST", path: "/rounds", token: "garbage-token", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+          makeEvent({ method: "POST", path: "/rounds", token: "garbage-token", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
         ),
       );
       expect(resp.statusCode).toBe(401);
@@ -866,14 +877,14 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
     });
 
     it("arm 3 — a VALID bearer token: 201, seated as the caller's OWN account golfer (as-self)", async () => {
-      const { dispatcher } = setupGolferTier();
+      const { dispatcher } = await setupGolferTier();
       // PUT /me first so ann has a named account golfer; the round's creator seat must resolve to it.
       const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
       const annGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
 
       const resp = asStructured(
         await dispatcher(
-          makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+          makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
         ),
       );
       expect(resp.statusCode).toBe(201);
@@ -888,14 +899,14 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
             ),
           ).body!,
         ),
       );
 
     it("arm 1 — no bearer token: 401 invalid-token (no anonymous join)", async () => {
-      const { dispatcher } = setupGolferTier();
+      const { dispatcher } = await setupGolferTier();
       const started = await startRoundAs(dispatcher);
       const resp = asStructured(
         await dispatcher(makeEvent({ method: "POST", path: "/rounds/join", body: { code: started.joinCode, tee: "white", courseHandicap: 2 } })),
@@ -905,7 +916,7 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
     });
 
     it("arm 2 — an INVALID bearer token: 401 invalid-token", async () => {
-      const { dispatcher } = setupGolferTier();
+      const { dispatcher } = await setupGolferTier();
       const started = await startRoundAs(dispatcher);
       const resp = asStructured(
         await dispatcher(makeEvent({ method: "POST", path: "/rounds/join", token: "garbage-token", body: { code: started.joinCode, tee: "white", courseHandicap: 2 } })),
@@ -915,7 +926,7 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
     });
 
     it("arm 3 — a VALID bearer token: 201, joiner seated as their OWN account golfer (as-self)", async () => {
-      const { dispatcher } = setupGolferTier();
+      const { dispatcher } = await setupGolferTier();
       // bo has a named account golfer; ann creates the round, bo joins as himself.
       const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(bo), body: { name: "Bo" } })));
       const boGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
@@ -961,7 +972,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   };
 
   it("POST /crews with no account golfer yet is rejected — golfer-required (the REAL error code, driven end-to-end)", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     const resp = asStructured(
       await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
     );
@@ -970,7 +981,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it("GET /crews/{crewId} for a non-member is rejected — 403 not-a-member (the REAL error code)", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const createResp = asStructured(
       await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
@@ -986,7 +997,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it("GET /crews/{crewId} for a fellow member succeeds with the full crew view", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     const annGolfer = await putMe(dispatcher, ann, "Ann");
     const createResp = asStructured(
       await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
@@ -1000,7 +1011,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it("GET /crews/{crewId} for an unknown crewId is rejected — 404 unknown-crew", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/crews/does-not-exist", token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(404);
@@ -1008,7 +1019,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it("POST /crews/join with a bad token is rejected — 403 crew-invite-invalid", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const resp = asStructured(
       await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(ann), body: { token: "not-a-real-token" } })),
@@ -1024,7 +1035,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     "drives create -> mint invite -> peek (pre-sign-in preview) -> join by token -> GET /me/crews -> " +
       "StartRound as-self (creator seat only) -> create season -> list seasons",
     async () => {
-      const { dispatcher } = setupCrews();
+      const { dispatcher } = await setupCrews();
       const annGolfer = await putMe(dispatcher, ann, "Ann");
       await putMe(dispatcher, bo, "Bo");
 
@@ -1068,7 +1079,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       // players[] roster, no crewId (sealed leaf). ann's crew membership is irrelevant to the round.
       const startResp = asStructured(
         await dispatcher(
-          makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+          makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
         ),
       );
       expect(startResp.statusCode).toBe(201);
@@ -1103,7 +1114,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   // Crew membership (invited in, accountable out — spec §1): ANY member mints, not just the
   // organizer — driven end-to-end (Bo, an ordinary member, mints his own invite).
   it("POST /crews/{crewId}/invites: any member (not just the organizer) may mint", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     await putMe(dispatcher, bo, "Bo");
     const created = createCrewResponseSchema.parse(
@@ -1122,7 +1133,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it("POST /crews/{crewId}/invites for a non-member is rejected — 403 not-a-member", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const created = createCrewResponseSchema.parse(
       JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
@@ -1137,7 +1148,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it("POST /crews/peek with a bad token is rejected — 403 crew-invite-invalid, no Bearer needed to fail this way", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews/peek", body: { token: "not-a-real-token" } })));
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "crew-invite-invalid" });
@@ -1147,7 +1158,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   // into a season, read standings (rounds list carries it), then un-count via DELETE. Exercises
   // POST .../rounds, GET .../standings, and the DELETE route's method wiring in one pass.
   it("drives finalize -> create season -> append counted round -> standings -> DELETE (un-count)", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     const annGolfer = await putMe(dispatcher, ann, "Ann");
 
     // A finalized round Ann played (as-self), so its snapshot exists and Ann is a participant.
@@ -1159,7 +1170,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
               method: "POST",
               path: "/rounds",
               token: golferBearer(ann),
-              body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
+              body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } },
             }),
           ),
         ).body!,
@@ -1200,7 +1211,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
 
   // Leave (Task 9): a member removes themselves; POST /crews/{crewId}/leave echoes the crewId.
   it("POST /crews/{crewId}/leave removes the caller from the roster", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const boGolfer = await putMe(dispatcher, bo, "Bo");
     const created = createCrewResponseSchema.parse(
@@ -1226,7 +1237,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   // through the REAL dispatcher — DELETE /crews/{crewId}/members/{golferId} (remove) and
   // POST /crews/{crewId}/transfer, plus the leaveCrew organizer guard.
   it("DELETE /crews/{crewId}/members/{golferId}: the organizer removes a member (200) — updated crew returned", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     const annGolfer = await putMe(dispatcher, ann, "Ann");
     const boGolfer = await putMe(dispatcher, bo, "Bo");
     const created = createCrewResponseSchema.parse(
@@ -1246,7 +1257,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it("DELETE /crews/{crewId}/members/{golferId}: an ordinary member attempting to remove someone is rejected — 403 not-organizer", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const boGolfer = await putMe(dispatcher, bo, "Bo");
     const calGolfer = await putMe(dispatcher, cal, "Cal");
@@ -1270,7 +1281,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it("POST /crews/{crewId}/transfer: the organizer transfers to a member (200) — role flip, exactly one organizer", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     const annGolfer = await putMe(dispatcher, ann, "Ann");
     const boGolfer = await putMe(dispatcher, bo, "Bo");
     const created = createCrewResponseSchema.parse(
@@ -1304,7 +1315,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it("POST /crews/{crewId}/transfer: an ordinary member attempting to transfer is rejected — 403 not-organizer", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const boGolfer = await putMe(dispatcher, bo, "Bo");
     const calGolfer = await putMe(dispatcher, cal, "Cal");
@@ -1329,7 +1340,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   });
 
   it("POST /crews/{crewId}/leave: the organizer cannot leave — 409 organizer-must-transfer", async () => {
-    const { dispatcher } = setupCrews();
+    const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const created = createCrewResponseSchema.parse(
       JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
@@ -1350,7 +1361,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } })),
         ).body!,
       ),
     );
@@ -1365,7 +1376,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
   };
 
   it("POST /rounds/{roundId}/share is deterministic — the same round returns the SAME url on a repeat call", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const { started, spectatorToken } = await startAndShare(dispatcher);
 
     const secondResp = asStructured(
@@ -1377,7 +1388,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
   });
 
   it("GET /rounds/{roundId}/events — round-read arm 1: a PARTICIPANT token is still accepted (unchanged)", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const { started } = await startAndShare(dispatcher);
 
     const resp = asStructured(
@@ -1387,7 +1398,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
   });
 
   it("GET /rounds/{roundId}/events — round-read arm 2: a SPECTATOR token is accepted", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const { started, spectatorToken } = await startAndShare(dispatcher);
 
     const resp = asStructured(
@@ -1399,12 +1410,12 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
   });
 
   it("GET /rounds/{roundId}/events — round-read: a spectator token minted for a DIFFERENT round — 403 token-round-mismatch", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const { spectatorToken } = await startAndShare(dispatcher);
     const otherRound = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 12 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 12 } } })),
         ).body!,
       ),
     );
@@ -1417,7 +1428,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
   });
 
   it("GET /rounds/{roundId}/events — round-read: no bearer token at all — 401 invalid-token", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const { started } = await startAndShare(dispatcher);
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, query: { since: "0" } })));
     expect(resp.statusCode).toBe(401);
@@ -1425,7 +1436,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
   });
 
   it("GET /rounds/{roundId}/events — round-read: a garbage bearer token — 401 invalid-token", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const { started } = await startAndShare(dispatcher);
     const resp = asStructured(
       await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: "not-a-real-token", query: { since: "0" } })),
@@ -1440,7 +1451,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
   // buildRoutes without an entry here is a visible gap, not a silent hole.
   describe("a spectator token 403s read-only-token on every write route class", () => {
     it("POST /rounds/{roundId}/games", async () => {
-      const { dispatcher } = setup();
+      const { dispatcher } = await setup();
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(
         await dispatcher(
@@ -1457,7 +1468,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     });
 
     it("POST /rounds/{roundId}/scores", async () => {
-      const { dispatcher } = setup();
+      const { dispatcher } = await setup();
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(
         await dispatcher(
@@ -1480,7 +1491,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     });
 
     it("POST /rounds/{roundId}/finalize", async () => {
-      const { dispatcher } = setup();
+      const { dispatcher } = await setup();
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: spectatorToken })));
       expect(resp.statusCode).toBe(403);
@@ -1488,7 +1499,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     });
 
     it("POST /rounds/{roundId}/games/{gameId}/terminate", async () => {
-      const { dispatcher } = setup();
+      const { dispatcher } = await setup();
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(
         await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/games/some-game/terminate`, token: spectatorToken })),
@@ -1498,7 +1509,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     });
 
     it("POST /rounds/{roundId}/share itself — minting a NEW share link is participant-only", async () => {
-      const { dispatcher } = setup();
+      const { dispatcher } = await setup();
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/share`, token: spectatorToken })));
       expect(resp.statusCode).toBe(403);
@@ -1511,12 +1522,12 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
   // mismatch, not read-only-token, same precedence the brief's own error-shape discipline
   // (M6 lesson: never mask a more specific failure behind a generic one).
   it("a spectator token for a DIFFERENT round on a write route — 403 token-round-mismatch, not read-only-token", async () => {
-    const { dispatcher } = setup();
+    const { dispatcher } = await setup();
     const { spectatorToken } = await startAndShare(dispatcher);
     const otherRound = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 12 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 12 } } })),
         ).body!,
       ),
     );
@@ -1539,11 +1550,11 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
 // bearer presented to a round-scoped route, independent of how it was minted.
 describe("createDispatcher — a crew-invite token never opens a round (crew membership, invited in)", () => {
   it("POST /rounds/{roundId}/finalize (participant tier) — 401 invalid-token, never touches .roundId", async () => {
-    const { dispatcher, tokens } = setup();
+    const { dispatcher, tokens } = await setup();
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } })),
         ).body!,
       ),
     );
@@ -1562,11 +1573,11 @@ describe("createDispatcher — a crew-invite token never opens a round (crew mem
   });
 
   it("GET /rounds/{roundId}/events (round-read tier) — 401 invalid-token, never touches .roundId", async () => {
-    const { dispatcher, tokens } = setup();
+    const { dispatcher, tokens } = await setup();
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } })),
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } })),
         ).body!,
       ),
     );
@@ -1620,7 +1631,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
               method: "POST",
               path: "/rounds",
               token: golferBearer(ann),
-              body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
+              body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } },
             }),
           ),
         ).body!,
@@ -1635,19 +1646,19 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
 
   describe("GET /rounds/{roundId}/archive", () => {
     it("404s round-not-found for a roundId with no snapshot at all", async () => {
-      const { dispatcher } = setupArchive();
+      const { dispatcher } = await setupArchive();
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/never-started/archive", token: golferBearer(ann) })));
       expect(resp.statusCode).toBe(404);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "round-not-found" });
     });
 
     it("404s round-not-found for a round that's still LIVE — the snapshot only lands at finalize", async () => {
-      const { dispatcher } = setupArchive();
+      const { dispatcher } = await setupArchive();
       const started = startRoundResponseSchema.parse(
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } }),
+              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
             ),
           ).body!,
         ),
@@ -1659,7 +1670,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
     });
 
     it("returns the archive's own event log for the participant who played it", async () => {
-      const { dispatcher } = setupArchive();
+      const { dispatcher } = await setupArchive();
       const started = await seedAnnsFinalizedRound(dispatcher);
 
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(ann) })));
@@ -1672,7 +1683,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
     // The stranger-403 pin (task-6-brief.md's binding resolution — Task 9's crew-membership
     // arm is explicitly deferred): a signed-in golfer who simply never played this round.
     it("403s not-a-viewer for a signed-in golfer who never played this round — a stranger", async () => {
-      const { dispatcher } = setupArchive();
+      const { dispatcher } = await setupArchive();
       const started = await seedAnnsFinalizedRound(dispatcher);
 
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(bo) })));
@@ -1681,7 +1692,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
     });
 
     it("401s with no bearer token at all — golfer-tier auth, never the round-scoped participant/spectator tier", async () => {
-      const { dispatcher } = setupArchive();
+      const { dispatcher } = await setupArchive();
       const started = await seedAnnsFinalizedRound(dispatcher);
 
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive` })));
@@ -1692,14 +1703,14 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
 
   describe("GET /me/rounds", () => {
     it("returns an empty list for a golfer who has never played a finalized round", async () => {
-      const { dispatcher } = setupArchive();
+      const { dispatcher } = await setupArchive();
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds", token: golferBearer(bo) })));
       expect(resp.statusCode).toBe(200);
       expect(getMyRoundsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: [] });
     });
 
     it("401s with no bearer token at all", async () => {
-      const { dispatcher } = setupArchive();
+      const { dispatcher } = await setupArchive();
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds" })));
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
@@ -1710,14 +1721,14 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
   // history. Same golfer tier/wiring idiom as GET /me/rounds just above.
   describe("GET /me/rounds/live", () => {
     it("returns an empty list for a golfer with no live round", async () => {
-      const { dispatcher } = setupArchive();
+      const { dispatcher } = await setupArchive();
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds/live", token: golferBearer(bo) })));
       expect(resp.statusCode).toBe(200);
       expect(getMyLiveRoundsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: [] });
     });
 
     it("lists a round the golfer just started, by identity — courseName + joinedAt + createdAt on the wire", async () => {
-      const { dispatcher } = setupArchive();
+      const { dispatcher } = await setupArchive();
       await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
 
       const started = startRoundResponseSchema.parse(
@@ -1728,7 +1739,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
                 method: "POST",
                 path: "/rounds",
                 token: golferBearer(ann),
-                body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
+                body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } },
               }),
             ),
           ).body!,
@@ -1745,7 +1756,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
     });
 
     it("401s with no bearer token at all", async () => {
-      const { dispatcher } = setupArchive();
+      const { dispatcher } = await setupArchive();
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds/live" })));
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
@@ -1786,7 +1797,7 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
               method: "POST",
               path: "/rounds",
               token: golferBearer(ann),
-              body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } },
+              body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } },
             }),
           ),
         ).body!,
@@ -1795,7 +1806,7 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
   };
 
   it("mints a fresh, WORKING participant token for the caller's own participation — same wire shape as JoinRoundResponse", async () => {
-    const { dispatcher } = setupToken();
+    const { dispatcher } = await setupToken();
     const started = await seedAnnsLiveRound(dispatcher);
 
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(ann) })));
@@ -1825,7 +1836,7 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
   });
 
   it("403s not-a-participant for a signed-in golfer who was never seated in this round", async () => {
-    const { dispatcher } = setupToken();
+    const { dispatcher } = await setupToken();
     const started = await seedAnnsLiveRound(dispatcher);
 
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(bo) })));
@@ -1834,7 +1845,7 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
   });
 
   it("404s round-not-found for a roundId that was never created — for a caller who DOES have an account golfer", async () => {
-    const { dispatcher } = setupToken();
+    const { dispatcher } = await setupToken();
     // A real golfer row for ann first (PUT /me) — otherwise the no-golfer-row 403 would fire
     // before the round is ever folded (mintParticipantToken.ts's own check-order doc comment),
     // masking this specific 404 case.
@@ -1846,7 +1857,7 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
   });
 
   it("409s round-final for an actual participant once the round is finalized", async () => {
-    const { dispatcher } = setupToken();
+    const { dispatcher } = await setupToken();
     const started = await seedAnnsLiveRound(dispatcher);
     const finalizeResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })));
     expect(finalizeResp.statusCode).toBe(200);
@@ -1857,7 +1868,7 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
   });
 
   it("401s with no bearer token at all — golfer-tier auth, never the round-scoped participant tier", async () => {
-    const { dispatcher } = setupToken();
+    const { dispatcher } = await setupToken();
     const started = await seedAnnsLiveRound(dispatcher);
 
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token` })));

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { GameId, GameResult, GolferId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
-import { gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
-import { courseCardSchema, gameConfigFields, gameResultSchema, holeResultSchema, roundEventSchema } from "./round.js";
+import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
+import { gameConfigFields, gameResultSchema, holeResultSchema, roundEventSchema } from "./round.js";
 
 // gameConfigFields' five field sets, minus `id` (they never had one — id-ness is
 // GameConfig's addition, applied in round.ts) — the server assigns the id on the
@@ -34,8 +34,11 @@ export type GameConfigInput = z.infer<typeof gameConfigInputSchema>;
 // join link is the one way onto it). This object is NOT `.strict()`, so an OLD client still
 // sending host.name / golferId / players / crewId isn't rejected — Zod's default strips the
 // unknown keys silently.
+// Course-cards spec §4: a REFERENCE, never a card — the server resolves and freezes the
+// lineage's current card itself (spec invariant 4/5: the client can never author a card; the
+// old `card:` shape is gone, not tolerated — an old client gets 400 invalid-request).
 export const startRoundRequestSchema = z.object({
-  card: courseCardSchema,
+  course: z.object({ courseId: courseIdSchema, cardId: cardIdSchema }),
   host: z.object({
     tee: z.string().min(1),
     courseHandicap: z.number().int(), // may be negative (plus handicap)

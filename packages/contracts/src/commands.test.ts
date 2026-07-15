@@ -16,16 +16,28 @@ const card: CourseCard = {
 };
 
 describe("startRoundRequestSchema", () => {
-  // Accounts-only identity (spec §3): the creator seat is always as-self from the caller's
-  // Bearer — the request carries only the card + the host's tee/courseHandicap. No host.name
-  // (the golfer record's name is frozen into the event server-side), no golferId, no players[].
+  const course = { courseId: "course-1", cardId: "card-1" };
+
+  // Course-cards spec §4: the request carries a REFERENCE (courseId + cardId), never a card — the
+  // server resolves and freezes the lineage's current card itself. Accounts-only identity (spec
+  // §3): the creator seat is always as-self from the caller's Bearer, so host carries only
+  // tee/courseHandicap. No host.name (the golfer record's name is frozen into the event
+  // server-side), no golferId, no players[].
   it("accepts a valid start-round request", () => {
-    const request = { card, host: { tee: "white", courseHandicap: 8 } };
+    const request = { course, host: { tee: "white", courseHandicap: 8 } };
     expect(parse(startRoundRequestSchema, request)).toEqual(request);
   });
 
   it("rejects a non-integer courseHandicap", () => {
-    const request = { card, host: { tee: "white", courseHandicap: 8.5 } };
+    const request = { course, host: { tee: "white", courseHandicap: 8.5 } };
+    expect(() => parse(startRoundRequestSchema, request)).toThrow(ContractError);
+  });
+
+  // Course-cards spec invariant 4/5: the client can never author a card — the old `card:` shape
+  // is GONE, not tolerated. A request still shaped the old way (a full card, no `course`
+  // reference) is rejected as invalid, not silently accepted.
+  it("rejects the old card: shape — a client can never author a card", () => {
+    const request = { card, host: { tee: "white", courseHandicap: 8 } };
     expect(() => parse(startRoundRequestSchema, request)).toThrow(ContractError);
   });
 
@@ -34,7 +46,7 @@ describe("startRoundRequestSchema", () => {
   // keys silently, leaving exactly the accounts-only shape.
   it("strips deleted/old-client fields (host.name, golferId, players, crewId) rather than rejecting them", () => {
     const request = {
-      card,
+      course,
       host: { name: "Ann", tee: "white", courseHandicap: 8 },
       golferId: "ann-1",
       players: [{ name: "Bo", tee: "white", courseHandicap: 2 }],
@@ -45,7 +57,7 @@ describe("startRoundRequestSchema", () => {
     expect(parsed).not.toHaveProperty("players");
     expect(parsed).not.toHaveProperty("crewId");
     expect(parsed.host).not.toHaveProperty("name");
-    expect(parsed).toEqual({ card, host: { tee: "white", courseHandicap: 8 } });
+    expect(parsed).toEqual({ course, host: { tee: "white", courseHandicap: 8 } });
   });
 });
 

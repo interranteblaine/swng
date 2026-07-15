@@ -11,7 +11,6 @@ import type {
   JoinRoundRequest,
   StartRoundRequest,
   UpdateMeRequest,
-  VerifyTeeSetRequest,
 } from "@swng/contracts";
 import {
   addGame,
@@ -48,7 +47,6 @@ import {
   terminateGame,
   transferOrganizer,
   updateMe,
-  verifyTeeSet,
 } from "./api";
 
 // Pinned to match vitest.config.ts's test.env.VITE_HTTP_URL — config.ts reads it at import
@@ -697,25 +695,6 @@ describe("addTeeSet", () => {
     expect(seenUrl).toBe(`${HTTP_URL}/courses/course-1/tees`);
     expect(JSON.parse(String(seenInit?.body))).toEqual(input);
     expect(result.course.name).toBe("Pebble Beach");
-  });
-});
-
-describe("verifyTeeSet", () => {
-  it("POSTs the request body to /courses/{courseId}/verify and parses a CourseView response", async () => {
-    let seenUrl: string | undefined;
-    let seenInit: RequestInit | undefined;
-    stubFetch(async (url, init) => {
-      seenUrl = String(url);
-      seenInit = init;
-      return fakeResponse(200, { course: courseViewJson });
-    });
-
-    const input: VerifyTeeSetRequest = { teeName: "white", verifierName: "Bo", version: 1 };
-    const result = await verifyTeeSet(courseId("course-1"), input);
-
-    expect(seenUrl).toBe(`${HTTP_URL}/courses/course-1/verify`);
-    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
-    expect(result.course.teeSets).toEqual(courseViewJson.teeSets);
   });
 });
 

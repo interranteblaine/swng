@@ -32,7 +32,6 @@ import {
   shareLinkResponseSchema,
   startRoundResponseSchema,
   terminateGameResponseSchema,
-  verifyTeeSetResponseSchema,
 } from "@swng/contracts";
 import type {
   AbandonRoundResponse,
@@ -78,8 +77,6 @@ import type {
   TerminateGameResponse,
   TransferOrganizerRequest,
   UpdateMeRequest,
-  VerifyTeeSetRequest,
-  VerifyTeeSetResponse,
 } from "@swng/contracts";
 import type { CourseId, CrewId, GameId, GolferId, RoundId } from "@swng/domain";
 import { config } from "./config";
@@ -214,11 +211,6 @@ export const createCourse = async (input: CreateCourseRequest): Promise<CreateCo
 export const addTeeSet = async (courseId: CourseId, input: AddTeeSetRequest): Promise<AddTeeSetResponse> => {
   const json = await requestJson(`/courses/${courseId}/tees`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
   return parse(addTeeSetResponseSchema, json);
-};
-
-export const verifyTeeSet = async (courseId: CourseId, input: VerifyTeeSetRequest): Promise<VerifyTeeSetResponse> => {
-  const json = await requestJson(`/courses/${courseId}/verify`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
-  return parse(verifyTeeSetResponseSchema, json);
 };
 
 // Same "missing/blank is the route layer's own 400, not an empty-string lookup" contract as

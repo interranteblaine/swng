@@ -16,7 +16,6 @@ vi.mock("../api", () => ({
   createRound: vi.fn(),
   getCourse: vi.fn(),
   searchCourses: vi.fn(),
-  verifyTeeSet: vi.fn(),
   getMe: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
@@ -30,7 +29,7 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, createRound, getCourse, getMe, searchCourses, verifyTeeSet } from "../api";
+import { createRound, getCourse, getMe, searchCourses } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { CreateRoundPage } from "./CreateRoundPage";
@@ -38,7 +37,6 @@ import { CreateRoundPage } from "./CreateRoundPage";
 const mockedCreateRound = vi.mocked(createRound);
 const mockedGetCourse = vi.mocked(getCourse);
 const mockedSearchCourses = vi.mocked(searchCourses);
-const mockedVerifyTeeSet = vi.mocked(verifyTeeSet);
 const mockedGetMe = vi.mocked(getMe);
 
 const courseView: CourseView = {
@@ -54,7 +52,6 @@ beforeEach(() => {
   mockedCreateRound.mockReset();
   mockedGetCourse.mockReset();
   mockedSearchCourses.mockReset();
-  mockedVerifyTeeSet.mockReset();
   mockedGetMe.mockReset();
 });
 
@@ -175,7 +172,7 @@ describe("CreateRoundPage — create as yourself", () => {
     expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(true);
   });
 
-  it("search → pick a result → the tee picker + verification badges populate from the fetched CourseView", async () => {
+  it("search → pick a result → the tee picker populates from the fetched CourseView", async () => {
     vi.useFakeTimers();
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
@@ -200,36 +197,6 @@ describe("CreateRoundPage — create as yourself", () => {
     expect(mockedGetCourse).toHaveBeenCalledWith(courseId("course-18"));
     expect(screen.getByLabelText(/^tee$/i)).toBeTruthy();
     expect(screen.getByText(/entered by ann/i)).toBeTruthy();
-  });
-
-  // M7 Task 7 (M-i): a mid-setup verify-409 re-fetch must replace THIS page's held card, not just
-  // CourseSummaryCard's own copy — proven the strongest way available: submit afterward and check
-  // createRound got the REVISED card.
-  it("M-i: a verify-409 re-fetch replaces THIS page's held card, not just CourseSummaryCard's own local copy", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("dee-g"), name: "Dee G" } });
-    vi.stubGlobal(
-      "prompt",
-      vi.fn(() => "Ed"),
-    );
-    mockedVerifyTeeSet.mockRejectedValue(new ApiError("tee-set-revised", 409, 'tee "white" is now version 2, expected version 1'));
-    const revisedCard = { ...fixtureLinks18, teeSets: [{ ...fixtureWhite18, rating: 68.8 }] };
-    const revisedCourseView: CourseView = { ...courseView, card: revisedCard, teeSets: [{ ...courseView.teeSets[0]!, version: 2, enteredBy: "Fran" }] };
-    mockedGetCourse.mockResolvedValueOnce({ course: courseView }).mockResolvedValueOnce({ course: revisedCourseView });
-    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-mi-1"), joinCode: "CCC222", token: "tok-mi-1", golferId: golferId("dee-g") });
-
-    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
-    await screen.findByText(fixtureLinks18.courseName);
-    await screen.findByText(/playing as/i);
-
-    fireEvent.click(screen.getByRole("button", { name: /verify this card/i }));
-    await screen.findByText(/entered by fran/i);
-
-    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "4" } });
-    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
-
-    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
-    expect(mockedCreateRound.mock.calls[0]![0].card).toEqual(revisedCard); // the freeze source swap, not the stale original
   });
 
   // M7 Task 7 (M-i): the edit flow's own return hand-off (router state, no re-fetch needed).

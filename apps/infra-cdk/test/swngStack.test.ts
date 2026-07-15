@@ -596,7 +596,7 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "$disconnect" });
     });
 
-    it("wires all thirty-five HTTP routes (34 + POST /crews/{crewId}/invites + POST /crews/peek - POST /crews/{crewId}/members, crew membership invited-in rework)", () => {
+    it("wires all thirty-seven HTTP routes (34 + invites + peek − members from the invited-in rework, + remove-member + transfer from accountable-out)", () => {
       const expectedRouteKeys = [
         "POST /rounds",
         "POST /rounds/join",

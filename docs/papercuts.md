@@ -266,3 +266,13 @@ never-written pointer is a no-op needing no golfer read) and no dependence on
 settled participants. Pinned by a test that drives the real `settleRound` through the
 omitted-departure case (Bo joins, leaves scoreless and gameless, is omitted from the archive,
 and his pointer is still cleared).
+
+### 12. The name-prompt's error arm renders raw server text, now duplicated across two funnels
+
+Observed 2026-07-15 (crew-membership final review). `CrewJoinPage.tsx`'s NamePrompt renders
+`caught.message` for an `ApiError` — against the M7 never-raw discipline — because it copies
+`JoinRoundPage.tsx`'s own name-prompt byte-for-byte, which has carried the same arm since the
+accounts-only funnel landed. Pre-existing class, not arc-introduced; both sites fail together.
+Wanted shape: one shared name-prompt component (or at least a shared error-humanizing arm), so
+the copy discipline and the duplication get fixed by the same change. Surfacing sites:
+`CrewJoinPage.tsx` NamePrompt error arm, `JoinRoundPage.tsx` name-prompt error arm.

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { CourseCard, TeeSet } from "./card.js";
-import { courseId } from "../ids.js";
+import { cardId, courseId, golferId, teeId } from "../ids.js";
 import { fixtureWhite, fixtureWhite18 } from "../scoring/golden/fixtureCourse.js";
-import { addTeeSet, courseCardOf, courseNameKey, createCourse, verifyTeeSet } from "./course.js";
+import { addTeeSet, buildCardRecord, courseCardOf, courseNameKey, createCourse, validateTeeContinuity, verifyTeeSet } from "./course.js";
 
 const ID = courseId("c-1");
 const NOW = 1_700_000_000_000;
@@ -227,5 +227,71 @@ describe("courseNameKey", () => {
 
   it("collapses tabs/newlines like any other whitespace run", () => {
     expect(courseNameKey("Pebble\tBeach\nGolf Links")).toBe("pebble beach golf links");
+  });
+});
+
+const nineHoles = Array.from({ length: 9 }, (_, i) => ({ number: i + 1, par: 4, yardage: 400, strokeIndex: i + 1 }));
+const tee = (name: string, id?: string): TeeSet => ({ ...(id ? { teeId: teeId(id) } : {}), name, rating: 71.1, slope: 129, holes: nineHoles });
+const base = {
+  cardId: cardId("c-1"),
+  courseId: courseId("k-1"),
+  courseName: "Casa Verde GC",
+  enteredBy: { golferId: golferId("g-1"), name: "Blaine" },
+  enteredAtMs: 1_000,
+};
+
+describe("buildCardRecord", () => {
+  it("assembles a record whose card carries source and whose every tee carries its id", () => {
+    const record = buildCardRecord({ ...base, teeSets: [tee("white", "t-1"), tee("blue", "t-2")] });
+    expect(record.card.source).toEqual({ cardId: base.cardId, courseId: base.courseId });
+    expect(record.card.teeSets.map((t) => t.teeId)).toEqual([teeId("t-1"), teeId("t-2")]);
+    expect(record.provenance).toBe("community");
+    expect(record.supersedes).toBeUndefined();
+  });
+
+  it("rejects a tee without an id — stored cards always carry identity", () => {
+    expect(() => buildCardRecord({ ...base, teeSets: [tee("white")] })).toThrow(/tee-id/);
+  });
+
+  it("rejects duplicate tee ids in one card", () => {
+    expect(() => buildCardRecord({ ...base, teeSets: [tee("white", "t-1"), tee("blue", "t-1")] })).toThrowError(
+      expect.objectContaining({ code: "duplicate-tee-id" }),
+    );
+  });
+
+  it("rejects mixed hole counts across tees (mismatched-hole-count)", () => {
+    const eighteen = { ...tee("blue", "t-2"), holes: Array.from({ length: 18 }, (_, i) => ({ number: i + 1, par: 4, yardage: 400, strokeIndex: i + 1 })) };
+    expect(() => buildCardRecord({ ...base, teeSets: [tee("white", "t-1"), eighteen] })).toThrowError(
+      expect.objectContaining({ code: "mismatched-hole-count" }),
+    );
+  });
+
+  it("keeps every M6 per-tee rule — e.g. a non-permutation strokeIndex still throws invalid-stroke-index", () => {
+    const bad = { ...tee("white", "t-1"), holes: nineHoles.map((h) => ({ ...h, strokeIndex: 1 })) };
+    expect(() => buildCardRecord({ ...base, teeSets: [bad] })).toThrowError(expect.objectContaining({ code: "invalid-stroke-index" }));
+  });
+
+  it("rejects case-insensitive duplicate tee names (duplicate-tee-name)", () => {
+    expect(() => buildCardRecord({ ...base, teeSets: [tee("White", "t-1"), tee("WHITE", "t-2")] })).toThrowError(
+      expect.objectContaining({ code: "duplicate-tee-name" }),
+    );
+  });
+});
+
+describe("validateTeeContinuity", () => {
+  const current = buildCardRecord({ ...base, teeSets: [tee("white", "t-1")] }).card;
+
+  it("accepts a kept id, an id-less new tee, and a rename under a kept id", () => {
+    expect(() => validateTeeContinuity(current, [tee("whites", "t-1"), tee("blue")])).not.toThrow();
+  });
+
+  it("rejects an id the superseded card never had (unknown-tee-id)", () => {
+    expect(() => validateTeeContinuity(current, [tee("white", "t-9")])).toThrowError(expect.objectContaining({ code: "unknown-tee-id" }));
+  });
+
+  it("rejects the same id submitted twice (duplicate-tee-id)", () => {
+    expect(() => validateTeeContinuity(current, [tee("white", "t-1"), tee("blue", "t-1")])).toThrowError(
+      expect.objectContaining({ code: "duplicate-tee-id" }),
+    );
   });
 });

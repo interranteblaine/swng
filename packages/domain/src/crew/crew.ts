@@ -34,7 +34,7 @@ const MIN_MEMBER_NAME_LENGTH = 1;
 const MAX_CREW_NAME_LENGTH = 60;
 
 // Called by createCrew.ts (application) before a Crew is ever constructed — there is no
-// domain-level `createCrew` factory the way course.ts has `createCourse` (a crew is built by
+// domain-level `createCrew` factory the way course.ts has `buildCardRecord` (a crew is built by
 // addMember calls directly, application/src/crews/createCrew.ts's own doc comment), so this
 // validator is exported for that call site rather than invoked internally here.
 export const validateCrewName = (name: string): void => {

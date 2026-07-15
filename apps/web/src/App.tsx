@@ -2,7 +2,6 @@ import { BrowserRouter, Link, Outlet, Route, Routes } from "react-router";
 import { SignInButton } from "./auth/SignInButton";
 import { AuthProvider, useAuth } from "./auth/useAuth";
 import { AddCoursePage } from "./courses/AddCoursePage";
-import { EditCoursePage } from "./courses/EditCoursePage";
 import { CrewCreatePage } from "./crews/CrewCreatePage";
 import { CrewPage } from "./crews/CrewPage";
 import { ArchivedRoundPage } from "./round/ArchivedRoundPage";
@@ -63,7 +62,8 @@ export function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/create" element={<CreateRoundPage />} />
             <Route path="/courses/new" element={<AddCoursePage />} />
-            <Route path="/courses/:courseId/edit" element={<EditCoursePage />} />
+            {/* Course-cards spec §8: the /courses/:courseId/edit route (EditCoursePage) is
+                deleted this task — T6 restores editing from the new CoursePage. */}
             <Route path="/crews/new" element={<CrewCreatePage />} />
             {/* Crew membership (invited in, accountable out — spec §2): the invite funnel — a
                 static segment, ranked ahead of the dynamic /crews/:crewId below by react-router

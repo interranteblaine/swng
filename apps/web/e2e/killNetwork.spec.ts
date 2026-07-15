@@ -37,11 +37,12 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
   const bRoute: WsRouteHandle = { current: undefined };
 
   test.beforeAll(async ({ browser }) => {
-    await ensureCourse(fixtureLinks.courseName, fixtureLinks);
     // Accounts-only (the wall): Ann and Bo are signed-in accounts, minted and named by the
     // harness (the funnel's own name prompt is fieldTest/primaryPath's coverage, not this
-    // reconnect-seam file's), injected before either page's first navigation.
+    // reconnect-seam file's), injected before either page's first navigation. Seeding a course
+    // is a golfer-gated write now (course-cards spec §4), so it's minted with Ann's Bearer.
     const ann = await mintAccountGolfer("kn-ann", "Ann");
+    await ensureCourse(fixtureLinks.courseName, fixtureLinks, ann);
     const bo = await mintAccountGolfer("kn-bo", "Bo");
     contextA = await browser.newContext();
     contextB = await browser.newContext();
@@ -148,10 +149,11 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
   const route: WsRouteHandle = { current: undefined };
 
   test.beforeAll(async ({ browser }) => {
-    await ensureCourse(fixtureLinks.courseName, fixtureLinks);
     // Accounts-only: this arm's solo Ann is her own separate throwaway account (arm 1's Ann
-    // belongs to a context that's already closed by the time this describe runs).
+    // belongs to a context that's already closed by the time this describe runs). Seeding a
+    // course is a golfer-gated write now (course-cards spec §4), minted with Ann's Bearer.
     const ann = await mintAccountGolfer("kn-solo-ann", "Ann");
+    await ensureCourse(fixtureLinks.courseName, fixtureLinks, ann);
     context = await browser.newContext();
     await installWsProxy(context, route);
     page = await context.newPage();

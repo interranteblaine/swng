@@ -41,9 +41,10 @@ const mockedGetMe = vi.mocked(getMe);
 
 const courseView: CourseView = {
   courseId: courseId("course-18"),
-  name: fixtureLinks18.courseName,
+  cardId: "card-18",
   card: fixtureLinks18,
-  teeSets: [{ name: "white", version: 1, provenance: "community", enteredBy: "Ann", verifiedBy: [] }],
+  enteredBy: "Ann",
+  updatedAtMs: 1_700_000_000_000,
 };
 
 beforeEach(() => {
@@ -176,7 +177,7 @@ describe("CreateRoundPage — create as yourself", () => {
     vi.useFakeTimers();
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedSearchCourses.mockResolvedValue({ courses: [{ courseId: courseId("course-18"), name: fixtureLinks18.courseName }] });
+    mockedSearchCourses.mockResolvedValue({ courses: [{ courseId: courseId("course-18"), name: fixtureLinks18.courseName, holeCount: 18 }] });
     mockedGetCourse.mockResolvedValue({ course: courseView });
 
     renderCreate();
@@ -189,7 +190,8 @@ describe("CreateRoundPage — create as yourself", () => {
       await vi.advanceTimersByTimeAsync(250);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: fixtureLinks18.courseName }));
+    // The result button now reads "<name> · <n> holes" (holeCount added) — match on the name substring.
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(fixtureLinks18.courseName) }));
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
@@ -204,11 +206,11 @@ describe("CreateRoundPage — create as yourself", () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("cy-g"), name: "Cy G" } });
     const revisedCard = { ...fixtureLinks18, teeSets: [{ ...fixtureWhite18, rating: 65.1 }] };
-    const revisedCourseView: CourseView = { ...courseView, card: revisedCard, teeSets: [{ ...courseView.teeSets[0]!, version: 3 }] };
+    const revisedCourseView: CourseView = { ...courseView, cardId: "card-18-v2", card: revisedCard };
     mockedCreateRound.mockResolvedValue({ roundId: roundId("round-mi-2"), joinCode: "DDD333", token: "tok-mi-2", golferId: golferId("cy-g") });
 
     renderCreate({ pathname: "/create", state: { refreshedCourse: revisedCourseView } });
-    await screen.findByText(revisedCourseView.name);
+    await screen.findByText(revisedCourseView.card.courseName);
     await screen.findByText(/playing as/i);
     expect(mockedGetCourse).not.toHaveBeenCalled(); // no re-fetch — EditCoursePage already returned the full CourseView
 

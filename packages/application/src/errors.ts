@@ -11,11 +11,9 @@ export type ApplicationErrorCode =
   | "round-not-live"
   | "round-final"
   | "unknown-golfer-in-game"
-  // M6: courses are a plain CRUD store (CourseStore), not event-sourced — "conflict" is
-  // this layer's optimistic-concurrency signal (a failed expectedRevision condition),
-  // mirroring what a head-seq condition would be for the journal (see startRound.ts's
-  // accepted-race comment) if one existed there.
-  | "course-conflict"
+  // Course-cards spec: an unresolvable courseId (getCourse/supersedeCard). Courses are the
+  // write-once card-lineage store now — there is no optimistic-concurrency "conflict" code;
+  // a moved CURRENT pointer surfaces as card-superseded (below), never a generic conflict.
   | "course-not-found"
   // M7 Task 2: terminateGame's gameId names a game outside the fold — same "referenced id
   // isn't part of this context" shape as unknown-golfer-in-game above.
@@ -114,7 +112,7 @@ export type ApplicationErrorCode =
   // Course-cards spec §6: CardStore.supersede's collision signal — the CURRENT pointer no
   // longer names the card the caller reviewed (record.supersedes). No retry, no revision
   // counter: a moved pointer means a human re-reviews the now-current card, same 409 bucket as
-  // course-conflict/crew-conflict above.
+  // crew-conflict above.
   | "card-superseded";
 
 export class ApplicationError extends Error {

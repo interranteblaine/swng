@@ -3,10 +3,12 @@ import { ApplicationError } from "./errors.js";
 import { retryOnConflict } from "./retryOnConflict.js";
 
 // A minimal revision-conditional single-cell store — enough to pin the generic retry loop's
-// own behavior in isolation. Store-specific wiring (CourseStore's/CrewStore's own plain put)
-// gets its own conflict-retry coverage through real use cases in courseSlice.test.ts (addTeeSet)
-// and crewSlice.test.ts (joinCrewByInvite).
-const codes = { notFound: "course-not-found", conflict: "course-conflict" } as const;
+// own behavior in isolation. Store-specific wiring (CrewStore's own plain put) gets its own
+// conflict-retry coverage through real use cases in crewSlice.test.ts (joinCrewByInvite). The
+// codes here are CrewStore's own living pair (the courses store no longer uses this retry — it
+// is a write-once card lineage now, whose one collision signal is card-superseded, not a
+// re-read-and-retry conflict).
+const codes = { notFound: "unknown-crew", conflict: "crew-conflict" } as const;
 
 const createFlakyCell = (initial: number, failCount: number) => {
   let value = initial;
@@ -17,8 +19,8 @@ const createFlakyCell = (initial: number, failCount: number) => {
     get: async () => ({ value, revision }),
     put: async (next: number, expectedRevision: number | undefined) => {
       putAttempts += 1;
-      if (putAttempts <= failCount) throw new ApplicationError("course-conflict", `synthetic conflict #${putAttempts}`);
-      if (expectedRevision !== revision) throw new ApplicationError("course-conflict", "real conflict");
+      if (putAttempts <= failCount) throw new ApplicationError("crew-conflict", `synthetic conflict #${putAttempts}`);
+      if (expectedRevision !== revision) throw new ApplicationError("crew-conflict", "real conflict");
       value = next;
       revision += 1;
     },
@@ -39,17 +41,17 @@ describe("retryOnConflict", () => {
   it("gives up after bounded attempts and rethrows the conflict when the store never stops conflicting", async () => {
     const cell = createFlakyCell(1, Number.POSITIVE_INFINITY);
 
-    await expect(retryOnConflict(cell, (current) => current + 1, codes)).rejects.toMatchObject({ code: "course-conflict" });
+    await expect(retryOnConflict(cell, (current) => current + 1, codes)).rejects.toMatchObject({ code: "crew-conflict" });
     expect(cell.putAttempts()).toBeGreaterThan(1);
   });
 
   it("get() resolving undefined throws the configured notFound code", async () => {
     const store = { get: async () => undefined, put: async () => {} };
 
-    await expect(retryOnConflict(store, (current: number) => current, codes)).rejects.toMatchObject({ code: "course-not-found" });
+    await expect(retryOnConflict(store, (current: number) => current, codes)).rejects.toMatchObject({ code: "unknown-crew" });
   });
 
-  // A DIFFERENT error than the one the loop discriminates on (course-conflict) — thrown by
+  // A DIFFERENT error than the one the loop discriminates on (crew-conflict) — thrown by
   // `mutate` itself, the same shape as a DomainError a real course/crew mutation would raise
   // (e.g. a duplicate member, a stale expected version) — propagates UNCAUGHT on the very
   // first attempt, never retried and never mistaken for a conflict to recover from.

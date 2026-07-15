@@ -3,9 +3,9 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, DynamoDBStreamEve
 import type { RoundArchive } from "@swng/domain";
 import type {
   AccountVerifier,
+  CardStore,
   Clock,
   ConnectionRegistry,
-  CourseStore,
   CrewStore,
   GolferStore,
   IdGenerator,
@@ -17,7 +17,6 @@ import type {
 import {
   abandonRound,
   addGame,
-  addTeeSet,
   appendCountedRound,
   createCourse,
   createCrew,
@@ -50,17 +49,17 @@ import {
   removeCrewMember,
   searchCourses,
   startRound,
+  supersedeCard,
   terminateGame,
   transferOrganizer,
   updateMyGolfer,
-  verifyTeeSet,
 } from "@swng/application";
 import { createApiGatewayBroadcast, createManagementClient } from "@swng/adapters-apigateway";
 import { createCognitoVerifier } from "@swng/adapters-cognito";
 import {
   createDocumentClient,
+  createDynamoCardStore,
   createDynamoConnectionRegistry,
-  createDynamoCourseStore,
   createDynamoCrewStore,
   createDynamoEventJournal,
   createDynamoGolferStore,
@@ -118,14 +117,14 @@ const requireEnv = (env: NodeJS.ProcessEnv, key: string): string => {
 // composition root, not one per entry). A `requireEnv("TABLE_CORE")` here would crash THEIR
 // cold start over a table they'll never query; this throws only if something actually calls
 // through it, which only http.ts's dispatched course routes ever do.
-const unavailableCourseStore = (): CourseStore => {
+const unavailableCardStore = (): CardStore => {
   const unavailable = (): never => {
     throw new Error("buildApp: TABLE_CORE is not set for this entry — course routes are HTTP-only (see swngStack.ts)");
   };
-  return { put: unavailable, get: unavailable, search: unavailable };
+  return { create: unavailable, supersede: unavailable, getCurrent: unavailable, search: unavailable };
 };
 
-// Same shape as unavailableCourseStore above, for the same reason: the "golfer" auth tier
+// Same shape as unavailableCardStore above, for the same reason: the "golfer" auth tier
 // (M7 Task 4) is dispatched HTTP-only, but wsConnect/wsDisconnect share buildApp and never
 // receive USER_POOL_ID/USER_POOL_CLIENT_ID (swngStack.ts only sets them on httpFn) — this
 // throws only if a golfer-tier route is ever actually dispatched against a cold start that
@@ -136,7 +135,7 @@ const unavailableVerifier = (): AccountVerifier => ({
   },
 });
 
-// Same shape again, for TABLE_CORE (unavailableCourseStore's own reason: wsConnect/
+// Same shape again, for TABLE_CORE (unavailableCardStore's own reason: wsConnect/
 // wsDisconnect never dispatch a golfer/course route) — golferStore lives on the CORE table
 // (keys.ts's golferPk), not TABLE_PROJECTIONS, so it shares TABLE_CORE's optionality with
 // courseStore rather than getting its own env var.
@@ -147,7 +146,7 @@ const unavailableGolferStore = (): GolferStore => {
   return { put: unavailable, get: unavailable, getMany: unavailable, getBySub: unavailable, bindSub: unavailable };
 };
 
-// Same shape again, for TABLE_CORE (unavailableCourseStore's own reason: wsConnect/
+// Same shape again, for TABLE_CORE (unavailableCardStore's own reason: wsConnect/
 // wsDisconnect never dispatch a golfer/crew/course route) — crewStore lives on the SAME core
 // table as courseStore/golferStore (keys.ts's crewPk), so it shares TABLE_CORE's optionality
 // rather than getting its own env var. (M8 Task 2/3 built this as a permanent STOPGAP that
@@ -216,12 +215,12 @@ export interface App {
 // env: TABLE_ROUNDS, TABLE_CONNECTIONS, TOKEN_SECRET, WS_ENDPOINT (apps/infra-cdk, M3 Task 5),
 // plus TABLE_CORE (M6 Task 4), USER_POOL_ID/USER_POOL_CLIENT_ID, and TABLE_PROJECTIONS (M7
 // Task 4/5), all OPTIONAL here — only httpFn's environment carries them (see
-// unavailableCourseStore/unavailableVerifier/unavailableGolferStore/
+// unavailableCardStore/unavailableVerifier/unavailableGolferStore/
 // unavailableProjectionStore above / swngStack.ts).
 export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const tableRounds = requireEnv(env, "TABLE_ROUNDS");
   const tableConnections = requireEnv(env, "TABLE_CONNECTIONS");
-  const tableCore = env.TABLE_CORE; // optional — see unavailableCourseStore above
+  const tableCore = env.TABLE_CORE; // optional — see unavailableCardStore above
   const tableProjections = env.TABLE_PROJECTIONS; // optional — see unavailableProjectionStore above
   const tableSnapshots = env.TABLE_SNAPSHOTS; // optional — see unavailableSnapshotStore above
   const userPoolId = env.USER_POOL_ID; // optional — see unavailableVerifier above
@@ -242,8 +241,8 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const store = createDynamoRoundStore({ client: documentClient, tableName: tableRounds });
   const snapshots = tableSnapshots !== undefined ? createDynamoSnapshotStore({ client: documentClient, tableName: tableSnapshots }) : unavailableSnapshotStore();
   const registry = createDynamoConnectionRegistry({ client: documentClient, tableName: tableConnections });
-  const courseStore = tableCore !== undefined ? createDynamoCourseStore({ client: documentClient, tableName: tableCore }) : unavailableCourseStore();
-  // golferStore lives on the SAME table as courseStore (keys.ts's golferPk — the core
+  const cardStore = tableCore !== undefined ? createDynamoCardStore({ client: documentClient, tableName: tableCore }) : unavailableCardStore();
+  // golferStore lives on the SAME table as the card store (keys.ts's golferPk — the core
   // table), so it shares tableCore's optionality rather than getting its own env var.
   const golferStore = tableCore !== undefined ? createDynamoGolferStore({ client: documentClient, tableName: tableCore }) : unavailableGolferStore();
   // M8 Task 4: crewStore lives on the SAME core table too (keys.ts's crewPk) — see
@@ -291,11 +290,13 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // instances startRound/joinRound above already share, plus the SAME golferStore
     // getRoundArchive above shares.
     mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
-    createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
-    addTeeSet: addTeeSet({ courseStore, clock, logger }),
-    verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
-    getCourse: getCourse({ courseStore }),
-    searchCourses: searchCourses({ courseStore }),
+    // Course-cards spec §4: createCourse/supersedeCard derive enteredBy from the account
+    // (golferStore's own get-or-create), so they take the SAME golferStore startRound/joinRound
+    // share; the two reads take only the cardStore.
+    createCourse: createCourse({ cardStore, golferStore, idGenerator: ids, clock, logger }),
+    supersedeCard: supersedeCard({ cardStore, golferStore, idGenerator: ids, clock, logger }),
+    getCourse: getCourse({ cardStore }),
+    searchCourses: searchCourses({ cardStore }),
     terminateGame: terminateGame({ journal, broadcast, clock, ids }),
     // idGenerator (accounts-only identity spec §2): GET /me now get-or-creates (ensureGolfer),
     // which mints a fresh golferId when the sub has none — the same `ids` every other minting use

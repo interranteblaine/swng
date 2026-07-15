@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import type { CourseCard } from "@swng/domain";
 import type { AuthTokens } from "../src/auth/tokenStore.js";
-import { enterScore, ensureCourse, injectAuthTokens, mintThrowawayUser, screenshotPath } from "./support.js";
+import { enterScore, ensureCourse, injectAuthTokens, mintAccountGolfer, mintThrowawayUser, screenshotPath } from "./support.js";
 
 // The primary path, accounts-only (the original M8 headline, rewritten for the wall): a fresh
 // golfer signs in, names themselves ONCE at the funnel's own prompt, and plays a round as
@@ -45,7 +45,12 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
     // this page's very first navigation — every goto() below, from / through /profile, runs
     // signed in (identityRecord.spec.ts's own beforeAll precedent).
     const tokens: AuthTokens = await mintThrowawayUser("primary-path");
-    await ensureCourse(courseName, card); // course seeding via the public API is test-fixture setup, not a user-facing step — same precedent as every other spec's step 1
+    // Course seeding is a golfer-gated write now (course-cards spec §4) but still pure
+    // test-fixture setup, not a user-facing step — so it uses a SEPARATE, already-named seed
+    // account (a real golfer with a name is required to author a course), leaving the funnel's
+    // own `tokens` un-named so the in-browser name prompt this spec exists to cover still fires.
+    const seedAccount = await mintAccountGolfer("primary-path-seed", "Seed");
+    await ensureCourse(courseName, card, seedAccount);
     const context = await browser.newContext();
     page = await context.newPage();
     await injectAuthTokens(page, tokens);

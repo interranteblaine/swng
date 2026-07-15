@@ -77,11 +77,13 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // tier as the archive route just above. Scoring capability derives from participation, not
   // the device that joined.
   { method: HttpMethod.POST, path: "/rounds/{roundId}/token" },
-  // M6 Task 4: peek + the course CRUD/search surface.
+  // Peek + the course CRUD/search surface. Course-cards spec §4: the M6 add-tee/verify routes
+  // are GONE — one whole-card supersession (PUT /courses/{courseId}) replaces both, and writes
+  // are "golfer"-gated (API Gateway forwards on method/path only, so the auth-tier move needs no
+  // edit here; the path change does).
   { method: HttpMethod.GET, path: "/rounds/peek" },
   { method: HttpMethod.POST, path: "/courses" },
-  { method: HttpMethod.POST, path: "/courses/{courseId}/tees" },
-  { method: HttpMethod.POST, path: "/courses/{courseId}/verify" },
+  { method: HttpMethod.PUT, path: "/courses/{courseId}" },
   { method: HttpMethod.GET, path: "/courses/{courseId}" },
   { method: HttpMethod.GET, path: "/courses" },
   // M7 Task 5: game/round termination + the golfer identity surface.
@@ -127,27 +129,26 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
 ];
 
 // M9 Task 5 (ops): the highest-abuse-value routes get the tighter per-route ceiling below —
-// nine as of crew membership's "invited in" rework (+POST /crews/peek). Seven are genuinely
-// no-token-reachable (routes.ts's `auth: "none"`): GET /rounds/peek (no participant exists yet
-// to hold a token before joining, M6 Task 4), POST /crews/peek (same story, one crew's invite
-// link instead of a round's join code), and the five course routes (the whole CRUD/search
-// surface, deliberately unauthenticated in v1). POST /rounds and POST /rounds/join are
-// golfer-gated now (accounts-only identity spec §3 — no anonymous start or join) but
-// deliberately STAY in this set: round creation and self-join are the abuse-sensitive
-// round-entry operations, and a Cognito account is a low, free, self-service barrier, so the
-// tighter ceiling still earns its keep on them. Re-tuning the throttle set is otherwise out of
-// this task's scope. Every OTHER route requires a participant token minted off a join code (or,
-// for crews, a signed-in account) first, a higher bar. Cross-checked against HTTP_ROUTES itself
-// in swngStack.test.ts (every entry here must also be a real route) so a typo'd path fails
-// loudly instead of silently throttling nothing.
+// eight as of the course-cards wire switch (the M6 add-tee/verify routes are gone; PUT
+// /courses/{courseId} takes their place). Four are genuinely no-token-reachable (routes.ts's
+// `auth: "none"`): GET /rounds/peek (no participant exists yet to hold a token before joining),
+// POST /crews/peek (same story, one crew's invite link instead of a round's join code), and the
+// two course READ routes (GET /courses, GET /courses/{courseId} — public data anyone may fetch
+// to pick a tee). POST /rounds, POST /rounds/join, POST /courses, and PUT /courses/{courseId}
+// are golfer-gated now but deliberately STAY in this set: round creation, self-join, and course
+// create/maintenance are the abuse-sensitive write operations, and a Cognito account is a low,
+// free, self-service barrier, so the tighter ceiling still earns its keep on them. Re-tuning the
+// throttle set is otherwise out of scope. Every OTHER route requires a participant token minted
+// off a join code (or, for crews, a signed-in account) first, a higher bar. Cross-checked
+// against HTTP_ROUTES itself in swngStack.test.ts (every entry here must also be a real route)
+// so a typo'd path fails loudly instead of silently throttling nothing.
 export const ANON_THROTTLED_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly path: string }> = [
   { method: HttpMethod.POST, path: "/rounds" },
   { method: HttpMethod.POST, path: "/rounds/join" },
   { method: HttpMethod.GET, path: "/rounds/peek" },
   { method: HttpMethod.POST, path: "/crews/peek" },
   { method: HttpMethod.POST, path: "/courses" },
-  { method: HttpMethod.POST, path: "/courses/{courseId}/tees" },
-  { method: HttpMethod.POST, path: "/courses/{courseId}/verify" },
+  { method: HttpMethod.PUT, path: "/courses/{courseId}" },
   { method: HttpMethod.GET, path: "/courses/{courseId}" },
   { method: HttpMethod.GET, path: "/courses" },
 ];
@@ -213,9 +214,10 @@ export class SwngStack extends Stack {
       stream: StreamViewType.NEW_IMAGE,
     });
 
-    // The core table now backs courses (M6 Task 3: createDynamoCourseStore) — pk `COURSE#<id>`
-    // / sk `COURSE`, one document per course, no separate event log (CourseStore's port
-    // comment). gsi1 is the course-name search index: a single partition across every course
+    // The core table now backs courses (course-cards spec §5: createDynamoCardStore) — a card
+    // lineage under pk `COURSE#<id>`: one mutable CURRENT pointer (sk `CURRENT`) plus one
+    // write-once item per card (sk `CARD#<cardId>`), no separate event log. gsi1 is the
+    // course-name search index over the CURRENT pointers: a single partition across every course
     // (gsi1pk fixed to one constant — adapters-dynamodb/src/keys.ts's courseGsi1pk — a
     // deliberate v1 choice; thousands of courses sit trivially inside one partition's limits,
     // and re-sharding is real future work only if beta telemetry ever shows it running hot),

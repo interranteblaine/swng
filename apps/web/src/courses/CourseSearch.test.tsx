@@ -85,8 +85,8 @@ describe("CourseSearch", () => {
     expect(mockedSearchCourses).toHaveBeenCalledWith("pe");
   });
 
-  it("renders tappable results and reports the picked courseId + name", async () => {
-    mockedSearchCourses.mockResolvedValue({ courses: [{ courseId: courseId("course-1"), name: "Pebble Beach" }] });
+  it("renders tappable results (name · holeCount) and reports the picked courseId + name", async () => {
+    mockedSearchCourses.mockResolvedValue({ courses: [{ courseId: courseId("course-1"), name: "Pebble Beach", holeCount: 18 }] });
     const onSelect = renderSearch();
 
     fireEvent.change(screen.getByLabelText(/course/i), { target: { value: "pebble" } });
@@ -94,7 +94,7 @@ describe("CourseSearch", () => {
       await vi.advanceTimersByTimeAsync(250);
     });
 
-    const result = screen.getByRole("button", { name: "Pebble Beach" });
+    const result = screen.getByRole("button", { name: /Pebble Beach · 18 holes/ });
     fireEvent.click(result);
 
     expect(onSelect).toHaveBeenCalledWith(courseId("course-1"), "Pebble Beach");

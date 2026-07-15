@@ -51,7 +51,7 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
     courseName: archive.card.courseName,
     tee: participant.tee,
     // course.ts's validateTeeSet is the one gate every tee set passes before it can ever
-    // reach a round (createCourse/addTeeSet reject anything else), so this length is
+    // reach a round (validateCard/buildCardRecord reject anything else), so this length is
     // always 9 or 18 by construction — the cast documents that upstream invariant rather
     // than re-checking it here.
     holes: teeSet.holes.length as 9 | 18,

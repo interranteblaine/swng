@@ -596,7 +596,7 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "$disconnect" });
     });
 
-    it("wires all thirty-seven HTTP routes (34 + invites + peek − members from the invited-in rework, + remove-member + transfer from accountable-out)", () => {
+    it("wires all thirty-six HTTP routes (37 − add-tee/verify + PUT /courses/{courseId} from the course-cards wire switch)", () => {
       const expectedRouteKeys = [
         "POST /rounds",
         "POST /rounds/join",
@@ -615,9 +615,10 @@ describe("SwngStack", () => {
         // Architecture-realignment Task 14: the participant-token re-mint.
         "POST /rounds/{roundId}/token",
         "GET /rounds/peek",
+        // Course-cards spec §4: the M6 add-tee/verify routes are gone — one whole-card
+        // supersession (PUT /courses/{courseId}) replaces both.
         "POST /courses",
-        "POST /courses/{courseId}/tees",
-        "POST /courses/{courseId}/verify",
+        "PUT /courses/{courseId}",
         "GET /courses/{courseId}",
         "GET /courses",
         // M7 Task 5: game/round termination + the golfer identity surface.
@@ -659,11 +660,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (37 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (36 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 39 routes total (37 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 39);
+    it("has exactly 38 routes total (36 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 38);
     });
 
     // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route
@@ -705,7 +706,7 @@ describe("SwngStack", () => {
     // The tightened routes get the tighter rate 5 / burst 10 ceiling — POST /rounds (golfer-gated
     // now but kept in the set as an abuse-sensitive round-entry route) and GET /courses/{courseId}
     // (a "none"-auth course route) each pinned individually, plus a full-membership check below
-    // that every one of the 9 keys is present with the same values (a single Match.objectLike would
+    // that every one of the 8 keys is present with the same values (a single Match.objectLike would
     // pass even if the OTHER 7 routes were silently dropped from the map).
     it("POST /rounds carries the tighter per-route throttle (rate 5 / burst 10)", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
@@ -719,7 +720,7 @@ describe("SwngStack", () => {
       });
     });
 
-    it("all 9 tightened routes carry the tighter throttle, and no others are present in RouteSettings", () => {
+    it("all 8 tightened routes carry the tighter throttle, and no others are present in RouteSettings", () => {
       const stages = template.findResources("AWS::ApiGatewayV2::Stage");
       const defaultStage = Object.values(stages).find((stage) => stage.Properties.StageName === "$default");
       expect(defaultStage).toBeDefined();

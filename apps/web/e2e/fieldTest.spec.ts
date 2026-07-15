@@ -74,13 +74,14 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // M6: the web app's create flow dropped bundled fixtures entirely (search is the only
     // picker now) — this deck needs a REAL course record to search for and pick in step 1
     // below. Search-first, create-if-absent, via the public course API directly (support.ts's
-    // own doc comment) — idempotent across the gate's three consecutive runs.
-    await ensureCourse(fixtureLinks18.courseName, fixtureLinks18);
-
+    // own doc comment) — idempotent across the gate's three consecutive runs. Seeding a course is
+    // a golfer-gated write now (course-cards spec §4), so it's minted with Ann's account Bearer.
+    //
     // Four accounts, one per deck golfer (see this file's header). Ann's tokens are injected
     // before pageA's first navigation (CreateRoundPage is sign-in-gated); Bo's are injected
     // mid-step-2, AFTER his signed-out funnel landing has been asserted.
     const annAccount = await mintAccountGolfer("field-ann", "Ann");
+    await ensureCourse(fixtureLinks18.courseName, fixtureLinks18, annAccount);
     boTokens = await mintThrowawayUser("field-bo");
     calAccount = await mintAccountGolfer("field-cal", "Cal");
     deeAccount = await mintAccountGolfer("field-dee", "Dee");
@@ -405,10 +406,12 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
   const route: WsRouteHandle = { current: undefined };
 
   test.beforeAll(async ({ browser }) => {
-    await ensureCourse(fixtureLinks18.courseName, fixtureLinks18); // idempotent — already seeded by the M5 block above when both run in the same pnpm e2e:field invocation
     // Accounts-only: Pat drives the browser signed in; Quinn's account exists purely for his
-    // own out-of-browser self-join in test 1.
+    // own out-of-browser self-join in test 1. Seeding a course is a golfer-gated write now
+    // (course-cards spec §4), so it's minted with Pat's account Bearer (idempotent — already
+    // seeded by the M5 block above when both run in the same pnpm e2e:field invocation).
     const patAccount = await mintAccountGolfer("field-pat", "Pat");
+    await ensureCourse(fixtureLinks18.courseName, fixtureLinks18, patAccount);
     quinnAccount = await mintAccountGolfer("field-quinn", "Quinn");
     const context = await browser.newContext();
     await installWsProxy(context, route);

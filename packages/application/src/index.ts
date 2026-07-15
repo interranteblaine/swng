@@ -4,9 +4,8 @@
 export type { AppendOptions, AppendResult, EventJournal } from "./ports/eventJournal.js";
 export type { RoundStore } from "./ports/roundStore.js";
 export type { SnapshotStore } from "./ports/snapshotStore.js";
-export type { CourseStore } from "./ports/courseStore.js";
-// Course-cards spec: the new write-once-lineage store lands BESIDE CourseStore (T4 switches
-// consumers and deletes the old pair — see ports/cardStore.ts's own doc comment).
+// Course-cards spec: the write-once-lineage store — the M6 CourseStore aggregate it replaced
+// is deleted whole (see ports/cardStore.ts's own doc comment).
 export type { CardStore } from "./ports/cardStore.js";
 export type { CountedRound, CrewSeason, CrewStore } from "./ports/crewStore.js";
 export type { GolferStore } from "./ports/golferStore.js";
@@ -43,8 +42,7 @@ export { getRoundArchive } from "./rounds/getRoundArchive.js";
 export { mintParticipantToken } from "./rounds/mintParticipantToken.js";
 
 export { createCourse } from "./courses/createCourse.js";
-export { addTeeSet } from "./courses/addTeeSet.js";
-export { verifyTeeSet } from "./courses/verifyTeeSet.js";
+export { supersedeCard } from "./courses/supersedeCard.js";
 export { getCourse } from "./courses/getCourse.js";
 export { searchCourses } from "./courses/searchCourses.js";
 
@@ -85,7 +83,7 @@ export {
   createCapturingBroadcast,
   createCapturingLogger,
   createFixedClock,
-  createInMemoryCourseStore,
+  createInMemoryCardStore,
   createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,

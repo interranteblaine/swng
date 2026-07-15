@@ -1,4 +1,3 @@
-import { Link, useLocation } from "react-router";
 import type { CourseView } from "@swng/contracts";
 
 export interface CourseSummaryCardProps {
@@ -23,12 +22,10 @@ export interface CourseSummaryCardProps {
 // component, not two. The verify affordance (M6 Task 5) is gone — attribution only now
 // (course-cards spec §8): a tee set names who entered it, never a self-typed verify count.
 export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCourse }: CourseSummaryCardProps) {
-  const location = useLocation();
-
   return (
     <div className="flex flex-col gap-3 rounded-lg bg-slate-900 p-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-lg font-semibold">{course.name}</p>
+        <p className="text-lg font-semibold">{course.card.courseName}</p>
         {onChangeCourse && (
           <button type="button" onClick={onChangeCourse} className="text-sm text-emerald-400 underline">
             Change course
@@ -47,27 +44,11 @@ export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCo
         </select>
       </label>
 
-      <ul className="flex flex-col gap-1 text-sm text-slate-400">
-        {course.teeSets.map((teeSet) => (
-          <li key={teeSet.name}>
-            {teeSet.name}: entered by {teeSet.enteredBy}
-          </li>
-        ))}
-      </ul>
-
-      <div className="flex items-center gap-4">
-        {/* I2 (papercut 3): the revise endpoint shipped in M6 with zero web callers — a golfer
-            who spots a transposed SI had no in-app remedy. `state` carries the tee being
-            edited and where to return once the correction lands (EditCoursePage's own success
-            hand-off reads `returnTo` back out — see EditCoursePage.tsx). */}
-        <Link
-          to={`/courses/${course.courseId}/edit`}
-          state={{ teeName: selectedTee, returnTo: `${location.pathname}${location.search}` }}
-          className="text-sm text-emerald-400 underline"
-        >
-          Edit this card
-        </Link>
-      </div>
+      {/* Attribution only (course-cards spec §8): who entered this card and when — no per-tee
+          verify badges, no edit affordance (T6 restores editing from the new CoursePage). */}
+      <p className="text-sm text-slate-400">
+        entered by {course.enteredBy} · updated {new Date(course.updatedAtMs).toLocaleDateString()}
+      </p>
     </div>
   );
 }

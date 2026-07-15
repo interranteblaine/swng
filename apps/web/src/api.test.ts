@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { courseId, crewId, fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
 import type {
   AddGameRequest,
-  AddTeeSetRequest,
   AppendCountedRoundRequest,
   CreateCourseRequest,
   CreateCrewRequest,
@@ -10,11 +9,11 @@ import type {
   JoinCrewRequest,
   JoinRoundRequest,
   StartRoundRequest,
+  SupersedeCardRequest,
   UpdateMeRequest,
 } from "@swng/contracts";
 import {
   addGame,
-  addTeeSet,
   appendCountedRound,
   ApiError,
   createCourse,
@@ -44,6 +43,7 @@ import {
   removeCrewMember,
   searchCourses,
   shareRound,
+  supersedeCard,
   terminateGame,
   transferOrganizer,
   updateMe,
@@ -60,18 +60,23 @@ const stubFetch = (impl: (url: string, init?: RequestInit) => Promise<Response>)
   vi.stubGlobal("fetch", vi.fn(impl));
 };
 
-// One CourseView wire body reused by every course-endpoint test below — a single hole is
-// enough to exercise courseCardSchema (this is api.ts's own wire-parsing test, not domain's
-// invariant tests, which already cover the real 9/18-hole shape elsewhere).
+// One CourseView wire body (course-cards spec §4) reused by every course-endpoint test below —
+// a single hole is enough to exercise courseCardSchema (this is api.ts's own wire-parsing test,
+// not domain's invariant tests, which already cover the real 9/18-hole shape elsewhere).
 const courseViewJson = {
   courseId: "course-1",
-  name: "Pebble Beach",
+  cardId: "card-1",
   card: {
     courseName: "Pebble Beach",
-    teeSets: [{ name: "white", rating: 71.8, slope: 130, holes: [{ number: 1, par: 4, yardage: 380, strokeIndex: 1 }] }],
+    source: { cardId: "card-1", courseId: "course-1" },
+    teeSets: [{ teeId: "t-white", name: "white", rating: 71.8, slope: 130, holes: [{ number: 1, par: 4, yardage: 380, strokeIndex: 1 }] }],
   },
-  teeSets: [{ name: "white", version: 1, provenance: "community", enteredBy: "Ann", verifiedBy: [] }],
+  enteredBy: "Ann",
+  updatedAtMs: 1_700_000_000_000,
 };
+
+// An input tee for a create/supersede request: no teeId (the server mints/tracks ids).
+const inputTee = { name: "white", rating: 71.8, slope: 130, holes: [{ number: 1, par: 4, yardage: 380, strokeIndex: 1 }] };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -616,21 +621,22 @@ describe("getCourse", () => {
     expect(seenUrl).toBe(`${HTTP_URL}/courses/course-1`);
     expect(result.course.courseId).toBe(courseId("course-1"));
     expect(result.course.card).toEqual(courseViewJson.card);
+    expect(result.course.enteredBy).toBe("Ann");
   });
 });
 
 describe("searchCourses", () => {
-  it("GETs /courses?query=... (percent-encoded) and parses the results", async () => {
+  it("GETs /courses?query=... (percent-encoded) and parses the results with holeCount", async () => {
     let seenUrl: string | undefined;
     stubFetch(async (url) => {
       seenUrl = String(url);
-      return fakeResponse(200, { courses: [{ courseId: "course-1", name: "Pebble Beach" }] });
+      return fakeResponse(200, { courses: [{ courseId: "course-1", name: "Pebble Beach", holeCount: 18 }] });
     });
 
     const result = await searchCourses("pebble beach");
 
     expect(seenUrl).toBe(`${HTTP_URL}/courses?query=pebble+beach`);
-    expect(result).toEqual({ courses: [{ courseId: courseId("course-1"), name: "Pebble Beach" }] });
+    expect(result).toEqual({ courses: [{ courseId: courseId("course-1"), name: "Pebble Beach", holeCount: 18 }] });
   });
 
   it("adds limit to the query string when given", async () => {
@@ -647,9 +653,9 @@ describe("searchCourses", () => {
 });
 
 describe("createCourse", () => {
-  const input: CreateCourseRequest = { name: "Pebble Beach", tee: courseViewJson.card.teeSets[0]!, enteredBy: "Ann" };
+  const input: CreateCourseRequest = { name: "Pebble Beach", teeSets: [inputTee] };
 
-  it("POSTs the request body to /courses and parses a CourseView response", async () => {
+  it("POSTs the request body + Bearer to /courses and parses a CourseView response", async () => {
     let seenUrl: string | undefined;
     let seenInit: RequestInit | undefined;
     stubFetch(async (url, init) => {
@@ -658,12 +664,13 @@ describe("createCourse", () => {
       return fakeResponse(201, { course: courseViewJson });
     });
 
-    const result = await createCourse(input);
+    const result = await createCourse(input, "tok-1");
 
     expect(seenUrl).toBe(`${HTTP_URL}/courses`);
     expect(seenInit?.method).toBe("POST");
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-1");
     expect(JSON.parse(String(seenInit?.body))).toEqual(input);
-    expect(result.course.name).toBe("Pebble Beach");
+    expect(result.course.card.courseName).toBe("Pebble Beach");
   });
 
   // The exact scenario AddCoursePage's inline-per-code display depends on — a domain
@@ -672,29 +679,31 @@ describe("createCourse", () => {
   it("throws a coded ApiError for a domain validation rejection", async () => {
     stubFetch(async () => fakeResponse(400, { code: "invalid-rating", message: 'tee "white" rating 200 outside 30..90' }));
 
-    const error: unknown = await createCourse(input).catch((caught: unknown) => caught);
+    const error: unknown = await createCourse(input, "tok-1").catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("invalid-rating");
   });
 });
 
-describe("addTeeSet", () => {
-  it("POSTs the request body to /courses/{courseId}/tees and parses a CourseView response", async () => {
+describe("supersedeCard", () => {
+  it("PUTs the whole-card body + Bearer to /courses/{courseId} and parses a CourseView response", async () => {
     let seenUrl: string | undefined;
     let seenInit: RequestInit | undefined;
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(201, { course: courseViewJson });
+      return fakeResponse(200, { course: courseViewJson });
     });
 
-    const input: AddTeeSetRequest = { tee: courseViewJson.card.teeSets[0]!, enteredBy: "Bo" };
-    const result = await addTeeSet(courseId("course-1"), input);
+    const input: SupersedeCardRequest = { name: "Pebble Beach", teeSets: [{ ...inputTee, teeId: "t-white" }], supersedes: "card-0" };
+    const result = await supersedeCard(courseId("course-1"), input, "tok-2");
 
-    expect(seenUrl).toBe(`${HTTP_URL}/courses/course-1/tees`);
+    expect(seenUrl).toBe(`${HTTP_URL}/courses/course-1`);
+    expect(seenInit?.method).toBe("PUT");
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-2");
     expect(JSON.parse(String(seenInit?.body))).toEqual(input);
-    expect(result.course.name).toBe("Pebble Beach");
+    expect(result.course.cardId).toBe("card-1");
   });
 });
 

@@ -3,8 +3,8 @@ import { ApplicationError, createNullLogger } from "@swng/application";
 import { DomainError } from "@swng/domain";
 import { toHttpError } from "./errorMapping.js";
 
-// The ten course-validation DomainError codes thrown by domain/src/course/course.ts
-// (validateCourseName / validateTeeSet / addTeeSet's duplicate-name guard) are client-input
+// The course-validation DomainError codes thrown by domain/src/course/course.ts
+// (validateCourseName / validateTeeSet / validateCard's duplicate-name guard) are client-input
 // errors — the same "the request you sent is malformed" shape as a zod ContractError — so
 // each must map to a coded 400, not fall through to the generic 500. Constructed here exactly
 // as course.ts throws them (code + message), not invented strings.
@@ -44,13 +44,17 @@ describe("toHttpError — course validation DomainErrors map to coded 400s", () 
     expect(JSON.parse(result.body)).toEqual({ code: "game-unresolved", message: "game not finished" });
   });
 
-  // I1 (M6 closing wave): a verify racing a revision it never saw is a 409, the same
-  // "your view is stale" shape as course-conflict — not a 400 (the request itself is
-  // well-formed) and not silently retried.
-  it("maps tee-set-revised to 409", () => {
-    const result = toHttpError(new DomainError("tee-set-revised", 'tee "white" is now version 2, expected version 1'), logger);
-    expect(result.statusCode).toBe(409);
-    expect(JSON.parse(result.body)).toEqual({ code: "tee-set-revised", message: 'tee "white" is now version 2, expected version 1' });
+  // Course-cards spec: the whole-card validators (validateTeeContinuity / validateCard /
+  // buildCardRecord) throw these on a bad supersede/create body — client-input the caller can
+  // correct, the same 400 bucket as unknown-tee-set / duplicate-tee-name above.
+  it.each([
+    ["unknown-tee-id", 'tee "white" claims id "t-9", which the superseded card does not have'],
+    ["duplicate-tee-id", 'tee id "t-1" submitted more than once'],
+    ["mismatched-hole-count", "every tee in a card must describe the same holes; got counts 9, 18"],
+  ])("maps %s to 400", (code, message) => {
+    const result = toHttpError(new DomainError(code, message), logger);
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body)).toEqual({ code, message });
   });
 
   // task-15: settleRound throws round-abandoned when finalize's candidate log folds to a scrapped
@@ -101,7 +105,7 @@ describe("toHttpError — M7 golfer/terminate ApplicationErrors", () => {
 
   // createDynamoGolferStore.ts's `put`: a ConditionalCheckFailedException on the
   // expectedRevision condition — a failed optimistic-concurrency write, same bucket as
-  // course-conflict.
+  // crew-conflict.
   it("maps golfer-conflict to 409", () => {
     const result = toHttpError(new ApplicationError("golfer-conflict", "golfer g-1 revision mismatch (expected 2)"), logger);
     expect(result.statusCode).toBe(409);
@@ -115,7 +119,7 @@ describe("toHttpError — joinRound golfer-already-in-round", () => {
   const logger = createNullLogger();
 
   // A duplicate participant-joined would corrupt the roster — same "failed precondition" 409
-  // shape as golfer-conflict/course-conflict above.
+  // shape as golfer-conflict/crew-conflict above.
   it("maps golfer-already-in-round to 409", () => {
     const result = toHttpError(new ApplicationError("golfer-already-in-round", "golfer g-1 is already a participant in this round"), logger);
     expect(result.statusCode).toBe(409);

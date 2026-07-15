@@ -37,12 +37,13 @@ export const snapshotPk = (id: RoundId): string => id;
 // own id on register/deregister and fanned out to via gsi1 on roundId for broadcast.
 export const connPk = (connectionId: string): string => `CONN#${connectionId}`;
 
-// The core table's course-item key vocabulary (M6 Task 3): a Course aggregate is a plain
-// CRUD document (CourseStore's port comment), so unlike the rounds table there's no event
-// collection per id — one item, `pk` = coursePk(id) / `sk` fixed to COURSE.
+// The core table's course-item key vocabulary (course-cards spec §5): a course is a card
+// lineage under one partition — `pk` = coursePk(id), holding the CURRENT pointer
+// (courseCurrentSk) and one write-once item per card (cardSk). The legacy single-document
+// "COURSE" sort key is gone with the M6 aggregate; the pointer's own sk (courseCurrentSk,
+// below) is deliberately NOT that constant so a legacy item can never be mistaken for a pointer.
 const COURSE_PK_PREFIX = "COURSE#";
 export const coursePk = (id: CourseId): string => `${COURSE_PK_PREFIX}${id}`;
-export const courseSk = "COURSE";
 
 // courseId parses back out of a projected gsi1 item's `pk` — a base table's own key
 // attributes are always projected onto a GSI regardless of ProjectionType (DynamoDB's own

@@ -40,10 +40,7 @@ const stubUseCases: UseCases = {
   createCourse: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
-  addTeeSet: () => {
-    throw new Error("not implemented: parity test never dispatches");
-  },
-  verifyTeeSet: () => {
+  supersedeCard: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
   getCourse: () => {

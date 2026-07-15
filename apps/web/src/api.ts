@@ -1,7 +1,6 @@
 import {
   abandonRoundResponseSchema,
   addGameResponseSchema,
-  addTeeSetResponseSchema,
   appendCountedRoundResponseSchema,
   createCourseResponseSchema,
   createCrewResponseSchema,
@@ -31,14 +30,13 @@ import {
   seasonStandingsResponseSchema,
   shareLinkResponseSchema,
   startRoundResponseSchema,
+  supersedeCardResponseSchema,
   terminateGameResponseSchema,
 } from "@swng/contracts";
 import type {
   AbandonRoundResponse,
   AddGameRequest,
   AddGameResponse,
-  AddTeeSetRequest,
-  AddTeeSetResponse,
   AppendCountedRoundRequest,
   AppendCountedRoundResponse,
   CreateCourseRequest,
@@ -74,6 +72,8 @@ import type {
   ShareLinkResponse,
   StartRoundRequest,
   StartRoundResponse,
+  SupersedeCardRequest,
+  SupersedeCardResponse,
   TerminateGameResponse,
   TransferOrganizerRequest,
   UpdateMeRequest,
@@ -186,9 +186,10 @@ export const shareRound = async (roundId: RoundId, token: string): Promise<Share
   return parse(shareLinkResponseSchema, json);
 };
 
-// M6 Task 5: the six course-surface calls, same requestJson + per-endpoint idiom as the five
-// round calls above — all `auth: "none"` on the wire (lambda/http/routes.ts's own M6 Task 4
-// comment: identity lands in M7), so none of these ever pass a token.
+// Course-cards spec §4: the course surface. The two READS (GET) are `auth: "none"` and pass
+// no token; the two WRITES (POST /courses, PUT /courses/{courseId}) are "golfer"-gated —
+// enteredBy derives from the account — so they take a Bearer, the same createRound/joinRound
+// idiom above (a real call passes one from a valid auth session via useAuth's withAuth).
 export const getCourse = async (courseId: CourseId): Promise<GetCourseResponse> => {
   const json = await requestJson(`/courses/${courseId}`, undefined);
   return parse(getCourseResponseSchema, json);
@@ -203,14 +204,16 @@ export const searchCourses = async (query: string, limit?: number): Promise<Sear
   return parse(searchCoursesResponseSchema, json);
 };
 
-export const createCourse = async (input: CreateCourseRequest): Promise<CreateCourseResponse> => {
-  const json = await requestJson("/courses", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+export const createCourse = async (input: CreateCourseRequest, token: string): Promise<CreateCourseResponse> => {
+  const json = await requestJson("/courses", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
   return parse(createCourseResponseSchema, json);
 };
 
-export const addTeeSet = async (courseId: CourseId, input: AddTeeSetRequest): Promise<AddTeeSetResponse> => {
-  const json = await requestJson(`/courses/${courseId}/tees`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
-  return parse(addTeeSetResponseSchema, json);
+// PUT /courses/{courseId} (course-cards spec §4): THE maintenance operation — add a tee, fix
+// numbers, rename the course or a tee, all one whole-card supersession under the same lineage id.
+export const supersedeCard = async (courseId: CourseId, input: SupersedeCardRequest, token: string): Promise<SupersedeCardResponse> => {
+  const json = await requestJson(`/courses/${courseId}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
+  return parse(supersedeCardResponseSchema, json);
 };
 
 // Same "missing/blank is the route layer's own 400, not an empty-string lookup" contract as

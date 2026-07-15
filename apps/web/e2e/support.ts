@@ -23,6 +23,7 @@ import {
   createSeasonRequestSchema,
   createSeasonResponseSchema,
   finalizeRoundResponseSchema,
+  getCourseResponseSchema,
   getCrewResponseSchema,
   getMyRecordResponseSchema,
   golferResponseSchema,
@@ -121,21 +122,18 @@ export const loadWebEnv = (): WebEnv => {
 
 // --- Course seeding: search-first, create-if-absent, via the PUBLIC course API ---------------
 
-// M6 field-test upkeep: the web app's create flow dropped bundled fixtures entirely — search
-// is the only picker (CreateRoundPage now renders CourseSearch, never a fixture <select>) — so
-// fieldTest.spec.ts's own deck (fieldDeck18/fixtureLinks18) needs a REAL course record to find
-// and pick in step 1. Idempotent across repeat runs: searches by the exact name first
-// (courseNameKey's prefix-match GSI — createDynamoCourseStore.ts's own normalization, the same
-// one createCourse's write uses), and only creates when no exact match comes back, so the
-// gate's three consecutive `pnpm e2e:field` runs (brief) seed the course once, not three times.
-// Returns the seeded course's own CourseId (crewSeason.spec.ts wants a real courseId/tee to
-// pin, not just a name the UI can search for) — every prior
-// caller (courseEntry/fieldTest/identityRecord) already only used this for its side effect and
-// never read a return value, so widening void -> Promise<CourseId> is additive, not breaking.
-export const ensureCourse = async (name: string, card: CourseCard): Promise<CourseId> => {
+// Course-cards spec §4: the web app's create flow needs a REAL course record for a deck to
+// search for and pick. Search-first, create-if-absent: searches by the exact name first
+// (courseNameKey's prefix-match GSI — createDynamoCardStore.ts's own normalization, the same
+// one the card store's pointer write uses), and only creates when no exact match comes back, so
+// the gate's three consecutive `pnpm e2e:field` runs (brief) seed the course once, not three
+// times. Writes are "golfer"-gated now (enteredBy derives from the account), so the caller passes
+// an already-minted account whose Bearer authorizes the POST. Returns both ids: the courseId a
+// UI search resolves to, plus the CURRENT cardId (fetched from GET /courses/{id} on a hit, or
+// read straight off the create response).
+export const ensureCourse = async (name: string, card: CourseCard, account: AccountGolfer): Promise<{ courseId: CourseId; cardId: string }> => {
   const { httpUrl } = loadWebEnv();
-  const teeSet = card.teeSets[0];
-  if (!teeSet) throw new Error(`course card "${name}" has no tee sets to seed with`);
+  if (card.teeSets.length === 0) throw new Error(`course card "${name}" has no tee sets to seed with`);
 
   const searchParams = new URLSearchParams({ query: name });
   const searchResponse = await fetch(`${httpUrl}/courses?${searchParams.toString()}`);
@@ -143,13 +141,31 @@ export const ensureCourse = async (name: string, card: CourseCard): Promise<Cour
   if (!searchResponse.ok) throw new Error(`GET /courses -> ${searchResponse.status}: ${JSON.stringify(searchJson)}`);
   const { courses } = parse(searchCoursesResponseSchema, searchJson);
   const existing = courses.find((c) => c.name === name);
-  if (existing) return existing.courseId; // already seeded by a prior run
+  if (existing) {
+    // Already seeded by a prior run — read the CURRENT card for its cardId (the reads are auth-none).
+    const getResponse = await fetch(`${httpUrl}/courses/${existing.courseId}`);
+    const getJson: unknown = await getResponse.json();
+    if (!getResponse.ok) throw new Error(`GET /courses/${existing.courseId} -> ${getResponse.status}: ${JSON.stringify(getJson)}`);
+    const { course } = parse(getCourseResponseSchema, getJson);
+    return { courseId: course.courseId, cardId: course.cardId };
+  }
 
-  const body = parse(createCourseRequestSchema, { name, tee: teeSet, enteredBy: "field-test-setup" });
-  const createResponse = await fetch(`${httpUrl}/courses`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  // Miss → create with ALL tees, stripped to plain input tees ({name, rating, slope, holes} —
+  // POST mints every id, and .strict() rejects a submitted teeId/source; fixture cards carry
+  // neither anyway). The account's Bearer authorizes the golfer-gated write.
+  const body = parse(createCourseRequestSchema, {
+    name,
+    teeSets: card.teeSets.map((tee) => ({ name: tee.name, rating: tee.rating, slope: tee.slope, holes: tee.holes })),
+  });
+  const createResponse = await fetch(`${httpUrl}/courses`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${account.tokens.idToken}` },
+    body: JSON.stringify(body),
+  });
   const createJson: unknown = await createResponse.json();
   if (!createResponse.ok) throw new Error(`POST /courses -> ${createResponse.status}: ${JSON.stringify(createJson)}`);
-  return parse(createCourseResponseSchema, createJson).course.courseId;
+  const { course } = parse(createCourseResponseSchema, createJson);
+  return { courseId: course.courseId, cardId: course.cardId };
 };
 
 // --- Out-of-browser joins (always as an account, always as yourself) -----------------------

@@ -2,29 +2,9 @@ import type { CourseCard, TeeSet } from "./card.js";
 import { DomainError } from "../errors.js";
 import type { CardId, CourseId, GolferId, TeeId } from "../ids.js";
 
-// Where a tee set's numbers came from: typed in by a community scorer, or
-// ingested from an external course-data source (identity/authority for either
-// case lands in M7 — for now this is just provenance metadata on the version).
+// Where a tee set's numbers came from: typed in by a community scorer, or ingested from an
+// external course-data source — provenance metadata frozen onto a stored card (CardRecord).
 export type Provenance = "community" | "imported";
-
-export interface TeeSetVersion {
-  readonly version: number; // 1-based, monotonic per tee name
-  readonly status: "current" | "superseded";
-  readonly provenance: Provenance;
-  readonly enteredBy: string; // display name; identity lands M7
-  readonly enteredAtMs: number;
-  readonly verifications: readonly { readonly name: string; readonly atMs: number }[];
-  readonly tee: TeeSet; // the existing scoring shape, embedded whole
-}
-
-// Every version of every tee name ever entered, never pruned — a course's audit
-// trail. Exactly one version per tee name is ever "current" (courseCardOf's
-// input invariant); the rest are "superseded" history.
-export interface Course {
-  readonly courseId: CourseId;
-  readonly name: string;
-  readonly teeSets: readonly TeeSetVersion[];
-}
 
 const MAX_COURSE_NAME_LENGTH = 80;
 const MAX_TEE_NAME_LENGTH = 40;
@@ -40,8 +20,8 @@ const validateCourseName = (name: string): void => {
   }
 };
 
-// Shared by createCourse and addTeeSet so a tee set is held to identical rules
-// regardless of which call introduced it — the invariant table lives exactly once.
+// The per-tee invariant table, applied to every tee of every card (validateCard calls this per
+// tee) — the rules live exactly once, regardless of which write introduced the tee.
 const validateTeeSet = (tee: TeeSet): void => {
   if (tee.name.trim().length === 0 || tee.name.length > MAX_TEE_NAME_LENGTH) {
     throw new DomainError("invalid-tee-name", `tee name must be 1-${MAX_TEE_NAME_LENGTH} characters: "${tee.name}"`);
@@ -78,109 +58,6 @@ const validateTeeSet = (tee: TeeSet): void => {
   if (!isPermutation) {
     throw new DomainError("invalid-stroke-index", `tee "${tee.name}" strokeIndex values are not a permutation of 1..${holeCount}`);
   }
-};
-
-export const createCourse = (input: {
-  readonly courseId: CourseId;
-  readonly name: string;
-  readonly tee: TeeSet;
-  readonly enteredBy: string;
-  readonly nowMs: number;
-  readonly provenance?: Provenance;
-}): Course => {
-  validateCourseName(input.name);
-  validateTeeSet(input.tee);
-  return {
-    courseId: input.courseId,
-    name: input.name,
-    teeSets: [
-      {
-        version: 1,
-        status: "current",
-        provenance: input.provenance ?? "community",
-        enteredBy: input.enteredBy,
-        enteredAtMs: input.nowMs,
-        verifications: [],
-        tee: input.tee,
-      },
-    ],
-  };
-};
-
-export const addTeeSet = (
-  course: Course,
-  input: { readonly tee: TeeSet; readonly enteredBy: string; readonly nowMs: number; readonly provenance?: Provenance },
-): Course => {
-  validateTeeSet(input.tee);
-
-  // Revision detection is exact-name match — that's what "same tee name" means for
-  // versioning. A genuinely new name is still checked case-insensitively against every
-  // CURRENT name so "White" and "WHITE" never coexist as two unrelated tee sets.
-  const priorVersions = course.teeSets.filter((v) => v.tee.name === input.tee.name);
-  const isRevision = priorVersions.length > 0;
-  if (!isRevision) {
-    const collidesWithCurrent = course.teeSets.some((v) => v.status === "current" && v.tee.name.toLowerCase() === input.tee.name.toLowerCase());
-    if (collidesWithCurrent) {
-      throw new DomainError("duplicate-tee-name", `tee name "${input.tee.name}" collides case-insensitively with an existing tee`);
-    }
-  }
-
-  const nextVersion: TeeSetVersion = {
-    version: isRevision ? Math.max(...priorVersions.map((v) => v.version)) + 1 : 1,
-    status: "current",
-    provenance: input.provenance ?? "community",
-    enteredBy: input.enteredBy,
-    enteredAtMs: input.nowMs,
-    verifications: [], // a revision starts fresh — the prior version's verifications don't carry
-    tee: input.tee,
-  };
-
-  const supersededTeeSets = course.teeSets.map((v) =>
-    v.tee.name === input.tee.name && v.status === "current" ? ({ ...v, status: "superseded" } as const) : v,
-  );
-
-  return { ...course, teeSets: [...supersededTeeSets, nextVersion] };
-};
-
-export const verifyTeeSet = (
-  course: Course,
-  input: { readonly teeName: string; readonly verifierName: string; readonly expectedVersion: number; readonly nowMs: number },
-): Course => {
-  const current = course.teeSets.find((v) => v.tee.name === input.teeName && v.status === "current");
-  if (!current) throw new DomainError("unknown-tee-set", `no tee set named "${input.teeName}"`);
-
-  // A verification is an attestation of the exact numbers the verifier looked at — it must
-  // never silently transplant onto a revision the verifier never saw (a corrected card is
-  // unverified until someone re-verifies it; that's the point of verification). If the
-  // caller's expectedVersion doesn't match what's current NOW, someone else's revision beat
-  // them to it — fail outright rather than attach the verifier's credit to numbers they
-  // never read.
-  if (current.version !== input.expectedVersion) {
-    throw new DomainError("tee-set-revised", `tee "${input.teeName}" is now version ${current.version}, expected version ${input.expectedVersion}`);
-  }
-
-  // Duplicate verifier name on the same version is a no-op, not an error — re-tapping
-  // "verify" a second time (a plausible double-submit) shouldn't accumulate duplicate credit.
-  if (current.verifications.some((v) => v.name === input.verifierName)) return course;
-
-  const verified: TeeSetVersion = { ...current, verifications: [...current.verifications, { name: input.verifierName, atMs: input.nowMs }] };
-  return { ...course, teeSets: course.teeSets.map((v) => (v === current ? verified : v)) };
-};
-
-// Current versions only, ordered by when each tee NAME first entered the course — not by
-// teeSets' array position, which drifts once a revision re-appends an already-established
-// name to the end of the array. version === 1 marks a name's first appearance exactly once
-// (revisions never get a new version-1 entry), so scanning for those gives first-entered
-// order independent of where the CURRENT version of that name now sits.
-export const courseCardOf = (course: Course): CourseCard => {
-  const firstEnteredNames = course.teeSets.filter((v) => v.version === 1).map((v) => v.tee.name);
-  const currentByName = new Map(course.teeSets.filter((v) => v.status === "current").map((v) => [v.tee.name, v.tee]));
-  return {
-    courseName: course.name,
-    // Every first-entered name has exactly one current version by construction
-    // (addTeeSet's own invariant), so this lookup can never miss.
-    teeSets: firstEnteredNames.map((name) => currentByName.get(name)!),
-  };
 };
 
 // The ONE normalization both the store's GSI write and search's query use — collapsing

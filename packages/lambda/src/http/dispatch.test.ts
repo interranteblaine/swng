@@ -5,13 +5,12 @@ import type { AccountClaims, AccountVerifier } from "@swng/application";
 import {
   abandonRound,
   addGame,
-  addTeeSet,
   appendCountedRound,
   createCapturingBroadcast,
   createCourse,
   createCrew,
   createFixedClock,
-  createInMemoryCourseStore,
+  createInMemoryCardStore,
   createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryJournal,
@@ -47,14 +46,13 @@ import {
   removeCrewMember,
   searchCourses,
   startRound,
+  supersedeCard,
   terminateGame,
   transferOrganizer,
   updateMyGolfer,
-  verifyTeeSet,
 } from "@swng/application";
 import {
   addGameResponseSchema,
-  addTeeSetResponseSchema,
   appendCountedRoundResponseSchema,
   createCourseResponseSchema,
   createCrewResponseSchema,
@@ -83,8 +81,8 @@ import {
   seasonStandingsResponseSchema,
   shareLinkResponseSchema,
   startRoundResponseSchema,
+  supersedeCardResponseSchema,
   terminateGameResponseSchema,
-  verifyTeeSetResponseSchema,
 } from "@swng/contracts";
 import { createHmacTokenIssuer } from "../auth/hmacTokenIssuer.js";
 import { buildRoutes } from "./routes.js";
@@ -148,7 +146,7 @@ const setup = (verifier: AccountVerifier = subVerifier) => {
   const snapshots = createInMemorySnapshotStore();
   const journal = createInMemoryJournal(snapshots);
   const store = createInMemoryRoundStore();
-  const courseStore = createInMemoryCourseStore();
+  const cardStore = createInMemoryCardStore();
   const golferStore = createInMemoryGolferStore();
   const crewStore = createInMemoryCrewStore();
   const projectionStore = createInMemoryProjectionStore();
@@ -171,11 +169,10 @@ const setup = (verifier: AccountVerifier = subVerifier) => {
     getShareLink: getShareLink({ tokens }),
     getRoundArchive: getRoundArchive({ snapshots, golferStore, crewStore }),
     mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
-    createCourse: createCourse({ courseStore, idGenerator: ids, clock, logger }),
-    addTeeSet: addTeeSet({ courseStore, clock, logger }),
-    verifyTeeSet: verifyTeeSet({ courseStore, clock, logger }),
-    getCourse: getCourse({ courseStore }),
-    searchCourses: searchCourses({ courseStore }),
+    createCourse: createCourse({ cardStore, golferStore, idGenerator: ids, clock, logger }),
+    supersedeCard: supersedeCard({ cardStore, golferStore, idGenerator: ids, clock, logger }),
+    getCourse: getCourse({ cardStore }),
+    searchCourses: searchCourses({ cardStore }),
     terminateGame: terminateGame({ journal, broadcast, clock, ids }),
     getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
@@ -453,57 +450,74 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
   });
 });
 
-// M6 Task 4: the course CRUD/search surface + the pre-join peek — all `auth: "none"`
-// (routes.ts's why-comment: identity is M7, rate-limiting/abuse is M9).
-describe("createDispatcher — course routes + peek (M6 Task 4)", () => {
-  it("drives create -> add a second tee -> verify -> get -> search over HTTP", async () => {
+// Course-cards spec §4: writes (POST /courses, PUT /courses/{courseId}) are "golfer"-gated —
+// enteredBy derives from the account — while the two reads (GET) stay identity-free. The write
+// tests present a plain "sub-<x>" bearer (subVerifier maps it to a sub; ensureGolfer mints the
+// author on first touch).
+const courseInputTee = { name: fixtureWhite.name, rating: fixtureWhite.rating, slope: fixtureWhite.slope, holes: fixtureWhite.holes };
+describe("createDispatcher — course routes + peek (course-cards spec)", () => {
+  it("drives create -> supersede (add a second tee) -> get -> search over HTTP", async () => {
     const { dispatcher } = setup();
 
     const createResp = asStructured(
-      await dispatcher(
-        makeEvent({ method: "POST", path: "/courses", body: { name: "Casa Verde GC", tee: fixtureWhite, enteredBy: "Ann" } }),
-      ),
+      await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })),
     );
     expect(createResp.statusCode).toBe(201);
     const created = createCourseResponseSchema.parse(JSON.parse(createResp.body!));
-    expect(created.course.name).toBe("Casa Verde GC");
+    expect(created.course.card.courseName).toBe("Casa Verde GC");
+    const keptTeeId = created.course.card.teeSets[0]!.teeId!;
 
-    const blueTee = { ...fixtureWhite, name: "blue", rating: 73.1, slope: 132 };
-    const addTeeResp = asStructured(
+    const blueTee = { ...courseInputTee, name: "blue", rating: 73.1, slope: 132 };
+    const supersedeResp = asStructured(
       await dispatcher(
         makeEvent({
-          method: "POST",
-          path: `/courses/${created.course.courseId}/tees`,
-          body: { tee: blueTee, enteredBy: "Bo" },
+          method: "PUT",
+          path: `/courses/${created.course.courseId}`,
+          token: "sub-ann",
+          body: { name: "Casa Verde GC", teeSets: [{ ...courseInputTee, teeId: keptTeeId }, blueTee], supersedes: created.course.cardId },
         }),
       ),
     );
-    expect(addTeeResp.statusCode).toBe(201);
-    const withTee = addTeeSetResponseSchema.parse(JSON.parse(addTeeResp.body!));
-    expect(withTee.course.card.teeSets.map((tee) => tee.name).sort()).toEqual(["blue", "white"]);
-
-    const verifyResp = asStructured(
-      await dispatcher(
-        makeEvent({
-          method: "POST",
-          path: `/courses/${created.course.courseId}/verify`,
-          body: { teeName: "white", verifierName: "Cal", version: 1 },
-        }),
-      ),
-    );
-    expect(verifyResp.statusCode).toBe(200);
-    const verified = verifyTeeSetResponseSchema.parse(JSON.parse(verifyResp.body!));
-    expect(verified.course.teeSets.find((tee) => tee.name === "white")?.verifiedBy).toEqual(["Cal"]);
+    expect(supersedeResp.statusCode).toBe(200);
+    const superseded = supersedeCardResponseSchema.parse(JSON.parse(supersedeResp.body!));
+    expect(superseded.course.card.teeSets.map((tee) => tee.name).sort()).toEqual(["blue", "white"]);
+    // The kept tee kept its id; the new tee got a fresh one; the card itself is new.
+    expect(superseded.course.card.teeSets.find((tee) => tee.name === "white")?.teeId).toBe(keptTeeId);
+    expect(superseded.course.cardId).not.toBe(created.course.cardId);
 
     const getResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/courses/${created.course.courseId}` })));
     expect(getResp.statusCode).toBe(200);
     const fetched = getCourseResponseSchema.parse(JSON.parse(getResp.body!));
-    expect(fetched.course.courseId).toBe(created.course.courseId);
+    expect(fetched.course.cardId).toBe(superseded.course.cardId); // GET serves the CURRENT (superseded) card
 
     const searchResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses", query: { query: "Casa" } })));
     expect(searchResp.statusCode).toBe(200);
     const searched = searchCoursesResponseSchema.parse(JSON.parse(searchResp.body!));
     expect(searched.courses.map((c) => c.name)).toEqual(["Casa Verde GC"]);
+    expect(searched.courses[0]?.holeCount).toBe(9);
+  });
+
+  it("409s a PUT /courses/{courseId} whose supersedes is stale — card-superseded", async () => {
+    const { dispatcher } = setup();
+    const createResp = asStructured(
+      await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })),
+    );
+    const created = createCourseResponseSchema.parse(JSON.parse(createResp.body!));
+
+    const resp = asStructured(
+      await dispatcher(
+        makeEvent({ method: "PUT", path: `/courses/${created.course.courseId}`, token: "sub-ann", body: { name: "Casa Verde GC", teeSets: [courseInputTee], supersedes: "stale-card" } }),
+      ),
+    );
+    expect(resp.statusCode).toBe(409);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "card-superseded" });
+  });
+
+  it("401s a POST /courses with no bearer — the write tier is golfer-gated now", async () => {
+    const { dispatcher } = setup();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })));
+    expect(resp.statusCode).toBe(401);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
 
   it("404s GET /courses/{courseId} for an unknown id — course-not-found", async () => {
@@ -526,7 +540,7 @@ describe("createDispatcher — course routes + peek (M6 Task 4)", () => {
   it("treats an empty ?limit= as absent — the default limit, not a clamped-to-1 result set", async () => {
     const { dispatcher } = setup();
     for (const name of ["Fixture Alpha", "Fixture Beta", "Fixture Gamma"]) {
-      const created = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", body: { name, tee: fixtureWhite, enteredBy: "Ann" } })));
+      const created = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name, teeSets: [courseInputTee] } })));
       expect(created.statusCode).toBe(201);
     }
 
@@ -540,7 +554,7 @@ describe("createDispatcher — course routes + peek (M6 Task 4)", () => {
 
   it("400s a zod-invalid POST /courses body — invalid-request", async () => {
     const { dispatcher } = setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", body: { name: "Casa Verde GC" } })));
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC" } })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });

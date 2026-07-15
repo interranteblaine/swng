@@ -6,8 +6,6 @@ import type {
   AbandonRoundResponse,
   AddGameRequest,
   AddGameResponse,
-  AddTeeSetRequest,
-  AddTeeSetResponse,
   AppendCountedRoundRequest,
   AppendCountedRoundResponse,
   CreateCourseRequest,
@@ -46,16 +44,15 @@ import type {
   ShareLinkResponse,
   StartRoundRequest,
   StartRoundResponse,
+  SupersedeCardRequest,
+  SupersedeCardResponse,
   TerminateGameResponse,
   TransferOrganizerRequest,
   UpdateMeRequest,
-  VerifyTeeSetRequest,
-  VerifyTeeSetResponse,
 } from "@swng/contracts";
 import {
   ContractError,
   addGameRequestSchema,
-  addTeeSetRequestSchema,
   appendCountedRoundRequestSchema,
   createCourseRequestSchema,
   createCrewRequestSchema,
@@ -65,9 +62,9 @@ import {
   peekCrewInviteRequestSchema,
   recordScoreRequestSchema,
   startRoundRequestSchema,
+  supersedeCardRequestSchema,
   transferOrganizerRequestSchema,
   updateMeRequestSchema,
-  verifyTeeSetRequestSchema,
 } from "@swng/contracts";
 
 // The deps-applied use-case functions from Task 2/M6 Task 2 (application/src/rounds/*.ts,
@@ -104,9 +101,10 @@ export interface UseCases {
   // JoinRoundResponse verbatim (mintParticipantToken.ts's own doc comment: the two shapes are
   // byte-identical, and the brief prefers reuse over a parallel type).
   mintParticipantToken: (claims: AccountClaims, id: RoundId) => Promise<JoinRoundResponse>;
-  createCourse: (command: CreateCourseRequest) => Promise<CreateCourseResponse>;
-  addTeeSet: (id: CourseId, command: AddTeeSetRequest) => Promise<AddTeeSetResponse>;
-  verifyTeeSet: (id: CourseId, command: VerifyTeeSetRequest) => Promise<VerifyTeeSetResponse>;
+  // Course-cards spec §4: writes are "golfer"-gated and enteredBy derives from the account, so
+  // createCourse/supersedeCard take AccountClaims; the two reads stay identity-free.
+  createCourse: (claims: AccountClaims, command: CreateCourseRequest) => Promise<CreateCourseResponse>;
+  supersedeCard: (claims: AccountClaims, id: CourseId, command: SupersedeCardRequest) => Promise<SupersedeCardResponse>;
   getCourse: (id: CourseId) => Promise<GetCourseResponse>;
   searchCourses: (query: string, limit?: number) => Promise<SearchCoursesResponse>;
   // M7 Task 5: game/round termination + the golfer identity surface. terminateGame stays
@@ -372,37 +370,30 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     method: "POST",
     path: "/courses",
     schema: createCourseRequestSchema,
-    auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
+    // Course-cards spec §4: writes are "golfer"-gated; enteredBy derives from the account.
+    auth: "golfer",
     successStatus: 201,
-    handler: async (_ctx, body) => useCases.createCourse(body as CreateCourseRequest),
+    handler: async (ctx, body) => useCases.createCourse(ctx.account!, body as CreateCourseRequest),
   },
   {
-    method: "POST",
-    path: "/courses/{courseId}/tees",
-    schema: addTeeSetRequestSchema,
-    auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
-    successStatus: 201,
-    handler: async (ctx, body) => useCases.addTeeSet(courseId(ctx.pathParams.courseId!), body as AddTeeSetRequest),
-  },
-  {
-    method: "POST",
-    path: "/courses/{courseId}/verify",
-    schema: verifyTeeSetRequestSchema,
-    auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
+    method: "PUT",
+    path: "/courses/{courseId}",
+    schema: supersedeCardRequestSchema,
+    auth: "golfer", // THE maintenance operation — add tee / fix numbers / rename are all this (spec §4)
     successStatus: 200,
-    handler: async (ctx, body) => useCases.verifyTeeSet(courseId(ctx.pathParams.courseId!), body as VerifyTeeSetRequest),
+    handler: async (ctx, body) => useCases.supersedeCard(ctx.account!, courseId(ctx.pathParams.courseId!), body as SupersedeCardRequest),
   },
   {
     method: "GET",
     path: "/courses/{courseId}",
-    auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
+    auth: "none", // Course-cards spec §4: reads are identity-free — a course card is public data anyone may fetch to pick a tee.
     successStatus: 200,
     handler: async (ctx) => useCases.getCourse(courseId(ctx.pathParams.courseId!)),
   },
   {
     method: "GET",
     path: "/courses",
-    auth: "none", // M6 Task 4: identity lands in M7, rate-limiting/abuse in M9 — courses are a shared, unauthenticated CRUD store in v1.
+    auth: "none", // Course-cards spec §4: search is identity-free too — the same public read surface as GET /courses/{courseId} above.
     successStatus: 200,
     handler: async (ctx) => useCases.searchCourses(parseSearchQuery(ctx.query.query), parseLimit(ctx.query.limit)),
   },

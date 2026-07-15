@@ -17,13 +17,9 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "round-not-live": 409,
   "round-final": 409,
   "unknown-golfer-in-game": 400,
-  // M6 Task 2 (application/src/errors.ts): courses are a plain CRUD store, and this map is
-  // a Record<ApplicationErrorCode, number> — exhaustive by construction, so the two new
-  // codes have to land here the moment the union grows, ahead of M6 Task 4's actual course
-  // routes. Same bucketing precedent as the pair above: a failed optimistic-concurrency
-  // write is a 409 like round-not-live/round-final; an unknown courseId is a 404 like
-  // round-not-found/bad-join-code.
-  "course-conflict": 409,
+  // Course-cards spec: an unresolvable courseId (getCourse/supersedeCard) is a 404 like
+  // round-not-found/bad-join-code. Courses are a write-once card lineage now — there is no
+  // optimistic-concurrency "conflict" code; a moved CURRENT pointer surfaces as card-superseded.
   "course-not-found": 404,
   // M7 Task 2 (application/src/errors.ts) forward-provisioned this ahead of M7 Task 5's
   // actual golfer/terminate routes with a 400 (bucketed with unknown-golfer-in-game, a bad
@@ -33,7 +29,7 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // round-not-found/bad-join-code/course-not-found above, so the plan
   // (docs/superpowers/plans/2026-07-10-m7-identity.md, Task 5) pins 404 here instead;
   // golfer-conflict/golfer-already-claimed are failed-precondition 409s, same bucket as
-  // course-conflict.
+  // crew-conflict.
   "unknown-game": 404,
   "golfer-conflict": 409,
   "golfer-already-claimed": 409,
@@ -42,8 +38,8 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "golfer-already-in-round": 409,
   // M8 Task 2 (application/src/errors.ts) forward-provisions these ahead of M8 Task 4's
   // actual crew routes — same "the map is exhaustive by construction, so a code lands here
-  // the instant the union grows" precedent as course-conflict/course-not-found above.
-  // crew-conflict is a failed optimistic-concurrency write, same bucket as course-conflict/
+  // the instant the union grows" precedent as course-not-found above.
+  // crew-conflict is a failed optimistic-concurrency write, same bucket as
   // golfer-conflict; unknown-crew is an unresolvable crewId, same bucket as
   // round-not-found/course-not-found; not-a-member is a forbidden ACTOR, same
   // bucket as not-a-participant; golfer-required is a bad-body precondition
@@ -77,7 +73,7 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "not-a-viewer": 403,
   // Architecture-realignment Task 8 (application/src/errors.ts): CrewStore.addCountedRound's
   // collision signal, forward-provisioned ahead of any real route that calls it (same
-  // "exhaustive Record" precedent as course-conflict/crew-conflict above) — a failed
+  // "exhaustive Record" precedent as crew-conflict above) — a failed
   // precondition on an append, same bucket as crew-conflict/golfer-already-in-round, not a
   // genuine-bug 500.
   "round-already-counted": 409,
@@ -98,22 +94,21 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // (the crew would be left with no organizer), same 409 bucket as season-closed above.
   "not-organizer": 403,
   "organizer-must-transfer": 409,
-  // Course-cards spec §6 (application/src/errors.ts) forward-provisions this ahead of T4's
-  // actual card routes — same "exhaustive Record" precedent as course-conflict/crew-conflict
-  // above: CardStore.supersede's moved-pointer signal is a failed optimistic-concurrency
-  // write, same 409 bucket as course-conflict.
+  // Course-cards spec §6 (application/src/errors.ts): CardStore.supersede's moved-pointer
+  // signal — the CURRENT pointer no longer names the card the caller reviewed. A failed
+  // precondition on the write, same 409 bucket as crew-conflict/round-already-counted above.
   "card-superseded": 409,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`
 // (finalize's settleRound over a game that never closed out) were this boundary's only two
-// documented DomainError codes pre-M6. M6 Task 4 wired POST /courses and POST
-// /courses/{courseId}/tees to domain/src/course/course.ts, which validates the request body
-// itself (validateCourseName / validateTeeSet / addTeeSet's duplicate-name guard) and throws
-// ten more codes on bad input — client-input errors, the same shape as `unknown-tee-set`, so
-// they get the same 400 (`duplicate-tee-name` included: it's a new-name collision the client
-// can correct, not a genuine-bug 409). Any other DomainError reaching here is a genuine bug,
-// not a client-shaped error, so it falls through to the generic 500 below.
+// documented DomainError codes pre-M6. The course routes (POST /courses, PUT /courses/{courseId})
+// go through domain/src/course/course.ts's card validators (validateCourseName / validateTeeSet /
+// validateCard / validateTeeContinuity / buildCardRecord), which throw the client-input codes
+// below on a bad body — the same shape as `unknown-tee-set`, so they get the same 400
+// (`duplicate-tee-name` included: it's a name collision the client can correct, not a
+// genuine-bug 409). Any other DomainError reaching here is a genuine bug, not a client-shaped
+// error, so it falls through to the generic 500 below.
 const DOMAIN_ERROR_STATUS: Record<string, number> = {
   "unknown-tee-set": 400,
   "game-unresolved": 409,
@@ -127,10 +122,14 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   "invalid-yardage": 400,
   "invalid-stroke-index": 400,
   "duplicate-tee-name": 400,
-  // A verify raced a revision it never saw (M6 closing wave, I1): the client's own numbers
-  // are stale, the same "your view of the resource is out of date" shape as an optimistic-
-  // concurrency conflict, so it gets the same 409 as course-conflict above.
-  "tee-set-revised": 409,
+  // Course-cards spec (domain/course/course.ts): whole-card validation the M6 aggregate never
+  // had — a submitted teeId the superseded card never carried (validateTeeContinuity), the same
+  // id twice (validateTeeContinuity/buildCardRecord), or a card whose tees disagree on hole
+  // count (validateCard). All bad-input the client can correct, same 400 bucket as the
+  // invalid-* / duplicate-tee-name rules above.
+  "unknown-tee-id": 400,
+  "duplicate-tee-id": 400,
+  "mismatched-hole-count": 400,
   // task-15: settleRound refused a scrapped round (finalizeRound's own settle-check throws this
   // when its candidate log folds to "abandoned"). A failed precondition on the round's terminal
   // lifecycle state, the same 409 bucket as game-unresolved/round-final above — never a

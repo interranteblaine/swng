@@ -17,7 +17,7 @@ const DEBOUNCE_MS = 250;
 // empty, not a separate thing you have to already know exists.
 export function CourseSearch({ onSelect }: CourseSearchProps) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<readonly { readonly courseId: CourseId; readonly name: string }[] | undefined>(undefined);
+  const [results, setResults] = useState<readonly { readonly courseId: CourseId; readonly name: string; readonly holeCount: 9 | 18 }[] | undefined>(undefined);
   // Distinct from `results === undefined`: gates the "no courses found" empty-state so it
   // never flashes before the golfer has typed anything, or while a search is still in flight —
   // only once a real search has actually come back (successfully) empty.
@@ -72,7 +72,7 @@ export function CourseSearch({ onSelect }: CourseSearchProps) {
                 onClick={() => onSelect(course.courseId, course.name)}
                 className="w-full rounded-lg bg-slate-800 p-3 text-left active:bg-slate-700"
               >
-                {course.name}
+                {course.name} · {course.holeCount} holes
               </button>
             </li>
           ))}

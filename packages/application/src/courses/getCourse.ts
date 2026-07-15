@@ -1,13 +1,13 @@
 import type { CourseId } from "@swng/domain";
 import type { GetCourseResponse } from "@swng/contracts";
 import { ApplicationError } from "../errors.js";
-import type { CourseStore } from "../ports/courseStore.js";
+import type { CardStore } from "../ports/cardStore.js";
 import { toCourseView } from "./courseView.js";
 
 export const getCourse =
-  (deps: { courseStore: CourseStore }) =>
+  (deps: { cardStore: CardStore }) =>
   async (id: CourseId): Promise<GetCourseResponse> => {
-    const found = await deps.courseStore.get(id);
-    if (!found) throw new ApplicationError("course-not-found");
-    return { course: toCourseView(found.course) };
+    const current = await deps.cardStore.getCurrent(id);
+    if (!current) throw new ApplicationError("course-not-found");
+    return { course: toCourseView(current) };
   };

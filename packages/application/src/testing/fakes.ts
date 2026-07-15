@@ -1,10 +1,10 @@
-import type { Course, CourseId, Crew, CrewId, Golfer, GolferId, GolferRoundLine, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import type { CardRecord, CourseId, Crew, CrewId, Golfer, GolferId, GolferRoundLine, OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
 import { courseNameKey } from "@swng/domain";
 import { ApplicationError } from "../errors.js";
 import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJournal.js";
 import type { Broadcast } from "../ports/broadcast.js";
+import type { CardStore } from "../ports/cardStore.js";
 import type { Clock } from "../ports/clock.js";
-import type { CourseStore } from "../ports/courseStore.js";
 import type { CountedRound, CrewSeason, CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
@@ -137,36 +137,36 @@ export const createInMemorySnapshotStore = (config?: { readonly pageSize?: numbe
   };
 };
 
-// CourseStore's real adapter (M6 Task 3) is a plain CRUD item + a name-prefix GSI; this
-// fake reproduces both without Dynamo — a Map keyed by courseId for get/put's optimistic
-// concurrency (the same expectedRevision contract the port doc specifies), and a linear
-// courseNameKey-prefix scan for search (fine at fake/test scale; the real GSI is what
-// makes this cheap in adapters-dynamodb).
-export const createInMemoryCourseStore = (): CourseStore => {
-  const byId = new Map<CourseId, { course: Course; revision: number }>();
-
+// CardStore's real adapter (course-cards spec §5) is a write-once card lineage under one
+// CURRENT pointer; this fake reproduces it without Dynamo — one append-only Array<CardRecord>
+// per courseId (current = the last element). `supersede` is the store's own concurrency
+// arbiter: it throws card-superseded unless the last element's cardId still names the card the
+// caller reviewed (record.supersedes) — the same one rule the Dynamo transact condition
+// enforces (spec §6). search is a linear courseNameKey-prefix scan over CURRENT pointers only.
+export const createInMemoryCardStore = (): CardStore => {
+  const lineages = new Map<CourseId, CardRecord[]>();
   return {
-    put: async (course, expectedRevision) => {
-      const existing = byId.get(course.courseId);
-      if (expectedRevision === undefined) {
-        if (existing) throw new ApplicationError("course-conflict", `course ${course.courseId} already exists`);
-        byId.set(course.courseId, { course, revision: 1 });
-        return;
-      }
-      if (!existing || existing.revision !== expectedRevision) {
-        throw new ApplicationError("course-conflict", `course ${course.courseId} revision mismatch (expected ${expectedRevision})`);
-      }
-      byId.set(course.courseId, { course, revision: existing.revision + 1 });
+    create: async (record) => {
+      if (lineages.has(record.courseId)) throw new ApplicationError("card-superseded", `course ${record.courseId} already exists`);
+      lineages.set(record.courseId, [record]);
     },
-    get: async (courseId) => {
-      const found = byId.get(courseId);
-      return found ? { course: found.course, revision: found.revision } : undefined;
+    supersede: async (record) => {
+      const lineage = lineages.get(record.courseId);
+      const current = lineage?.[lineage.length - 1];
+      if (!lineage || !current) throw new ApplicationError("course-not-found");
+      if (current.cardId !== record.supersedes) throw new ApplicationError("card-superseded", `course ${record.courseId}: the CURRENT pointer has moved`);
+      lineage.push(record);
+    },
+    getCurrent: async (id) => {
+      const lineage = lineages.get(id);
+      return lineage?.[lineage.length - 1];
     },
     search: async (nameKeyPrefix, limit) =>
-      [...byId.values()]
-        .filter(({ course }) => courseNameKey(course.name).startsWith(nameKeyPrefix))
+      [...lineages.values()]
+        .map((lineage) => lineage[lineage.length - 1]!)
+        .filter((record) => courseNameKey(record.card.courseName).startsWith(nameKeyPrefix))
         .slice(0, limit)
-        .map(({ course }) => ({ courseId: course.courseId, name: course.name })),
+        .map((record) => ({ courseId: record.courseId, name: record.card.courseName, holeCount: record.card.teeSets[0]!.holes.length as 9 | 18 })),
   };
 };
 

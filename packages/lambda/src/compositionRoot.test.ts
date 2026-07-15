@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, DynamoDBStreamEvent } from "aws-lambda";
-import { deviceId, fixtureLinks18, fixtureWhite, golferId, opId, roundId } from "@swng/domain";
+import { deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
 import type { RoundArchive, RoundEvent } from "@swng/domain";
 import { createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, projectArchive, putAndBindGolfer } from "@swng/application";
 import { buildApp, buildProjector, buildRebuild, createConsoleLogger, createProjectorHandler } from "./compositionRoot.js";
@@ -82,10 +82,13 @@ describe("buildApp — TABLE_CORE is optional (wsConnect/wsDisconnect never set 
 
   it("a dispatched course route 500s gracefully (not a process crash) when TABLE_CORE was absent at cold start", async () => {
     const app = buildApp(baseEnv);
+    // GET /courses/{courseId} is auth "none" (course-cards spec §4), so it reaches the handler
+    // — and the unavailable card store — with no Cognito config required; the write routes are
+    // "golfer"-gated now and would 401 before the store, which wouldn't exercise this path.
     const event: APIGatewayProxyEventV2 = {
       version: "2.0",
       routeKey: "$default",
-      rawPath: "/courses",
+      rawPath: "/courses/does-not-exist",
       rawQueryString: "",
       headers: {},
       requestContext: {
@@ -93,14 +96,13 @@ describe("buildApp — TABLE_CORE is optional (wsConnect/wsDisconnect never set 
         apiId: "test-api",
         domainName: "test.execute-api.us-east-1.amazonaws.com",
         domainPrefix: "test",
-        http: { method: "POST", path: "/courses", protocol: "HTTP/1.1", sourceIp: "127.0.0.1", userAgent: "vitest" },
+        http: { method: "GET", path: "/courses/does-not-exist", protocol: "HTTP/1.1", sourceIp: "127.0.0.1", userAgent: "vitest" },
         requestId: "req-1",
         routeKey: "$default",
         stage: "$default",
         time: "07/Jul/2026:00:00:00 +0000",
         timeEpoch: 0,
       },
-      body: JSON.stringify({ name: "Casa Verde GC", tee: fixtureWhite, enteredBy: "Ann" }),
       isBase64Encoded: false,
     };
 

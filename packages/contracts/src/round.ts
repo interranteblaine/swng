@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { CourseCard, GameConfig, GameResult, HoleResult, Participant, RoundEvent } from "@swng/domain";
-import { gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
+import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema, teeIdSchema } from "./ids.js";
 
 // Wire mirrors of domain types. These stay structural (loose numeric bounds where the
 // domain type itself doesn't declare one) — the source of truth for "is this score
@@ -12,7 +12,9 @@ export const holeResultSchema: z.ZodType<HoleResult> = z.discriminatedUnion("kin
   z.object({ kind: z.literal("conceded") }),
 ]);
 
-const holeSchema = z.object({
+// Exported (course-cards spec): courses.ts' tee-input payloads reuse the one hole shape rather
+// than re-declaring it — the wire mirror of domain's Hole, defined once.
+export const holeSchema = z.object({
   number: z.number().int(),
   par: z.number().int(),
   yardage: z.number().int(),
@@ -21,7 +23,10 @@ const holeSchema = z.object({
 
 // Exported for reuse wherever a wire tee set is needed outside a CourseCard (courses.ts'
 // tee-input payloads) — the one wire mirror of domain's TeeSet, not duplicated per caller.
+// `teeId` is optional (course-cards spec §3): pre-scrap stored events/fixtures carry no id;
+// every stored/newly-frozen card's tees do (buildCardRecord's invariant).
 export const teeSetSchema = z.object({
+  teeId: teeIdSchema.optional(),
   name: z.string(),
   rating: z.number(),
   slope: z.number(),
@@ -30,6 +35,9 @@ export const teeSetSchema = z.object({
 
 export const courseCardSchema: z.ZodType<CourseCard> = z.object({
   courseName: z.string(),
+  // Which course record + exact card this value was frozen from (course-cards spec §2) —
+  // optional, same pre-scrap-tolerant split as teeSetSchema's teeId above.
+  source: z.object({ cardId: cardIdSchema, courseId: courseIdSchema }).optional(),
   teeSets: z.array(teeSetSchema).min(1).readonly(),
 });
 

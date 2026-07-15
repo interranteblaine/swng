@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { ApiError, createCourse } from "../api";
+import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { HoleGrid, defaultHoles, holesAreComplete, parseHoles } from "./HoleGrid";
 import type { HoleCount, HoleInput } from "./HoleGrid";
@@ -27,17 +28,15 @@ const FIELD_FOR_CODE: Readonly<Record<string, Field>> = {
   "duplicate-tee-name": "teeName",
 };
 
-// The keyboard-first, single-screen course entry flow (M6 Task 5, redesigned M7 Task 7 —
-// papercut 2's illegible grid): course name, tee name, rating, slope, then HoleGrid (the
-// hole-count toggle + grid, shared with EditCoursePage so a correction pre-fills and
-// validates against the exact same code — see HoleGrid.tsx). This page now owns only the
-// fields the grid doesn't: name/enteredBy/teeName/rating/slope, and the submit wiring.
+// The keyboard-first, single-screen course entry flow (course-cards spec §4): course name, tee
+// name, rating, slope, then HoleGrid (the hole-count toggle + grid — see HoleGrid.tsx). Adding a
+// course is "golfer"-gated now (enteredBy derives from the account, never a self-typed name — the
+// "Your name" field is gone), so the page is a sign-in funnel when signed out.
 export function AddCoursePage() {
   const navigate = useNavigate();
   const auth = useAuth();
 
   const [name, setName] = useState("");
-  const [enteredBy, setEnteredBy] = useState("");
   const [teeName, setTeeName] = useState("");
   const [rating, setRating] = useState("");
   const [slope, setSlope] = useState("");
@@ -45,16 +44,6 @@ export function AddCoursePage() {
   const [holes, setHoles] = useState<readonly HoleInput[]>(defaultHoles(18));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<{ readonly code: string; readonly message: string } | undefined>(undefined);
-
-  // Auto-fill (M7 Task 6, an M6 carry): "Your name" defaults to the signed-in golfer's name
-  // once GET /me resolves (it arrives async, hence an effect rather than a useState seed) —
-  // only into a still-empty field, never over something already typed, and the wire shape is
-  // unchanged (enteredBy still submits whatever the field holds).
-  const signedInName = auth.golfer?.name;
-  useEffect(() => {
-    if (!signedInName) return;
-    setEnteredBy((current) => (current === "" ? signedInName : current));
-  }, [signedInName]);
 
   const changeHoleCount = (next: HoleCount) => {
     setHoleCount(next);
@@ -76,8 +65,7 @@ export function AddCoursePage() {
   // e.g. CreateRoundPage's courseHandicap check) — NOT a re-implementation of domain's bounds/
   // permutation rules (rating 30..90, slope 55..155, SI a permutation, ...). Those live once,
   // in course.ts, and reach the golfer via the server's own coded rejection below.
-  const canSubmit =
-    name.trim().length > 0 && enteredBy.trim().length > 0 && teeName.trim().length > 0 && Number.isFinite(parsedRating) && Number.isInteger(parsedSlope) && holesComplete;
+  const canSubmit = name.trim().length > 0 && teeName.trim().length > 0 && Number.isFinite(parsedRating) && Number.isInteger(parsedSlope) && holesComplete;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -86,11 +74,11 @@ export function AddCoursePage() {
     setSubmitting(true);
     setError(undefined);
     try {
-      const response = await createCourse({
-        name: name.trim(),
-        tee: { name: teeName.trim(), rating: parsedRating, slope: parsedSlope, holes: parsedHoles },
-        enteredBy: enteredBy.trim(),
-      });
+      // "golfer"-gated: enteredBy derives from the account server-side, so the body carries only
+      // the card fields — the Bearer rides along via withAuth (useAuth's refresh-then-signout policy).
+      const response = await auth.withAuth((token) =>
+        createCourse({ name: name.trim(), teeSets: [{ name: teeName.trim(), rating: parsedRating, slope: parsedSlope, holes: parsedHoles }] }, token),
+      );
       // Success → /create, with the just-added course preselected (brief) — CreateRoundPage
       // fetches the full CourseView from this id itself (the same path a search pick takes),
       // so this page hands over nothing but the id.
@@ -106,6 +94,17 @@ export function AddCoursePage() {
   // Any code this page doesn't have a field slot for (network, a 500, ...) — the same generic
   // fallback every other page's catch block already shows.
   const generalError = error && FIELD_FOR_CODE[error.code] === undefined ? error.message : undefined;
+
+  // The wall (course-cards spec §4): adding a course is signed-in-only. Signed out, the page is
+  // a sign-in funnel, not a form — the same SignInCta idiom CreateRoundPage uses.
+  if (!auth.signedIn) {
+    return (
+      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
+        <h1 className="text-2xl font-bold">Add a course</h1>
+        <SignInCta message="Sign in to add a course." returnTo="/courses/new" />
+      </main>
+    );
+  }
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
@@ -126,11 +125,6 @@ export function AddCoursePage() {
             </span>
           )}
         </div>
-
-        <label className="flex flex-col gap-1">
-          Your name
-          <input value={enteredBy} onChange={(event) => setEnteredBy(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
-        </label>
 
         <div className="flex flex-col gap-1">
           <label className="flex flex-col gap-1">

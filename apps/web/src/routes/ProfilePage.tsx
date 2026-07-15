@@ -124,7 +124,7 @@ export function ProfilePage() {
     const homeCourseId = auth.golfer?.homeCourseId;
     if (homeCourseId) {
       getCourse(homeCourseId)
-        .then((response) => setHomeCourse({ id: response.course.courseId, name: response.course.name }))
+        .then((response) => setHomeCourse({ id: response.course.courseId, name: response.course.card.courseName }))
         .catch(() => {}); // a friendly name is a nicety — a failed lookup just leaves the picker open, never blocks the page
     }
   }, [auth.golfer, hydrated]);

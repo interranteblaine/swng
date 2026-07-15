@@ -83,7 +83,7 @@ export const joinCrewRequestSchema = z.object({ token: z.string() }).strict();
 export type JoinCrewRequest = z.infer<typeof joinCrewRequestSchema>;
 
 // One response shape, `{ crew }`, for every crew mutation/read — named per endpoint (courses.ts'
-// house style: CreateCourseResponse/AddTeeSetResponse/... are all `{ course }` too, each with
+// house style: CreateCourseResponse/SupersedeCardResponse/... are all `{ course }` too, each with
 // its own name for route-level clarity even though the shape repeats).
 export interface CreateCrewResponse {
   readonly crew: CrewView;

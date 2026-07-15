@@ -23,6 +23,7 @@ import {
   createSeasonRequestSchema,
   createSeasonResponseSchema,
   finalizeRoundResponseSchema,
+  getCrewResponseSchema,
   getMyRecordResponseSchema,
   golferResponseSchema,
   joinCrewRequestSchema,
@@ -48,6 +49,7 @@ import type {
   CreateSeasonResponse,
   FinalizeRoundResponse,
   GameConfigInput,
+  GetCrewResponse,
   GetMyRecordResponse,
   GolferResponse,
   GolferView,
@@ -306,6 +308,24 @@ export const joinCrewDirect = async (httpUrl: string, token: string, inviteToken
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`POST /crews/join -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(joinCrewResponseSchema, json);
+};
+
+// DELETE /crews/{crewId}/members/{golferId} (crew membership, invited in, accountable out —
+// spec §1): the ORGANIZER's authority to remove a member — no body, the target rides the path
+// (crews.ts's own doc comment on the route). Returns the crew's own updated view
+// (getCrewResponseSchema), same "produces the crew" shape as createCrew/joinCrewDirect above.
+// crewSeason.spec.ts's step 8 uses this to pin the aggregation-scope law one hop further than
+// join alone reaches: a removed member's standings rows vanish on the very next read (nothing
+// about the counted rounds themselves changes — only the roster a season's standings filter
+// against), and a fresh invite + re-join (joinCrewDirect) restores them byte-identical.
+export const removeCrewMemberDirect = async (httpUrl: string, token: string, id: CrewId, target: GolferId): Promise<GetCrewResponse> => {
+  const response = await fetch(`${httpUrl}/crews/${id}/members/${target}`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`DELETE /crews/${id}/members/${target} -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(getCrewResponseSchema, json);
 };
 
 // Architecture-realignment Task 12: crew seasons + counted rounds + standings-on-read replace

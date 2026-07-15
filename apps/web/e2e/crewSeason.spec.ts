@@ -20,6 +20,7 @@ import {
   pollUntil,
   recordScoreDirect,
   removeCountedRoundDirect,
+  removeCrewMemberDirect,
   startRoundDirect,
 } from "./support.js";
 import type { AccountGolfer } from "./support.js";
@@ -342,5 +343,42 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     const memberIds = new Set<GolferId>([ids.al, ids.bo]);
     expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
     expect(standings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
+  });
+
+  test("8b: Al removes Bo — his standings rows vanish; a fresh invite and re-join restore them byte-identical — the aggregation-scope law, reached through remove", async () => {
+    test.setTimeout(120_000);
+    const { httpUrl } = loadWebEnv();
+    const frozen = frozenSeasonExpectation(ids);
+
+    // The organizer's own authority (crew membership, invited in, accountable out — spec §1):
+    // DELETE /crews/{crewId}/members/{golferId}, Al on Bo. Same law as step 8's own late join,
+    // run in reverse — the counted rounds never change, only the roster the NEXT standings
+    // read filters against. Bo's account, his 12 history lines, and every round he's counted
+    // into all stay exactly as they were; only his ROW in THIS season's standings depends on
+    // current membership.
+    const afterRemoval = await removeCrewMemberDirect(httpUrl, al.tokens.idToken, crewId, ids.bo);
+    expect(afterRemoval.crew.members.map((member) => member.golferId)).toEqual([ids.al]);
+
+    const removedMemberIds = new Set<GolferId>([ids.al]);
+    const standingsAfterRemoval = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
+    expect(standingsAfterRemoval.ledger).toEqual(expectedStandingLines(frozen.ledger, removedMemberIds));
+    expect(standingsAfterRemoval.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, removedMemberIds));
+
+    // Getting back in takes a FRESH invite — the permanent join code this file swapped away
+    // from (C-T3) has no comeback, and neither does the one Bo used in step 8; it already spent
+    // itself becoming membership once. A brand-new mint + join is what "accountable out" means
+    // in practice: leaving is never a one-way door, but it's also never free.
+    const reinvite = await mintCrewInviteDirect(httpUrl, al.tokens.idToken, crewId);
+    const rejoined = await joinCrewDirect(httpUrl, bo.tokens.idToken, reinvite.token);
+    expect(rejoined.crew.members.map((member) => member.golferId).sort()).toEqual([ids.al, ids.bo].sort());
+
+    // BYTE-IDENTICAL restoration: the exact same frozen-derived expected objects step 8 already
+    // asserted, not merely "Bo's rows are non-empty again" — standings are computed on read from
+    // the counted snapshots every time, so a roster round-trip that ends where it started must
+    // reproduce the identical numbers, not just similar ones.
+    const restoredMemberIds = new Set<GolferId>([ids.al, ids.bo]);
+    const standingsAfterRejoin = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
+    expect(standingsAfterRejoin.ledger).toEqual(expectedStandingLines(frozen.ledger, restoredMemberIds));
+    expect(standingsAfterRejoin.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, restoredMemberIds));
   });
 });

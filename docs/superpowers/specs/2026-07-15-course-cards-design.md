@@ -280,8 +280,10 @@ book wants it — YAGNI).
 
 ## 10. Invariants (pinned for review)
 
-1. **Cards are immutable and write-once** — enforced by `attribute_not_exists`, not
-   convention. A `cardId`'s numbers can never change.
+1. **Cards are immutable, write-once, and never deleted** — enforced by
+   `attribute_not_exists`, not convention. A `cardId`'s numbers can never change, and
+   lineages are append-only: retained history is what keeps later identity work (e.g.
+   tee-lineage recovery, §11) derivable instead of lost.
 2. **The stored unit is the frozen unit** — `startRound` freezes `CardRecord.card`
    verbatim; no translation function exists anywhere.
 3. **Rounds are created only from a lineage's current card**; staleness is 409
@@ -323,9 +325,17 @@ that a future analytic could want and we discard.
 Two grouping granularities are deliberately not first-class yet, and both extend
 additively — new fields on future cards, no remodel, sealed rounds untouched:
 
-- **Tee identity** — tee-level series key on the frozen tee name, so a tee rename
-  starts a new series (course-level analytics are unaffected). If tee-level analytics
-  ever matter enough, cards gain per-tee ids from that day forward.
+- **Tee identity** — tees inherit the lineage pattern from cards rather than carrying
+  their own ids. No operation addresses a tee (maintenance is whole-card supersession),
+  and every snapshot already pins its tee exactly: `(cardId, tee name)` is a globally
+  unique, permanent identifier of one tee-version, since names are unique within a card.
+  Tee lineage ("the same tee across card versions") is therefore *derivable* whenever
+  tee-level analytics arrive: walk the retained card chain and connect columns across
+  supersessions — retroactively covering every round played under this model, which
+  ids-from-now-on could not. A separate `teeId` would record no fact a snapshot doesn't
+  already carry. Residual: a reused tee name (renamed away, later re-added as a
+  different tee) makes one seam of that walk ambiguous and needs a curation call — rare,
+  and resolvable from retained history.
 - **Facility identity** — an 18-hole card and its front-nine card are separate lineages,
   so their stats are separate groups. For most stats that is semantically *correct* (a
   nine-hole round is not comparable to an eighteen). Where a venue-level view is wanted,
@@ -345,8 +355,9 @@ Decisions made with eyes open, each with its revisit trigger:
 - **Import (GHIN-style course data)** — an importer is a card factory: it emits cards
   with `provenance: "imported"`. The imported ontology reshapes the course store then;
   rounds don't care. *Trigger:* the decision to scale beyond community entry.
-- **Tee-level stable identity** — accepted as name-keyed for now; mechanics and the
-  additive escape path in §11. *Trigger:* real tee-level analytics.
+- **Tee-level stable identity** — name-keyed by design; tee lineage is derivable from
+  retained card history (§11), so nothing is recorded now. *Trigger:* real tee-level
+  analytics.
 - **Verification with real semantics** — see §8. *Trigger:* a trust problem community
   attribution can't absorb.
 - **Steward moderation of course edits** — v1 is immediate-with-audit. *Trigger:* scale

@@ -196,8 +196,13 @@ Write schemas are `.strict()`; `enteredBy` no longer exists on any wire body. Te
 the wire follow the continuity rule (§3): `POST /courses` tees carry no ids (all minted);
 `PUT /courses/{courseId}` tees carry `teeId` iff they continue an existing tee — two
 distinct input tee schemas, so a client can never supply an id the server didn't mint.
-The two writes leave the anonymous-reachable throttle set (they are golfer-auth now); the
-two GETs stay in it.
+~~The two writes leave the anonymous-reachable throttle set (they are golfer-auth now); the
+two GETs stay in it.~~ **Superseded (controller adjudication, 2026-07-15, during
+implementation):** course writes STAY in the tightened per-route throttle set —
+`POST /courses` kept, `PUT /courses/{courseId}` added (set: 9 → 8). The set's real meaning
+had already drifted from "anonymous-reachable" to "abuse-sensitive entry points"
+(`POST /rounds`/`/rounds/join` are golfer-gated and throttled); community-write endpoints
+warrant the same defense-in-depth, and 5 rps is far above any legitimate maintenance rate.
 
 ```ts
 export const courseViewSchema = z.object({

@@ -1,13 +1,19 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cardId, courseId, teeId } from "@swng/domain";
 import type { CourseView } from "@swng/contracts";
 import { CourseSummaryCard } from "./CourseSummaryCard";
 import type { CourseSummaryCardProps } from "./CourseSummaryCard";
 
-// The card carries no router affordances anymore (course-cards spec §8: attribution only, no
-// "Edit this card" Link) — so a plain render is enough, no MemoryRouter wrapper needed.
-const renderCard = (props: CourseSummaryCardProps) => render(<CourseSummaryCard {...props} />);
+// The card carries a "View course" Link now (Courses-surface T6) — needs a Router context,
+// unlike the pre-T6 version's plain render.
+const renderCard = (props: CourseSummaryCardProps) =>
+  render(
+    <MemoryRouter>
+      <CourseSummaryCard {...props} />
+    </MemoryRouter>,
+  );
 
 const course: CourseView = {
   courseId: courseId("course-1"),
@@ -52,7 +58,8 @@ describe("CourseSummaryCard", () => {
   });
 
   // Attribution only (course-cards spec §8): who entered the card and when — no verify badge,
-  // no verify button, and no "Edit this card" link (T6 restores editing from the new CoursePage).
+  // no verify button, and no "Edit this card" link directly on the card (editing lives on
+  // CoursePage now, reached via the "View course" link asserted below).
   it("shows attribution without any verification badge or edit affordance", () => {
     renderCard({ course, selectedTee: "white", onSelectTee: vi.fn() });
 
@@ -60,5 +67,14 @@ describe("CourseSummaryCard", () => {
     expect(screen.queryByText(/verified/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /verify/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /edit this card/i })).toBeNull();
+  });
+
+  // Courses-surface T6: the create-flow's own path to maintenance now that the edit link
+  // lives on CoursePage — "View course" links to that hub for THIS course's own id.
+  it("links to the course's own hub page", () => {
+    renderCard({ course, selectedTee: "white", onSelectTee: vi.fn() });
+
+    const link = screen.getByRole("link", { name: /view course/i }) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("/courses/course-1");
   });
 });

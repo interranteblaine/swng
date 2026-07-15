@@ -51,13 +51,19 @@ export interface HoleGridProps {
   // since the code vocabulary differs slightly between create and revise) — rendered as a
   // single alert under the grid, matching every other field's own error slot.
   readonly error?: string;
+  // EditCoursePage-only (Courses-surface T6): an EXISTING card's hole count is fixed by every
+  // one of its OTHER tees (course.ts's validateCard: one hole count per card) — hiding the
+  // toggle here structurally pins that invariant in the UI rather than leaning on the server's
+  // own `mismatched-hole-count` rejection to catch a golfer who tried to switch it mid-edit.
+  // AddCoursePage never sets this: a brand-new course has no other tees to stay consistent with.
+  readonly hideHoleCountToggle?: boolean;
 }
 
 // The keyboard-first, single-screen hole grid (M6 Task 5, reworked M7 Task 7): tab order runs
 // left-to-right top-to-bottom (par, yardage, SI per row) purely from DOM order — no explicit
 // tabIndex plumbing — with a visible sticky header row over it (papercut 2: the column order
 // previously lived ONLY in aria-labels, so a sighted golfer saw three unlabeled boxes).
-export function HoleGrid({ holeCount, onChangeHoleCount, holes, onChangeHole, error }: HoleGridProps) {
+export function HoleGrid({ holeCount, onChangeHoleCount, holes, onChangeHole, error, hideHoleCountToggle }: HoleGridProps) {
   // The unused indexes, as a HINT only — never written back into a hole's own field. Typos in
   // stroke index poison every game's dot allocation for the life of the course, so the one
   // thing this grid must never do is guess: the golfer types exactly what the paper card says,
@@ -75,14 +81,16 @@ export function HoleGrid({ holeCount, onChangeHoleCount, holes, onChangeHole, er
 
   return (
     <div className="flex flex-col gap-2">
-      <fieldset role="radiogroup" aria-label="Holes" className="flex gap-4">
-        {([9, 18] as const).map((count) => (
-          <label key={count} className="flex items-center gap-2">
-            <input type="radio" name="holeCount" checked={holeCount === count} onChange={() => onChangeHoleCount(count)} className="h-5 w-5" />
-            {count}
-          </label>
-        ))}
-      </fieldset>
+      {!hideHoleCountToggle && (
+        <fieldset role="radiogroup" aria-label="Holes" className="flex gap-4">
+          {([9, 18] as const).map((count) => (
+            <label key={count} className="flex items-center gap-2">
+              <input type="radio" name="holeCount" checked={holeCount === count} onChange={() => onChangeHoleCount(count)} className="h-5 w-5" />
+              {count}
+            </label>
+          ))}
+        </fieldset>
+      )}
 
       <p aria-label="Stroke index remaining" className="text-xs text-slate-400">
         SI remaining: {remainingStrokeIndexes.length > 0 ? remainingStrokeIndexes.join(", ") : "none"}

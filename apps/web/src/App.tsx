@@ -2,6 +2,8 @@ import { BrowserRouter, Link, Outlet, Route, Routes } from "react-router";
 import { SignInButton } from "./auth/SignInButton";
 import { AuthProvider, useAuth } from "./auth/useAuth";
 import { AddCoursePage } from "./courses/AddCoursePage";
+import { CoursePage } from "./courses/CoursePage";
+import { EditCoursePage } from "./courses/EditCoursePage";
 import { CrewCreatePage } from "./crews/CrewCreatePage";
 import { CrewPage } from "./crews/CrewPage";
 import { ArchivedRoundPage } from "./round/ArchivedRoundPage";
@@ -61,9 +63,12 @@ export function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/create" element={<CreateRoundPage />} />
+            {/* /courses/new is a static segment, ranked ahead of the dynamic /courses/:courseId
+                below by react-router itself regardless of declaration order — kept here too for
+                the same readability reason /crews/new sits ahead of /crews/:crewId. */}
             <Route path="/courses/new" element={<AddCoursePage />} />
-            {/* Course-cards spec §8: the /courses/:courseId/edit route (EditCoursePage) is
-                deleted this task — T6 restores editing from the new CoursePage. */}
+            <Route path="/courses/:courseId" element={<CoursePage />} />
+            <Route path="/courses/:courseId/edit" element={<EditCoursePage />} />
             <Route path="/crews/new" element={<CrewCreatePage />} />
             {/* Crew membership (invited in, accountable out — spec §2): the invite funnel — a
                 static segment, ranked ahead of the dynamic /crews/:crewId below by react-router

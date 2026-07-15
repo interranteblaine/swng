@@ -1,3 +1,4 @@
+import { Link } from "react-router";
 import type { CourseView } from "@swng/contracts";
 
 export interface CourseSummaryCardProps {
@@ -16,21 +17,28 @@ export interface CourseSummaryCardProps {
   readonly onCourseRefreshed?: (courseView: CourseView) => void;
 }
 
-// The course detail + tee picker — shown once a course is selected, in CreateRoundPage (via
-// search or via AddCoursePage's own preselect-on-success) and reused as-is rather than
-// duplicated: "shown after add and in the create-flow course detail" (brief) is the SAME
-// component, not two. The verify affordance (M6 Task 5) is gone — attribution only now
-// (course-cards spec §8): a tee set names who entered it, never a self-typed verify count.
+// The course detail + tee picker — shown once a course is selected in CreateRoundPage, via
+// search or via CoursePage's own "Start a round here" preselect (Courses-surface T6;
+// AddCoursePage itself now lands on CoursePage, not here, on success). The verify affordance
+// (M6 Task 5) is gone — attribution only now (course-cards spec §8): a tee set names who
+// entered it, never a self-typed verify count.
 export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCourse }: CourseSummaryCardProps) {
   return (
     <div className="flex flex-col gap-3 rounded-lg bg-slate-900 p-4">
       <div className="flex items-center justify-between gap-2">
         <p className="text-lg font-semibold">{course.card.courseName}</p>
-        {onChangeCourse && (
-          <button type="button" onClick={onChangeCourse} className="text-sm text-emerald-400 underline">
-            Change course
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {onChangeCourse && (
+            <button type="button" onClick={onChangeCourse} className="text-sm text-emerald-400 underline">
+              Change course
+            </button>
+          )}
+          {/* The create-flow's own path to maintenance (Courses-surface T6): editing itself
+              lives on CoursePage now, not here — this is just the door to it. */}
+          <Link to={`/courses/${course.courseId}`} className="text-sm text-emerald-400 underline">
+            View course
+          </Link>
+        </div>
       </div>
 
       <label className="flex flex-col gap-1">
@@ -45,7 +53,8 @@ export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCo
       </label>
 
       {/* Attribution only (course-cards spec §8): who entered this card and when — no per-tee
-          verify badges, no edit affordance (T6 restores editing from the new CoursePage). */}
+          verify badges, no edit affordance here directly (editing lives on CoursePage, reached
+          via "View course" above). */}
       <p className="text-sm text-slate-400">
         entered by {course.enteredBy} · updated {new Date(course.updatedAtMs).toLocaleDateString()}
       </p>

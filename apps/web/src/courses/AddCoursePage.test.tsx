@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { courseId, golferId } from "@swng/domain";
 import { createCourseRequestSchema } from "@swng/contracts";
@@ -58,10 +58,12 @@ const signIn = (): string => {
   return idToken;
 };
 
-function CreateStub() {
-  const location = useLocation();
-  const state = location.state as { courseId?: string } | null;
-  return <div>create page — preselected {state?.courseId ?? "none"}</div>;
+// Stands in for the real CoursePage (Courses-surface T6) — AddCoursePage now lands there on
+// success, not on /create with a preselect hand-off; this stub just proves the courseId rode
+// along in the URL itself.
+function CoursePageStub() {
+  const { courseId } = useParams<{ courseId: string }>();
+  return <div>course page — {courseId ?? "none"}</div>;
 }
 
 const renderAddCourse = (initialEntry: string | { pathname: string; state?: unknown } = "/courses/new") =>
@@ -70,7 +72,7 @@ const renderAddCourse = (initialEntry: string | { pathname: string; state?: unkn
       <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route path="/courses/new" element={<AddCoursePage />} />
-          <Route path="/create" element={<CreateStub />} />
+          <Route path="/courses/:courseId" element={<CoursePageStub />} />
         </Routes>
       </MemoryRouter>
     </AuthProvider>,
@@ -216,7 +218,7 @@ describe("AddCoursePage", () => {
     expect(screen.getByLabelText(/^slope$/i).closest("label")?.parentElement?.contains(alert)).toBe(false);
   });
 
-  it("success navigates to /create with the new course preselected", async () => {
+  it("success navigates to the new course's own hub page", async () => {
     signIn();
     mockedCreateCourse.mockResolvedValue(courseResponse("course-9"));
     renderAddCourse();
@@ -230,7 +232,7 @@ describe("AddCoursePage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /add course/i }));
 
-    await waitFor(() => expect(screen.getByText(/create page — preselected course-9/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/course page — course-9/)).toBeTruthy());
   });
 
   it("the submit button is disabled until every field is filled", async () => {

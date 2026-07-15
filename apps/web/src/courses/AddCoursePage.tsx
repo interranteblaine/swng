@@ -79,10 +79,10 @@ export function AddCoursePage() {
       const response = await auth.withAuth((token) =>
         createCourse({ name: name.trim(), teeSets: [{ name: teeName.trim(), rating: parsedRating, slope: parsedSlope, holes: parsedHoles }] }, token),
       );
-      // Success → /create, with the just-added course preselected (brief) — CreateRoundPage
-      // fetches the full CourseView from this id itself (the same path a search pick takes),
-      // so this page hands over nothing but the id.
-      navigate("/create", { state: { courseId: response.course.courseId } });
+      // Success → the new course's own hub (Courses-surface T6) — CoursePage is now where a
+      // freshly added card lands, not a hand-off into CreateRoundPage; "Start a round here"
+      // lives on CoursePage itself for the golfer who wants that next.
+      navigate(`/courses/${response.course.courseId}`);
     } catch (caught) {
       if (caught instanceof ApiError) setError({ code: caught.code, message: caught.message });
       else setError({ code: "unknown", message: "Could not add the course — try again." });

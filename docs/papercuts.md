@@ -307,3 +307,18 @@ From the course-cards arc's final review (2026-07-15). Comment-only: `ports/golf
 `createDynamoCrewStore.ts:43`, and `CourseSummaryCardProps.onChangeCourse`'s "Absent on
 AddCoursePage's own post-add summary" (that page no longer renders the component). Sweep
 opportunistically next time each file is touched.
+
+### 16. Unrated tees can't be entered — the form forces fabricated rating/slope into the index
+
+Owner-raised (2026-07-15, during the course-cards rollout). Validation requires rating
+30–90 and slope 55–155, so a course with no published rating (par-3, executive, many
+9-holers) can only be entered by inventing numbers — which flow silently into WHS
+differentials and the handicap index. Rating/slope feed EXACTLY one computation (the
+differential); games/dots/scoring use the golfer-typed course handicap + stroke index and
+never touch them, and `GolferRoundLine` already supports absent ags/differential (the
+"incomplete" path). Wanted shape, matching the real WHS rule that unrated courses don't
+post: `TeeSet.rating?/slope?` optional ("unrated"), bounds enforced iff present,
+`handicappingFor` yields no differential on unrated tees, blank-allowed form fields, an
+"unrated" badge. Small additive arc; zero contact with sealed rounds or card identity.
+Adjacent-but-different: SI-less cards would break dots allocation — that half needs a
+product decision (gross-only games?), not just optionality; explicitly out of this entry.

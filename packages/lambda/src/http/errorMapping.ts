@@ -98,6 +98,11 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // (the crew would be left with no organizer), same 409 bucket as season-closed above.
   "not-organizer": 403,
   "organizer-must-transfer": 409,
+  // Course-cards spec §6 (application/src/errors.ts) forward-provisions this ahead of T4's
+  // actual card routes — same "exhaustive Record" precedent as course-conflict/crew-conflict
+  // above: CardStore.supersede's moved-pointer signal is a failed optimistic-concurrency
+  // write, same 409 bucket as course-conflict.
+  "card-superseded": 409,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`

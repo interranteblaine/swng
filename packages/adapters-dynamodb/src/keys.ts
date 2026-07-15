@@ -1,4 +1,4 @@
-import type { CourseId, CrewId, GolferId, OpId, RoundId } from "@swng/domain";
+import type { CardId, CourseId, CrewId, GolferId, OpId, RoundId } from "@swng/domain";
 import { courseId, crewId, golferId } from "@swng/domain";
 
 // The rounds table's key vocabulary (M3 plan, Global Constraints): one item collection per
@@ -58,6 +58,13 @@ export const courseIdFromPk = (pk: string): CourseId => courseId(pk.slice(COURSE
 // letter) is real future work only if beta telemetry ever shows this partition running hot —
 // not a v1 concern.
 export const courseGsi1pk = "COURSE";
+
+// Course-cards spec §5: one immutable item per card under the lineage's own partition, plus
+// one mutable CURRENT pointer carrying the search-GSI attributes. The pointer's sk is
+// deliberately NOT the legacy "COURSE" constant — legacy single-document items are wiped at
+// rollout (spec §9), never read by the new store.
+export const courseCurrentSk = "CURRENT";
+export const cardSk = (id: CardId): string => `CARD#${id}`;
 
 // The core table's golfer-item key vocabulary (M7 Task 3): a Golfer aggregate is a plain CRUD
 // document too (GolferStore's port comment, mirrors CourseStore) — one item, `pk` =

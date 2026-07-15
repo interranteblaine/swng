@@ -5,6 +5,9 @@ export type { AppendOptions, AppendResult, EventJournal } from "./ports/eventJou
 export type { RoundStore } from "./ports/roundStore.js";
 export type { SnapshotStore } from "./ports/snapshotStore.js";
 export type { CourseStore } from "./ports/courseStore.js";
+// Course-cards spec: the new write-once-lineage store lands BESIDE CourseStore (T4 switches
+// consumers and deletes the old pair — see ports/cardStore.ts's own doc comment).
+export type { CardStore } from "./ports/cardStore.js";
 export type { CountedRound, CrewSeason, CrewStore } from "./ports/crewStore.js";
 export type { GolferStore } from "./ports/golferStore.js";
 export type { ProjectionStore } from "./ports/projectionStore.js";

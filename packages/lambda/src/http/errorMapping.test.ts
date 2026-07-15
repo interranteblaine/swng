@@ -252,3 +252,14 @@ describe("toHttpError — crew organizer authority (crew membership, invited in 
     expect(JSON.parse(result.body)).toEqual({ code: "organizer-immovable", message: 'the organizer of crew "c-1" cannot be removed' });
   });
 });
+
+// Course-cards spec Task 3: CardStore.supersede's own collision code, forward-provisioned
+// ahead of T4's actual card routes — same "exhaustive Record, so the mapping lands the moment
+// the union grows" precedent as round-already-counted (Task 8 debt) above.
+describe("toHttpError — course-cards (Task 3)", () => {
+  it("maps ApplicationError card-superseded to 409", () => {
+    const result = toHttpError(new ApplicationError("card-superseded", "course c-1: the card being replaced is no longer current"), createNullLogger());
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body)).toEqual({ code: "card-superseded", message: "course c-1: the card being replaced is no longer current" });
+  });
+});

@@ -110,7 +110,12 @@ export type ApplicationErrorCode =
   // organizer cannot leave (the crew would be left with none). A failed lifecycle precondition,
   // same 409 bucket as season-closed/round-already-counted above; the message names the way out
   // (transfer the role first, then leave).
-  | "organizer-must-transfer";
+  | "organizer-must-transfer"
+  // Course-cards spec §6: CardStore.supersede's collision signal — the CURRENT pointer no
+  // longer names the card the caller reviewed (record.supersedes). No retry, no revision
+  // counter: a moved pointer means a human re-reviews the now-current card, same 409 bucket as
+  // course-conflict/crew-conflict above.
+  | "card-superseded";
 
 export class ApplicationError extends Error {
   constructor(

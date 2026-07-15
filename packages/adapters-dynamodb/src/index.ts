@@ -8,6 +8,9 @@ export { createDynamoEventJournal } from "./createDynamoEventJournal.js";
 export { createDynamoRoundStore } from "./createDynamoRoundStore.js";
 export { createDynamoConnectionRegistry } from "./createDynamoConnectionRegistry.js";
 export { createDynamoCourseStore } from "./createDynamoCourseStore.js";
+// Course-cards spec: the new write-once-lineage store lands BESIDE createDynamoCourseStore
+// (T4 switches consumers and deletes the old pair).
+export { createDynamoCardStore } from "./createDynamoCardStore.js";
 export { createDynamoGolferStore } from "./createDynamoGolferStore.js";
 export { createDynamoCrewStore } from "./createDynamoCrewStore.js";
 export { createDynamoProjectionStore } from "./createDynamoProjectionStore.js";

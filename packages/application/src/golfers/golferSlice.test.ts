@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { combineNineHoleDifferentials, computeIndexDetail, deviceId, fixtureLinks, golferId, opId, placeholderName, roundId } from "@swng/domain";
+import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, fixtureLinks, golferId, opId, placeholderName, roundId } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import { createFrozenClock, createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
@@ -159,6 +159,37 @@ describe("getMyRecord", () => {
     const record = await ctx.record({ sub: "sub-1" });
     expect(record.index).toBeUndefined();
     expect(record.history).toHaveLength(1);
+  });
+
+  // courseId (course-cards spec §4, the analytics join key): carried when the stored line has
+  // it, omitted for a pre-scrap line without it — absent means ABSENT, never an explicit
+  // undefined key (toWireLine's conditional-spread idiom, same as ags/differential).
+  it("carries courseId on a history line when the stored line has it, omitting it for a line without", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    await ctx.projectionStore.putLine(golfer.golferId, {
+      roundId: roundId("r1"),
+      courseName: "Casa Verde GC",
+      courseId: courseId("course-1"),
+      tee: "white",
+      holes: 18,
+      distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
+      finalizedAtMs: 2_000,
+    });
+    // A pre-scrap line: no courseId at all (frozen before cards carried a source).
+    await ctx.projectionStore.putLine(golfer.golferId, {
+      roundId: roundId("r0"),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 18,
+      distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
+      finalizedAtMs: 1_000,
+    });
+
+    const record = await ctx.record({ sub: "sub-1" });
+    expect(record.history.map((line) => line.roundId)).toEqual(["r1", "r0"]); // newest first
+    expect(record.history[0]!.courseId).toBe(courseId("course-1"));
+    expect(record.history[1]).not.toHaveProperty("courseId");
   });
 
   // Below the 3-differential bootstrap (Rule 5.2a's own minimum), the index is ABSENT, not
@@ -346,6 +377,36 @@ describe("getMyRounds", () => {
     expect(result.rounds.map((line) => line.roundId)).toEqual(["r1", "r0"]); // newest first
     expect(result.rounds[0]!.createdAt).toBe(1_500);
     expect(result.rounds[1]).not.toHaveProperty("createdAt");
+  });
+
+  // courseId (course-cards spec §4, the analytics join key): same carried-or-ABSENT discipline
+  // as getMyRecord's history above — never an explicit undefined key on the wire.
+  it("carries courseId when the stored line has it, omitting it for a pre-scrap line without", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    await ctx.projectionStore.putLine(golfer.golferId, {
+      roundId: roundId("r1"),
+      courseName: "Casa Verde GC",
+      courseId: courseId("course-1"),
+      tee: "white",
+      holes: 18,
+      distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
+      finalizedAtMs: 2_000,
+    });
+    // A pre-scrap line: no courseId at all (frozen before cards carried a source).
+    await ctx.projectionStore.putLine(golfer.golferId, {
+      roundId: roundId("r0"),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 18,
+      distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
+      finalizedAtMs: 1_000,
+    });
+
+    const result = await ctx.myRounds({ sub: "sub-1" });
+    expect(result.rounds.map((line) => line.roundId)).toEqual(["r1", "r0"]); // newest first
+    expect(result.rounds[0]!.courseId).toBe(courseId("course-1"));
+    expect(result.rounds[1]).not.toHaveProperty("courseId");
   });
 
   // Same ordering the sibling getMyRecord assertion above pins — the two responses must never

@@ -13,6 +13,9 @@ const toWireLine = (
 ): GolferRoundLine & { readonly finalizedAt: number; readonly createdAt?: number } => ({
   roundId: line.roundId,
   courseName: line.courseName,
+  // courseId (course-cards spec §4, the analytics join key) — omitted for pre-scrap lines
+  // whose card carried no source (tolerated as absent, no migration).
+  ...(line.courseId !== undefined ? { courseId: line.courseId } : {}),
   tee: line.tee,
   holes: line.holes,
   ...(line.ags !== undefined ? { ags: line.ags } : {}),

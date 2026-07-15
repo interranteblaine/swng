@@ -64,19 +64,28 @@ cannot reach the round.
 `packages/domain/src/course/` is rewritten around one record type:
 
 ```ts
-// ids.ts — CardId joins the existing brand family beside CourseId
+// ids.ts — CardId and TeeId join the existing brand family beside CourseId
 export type CardId = Brand<string, "CardId">;
+export type TeeId = Brand<string, "TeeId">;
 
 export interface CardSource {
   readonly cardId: CardId;     // identity of this exact card
   readonly courseId: CourseId; // the lineage
 }
 
-// card.ts — CourseCard gains one optional field; Hole/TeeSet unchanged
+// card.ts — CourseCard and TeeSet each gain one optional identity field; Hole unchanged
 export interface CourseCard {
   readonly courseName: string;
   readonly source?: CardSource; // absent on pre-spec frozen cards; present on all new ones
   readonly teeSets: readonly TeeSet[];
+}
+
+export interface TeeSet {
+  readonly teeId?: TeeId; // absent on pre-spec frozen cards; required (by invariant) on stored cards
+  readonly name: string;
+  readonly rating: number;
+  readonly slope: number;
+  readonly holes: readonly Hole[];
 }
 
 export interface CardRecord {
@@ -91,6 +100,17 @@ export interface CardRecord {
 
 Ids are branded in the domain, plain `z.string()` on the wire — the standing pattern
 (`RoundId`, `GolferId`, `CrewId` all work this way).
+
+**Tee identity is recorded at the only moment it is certain — write time.** The editor
+edits the loaded card in place, so column identity through an edit is knowledge, not
+inference: a tee submitted *with* its `teeId` is the same tee (renames and number
+corrections included); a tee submitted *without* one is new and the server mints its id;
+an id absent from the submission is a removed tee. Supersede validation: every submitted
+`teeId` must exist in the superseded card (400 `unknown-tee-id`), no duplicates. On
+stored `CardRecord`s every tee carries its id — the optional-on-the-value-type /
+required-on-stored-records split is the same one `card.source` uses. The governing
+principle (also why facility grouping is deferred, §11): record facts at the moment they
+are known with certainty; defer relations that are not knowable at write time.
 
 Deleted from the domain: `Course`, `TeeSetVersion`, `verifications`, `addTeeSet`,
 `verifyTeeSet`, `courseCardOf` (no translation exists — `record.card` IS the card).
@@ -136,8 +156,8 @@ at join; names are stable within an immutable card by construction).
    value, `source` included.
 
 `joinRound`, `peekRound`, the fold, scoring, settle, and the archive shape are
-**untouched**. The only change the round side sees is the optional `source` field on the
-`CourseCard` type it already imports.
+**untouched**. The only change the round side sees is the pair of optional identity
+fields (`CourseCard.source`, `TeeSet.teeId`) on types it already imports.
 
 ### Course routes (37 → 36 HTTP; 38 total with WS)
 
@@ -150,9 +170,12 @@ at join; names are stable within an immutable card by construction).
 | ~~`POST /courses/{id}/tees`~~ | — | — | **Deleted** (subsumed by PUT). |
 | ~~`POST /courses/{id}/verify`~~ | — | — | **Deleted** (see §8). |
 
-Write schemas are `.strict()`; `enteredBy` no longer exists on any wire body. The two
-writes leave the anonymous-reachable throttle set (they are golfer-auth now); the two
-GETs stay in it.
+Write schemas are `.strict()`; `enteredBy` no longer exists on any wire body. Tee ids on
+the wire follow the continuity rule (§3): `POST /courses` tees carry no ids (all minted);
+`PUT /courses/{courseId}` tees carry `teeId` iff they continue an existing tee — two
+distinct input tee schemas, so a client can never supply an id the server didn't mint.
+The two writes leave the anonymous-reachable throttle set (they are golfer-auth now); the
+two GETs stay in it.
 
 ```ts
 export const courseViewSchema = z.object({
@@ -231,7 +254,9 @@ Courses become their own product area, consuming and maintaining cards:
 - **AddCoursePage** — unchanged entry grid, now lands on the new CoursePage (not
   `/create`), where "Edit this card" makes adding the second tee a natural next step.
 - **EditCoursePage** — becomes the whole-card editor: course name, every tee as a
-  column, an "add tee" affordance that appends a column. Submits
+  column, an "add tee" affordance that appends a column. Columns loaded from the current
+  card carry their `teeId` through rename and correction; appended columns carry none —
+  identity threading falls out of editing in place, no extra affordance. Submits
   `PUT /courses/{courseId}` with `supersedes` = the `cardId` it loaded. On 409:
   "This card was just updated — review the new numbers." and re-fetch. (Same idiom as
   M6's verify-race alert.)
@@ -282,22 +307,26 @@ book wants it — YAGNI).
 
 1. **Cards are immutable, write-once, and never deleted** — enforced by
    `attribute_not_exists`, not convention. A `cardId`'s numbers can never change, and
-   lineages are append-only: retained history is what keeps later identity work (e.g.
-   tee-lineage recovery, §11) derivable instead of lost.
-2. **The stored unit is the frozen unit** — `startRound` freezes `CardRecord.card`
+   lineages are append-only: the retained chain is the audit trail and the safety net
+   for any future archaeology.
+2. **Tee identity is recorded at write time, never inferred later** — `TeeId`s are
+   server-minted; a supersession's submitted ids must exist in the superseded card;
+   every tee on a stored card carries its id.
+3. **The stored unit is the frozen unit** — `startRound` freezes `CardRecord.card`
    verbatim; no translation function exists anywhere.
-3. **Rounds are created only from a lineage's current card**; staleness is 409
+4. **Rounds are created only from a lineage's current card**; staleness is 409
    `card-superseded` — the same code and semantics as a maintenance race.
-4. **The client can never author a card on the round wire.** The old shape is gone, not
+5. **The client can never author a card on the round wire.** The old shape is gone, not
    tolerated.
-5. **Every tee in a card has the same hole count (9 or 18)** — a frozen card cannot be
+6. **Every tee in a card has the same hole count (9 or 18)** — a frozen card cannot be
    internally contradictory.
-6. **All course writes are authenticated; `enteredBy` is derived, frozen at write time,
+7. **All course writes are authenticated; `enteredBy` is derived, frozen at write time,
    and never wire-supplied.**
-7. **Frozen cards are never re-read from the course store; renames never rewrite cards**
+8. **Frozen cards are never re-read from the course store; renames never rewrite cards**
    — the lineage id (`courseId`) is what keeps analytics whole across renames.
-8. **The round domain is unchanged** except `CourseCard.source?` — events, fold,
-   scoring, settle, archive, join, peek all as before.
+9. **The round domain is unchanged** except the optional identity fields
+   (`CourseCard.source`, `TeeSet.teeId`) — events, fold, scoring, settle, archive,
+   join, peek all as before.
 
 ## 11. How analytics stand on this model
 
@@ -307,8 +336,9 @@ referencing rounds inbound and computing on read — the same architecture as cr
 standings and the handicap index today:
 
 - **"My history at Casa Verde"** — the golfer's history lines filtered by `courseId`.
-- **Scoring average / best round, by tee** — group lines by `courseId`, then by the
-  frozen tee name within each snapshot's card.
+- **Scoring average / best round, by tee** — group lines by `courseId`, then by
+  `teeId`, resolved from the snapshot's own card (each participant's frozen tee name is
+  unique within it); by name for pre-spec legacy snapshots.
 - **Hole insights ("which holes eat you alive")** — fold per-hole cells across a
   golfer's snapshots for one `courseId`; hole numbers are stable within a lineage, and
   each snapshot carries its own full card (par, SI, yardage), so every derived stat is
@@ -318,34 +348,29 @@ standings and the handicap index today:
   either works, because the inputs are sealed and identified.
 
 The structural point: the only thing analytics can never recover is what rounds failed
-to *record* — and the snapshot now records the complete card plus the two identity
-facts (`cardId`, `courseId`). There is nothing course-shaped known at creation time
-that a future analytic could want and we discard.
+to *record* — and the snapshot now records the complete card plus its identity facts
+(`cardId`, `courseId`, and each tee's `teeId`). There is nothing course-shaped known at
+creation time that a future analytic could want and we discard.
 
-Two grouping granularities are deliberately not first-class yet, and both extend
-additively — new fields on future cards, no remodel, sealed rounds untouched:
+Identity is sorted by one rule — **record facts at the moment they are known with
+certainty; defer relations that are not knowable at write time** (§3):
 
-- **Tee identity** — tees inherit the lineage pattern from cards rather than carrying
-  their own ids. No operation addresses a tee (maintenance is whole-card supersession),
-  and every snapshot already pins its tee exactly: `(cardId, tee name)` is a globally
-  unique, permanent identifier of one tee-version, since names are unique within a card.
-  Note it is the *join key*, not the *series key* — it names a node in the lineage's
-  history, and a tee series is the equivalence class of nodes connected across
-  supersession seams (a name persisting across one supersession is the same tee,
-  deterministically; a rename seam is connectable by its matching numbers). Tee lineage
-  is therefore *derivable* whenever tee-level analytics arrive: walk the retained card
-  chain once per lineage and map each snapshot's join key through the computed classes —
-  retroactively covering every round played under this model, which ids-from-now-on
-  could not. A recorded `teeId` would be a precomputed cache of that walk, stamped at
-  edit time from the same information the chain already preserves. A separate `teeId` would record no fact a snapshot doesn't
-  already carry. Residual: a reused tee name (renamed away, later re-added as a
-  different tee) makes one seam of that walk ambiguous and needs a curation call — rare,
-  and resolvable from retained history.
-- **Facility identity** — an 18-hole card and its front-nine card are separate lineages,
-  so their stats are separate groups. For most stats that is semantically *correct* (a
-  nine-hole round is not comparable to an eighteen). Where a venue-level view is wanted,
-  a facility grouping over `courseId`s unites them at read time — the crews-over-rounds
-  shape, never a parent tier inside card identity.
+- **Tee identity is recorded, not derived** (§3). The editor knows column identity with
+  certainty while the write happens (it edits the loaded card in place), so continuity
+  through renames and corrections is captured then — never reconstructed later by
+  walking history or matching numbers, which composite edits (a rename plus a
+  correction in one supersede) would routinely defeat. Every new snapshot pins
+  `(courseId, cardId, teeId per tee)`; tee series group by id with no inference.
+  Pre-spec snapshots lack tee ids exactly as they lack course ids — the same legacy
+  tier, grouped by name.
+- **Facility identity is the deferred one** — an 18-hole card and its front-nine card
+  are separate lineages, so their stats are separate groups (for most stats that is
+  semantically *correct*: a nine-hole round is not comparable to an eighteen). It
+  defers because facility membership is *nobody's* write-time knowledge — no one
+  declares it while entering a card, and a grouping claim needs an authority (import)
+  or a moderation story (both future). It is a pure read-time relation over recorded
+  `courseId`s: creatable years later and instantly covering every old round — the
+  crews-over-rounds shape, never a parent tier inside card identity.
 
 ## 12. Future scenarios, recorded (2026-07-15)
 
@@ -360,9 +385,6 @@ Decisions made with eyes open, each with its revisit trigger:
 - **Import (GHIN-style course data)** — an importer is a card factory: it emits cards
   with `provenance: "imported"`. The imported ontology reshapes the course store then;
   rounds don't care. *Trigger:* the decision to scale beyond community entry.
-- **Tee-level stable identity** — name-keyed by design; tee lineage is derivable from
-  retained card history (§11), so nothing is recorded now. *Trigger:* real tee-level
-  analytics.
 - **Verification with real semantics** — see §8. *Trigger:* a trust problem community
   attribution can't absorb.
 - **Steward moderation of course edits** — v1 is immediate-with-audit. *Trigger:* scale

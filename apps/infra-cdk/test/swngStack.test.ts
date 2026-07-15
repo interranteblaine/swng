@@ -834,6 +834,31 @@ describe("SwngStack", () => {
     });
   });
 
+  describe("stage-vs-route deploy ordering (crew membership's POST /crews/peek incident)", () => {
+    // RouteSettings names routes by KEY string, not CloudFormation ref, so nothing implicit
+    // orders the stage update after route creation — the first deploy that added a brand-new
+    // route to ANON_THROTTLED_ROUTES wedged the stack in UPDATE_ROLLBACK_FAILED when the
+    // stage's settings named a route that didn't exist yet. This pins the structural fix: the
+    // HTTP default stage declares DependsOn on EVERY route resource, so its settings can never
+    // apply before the routes they name exist.
+    it("the HTTP default stage DependsOn every HTTP route resource", () => {
+      const routes = template.findResources("AWS::ApiGatewayV2::Route");
+      const stages = template.findResources("AWS::ApiGatewayV2::Stage");
+      const httpStageEntry = Object.entries(stages).find(([, stage]) => stage.Properties.StageName === "$default");
+      expect(httpStageEntry, "no $default HTTP stage found").toBeDefined();
+      const dependsOn: readonly string[] = httpStageEntry![1].DependsOn ?? [];
+      // Every HTTP-API route (routes whose ApiId resolves to the HttpApi) must appear; the
+      // WebSocket routes belong to a different api/stage pair and are not required here. The
+      // HTTP route count is HTTP_ROUTES.length, so requiring that many route ids in DependsOn
+      // pins full coverage without hardcoding a single hashed logical id.
+      const httpRouteIds = Object.keys(routes).filter((id) => id.startsWith("HttpApi"));
+      expect(httpRouteIds.length).toBe(HTTP_ROUTES.length);
+      for (const id of httpRouteIds) {
+        expect(dependsOn, `stage missing DependsOn ${id}`).toContain(id);
+      }
+    });
+  });
+
   // M9 Task 5: one SNS topic, one email subscription to the plan's flagged owner address — the
   // subscription itself needs a confirmation click after deploy (SNS's own protocol), which is
   // a real human action, not something this stack (or a deploy script) can complete.

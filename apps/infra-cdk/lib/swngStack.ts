@@ -3,7 +3,7 @@ import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from "aws-
 import { Alarm, ComparisonOperator, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
 import { AttributeType, BillingMode, Operation, ProjectionType, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
-import { CfnStage, CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
+import { CfnRoute, CfnStage, CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration, WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { CfnUserPoolClient, OAuthScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
 import { Distribution, ResponseHeadersPolicy, ViewerProtocolPolicy } from "aws-cdk-lib/aws-cloudfront";
@@ -551,6 +551,19 @@ export class SwngStack extends Stack {
         { ThrottlingRateLimit: ANON_ROUTE_THROTTLE_RATE_LIMIT, ThrottlingBurstLimit: ANON_ROUTE_THROTTLE_BURST_LIMIT },
       ]),
     );
+    // RouteSettings references routes by KEY, not by CloudFormation ref — so nothing above
+    // gives CloudFormation an ordering edge between this stage update and the Route resources
+    // themselves. The first deploy that added a BRAND-NEW route to ANON_THROTTLED_ROUTES
+    // (crew membership's POST /crews/peek) proved it the hard way: the stage update ran before
+    // the route existed, API Gateway 404'd the unknown route key, and the stack wedged in
+    // UPDATE_ROLLBACK_FAILED (recovered via continue-update-rollback --resources-to-skip).
+    // This explicit dependency on every route resource is the structural fix: the stage's
+    // settings never apply until every route they could name exists.
+    for (const child of httpApi.node.findAll()) {
+      if (CfnRoute.isCfnResource(child) && child.cfnResourceType === "AWS::ApiGatewayV2::Route") {
+        defaultStageResource.addDependency(child as CfnRoute);
+      }
+    }
 
     // --- Grants ---------------------------------------------------------------------------
 

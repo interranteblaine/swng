@@ -34,14 +34,15 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (35, as of crew membership's "invited in" rework — +POST
-// /crews/{crewId}/invites, +POST /crews/peek, −POST /crews/{crewId}/members) routes are
-// declared here explicitly (matching packages/lambda/src/http/routes.ts) rather than via a
-// single $default catch-all, so the API's shape is visible in the CloudFormation template and
-// the AWS console, not hidden inside the Lambda. Exported (not module-private) so
-// test/routesParity.test.ts can pin this table against buildRoutes' own {method, path} set —
-// infra depends on lambda, the correct direction, so that guard lives here rather than in
-// packages/lambda.
+// function — but the (37, as of crew membership's "accountable out" rework — +DELETE
+// /crews/{crewId}/members/{golferId}, +POST /crews/{crewId}/transfer, on top of the "invited
+// in" rework's own +POST /crews/{crewId}/invites, +POST /crews/peek, −POST
+// /crews/{crewId}/members) routes are declared here explicitly (matching
+// packages/lambda/src/http/routes.ts) rather than via a single $default catch-all, so the API's
+// shape is visible in the CloudFormation template and the AWS console, not hidden inside the
+// Lambda. Exported (not module-private) so test/routesParity.test.ts can pin this table against
+// buildRoutes' own {method, path} set — infra depends on lambda, the correct direction, so that
+// guard lives here rather than in packages/lambda.
 export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly path: string }> = [
   { method: HttpMethod.POST, path: "/rounds" },
   { method: HttpMethod.POST, path: "/rounds/join" },
@@ -108,6 +109,10 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.DELETE, path: "/crews/{crewId}/seasons/{seasonId}/rounds/{roundId}" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/seasons/{seasonId}/standings" },
   { method: HttpMethod.POST, path: "/crews/{crewId}/leave" },
+  // Crew membership (invited in, accountable out — spec §1): the organizer's authority — remove
+  // (organizer-only, target in the path) and transfer (organizer-only, target in the body).
+  { method: HttpMethod.DELETE, path: "/crews/{crewId}/members/{golferId}" },
+  { method: HttpMethod.POST, path: "/crews/{crewId}/transfer" },
 ];
 
 // M9 Task 5 (ops): the highest-abuse-value routes get the tighter per-route ceiling below —

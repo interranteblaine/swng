@@ -403,4 +403,18 @@ describe("leaveCrew", () => {
     await seedGolfer(ctx, "stranger", "Stranger");
     await expect(ctx.leave(asClaims("stranger"), crewId)).rejects.toMatchObject({ code: "not-a-member" });
   });
+
+  // Crew membership (invited in, accountable out — spec §1): the organizer's own leave-guard —
+  // a crew always has exactly one organizer, so the organizer must transfer the role
+  // (transferOrganizer, crewSlice.test.ts) before they can leave. The message names the way out.
+  it("the organizer cannot leave — organizer-must-transfer, naming the way out", async () => {
+    const ctx = setup();
+    const { ann, crewId } = await crewWithSeason(ctx);
+
+    await expect(ctx.leave(asClaims("ann"), crewId)).rejects.toMatchObject({ code: "organizer-must-transfer" });
+
+    // Nothing changed — Ann is still on the roster, still organizer.
+    const crew = await ctx.crewStore.get(crewId);
+    expect(crew!.crew.members.find((member) => member.golferId === ann)).toMatchObject({ role: "organizer" });
+  });
 });

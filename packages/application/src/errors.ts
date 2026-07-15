@@ -101,7 +101,16 @@ export type ApplicationErrorCode =
   | "did-not-play"
   // Task 9: only the member who appended a counted round may remove it. A forbidden actor, same
   // 403 bucket as did-not-play/not-a-member above.
-  | "not-the-appender";
+  | "not-the-appender"
+  // Crew membership (invited in, accountable out — spec §1): removeCrewMember/transferOrganizer's
+  // authorization gate — the caller passed requireCrewMember (they ARE a member) but isn't the
+  // crew's organizer. A forbidden ACTOR, same 403 bucket as not-a-member/did-not-play above.
+  | "not-organizer"
+  // Crew membership (invited in, accountable out — spec §1): leaveCrew's organizer guard — the
+  // organizer cannot leave (the crew would be left with none). A failed lifecycle precondition,
+  // same 409 bucket as season-closed/round-already-counted above; the message names the way out
+  // (transfer the role first, then leave).
+  | "organizer-must-transfer";
 
 export class ApplicationError extends Error {
   constructor(

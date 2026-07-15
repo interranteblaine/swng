@@ -112,6 +112,12 @@ const stubUseCases: UseCases = {
   leaveCrew: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
+  removeCrewMember: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  transferOrganizer: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
 };
 
 const sortKey = (route: { readonly method: string; readonly path: string }): string => `${route.method} ${route.path}`;

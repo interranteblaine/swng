@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DomainError } from "../errors.js";
 import { crewId, golferId } from "../ids.js";
-import { addMember, validateCrewName } from "./crew.js";
+import { addMember, removeMember, transferOrganizer, validateCrewName } from "./crew.js";
 import type { Crew, CrewMember } from "./crew.js";
 
 const CREW = crewId("saturday-boys");
@@ -53,6 +53,78 @@ describe("addMember", () => {
   it("accepts a single-character name (min 1)", () => {
     const crew = addMember(emptyCrew, { golferId: A, name: "A", role: "organizer" });
     expect(crew.members[0]?.name).toBe("A");
+  });
+});
+
+// Crew membership (invited in, accountable out — spec §1): the organizer's authority.
+// removeMember/transferOrganizer are pure roster ops — identical revision-checked put idiom as
+// addMember, no projection/season/standings code touched (standings aggregation scope does the
+// rest at read time).
+describe("removeMember", () => {
+  const organizer: CrewMember = { golferId: A, name: "Ann", role: "organizer" };
+  const member: CrewMember = { golferId: B, name: "Bo", role: "member" };
+  const crew: Crew = { id: CREW, name: "The Saturday Boys", members: [organizer, member] };
+
+  it("removes a non-organizer member", () => {
+    const result = removeMember(crew, B);
+    expect(result.members).toEqual([organizer]);
+  });
+
+  it("does not mutate the input crew (pure)", () => {
+    removeMember(crew, B);
+    expect(crew.members).toEqual([organizer, member]);
+  });
+
+  it("throws organizer-immovable when the target is the organizer", () => {
+    const attempt = () => removeMember(crew, A);
+    expect(attempt).toThrowError(DomainError);
+    expect(attempt).toThrowError(expect.objectContaining({ code: "organizer-immovable" }));
+  });
+
+  it("throws not-a-member when the target golferId isn't on the roster", () => {
+    const stranger = golferId("stranger");
+    const attempt = () => removeMember(crew, stranger);
+    expect(attempt).toThrowError(DomainError);
+    expect(attempt).toThrowError(expect.objectContaining({ code: "not-a-member" }));
+  });
+});
+
+describe("transferOrganizer", () => {
+  const organizer: CrewMember = { golferId: A, name: "Ann", role: "organizer" };
+  const memberB: CrewMember = { golferId: B, name: "Bo", role: "member" };
+  const memberC: CrewMember = { golferId: golferId("cal"), name: "Cal", role: "member" };
+  const crew: Crew = { id: CREW, name: "The Saturday Boys", members: [organizer, memberB, memberC] };
+
+  it("flips the target to organizer and the old organizer to member, preserving member order", () => {
+    const result = transferOrganizer(crew, B);
+    expect(result.members.map((m) => m.golferId)).toEqual([A, B, memberC.golferId]); // order preserved
+    expect(result.members).toEqual([
+      { ...organizer, role: "member" },
+      { ...memberB, role: "organizer" },
+      memberC,
+    ]);
+  });
+
+  it("results in exactly one organizer after transfer", () => {
+    const result = transferOrganizer(crew, B);
+    expect(result.members.filter((m) => m.role === "organizer")).toHaveLength(1);
+  });
+
+  it("does not mutate the input crew (pure)", () => {
+    transferOrganizer(crew, B);
+    expect(crew.members).toEqual([organizer, memberB, memberC]);
+  });
+
+  it("throws not-a-member when the target golferId isn't on the roster", () => {
+    const stranger = golferId("stranger");
+    const attempt = () => transferOrganizer(crew, stranger);
+    expect(attempt).toThrowError(DomainError);
+    expect(attempt).toThrowError(expect.objectContaining({ code: "not-a-member" }));
+  });
+
+  it("transferring to the current organizer is a harmless no-op (still exactly one organizer)", () => {
+    const result = transferOrganizer(crew, A);
+    expect(result.members).toEqual(crew.members);
   });
 });
 

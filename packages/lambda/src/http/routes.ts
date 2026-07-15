@@ -1,6 +1,6 @@
 import type { z } from "zod";
-import { courseId, crewId, gameId, roundId } from "@swng/domain";
-import type { CourseId, CrewId, GameId, RoundId } from "@swng/domain";
+import { courseId, crewId, gameId, golferId, roundId } from "@swng/domain";
+import type { CourseId, CrewId, GameId, GolferId, RoundId } from "@swng/domain";
 import type { AccountClaims, ParticipantClaims } from "@swng/application";
 import type {
   AbandonRoundResponse,
@@ -47,6 +47,7 @@ import type {
   StartRoundRequest,
   StartRoundResponse,
   TerminateGameResponse,
+  TransferOrganizerRequest,
   UpdateMeRequest,
   VerifyTeeSetRequest,
   VerifyTeeSetResponse,
@@ -64,6 +65,7 @@ import {
   peekCrewInviteRequestSchema,
   recordScoreRequestSchema,
   startRoundRequestSchema,
+  transferOrganizerRequestSchema,
   updateMeRequestSchema,
   verifyTeeSetRequestSchema,
 } from "@swng/contracts";
@@ -142,6 +144,13 @@ export interface UseCases {
   removeCountedRound: (claims: AccountClaims, id: CrewId, seasonId: string, roundId: RoundId) => Promise<RemoveCountedRoundResponse>;
   getSeasonStandings: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<SeasonStandingsResponse>;
   leaveCrew: (claims: AccountClaims, id: CrewId) => Promise<LeaveCrewResponse>;
+  // Crew membership (invited in, accountable out — spec §1): the organizer's authority.
+  // Organizer-gated inside application (crews/membership.ts's requireCrewMember, then a role
+  // check) — never re-checked here. Both mutate the roster and return the crew's own updated
+  // view (GetCrewResponse), same "produces the crew" shape as createCrew/getCrew/
+  // joinCrewByInvite, since the organizer stays authorized to see what they just changed.
+  removeCrewMember: (claims: AccountClaims, id: CrewId, targetGolferId: GolferId) => Promise<GetCrewResponse>;
+  transferOrganizer: (claims: AccountClaims, id: CrewId, command: TransferOrganizerRequest) => Promise<GetCrewResponse>;
 }
 
 // What a route handler sees once the dispatcher has matched the path, verified auth, and
@@ -547,5 +556,24 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 200, // removes the caller's member item — an act on an existing resource, not a mint.
     handler: async (ctx) => useCases.leaveCrew(ctx.account!, crewId(ctx.pathParams.crewId!)),
+  },
+  // Crew membership (invited in, accountable out — spec §1): the organizer's authority. Both
+  // "golfer"-gated (organizer-only authorization lives in application, never re-checked here,
+  // same split as every other crew route above); both an act on an existing resource, not a
+  // mint (200, not 201).
+  {
+    method: "DELETE",
+    path: "/crews/{crewId}/members/{golferId}",
+    auth: "golfer", // no request schema — the target golferId rides the path, same shape as DELETE .../rounds/{roundId} (removeCountedRound).
+    successStatus: 200,
+    handler: async (ctx) => useCases.removeCrewMember(ctx.account!, crewId(ctx.pathParams.crewId!), golferId(ctx.pathParams.golferId!)),
+  },
+  {
+    method: "POST",
+    path: "/crews/{crewId}/transfer",
+    schema: transferOrganizerRequestSchema,
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx, body) => useCases.transferOrganizer(ctx.account!, crewId(ctx.pathParams.crewId!), body as TransferOrganizerRequest),
   },
 ];

@@ -1,5 +1,6 @@
 import type { Crew, CrewId } from "@swng/domain";
 import type { LeaveCrewResponse } from "@swng/contracts";
+import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
@@ -13,12 +14,20 @@ import { requireCrewMember } from "./membership.js";
 // vanish from future standings reads (nothing is stored — re-joining restores them on the next
 // read). A non-member (or a sub with no account golfer) leaving is not-a-member
 // (requireCrewMember).
+// Crew membership (invited in, accountable out — spec §1): the organizer CANNOT leave —
+// organizer-must-transfer names the way out (transfer the role first, transferOrganizer.ts),
+// same invariant crew.ts's own removeMember enforces for a forced removal (organizer-immovable).
 export const leaveCrew =
   (deps: { crewStore: CrewStore; golferStore: GolferStore }) =>
   async (claims: AccountClaims, id: CrewId): Promise<LeaveCrewResponse> => {
-    await requireCrewMember(deps, claims, id);
+    const { crew } = await requireCrewMember(deps, claims, id);
     const account = await deps.golferStore.getBySub(claims.sub);
     const callerGolferId = account!.golfer.id;
+
+    const caller = crew.members.find((member) => member.golferId === callerGolferId);
+    if (caller?.role === "organizer") {
+      throw new ApplicationError("organizer-must-transfer", "the organizer cannot leave — transfer the role to another member first");
+    }
 
     await retryOnConflict(
       {

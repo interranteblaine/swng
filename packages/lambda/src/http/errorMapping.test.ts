@@ -219,3 +219,36 @@ describe("toHttpError — crew seasons + counted rounds (architecture-realignmen
     expect(JSON.parse(result.body)).toMatchObject({ code });
   });
 });
+
+// Crew membership (invited in, accountable out — spec §1): the organizer's authority —
+// removeCrewMember/transferOrganizer's organizer-only gate (ApplicationError) and leaveCrew's
+// organizer guard (ApplicationError), plus crew.ts's own two domain-level roster invariants
+// (DomainError) — not-a-member reuses the SAME code+status as application's own not-a-member
+// (membership.ts's requireCrewMember), organizer-immovable is a fresh code.
+describe("toHttpError — crew organizer authority (crew membership, invited in — spec §1)", () => {
+  const logger = createNullLogger();
+
+  it("maps ApplicationError not-organizer to 403", () => {
+    const result = toHttpError(new ApplicationError("not-organizer"), logger);
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({ code: "not-organizer", message: "not-organizer" });
+  });
+
+  it("maps ApplicationError organizer-must-transfer to 409", () => {
+    const result = toHttpError(new ApplicationError("organizer-must-transfer", "transfer the organizer role before leaving"), logger);
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body)).toEqual({ code: "organizer-must-transfer", message: "transfer the organizer role before leaving" });
+  });
+
+  it("maps DomainError not-a-member (crew.ts's removeMember/transferOrganizer) to 403", () => {
+    const result = toHttpError(new DomainError("not-a-member", 'golfer "g-1" is not a member of crew "c-1"'), logger);
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({ code: "not-a-member", message: 'golfer "g-1" is not a member of crew "c-1"' });
+  });
+
+  it("maps DomainError organizer-immovable to 409", () => {
+    const result = toHttpError(new DomainError("organizer-immovable", 'the organizer of crew "c-1" cannot be removed'), logger);
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body)).toEqual({ code: "organizer-immovable", message: 'the organizer of crew "c-1" cannot be removed' });
+  });
+});

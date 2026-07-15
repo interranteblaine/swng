@@ -92,6 +92,12 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "season-closed": 409,
   "did-not-play": 403,
   "not-the-appender": 403,
+  // Crew membership (invited in, accountable out — spec §1): removeCrewMember/transferOrganizer's
+  // organizer-only gate — a forbidden actor, same 403 bucket as not-a-member/not-the-appender
+  // above. organizer-must-transfer is leaveCrew's own guard — a failed lifecycle precondition
+  // (the crew would be left with no organizer), same 409 bucket as season-closed above.
+  "not-organizer": 403,
+  "organizer-must-transfer": 409,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`
@@ -136,6 +142,16 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   // M9 hardening (papercut 9): crew.ts's validateCrewName — same bucket as invalid-course-name/
   // invalid-member-name above.
   "invalid-crew-name": 400,
+  // Crew membership (invited in, accountable out — spec §1): crew.ts's removeMember/
+  // transferOrganizer — a golferId (the removeMember target, or transferOrganizer's toGolferId)
+  // that isn't on the roster. Reuses the SAME code (and the SAME 403 bucket) as application's
+  // own not-a-member (membership.ts's requireCrewMember) — both mean "this golferId has no
+  // standing here," whether that's the caller or a named target.
+  "not-a-member": 403,
+  // Crew membership (invited in, accountable out — spec §1): crew.ts's removeMember — the
+  // organizer can't be removed (transfer first). A failed precondition on the roster, same 409
+  // bucket as duplicate-member above, not a genuine-bug 500.
+  "organizer-immovable": 409,
 };
 
 // Exported so every error-shaped response — including dispatch.ts's route-not-found 404,

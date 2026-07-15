@@ -54,3 +54,35 @@ export const addMember = (crew: Crew, member: CrewMember): Crew => {
   }
   return { ...crew, members: [...crew.members, member] };
 };
+
+// Crew membership (invited in, accountable out — spec §1): the organizer's authority, half one
+// (remove). A pure roster op, same shape as addMember — WHO may call this (organizer-only) is
+// application's job (removeCrewMember.ts's requireCrewMember + role check), never checked here.
+// Removing an absent golferId is not-a-member (same code requireCrewMember's own 403 uses — a
+// golferId with no standing on this roster, whether that's the caller or a named target); the
+// organizer is immovable — transfer the role first (transferOrganizer below).
+export const removeMember = (crew: Crew, golferId: GolferId): Crew => {
+  const target = crew.members.find((member) => member.golferId === golferId);
+  if (!target) throw new DomainError("not-a-member", `golfer "${golferId}" is not a member of crew "${crew.id}"`);
+  if (target.role === "organizer") {
+    throw new DomainError("organizer-immovable", `the organizer of crew "${crew.id}" cannot be removed — transfer the role first`);
+  }
+  return { ...crew, members: crew.members.filter((member) => member.golferId !== golferId) };
+};
+
+// The organizer's authority, half two (transfer). A role flip in the members array — order is
+// preserved (map, not filter+push), and exactly one organizer survives by construction: every
+// OTHER member is forced to "member" in the same pass that promotes the target (golferIds are
+// unique on a roster, addMember's own duplicate-member guard). Transferring to the CURRENT
+// organizer is a harmless no-op, not a special case. The target must already be a member —
+// same not-a-member code removeMember uses for the identical "golferId isn't on this roster"
+// shape.
+export const transferOrganizer = (crew: Crew, toGolferId: GolferId): Crew => {
+  if (!crew.members.some((member) => member.golferId === toGolferId)) {
+    throw new DomainError("not-a-member", `golfer "${toGolferId}" is not a member of crew "${crew.id}"`);
+  }
+  return {
+    ...crew,
+    members: crew.members.map((member) => ({ ...member, role: member.golferId === toGolferId ? "organizer" : "member" })),
+  };
+};

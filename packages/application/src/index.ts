@@ -62,6 +62,11 @@ export { CREW_INVITE_TTL_MS, mintCrewInvite } from "./crews/mintCrewInvite.js";
 export { peekCrewInvite } from "./crews/peekCrewInvite.js";
 export { joinCrewByInvite } from "./crews/joinCrewByInvite.js";
 export { leaveCrew } from "./crews/leaveCrew.js";
+// Crew membership (invited in, accountable out — spec §1): the organizer's authority — remove
+// (DELETE /crews/{crewId}/members/{golferId}) and transfer (POST /crews/{crewId}/transfer), both
+// organizer-gated (requireCrewMember then a role check → ApplicationError("not-organizer")).
+export { removeCrewMember } from "./crews/removeCrewMember.js";
+export { transferOrganizer } from "./crews/transferOrganizer.js";
 export { createSeason } from "./crews/createSeason.js";
 export { listSeasons } from "./crews/listSeasons.js";
 export { appendCountedRound } from "./crews/appendCountedRound.js";

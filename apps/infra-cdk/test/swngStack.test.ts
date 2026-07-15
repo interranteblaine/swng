@@ -648,6 +648,9 @@ describe("SwngStack", () => {
         "DELETE /crews/{crewId}/seasons/{seasonId}/rounds/{roundId}",
         "GET /crews/{crewId}/seasons/{seasonId}/standings",
         "POST /crews/{crewId}/leave",
+        // Crew membership (invited in, accountable out — spec §1): the organizer's authority.
+        "DELETE /crews/{crewId}/members/{golferId}",
+        "POST /crews/{crewId}/transfer",
       ];
       const routes = template.findResources("AWS::ApiGatewayV2::Route");
       const routeKeys = Object.values(routes).map((route) => route.Properties.RouteKey);
@@ -656,11 +659,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (35 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (37 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 37 routes total (35 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 37);
+    it("has exactly 39 routes total (37 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 39);
     });
 
     // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route

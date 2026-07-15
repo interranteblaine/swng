@@ -44,9 +44,11 @@ import {
   readEvents,
   recordScore,
   removeCountedRound,
+  removeCrewMember,
   searchCourses,
   startRound,
   terminateGame,
+  transferOrganizer,
   updateMyGolfer,
   verifyTeeSet,
 } from "@swng/application";
@@ -192,6 +194,8 @@ const setup = (verifier: AccountVerifier = subVerifier) => {
     removeCountedRound: removeCountedRound({ crewStore, golferStore }),
     getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots }),
     leaveCrew: leaveCrew({ crewStore, golferStore }),
+    removeCrewMember: removeCrewMember({ crewStore, golferStore }),
+    transferOrganizer: transferOrganizer({ crewStore, golferStore }),
   };
 
   const dispatcher = createDispatcher(buildRoutes(useCases), tokens, verifier, logger);
@@ -1202,6 +1206,124 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     expect(getResp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(getResp.body!))).toMatchObject({ code: "not-a-member" });
     expect(boGolfer).toBeDefined();
+  });
+
+  // Crew membership (invited in, accountable out — spec §1): the organizer's authority, driven
+  // through the REAL dispatcher — DELETE /crews/{crewId}/members/{golferId} (remove) and
+  // POST /crews/{crewId}/transfer, plus the leaveCrew organizer guard.
+  it("DELETE /crews/{crewId}/members/{golferId}: the organizer removes a member (200) — updated crew returned", async () => {
+    const { dispatcher } = setupCrews();
+    const annGolfer = await putMe(dispatcher, ann, "Ann");
+    const boGolfer = await putMe(dispatcher, bo, "Bo");
+    const created = createCrewResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+    );
+    const invite = mintCrewInviteResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+    );
+    await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
+
+    const removeResp = asStructured(
+      await dispatcher(makeEvent({ method: "DELETE", path: `/crews/${created.crew.crewId}/members/${boGolfer.golferId}`, token: golferBearer(ann) })),
+    );
+    expect(removeResp.statusCode).toBe(200);
+    const removed = getCrewResponseSchema.parse(JSON.parse(removeResp.body!));
+    expect(removed.crew.members).toEqual([{ golferId: annGolfer.golferId, name: "Ann", role: "organizer", claimed: true }]);
+  });
+
+  it("DELETE /crews/{crewId}/members/{golferId}: an ordinary member attempting to remove someone is rejected — 403 not-organizer", async () => {
+    const { dispatcher } = setupCrews();
+    await putMe(dispatcher, ann, "Ann");
+    const boGolfer = await putMe(dispatcher, bo, "Bo");
+    const calGolfer = await putMe(dispatcher, cal, "Cal");
+    const created = createCrewResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+    );
+    for (const account of [bo, cal]) {
+      const invite = mintCrewInviteResponseSchema.parse(
+        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+      );
+      await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(account), body: { token: invite.token } }));
+    }
+    expect(boGolfer).toBeDefined();
+
+    // Bo (an ordinary member, not the organizer) tries to remove Cal.
+    const resp = asStructured(
+      await dispatcher(makeEvent({ method: "DELETE", path: `/crews/${created.crew.crewId}/members/${calGolfer.golferId}`, token: golferBearer(bo) })),
+    );
+    expect(resp.statusCode).toBe(403);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-organizer" });
+  });
+
+  it("POST /crews/{crewId}/transfer: the organizer transfers to a member (200) — role flip, exactly one organizer", async () => {
+    const { dispatcher } = setupCrews();
+    const annGolfer = await putMe(dispatcher, ann, "Ann");
+    const boGolfer = await putMe(dispatcher, bo, "Bo");
+    const created = createCrewResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+    );
+    const invite = mintCrewInviteResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+    );
+    await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
+
+    const transferResp = asStructured(
+      await dispatcher(
+        makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/transfer`, token: golferBearer(ann), body: { golferId: boGolfer.golferId } }),
+      ),
+    );
+    expect(transferResp.statusCode).toBe(200);
+    const transferred = getCrewResponseSchema.parse(JSON.parse(transferResp.body!));
+    expect(transferred.crew.members).toEqual([
+      { golferId: annGolfer.golferId, name: "Ann", role: "member", claimed: true },
+      { golferId: boGolfer.golferId, name: "Bo", role: "organizer", claimed: true },
+    ]);
+
+    // Ann (now an ordinary member) can no longer remove/transfer — not-organizer.
+    const rejected = asStructured(
+      await dispatcher(
+        makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/transfer`, token: golferBearer(ann), body: { golferId: annGolfer.golferId } }),
+      ),
+    );
+    expect(rejected.statusCode).toBe(403);
+    expect(errorResponseSchema.parse(JSON.parse(rejected.body!))).toMatchObject({ code: "not-organizer" });
+  });
+
+  it("POST /crews/{crewId}/transfer: an ordinary member attempting to transfer is rejected — 403 not-organizer", async () => {
+    const { dispatcher } = setupCrews();
+    await putMe(dispatcher, ann, "Ann");
+    const boGolfer = await putMe(dispatcher, bo, "Bo");
+    const calGolfer = await putMe(dispatcher, cal, "Cal");
+    const created = createCrewResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+    );
+    for (const account of [bo, cal]) {
+      const invite = mintCrewInviteResponseSchema.parse(
+        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+      );
+      await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(account), body: { token: invite.token } }));
+    }
+    expect(boGolfer).toBeDefined();
+
+    const resp = asStructured(
+      await dispatcher(
+        makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/transfer`, token: golferBearer(bo), body: { golferId: calGolfer.golferId } }),
+      ),
+    );
+    expect(resp.statusCode).toBe(403);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-organizer" });
+  });
+
+  it("POST /crews/{crewId}/leave: the organizer cannot leave — 409 organizer-must-transfer", async () => {
+    const { dispatcher } = setupCrews();
+    await putMe(dispatcher, ann, "Ann");
+    const created = createCrewResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+    );
+
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/leave`, token: golferBearer(ann) })));
+    expect(resp.statusCode).toBe(409);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "organizer-must-transfer" });
   });
 });
 

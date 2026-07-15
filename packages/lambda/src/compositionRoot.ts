@@ -47,9 +47,11 @@ import {
   rebuildProjections,
   recordScore,
   removeCountedRound,
+  removeCrewMember,
   searchCourses,
   startRound,
   terminateGame,
+  transferOrganizer,
   updateMyGolfer,
   verifyTeeSet,
 } from "@swng/application";
@@ -330,6 +332,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     removeCountedRound: removeCountedRound({ crewStore, golferStore }),
     getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots }),
     leaveCrew: leaveCrew({ crewStore, golferStore }),
+    // Crew membership (invited in, accountable out — spec §1): the organizer's authority — the
+    // SAME crewStore/golferStore instances leaveCrew above shares.
+    removeCrewMember: removeCrewMember({ crewStore, golferStore }),
+    transferOrganizer: transferOrganizer({ crewStore, golferStore }),
   };
 
   const dispatcher = createDispatcher(buildRoutes(useCases), tokens, verifier, logger);

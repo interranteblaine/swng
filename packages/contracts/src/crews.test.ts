@@ -16,6 +16,7 @@ import {
   peekCrewInviteRequestSchema,
   peekCrewInviteResponseSchema,
   seasonStandingsResponseSchema,
+  transferOrganizerRequestSchema,
 } from "./crews.js";
 
 // parse(JSON.parse(JSON.stringify(x))) === x — the wire round-trip every schema here has to
@@ -146,5 +147,18 @@ describe("season + standings schemas", () => {
       ledger: [{ golferId: golferId("ann"), rounds: 1, wins: 1, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann" }],
       headToHead: [{ a: golferId("ann"), b: golferId("bo"), aWins: 1, bWins: 0, halves: 0 }],
     });
+  });
+});
+
+// Crew membership (invited in, accountable out — spec §1): the organizer's authority.
+// DELETE /crews/{crewId}/members/{golferId} (remove) takes no body (golferId in path) — no
+// schema to test here; POST /crews/{crewId}/transfer's body is transferOrganizerRequestSchema.
+describe("transferOrganizerRequestSchema", () => {
+  it("round-trips a valid transfer request", () => {
+    roundTrips(transferOrganizerRequestSchema, { golferId: golferId("bo") });
+  });
+
+  it("rejects a server-assigned extra field (.strict())", () => {
+    expect(() => parse(transferOrganizerRequestSchema, { golferId: "bo", role: "organizer" })).toThrow(ContractError);
   });
 });

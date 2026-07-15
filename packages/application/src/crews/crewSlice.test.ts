@@ -21,6 +21,8 @@ import { joinCrewByInvite } from "./joinCrewByInvite.js";
 import { listMyCrews } from "./listMyCrews.js";
 import { CREW_INVITE_TTL_MS, mintCrewInvite } from "./mintCrewInvite.js";
 import { peekCrewInvite } from "./peekCrewInvite.js";
+import { removeCrewMember } from "./removeCrewMember.js";
+import { transferOrganizer } from "./transferOrganizer.js";
 
 const setup = (
   crewStore: CrewStore = createInMemoryCrewStore(),
@@ -41,6 +43,8 @@ const setup = (
     mint: mintCrewInvite({ crewStore, golferStore, tokenIssuer, clock }),
     peek: peekCrewInvite({ crewStore, tokenIssuer, clock }),
     join: joinCrewByInvite({ crewStore, golferStore, tokenIssuer, clock }),
+    remove: removeCrewMember({ crewStore, golferStore }),
+    transfer: transferOrganizer({ crewStore, golferStore }),
   };
 };
 
@@ -307,6 +311,116 @@ describe("joinCrewByInvite", () => {
 
     const join = joinCrewByInvite({ crewStore, golferStore, tokenIssuer, clock: createFrozenClock(minted.expiresAtMs) });
     await expect(join({ sub: "sub-bo" }, { token: minted.token })).rejects.toMatchObject({ code: "crew-invite-expired" });
+  });
+});
+
+// Crew membership (invited in, accountable out — spec §1): the organizer's authority, half one
+// (remove) — organizer-gated (requireCrewMember then a role check → ApplicationError
+// "not-organizer"), then the domain roster op itself (crew.ts's removeMember: not-a-member for
+// an absent target, organizer-immovable for the organizer). Semantically identical to leaveCrew
+// (a pure roster op through the same revision-checked put) — no season/standings/projection code
+// is exercised or touched by any test here.
+describe("removeCrewMember", () => {
+  it("the organizer removes an ordinary member — 200 path, updated crew returned", async () => {
+    const ctx = setup();
+    const annId = await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    const boId = await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    await ctx.join({ sub: "sub-bo" }, { token: (await ctx.mint({ sub: "sub-ann" }, created.crew.crewId)).token });
+
+    const result = await ctx.remove({ sub: "sub-ann" }, created.crew.crewId, boId);
+
+    expect(result.crew.members).toEqual([{ golferId: annId, name: "Ann", role: "organizer", claimed: true }]);
+    // Removal really landed in the store, not just the response shape.
+    const stored = await ctx.crewStore.get(created.crew.crewId);
+    expect(stored!.crew.members.map((m) => m.golferId)).toEqual([annId]);
+  });
+
+  it("an ordinary member attempting to remove someone is rejected — not-organizer", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    await ctx.join({ sub: "sub-bo" }, { token: (await ctx.mint({ sub: "sub-ann" }, created.crew.crewId)).token });
+    const calId = await seedAccountGolfer(ctx.golferStore, "sub-cal", "Cal");
+    await ctx.join({ sub: "sub-cal" }, { token: (await ctx.mint({ sub: "sub-ann" }, created.crew.crewId)).token });
+
+    // Bo (an ordinary member) tries to remove Cal — rejected, even though Bo IS a crew member.
+    await expect(ctx.remove({ sub: "sub-bo" }, created.crew.crewId, calId)).rejects.toMatchObject({ code: "not-organizer" });
+  });
+
+  it("a non-member caller is rejected — not-a-member (requireCrewMember's own gate, before the role check)", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    const boId = await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    await ctx.join({ sub: "sub-bo" }, { token: (await ctx.mint({ sub: "sub-ann" }, created.crew.crewId)).token });
+    await seedAccountGolfer(ctx.golferStore, "sub-stranger", "Stranger");
+
+    await expect(ctx.remove({ sub: "sub-stranger" }, created.crew.crewId, boId)).rejects.toMatchObject({ code: "not-a-member" });
+  });
+
+  it("the organizer attempting to remove themselves is rejected — organizer-immovable (crew.ts's own invariant)", async () => {
+    const ctx = setup();
+    const annId = await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+
+    await expect(ctx.remove({ sub: "sub-ann" }, created.crew.crewId, annId)).rejects.toMatchObject({ code: "organizer-immovable" });
+  });
+
+  it("removing an absent golferId is rejected — not-a-member (the domain roster op, not the caller-membership gate)", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+
+    await expect(ctx.remove({ sub: "sub-ann" }, created.crew.crewId, golferId("never-joined"))).rejects.toMatchObject({ code: "not-a-member" });
+  });
+});
+
+// Crew membership (invited in, accountable out — spec §1): the organizer's authority, half two
+// (transfer) — same organizer gate as removeCrewMember, then crew.ts's own transferOrganizer (a
+// role flip preserving exactly one organizer, order untouched).
+describe("transferOrganizer", () => {
+  it("the organizer transfers to a member — role flip, exactly one organizer, member order preserved", async () => {
+    const ctx = setup();
+    const annId = await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    const boId = await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    await ctx.join({ sub: "sub-bo" }, { token: (await ctx.mint({ sub: "sub-ann" }, created.crew.crewId)).token });
+
+    const result = await ctx.transfer({ sub: "sub-ann" }, created.crew.crewId, { golferId: boId });
+
+    expect(result.crew.members.map((m) => m.golferId)).toEqual([annId, boId]); // order preserved
+    expect(result.crew.members).toEqual([
+      { golferId: annId, name: "Ann", role: "member", claimed: true },
+      { golferId: boId, name: "Bo", role: "organizer", claimed: true },
+    ]);
+    expect(result.crew.members.filter((m) => m.role === "organizer")).toHaveLength(1);
+
+    // The old organizer can no longer remove/transfer (not-organizer now); the new one can.
+    await expect(ctx.remove({ sub: "sub-ann" }, created.crew.crewId, boId)).rejects.toMatchObject({ code: "not-organizer" });
+  });
+
+  it("an ordinary member attempting to transfer is rejected — not-organizer", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    await ctx.join({ sub: "sub-bo" }, { token: (await ctx.mint({ sub: "sub-ann" }, created.crew.crewId)).token });
+    const calId = await seedAccountGolfer(ctx.golferStore, "sub-cal", "Cal");
+    await ctx.join({ sub: "sub-cal" }, { token: (await ctx.mint({ sub: "sub-ann" }, created.crew.crewId)).token });
+
+    await expect(ctx.transfer({ sub: "sub-bo" }, created.crew.crewId, { golferId: calId })).rejects.toMatchObject({ code: "not-organizer" });
+  });
+
+  it("transferring to a non-member is rejected — not-a-member (the domain roster op)", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+
+    await expect(ctx.transfer({ sub: "sub-ann" }, created.crew.crewId, { golferId: golferId("never-joined") })).rejects.toMatchObject({
+      code: "not-a-member",
+    });
   });
 });
 

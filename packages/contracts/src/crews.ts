@@ -222,3 +222,14 @@ export interface LeaveCrewResponse {
   readonly crewId: CrewId;
 }
 export const leaveCrewResponseSchema: z.ZodType<LeaveCrewResponse> = z.object({ crewId: crewIdSchema });
+
+// Crew membership (invited in, accountable out — spec §1): the organizer's authority.
+// DELETE /crews/{crewId}/members/{golferId} (remove) takes NO body — the target rides the path,
+// same "path param, no schema" shape as DELETE /crews/{crewId}/seasons/{seasonId}/rounds/{roundId}
+// (removeCountedRound) — so it needs no request schema here. Both mutations return the crew's
+// OWN updated view (getCrewResponseSchema/GetCrewResponse) — the organizer stays authorized to
+// see the roster they just changed, same "produces the crew" shape as createCrew/getCrew/
+// joinCrewByInvite, unlike leaveCrew's minimal `{ crewId }` (the leaver's own authorization to
+// view the crew ends with the act).
+export const transferOrganizerRequestSchema = z.object({ golferId: golferIdSchema }).strict();
+export type TransferOrganizerRequest = z.infer<typeof transferOrganizerRequestSchema>;

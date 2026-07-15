@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DomainError } from "../errors.js";
-import { deviceId, golferId, opId, roundId } from "../ids.js";
+import { cardId, courseId, deviceId, golferId, opId, roundId } from "../ids.js";
 import { fixtureLinks18 } from "../scoring/golden/fixtureCourse.js";
 import type { RoundArchive } from "../round/archive.js";
 import { cellKey } from "../round/state.js";
@@ -78,6 +78,20 @@ describe("archiveGolferLine", () => {
     };
     const line = archiveGolferLine(sparse, G);
     expect(line.distribution).toEqual({ eagles: 0, birdies: 0, pars: 1, bogeys: 0, doublePlus: 0 });
+  });
+
+  it("carries courseId when the card carries a source (spec §4: recorded from day one)", () => {
+    const sourced: RoundArchive = {
+      ...baseArchive,
+      card: { ...fixtureLinks18, source: { cardId: cardId("card-1"), courseId: courseId("course-1") } },
+    };
+    const line = archiveGolferLine(sourced, G);
+    expect(line.courseId).toBe(courseId("course-1"));
+  });
+
+  it("omits courseId when the card carries no source (pre-scrap archives)", () => {
+    const line = archiveGolferLine(baseArchive, G);
+    expect("courseId" in line).toBe(false);
   });
 
   it("throws unknown-participant for a golfer not on this archive's roster", () => {

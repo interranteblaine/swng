@@ -1,6 +1,6 @@
 import { findTeeSet } from "../course/card.js";
 import { DomainError } from "../errors.js";
-import type { GolferId, RoundId } from "../ids.js";
+import type { CourseId, GolferId, RoundId } from "../ids.js";
 import type { RoundArchive } from "../round/archive.js";
 import { cellKey } from "../round/state.js";
 
@@ -12,6 +12,7 @@ import { cellKey } from "../round/state.js";
 export interface GolferRoundLine {
   readonly roundId: RoundId;
   readonly courseName: string;
+  readonly courseId?: CourseId;
   readonly tee: string;
   readonly holes: 9 | 18;
   readonly ags?: number;
@@ -49,6 +50,8 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
   return {
     roundId: archive.roundId,
     courseName: archive.card.courseName,
+    // spec §4: recorded from day one because it cannot be backfilled; absent on pre-scrap archives.
+    ...(archive.card.source ? { courseId: archive.card.source.courseId } : {}),
     tee: participant.tee,
     // course.ts's validateTeeSet is the one gate every tee set passes before it can ever
     // reach a round (validateCard/buildCardRecord reject anything else), so this length is

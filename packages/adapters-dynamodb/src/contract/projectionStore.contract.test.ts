@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import type { GolferRoundLine, RoundId } from "@swng/domain";
-import { golferId, roundId } from "@swng/domain";
+import { courseId, golferId, roundId } from "@swng/domain";
 import { createDynamoProjectionStore } from "../createDynamoProjectionStore.js";
 import { golferPk } from "../keys.js";
 import type { LocalDynamo } from "../testing/local.js";
@@ -52,6 +52,16 @@ describe("createDynamoProjectionStore", () => {
       const store = newStore();
       const golfer = golferId(randomUUID());
       const line = makeLine(roundId(randomUUID()), 1_000);
+
+      await store.putLine(golfer, line);
+
+      expect(await store.listLines(golfer)).toEqual([line]);
+    });
+
+    it("round-trips courseId on a line (Task 7: the analytics join key) — the store persists the line object whole, so no field list drops it", async () => {
+      const store = newStore();
+      const golfer = golferId(randomUUID());
+      const line = makeLine(roundId(randomUUID()), 1_000, { courseId: courseId("course-1") });
 
       await store.putLine(golfer, line);
 

@@ -76,6 +76,7 @@ export type UpdateMeRequest = z.infer<typeof updateMeRequestSchema>;
 const golferRoundLineFields = {
   roundId: roundIdSchema,
   courseName: z.string(),
+  courseId: courseIdSchema.optional(),
   tee: z.string(),
   holes: z.union([z.literal(9), z.literal(18)]),
   ags: z.number().optional(),

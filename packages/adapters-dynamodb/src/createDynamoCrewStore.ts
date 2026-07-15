@@ -1,6 +1,6 @@
 import { ConditionalCheckFailedException, TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { BatchGetCommand, DeleteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { BatchGetCommand, DeleteCommand, GetCommand, PutCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import type { Crew, CrewId, CrewMember, GolferId, RoundId } from "@swng/domain";
 import { golferId as toGolferId } from "@swng/domain";
 import type { CountedRound, CrewSeason, CrewStore } from "@swng/application";
@@ -9,8 +9,6 @@ import {
   countedRoundSk,
   countedRoundSkMarker,
   countedRoundSkPrefix,
-  crewGsi1pk,
-  crewIdFromPk,
   crewPk,
   crewSk,
   golferPk,
@@ -50,13 +48,15 @@ interface CountedRoundItem {
 // never spreads the raw stored value), so it never leaks into anything this store returns, and
 // the next `put` (a whole-document write of a caller-supplied Crew, which can no longer even
 // TYPE a standingGame field) naturally never writes it back. Never a migration script.
+//
+// Crew membership (invited in, accountable out): `joinCode`/`gsi1pk`/`gsi1sk` are GONE — the
+// permanent join code they backed is deleted outright, not tolerated on read the way
+// standingGame is (spec §4, owner amendment: "delete, don't migrate" — beta crew data is test
+// data, wiped by C-T5 before this ships, so there is nothing legacy to tolerate here).
 interface CrewItem {
   readonly pk: string;
   readonly sk: string;
   readonly revision: number;
-  readonly joinCode: string;
-  readonly gsi1pk: string;
-  readonly gsi1sk: string;
   readonly crew: Crew;
 }
 
@@ -99,7 +99,7 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
   const { client, tableName } = config;
 
   return {
-    put: async (crew: Crew, joinCode: string, expectedRevision: number | undefined) => {
+    put: async (crew: Crew, expectedRevision: number | undefined) => {
       const pk = crewPk(crew.id);
       const revision = expectedRevision === undefined ? 1 : expectedRevision + 1;
 
@@ -126,7 +126,7 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
         return existing === undefined || existing.name !== member.name || existing.role !== member.role;
       });
 
-      const item: CrewItem = { pk, sk: crewSk, revision, joinCode, gsi1pk: crewGsi1pk, gsi1sk: joinCode, crew };
+      const item: CrewItem = { pk, sk: crewSk, revision, crew };
       const condition =
         expectedRevision === undefined
           ? { ConditionExpression: "attribute_not_exists(pk)" }
@@ -173,26 +173,7 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
       // this is where that gets tolerated-and-ignored, so every caller of this store only ever
       // sees a clean Crew, no matter what the stored document actually holds.
       const crew: Crew = { id: item.crew.id, name: item.crew.name, members: item.crew.members };
-      return { crew, joinCode: item.joinCode, revision: item.revision };
-    },
-
-    findByJoinCode: async (joinCode: string) => {
-      // gsi1, like gsi2, is eventually consistent — DynamoDB GSIs never support
-      // ConsistentRead (findByJoinCode's same accepted tradeoff in createDynamoRoundStore).
-      const result = await client.send(
-        new QueryCommand({
-          TableName: tableName,
-          IndexName: "gsi1",
-          KeyConditionExpression: "gsi1pk = :gsi1pk AND gsi1sk = :code",
-          ExpressionAttributeValues: { ":gsi1pk": crewGsi1pk, ":code": joinCode },
-          Limit: 1,
-        }),
-      );
-      // The base table's key attributes (`pk`/`sk`) are always projected onto a GSI
-      // regardless of ProjectionType (courseIdFromPk's own doc note) — crewId parses back out
-      // of `pk` even though gsi1's real ProjectionType is INCLUDE(["name"]) for courses.
-      const item = result.Items?.[0] as { pk: string } | undefined;
-      return item ? crewIdFromPk(item.pk) : undefined;
+      return { crew, revision: item.revision };
     },
 
     listByGolfer: async (golferId: GolferId) => {

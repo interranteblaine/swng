@@ -3,7 +3,6 @@ import type { z } from "zod";
 import { crewId, golferId, roundId } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
 import {
-  addCrewMemberRequestSchema,
   appendCountedRoundRequestSchema,
   createCrewRequestSchema,
   createSeasonRequestSchema,
@@ -13,6 +12,9 @@ import {
   joinCrewRequestSchema,
   listMyCrewsResponseSchema,
   listSeasonsResponseSchema,
+  mintCrewInviteResponseSchema,
+  peekCrewInviteRequestSchema,
+  peekCrewInviteResponseSchema,
   seasonStandingsResponseSchema,
 } from "./crews.js";
 
@@ -36,25 +38,34 @@ describe("createCrewRequestSchema", () => {
   });
 });
 
-describe("addCrewMemberRequestSchema", () => {
-  // De-ghost (architecture-realignment Task 9): a member is added by an EXISTING account
-  // golfer's golferId, not a free-text name.
-  it("round-trips a valid add-member request (by golferId)", () => {
-    roundTrips(addCrewMemberRequestSchema, { golferId: golferId("cal-g") });
+// Crew membership (invited in, accountable out — spec §2): the permanent join code is GONE —
+// mintCrewInviteResponseSchema/peekCrewInviteRequestSchema/peekCrewInviteResponseSchema/
+// joinCrewRequestSchema (below) are the whole "in" wire surface now. addCrewMemberRequestSchema
+// died with addCrewMember.ts — there is no add-by-id path left (spec §3).
+describe("mintCrewInviteResponseSchema", () => {
+  it("round-trips a minted invite (token + expiresAtMs)", () => {
+    roundTrips(mintCrewInviteResponseSchema, { token: "signed-token-1", expiresAtMs: 1_700_000_000_000 });
+  });
+});
+
+describe("peekCrewInviteRequestSchema / peekCrewInviteResponseSchema", () => {
+  it("round-trips a peek request (bare token), rejects an extra field (.strict())", () => {
+    roundTrips(peekCrewInviteRequestSchema, { token: "signed-token-1" });
+    expect(() => parse(peekCrewInviteRequestSchema, { token: "signed-token-1", crewId: "sneaky" })).toThrow(ContractError);
   });
 
-  it("rejects an extra field (.strict()) — e.g. a client proposing a name", () => {
-    expect(() => parse(addCrewMemberRequestSchema, { golferId: "cal-g", name: "Cal" })).toThrow(ContractError);
+  it("round-trips the consent-screen preview (crewName + memberCount + inviterName)", () => {
+    roundTrips(peekCrewInviteResponseSchema, { crewName: "Sunday Skins", memberCount: 8, inviterName: "Al" });
   });
 });
 
 describe("joinCrewRequestSchema", () => {
-  it("round-trips a valid join-by-code request", () => {
-    roundTrips(joinCrewRequestSchema, { code: "ABC123" });
+  it("round-trips a valid join-by-invite request (bare token)", () => {
+    roundTrips(joinCrewRequestSchema, { token: "signed-token-1" });
   });
 
-  it("rejects a code that isn't exactly 6 characters", () => {
-    expect(() => parse(joinCrewRequestSchema, { code: "ABC12" })).toThrow(ContractError);
+  it("rejects an extra field (.strict()) — e.g. a client proposing a code", () => {
+    expect(() => parse(joinCrewRequestSchema, { token: "signed-token-1", code: "ABC123" })).toThrow(ContractError);
   });
 });
 
@@ -64,7 +75,6 @@ describe("crewViewSchema (via getCrewResponseSchema)", () => {
       crew: {
         crewId: crewId("crew-1"),
         name: "Sunday Skins",
-        joinCode: "ABC123",
         members: [
           { golferId: golferId("ann"), name: "Ann", role: "organizer", claimed: true },
           { golferId: golferId("ghost-1"), name: "Cal", role: "member", claimed: false },
@@ -72,11 +82,23 @@ describe("crewViewSchema (via getCrewResponseSchema)", () => {
       },
     });
   });
+
+  // crewViewSchema isn't `.strict()` (that discipline is request-bodies-only — this file's own
+  // house-style comment above createCrewRequestSchema) — a legacy `joinCode` on the wire is
+  // silently stripped, never round-tripped back out, proving the permanent join code really is
+  // gone from this shape rather than merely unused.
+  it("strips a legacy joinCode field rather than round-tripping it — the permanent join code is gone", () => {
+    const parsed = parse(getCrewResponseSchema, {
+      crew: { crewId: crewId("crew-1"), name: "Sunday Skins", joinCode: "ABC123", members: [] },
+    });
+    expect(parsed).not.toHaveProperty("crew.joinCode");
+    expect(parsed.crew).not.toHaveProperty("joinCode");
+  });
 });
 
 describe("crewViewSchema — round-trips directly", () => {
   it("round-trips a bare crew view", () => {
-    roundTrips(crewViewSchema, { crewId: crewId("crew-1"), name: "Sunday Skins", joinCode: "ABC123", members: [] });
+    roundTrips(crewViewSchema, { crewId: crewId("crew-1"), name: "Sunday Skins", members: [] });
   });
 });
 

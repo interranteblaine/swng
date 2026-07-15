@@ -2,26 +2,45 @@ import { describe, expect, it } from "vitest";
 import { addMember, crewId, golferId } from "@swng/domain";
 import type { Crew, GolferId } from "@swng/domain";
 import { ApplicationError } from "../errors.js";
+import type { Clock } from "../ports/clock.js";
 import type { CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
-import { createInMemoryCrewStore, createInMemoryGolferStore, createSequentialIds, putAndBindGolfer } from "../testing/fakes.js";
-import { addCrewMember } from "./addCrewMember.js";
+import type { TokenIssuer } from "../ports/tokenIssuer.js";
+import {
+  createFixedClock,
+  createFrozenClock,
+  createInMemoryCrewStore,
+  createInMemoryGolferStore,
+  createSequentialIds,
+  createTestTokenIssuer,
+  putAndBindGolfer,
+} from "../testing/fakes.js";
 import { createCrew } from "./createCrew.js";
 import { getCrew } from "./getCrew.js";
-import { joinCrewByCode } from "./joinCrewByCode.js";
+import { joinCrewByInvite } from "./joinCrewByInvite.js";
 import { listMyCrews } from "./listMyCrews.js";
+import { CREW_INVITE_TTL_MS, mintCrewInvite } from "./mintCrewInvite.js";
+import { peekCrewInvite } from "./peekCrewInvite.js";
 
-const setup = (crewStore: CrewStore = createInMemoryCrewStore(), golferStore: GolferStore = createInMemoryGolferStore()) => {
+const setup = (
+  crewStore: CrewStore = createInMemoryCrewStore(),
+  golferStore: GolferStore = createInMemoryGolferStore(),
+  tokenIssuer: TokenIssuer = createTestTokenIssuer(),
+  clock: Clock = createFixedClock(1_000),
+) => {
   const ids = createSequentialIds("c");
   return {
     crewStore,
     golferStore,
+    tokenIssuer,
+    clock,
     ids,
     create: createCrew({ crewStore, golferStore, ids }),
     get: getCrew({ crewStore, golferStore }),
     list: listMyCrews({ crewStore, golferStore }),
-    addMember: addCrewMember({ crewStore, golferStore }),
-    join: joinCrewByCode({ crewStore, golferStore }),
+    mint: mintCrewInvite({ crewStore, golferStore, tokenIssuer, clock }),
+    peek: peekCrewInvite({ crewStore, tokenIssuer, clock }),
+    join: joinCrewByInvite({ crewStore, golferStore, tokenIssuer, clock }),
   };
 };
 
@@ -35,14 +54,14 @@ const seedAccountGolfer = async (golferStore: GolferStore, sub: string, name: st
 };
 
 describe("createCrew", () => {
-  it("seats the caller's own account golfer as organizer and mints a joinCode via the round join-code machinery", async () => {
+  it("seats the caller's own account golfer as organizer — no join code minted anymore (crew membership, invited in)", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
 
     const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
 
     expect(created.crew.name).toBe("Sunday Skins");
-    expect(created.crew.joinCode).toHaveLength(6);
+    expect(created.crew).not.toHaveProperty("joinCode");
     expect(created.crew.members).toEqual([{ golferId: golferId("golfer-sub-ann"), name: "Ann", role: "organizer", claimed: true }]);
   });
 
@@ -53,58 +72,13 @@ describe("createCrew", () => {
 
   // Papercut 9 (M9 hardening): domain's validateCrewName (crew/crew.ts) — the wire's own
   // `.min(1)` doesn't trim, so a whitespace-only name would otherwise mint a blank-looking
-  // crew. Checked before anything is minted/written: no join code drawn, no crew put.
+  // crew. Checked before anything is minted/written: no crew put.
   it("a whitespace-only name is rejected — invalid-crew-name, nothing minted", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
 
     await expect(ctx.create({ sub: "sub-ann" }, { name: "   " })).rejects.toMatchObject({ code: "invalid-crew-name" });
     await expect(ctx.list({ sub: "sub-ann" })).resolves.toEqual({ crews: [] });
-  });
-});
-
-// M9 hardening: the join-code mint loop (crews/createCrew.ts) skips codes an existing crew
-// already holds instead of minting once and living with a permanent collision.
-describe("createCrew — join-code collisions (M9 hardening)", () => {
-  it("skips codes already in use, minting the first free one within the attempt budget", async () => {
-    const crewStore = createInMemoryCrewStore();
-    const golferStore = createInMemoryGolferStore();
-    await seedAccountGolfer(golferStore, "sub-ann", "Ann");
-
-    // Predict the first 5 codes createSequentialIds("c") would mint (a SEPARATE instance with
-    // the SAME prefix — joinCodeFromCounter is a pure function of (prefix, counter), so it
-    // reproduces the identical sequence a fresh "c"-prefixed generator will produce below),
-    // and pre-seed the crew store with filler crews AT the first 4 of them — forcing the mint
-    // loop to skip all 4 before landing on the 5th, uncollided one.
-    const predictor = createSequentialIds("c");
-    const predictedCodes = Array.from({ length: 5 }, () => predictor.newJoinCode());
-    for (const [index, code] of predictedCodes.slice(0, 4).entries()) {
-      const filler: Crew = { id: crewId(`filler-${index}`), name: `Filler ${index}`, members: [] };
-      await crewStore.put(filler, code, undefined);
-    }
-
-    const ids = createSequentialIds("c"); // fresh instance, same prefix -> identical sequence
-    const create = createCrew({ crewStore, golferStore, ids });
-
-    const created = await create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-    expect(created.crew.joinCode).toBe(predictedCodes[4]);
-  });
-
-  it("exhausting every attempt (5 collisions running) throws join-code-exhausted", async () => {
-    const crewStore = createInMemoryCrewStore();
-    const golferStore = createInMemoryGolferStore();
-    await seedAccountGolfer(golferStore, "sub-ann", "Ann");
-
-    const predictor = createSequentialIds("c");
-    for (let index = 0; index < 5; index += 1) {
-      const filler: Crew = { id: crewId(`filler-${index}`), name: `Filler ${index}`, members: [] };
-      await crewStore.put(filler, predictor.newJoinCode(), undefined);
-    }
-
-    const ids = createSequentialIds("c");
-    const create = createCrew({ crewStore, golferStore, ids });
-
-    await expect(create({ sub: "sub-ann" }, { name: "Sunday Skins" })).rejects.toMatchObject({ code: "join-code-exhausted" });
   });
 });
 
@@ -151,10 +125,11 @@ describe("listMyCrews", () => {
   it("lists every crew the caller's golfer belongs to, with member counts", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const calId = await seedAccountGolfer(ctx.golferStore, "sub-cal", "Cal");
+    await seedAccountGolfer(ctx.golferStore, "sub-cal", "Cal");
     const crewA = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
     const crewB = await ctx.create({ sub: "sub-ann" }, { name: "Wednesday Nine" });
-    await ctx.addMember({ sub: "sub-ann" }, crewA.crew.crewId, { golferId: calId });
+    const invite = await ctx.mint({ sub: "sub-ann" }, crewA.crew.crewId);
+    await ctx.join({ sub: "sub-cal" }, { token: invite.token });
 
     const listed = await ctx.list({ sub: "sub-ann" });
     expect([...listed.crews].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
@@ -164,91 +139,174 @@ describe("listMyCrews", () => {
   });
 });
 
-// De-ghost (architecture-realignment Task 9, spec §4 "membership: real accounts only"):
-// addCrewMember adds an EXISTING account golfer by golferId and requires a bound sub — the M8
-// ghost-minting-from-a-name path is gone.
-describe("addCrewMember", () => {
-  it("adds an existing account golfer (bound sub) to the roster by golferId", async () => {
-    const ctx = setup();
-    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const calId = await seedAccountGolfer(ctx.golferStore, "sub-cal", "Cal"); // a real account, not yet a member
-    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-
-    const added = await ctx.addMember({ sub: "sub-ann" }, created.crew.crewId, { golferId: calId });
-
-    // Name comes from the golfer's OWN record (never the wire), claimed:true since it has a sub.
-    expect(added.crew.members.find((member) => member.golferId === calId)).toEqual({ golferId: calId, name: "Cal", role: "member", claimed: true });
-  });
-
-  it("a target golfer without a bound sub (a sub-less golfer) is rejected — ghost-not-addable, nothing added", async () => {
-    const ctx = setup();
+// Crew membership (invited in, accountable out — spec §2): mintCrewInvite/peekCrewInvite/
+// joinCrewByInvite replace addCrewMember/joinCrewByCode and the permanent join code they rode.
+describe("mintCrewInvite", () => {
+  it("any member (not just the organizer) mints a token stamped clock.now() + 7 days", async () => {
+    const clock = createFrozenClock(1_000); // frozen, so the stamp is exactly predictable
+    const ctx = setup(createInMemoryCrewStore(), createInMemoryGolferStore(), createTestTokenIssuer(), clock);
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
     const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-    // A golfer row with NO sub — a sub-less golfer (e.g. minted inside a round).
-    const ghostId = golferId("ghost-cal");
-    await ctx.golferStore.put({ id: ghostId, name: "Cal", handicap: {} }, undefined);
+    const boId = await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    await ctx.join({ sub: "sub-bo" }, { token: (await ctx.mint({ sub: "sub-ann" }, created.crew.crewId)).token });
+    expect(boId).toBeDefined();
 
-    await expect(ctx.addMember({ sub: "sub-ann" }, created.crew.crewId, { golferId: ghostId })).rejects.toMatchObject({ code: "ghost-not-addable" });
-    const fetched = await ctx.get({ sub: "sub-ann" }, created.crew.crewId);
-    expect(fetched.crew.members.some((member) => member.golferId === ghostId)).toBe(false);
+    // Bo — an ordinary member, not the organizer — mints too (spec §1: "any member invites").
+    const minted = await ctx.mint({ sub: "sub-bo" }, created.crew.crewId);
+
+    expect(minted.expiresAtMs).toBe(1_000 + CREW_INVITE_TTL_MS);
+    expect(typeof minted.token).toBe("string");
+    expect(minted.token.length).toBeGreaterThan(0);
   });
 
-  it("a target golferId with no golfer row at all is rejected — ghost-not-addable", async () => {
+  it("a non-member is rejected — not-a-member (requireCrewMember's own gate)", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
-
-    await expect(ctx.addMember({ sub: "sub-ann" }, created.crew.crewId, { golferId: golferId("nobody") })).rejects.toMatchObject({ code: "ghost-not-addable" });
-  });
-
-  it("a non-member caller is rejected — not-a-member (checked before the target)", async () => {
-    const ctx = setup();
-    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
-    const calId = await seedAccountGolfer(ctx.golferStore, "sub-cal", "Cal");
     const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
     await seedAccountGolfer(ctx.golferStore, "sub-stranger", "Stranger");
 
-    await expect(ctx.addMember({ sub: "sub-stranger" }, created.crew.crewId, { golferId: calId })).rejects.toMatchObject({ code: "not-a-member" });
+    await expect(ctx.mint({ sub: "sub-stranger" }, created.crew.crewId)).rejects.toMatchObject({ code: "not-a-member" });
+  });
+
+  it("an unknown crewId is rejected — unknown-crew", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    await expect(ctx.mint({ sub: "sub-ann" }, crewId("nope"))).rejects.toMatchObject({ code: "unknown-crew" });
   });
 });
 
-describe("joinCrewByCode", () => {
+describe("peekCrewInvite", () => {
+  it("returns crewName + memberCount + inviterName for a live invite", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    const minted = await ctx.mint({ sub: "sub-ann" }, created.crew.crewId);
+
+    const peeked = await ctx.peek({ token: minted.token });
+
+    expect(peeked).toEqual({ crewName: "Sunday Skins", memberCount: 1, inviterName: "Ann" });
+  });
+
+  it("a tampered/unrecognized token is rejected — crew-invite-invalid", async () => {
+    const ctx = setup();
+    await expect(ctx.peek({ token: "not-a-real-token" })).rejects.toMatchObject({ code: "crew-invite-invalid" });
+  });
+
+  // Inviter-still-a-member is checked at BOTH peek and join (spec §2) — a removed member's
+  // outstanding invites die with their membership, and peek never over-promises.
+  it("crew-invite-invalid once the inviter has left the crew", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    await ctx.join({ sub: "sub-bo" }, { token: (await ctx.mint({ sub: "sub-ann" }, created.crew.crewId)).token });
+
+    // Bo (now a member) mints his OWN invite, then leaves directly on the store (there is no
+    // leaveCrew wiring in this file's ctx — crewSlice.test.ts owns createCrew/getCrew/
+    // listMyCrews/mint/peek/join only; leaveCrew itself is pinned in seasonSlice.test.ts) — his
+    // link should die with his membership.
+    const bosInvite = await ctx.mint({ sub: "sub-bo" }, created.crew.crewId);
+    const found = await ctx.crewStore.get(created.crew.crewId);
+    await ctx.crewStore.put(
+      { ...found!.crew, members: found!.crew.members.filter((m) => m.golferId !== golferId("golfer-sub-bo")) },
+      found!.revision,
+    );
+
+    await expect(ctx.peek({ token: bosInvite.token })).rejects.toMatchObject({ code: "crew-invite-invalid" });
+  });
+
+  it("an expired invite is rejected — crew-invite-expired, distinct from crew-invite-invalid", async () => {
+    const crewStore = createInMemoryCrewStore();
+    const golferStore = createInMemoryGolferStore();
+    const tokenIssuer = createTestTokenIssuer();
+    await seedAccountGolfer(golferStore, "sub-ann", "Ann");
+    const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("c") });
+    const created = await create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+
+    // Minted against a clock frozen well BEFORE its own expiresAtMs...
+    const mint = mintCrewInvite({ crewStore, golferStore, tokenIssuer, clock: createFrozenClock(1_000) });
+    const minted = await mint({ sub: "sub-ann" }, created.crew.crewId);
+
+    // ...peeked against a clock frozen AT-OR-PAST it (mirrors hmacTokenIssuer's own `<=` boundary).
+    const peek = peekCrewInvite({ crewStore, tokenIssuer, clock: createFrozenClock(minted.expiresAtMs) });
+    await expect(peek({ token: minted.token })).rejects.toMatchObject({ code: "crew-invite-expired" });
+  });
+});
+
+describe("joinCrewByInvite", () => {
   it("adds the caller's own account golfer as a member (role member)", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
     const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
     const boId = await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    const minted = await ctx.mint({ sub: "sub-ann" }, created.crew.crewId);
 
-    const joined = await ctx.join({ sub: "sub-bo" }, { code: created.crew.joinCode });
+    const joined = await ctx.join({ sub: "sub-bo" }, { token: minted.token });
 
     expect(joined.crew.members).toEqual(expect.arrayContaining([{ golferId: boId, name: "Bo", role: "member", claimed: true }]));
   });
 
-  it("re-joining with an already-a-member caller is idempotent — same crew returned, no duplicate roster entry", async () => {
+  it("re-joining with an already-a-member caller is idempotent — same crew returned, no duplicate roster entry (no-op, spec §2)", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
     const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
     await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    const minted = await ctx.mint({ sub: "sub-ann" }, created.crew.crewId);
 
-    const first = await ctx.join({ sub: "sub-bo" }, { code: created.crew.joinCode });
-    const second = await ctx.join({ sub: "sub-bo" }, { code: created.crew.joinCode });
+    const first = await ctx.join({ sub: "sub-bo" }, { token: minted.token });
+    const second = await ctx.join({ sub: "sub-bo" }, { token: minted.token });
 
     expect(second).toEqual(first);
     expect(second.crew.members).toHaveLength(2); // Ann + Bo, not Ann + Bo + Bo
   });
 
-  it("a bad code is rejected — unknown-crew", async () => {
+  it("a tampered/unrecognized token is rejected — crew-invite-invalid", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
-    await expect(ctx.join({ sub: "sub-bo" }, { code: "ZZZZZZ" })).rejects.toMatchObject({ code: "unknown-crew" });
+    await expect(ctx.join({ sub: "sub-bo" }, { token: "not-a-real-token" })).rejects.toMatchObject({ code: "crew-invite-invalid" });
   });
 
   it("a caller with no account golfer yet is rejected — golfer-required", async () => {
     const ctx = setup();
     await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
     const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    const minted = await ctx.mint({ sub: "sub-ann" }, created.crew.crewId);
 
-    await expect(ctx.join({ sub: "sub-nobody" }, { code: created.crew.joinCode })).rejects.toMatchObject({ code: "golfer-required" });
+    await expect(ctx.join({ sub: "sub-nobody" }, { token: minted.token })).rejects.toMatchObject({ code: "golfer-required" });
+  });
+
+  it("crew-invite-invalid once the inviter has left the crew — checked at join too, not just peek", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    await ctx.join({ sub: "sub-bo" }, { token: (await ctx.mint({ sub: "sub-ann" }, created.crew.crewId)).token });
+    const bosInvite = await ctx.mint({ sub: "sub-bo" }, created.crew.crewId);
+
+    const found = await ctx.crewStore.get(created.crew.crewId);
+    await ctx.crewStore.put(
+      { ...found!.crew, members: found!.crew.members.filter((m) => m.golferId !== golferId("golfer-sub-bo")) },
+      found!.revision,
+    );
+    await seedAccountGolfer(ctx.golferStore, "sub-cy", "Cy");
+
+    await expect(ctx.join({ sub: "sub-cy" }, { token: bosInvite.token })).rejects.toMatchObject({ code: "crew-invite-invalid" });
+  });
+
+  it("an expired invite is rejected — crew-invite-expired", async () => {
+    const crewStore = createInMemoryCrewStore();
+    const golferStore = createInMemoryGolferStore();
+    const tokenIssuer = createTestTokenIssuer();
+    await seedAccountGolfer(golferStore, "sub-ann", "Ann");
+    const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("c") });
+    const created = await create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    await seedAccountGolfer(golferStore, "sub-bo", "Bo");
+
+    const mint = mintCrewInvite({ crewStore, golferStore, tokenIssuer, clock: createFrozenClock(1_000) });
+    const minted = await mint({ sub: "sub-ann" }, created.crew.crewId);
+
+    const join = joinCrewByInvite({ crewStore, golferStore, tokenIssuer, clock: createFrozenClock(minted.expiresAtMs) });
+    await expect(join({ sub: "sub-bo" }, { token: minted.token })).rejects.toMatchObject({ code: "crew-invite-expired" });
   });
 });
 
@@ -269,7 +327,6 @@ const createFlakyCrewStore = (inner: CrewStore, failCount: number): FlakyCrewSto
   return {
     putAttempts: () => putAttempts,
     get: inner.get,
-    findByJoinCode: inner.findByJoinCode,
     listByGolfer: inner.listByGolfer,
     putSeason: inner.putSeason,
     getSeason: inner.getSeason,
@@ -278,32 +335,37 @@ const createFlakyCrewStore = (inner: CrewStore, failCount: number): FlakyCrewSto
     removeCountedRound: inner.removeCountedRound,
     listCountedRounds: inner.listCountedRounds,
     countsRound: inner.countsRound,
-    put: async (crew, joinCode, expectedRevision) => {
+    put: async (crew, expectedRevision) => {
       putAttempts += 1;
       if (putAttempts <= failCount) throw new ApplicationError("crew-conflict", `synthetic conflict #${putAttempts}`);
-      return inner.put(crew, joinCode, expectedRevision);
+      return inner.put(crew, expectedRevision);
     },
   };
 };
 
 // The generic retry loop itself (bounded attempts, conflict-vs-non-conflict discrimination)
 // is pinned once at its shared home, retryOnConflict.test.ts — these two mirror
-// courseSlice.test.ts's own addTee flaky-store pair exactly, but through addCrewMember, to
-// confirm the CREW-SPECIFIC wiring (crewStore's get/put shape, the joinCode capture,
-// unknown-crew/crew-conflict codes) is actually correct, not just the abstract algorithm.
-describe("addCrewMember conflict retry", () => {
+// courseSlice.test.ts's own addTee flaky-store pair exactly, but through joinCrewByInvite (the
+// M8-era addCrewMember these tests used to drive is gone), to confirm the CREW-SPECIFIC wiring
+// (crewStore's get/put shape, unknown-crew/crew-conflict codes) is actually correct, not just
+// the abstract algorithm.
+describe("joinCrewByInvite conflict retry", () => {
   it("retries once on a synthetic crew-conflict from the store, then succeeds", async () => {
     const inner = createInMemoryCrewStore();
     const golferStore = createInMemoryGolferStore();
+    const tokenIssuer = createTestTokenIssuer();
+    const clock = createFixedClock(1_000);
     await seedAccountGolfer(golferStore, "sub-ann", "Ann");
     const calId = await seedAccountGolfer(golferStore, "sub-cal", "Cal");
     const created = await createCrew({ crewStore: inner, golferStore, ids: createSequentialIds("c") })({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    const minted = await mintCrewInvite({ crewStore: inner, golferStore, tokenIssuer, clock })({ sub: "sub-ann" }, created.crew.crewId);
 
     const flaky = createFlakyCrewStore(inner, 1);
-    const flakyCtx = setup(flaky, golferStore);
-    const added = await flakyCtx.addMember({ sub: "sub-ann" }, created.crew.crewId, { golferId: calId });
+    const join = joinCrewByInvite({ crewStore: flaky, golferStore, tokenIssuer, clock });
+    const joined = await join({ sub: "sub-cal" }, { token: minted.token });
 
-    expect(added.crew.members.map((m) => m.name)).toEqual(expect.arrayContaining(["Ann", "Cal"]));
+    expect(joined.crew.members.map((m) => m.name)).toEqual(expect.arrayContaining(["Ann", "Cal"]));
+    expect(calId).toBeDefined();
     // More than one put attempt is the proof the retry path actually ran, not that the first
     // attempt just happened to succeed.
     expect(flaky.putAttempts()).toBeGreaterThan(1);
@@ -312,14 +374,17 @@ describe("addCrewMember conflict retry", () => {
   it("gives up after bounded attempts and rethrows crew-conflict when the store never stops conflicting", async () => {
     const inner = createInMemoryCrewStore();
     const golferStore = createInMemoryGolferStore();
+    const tokenIssuer = createTestTokenIssuer();
+    const clock = createFixedClock(1_000);
     await seedAccountGolfer(golferStore, "sub-ann", "Ann");
-    const calId = await seedAccountGolfer(golferStore, "sub-cal", "Cal");
+    await seedAccountGolfer(golferStore, "sub-cal", "Cal");
     const created = await createCrew({ crewStore: inner, golferStore, ids: createSequentialIds("c") })({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    const minted = await mintCrewInvite({ crewStore: inner, golferStore, tokenIssuer, clock })({ sub: "sub-ann" }, created.crew.crewId);
 
     const flaky = createFlakyCrewStore(inner, Number.POSITIVE_INFINITY);
-    const flakyCtx = setup(flaky, golferStore);
+    const join = joinCrewByInvite({ crewStore: flaky, golferStore, tokenIssuer, clock });
 
-    await expect(flakyCtx.addMember({ sub: "sub-ann" }, created.crew.crewId, { golferId: calId })).rejects.toMatchObject({ code: "crew-conflict" });
+    await expect(join({ sub: "sub-cal" }, { token: minted.token })).rejects.toMatchObject({ code: "crew-conflict" });
     expect(flaky.putAttempts()).toBeGreaterThan(1);
   });
 });

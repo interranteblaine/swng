@@ -3,9 +3,9 @@ import { ApplicationError } from "./errors.js";
 import { retryOnConflict } from "./retryOnConflict.js";
 
 // A minimal revision-conditional single-cell store — enough to pin the generic retry loop's
-// own behavior in isolation. Store-specific wiring (CourseStore's plain put, CrewStore's
-// joinCode-threaded put) gets its own conflict-retry coverage through real use cases in
-// courseSlice.test.ts (addTeeSet) and crewSlice.test.ts (addCrewMember).
+// own behavior in isolation. Store-specific wiring (CourseStore's/CrewStore's own plain put)
+// gets its own conflict-retry coverage through real use cases in courseSlice.test.ts (addTeeSet)
+// and crewSlice.test.ts (joinCrewByInvite).
 const codes = { notFound: "course-not-found", conflict: "course-conflict" } as const;
 
 const createFlakyCell = (initial: number, failCount: number) => {

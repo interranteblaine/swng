@@ -148,10 +148,9 @@ describe("toHttpError — M8 crew DomainErrors", () => {
   });
 });
 
-// M9 hardening (application/src/errors.ts): both deliberately mapped to a genuine-bug 500 —
-// a programmer-error guard, never a request the client sent wrong. Constructed exactly as
-// their real throw sites do (createDynamoGolferStore's put/bindSub; crews/createCrew.ts's
-// mint loop), not invented strings (M6 lesson).
+// M9 hardening (application/src/errors.ts): a deliberate genuine-bug 500 — a programmer-error
+// guard, never a request the client sent wrong. Constructed exactly as its real throw site
+// does (createDynamoGolferStore's put/bindSub), not an invented string (M6 lesson).
 describe("toHttpError — M9 hardening ApplicationErrors (deliberate 500s)", () => {
   const logger = createNullLogger();
 
@@ -160,11 +159,25 @@ describe("toHttpError — M9 hardening ApplicationErrors (deliberate 500s)", () 
     expect(result.statusCode).toBe(500);
     expect(JSON.parse(result.body)).toEqual({ code: "sub-drop-forbidden", message: "put on golfer g-1 would drop its bound sub" });
   });
+});
 
-  it("maps join-code-exhausted to 500", () => {
-    const result = toHttpError(new ApplicationError("join-code-exhausted", "no unique crew join code found after 5 attempts"), logger);
-    expect(result.statusCode).toBe(500);
-    expect(JSON.parse(result.body)).toEqual({ code: "join-code-exhausted", message: "no unique crew join code found after 5 attempts" });
+// Crew membership (invited in, accountable out — spec §5): peekCrewInvite/joinCrewByInvite's
+// token-check codes — both 403 (a forbidden ACTOR, never the dispatcher's OWN "invalid-token"
+// 401 tier — errorMapping.ts's own doc comment on why), split from each other for their own
+// distinct web copy, not a different HTTP status.
+describe("toHttpError — crew-invite token codes (crew membership, invited in)", () => {
+  const logger = createNullLogger();
+
+  it("maps crew-invite-invalid to 403", () => {
+    const result = toHttpError(new ApplicationError("crew-invite-invalid"), logger);
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({ code: "crew-invite-invalid", message: "crew-invite-invalid" });
+  });
+
+  it("maps crew-invite-expired to 403", () => {
+    const result = toHttpError(new ApplicationError("crew-invite-expired"), logger);
+    expect(result.statusCode).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({ code: "crew-invite-expired", message: "crew-invite-expired" });
   });
 });
 
@@ -198,7 +211,6 @@ describe("toHttpError — crew seasons + counted rounds (architecture-realignmen
     ["season-closed", 409],
     ["did-not-play", 403],
     ["not-the-appender", 403],
-    ["ghost-not-addable", 409],
   ] as const;
 
   it.each(codeToStatus)("maps %s to %d", (code, status) => {

@@ -22,7 +22,7 @@ export const requireCrewMember = async (
   deps: { golferStore: GolferStore; crewStore: CrewStore },
   claims: AccountClaims,
   crewId: CrewId,
-): Promise<{ crew: Crew; joinCode: string; revision: number }> => {
+): Promise<{ crew: Crew; revision: number }> => {
   const found = await deps.crewStore.get(crewId);
   if (!found) throw new ApplicationError("unknown-crew");
 

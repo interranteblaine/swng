@@ -10,6 +10,6 @@ export const getCrew =
   (deps: { crewStore: CrewStore; golferStore: GolferStore }) =>
   async (claims: AccountClaims, id: CrewId): Promise<GetCrewResponse> => {
     // member-only: not-a-member propagates for a non-member (or unbound) caller.
-    const { crew, joinCode } = await requireCrewMember(deps, claims, id);
-    return { crew: await toCrewView({ golferStore: deps.golferStore }, crew, joinCode) };
+    const { crew } = await requireCrewMember(deps, claims, id);
+    return { crew: await toCrewView({ golferStore: deps.golferStore }, crew) };
   };

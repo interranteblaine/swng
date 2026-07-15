@@ -37,14 +37,13 @@ export type ApplicationErrorCode =
   // M8: CrewStore is a plain CRUD store too (courses'/golfers' "conflict" precedent above) —
   // a failed expectedRevision condition on a crew put.
   | "crew-conflict"
-  // M8: no crew exists under the given crewId, or the given join code names no crew.
+  // M8: no crew exists under the given crewId.
   | "unknown-crew"
-  // M8: the caller's account golfer isn't on this crew's roster (GetCrew/AddCrewMember/
-  // getSeasonStandings) — folds "no account golfer at all" and "a real golfer who just isn't a
-  // member of THIS crew" into the one 403 the wire exposes, since only a real GolferId ever
-  // lands in crew.members.
+  // M8: the caller's account golfer isn't on this crew's roster (GetCrew/getSeasonStandings) —
+  // folds "no account golfer at all" and "a real golfer who just isn't a member of THIS crew"
+  // into the one 403 the wire exposes, since only a real GolferId ever lands in crew.members.
   | "not-a-member"
-  // M8: CreateCrew (and JoinCrewByCode) need the caller's OWN account golfer to seat as a
+  // M8: CreateCrew (and joinCrewByInvite) need the caller's OWN account golfer to seat as a
   // member — a sub with no golfer yet (never PUT /me) gets this wire-honesty 400 rather than
   // a silent auto-create; the web PUTs /me first (the same T5 pattern GET /me's plan
   // amendment established).
@@ -55,13 +54,19 @@ export type ApplicationErrorCode =
   // the lambda's error-mapping module (never a client-correctable 4xx), a guard against a bug,
   // not a request shape the caller controls.
   | "sub-drop-forbidden"
-  // M9 hardening: createCrew's join-code mint loop (crews/createCrew.ts) exhausted its bounded
-  // attempts without finding a code no crew already holds — astronomically unlikely at v1's
-  // scale (a fresh 6-char draw from a 32-symbol alphabet colliding 5 times running), so this
-  // is a genuine-bug signal (the alphabet/generator itself broken), not a request the caller
-  // can retry their way out of — deliberately mapped to 500, same reasoning as
-  // sub-drop-forbidden above.
-  | "join-code-exhausted"
+  // Crew membership (invited in, accountable out — spec §5): peekCrewInvite/joinCrewByInvite's
+  // token check — signature/shape invalid, the crew itself can't be resolved (crews are never
+  // deleted, spec §6 — defensive only), or the token's named inviter has since left the crew
+  // (a removed member's outstanding invites die with their membership, checked at BOTH peek and
+  // join). NEVER thrown for an expired-but-otherwise-valid token — see crew-invite-expired.
+  | "crew-invite-invalid"
+  // Crew membership (invited in, accountable out — spec §5): the SAME token check, but the
+  // ONE condition that gets its own distinct code — `expiresAtMs` has passed. Kept separate from
+  // crew-invite-invalid because the two map to different web copy (M7 never-raw discipline):
+  // "this link has expired" vs. "this link isn't valid" are different asks of the user (get a
+  // fresh link vs. get a different one) — see TokenClaims' own doc comment (ports/tokenIssuer.ts)
+  // for why hmacTokenIssuer's verify() itself never collapses these two into one undefined.
+  | "crew-invite-expired"
   // M9 Task 3 (share): a spectator token presented to a WRITE route (dispatch.ts's own
   // "participant" tier check) — a forbidden actor, same shape as not-a-participant above (403,
   // not 401: the bearer verified fine, it just isn't allowed to do this).
@@ -96,12 +101,7 @@ export type ApplicationErrorCode =
   | "did-not-play"
   // Task 9: only the member who appended a counted round may remove it. A forbidden actor, same
   // 403 bucket as did-not-play/not-a-member above.
-  | "not-the-appender"
-  // Task 9 (de-ghost, spec §4 "membership: real accounts only"): addCrewMember now requires the
-  // target golfer to already carry a bound sub (a real account) — adding a fresh account-less
-  // golfer to a crew is gone. A failed precondition on the target, same 409 bucket as
-  // crew-conflict/round-already-counted above.
-  | "ghost-not-addable";
+  | "not-the-appender";
 
 export class ApplicationError extends Error {
   constructor(

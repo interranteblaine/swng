@@ -23,52 +23,69 @@ export const crewMemberViewSchema: z.ZodType<CrewMemberView> = z.object({
   claimed: z.boolean(),
 });
 
-// The wire projection of a Crew aggregate (application/src/crews/crewView.ts builds it):
-// `joinCode` is store-level metadata (mirrors RoundStore's join-code split — the domain Crew
-// type itself carries no joinCode field, same reason RoundState carries no joinCode either).
-// A crew is a grouping/competition ONLY (owner ruling, spec §11a) — no standing game.
+// The wire projection of a Crew aggregate (application/src/crews/crewView.ts builds it). The
+// permanent `joinCode` — store-level metadata that used to mirror RoundStore's own join-code
+// split — is GONE (crew membership, invited in): getting in is an expiring HMAC invite link
+// now (MintCrewInviteResponse below), never a value that rides the crew's own view. A crew is
+// a grouping/competition ONLY (owner ruling, spec §11a) — no standing game.
 export interface CrewView {
   readonly crewId: CrewId;
   readonly name: string;
-  readonly joinCode: string;
   readonly members: readonly CrewMemberView[];
 }
 
 export const crewViewSchema: z.ZodType<CrewView> = z.object({
   crewId: crewIdSchema,
   name: z.string(),
-  joinCode: z.string(),
   members: z.array(crewMemberViewSchema).readonly(),
 });
 
 // Request bodies are `.strict()` (courses.ts' house style): every server-assigned field
-// (crewId, joinCode, role, claimed, member ids) is a rejection, not a silently-dropped extra
-// key, if a client proposes it.
+// (crewId, role, claimed, member ids) is a rejection, not a silently-dropped extra key, if a
+// client proposes it.
 export const createCrewRequestSchema = z.object({ name: z.string().min(1) }).strict();
 export type CreateCrewRequest = z.infer<typeof createCrewRequestSchema>;
 
-// Architecture-realignment Task 9 (de-ghost, spec §4 "membership: real accounts only"): a crew
-// member is an EXISTING account golfer, added by their golferId — the server requires that
-// golfer to already carry a bound sub (a sub-less golfer is not addable). The old M8 shape minted
-// a fresh ghost from a `name`; that path is gone. Since the wall (accounts-only identity) every
-// round participant is a real account too — sub-less golferIds survive only inside pre-wall stored
-// rounds, never minted anew.
-export const addCrewMemberRequestSchema = z.object({ golferId: golferIdSchema }).strict();
-export type AddCrewMemberRequest = z.infer<typeof addCrewMemberRequestSchema>;
+// Crew membership (invited in, accountable out — spec §2): POST /crews/{crewId}/invites'
+// response — `token` composes into `/crews/join#<token>` from the web's own origin
+// (shareRound's exact idiom), `expiresAtMs` lets the web show/reason about the link's own
+// 7-day window without decoding the token itself.
+export interface MintCrewInviteResponse {
+  readonly token: string;
+  readonly expiresAtMs: number;
+}
+export const mintCrewInviteResponseSchema: z.ZodType<MintCrewInviteResponse> = z.object({
+  token: z.string(),
+  expiresAtMs: z.number().int(),
+});
 
-// `code`'s shape mirrors joinRoundRequestSchema's own `code` field exactly (commands.ts) —
-// the crew join code is minted with the SAME machinery (IdGenerator.newJoinCode) as a
-// round's, so it carries the same 6-character shape.
-export const joinCrewRequestSchema = z.object({ code: z.string().length(6) }).strict();
+// POST /crews/peek (auth none — spec §2): the capability-scoped preview, mirroring
+// PeekRoundResponse's own "nothing about who's already in, just enough to decide" shape — the
+// join page's consent screen (spec §2: "Join The Saturday Boys? · 8 members · invited by Al")
+// is built from this alone, before sign-in.
+export const peekCrewInviteRequestSchema = z.object({ token: z.string() }).strict();
+export type PeekCrewInviteRequest = z.infer<typeof peekCrewInviteRequestSchema>;
+
+export interface PeekCrewInviteResponse {
+  readonly crewName: string;
+  readonly memberCount: number;
+  readonly inviterName: string;
+}
+export const peekCrewInviteResponseSchema: z.ZodType<PeekCrewInviteResponse> = z.object({
+  crewName: z.string(),
+  memberCount: z.number().int(),
+  inviterName: z.string(),
+});
+
+// POST /crews/join's body — the permanent 6-character `code` is GONE, replaced by the SAME
+// bearer `token` a mint response hands out (crew membership, invited in — spec §2/§3).
+export const joinCrewRequestSchema = z.object({ token: z.string() }).strict();
 export type JoinCrewRequest = z.infer<typeof joinCrewRequestSchema>;
 
 // One response shape, `{ crew }`, for every crew mutation/read — named per endpoint (courses.ts'
 // house style: CreateCourseResponse/AddTeeSetResponse/... are all `{ course }` too, each with
 // its own name for route-level clarity even though the shape repeats).
 export interface CreateCrewResponse {
-  readonly crew: CrewView;
-}
-export interface AddCrewMemberResponse {
   readonly crew: CrewView;
 }
 export interface JoinCrewResponse {
@@ -79,7 +96,6 @@ export interface GetCrewResponse {
 }
 
 export const createCrewResponseSchema: z.ZodType<CreateCrewResponse> = z.object({ crew: crewViewSchema });
-export const addCrewMemberResponseSchema: z.ZodType<AddCrewMemberResponse> = z.object({ crew: crewViewSchema });
 export const joinCrewResponseSchema: z.ZodType<JoinCrewResponse> = z.object({ crew: crewViewSchema });
 export const getCrewResponseSchema: z.ZodType<GetCrewResponse> = z.object({ crew: crewViewSchema });
 

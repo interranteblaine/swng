@@ -22,7 +22,12 @@ const app = buildApp(process.env);
 export const handler = async (event: APIGatewayProxyWebsocketEventV2): Promise<APIGatewayProxyResultV2> => {
   const token = event.queryStringParameters?.["token"];
   const claims = token ? app.tokens.verify(token) : undefined;
-  if (!claims) return { statusCode: 401, body: "invalid token" };
+  // Crew membership (invited in, accountable out): a crew-invite token verifies fine — it's a
+  // REAL bearer — but carries no roundId at all (TokenClaims' own doc comment,
+  // ports/tokenIssuer.ts, on why the union's old "every variant carries roundId" invariant no
+  // longer holds). Narrowed OUT here, same 401 as no/garbage token: it opens no round, no
+  // socket, nothing but a crew join — never reaches `claims.roundId` below.
+  if (!claims || claims.scope === "crew-invite") return { statusCode: 401, body: "invalid token" };
 
   await app.registry.register(event.requestContext.connectionId, claims.roundId);
   return { statusCode: 200, body: "connected" };

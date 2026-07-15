@@ -78,7 +78,7 @@ describe("getRoundArchive", () => {
     // Bo isn't in the round (Ann is the only participant) but is a crew member, and the crew
     // counts this round into a season.
     const crew: Crew = { id: CREW_ID, name: "Sunday Skins", members: [{ golferId: BO_ID, name: "Bo", role: "organizer" }] };
-    await ctx.crewStore.put(crew, "CODE12", undefined);
+    await ctx.crewStore.put(crew, undefined);
     await ctx.crewStore.putSeason(CREW_ID, { seasonId: "s1", name: "2026", status: "open", createdAtMs: 1_000 });
     await ctx.crewStore.addCountedRound(CREW_ID, "s1", { roundId: ROUND_ID, finalizedAtMs: 2_000, appendedBy: BO_ID, appendedAtMs: 3_000 });
 

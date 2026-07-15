@@ -9,10 +9,9 @@ import { ApplicationError, type ApplicationErrorCode } from "./errors.js";
 // re-running `mutate` against a fresher read IS "try again".
 //
 // Parameterized over get/mutate/put/conflict-code rather than over a concrete store type,
-// because the stores themselves don't share a shape: CrewStore.put also threads a stable
-// joinCode CourseStore has no equivalent of (crewStore.ts's own doc comment), so each call
-// site adapts its own store's get/put into this `{ value, revision }` shape rather than this
-// module knowing about joinCode or any other store-specific extra.
+// because the stores themselves don't share a shape (CourseStore/CrewStore/GolferStore each
+// have their own put/get signature) — each call site adapts its own store's get/put into this
+// `{ value, revision }` shape rather than this module knowing about any store-specific extra.
 //
 // This has a precedent in adapters-dynamodb's journal append retry, but deliberately skips
 // that retry's full-jitter backoff timer: the journal's loop exists to de-lockstep a burst of

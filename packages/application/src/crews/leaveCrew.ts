@@ -20,18 +20,13 @@ export const leaveCrew =
     const account = await deps.golferStore.getBySub(claims.sub);
     const callerGolferId = account!.golfer.id;
 
-    // joinCode never changes after minting (crewStore.ts's doc) but put still requires it on
-    // every write — captured from whichever read wins the retry race, mirroring joinCrewByCode.
-    let joinCode: string | undefined;
     await retryOnConflict(
       {
         get: async () => {
           const current = await deps.crewStore.get(id);
-          if (!current) return undefined;
-          joinCode = current.joinCode;
-          return { value: current.crew, revision: current.revision };
+          return current && { value: current.crew, revision: current.revision };
         },
-        put: (value, revision) => deps.crewStore.put(value, joinCode!, revision),
+        put: (value, revision) => deps.crewStore.put(value, revision),
       },
       // Removing an already-absent member is a harmless no-op copy (a concurrent leave that
       // won the race), so this is safe to replay under retryOnConflict's fresh-read contract —

@@ -2,14 +2,23 @@ import { describe, expect, it } from "vitest";
 import { deviceId, fixtureLinks18, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { GolferId, Participant, RoundArchive, RoundEvent } from "@swng/domain";
 import type { AccountClaims } from "../ports/accountClaims.js";
-import { createFixedClock, createInMemoryCrewStore, createInMemoryGolferStore, createInMemorySnapshotStore, createSequentialIds, putAndBindGolfer } from "../testing/fakes.js";
+import {
+  createFixedClock,
+  createInMemoryCrewStore,
+  createInMemoryGolferStore,
+  createInMemorySnapshotStore,
+  createSequentialIds,
+  createTestTokenIssuer,
+  putAndBindGolfer,
+} from "../testing/fakes.js";
 import { appendCountedRound } from "./appendCountedRound.js";
 import { createCrew } from "./createCrew.js";
 import { createSeason } from "./createSeason.js";
 import { getSeasonStandings } from "./getSeasonStandings.js";
-import { joinCrewByCode } from "./joinCrewByCode.js";
+import { joinCrewByInvite } from "./joinCrewByInvite.js";
 import { leaveCrew } from "./leaveCrew.js";
 import { listSeasons } from "./listSeasons.js";
+import { mintCrewInvite } from "./mintCrewInvite.js";
 import { removeCountedRound } from "./removeCountedRound.js";
 
 // A finalized-round snapshot (RoundArchive) with a decided singles match — the smallest shape
@@ -42,6 +51,7 @@ const setup = () => {
   const crewStore = createInMemoryCrewStore();
   const golferStore = createInMemoryGolferStore();
   const snapshots = createInMemorySnapshotStore();
+  const tokenIssuer = createTestTokenIssuer();
   const ids = createSequentialIds("t");
   const clock = createFixedClock(1_000);
   return {
@@ -49,7 +59,11 @@ const setup = () => {
     golferStore,
     snapshots,
     create: createCrew({ crewStore, golferStore, ids }),
-    join: joinCrewByCode({ crewStore, golferStore }),
+    // Crew membership (invited in, accountable out): the permanent join code is gone —
+    // mint/join replace it. `mint` and `join` share this ctx's ONE tokenIssuer/clock, same as
+    // every real caller shares ONE hmacTokenIssuer/system clock through compositionRoot.
+    mint: mintCrewInvite({ crewStore, golferStore, tokenIssuer, clock }),
+    join: joinCrewByInvite({ crewStore, golferStore, tokenIssuer, clock }),
     createSeason: createSeason({ crewStore, golferStore, ids, clock }),
     listSeasons: listSeasons({ crewStore, golferStore }),
     append: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
@@ -73,7 +87,8 @@ const crewWithSeason = async (ctx: ReturnType<typeof setup>) => {
   const ann = await seedGolfer(ctx, "ann", "Ann");
   const bo = await seedGolfer(ctx, "bo", "Bo");
   const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
-  await ctx.join(asClaims("bo"), { code: created.crew.joinCode });
+  const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
+  await ctx.join(asClaims("bo"), { token: invite.token });
   const season = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026" });
   return { ann, bo, crewId: created.crew.crewId, seasonId: season.season.seasonId };
 };
@@ -181,7 +196,8 @@ describe("appendCountedRound", () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
     const cy = await seedGolfer(ctx, "cy", "Cy");
-    await ctx.join(asClaims("cy"), { code: (await ctx.crewStore.get(crewId))!.joinCode });
+    const invite = await ctx.mint(asClaims("ann"), crewId);
+    await ctx.join(asClaims("cy"), { token: invite.token });
     // The round is Ann vs Bo — Cy is a member but wasn't in it.
     ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
     expect(cy).toBeDefined();
@@ -314,8 +330,8 @@ describe("getSeasonStandings", () => {
     expect(afterLeave.ledger.find((line) => line.golferId === ann)).toBeDefined(); // Ann's own row remains
     expect(afterLeave.headToHead).toEqual([]); // Bo is half the pair now — the pair goes too
 
-    const crew = await ctx.crewStore.get(crewId);
-    await ctx.join(asClaims("bo"), { code: crew!.joinCode });
+    const rejoinInvite = await ctx.mint(asClaims("ann"), crewId);
+    await ctx.join(asClaims("bo"), { token: rejoinInvite.token });
     const afterRejoin = await ctx.standings(asClaims("ann"), crewId, seasonId);
     expect(afterRejoin.ledger.find((line) => line.golferId === bo)).toBeDefined(); // restored
     expect(afterRejoin.headToHead).toHaveLength(1); // restored
@@ -333,7 +349,7 @@ describe("getSeasonStandings", () => {
     // mirrors the contract test's own "changed name/role" idiom (a direct store mutation).
     const found = await ctx.crewStore.get(crewId);
     const renamed = { ...found!.crew, members: found!.crew.members.map((member) => (member.golferId === ann ? { ...member, name: "Annie" } : member)) };
-    await ctx.crewStore.put(renamed, found!.joinCode, found!.revision);
+    await ctx.crewStore.put(renamed, found!.revision);
 
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
     expect(standings.ledger.find((line) => line.golferId === ann)?.name).toBe("Annie");

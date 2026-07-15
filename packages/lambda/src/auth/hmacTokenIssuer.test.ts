@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { golferId, roundId } from "@swng/domain";
+import { crewId, golferId, roundId } from "@swng/domain";
 import { createFixedClock } from "@swng/application";
 import type { TokenClaims } from "@swng/application";
 import { createHmacTokenIssuer } from "./hmacTokenIssuer.js";
@@ -115,5 +115,64 @@ describe("createHmacTokenIssuer — spectator scope", () => {
     const token = tokens.issue(claims); // claims = scope: "participant"
     for (let i = 0; i < 200; i += 1) clock.now();
     expect(tokens.verify(token)).toBeUndefined();
+  });
+});
+
+// Crew membership (invited in, accountable out): a crew-invite token — same signer, a third
+// scope. `expiresAtMs` rides as a plain, inspectable claim (unlike participant's hidden `exp`)
+// and verify() deliberately does NOT gate on it — see hmacTokenIssuer.ts's own doc comment and
+// TokenClaims' (ports/tokenIssuer.ts) for why: peekCrewInvite/joinCrewByInvite need "expired"
+// and "otherwise invalid" as two DIFFERENT wire codes, so expiry enforcement for this scope
+// lives one level up, in the calling use case's own Clock — this suite pins the issuer's own
+// half of that split (round-trips, rejects tamper/wrong-secret, never itself gates on time).
+describe("createHmacTokenIssuer — crew-invite scope", () => {
+  const crewInviteClaims: TokenClaims = {
+    scope: "crew-invite",
+    crewId: crewId("crew-1"),
+    inviterGolferId: golferId("golfer-1"),
+    expiresAtMs: 1_000_000,
+  };
+
+  it("round-trips crew-invite claims through verify", () => {
+    const tokens = createHmacTokenIssuer({ secret: "swng-secret", clock: createFixedClock(1_000) });
+    const token = tokens.issue(crewInviteClaims);
+    expect(tokens.verify(token)).toEqual(crewInviteClaims);
+  });
+
+  // The deliberate half of the split above: verify() itself never compares expiresAtMs to the
+  // clock, so a token whose claimed expiresAtMs is already WAY in the past still round-trips
+  // cleanly here — the issuer's job stops at "is this authentic", not "is this still good".
+  it("does NOT reject an expired crew-invite at the issuer boundary — verify() still returns the claims verbatim", () => {
+    const clock = createFixedClock(10_000_000); // far past crewInviteClaims.expiresAtMs
+    const tokens = createHmacTokenIssuer({ secret: "swng-secret", clock });
+    const token = tokens.issue(crewInviteClaims);
+    expect(tokens.verify(token)).toEqual(crewInviteClaims);
+  });
+
+  it("rejects a tampered crew-invite payload (wrong crewId spliced in)", () => {
+    const tokens = createHmacTokenIssuer({ secret: "swng-secret", clock: createFixedClock(1_000) });
+    const token = tokens.issue(crewInviteClaims);
+    const [, signature] = token.split(".");
+    const forgedPayload = Buffer.from(
+      JSON.stringify({ scope: "crew-invite", crewId: "crew-EVIL", inviterGolferId: "golfer-1", expiresAtMs: 1_000_000 }),
+    ).toString("base64url");
+    expect(tokens.verify(`${forgedPayload}.${signature}`)).toBeUndefined();
+  });
+
+  it("rejects a crew-invite token issued by a different secret", () => {
+    const clock = createFixedClock(1_000);
+    const issued = createHmacTokenIssuer({ secret: "swng-secret", clock }).issue(crewInviteClaims);
+    const verifier = createHmacTokenIssuer({ secret: "a-different-secret", clock });
+    expect(verifier.verify(issued)).toBeUndefined();
+  });
+
+  it("rejects a malformed crew-invite payload (expiresAtMs missing)", () => {
+    const tokens = createHmacTokenIssuer({ secret: "swng-secret", clock: createFixedClock(1_000) });
+    const token = tokens.issue(crewInviteClaims);
+    const [, signature] = token.split(".");
+    const malformedPayload = Buffer.from(JSON.stringify({ scope: "crew-invite", crewId: "crew-1", inviterGolferId: "golfer-1" })).toString(
+      "base64url",
+    );
+    expect(tokens.verify(`${malformedPayload}.${signature}`)).toBeUndefined();
   });
 });

@@ -96,7 +96,12 @@ export const createDispatcher =
       if (route.auth === "participant") {
         const token = bearerToken(event);
         const verified = token ? tokens.verify(token) : undefined;
-        if (!verified) throw new ApplicationError("invalid-token");
+        // Crew membership (invited in, accountable out): a verified crew-invite token carries
+        // no roundId at all (TokenClaims' own doc comment, ports/tokenIssuer.ts) — narrowed OUT
+        // here, same invalid-token 401 as no/garbage token, BEFORE ever touching
+        // `verified.roundId` (which the crew-invite variant doesn't even have — a TS
+        // compile-time guarantee this check makes true at runtime too).
+        if (!verified || verified.scope === "crew-invite") throw new ApplicationError("invalid-token");
         // Every "participant" route declares a {roundId} path segment (routes.ts) — a
         // token minted for a different round must never authorize this path.
         if (verified.roundId !== pathParams.roundId) throw new ApplicationError("token-round-mismatch");
@@ -117,7 +122,9 @@ export const createDispatcher =
         // this tier by mistake instead of declaring "participant".
         const token = bearerToken(event);
         const verified = token ? tokens.verify(token) : undefined;
-        if (!verified) throw new ApplicationError("invalid-token");
+        // Crew membership (invited in, accountable out): same crew-invite rejection as the
+        // "participant" tier above, and for the same reason — no roundId to match against.
+        if (!verified || verified.scope === "crew-invite") throw new ApplicationError("invalid-token");
         if (verified.roundId !== pathParams.roundId) throw new ApplicationError("token-round-mismatch");
       }
 

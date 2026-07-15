@@ -596,7 +596,7 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "$disconnect" });
     });
 
-    it("wires all thirty-four HTTP routes (36 - POST /golfers/claim - POST /rounds/{roundId}/players, accounts-only identity spec §3)", () => {
+    it("wires all thirty-five HTTP routes (34 + POST /crews/{crewId}/invites + POST /crews/peek - POST /crews/{crewId}/members, crew membership invited-in rework)", () => {
       const expectedRouteKeys = [
         "POST /rounds",
         "POST /rounds/join",
@@ -630,12 +630,16 @@ describe("SwngStack", () => {
         // Projection-realignment Task 13: "your rounds, right now" — presence.
         "GET /me/rounds/live",
         // M8 Task 4: crews (POST /rounds, POST /rounds/join above are unchanged route keys —
-        // accounts-only identity spec §3 only moved their auth tier).
+        // accounts-only identity spec §3 only moved their auth tier). Crew membership
+        // (invited in, accountable out): POST /crews/{crewId}/members (add-by-id) is gone;
+        // POST /crews/{crewId}/invites (mint) and POST /crews/peek (the "none"-auth preview)
+        // replace it.
         "POST /crews",
         "POST /crews/join",
+        "POST /crews/peek",
         "GET /me/crews",
         "GET /crews/{crewId}",
-        "POST /crews/{crewId}/members",
+        "POST /crews/{crewId}/invites",
         // Architecture-realignment Task 9: crew seasons + counted rounds + standings + leave
         // (GET /crews/{crewId}/records is gone — the crew projection layer it read is deleted).
         "POST /crews/{crewId}/seasons",
@@ -652,11 +656,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (34 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (35 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 36 routes total (34 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 36);
+    it("has exactly 37 routes total (35 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 37);
     });
 
     // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route
@@ -698,7 +702,7 @@ describe("SwngStack", () => {
     // The tightened routes get the tighter rate 5 / burst 10 ceiling — POST /rounds (golfer-gated
     // now but kept in the set as an abuse-sensitive round-entry route) and GET /courses/{courseId}
     // (a "none"-auth course route) each pinned individually, plus a full-membership check below
-    // that every one of the 8 keys is present with the same values (a single Match.objectLike would
+    // that every one of the 9 keys is present with the same values (a single Match.objectLike would
     // pass even if the OTHER 7 routes were silently dropped from the map).
     it("POST /rounds carries the tighter per-route throttle (rate 5 / burst 10)", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Stage", {
@@ -712,7 +716,7 @@ describe("SwngStack", () => {
       });
     });
 
-    it("all 8 tightened routes carry the tighter throttle, and no others are present in RouteSettings", () => {
+    it("all 9 tightened routes carry the tighter throttle, and no others are present in RouteSettings", () => {
       const stages = template.findResources("AWS::ApiGatewayV2::Stage");
       const defaultStage = Object.values(stages).find((stage) => stage.Properties.StageName === "$default");
       expect(defaultStage).toBeDefined();

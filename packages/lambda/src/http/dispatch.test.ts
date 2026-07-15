@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
-import { deviceId, fixtureLinks, fixtureWhite, opId, placeholderName } from "@swng/domain";
+import { crewId, deviceId, fixtureLinks, fixtureWhite, golferId, opId, placeholderName } from "@swng/domain";
 import type { AccountClaims, AccountVerifier } from "@swng/application";
 import {
   abandonRound,
-  addCrewMember,
   addGame,
   addTeeSet,
   appendCountedRound,
@@ -32,13 +31,15 @@ import {
   getRoundArchive,
   getSeasonStandings,
   getShareLink,
-  joinCrewByCode,
+  joinCrewByInvite,
   joinRound,
   leaveCrew,
   leaveRound,
   listMyCrews,
   listSeasons,
+  mintCrewInvite,
   mintParticipantToken,
+  peekCrewInvite,
   peekRound,
   readEvents,
   recordScore,
@@ -50,7 +51,6 @@ import {
   verifyTeeSet,
 } from "@swng/application";
 import {
-  addCrewMemberResponseSchema,
   addGameResponseSchema,
   addTeeSetResponseSchema,
   appendCountedRoundResponseSchema,
@@ -72,6 +72,8 @@ import {
   leaveCrewResponseSchema,
   listMyCrewsResponseSchema,
   listSeasonsResponseSchema,
+  mintCrewInviteResponseSchema,
+  peekCrewInviteResponseSchema,
   peekRoundResponseSchema,
   recordScoreResponseSchema,
   removeCountedRoundResponseSchema,
@@ -181,8 +183,9 @@ const setup = (verifier: AccountVerifier = subVerifier) => {
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
-    addCrewMember: addCrewMember({ crewStore, golferStore }),
-    joinCrewByCode: joinCrewByCode({ crewStore, golferStore }),
+    mintCrewInvite: mintCrewInvite({ crewStore, golferStore, tokenIssuer: tokens, clock }),
+    peekCrewInvite: peekCrewInvite({ crewStore, tokenIssuer: tokens, clock }),
+    joinCrewByInvite: joinCrewByInvite({ crewStore, golferStore, tokenIssuer: tokens, clock }),
     createSeason: createSeason({ crewStore, golferStore, ids, clock }),
     listSeasons: listSeasons({ crewStore, golferStore }),
     appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
@@ -986,24 +989,26 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "unknown-crew" });
   });
 
-  it("POST /crews/join with a bad code is rejected — 404 unknown-crew", async () => {
+  it("POST /crews/join with a bad token is rejected — 403 crew-invite-invalid", async () => {
     const { dispatcher } = setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(ann), body: { code: "ZZZZZZ" } })),
+      await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(ann), body: { token: "not-a-real-token" } })),
     );
-    expect(resp.statusCode).toBe(404);
-    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "unknown-crew" });
+    expect(resp.statusCode).toBe(403);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "crew-invite-invalid" });
   });
 
+  // Crew membership (invited in, accountable out — spec §2): POST /crews/{crewId}/invites
+  // (mint, ANY member) -> POST /crews/peek ("none"-auth consent-screen preview, BEFORE sign-in)
+  // -> POST /crews/join ({token}). Replaces the old permanent-join-code + add-by-id flow.
   it(
-    "drives create -> join -> add an existing account member (de-ghost) -> GET /me/crews -> " +
+    "drives create -> mint invite -> peek (pre-sign-in preview) -> join by token -> GET /me/crews -> " +
       "StartRound as-self (creator seat only) -> create season -> list seasons",
     async () => {
       const { dispatcher } = setupCrews();
       const annGolfer = await putMe(dispatcher, ann, "Ann");
       await putMe(dispatcher, bo, "Bo");
-      const calGolfer = await putMe(dispatcher, cal, "Cal"); // a third real account, added by golferId below
 
       const createResp = asStructured(
         await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
@@ -1011,28 +1016,35 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       expect(createResp.statusCode).toBe(201);
       const created = createCrewResponseSchema.parse(JSON.parse(createResp.body!));
       expect(created.crew.members).toEqual([{ golferId: annGolfer.golferId, name: "Ann", role: "organizer", claimed: true }]);
+      expect(created.crew).not.toHaveProperty("joinCode"); // the permanent join code is gone (crew membership, invited in)
+
+      const inviteResp = asStructured(
+        await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) })),
+      );
+      expect(inviteResp.statusCode).toBe(200); // an act on an existing resource, not a top-level mint — see routes.ts's own comment
+      const invite = mintCrewInviteResponseSchema.parse(JSON.parse(inviteResp.body!));
+      expect(invite.expiresAtMs).toBeGreaterThan(0);
+
+      // The consent-screen preview — no Bearer token at all (auth: "none"), proving the
+      // "Join The Saturday Boys? · N members · invited by Al" screen renders BEFORE sign-in.
+      const peekResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews/peek", body: { token: invite.token } })));
+      expect(peekResp.statusCode).toBe(200);
+      expect(peekCrewInviteResponseSchema.parse(JSON.parse(peekResp.body!))).toEqual({
+        crewName: "Sunday Skins",
+        memberCount: 1,
+        inviterName: "Ann",
+      });
 
       const joinResp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { code: created.crew.joinCode } })),
+        await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } })),
       );
       expect(joinResp.statusCode).toBe(200); // an act on an existing resource, not a mint — see routes.ts's own comment
       joinCrewResponseSchema.parse(JSON.parse(joinResp.body!));
 
-      // De-ghost (Task 9): addCrewMember adds an EXISTING account golfer by golferId — Cal has a
-      // bound sub, so this succeeds (a sub-less golferId would 409 ghost-not-addable).
-      const addMemberResp = asStructured(
-        await dispatcher(
-          makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/members`, token: golferBearer(ann), body: { golferId: calGolfer.golferId } }),
-        ),
-      );
-      expect(addMemberResp.statusCode).toBe(201);
-      const addedMember = addCrewMemberResponseSchema.parse(JSON.parse(addMemberResp.body!));
-      expect(addedMember.crew.members.find((member) => member.golferId === calGolfer.golferId)).toMatchObject({ name: "Cal", claimed: true });
-
       const myCrewsResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/crews", token: golferBearer(bo) })));
       expect(myCrewsResp.statusCode).toBe(200);
       const myCrews = listMyCrewsResponseSchema.parse(JSON.parse(myCrewsResp.body!));
-      expect(myCrews.crews).toEqual(expect.arrayContaining([{ crewId: created.crew.crewId, name: "Sunday Skins", memberCount: 3 }]));
+      expect(myCrews.crews).toEqual(expect.arrayContaining([{ crewId: created.crew.crewId, name: "Sunday Skins", memberCount: 2 }]));
 
       // Accounts-only identity (spec §3): StartRound seats its CREATOR ONLY, always as-self — no
       // players[] roster, no crewId (sealed leaf). ann's crew membership is irrelevant to the round.
@@ -1070,25 +1082,47 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     },
   );
 
-  // De-ghost (Task 9): adding a sub-less golferId (a golfer row with no bound sub) is
-  // rejected — ghost-not-addable (409), driven end-to-end.
-  it("POST /crews/{crewId}/members with a golferId that has no bound sub is rejected — 409 ghost-not-addable", async () => {
+  // Crew membership (invited in, accountable out — spec §1): ANY member mints, not just the
+  // organizer — driven end-to-end (Bo, an ordinary member, mints his own invite).
+  it("POST /crews/{crewId}/invites: any member (not just the organizer) may mint", async () => {
     const { dispatcher } = setupCrews();
     await putMe(dispatcher, ann, "Ann");
-    const createResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
+    await putMe(dispatcher, bo, "Bo");
+    const created = createCrewResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
-    const created = createCrewResponseSchema.parse(JSON.parse(createResp.body!));
+    const firstInvite = mintCrewInviteResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+    );
+    await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: firstInvite.token } }));
 
-    // A golferId that was never claimed / never had a row — same "no bound sub" failure the
-    // use-case slice test pins directly.
     const resp = asStructured(
-      await dispatcher(
-        makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/members`, token: golferBearer(ann), body: { golferId: "never-an-account" } }),
-      ),
+      await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(bo) })),
     );
-    expect(resp.statusCode).toBe(409);
-    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "ghost-not-addable" });
+    expect(resp.statusCode).toBe(200);
+    mintCrewInviteResponseSchema.parse(JSON.parse(resp.body!));
+  });
+
+  it("POST /crews/{crewId}/invites for a non-member is rejected — 403 not-a-member", async () => {
+    const { dispatcher } = setupCrews();
+    await putMe(dispatcher, ann, "Ann");
+    const created = createCrewResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+    );
+    await putMe(dispatcher, cal, "Cal");
+
+    const resp = asStructured(
+      await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(cal) })),
+    );
+    expect(resp.statusCode).toBe(403);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-a-member" });
+  });
+
+  it("POST /crews/peek with a bad token is rejected — 403 crew-invite-invalid, no Bearer needed to fail this way", async () => {
+    const { dispatcher } = setupCrews();
+    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews/peek", body: { token: "not-a-real-token" } })));
+    expect(resp.statusCode).toBe(403);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "crew-invite-invalid" });
   });
 
   // The counted-round lifecycle end-to-end (Task 9): finalize a round the caller played, count it
@@ -1154,7 +1188,10 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const created = createCrewResponseSchema.parse(
       JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
-    await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { code: created.crew.joinCode } }));
+    const invite = mintCrewInviteResponseSchema.parse(
+      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+    );
+    await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
 
     const leaveResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/leave`, token: golferBearer(bo) })));
     expect(leaveResp.statusCode).toBe(200);
@@ -1353,6 +1390,62 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     );
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "token-round-mismatch" });
+  });
+});
+
+// Crew membership (invited in, accountable out): a crew-invite token is a REAL, authentic
+// bearer (tokens.verify() returns claims for it) but carries no roundId at all — TokenClaims'
+// own doc comment (ports/tokenIssuer.ts) calls out the dispatcher's "participant"/"round-read"
+// tiers by name as two of the three roundId-consuming verifiers that must narrow on scope and
+// reject it (wsConnect's own subscribe gate is the third — see entries/wsConnect.test.ts).
+// Minted directly off `tokens` (setup()'s own shared TokenIssuer instance) rather than through
+// the crew HTTP routes — this proves the DISPATCHER's generic tier logic rejects ANY crew-invite
+// bearer presented to a round-scoped route, independent of how it was minted.
+describe("createDispatcher — a crew-invite token never opens a round (crew membership, invited in)", () => {
+  it("POST /rounds/{roundId}/finalize (participant tier) — 401 invalid-token, never touches .roundId", async () => {
+    const { dispatcher, tokens } = setup();
+    const started = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } })),
+        ).body!,
+      ),
+    );
+    const crewInviteToken = tokens.issue({
+      scope: "crew-invite",
+      crewId: crewId("crew-1"),
+      inviterGolferId: golferId("golfer-1"),
+      expiresAtMs: Number.MAX_SAFE_INTEGER,
+    });
+
+    const resp = asStructured(
+      await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: crewInviteToken })),
+    );
+    expect(resp.statusCode).toBe(401);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+  });
+
+  it("GET /rounds/{roundId}/events (round-read tier) — 401 invalid-token, never touches .roundId", async () => {
+    const { dispatcher, tokens } = setup();
+    const started = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { card: fixtureLinks, host: { tee: "white", courseHandicap: 8 } } })),
+        ).body!,
+      ),
+    );
+    const crewInviteToken = tokens.issue({
+      scope: "crew-invite",
+      crewId: crewId("crew-1"),
+      inviterGolferId: golferId("golfer-1"),
+      expiresAtMs: Number.MAX_SAFE_INTEGER,
+    });
+
+    const resp = asStructured(
+      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: crewInviteToken, query: { since: "0" } })),
+    );
+    expect(resp.statusCode).toBe(401);
+    expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
 });
 

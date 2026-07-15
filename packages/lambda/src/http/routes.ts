@@ -4,8 +4,6 @@ import type { CourseId, CrewId, GameId, RoundId } from "@swng/domain";
 import type { AccountClaims, ParticipantClaims } from "@swng/application";
 import type {
   AbandonRoundResponse,
-  AddCrewMemberRequest,
-  AddCrewMemberResponse,
   AddGameRequest,
   AddGameResponse,
   AddTeeSetRequest,
@@ -36,6 +34,9 @@ import type {
   LeaveRoundResponse,
   ListMyCrewsResponse,
   ListSeasonsResponse,
+  MintCrewInviteResponse,
+  PeekCrewInviteRequest,
+  PeekCrewInviteResponse,
   PeekRoundResponse,
   RecordScoreRequest,
   RecordScoreResponse,
@@ -52,7 +53,6 @@ import type {
 } from "@swng/contracts";
 import {
   ContractError,
-  addCrewMemberRequestSchema,
   addGameRequestSchema,
   addTeeSetRequestSchema,
   appendCountedRoundRequestSchema,
@@ -61,6 +61,7 @@ import {
   createSeasonRequestSchema,
   joinCrewRequestSchema,
   joinRoundRequestSchema,
+  peekCrewInviteRequestSchema,
   recordScoreRequestSchema,
   startRoundRequestSchema,
   updateMeRequestSchema,
@@ -119,12 +120,18 @@ export interface UseCases {
   // Projection-realignment Task 13: "your rounds, right now" — presence pointers, not
   // finalized history (getMyRounds just above). Same golfer-tier auth.
   getMyLiveRounds: (claims: AccountClaims) => Promise<GetMyLiveRoundsResponse>;
-  // M8 Task 4: crews — every route below is "golfer"-gated (routes.ts's table).
+  // M8 Task 4: crews — every route below is "golfer"-gated (routes.ts's table), EXCEPT
+  // peekCrewInvite ("none" — the consent-screen preview a would-be joiner sees before signing
+  // in). Crew membership (invited in, accountable out — spec §2/§3): mintCrewInvite/
+  // peekCrewInvite/joinCrewByInvite replace addCrewMember/joinCrewByCode and the permanent join
+  // code they rode — there is no add-by-id path left, and getting in is by expiring HMAC
+  // invite link, minted by ANY member (not organizer-only — spec §1).
   createCrew: (claims: AccountClaims, command: CreateCrewRequest) => Promise<CreateCrewResponse>;
   getCrew: (claims: AccountClaims, id: CrewId) => Promise<GetCrewResponse>;
   listMyCrews: (claims: AccountClaims) => Promise<ListMyCrewsResponse>;
-  addCrewMember: (claims: AccountClaims, id: CrewId, command: AddCrewMemberRequest) => Promise<AddCrewMemberResponse>;
-  joinCrewByCode: (claims: AccountClaims, command: JoinCrewRequest) => Promise<JoinCrewResponse>;
+  mintCrewInvite: (claims: AccountClaims, id: CrewId) => Promise<MintCrewInviteResponse>;
+  peekCrewInvite: (command: PeekCrewInviteRequest) => Promise<PeekCrewInviteResponse>;
+  joinCrewByInvite: (claims: AccountClaims, command: JoinCrewRequest) => Promise<JoinCrewResponse>;
   // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read, plus
   // leave. Every one is "golfer"-gated with member-only authorization inside application
   // (crews/membership.ts). `seasonId` rides in the path as an opaque string (a server-minted
@@ -434,8 +441,9 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     handler: async (ctx) => useCases.getMyLiveRounds(ctx.account!),
   },
   // M8 Task 4: crews — every route below is "golfer"-gated (a signed-in Cognito identity,
-  // same tier as the /me* surface above). Member-only authorization (not-a-member 403) lives
-  // in application (crews/membership.ts's requireCrewMember), never re-checked here.
+  // same tier as the /me* surface above), EXCEPT POST /crews/peek ("none" — see its own entry
+  // below). Member-only authorization (not-a-member 403) lives in application
+  // (crews/membership.ts's requireCrewMember), never re-checked here.
   {
     method: "POST",
     path: "/crews",
@@ -449,8 +457,21 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     path: "/crews/join",
     schema: joinCrewRequestSchema,
     auth: "golfer",
-    successStatus: 200, // joining is idempotent for an already-a-member caller (joinCrewByCode.ts) — an act, not always a fresh mint, so 200 not 201.
-    handler: async (ctx, body) => useCases.joinCrewByCode(ctx.account!, body as JoinCrewRequest),
+    successStatus: 200, // joining is idempotent for an already-a-member caller (joinCrewByInvite.ts) — an act, not always a fresh mint, so 200 not 201.
+    handler: async (ctx, body) => useCases.joinCrewByInvite(ctx.account!, body as JoinCrewRequest),
+  },
+  // Crew membership (invited in, accountable out — spec §2): the capability-scoped preview a
+  // would-be joiner sees BEFORE signing in, mirroring GET /rounds/peek's own "none"-auth,
+  // pre-join preview story — POST here (not GET) because the body carries a bearer-shaped
+  // `token`, not a short human-typed code. Joins the anonymous-route throttle set
+  // (apps/infra-cdk/lib/swngStack.ts's ANON_THROTTLED_ROUTES).
+  {
+    method: "POST",
+    path: "/crews/peek",
+    schema: peekCrewInviteRequestSchema,
+    auth: "none",
+    successStatus: 200,
+    handler: async (_ctx, body) => useCases.peekCrewInvite(body as PeekCrewInviteRequest),
   },
   {
     method: "GET",
@@ -466,13 +487,16 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     successStatus: 200,
     handler: async (ctx) => useCases.getCrew(ctx.account!, crewId(ctx.pathParams.crewId!)),
   },
+  // Crew membership (invited in, accountable out — spec §2): mints a fresh 7-day invite link —
+  // ANY member (not organizer-only, spec §1), same status-code spirit as getShareLink/
+  // mintParticipantToken above (an act on an existing resource, not a top-level mint, even
+  // though the token itself is fresh every call).
   {
     method: "POST",
-    path: "/crews/{crewId}/members",
-    schema: addCrewMemberRequestSchema,
+    path: "/crews/{crewId}/invites",
     auth: "golfer",
-    successStatus: 201, // adds an existing account golfer to the roster (rejects a sub-less golfer), same status-code spirit as JoinRound/addGame.
-    handler: async (ctx, body) => useCases.addCrewMember(ctx.account!, crewId(ctx.pathParams.crewId!), body as AddCrewMemberRequest),
+    successStatus: 200,
+    handler: async (ctx) => useCases.mintCrewInvite(ctx.account!, crewId(ctx.pathParams.crewId!)),
   },
   // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave.
   // Every route is "golfer"-gated; member-only authorization lives in application

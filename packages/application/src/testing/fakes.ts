@@ -12,6 +12,7 @@ import type { Logger } from "../ports/logger.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { SnapshotStore } from "../ports/snapshotStore.js";
+import type { TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 
 // In-memory ports for application's own tests AND exported product surface for lambda/E2E
 // unit tests later in M3 — the Dynamo journal adapter is tested against this SAME
@@ -243,15 +244,15 @@ export const putAndBindGolfer = async (store: GolferStore, id: GolferId, sub: st
   await store.bindSub(id, sub);
 };
 
-// CrewStore's real adapter (M8 Task 3) lives on the `core` table plus a join-code GSI and a
-// golfer→crews GSI (architecture.md's persistence sketch); this fake reproduces both without
-// Dynamo — a Map keyed by crewId for get/put's optimistic concurrency (same expectedRevision
-// contract as courseStore's/golferStore's fakes), a second Map for the join-code index, and
-// a linear scan for listByGolfer (fine at fake/test scale; the real GSI is what makes this
-// cheap in adapters-dynamodb).
+// CrewStore's real adapter (M8 Task 3; the permanent join code + its gsi1 partition are GONE
+// as of crew membership's "invited in" rework — getting in is an expiring HMAC invite link
+// now, never a store-resident lookup) lives on the `core` table plus a golfer→crews GSI
+// (architecture.md's persistence sketch); this fake reproduces it without Dynamo — a Map keyed
+// by crewId for get/put's optimistic concurrency (same expectedRevision contract as
+// courseStore's/golferStore's fakes), and a linear scan for listByGolfer (fine at fake/test
+// scale; the real GSI is what makes this cheap in adapters-dynamodb).
 export const createInMemoryCrewStore = (): CrewStore => {
-  const byId = new Map<CrewId, { crew: Crew; joinCode: string; revision: number }>();
-  const idByJoinCode = new Map<string, CrewId>();
+  const byId = new Map<CrewId, { crew: Crew; revision: number }>();
   // Seasons + counted rounds (task-8-brief.md), reproducing createDynamoCrewStore's own key
   // scheme without Dynamo: one Map<seasonId, CrewSeason> per crew, and one
   // Map<seasonId, Map<roundId, CountedRound>> per crew for counted rounds — the SAME roundId
@@ -271,24 +272,22 @@ export const createInMemoryCrewStore = (): CrewStore => {
   };
 
   return {
-    put: async (crew, joinCode, expectedRevision) => {
+    put: async (crew, expectedRevision) => {
       const existing = byId.get(crew.id);
       if (expectedRevision === undefined) {
         if (existing) throw new ApplicationError("crew-conflict", `crew ${crew.id} already exists`);
-        byId.set(crew.id, { crew, joinCode, revision: 1 });
-        idByJoinCode.set(joinCode, crew.id);
+        byId.set(crew.id, { crew, revision: 1 });
         return;
       }
       if (!existing || existing.revision !== expectedRevision) {
         throw new ApplicationError("crew-conflict", `crew ${crew.id} revision mismatch (expected ${expectedRevision})`);
       }
-      byId.set(crew.id, { crew, joinCode: existing.joinCode, revision: existing.revision + 1 });
+      byId.set(crew.id, { crew, revision: existing.revision + 1 });
     },
     get: async (crewId) => {
       const found = byId.get(crewId);
-      return found ? { crew: found.crew, joinCode: found.joinCode, revision: found.revision } : undefined;
+      return found ? { crew: found.crew, revision: found.revision } : undefined;
     },
-    findByJoinCode: async (joinCode) => idByJoinCode.get(joinCode),
     listByGolfer: async (golferId) =>
       [...byId.values()]
         .filter(({ crew }) => crew.members.some((member) => member.golferId === golferId))
@@ -397,6 +396,28 @@ export const createFixedClock = (startMs: number): Clock => {
 export const createFrozenClock = (atMs: number): Clock => ({
   now: () => atMs,
 });
+
+// A local, in-memory TokenIssuer — the SAME idiom several use-case test files each hand-rolled
+// independently (getShareLink.test.ts's own doc comment names terminateGame.test.ts/
+// finalizeRound.test.ts's copies), promoted here now that crew-invite testing (crewSlice.test.ts/
+// seasonSlice.test.ts/mintCrewInvite.test.ts/peekCrewInvite.test.ts/joinCrewByInvite.test.ts) pushes
+// the call-site count past the three-plus extraction trigger (conventions §0). Keyed by an
+// incrementing counter, not the claims' own value (unlike getShareLink.test.ts's OWN fake, which
+// needs same-claims-in ⇒ same-token-out determinism to pin getShareLink's own contract) — every
+// crew-invite claim these tests mint is already unique enough (nothing here asserts token
+// byte-identity), and a plain counter is simpler.
+export const createTestTokenIssuer = (): TokenIssuer => {
+  const claimsByToken = new Map<string, TokenClaims>();
+  let counter = 0;
+  return {
+    issue: (claims) => {
+      const token = `token-${(counter += 1)}`;
+      claimsByToken.set(token, claims);
+      return token;
+    },
+    verify: (token) => claimsByToken.get(token),
+  };
+};
 
 // The same human-facing alphabet compositionRoot.ts's real `newJoinCode` draws from (no
 // 0/O/1/I/L — visually unambiguous read aloud or typed on a phone).

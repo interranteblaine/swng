@@ -138,18 +138,11 @@ const MEMBER_SK_PREFIX = "MEMBER#";
 export const memberSk = (golferId: GolferId): string => `${MEMBER_SK_PREFIX}${golferId}`;
 export const memberSkPrefix = MEMBER_SK_PREFIX;
 
-// findByJoinCode's lookup (mirrors RoundStore.findByJoinCode) — but unlike the rounds table,
-// the core table's gsi1 is ALREADY spoken for by course search's fixed "COURSE" partition
-// (courseGsi1pk above), and architecture.md's M8 deploy is explicitly a no-table-change
-// deploy (the plan's Task 4: "lambda-code + route additions only"), so a crew join code
-// can't get its own dedicated GSI the way a round's does. Instead crews get their OWN fixed
-// partition value on the SAME shared (gsi1pk, gsi1sk) String/String schema — a second
-// single-partition scatter-gather index living beside courses', same v1 tradeoff
-// courseGsi1pk's own doc comment already accepts (a few thousand crews trivially fits one
-// partition's limits). gsi1sk is the joinCode itself (already a fixed-format, unique,
-// server-minted 6-char code — nothing to normalize, same as RoundStore's own exact-match
-// lookup).
-export const crewGsi1pk = "CREW";
+// Crew membership (invited in, accountable out): the permanent join code — and the crew's own
+// dedicated gsi1 partition (`crewGsi1pk`) it lived on, findByJoinCode's whole reason to exist —
+// is GONE. Getting in is an expiring HMAC invite link now (crews/mintCrewInvite.ts), a
+// stateless TokenIssuer claim; the core table's gsi1 partition space goes back to being
+// course-search-only (courseGsi1pk above).
 
 // gsi2's golfer→crews lookup (listByGolfer) reuses the SAME gsi2 golferStore.getBySub
 // queries — a MEMBER item's gsi2pk is exactly golferPk(golferId) ("GOLFER#<id>"), a

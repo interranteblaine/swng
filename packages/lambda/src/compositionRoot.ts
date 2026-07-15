@@ -16,7 +16,6 @@ import type {
 } from "@swng/application";
 import {
   abandonRound,
-  addCrewMember,
   addGame,
   addTeeSet,
   appendCountedRound,
@@ -33,13 +32,15 @@ import {
   getRoundArchive,
   getSeasonStandings,
   getShareLink,
-  joinCrewByCode,
+  joinCrewByInvite,
   joinRound,
   leaveCrew,
   leaveRound,
   listMyCrews,
   listSeasons,
+  mintCrewInvite,
   mintParticipantToken,
+  peekCrewInvite,
   peekRound,
   projectArchive,
   readEvents,
@@ -157,7 +158,6 @@ const unavailableCrewStore = (): CrewStore => {
   return {
     put: unavailable,
     get: unavailable,
-    findByJoinCode: unavailable,
     listByGolfer: unavailable,
     putSeason: unavailable,
     getSeason: unavailable,
@@ -311,8 +311,16 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
-    addCrewMember: addCrewMember({ crewStore, golferStore }),
-    joinCrewByCode: joinCrewByCode({ crewStore, golferStore }),
+    // Crew membership (invited in, accountable out): mintCrewInvite needs tokens (the SAME
+    // TokenIssuer/hmacTokenIssuer instance every round-scoped route already shares — "never a
+    // parallel signer") + clock (the 7-day stamp); peekCrewInvite/joinCrewByInvite need tokens
+    // too, PLUS their own clock reading — hmacTokenIssuer's crew-invite verify() arm
+    // deliberately does NOT gate on expiry itself (ports/tokenIssuer.ts's own doc comment on
+    // CrewInviteClaims), so "expired" vs. "otherwise invalid" is these use cases' OWN Clock
+    // comparison, not the issuer's.
+    mintCrewInvite: mintCrewInvite({ crewStore, golferStore, tokenIssuer: tokens, clock }),
+    peekCrewInvite: peekCrewInvite({ crewStore, tokenIssuer: tokens, clock }),
+    joinCrewByInvite: joinCrewByInvite({ crewStore, golferStore, tokenIssuer: tokens, clock }),
     // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave
     // — the SAME crewStore/golferStore/snapshots/clock/ids instances the crew + finalize use
     // cases above already share (standings fold the counted snapshots, never a stored ledger).

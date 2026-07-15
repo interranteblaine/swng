@@ -9,7 +9,7 @@ export type { CountedRound, CrewSeason, CrewStore } from "./ports/crewStore.js";
 export type { GolferStore } from "./ports/golferStore.js";
 export type { ProjectionStore } from "./ports/projectionStore.js";
 export type { Broadcast } from "./ports/broadcast.js";
-export type { ParticipantClaims, SpectatorClaims, TokenClaims, TokenIssuer } from "./ports/tokenIssuer.js";
+export type { CrewInviteClaims, ParticipantClaims, SpectatorClaims, TokenClaims, TokenIssuer } from "./ports/tokenIssuer.js";
 export type { AccountClaims } from "./ports/accountClaims.js";
 export type { AccountVerifier } from "./ports/accountVerifier.js";
 export type { Clock } from "./ports/clock.js";
@@ -55,8 +55,12 @@ export { getMyLiveRounds } from "./golfers/getMyLiveRounds.js";
 export { createCrew } from "./crews/createCrew.js";
 export { getCrew } from "./crews/getCrew.js";
 export { listMyCrews } from "./crews/listMyCrews.js";
-export { addCrewMember } from "./crews/addCrewMember.js";
-export { joinCrewByCode } from "./crews/joinCrewByCode.js";
+// Crew membership (invited in, accountable out): addCrewMember/joinCrewByCode and the
+// permanent join code they rode are GONE — mintCrewInvite/peekCrewInvite/joinCrewByInvite
+// replace the whole "in" surface with expiring, revocation-bounded invite links (spec §2/§3).
+export { CREW_INVITE_TTL_MS, mintCrewInvite } from "./crews/mintCrewInvite.js";
+export { peekCrewInvite } from "./crews/peekCrewInvite.js";
+export { joinCrewByInvite } from "./crews/joinCrewByInvite.js";
 export { leaveCrew } from "./crews/leaveCrew.js";
 export { createSeason } from "./crews/createSeason.js";
 export { listSeasons } from "./crews/listSeasons.js";
@@ -82,6 +86,7 @@ export {
   createInMemorySnapshotStore,
   createNullLogger,
   createSequentialIds,
+  createTestTokenIssuer,
   putAndBindGolfer,
 } from "./testing/fakes.js";
 export type { CapturingBroadcast, CapturingLogger, InMemorySnapshotStore } from "./testing/fakes.js";

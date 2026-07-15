@@ -85,10 +85,13 @@ const stubUseCases: UseCases = {
   listMyCrews: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
-  addCrewMember: () => {
+  mintCrewInvite: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
-  joinCrewByCode: () => {
+  peekCrewInvite: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  joinCrewByInvite: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
   createSeason: () => {

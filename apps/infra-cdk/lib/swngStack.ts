@@ -34,14 +34,14 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (34, as of the accounts-only identity deletion — POST /golfers/claim and
-// POST /rounds/{roundId}/players are gone) routes are declared here explicitly (matching
-// packages/lambda/src/http/routes.ts) rather than via a single $default catch-all, so the API's
-// shape is visible in the
-// CloudFormation template and the AWS console, not hidden inside the Lambda. Exported (not
-// module-private) so test/routesParity.test.ts can pin this table against buildRoutes' own
-// {method, path} set — infra depends on lambda, the correct direction, so that guard lives
-// here rather than in packages/lambda.
+// function — but the (35, as of crew membership's "invited in" rework — +POST
+// /crews/{crewId}/invites, +POST /crews/peek, −POST /crews/{crewId}/members) routes are
+// declared here explicitly (matching packages/lambda/src/http/routes.ts) rather than via a
+// single $default catch-all, so the API's shape is visible in the CloudFormation template and
+// the AWS console, not hidden inside the Lambda. Exported (not module-private) so
+// test/routesParity.test.ts can pin this table against buildRoutes' own {method, path} set —
+// infra depends on lambda, the correct direction, so that guard lives here rather than in
+// packages/lambda.
 export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly path: string }> = [
   { method: HttpMethod.POST, path: "/rounds" },
   { method: HttpMethod.POST, path: "/rounds/join" },
@@ -87,10 +87,19 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // forwards every method/path here identically regardless of auth tier, so this table needs no
   // edit for that part of the change.
   { method: HttpMethod.POST, path: "/crews" },
+  // POST /crews/join's PATH is unchanged (crew membership, invited in — spec §2/§3 swapped its
+  // BODY from a permanent {code} to a bearer {token}; API Gateway forwards on method/path only).
   { method: HttpMethod.POST, path: "/crews/join" },
+  // Crew membership (invited in, accountable out — spec §2): the "none"-auth consent-screen
+  // preview, mirrors GET /rounds/peek's own pre-join-preview story — joins the anonymous
+  // throttle set (ANON_THROTTLED_ROUTES below).
+  { method: HttpMethod.POST, path: "/crews/peek" },
   { method: HttpMethod.GET, path: "/me/crews" },
   { method: HttpMethod.GET, path: "/crews/{crewId}" },
-  { method: HttpMethod.POST, path: "/crews/{crewId}/members" },
+  // Crew membership (invited in, accountable out — spec §2): mints a fresh 7-day invite link —
+  // ANY member, not organizer-only. POST /crews/{crewId}/members (add-by-id) is GONE — nobody
+  // is conscripted onto a roster; they accept an invite (spec §3).
+  { method: HttpMethod.POST, path: "/crews/{crewId}/invites" },
   // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave.
   // GET /crews/{crewId}/records is GONE (the crew projection layer it read from is deleted).
   { method: HttpMethod.POST, path: "/crews/{crewId}/seasons" },
@@ -101,21 +110,25 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.POST, path: "/crews/{crewId}/leave" },
 ];
 
-// M9 Task 5 (ops): the eight highest-abuse-value routes get the tighter per-route ceiling below.
-// Six are genuinely no-token-reachable (routes.ts's `auth: "none"`): GET /rounds/peek (no
-// participant exists yet to hold a token before joining, M6 Task 4) and the five course routes
-// (the whole CRUD/search surface, deliberately unauthenticated in v1). POST /rounds and POST
-// /rounds/join are golfer-gated now (accounts-only identity spec §3 — no anonymous start or join)
-// but deliberately STAY in this set: round creation and self-join are the abuse-sensitive
+// M9 Task 5 (ops): the highest-abuse-value routes get the tighter per-route ceiling below —
+// nine as of crew membership's "invited in" rework (+POST /crews/peek). Seven are genuinely
+// no-token-reachable (routes.ts's `auth: "none"`): GET /rounds/peek (no participant exists yet
+// to hold a token before joining, M6 Task 4), POST /crews/peek (same story, one crew's invite
+// link instead of a round's join code), and the five course routes (the whole CRUD/search
+// surface, deliberately unauthenticated in v1). POST /rounds and POST /rounds/join are
+// golfer-gated now (accounts-only identity spec §3 — no anonymous start or join) but
+// deliberately STAY in this set: round creation and self-join are the abuse-sensitive
 // round-entry operations, and a Cognito account is a low, free, self-service barrier, so the
 // tighter ceiling still earns its keep on them. Re-tuning the throttle set is otherwise out of
-// this task's scope. Every OTHER route requires a participant token minted off a join code first,
-// a higher bar. Cross-checked against HTTP_ROUTES itself in swngStack.test.ts (every entry here
-// must also be a real route) so a typo'd path fails loudly instead of silently throttling nothing.
+// this task's scope. Every OTHER route requires a participant token minted off a join code (or,
+// for crews, a signed-in account) first, a higher bar. Cross-checked against HTTP_ROUTES itself
+// in swngStack.test.ts (every entry here must also be a real route) so a typo'd path fails
+// loudly instead of silently throttling nothing.
 export const ANON_THROTTLED_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly path: string }> = [
   { method: HttpMethod.POST, path: "/rounds" },
   { method: HttpMethod.POST, path: "/rounds/join" },
   { method: HttpMethod.GET, path: "/rounds/peek" },
+  { method: HttpMethod.POST, path: "/crews/peek" },
   { method: HttpMethod.POST, path: "/courses" },
   { method: HttpMethod.POST, path: "/courses/{courseId}/tees" },
   { method: HttpMethod.POST, path: "/courses/{courseId}/verify" },

@@ -1,8 +1,11 @@
 # Crew membership — invited in, accountable out
 
-> Status: **approved** (owner, in-chat, 2026-07-14 — including the amendment: beta crew data
-> is DELETED outright, no migrations, no tolerate machinery). Closes pre-prod hardening spec
-> D3 (`2026-07-14-pre-prod-hardening-design.md`), the open question that blocks prod.
+> Status: **implemented** (2026-07-15, beta deploy #9 — commits `7219563..` through the
+> close-out; approved by owner in-chat 2026-07-14, including the amendment: beta crew data
+> is DELETED outright, no migrations, no tolerate machinery — 392 items wiped). Closes
+> pre-prod hardening spec D3 (`2026-07-14-pre-prod-hardening-design.md`), the open question
+> that blocked prod. One copy correction landed during execution: the consent line is
+> singular-aware (`1 member`, not `1 members`).
 
 ## The ruling
 

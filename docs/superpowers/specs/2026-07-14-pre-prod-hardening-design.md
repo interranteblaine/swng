@@ -48,7 +48,11 @@ people we chose to show them to.
 **Tripwire:** if rounds ever carry genuinely private data (money settled, personal notes),
 revisit before that feature ships.
 
-## D3 — Crew membership model: OPEN — blocks prod
+## D3 — Crew membership model: ~~OPEN — blocks prod~~ CLOSED (2026-07-15)
+
+> Resolved by `2026-07-14-crew-membership-design.md` (implemented, beta deploy #9): invite
+> links replace the permanent code, the organizer holds remove/transfer, exactly one
+> organizer always. The prod blocker this section recorded is lifted.
 
 Owner ruling (2026-07-14): the current model does not fold into prod. The flaw is not the
 join code itself but the combination **permanent code + no removal**: the only membership

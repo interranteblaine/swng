@@ -861,6 +861,12 @@ cited spot, this is just the one consolidated list Task 2 works from.
   exit is `leaveCrew`, self-only), not the code mechanism. Recorded as an OPEN product design
   question (`docs/superpowers/specs/2026-07-14-pre-prod-hardening-design.md` D3) that blocks
   the prod deployment; gets its own owner-driven design session.
+  **LANDED (crew membership — invited in, accountable out; 2026-07-15, beta deploy #9):** the
+  design session produced `2026-07-14-crew-membership-design.md`, implemented whole — invite
+  links (7-day HMAC, one signer, inviter-still-member at peek AND join) replace the permanent
+  code outright; the organizer holds remove/transfer with exactly-one-organizer by
+  construction; add-by-id deleted (one path in); beta crew data wiped by owner amendment
+  (392 items). The prod blocker is lifted.
 - **Projector stream poison-record handling** (identified & landed same day — pre-prod
   hardening D4b, 2026-07-14): the snapshots-stream event source previously carried only
   defaults, so a deterministically-throwing record would block its shard for 24h of retries

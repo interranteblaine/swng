@@ -340,6 +340,31 @@ rounds), stage config becomes a typed per-stage props table with the prod stack,
 crew membership model (permanent join code + no removal path) is an **OPEN design question
 that blocks prod** — owner-driven session pending.
 
+Crew membership is real — invited in, accountable out (2026-07-15, spec
+`docs/superpowers/specs/2026-07-14-crew-membership-design.md`, closing pre-prod D3, the prod
+blocker): membership is **invite links, 7-day expiry, one signer** — a `crew-invite`
+`TokenClaims` variant on the same HMAC issuer as participant/spectator tokens (every
+round-token verifier scope-narrows and rejects it; expiry is enforced in the two use cases so
+`crew-invite-expired` stays wire-distinct from `crew-invite-invalid`), minted by any member
+(`POST /crews/{crewId}/invites`), previewed by a capability-scoped auth-none peek
+(`POST /crews/peek`, in the anon throttle set), joined as-yourself with inviter-still-member
+checked at both peek and join. The **organizer** (M8's dormant role, now real) holds remove
+(`DELETE /crews/{crewId}/members/{golferId}`) and transfer (`POST /crews/{crewId}/transfer`),
+with exactly-one-organizer enforced by construction and a `leaveCrew` guard
+(`organizer-must-transfer`); remove ≡ leave — membership stays pure aggregation scope
+(crewSeason test 8b pins remove → rows vanish → re-invite → byte-identical restore, live).
+DELETED whole: the permanent join code (field, crew gsi1 partition, `findByJoinCode`,
+mint-retry, `CrewView.joinCode`, every UI surface) and `addCrewMember` (nobody is conscripted
+— one path in). Beta crew data wiped by owner amendment (392 items,
+`scripts/dropCrewData.mjs`) — no migrations, no tolerate machinery. Routes 34→37 HTTP/39
+total; web gains CrewJoinPage (fragment token, consent-first: "Join {crew}? · N member(s) ·
+invited by {name}", the JoinRoundPage funnel idioms) and CrewPage's Invite button + organizer
+roster controls. Deploy #9 also hardened deploy ordering itself: the first new-route-in-the-
+throttle-set deploy wedged CloudFormation (`UPDATE_ROLLBACK_FAILED` — stage RouteSettings
+name routes by key, no implicit ordering), recovered via `continue-update-rollback
+--resources-to-skip`, and fixed structurally (the HTTP stage now `DependsOn` every route,
+pinned in the stack tests).
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

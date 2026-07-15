@@ -64,9 +64,12 @@ cannot reach the round.
 `packages/domain/src/course/` is rewritten around one record type:
 
 ```ts
+// ids.ts — CardId joins the existing brand family beside CourseId
+export type CardId = Brand<string, "CardId">;
+
 export interface CardSource {
-  readonly cardId: string;   // identity of this exact card
-  readonly courseId: string; // the lineage
+  readonly cardId: CardId;     // identity of this exact card
+  readonly courseId: CourseId; // the lineage
 }
 
 // card.ts — CourseCard gains one optional field; Hole/TeeSet unchanged
@@ -77,14 +80,17 @@ export interface CourseCard {
 }
 
 export interface CardRecord {
-  readonly cardId: string;
-  readonly courseId: string;
+  readonly cardId: CardId;
+  readonly courseId: CourseId;
   readonly card: CourseCard; // card.source === { cardId, courseId } — set at mint, invariant
   readonly enteredBy: { readonly golferId: GolferId; readonly name: string };
   readonly enteredAtMs: number;
-  readonly supersedes?: string; // cardId of the card this one replaced; absent on lineage roots
+  readonly supersedes?: CardId; // the card this one replaced; absent on lineage roots
 }
 ```
+
+Ids are branded in the domain, plain `z.string()` on the wire — the standing pattern
+(`RoundId`, `GolferId`, `CrewId` all work this way).
 
 Deleted from the domain: `Course`, `TeeSetVersion`, `verifications`, `addTeeSet`,
 `verifyTeeSet`, `courseCardOf` (no translation exists — `record.card` IS the card).
@@ -247,7 +253,7 @@ constant `community` until an importer exists).
 
 Verification returns only when it has defined semantics (distinct authenticated actor,
 evidence reviewed, a threshold, a stated product consequence). Recorded as a future
-decision (§11), not designed here. Until then, "entered by Blaine · updated Jul 14" is
+decision (§12), not designed here. Until then, "entered by Blaine · updated Jul 14" is
 more honest than "✓ verified".
 
 ## 9. Rollout
@@ -291,7 +297,42 @@ book wants it — YAGNI).
 8. **The round domain is unchanged** except `CourseCard.source?` — events, fold,
    scoring, settle, archive, join, peek all as before.
 
-## 11. Future scenarios, recorded (2026-07-15)
+## 11. How analytics stand on this model
+
+Not built in this arc — but the model is shaped so they hold, and this section is the
+proof-by-walkthrough. Every course analytic is a downstream reader of snapshots,
+referencing rounds inbound and computing on read — the same architecture as crew
+standings and the handicap index today:
+
+- **"My history at Casa Verde"** — the golfer's history lines filtered by `courseId`.
+- **Scoring average / best round, by tee** — group lines by `courseId`, then by the
+  frozen tee name within each snapshot's card.
+- **Hole insights ("which holes eat you alive")** — fold per-hole cells across a
+  golfer's snapshots for one `courseId`; hole numbers are stable within a lineage, and
+  each snapshot carries its own full card (par, SI, yardage), so every derived stat is
+  recomputable from snapshots alone, forever, with no course-store read.
+- **Venue head-to-head / course records across golfers** — `aggregateSeason`-style folds
+  over snapshots grouped by `courseId`, computed on read or projected to stable keys —
+  either works, because the inputs are sealed and identified.
+
+The structural point: the only thing analytics can never recover is what rounds failed
+to *record* — and the snapshot now records the complete card plus the two identity
+facts (`cardId`, `courseId`). There is nothing course-shaped known at creation time
+that a future analytic could want and we discard.
+
+Two grouping granularities are deliberately not first-class yet, and both extend
+additively — new fields on future cards, no remodel, sealed rounds untouched:
+
+- **Tee identity** — tee-level series key on the frozen tee name, so a tee rename
+  starts a new series (course-level analytics are unaffected). If tee-level analytics
+  ever matter enough, cards gain per-tee ids from that day forward.
+- **Facility identity** — an 18-hole card and its front-nine card are separate lineages,
+  so their stats are separate groups. For most stats that is semantically *correct* (a
+  nine-hole round is not comparable to an eighteen). Where a venue-level view is wanted,
+  a facility grouping over `courseId`s unites them at read time — the crews-over-rounds
+  shape, never a parent tier inside card identity.
+
+## 12. Future scenarios, recorded (2026-07-15)
 
 Decisions made with eyes open, each with its revisit trigger:
 
@@ -304,14 +345,14 @@ Decisions made with eyes open, each with its revisit trigger:
 - **Import (GHIN-style course data)** — an importer is a card factory: it emits cards
   with `provenance: "imported"`. The imported ontology reshapes the course store then;
   rounds don't care. *Trigger:* the decision to scale beyond community entry.
-- **Tee-level stable identity** — tee analytics group by (courseId, tee name); a tee
-  rename splinters that grouping. Accepted. *Trigger:* real tee-level analytics.
+- **Tee-level stable identity** — accepted as name-keyed for now; mechanics and the
+  additive escape path in §11. *Trigger:* real tee-level analytics.
 - **Verification with real semantics** — see §8. *Trigger:* a trust problem community
   attribution can't absorb.
 - **Steward moderation of course edits** — v1 is immediate-with-audit. *Trigger:* scale
   beyond crews who know each other, or the first bad-faith edit.
 
-## 12. Out of scope
+## 13. Out of scope
 
 Course book / course-based analytics surfaces (only the `source` ids and the history
 line's `courseId?` are recorded); facility grouping; import; any prod-stack work; any

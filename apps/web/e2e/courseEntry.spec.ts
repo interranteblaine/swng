@@ -140,7 +140,10 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     await page.getByRole("button", { name: "Add course", exact: true }).click();
 
     // Success lands on the course's own hub now (course-cards spec §7), not back on /create.
-    await expect(page).toHaveURL(/\/courses\/[^/]+$/);
+    // The (?!new$) lookahead is load-bearing: the PRE-click URL is /courses/new, which a bare
+    // /\/courses\/[^/]+$/ already matches (the submit handler awaits the API before navigate()),
+    // so without it this wait resolves immediately and courseId captures as the literal "new".
+    await expect(page).toHaveURL(/\/courses\/(?!new$)[^/]+$/);
     courseId = new URL(page.url()).pathname.split("/").pop() ?? "";
     expect(courseId).not.toBe("");
   });

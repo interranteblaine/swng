@@ -365,6 +365,18 @@ name routes by key, no implicit ordering), recovered via `continue-update-rollba
 --resources-to-skip`, and fixed structurally (the HTTP stage now `DependsOn` every route,
 pinned in the stack tests).
 
+Beta lives at **https://beta.swng.golf** (2026-07-15, owner call): an optional per-stage
+`web` prop on `SwngStack` (`{ domainName, hostedZoneId, zoneName }`, resolved in
+`bin/infra-cdk.ts`'s `STAGE_WEB` table — the first real D5-style stage config, no stage-name
+branching in the stack) mints an in-stack DNS-validated ACM cert, adds the CloudFront alias,
+creates the Route 53 A/AAAA alias records in zone `Z00936512AJC1HGD9M7B7` (`swng.golf`), and
+appends the domain's Cognito callback/logout entries ALONGSIDE the localhost and
+cloudfront.net ones (the old `https://d5qqgppnyb7y1.cloudfront.net/` URL still works — e2e
+suites use it). The hostname was handed over from the old POC distribution
+(`E2LRGWTEQIYOX9` released the alias via an API-level edit — the POC STACK itself remains
+untouched; its own cert was not reused). Prod later gets `swng.golf` as one `STAGE_WEB`
+entry in the prod-stack task.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

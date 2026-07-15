@@ -373,6 +373,19 @@ export const createProjectorHandler =
   }) =>
   async (event: DynamoDBStreamEvent): Promise<void> => {
     for (const record of event.Records) {
+      // A REMOVE carries no NEW_IMAGE and nothing to project — skip it, logged, never thrown.
+      // "Snapshots are never deleted" stopped being an invariant the day the owner-sanctioned
+      // beta scrap (scripts/scrapCourseAndRoundData.mjs, course-cards spec §9) deleted 1,080 of
+      // them: each deletion emitted a REMOVE onto this stream, and treating those as poison
+      // records blocked the shard for hours behind bisect+retry cycles (live incident,
+      // 2026-07-15). INSERT/MODIFY records remain held to the full poison discipline below —
+      // a missing/corrupt NEW_IMAGE on those still logs and rethrows.
+      if (record.eventName === "REMOVE") {
+        deps.logger.info("projector: skipping a REMOVE stream record (snapshot deletion — an operational scrap, nothing to project)", {
+          eventId: record.eventID,
+        });
+        continue;
+      }
       try {
         const archive = deps.parseArchive(record.dynamodb?.NewImage);
         await deps.project(archive);

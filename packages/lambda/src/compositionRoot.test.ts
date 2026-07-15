@@ -250,9 +250,10 @@ describe("createProjectorHandler", () => {
   // The "image" the fake parseArchive below reads back is the archive itself, unwrapped —
   // never real DynamoDB-JSON-shaped AttributeValues (that's parseSnapshotStreamImage's own
   // concern, unit-tested in adapters-dynamodb), so NewImage's real type is cast away here.
-  const streamEventFor = (records: readonly { eventId: string; image: RoundArchive | undefined }[]): DynamoDBStreamEvent => ({
+  const streamEventFor = (records: readonly { eventId: string; image: RoundArchive | undefined; eventName?: "INSERT" | "REMOVE" }[]): DynamoDBStreamEvent => ({
     Records: records.map(
-      (r) => ({ eventID: r.eventId, eventName: "INSERT", dynamodb: { NewImage: r.image } }) as unknown as DynamoDBStreamEvent["Records"][number],
+      (r) =>
+        ({ eventID: r.eventId, eventName: r.eventName ?? "INSERT", dynamodb: { NewImage: r.image } }) as unknown as DynamoDBStreamEvent["Records"][number],
     ),
   });
 
@@ -288,6 +289,25 @@ describe("createProjectorHandler", () => {
 
     expect(await ctx.projectionStore.listLines(ann)).toHaveLength(1);
     expect(await ctx.projectionStore.listLines(bo)).toHaveLength(1);
+  });
+
+  it("a REMOVE record (an operational snapshot scrap) is skipped, logged, never thrown — the batch's INSERTs still project", async () => {
+    const ctx = await setup();
+    const infoSpy = vi.fn();
+    const handler = createProjectorHandler({ parseArchive: fakeParseArchive, project: ctx.project, logger: { ...ctx.logger, info: infoSpy } });
+
+    // The REMOVE carries no NEW_IMAGE — exactly the shape that blocked the shard live on
+    // 2026-07-15 when the beta scrap deleted 1,080 snapshots. It must not reach parseArchive.
+    await handler(
+      streamEventFor([
+        { eventId: "evt-removed", image: undefined, eventName: "REMOVE" },
+        { eventId: "evt-live", image: archiveFor("r-after-scrap", 3_000) },
+      ]),
+    );
+
+    expect(await ctx.projectionStore.listLines(ann)).toHaveLength(1);
+    expect(infoSpy).toHaveBeenCalledOnce();
+    expect(infoSpy.mock.calls[0]![1]).toMatchObject({ eventId: "evt-removed" });
   });
 
   it("a poison record (unparseable NEW_IMAGE) logs and rethrows — never silently skipped", async () => {

@@ -329,10 +329,15 @@ additively — new fields on future cards, no remodel, sealed rounds untouched:
   their own ids. No operation addresses a tee (maintenance is whole-card supersession),
   and every snapshot already pins its tee exactly: `(cardId, tee name)` is a globally
   unique, permanent identifier of one tee-version, since names are unique within a card.
-  Tee lineage ("the same tee across card versions") is therefore *derivable* whenever
-  tee-level analytics arrive: walk the retained card chain and connect columns across
-  supersessions — retroactively covering every round played under this model, which
-  ids-from-now-on could not. A separate `teeId` would record no fact a snapshot doesn't
+  Note it is the *join key*, not the *series key* — it names a node in the lineage's
+  history, and a tee series is the equivalence class of nodes connected across
+  supersession seams (a name persisting across one supersession is the same tee,
+  deterministically; a rename seam is connectable by its matching numbers). Tee lineage
+  is therefore *derivable* whenever tee-level analytics arrive: walk the retained card
+  chain once per lineage and map each snapshot's join key through the computed classes —
+  retroactively covering every round played under this model, which ids-from-now-on
+  could not. A recorded `teeId` would be a precomputed cache of that walk, stamped at
+  edit time from the same information the chain already preserves. A separate `teeId` would record no fact a snapshot doesn't
   already carry. Residual: a reused tee name (renamed away, later re-added as a
   different tee) makes one seam of that walk ambiguous and needs a curation call — rare,
   and resolvable from retained history.

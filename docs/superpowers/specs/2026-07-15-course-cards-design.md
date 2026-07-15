@@ -59,6 +59,18 @@ a *card factory* — upstream machinery whose output is a card in a lineage. The
 interface is the card; the card is the stored unit; course-model evolution structurally
 cannot reach the round.
 
+**The trust model is transcription, not authority.** The authoritative scorecard is the
+printed one in the cart; swng's course record is the crew's *shared transcription* of it,
+entered once instead of re-typed every Saturday — "for the golf you actually play." That
+is why community editing is the right model at this scale (fixing a transcription typo is
+not an act of authority), why the trust surface is attribution and retained history
+rather than a verification badge (§8 — the badge claimed an authority the mechanism never
+had), and why the stakes are self-limiting: a wrong number is visible on the very card
+you're scoring against, and every round archives the exact transcription it was played
+against, right or wrong — which is the honest record of what happened. If real authority
+is ever wanted (competition across strangers, official posting), it arrives as *imported*
+cards — `provenance` already keeps the two kinds distinct and never conflates them.
+
 ## 3. Domain model
 
 `packages/domain/src/course/` is rewritten around one record type:
@@ -76,12 +88,12 @@ export interface CardSource {
 // card.ts — CourseCard and TeeSet each gain one optional identity field; Hole unchanged
 export interface CourseCard {
   readonly courseName: string;
-  readonly source?: CardSource; // absent on pre-spec frozen cards; present on all new ones
+  readonly source?: CardSource; // optional on the value type (fixtures/decks); present on every stored & frozen card post-scrap (§9)
   readonly teeSets: readonly TeeSet[];
 }
 
 export interface TeeSet {
-  readonly teeId?: TeeId; // absent on pre-spec frozen cards; required (by invariant) on stored cards
+  readonly teeId?: TeeId; // optional on the value type (fixtures/decks); present on every stored & frozen card post-scrap (§9)
   readonly name: string;
   readonly rating: number;
   readonly slope: number;
@@ -288,9 +300,13 @@ No migration code anywhere.
 1. Land the arc (domain → contracts/application → adapters (+contract tests) → lambda
    routes → web), `pnpm validate` green throughout.
 2. One beta deploy (route table change: −2 +1; nothing stateful in the stack).
-3. Run `scripts/dropCourseData.mjs` — delete every `pk begins_with COURSE#` item (legacy
-   single-item courses and their GSI rows). Owner-approved wipe precedent (crew arc);
-   beta courses are Casa Verde plus e2e seeds.
+3. Scrap beta's course AND round data (owner amendment, 2026-07-15): one script deletes
+   legacy course items (`pk begins_with COURSE#`, both shapes and their GSI rows), the
+   rounds journal, every snapshot, and the derived golfer projections/presence. This
+   knowingly includes the 752 POC-migrated archives and all beta handicap history —
+   profiles restart clean. The payoff: **no legacy snapshot tier ever exists** — every
+   snapshot in the system carries full identity (`source` + tee ids), so future
+   analytics are single-shape with no name-grouped fallback.
 4. Re-enter Casa Verde GC by hand from the paper card through the new AddCoursePage —
    this doubles as the controller's live walk of the new surface.
 5. Gates: `pnpm validate`; `pnpm test:contract` (course store rewritten); rewritten
@@ -299,9 +315,11 @@ No migration code anywhere.
    its course through the authenticated API; `pnpm e2e:beta` ×2; `pnpm e2e:field`;
    controller browser walk on the deployed app.
 
-Sealed rounds are untouched forever: old frozen cards lack `source` and render/compute
-identically; no external legacy-mapping table is built (build it if and when a course
-book wants it — YAGNI).
+"Sealed rounds are never rewritten" remains the standing rule — the scrap deletes; it
+never mutates. The identity fields stay optional on the *value types* (test fixtures and
+the frozen decks construct cards directly; defensive parsing costs nothing) while being
+present on every stored card and every snapshot that exists after the scrap — required
+by construction at the write path, not by the type.
 
 ## 10. Invariants (pinned for review)
 
@@ -338,7 +356,7 @@ standings and the handicap index today:
 - **"My history at Casa Verde"** — the golfer's history lines filtered by `courseId`.
 - **Scoring average / best round, by tee** — group lines by `courseId`, then by
   `teeId`, resolved from the snapshot's own card (each participant's frozen tee name is
-  unique within it); by name for pre-spec legacy snapshots.
+  unique within it).
 - **Hole insights ("which holes eat you alive")** — fold per-hole cells across a
   golfer's snapshots for one `courseId`; hole numbers are stable within a lineage, and
   each snapshot carries its own full card (par, SI, yardage), so every derived stat is
@@ -359,10 +377,10 @@ certainty; defer relations that are not knowable at write time** (§3):
   certainty while the write happens (it edits the loaded card in place), so continuity
   through renames and corrections is captured then — never reconstructed later by
   walking history or matching numbers, which composite edits (a rename plus a
-  correction in one supersede) would routinely defeat. Every new snapshot pins
-  `(courseId, cardId, teeId per tee)`; tee series group by id with no inference.
-  Pre-spec snapshots lack tee ids exactly as they lack course ids — the same legacy
-  tier, grouped by name.
+  correction in one supersede) would routinely defeat. Every snapshot pins
+  `(courseId, cardId, teeId per tee)`; tee series group by id with no inference — and
+  after the beta scrap (§9) that is *every snapshot in existence*: no legacy tier, no
+  name-grouped fallback, anywhere.
 - **Facility identity is the deferred one** — an 18-hole card and its front-nine card
   are separate lineages, so their stats are separate groups (for most stats that is
   semantically *correct*: a nine-hole round is not comparable to an eighteen). It

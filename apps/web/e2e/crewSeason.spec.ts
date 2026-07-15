@@ -16,6 +16,7 @@ import {
   joinRoundDirect,
   loadWebEnv,
   mintAccountGolfer,
+  mintCrewInviteDirect,
   pollUntil,
   recordScoreDirect,
   removeCountedRoundDirect,
@@ -51,7 +52,6 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
   let cy: AccountGolfer;
   let dee: AccountGolfer;
   let crewId: CrewId;
-  let crewJoinCode = ""; // Bo's route into the roster in step 8, minted at crew creation (step 2)
   let ids: SeasonGolferIds;
   let seasonId = "";
   const roundIds: RoundId[] = [];
@@ -107,7 +107,6 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
     const created = await createCrewDirect(httpUrl, al.tokens.idToken, "The Saturday Boys");
     crewId = created.crew.crewId;
-    crewJoinCode = created.crew.joinCode;
     expect(created.crew.members).toEqual([{ golferId: ids.al, name: "Al", role: "organizer", claimed: true }]);
   });
 
@@ -321,12 +320,14 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect([...record.history.map((line) => line.roundId)].sort()).toEqual([...roundIds].sort());
 
     // The live proof that membership is pure aggregation scope: Bo — a season-long
-    // NON-member whose rounds were all counted anyway — joins the crew by its own join code
-    // (minted at creation, step 2), the self-service arm (joinCrewByCode.ts) that adds the
-    // CALLER's own account golfer. His roster-row name comes from his account golfer record —
-    // asserted directly off the live join response before trusting it in the standings
-    // comparison below.
-    const joined = await joinCrewDirect(httpUrl, bo.tokens.idToken, crewJoinCode);
+    // NON-member whose rounds were all counted anyway — joins the crew off a fresh invite Al
+    // mints right here (crew membership, invited in, accountable out — spec §2: ANY member may
+    // invite; the permanent join code this step used to read off crew creation is gone), the
+    // self-service arm (joinCrewByInvite.ts) that adds the CALLER's own account golfer. His
+    // roster-row name comes from his account golfer record — asserted directly off the live
+    // join response before trusting it in the standings comparison below.
+    const invite = await mintCrewInviteDirect(httpUrl, al.tokens.idToken, crewId);
+    const joined = await joinCrewDirect(httpUrl, bo.tokens.idToken, invite.token);
     expect(joined.crew.members.map((member) => member.golferId).sort()).toEqual([ids.al, ids.bo].sort());
     const boMember = joined.crew.members.find((member) => member.golferId === ids.bo);
     expect(boMember?.name).toBe("Bo");

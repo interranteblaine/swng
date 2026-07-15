@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { courseId, crewId, fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
 import type {
-  AddCrewMemberRequest,
   AddGameRequest,
   AddTeeSetRequest,
   AppendCountedRoundRequest,
@@ -15,7 +14,6 @@ import type {
   VerifyTeeSetRequest,
 } from "@swng/contracts";
 import {
-  addCrewMember,
   addGame,
   addTeeSet,
   appendCountedRound,
@@ -33,18 +31,22 @@ import {
   getMyRounds,
   getRoundArchive,
   getSeasonStandings,
-  joinCrew,
+  joinCrewByInvite,
   joinRound,
   leaveCrew,
   leaveRound,
   listMyCrews,
   listSeasons,
+  mintCrewInvite,
   mintParticipantToken,
+  peekCrewInvite,
   peekRound,
   removeCountedRound,
+  removeCrewMember,
   searchCourses,
   shareRound,
   terminateGame,
+  transferOrganizer,
   updateMe,
   verifyTeeSet,
 } from "./api";
@@ -197,7 +199,7 @@ describe("getCrew", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [] } });
+      return fakeResponse(200, { crew: { crewId: "crew-1", name: "Sunday crew", members: [] } });
     });
 
     const result = await getCrew("tok-crew", crewId("crew-1"));
@@ -226,7 +228,7 @@ describe("createCrew", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(201, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [] } });
+      return fakeResponse(201, { crew: { crewId: "crew-1", name: "Sunday crew", members: [] } });
     });
 
     const input: CreateCrewRequest = { name: "Sunday crew" };
@@ -240,31 +242,142 @@ describe("createCrew", () => {
   });
 });
 
-describe("joinCrew", () => {
-  it("POSTs { code } to /crews/join with the bearer token and parses a JoinCrewResponse", async () => {
+// Crew membership (invited in, accountable out — spec §2/§3): the permanent join code is gone
+// — POST /crews/join now carries the SAME bearer-shaped `token` a mint response hands out.
+describe("joinCrewByInvite", () => {
+  it("POSTs { token } to /crews/join with the bearer token and parses a JoinCrewResponse", async () => {
     let seenUrl: string | undefined;
     let seenInit: RequestInit | undefined;
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [] } });
+      return fakeResponse(200, { crew: { crewId: "crew-1", name: "Sunday crew", members: [] } });
     });
 
-    const input: JoinCrewRequest = { code: "ZZZ111" };
-    const result = await joinCrew("tok-me", input);
+    const input: JoinCrewRequest = { token: "invite-token-1" };
+    const result = await joinCrewByInvite("tok-me", input);
 
     expect(seenUrl).toBe(`${HTTP_URL}/crews/join`);
     expect(JSON.parse(String(seenInit?.body))).toEqual(input);
     expect(result.crew.crewId).toBe(crewId("crew-1"));
   });
 
-  it("throws a coded ApiError('unknown-crew') on an unknown code", async () => {
-    stubFetch(async () => fakeResponse(404, { code: "unknown-crew", message: "no crew with that code" }));
+  it("throws a coded ApiError('crew-invite-expired') on an expired invite", async () => {
+    stubFetch(async () => fakeResponse(403, { code: "crew-invite-expired", message: "invite token expired" }));
 
-    const error: unknown = await joinCrew("tok-me", { code: "ZZZ999" }).catch((caught: unknown) => caught);
+    const error: unknown = await joinCrewByInvite("tok-me", { token: "stale-token" }).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).code).toBe("unknown-crew");
+    expect((error as ApiError).code).toBe("crew-invite-expired");
+  });
+});
+
+// Crew membership (invited in, accountable out — spec §2): ANY member mints a fresh 7-day
+// invite link — same POST + bearer-token idiom as every crew call above.
+describe("mintCrewInvite", () => {
+  it("POSTs to /crews/{crewId}/invites with the bearer token and parses a MintCrewInviteResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { token: "invite-token-1", expiresAtMs: 1_700_000_000_000 });
+    });
+
+    const result = await mintCrewInvite("tok-crew", crewId("crew-1"));
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/invites`);
+    expect(seenInit?.method).toBe("POST");
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-crew");
+    expect(result).toEqual({ token: "invite-token-1", expiresAtMs: 1_700_000_000_000 });
+  });
+});
+
+// Crew membership (invited in, accountable out — spec §2): auth "none" — the consent screen's
+// preview, mirroring peekRound's own "none"-auth shape above.
+describe("peekCrewInvite", () => {
+  it("POSTs { token } to /crews/peek with NO bearer token and parses a PeekCrewInviteResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { crewName: "The Saturday Boys", memberCount: 8, inviterName: "Al" });
+    });
+
+    const result = await peekCrewInvite({ token: "invite-token-1" });
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/peek`);
+    expect(JSON.parse(String(seenInit?.body))).toEqual({ token: "invite-token-1" });
+    expect((seenInit?.headers as Record<string, string> | undefined)?.authorization).toBeUndefined();
+    expect(result).toEqual({ crewName: "The Saturday Boys", memberCount: 8, inviterName: "Al" });
+  });
+
+  it("throws a coded ApiError('crew-invite-invalid') on a bad token", async () => {
+    stubFetch(async () => fakeResponse(403, { code: "crew-invite-invalid", message: "invite token invalid" }));
+
+    const error: unknown = await peekCrewInvite({ token: "garbage" }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("crew-invite-invalid");
+  });
+});
+
+// Crew membership (invited in, accountable out — spec §1): the organizer's authority — no
+// request schema, the target golferId rides the path.
+describe("removeCrewMember", () => {
+  it("DELETEs /crews/{crewId}/members/{golferId} with the bearer token and parses a GetCrewResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { crew: { crewId: "crew-1", name: "Sunday crew", members: [] } });
+    });
+
+    const result = await removeCrewMember("tok-crew", crewId("crew-1"), golferId("bo-g"));
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/members/bo-g`);
+    expect(seenInit?.method).toBe("DELETE");
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-crew");
+    expect(result.crew.crewId).toBe(crewId("crew-1"));
+  });
+
+  it("throws a coded ApiError('not-organizer') on a 403", async () => {
+    stubFetch(async () => fakeResponse(403, { code: "not-organizer", message: "caller is not the organizer" }));
+
+    const error: unknown = await removeCrewMember("tok-crew", crewId("crew-1"), golferId("bo-g")).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("not-organizer");
+  });
+});
+
+describe("transferOrganizer", () => {
+  it("POSTs { golferId } to /crews/{crewId}/transfer with the bearer token and parses a GetCrewResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { crew: { crewId: "crew-1", name: "Sunday crew", members: [] } });
+    });
+
+    const result = await transferOrganizer("tok-crew", crewId("crew-1"), { golferId: golferId("bo-g") });
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/transfer`);
+    expect(seenInit?.method).toBe("POST");
+    expect(JSON.parse(String(seenInit?.body))).toEqual({ golferId: "bo-g" });
+    expect(result.crew.crewId).toBe(crewId("crew-1"));
+  });
+
+  it("throws a coded ApiError('not-a-member') when the target has left the crew", async () => {
+    stubFetch(async () => fakeResponse(403, { code: "not-a-member", message: "golfer bo-g is not a member of crew crew-1" }));
+
+    const error: unknown = await transferOrganizer("tok-crew", crewId("crew-1"), { golferId: golferId("bo-g") }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("not-a-member");
   });
 });
 
@@ -283,27 +396,6 @@ describe("listMyCrews", () => {
     expect(seenUrl).toBe(`${HTTP_URL}/me/crews`);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
     expect(result).toEqual({ crews: [{ crewId: crewId("crew-1"), name: "Sunday crew", memberCount: 4 }] });
-  });
-});
-
-describe("addCrewMember", () => {
-  // De-ghost (architecture-realignment Task 9): the body is now { golferId }, not { name }.
-  it("POSTs { golferId } to /crews/{crewId}/members with the bearer token and parses an AddCrewMemberResponse", async () => {
-    let seenUrl: string | undefined;
-    let seenInit: RequestInit | undefined;
-    stubFetch(async (url, init) => {
-      seenUrl = String(url);
-      seenInit = init;
-      return fakeResponse(201, { crew: { crewId: "crew-1", name: "Sunday crew", joinCode: "ZZZ111", members: [{ golferId: "dave-g", name: "Dave", role: "member", claimed: true }] } });
-    });
-
-    const input: AddCrewMemberRequest = { golferId: golferId("dave-g") };
-    const result = await addCrewMember("tok-crew", crewId("crew-1"), input);
-
-    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/members`);
-    expect(seenInit?.method).toBe("POST");
-    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
-    expect(result.crew.members).toEqual([{ golferId: golferId("dave-g"), name: "Dave", role: "member", claimed: true }]);
   });
 });
 

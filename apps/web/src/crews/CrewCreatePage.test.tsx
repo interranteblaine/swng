@@ -67,7 +67,7 @@ describe("CrewCreatePage", () => {
   it("name → POST /crews with the bearer token → navigates to the new crew's page", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedCreateCrew.mockResolvedValue({ crew: { crewId: crewId("crew-1"), name: "Sunday crew", joinCode: "ZZZ111", members: [] } });
+    mockedCreateCrew.mockResolvedValue({ crew: { crewId: crewId("crew-1"), name: "Sunday crew", members: [] } });
 
     renderPage();
 

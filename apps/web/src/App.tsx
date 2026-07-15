@@ -8,6 +8,7 @@ import { CrewPage } from "./crews/CrewPage";
 import { ArchivedRoundPage } from "./round/ArchivedRoundPage";
 import { AuthCallbackPage } from "./routes/AuthCallbackPage";
 import { CreateRoundPage } from "./routes/CreateRoundPage";
+import { CrewJoinPage } from "./routes/CrewJoinPage";
 import { HomePage } from "./routes/HomePage";
 import { JoinRoundPage } from "./routes/JoinRoundPage";
 import { ProfilePage } from "./routes/ProfilePage";
@@ -64,6 +65,11 @@ export function App() {
             <Route path="/courses/new" element={<AddCoursePage />} />
             <Route path="/courses/:courseId/edit" element={<EditCoursePage />} />
             <Route path="/crews/new" element={<CrewCreatePage />} />
+            {/* Crew membership (invited in, accountable out — spec §2): the invite funnel — a
+                static segment, ranked ahead of the dynamic /crews/:crewId below by react-router
+                itself regardless of declaration order, but placed here too for the same
+                readability reason /crews/new already is. */}
+            <Route path="/crews/join" element={<CrewJoinPage />} />
             <Route path="/crews/:crewId" element={<CrewPage />} />
             <Route path="/join" element={<JoinRoundPage />} />
             <Route path="/round/:roundId" element={<RoundPage />} />

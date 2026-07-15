@@ -29,6 +29,7 @@ import {
   joinCrewResponseSchema,
   joinRoundRequestSchema,
   joinRoundResponseSchema,
+  mintCrewInviteResponseSchema,
   parse,
   recordScoreRequestSchema,
   recordScoreResponseSchema,
@@ -52,6 +53,7 @@ import type {
   GolferView,
   JoinCrewResponse,
   JoinRoundResponse,
+  MintCrewInviteResponse,
   RemoveCountedRoundResponse,
   SeasonStandingsResponse,
   ShareLinkResponse,
@@ -275,14 +277,27 @@ export const createCrewDirect = async (httpUrl: string, token: string, name: str
   return parse(createCrewResponseSchema, json);
 };
 
+// POST /crews/{crewId}/invites (crew membership, invited in, accountable out — spec §2): ANY
+// member mints a fresh 7-day HMAC invite token — the self-service counterpart to the deleted
+// permanent join code. crewSeason.spec.ts's step 8 (the late crew join) mints one as Al (the
+// crew's sole member through steps 5-7) and hands the token to joinCrewDirect below.
+export const mintCrewInviteDirect = async (httpUrl: string, token: string, id: CrewId): Promise<MintCrewInviteResponse> => {
+  const response = await fetch(`${httpUrl}/crews/${id}/invites`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /crews/${id}/invites -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(mintCrewInviteResponseSchema, json);
+};
+
 // POST /crews/join — the self-service counterpart to the deleted add-a-ghost-by-name path
-// (joinCrewByCode.ts's own doc comment): adds the CALLER's own account golfer as a member
-// (role "member"). crewSeason.spec.ts's step 8 (the late crew join) uses this to prove
-// membership is pure aggregation scope: Bo, a season-long non-member whose rounds were all
-// counted anyway, joins the crew by its own join code and his standings rows materialize on
-// the very next read — nothing about them was lost while he was a non-member.
-export const joinCrewDirect = async (httpUrl: string, token: string, code: string): Promise<JoinCrewResponse> => {
-  const body = parse(joinCrewRequestSchema, { code });
+// (joinCrewByInvite.ts's own doc comment): adds the CALLER's own account golfer as a member
+// (role "member") off an invite TOKEN (mintCrewInviteDirect above) — the permanent join code
+// this call used to carry is gone (crew membership, invited in, accountable out — spec §3).
+// crewSeason.spec.ts's step 8 (the late crew join) uses this to prove membership is pure
+// aggregation scope: Bo, a season-long non-member whose rounds were all counted anyway, joins
+// the crew by invite and his standings rows materialize on the very next read — nothing about
+// them was lost while he was a non-member.
+export const joinCrewDirect = async (httpUrl: string, token: string, inviteToken: string): Promise<JoinCrewResponse> => {
+  const body = parse(joinCrewRequestSchema, { token: inviteToken });
   const response = await fetch(`${httpUrl}/crews/join`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },

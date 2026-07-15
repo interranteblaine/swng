@@ -12,9 +12,10 @@ const fakeResponse = (status: number, body: unknown): Response => ({ ok: status 
 
 // ProfilePage's history lines are now react-router <Link>s (projection-realignment Task 6) —
 // every render needs a Router ancestor, same MemoryRouter-wrapping idiom WatchPage.test.tsx's
-// own renderWithAuth uses. A `/crews/:crewId` probe route is registered too (the crews section
-// moved here from HomePage — spec §11a) so the join-crew success hand-off can be asserted the
-// same "read the outgoing navigation via a stub" way HomePage.test.tsx's own crews suite did.
+// own renderWithAuth uses. A `/crews/:crewId` probe route is registered too since the crews
+// list itself renders real <Link>s to it (the crews section moved here from HomePage — spec
+// §11a) — kept even though nothing here clicks through it anymore (crew membership, invited in,
+// accountable out — spec §2/§3, deleted the join-by-code form that used to navigate there).
 function CrewProbe() {
   return <div data-testid="crew-probe">crew page probe</div>;
 }
@@ -217,8 +218,9 @@ describe("ProfilePage — signed in", () => {
 });
 
 // Moved here from HomePage (spec §11a, owner ruling: a crew is a grouping/competition only, off
-// the play surface) — same list/New-crew-link/join-by-code behavior and error copy HomePage's
-// own crews suite pinned before this move.
+// the play surface) — same list/New-crew-link behavior HomePage's own crews suite pinned before
+// this move. Crew membership (invited in, accountable out — spec §2/§3): the join-by-code form
+// is deleted whole — the "no join input" test below is this task's own structural pin.
 describe("ProfilePage — crews", () => {
   it("signed in: lists crews from GET /me/crews, each linking to its crew page", async () => {
     signIn();
@@ -266,37 +268,10 @@ describe("ProfilePage — crews", () => {
     expect(link.getAttribute("href")).toBe("/crews/new");
   });
 
-  it("join a crew: code entry → POST /crews/join → navigates to the crew page", async () => {
-    signIn();
-    let joinBody: unknown;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string, init?: RequestInit) => {
-        const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
-        if (path === "/me/record") return fakeResponse(200, { history: [] });
-        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/crews/join") {
-          joinBody = JSON.parse(String(init?.body));
-          return fakeResponse(200, { crew: { crewId: "crew-9", name: "Saturday crew", joinCode: "CRW999", members: [] } });
-        }
-        throw new Error(`unexpected fetch ${path}`);
-      }),
-    );
-
-    renderProfilePage();
-    await screen.findByText(/your crews/i);
-
-    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "crw999" } });
-    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
-
-    // Uppercased before it rides the wire (joinCrewRequestSchema's canonical 6-char form —
-    // JoinRoundPage's own code-input precedent).
-    await waitFor(() => expect(joinBody).toEqual({ code: "CRW999" }));
-    await screen.findByTestId("crew-probe");
-  });
-
-  it("an unknown code surfaces humanized copy, never the raw server text", async () => {
+  // Crew membership (invited in, accountable out — spec §2/§3): the permanent join code is
+  // gone — this is C-T3's own structural pin that the form (and the golfer-required alert arm
+  // that guarded it) never renders again, matching the proof-grep the task closes with.
+  it("no join-by-code input anywhere — an invite LINK (/crews/join) is the one way in now", async () => {
     signIn();
     vi.stubGlobal(
       "fetch",
@@ -305,7 +280,6 @@ describe("ProfilePage — crews", () => {
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
         if (path === "/me/record") return fakeResponse(200, { history: [] });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/crews/join") return fakeResponse(404, { code: "unknown-crew", message: 'no crew for join code "ZZZZZZ"' });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -313,69 +287,9 @@ describe("ProfilePage — crews", () => {
     renderProfilePage();
     await screen.findByText(/your crews/i);
 
-    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "ZZZZZZ" } });
-    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/no crew found with that code/i);
-    expect(screen.queryByText(/no crew for join code/i)).toBeNull();
+    expect(screen.queryByLabelText(/crew code/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /join crew/i })).toBeNull();
+    expect(screen.queryByText(/save your name in the form above first, then join the crew/i)).toBeNull();
   });
 
-  // Papercut 8: golfer-required means the signed-in account has no golfer profile yet — the
-  // join-code form collects no name, so retrying can never fix it. Post-wall this is a
-  // defensive arm only (AuthProvider's GET /me mints a golfer before the join form is usable),
-  // and it stops linking to the page it's already on — a "Go to profile" link from Profile
-  // itself was the self-link papercut. Instead it tells the caller to use the form above.
-  it("golfer-required tells the caller to save their name above — no link back to the page it's already on", async () => {
-    signIn();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: null });
-        if (path === "/me/record") return fakeResponse(200, { history: [] });
-        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/crews/join") return fakeResponse(400, { code: "golfer-required", message: "golfer row required for sub sub-1" });
-        throw new Error(`unexpected fetch ${path}`);
-      }),
-    );
-
-    renderProfilePage();
-    await screen.findByText(/your crews/i);
-
-    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "CRW999" } });
-    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toBe("Save your name in the form above first, then join the crew.");
-    expect(screen.queryByText(/sub sub-1/)).toBeNull();
-    expect(screen.queryByRole("link", { name: /go to profile/i })).toBeNull();
-  });
-
-  it("a short code never submits", async () => {
-    signIn();
-    let joinCalled = false;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: null });
-        if (path === "/me/record") return fakeResponse(200, { history: [] });
-        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/crews/join") {
-          joinCalled = true;
-          return fakeResponse(200, { crew: { crewId: "crew-9", name: "Saturday crew", joinCode: "CRW999", members: [] } });
-        }
-        throw new Error(`unexpected fetch ${path}`);
-      }),
-    );
-
-    renderProfilePage();
-    await screen.findByText(/your crews/i);
-
-    fireEvent.change(screen.getByLabelText(/crew code/i), { target: { value: "ABC" } });
-    fireEvent.click(screen.getByRole("button", { name: /join crew/i }));
-
-    expect(joinCalled).toBe(false);
-  });
 });

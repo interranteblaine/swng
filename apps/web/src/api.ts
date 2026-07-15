@@ -1,6 +1,5 @@
 import {
   abandonRoundResponseSchema,
-  addCrewMemberResponseSchema,
   addGameResponseSchema,
   addTeeSetResponseSchema,
   appendCountedRoundResponseSchema,
@@ -23,7 +22,9 @@ import {
   leaveRoundResponseSchema,
   listMyCrewsResponseSchema,
   listSeasonsResponseSchema,
+  mintCrewInviteResponseSchema,
   parse,
+  peekCrewInviteResponseSchema,
   peekRoundResponseSchema,
   removeCountedRoundResponseSchema,
   searchCoursesResponseSchema,
@@ -35,8 +36,6 @@ import {
 } from "@swng/contracts";
 import type {
   AbandonRoundResponse,
-  AddCrewMemberRequest,
-  AddCrewMemberResponse,
   AddGameRequest,
   AddGameResponse,
   AddTeeSetRequest,
@@ -66,6 +65,9 @@ import type {
   LeaveRoundResponse,
   ListMyCrewsResponse,
   ListSeasonsResponse,
+  MintCrewInviteResponse,
+  PeekCrewInviteRequest,
+  PeekCrewInviteResponse,
   PeekRoundResponse,
   RemoveCountedRoundResponse,
   SearchCoursesResponse,
@@ -74,11 +76,12 @@ import type {
   StartRoundRequest,
   StartRoundResponse,
   TerminateGameResponse,
+  TransferOrganizerRequest,
   UpdateMeRequest,
   VerifyTeeSetRequest,
   VerifyTeeSetResponse,
 } from "@swng/contracts";
-import type { CourseId, CrewId, GameId, RoundId } from "@swng/domain";
+import type { CourseId, CrewId, GameId, GolferId, RoundId } from "@swng/domain";
 import { config } from "./config";
 
 export class ApiError extends Error {
@@ -301,7 +304,12 @@ export const createCrew = async (token: string, input: CreateCrewRequest): Promi
   return parse(createCrewResponseSchema, json);
 };
 
-export const joinCrew = async (token: string, input: JoinCrewRequest): Promise<JoinCrewResponse> => {
+// Crew membership (invited in, accountable out — spec §2/§3): joins the CALLER's own account
+// golfer off an expiring invite token — replaces the deleted permanent join-code path outright.
+// `input.token` is the invite token (from the link's own URL fragment, CrewJoinPage), never
+// confused with this function's own bearer `token` param — same two-tokens-in-one-call shape
+// mintCrewInvite's response/consumption split already has on the wire.
+export const joinCrewByInvite = async (token: string, input: JoinCrewRequest): Promise<JoinCrewResponse> => {
   const json = await requestJson("/crews/join", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
   return parse(joinCrewResponseSchema, json);
 };
@@ -311,9 +319,35 @@ export const listMyCrews = async (token: string): Promise<ListMyCrewsResponse> =
   return parse(listMyCrewsResponseSchema, json);
 };
 
-export const addCrewMember = async (token: string, id: CrewId, input: AddCrewMemberRequest): Promise<AddCrewMemberResponse> => {
-  const json = await requestJson(`/crews/${id}/members`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
-  return parse(addCrewMemberResponseSchema, json);
+// Crew membership (invited in, accountable out — spec §2): mints a fresh 7-day invite link —
+// ANY member may call this (mirrors mintCrewInvite.ts's own "any member invites" doc comment).
+// CrewPage composes `${location.origin}/crews/join#${token}` from the response, ShareButton's
+// exact idiom for the round-share link.
+export const mintCrewInvite = async (token: string, id: CrewId): Promise<MintCrewInviteResponse> => {
+  const json = await requestJson(`/crews/${id}/invites`, { method: "POST", token });
+  return parse(mintCrewInviteResponseSchema, json);
+};
+
+// Crew membership (invited in, accountable out — spec §2): the capability-scoped preview a
+// would-be joiner sees BEFORE signing in — auth "none" (never a bearer token), same "none"-auth
+// shape as peekRound above. CrewJoinPage's consent card is built from this alone.
+export const peekCrewInvite = async (input: PeekCrewInviteRequest): Promise<PeekCrewInviteResponse> => {
+  const json = await requestJson("/crews/peek", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+  return parse(peekCrewInviteResponseSchema, json);
+};
+
+// Crew membership (invited in, accountable out — spec §1): the organizer's authority. No request
+// schema — the target golferId rides the path (removeCrewMember.ts's own doc comment) — and both
+// return the crew's own updated GetCrewResponse, the same shape createCrew/getCrew/joinCrewByInvite
+// already return.
+export const removeCrewMember = async (token: string, id: CrewId, targetGolferId: GolferId): Promise<GetCrewResponse> => {
+  const json = await requestJson(`/crews/${id}/members/${targetGolferId}`, { method: "DELETE", token });
+  return parse(getCrewResponseSchema, json);
+};
+
+export const transferOrganizer = async (token: string, id: CrewId, input: TransferOrganizerRequest): Promise<GetCrewResponse> => {
+  const json = await requestJson(`/crews/${id}/transfer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
+  return parse(getCrewResponseSchema, json);
 };
 
 // Architecture-realignment Task 11: crew seasons + counted rounds + standings-on-read + leave —

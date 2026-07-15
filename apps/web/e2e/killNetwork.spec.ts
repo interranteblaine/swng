@@ -62,7 +62,7 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
   test("1: A creates the round as Ann; B joins as Bo; both score hole 1 and see each other live over WS", async () => {
     await pageA.goto("/create");
     await pageA.getByLabel("Course", { exact: true }).fill(fixtureLinks.courseName);
-    const result = pageA.getByRole("button", { name: fixtureLinks.courseName, exact: true }).first();
+    const result = pageA.getByRole("button", { name: `${fixtureLinks.courseName} · ${fixtureLinks.teeSets[0]!.holes.length} holes`, exact: true }).first(); // CourseSearch renders "name · N holes"
     await expect(result).toBeVisible();
     await result.click();
     // No name entry: the create form renders "Playing as Ann" from the account's own record.
@@ -167,7 +167,7 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
   test("1: Ann creates a solo round and scores hole 1 online — a normal baseline", async () => {
     await page.goto("/create");
     await page.getByLabel("Course", { exact: true }).fill(fixtureLinks.courseName);
-    const result = page.getByRole("button", { name: fixtureLinks.courseName, exact: true }).first();
+    const result = page.getByRole("button", { name: `${fixtureLinks.courseName} · ${fixtureLinks.teeSets[0]!.holes.length} holes`, exact: true }).first(); // CourseSearch renders "name · N holes"
     await expect(result).toBeVisible();
     await result.click();
     // No name entry: "Playing as Ann" comes from the account's own record.

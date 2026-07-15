@@ -82,7 +82,7 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
     await expect(page).toHaveURL(/\/create/);
 
     await page.getByLabel("Course", { exact: true }).fill(courseName);
-    const result = page.getByRole("button", { name: courseName, exact: true }).first();
+    const result = page.getByRole("button", { name: `${courseName} · ${card.teeSets[0]!.holes.length} holes`, exact: true }).first(); // CourseSearch renders "name · N holes"
     await expect(result).toBeVisible();
     await result.click();
 

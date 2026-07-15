@@ -107,7 +107,12 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // M6: CourseSearch replaced the old fixture <select> — search by name (ensureCourse above
     // guarantees exactly one real course record answers to it) and tap the one result.
     await pageA.getByLabel("Course", { exact: true }).fill(fixtureLinks18.courseName);
-    const result = pageA.getByRole("button", { name: fixtureLinks18.courseName, exact: true }).first();
+    // Course-cards arc: CourseSearch renders "name · N holes" — match the FULL accessible name
+    // (exact) with the count derived from the fixture card itself, so a shorter course name
+    // that prefixes another (e.g. "Fixture Links" vs "Fixture Links 18") can never cross-match.
+    const result = pageA
+      .getByRole("button", { name: `${fixtureLinks18.courseName} · ${fixtureLinks18.teeSets[0]!.holes.length} holes`, exact: true })
+      .first();
     await expect(result).toBeVisible();
     await result.click();
     // No name entry: the create form renders "Playing as Ann" from the account's own record —
@@ -426,7 +431,10 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
   test("1: Pat creates a throwaway round on fixtureLinks18; Quinn joins as himself over a direct HTTP fetch", async () => {
     await page.goto("/create");
     await page.getByLabel("Course", { exact: true }).fill(fixtureLinks18.courseName);
-    const result = page.getByRole("button", { name: fixtureLinks18.courseName, exact: true }).first();
+    // Full "name · N holes" accessible name — see the M5 block's own comment above.
+    const result = page
+      .getByRole("button", { name: `${fixtureLinks18.courseName} · ${fixtureLinks18.teeSets[0]!.holes.length} holes`, exact: true })
+      .first();
     await expect(result).toBeVisible();
     await result.click();
     // No name entry: "Playing as Pat" renders from the account's own record.

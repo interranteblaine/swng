@@ -276,3 +276,34 @@ accounts-only funnel landed. Pre-existing class, not arc-introduced; both sites 
 Wanted shape: one shared name-prompt component (or at least a shared error-humanizing arm), so
 the copy discipline and the duplication get fixed by the same change. Surfacing sites:
 `CrewJoinPage.tsx` NamePrompt error arm, `JoinRoundPage.tsx` name-prompt error arm.
+
+### 13. Dead `refreshedCourse` plumbing pins a return-flow that no longer exists
+
+From the course-cards arc's final review (2026-07-15). `CreateRoundPage.tsx`'s location-state
+effect still handles `state.refreshedCourse`, `handleCourseRefreshed` still threads into
+`CourseSummaryCard`'s `onCourseRefreshed` prop, and a green test still pins the "edit-flow
+return hand-off" — but the new EditCoursePage navigates to `/courses/${id}` on success and
+never back to `/create` with that state. Nothing sets the key; the comment claiming T6 would
+restore it is false. Harmless at runtime (worst case a stale history entry replays an
+old-shape CourseView and the server 400s), but a fresh reader is misled and the test asserts
+a flow with no production setter. Wanted shape: delete the effect arm, the state key, the
+handler thread, and the zombie test — or a real editor return-flow if one is ever wanted.
+
+### 14. The add-tee editor's 409 re-seed discards a fully-typed new tee
+
+From the course-cards arc's final review (2026-07-15). `EditCoursePage.tsx`'s
+`card-superseded` handler re-seeds the whole form from the fresh card — correct for edits
+(the base changed under you), but in add-tee mode it blanks the new tee's name/rating/slope
+and all ~30 typed grid cells even though the new tee conflicts with nothing that changed.
+Spec-conforming and the race is rare (concurrent maintenance on one course). Wanted shape:
+preserve the in-progress new-tee column across the re-seed; refresh only the pass-through
+tees and `supersedes`.
+
+### 15. Stale M6-course-aggregate analogy comments survive the deletion
+
+From the course-cards arc's final review (2026-07-15). Comment-only: `ports/golferStore.ts`
+("mirrors CourseStore (courseStore.ts)" — deleted file), `ports/crewStore.ts:32`,
+`retryOnConflict.ts:12`, `crews/crewSlice.test.ts` ("createFlakyCourseStore harness"),
+`createDynamoCrewStore.ts:43`, and `CourseSummaryCardProps.onChangeCourse`'s "Absent on
+AddCoursePage's own post-add summary" (that page no longer renders the component). Sweep
+opportunistically next time each file is touched.

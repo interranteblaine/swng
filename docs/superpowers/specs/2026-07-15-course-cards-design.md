@@ -171,6 +171,16 @@ at join; names are stable within an immutable card by construction).
 **untouched**. The only change the round side sees is the pair of optional identity
 fields (`CourseCard.source`, `TeeSet.teeId`) on types it already imports.
 
+**The frozen card governs the day — it is not editable mid-round.** The paper-golf rule:
+a misprinted club card still governs the Saturday game; everyone plays the same numbers
+and the pro shop fixes it for next week. Wrong *yardage* discovered mid-round feeds no
+math at all — correct the course record whenever, today's round is unaffected. Wrong
+*par/SI* caught early → scrap, fix, recreate (the existing escape hatch); caught late →
+the day finishes on the card it started on, the course record gets corrected for next
+time, and the archive honestly records the exact card the game was scored against. A
+mid-round correction, if grass-time ever demands it, is designable *inside* this model as
+a round event (§12) — never as a backdoor into the course store.
+
 ### Course routes (37 → 36 HTTP; 38 total with WS)
 
 | Route | Auth | Body | Notes |
@@ -403,6 +413,12 @@ Decisions made with eyes open, each with its revisit trigger:
 - **Import (GHIN-style course data)** — an importer is a card factory: it emits cards
   with `provenance: "imported"`. The imported ontology reshapes the course store then;
   rounds don't care. *Trigger:* the decision to scale beyond community entry.
+- **Mid-round card correction** — a wrong par/SI that survives the scrap window and
+  materially garbles a game would be fixed by a *round event* (numbers-only, never tee
+  names, HLC-latest-wins), re-deriving standings through the fold exactly as a score
+  correction already moves a settled skin — the round stays self-contained; the course
+  store is never re-read. *Trigger:* a real Saturday where the paper-golf rule ("the
+  card you teed off under governs the day") isn't good enough.
 - **Verification with real semantics** — see §8. *Trigger:* a trust problem community
   attribution can't absorb.
 - **Steward moderation of course edits** — v1 is immediate-with-audit. *Trigger:* scale

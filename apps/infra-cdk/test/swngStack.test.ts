@@ -977,3 +977,95 @@ describe("SwngStack", () => {
     });
   });
 });
+
+// Task D-T1 (docs/.../task-D-T1-brief.md): beta.swng.golf — the optional `web` prop. This is a
+// SECOND, deliberate `Template.fromStack` (the file's own comment on `template` above flags
+// synthesis as this suite's expensive part specifically because it's normally shared across
+// every `it`) — the `web` prop changes cert/alias/Cognito-URL output in ways that would either
+// contaminate the shared prop-less `template` above or require every one of ITS assertions to
+// branch on a prop it was built to prove is byte-identical without. Paying synth once more here,
+// scoped to this one describe, keeps that proof intact: `template` above (and the rest of the
+// file) stays completely unmodified, and its continued green run IS the "absent web prop ⇒
+// byte-identical synth" pin the plan calls for.
+describe("SwngStack with a configured web domain (Task D-T1: beta.swng.golf)", () => {
+  const WEB_BETA = { domainName: "beta.swng.golf", hostedZoneId: "Z00936512AJC1HGD9M7B7", zoneName: "swng.golf" };
+  const webTemplate = Template.fromStack(new SwngStack(new App(), "swng-beta", { stage: "beta", web: WEB_BETA }));
+
+  // Same resolve-the-real-logical-id idiom as `findLogicalId` above, generalized over which
+  // template it queries (that helper is closed over the shared prop-less `template`).
+  const findLogicalIdIn = (tpl: Template, resourceType: string, predicate?: (properties: Record<string, unknown>) => boolean): string => {
+    const resources = tpl.findResources(resourceType);
+    const entry = predicate ? Object.entries(resources).find(([, resource]) => predicate(resource.Properties)) : Object.entries(resources)[0];
+    expect(entry, `no ${resourceType} resource found matching the predicate`).toBeDefined();
+    return entry![0];
+  };
+
+  // Global Constraints: the POC's existing issued cert for beta.swng.golf is NOT reused — this
+  // stack mints its own, independent of the POC's lifecycle. DNS validation against the pinned
+  // zone; ACM's validation CNAME is per-account-per-domain identical to the one the POC's own
+  // cert already satisfies, so this cert validates with no new manual DNS step.
+  it("mints its own ACM certificate for beta.swng.golf, DNS-validated in the pinned zone", () => {
+    webTemplate.resourceCountIs("AWS::CertificateManager::Certificate", 1);
+    webTemplate.hasResourceProperties("AWS::CertificateManager::Certificate", {
+      DomainName: "beta.swng.golf",
+      ValidationMethod: "DNS",
+      DomainValidationOptions: [{ DomainName: "beta.swng.golf", HostedZoneId: "Z00936512AJC1HGD9M7B7" }],
+    });
+  });
+
+  it("the distribution's Aliases carries beta.swng.golf and its ViewerCertificate references the minted certificate", () => {
+    const certLogicalId = findLogicalIdIn(webTemplate, "AWS::CertificateManager::Certificate");
+    webTemplate.hasResourceProperties("AWS::CloudFront::Distribution", {
+      DistributionConfig: Match.objectLike({
+        Aliases: ["beta.swng.golf"],
+        ViewerCertificate: Match.objectLike({ AcmCertificateArn: { Ref: certLogicalId } }),
+      }),
+    });
+  });
+
+  // The distribution's own logical id must not change even once the web prop is set — an id
+  // change would replace the resource (a new physical distribution, a new cloudfront.net URL),
+  // which the plan's own Global Constraints forbids (other docs/tests reference the existing
+  // cloudfront.net URL as a stable fact).
+  it("the distribution's construct id is still \"WebDistribution\" (in-place alias/cert update, never a replacement)", () => {
+    const distributions = webTemplate.findResources("AWS::CloudFront::Distribution");
+    expect(Object.keys(distributions).some((id) => id.startsWith("WebDistribution"))).toBe(true);
+    webTemplate.resourceCountIs("AWS::CloudFront::Distribution", 1);
+  });
+
+  it("Route 53 A and AAAA alias records for beta.swng.golf. target the distribution, in the pinned hosted zone", () => {
+    const distributionLogicalId = findLogicalIdIn(webTemplate, "AWS::CloudFront::Distribution");
+    const sharedProps = {
+      AliasTarget: Match.objectLike({ DNSName: { "Fn::GetAtt": [distributionLogicalId, "DomainName"] } }),
+      HostedZoneId: "Z00936512AJC1HGD9M7B7",
+      Name: "beta.swng.golf.",
+    };
+    webTemplate.hasResourceProperties("AWS::Route53::RecordSet", { ...sharedProps, Type: "A" });
+    webTemplate.hasResourceProperties("AWS::Route53::RecordSet", { ...sharedProps, Type: "AAAA" });
+    webTemplate.resourceCountIs("AWS::Route53::RecordSet", 2);
+  });
+
+  // Additive, not a swap: dev (localhost) and the existing cloudfront.net origin (M9 Task 6)
+  // must both keep working once the custom domain is added — the SAME UserPoolClient, one more
+  // pair of entries in the same L1 arrays.
+  it("Cognito callback/logout URLs gain the domain's entries ALONGSIDE the distribution-domain and localhost entries", () => {
+    webTemplate.resourceCountIs("AWS::Cognito::UserPoolClient", 1);
+    const clients = webTemplate.findResources("AWS::Cognito::UserPoolClient");
+    const props = Object.values(clients)[0]!.Properties as Record<string, unknown>;
+    const callbackUrls = JSON.stringify(props.CallbackURLs);
+    const logoutUrls = JSON.stringify(props.LogoutURLs);
+    const distributionLogicalId = findLogicalIdIn(webTemplate, "AWS::CloudFront::Distribution");
+
+    expect(callbackUrls).toContain("http://localhost:5173/auth/callback");
+    expect(callbackUrls).toContain(distributionLogicalId);
+    expect(callbackUrls).toContain("https://beta.swng.golf/auth/callback");
+
+    expect(logoutUrls).toContain("http://localhost:5173/");
+    expect(logoutUrls).toContain(distributionLogicalId);
+    expect(logoutUrls).toContain("https://beta.swng.golf/");
+  });
+
+  it("outputs WebDomainUrl when a web domain is configured", () => {
+    webTemplate.hasOutput("WebDomainUrl", { Value: "https://beta.swng.golf/" });
+  });
+});

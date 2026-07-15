@@ -5,12 +5,15 @@ import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
 import { AttributeType, BillingMode, Operation, ProjectionType, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
 import { CfnRoute, CfnStage, CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration, WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
+import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
 import { CfnUserPoolClient, OAuthScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
 import { Distribution, ResponseHeadersPolicy, ViewerProtocolPolicy } from "aws-cdk-lib/aws-cloudfront";
 import { S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
 import { DynamoEventSource, SqsDlq } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import { ARecord, AaaaRecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
+import { CloudFrontTarget } from "aws-cdk-lib/aws-route53-targets";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import { BlockPublicAccess, Bucket } from "aws-cdk-lib/aws-s3";
 import { Topic } from "aws-cdk-lib/aws-sns";
@@ -30,6 +33,14 @@ export interface SwngStackProps extends StackProps {
   // WebSocket stage). Defaults to "beta" — swng has no "prod" stack yet (M3 scope is beta
   // only; CLAUDE.md).
   readonly stage?: string;
+  // Task D-T1 (custom domain): the first real per-stage D5-style config, supplied by
+  // bin/infra-cdk.ts's own STAGE_WEB table — never a `stage === "prod"`-shaped branch inside
+  // this stack. hostedZoneId/zoneName identify an ALREADY-PROVISIONED Route 53 zone this stack
+  // imports (not owns); domainName is the alias this stack mints a cert for and claims via
+  // Route 53 alias records. OPTIONAL and absent today for every stage but beta: when absent,
+  // this stack synthesizes byte-identical to before this prop existed — pinned by the existing
+  // test suite's shared prop-less template continuing to pass unmodified.
+  readonly web?: { readonly domainName: string; readonly hostedZoneId: string; readonly zoneName: string };
 }
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
@@ -795,6 +806,26 @@ export class SwngStack extends Stack {
       },
     });
 
+    // --- Custom domain (Task D-T1): cert + hosted zone, only when a domain is configured ---
+    //
+    // webDomain comes from the per-stage config table in bin/infra-cdk.ts (D5's shape,
+    // starting here) — nothing in this stack branches on the stage NAME itself. hostedZone is
+    // IMPORTED, not created: swng.golf's zone already exists (and, until D-T2's controller-run
+    // handover, still holds the POC's own beta.swng.golf A record — Global Constraints) — this
+    // stack only ever appends its own alias records into it below, never claims ownership.
+    const webDomain = props?.web;
+    const hostedZone = webDomain
+      ? HostedZone.fromHostedZoneAttributes(this, "WebZone", { hostedZoneId: webDomain.hostedZoneId, zoneName: webDomain.zoneName })
+      : undefined;
+    // A BRAND NEW certificate — the POC's own already-issued cert for beta.swng.golf is
+    // deliberately NOT referenced or reused (Global Constraints: lifecycle independence — this
+    // stack's cert must be destroyable/replaceable without any dependency on the POC's own
+    // resources). DNS validation UPSERTs its validation CNAME into the hosted zone; ACM's
+    // per-account-per-domain validation record is identical to the one the POC's cert already
+    // satisfies, so this cert validates immediately with no new manual DNS step required.
+    const webCertificate =
+      webDomain && hostedZone ? new Certificate(this, "WebCertificate", { domainName: webDomain.domainName, validation: CertificateValidation.fromDns(hostedZone) }) : undefined;
+
     const distribution = new Distribution(this, "WebDistribution", {
       defaultRootObject: "index.html",
       defaultBehavior: {
@@ -815,7 +846,27 @@ export class SwngStack extends Stack {
         { httpStatus: 403, responseHttpStatus: 200, responsePagePath: "/index.html" },
         { httpStatus: 404, responseHttpStatus: 200, responsePagePath: "/index.html" },
       ],
+      // Task D-T1: the alias + its cert, ONLY when a domain is configured — the distribution's
+      // OWN cloudfront.net URL (WebUrl output below) keeps resolving regardless (Global
+      // Constraints: aliases are additive, never a replacement of the default domain). Spread
+      // idiom, not a second Distribution prop object, so the construct's logical id (and
+      // therefore its physical distribution / cloudfront.net URL) never changes because of this
+      // prop being set or unset.
+      ...(webDomain && webCertificate ? { domainNames: [webDomain.domainName], certificate: webCertificate } : {}),
     });
+
+    // The alias records themselves — A (IPv4) and AAAA (IPv6; CloudFront is dual-stack, so
+    // omitting this would leave IPv6 clients unable to resolve the domain at all), both alias-
+    // targeting the distribution built just above. D-T2 (the controller-run live handover)
+    // releases the alias from the POC's own distribution and deletes the POC's existing
+    // beta.swng.golf A record BEFORE this stack's first real deploy of these records — until
+    // then, a deploy would fail CNAMEAlreadyExists (Global Constraints) — but that sequencing
+    // is a live, controller-run act, not stack code.
+    if (webDomain && hostedZone) {
+      const webAliasTarget = RecordTarget.fromAlias(new CloudFrontTarget(distribution));
+      new ARecord(this, "WebAliasA", { zone: hostedZone, recordName: webDomain.domainName, target: webAliasTarget });
+      new AaaaRecord(this, "WebAliasAaaa", { zone: hostedZone, recordName: webDomain.domainName, target: webAliasTarget });
+    }
 
     // The distribution's domain is only known here — it's built from httpApi/webSocketStage
     // (constructed earlier, above), so it can't be folded into userPoolClient's ORIGINAL
@@ -827,11 +878,20 @@ export class SwngStack extends Stack {
     // Task 2's own logoutUrls change already relied on), never a reconstruction. The existing
     // localhost entries stay untouched so dev keeps working.
     const cfnUserPoolClient = userPoolClient.node.defaultChild as CfnUserPoolClient;
+    // Task D-T1: when a custom domain is configured, its callback/logout entries are APPENDED
+    // onto these SAME arrays too — alongside localhost and the distribution-domain entries
+    // above, never in place of them, so dev and the plain cloudfront.net URL both keep working
+    // once beta.swng.golf goes live.
     cfnUserPoolClient.callbackUrLs = [
       ...webOrigins.map((origin) => `${origin}/auth/callback`),
       `https://${distribution.distributionDomainName}/auth/callback`,
+      ...(webDomain ? [`https://${webDomain.domainName}/auth/callback`] : []),
     ];
-    cfnUserPoolClient.logoutUrLs = [...webOrigins.map((origin) => `${origin}/`), `https://${distribution.distributionDomainName}/`];
+    cfnUserPoolClient.logoutUrLs = [
+      ...webOrigins.map((origin) => `${origin}/`),
+      `https://${distribution.distributionDomainName}/`,
+      ...(webDomain ? [`https://${webDomain.domainName}/`] : []),
+    ];
 
     // --- Outputs ----------------------------------------------------------------------
 
@@ -844,5 +904,10 @@ export class SwngStack extends Stack {
     new CfnOutput(this, "WebBucketName", { value: webBucket.bucketName });
     new CfnOutput(this, "DistributionId", { value: distribution.distributionId });
     new CfnOutput(this, "WebUrl", { value: `https://${distribution.distributionDomainName}/` });
+    // Task D-T1: only emitted when a custom domain is configured — the plain cloudfront.net
+    // WebUrl above always exists regardless.
+    if (webDomain) {
+      new CfnOutput(this, "WebDomainUrl", { value: `https://${webDomain.domainName}/` });
+    }
   }
 }

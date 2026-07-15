@@ -15,7 +15,7 @@
 - **Expiry:** `CREW_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000`, applied in `mintCrewInvite` from the `Clock` port (`clock.now() + CREW_INVITE_TTL_MS`). `verify()` must reject an expired crew-invite (confirm/extend the issuer's existing participant-exp handling — the M4-era participant tokens carry `exp`).
 - **Inviter-still-member is checked at BOTH peek and join.** Already-a-member join stays a no-op success (joinCrewByCode's existing arm).
 - Error codes exact: `crew-invite-expired`, `crew-invite-invalid`, `organizer-must-transfer`, `not-organizer`. Web copy exact (M7 never-raw discipline): expired → "This invite link has expired — ask your crew for a fresh one."; invalid → "This invite link isn't valid — ask your crew for a fresh one."
-- Consent screen copy exact: heading `Join {crewName}?`, line `{memberCount} members · invited by {inviterName}`.
+- Consent screen copy exact: heading `Join {crewName}?`, line `{memberCount} members · invited by {inviterName}`. (Corrected at C-T5: singular-aware `member`/`members` — the C-T3 review caught that this literal renders "1 members" on the solo-founder card, the commonest consent screen there is.)
 - **Deletions are TOTAL** (closing proof-greps, C-T5): `grep -rn "joinCode\|join-code\|findByJoinCode\|joinCrewByCode\|addCrewMember\|join-code-exhausted" packages/ apps/web/src/ --include="*.ts" --include="*.tsx"` → zero outside git history. CrewCreatePage untouched.
 - Data: NO tolerate machinery, NO migrations — C-T5 deletes all beta crew items before gates run.
 - Every task: `pnpm validate` green before commit; tasks touching adapters-dynamodb also `pnpm test:contract`. Deploys controller-only (swng-beta; never `InfraCdkStack-*`). No pushes.

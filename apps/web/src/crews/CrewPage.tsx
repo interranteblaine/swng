@@ -323,7 +323,12 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                         </button>
                         <button
                           type="button"
-                          onClick={() => setMemberAction(undefined)}
+                          onClick={() => {
+                            // A dismissed action's failure must not haunt the NEXT row's dialog
+                            // (review minor, C-T3): the error belongs to the attempt, not the panel.
+                            setMemberAction(undefined);
+                            setMemberActionError(undefined);
+                          }}
                           disabled={memberActionBusy}
                           className="rounded-md bg-slate-800 px-2 py-1 text-slate-300 disabled:opacity-50"
                         >
@@ -340,14 +345,20 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                     <span className="flex items-center gap-3">
                       <button
                         type="button"
-                        onClick={() => setMemberAction({ type: "remove", golferId: member.golferId, name: member.name })}
+                        onClick={() => {
+                          setMemberAction({ type: "remove", golferId: member.golferId, name: member.name });
+                          setMemberActionError(undefined);
+                        }}
                         className="text-red-400 underline"
                       >
                         Remove…
                       </button>
                       <button
                         type="button"
-                        onClick={() => setMemberAction({ type: "transfer", golferId: member.golferId, name: member.name })}
+                        onClick={() => {
+                          setMemberAction({ type: "transfer", golferId: member.golferId, name: member.name });
+                          setMemberActionError(undefined);
+                        }}
                         className="text-emerald-400 underline"
                       >
                         Make organizer…

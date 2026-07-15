@@ -117,7 +117,7 @@ function ConsentCard({ peek, token }: { readonly peek: PeekCrewInviteResponse; r
       <div>
         <h1 className="text-2xl font-bold">Join {peek.crewName}?</h1>
         <p className="text-slate-400">
-          {peek.memberCount} members · invited by {peek.inviterName}
+          {peek.memberCount} member{peek.memberCount === 1 ? "" : "s"} · invited by {peek.inviterName}
         </p>
       </div>
 

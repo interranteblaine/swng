@@ -359,10 +359,10 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     const afterRemoval = await removeCrewMemberDirect(httpUrl, al.tokens.idToken, crewId, ids.bo);
     expect(afterRemoval.crew.members.map((member) => member.golferId)).toEqual([ids.al]);
 
-    const removedMemberIds = new Set<GolferId>([ids.al]);
+    const remainingMemberIds = new Set<GolferId>([ids.al]);
     const standingsAfterRemoval = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    expect(standingsAfterRemoval.ledger).toEqual(expectedStandingLines(frozen.ledger, removedMemberIds));
-    expect(standingsAfterRemoval.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, removedMemberIds));
+    expect(standingsAfterRemoval.ledger).toEqual(expectedStandingLines(frozen.ledger, remainingMemberIds));
+    expect(standingsAfterRemoval.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, remainingMemberIds));
 
     // Getting back in takes a FRESH invite — the permanent join code this file swapped away
     // from (C-T3) has no comeback, and neither does the one Bo used in step 8; it already spent

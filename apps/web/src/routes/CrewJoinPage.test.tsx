@@ -148,6 +148,16 @@ describe("CrewJoinPage — the consent card", () => {
     expect(screen.getByText("8 members · invited by Al")).toBeTruthy();
   });
 
+  // The solo-founder crew is the commonest consent card there is (a brand-new crew's first
+  // invite) — it must not read "1 members" (C-T3 review minor, fixed at C-T5).
+  it("a one-member crew reads '1 member', singular", async () => {
+    mockedPeekCrewInvite.mockResolvedValue({ ...peekResponse, memberCount: 1 });
+
+    renderJoin("/crews/join#tok-1");
+
+    expect(await screen.findByText("1 member · invited by Al")).toBeTruthy();
+  });
+
   it("passes the token through to peekCrewInvite", async () => {
     mockedPeekCrewInvite.mockResolvedValue(peekResponse);
 

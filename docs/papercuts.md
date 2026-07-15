@@ -308,17 +308,25 @@ From the course-cards arc's final review (2026-07-15). Comment-only: `ports/golf
 AddCoursePage's own post-add summary" (that page no longer renders the component). Sweep
 opportunistically next time each file is touched.
 
-### 16. Unrated tees can't be entered — the form forces fabricated rating/slope into the index
+### 16. Unrated courses are UNUSABLE — a real product gap, design session required
 
-Owner-raised (2026-07-15, during the course-cards rollout). Validation requires rating
+Owner-raised (2026-07-15, during the course-cards rollout), then escalated same day with a
+field report: the owner played a 9-hole unrated course — a favorite pre-work spot — and the
+app was unusable for it. This is a real gap under "for the golf you actually play," not a
+polish item. **Owner ruling: needs a proper design session; the sketch below is a
+dependency analysis, NOT the design.** The session should cover what "usable" means
+end-to-end for casual/unrated golf — entry, join, games, what the history line and profile
+show for non-posting rounds, and the adjacent SI-less-card half (dots allocation breaks
+without SI; gross-only games or allocate-by-agreement is a product decision). Deliberately
+queued until AFTER the course-cards workstream closes.
+
+Dependency facts (verified in code, for the future session): validation requires rating
 30–90 and slope 55–155, so a course with no published rating (par-3, executive, many
 9-holers) can only be entered by inventing numbers — which flow silently into WHS
 differentials and the handicap index. Rating/slope feed EXACTLY one computation (the
 differential); games/dots/scoring use the golfer-typed course handicap + stroke index and
 never touch them, and `GolferRoundLine` already supports absent ags/differential (the
-"incomplete" path). Wanted shape, matching the real WHS rule that unrated courses don't
-post: `TeeSet.rating?/slope?` optional ("unrated"), bounds enforced iff present,
-`handicappingFor` yields no differential on unrated tees, blank-allowed form fields, an
-"unrated" badge. Small additive arc; zero contact with sealed rounds or card identity.
+"incomplete" path). The real-WHS anchor: unrated courses don't post. Whatever the design,
+it has zero contact with sealed rounds or card identity.
 Adjacent-but-different: SI-less cards would break dots allocation — that half needs a
 product decision (gross-only games?), not just optionality; explicitly out of this entry.

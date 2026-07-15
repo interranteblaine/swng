@@ -91,6 +91,16 @@ describe("getMyRecordResponseSchema", () => {
   it("round-trips an entirely empty record", () => {
     roundTrips(getMyRecordResponseSchema, { history: [] });
   });
+
+  // course-cards spec §4: courseId (the analytics join key) is OPTIONAL on a history line —
+  // pre-scrap lines carry none, tolerated as absent.
+  it("round-trips a history line carrying courseId", () => {
+    roundTrips(getMyRecordResponseSchema, { history: [{ ...completeLine, courseId: courseId("course-1") }] });
+  });
+
+  it("round-trips a pre-scrap history line with no courseId", () => {
+    roundTrips(getMyRecordResponseSchema, { history: [completeLine] });
+  });
 });
 
 // accounts-only identity spec §5: createdAt (the "course + date" designation) is OPTIONAL on both
@@ -103,6 +113,16 @@ describe("getMyRoundsResponseSchema", () => {
   });
 
   it("round-trips a legacy round line with no createdAt", () => {
+    roundTrips(getMyRoundsResponseSchema, { rounds: [{ ...line, finalizedAt: 2_000 }] });
+  });
+
+  // course-cards spec §4: courseId is OPTIONAL here too — same carried-or-absent tolerance as
+  // getMyRecordResponseSchema's history lines above.
+  it("round-trips a round line carrying courseId", () => {
+    roundTrips(getMyRoundsResponseSchema, { rounds: [{ ...line, courseId: courseId("course-1"), finalizedAt: 2_000 }] });
+  });
+
+  it("round-trips a pre-scrap round line with no courseId", () => {
     roundTrips(getMyRoundsResponseSchema, { rounds: [{ ...line, finalizedAt: 2_000 }] });
   });
 });

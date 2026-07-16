@@ -885,7 +885,8 @@ export const waitForFinalOrRecover = async (page: Page, routeHandle: WsRouteHand
 // a <select> includes the currently-DISPLAYED option's own text (e.g. "CourseFixture Links",
 // the label's own text concatenated with the collapsed dropdown's visible value), not just the
 // label's literal text, so an exact match against just "Course" finds nothing and a substring
-// match over-matches (e.g. "Course" also substring-matches "Course handicap"). getByRole's
+// match over-matches (e.g. "Course" also substring-matches "Course name", another real label).
+// getByRole's
 // accessible-name computation for the CONTROL itself doesn't have this contamination — the
 // combobox's own name is cleanly "Course", excluding its own displayed option text.
 export const gameKindSelect = (page: Page) => page.getByRole("combobox", { name: "Kind", exact: true });

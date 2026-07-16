@@ -66,7 +66,7 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     await expect(result).toBeVisible();
     await result.click();
     // No name entry: the create form renders "Playing as Ann" from the account's own record.
-    await pageA.getByLabel("Course handicap").fill("8");
+    await pageA.getByLabel("Strokes you get here").fill("8");
     await pageA.getByRole("button", { name: "Create round" }).click();
     await expect(pageA).toHaveURL(/\/round\//);
 
@@ -81,7 +81,7 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     // prompt, no name field, "Playing as Bo" from the record.
     await expect(pageB.getByText(`Joining ${fixtureLinks.courseName}`)).toBeVisible();
     await pageB.getByLabel("Tee").selectOption("white");
-    await pageB.getByLabel("Course handicap").fill("4");
+    await pageB.getByLabel("Strokes you get here").fill("4");
     await pageB.getByRole("button", { name: "Join round" }).click();
     await expect(pageB).toHaveURL(/\/round\//);
 
@@ -171,7 +171,7 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     await expect(result).toBeVisible();
     await result.click();
     // No name entry: "Playing as Ann" comes from the account's own record.
-    await page.getByLabel("Course handicap").fill("8");
+    await page.getByLabel("Strokes you get here").fill("8");
     await page.getByRole("button", { name: "Create round" }).click();
     await expect(page).toHaveURL(/\/round\//);
 

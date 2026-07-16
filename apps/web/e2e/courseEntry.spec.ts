@@ -203,7 +203,7 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     // No name entry here: CreateRoundPage renders "Playing as Pat" from the signed-in account's
     // own record — the create form has no name field to fill anymore.
     await expect(page.getByText("Playing as", { exact: true })).toBeVisible();
-    await page.getByLabel("Course handicap", { exact: true }).fill("21");
+    await page.getByLabel("Strokes you get here", { exact: true }).fill("21");
     await page.getByRole("button", { name: "Create round", exact: true }).click();
 
     await expect(page).toHaveURL(/\/round\//);

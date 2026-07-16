@@ -231,7 +231,7 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     await expect(page).toHaveURL(/\/create/);
     await expect(page.getByText(courseName, { exact: true })).toBeVisible();
     await expect(page.getByText("Playing as", { exact: true })).toBeVisible(); // no name field — the account's own record
-    await page.getByLabel("Course handicap", { exact: true }).fill(String(UMA_CH));
+    await page.getByLabel("Strokes you get here", { exact: true }).fill(String(UMA_CH));
     await page.getByRole("button", { name: "Create round", exact: true }).click();
 
     await expect(page).toHaveURL(/\/round\//);

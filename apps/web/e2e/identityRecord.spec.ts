@@ -179,12 +179,19 @@ test.describe.serial("identity/record gate — one account, three rounds as self
   test("3: ProfilePage renders the same live record for the signed-in golfer", async () => {
     await page.goto("/profile");
 
-    const indexParagraph = page.getByText(/swng Index/);
-    await expect(indexParagraph).toContainText("7.2");
-    // Singular "differential" (not "differentials") is the differentialsUsed===1 case
-    // (ProfilePage.tsx's own ternary) — a negative lookahead so a stray plural wouldn't pass
-    // this as a false positive (a bare "contains 'differential'" substring check would).
-    await expect(indexParagraph).toHaveText(/from 1 differential(?!s)/);
+    // "Your index" (handicap-model legibility spec §3): the old "swng Index {value} — from N
+    // differential(s)" paragraph this test pinned against was DELETED whole by HL-T2 — it was a
+    // mislabel (a "swng Index" heading over what was actually the WHS value). The value pinned
+    // in test 2 above (record.metrics.whsIndex.value === PINNED_INDEX) has a direct analog on
+    // the new surface: the "WHS index · <value>" data point (ProfilePage.tsx's INDEX_SOURCES
+    // row), read straight off the very same field — the account plays only rated rounds, so its
+    // swng index and WHS index are numerically identical (7.2 either way), but the WHS row is
+    // the more direct read of the field this suite already pinned. The new surface renders no
+    // differentials-count copy anywhere near the value, so the old `/from 1 differential(?!s)/`
+    // half of this assertion has nothing left to target — dropped rather than invented against
+    // text that no longer exists.
+    const whsIndexRow = page.getByText(/WHS index/);
+    await expect(whsIndexRow).toContainText("7.2");
 
     // "History" h3's own following <ul> (ProfilePage.tsx: history.length > 0 renders exactly
     // this shape) — same structural-lookup idiom as support.ts's readJoinCode, since neither

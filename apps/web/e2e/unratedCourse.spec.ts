@@ -25,19 +25,19 @@ import type { AccountGolfer } from "./support.js";
 // work exactly as a rated course's do (dots come from stroke index + course handicap, which the
 // missing rating never touches), a finalized round posts an AGS but NO handicap differential
 // (unrated → not postable), the golfer's WHS index is never moved by it, and the round's
-// difficulty-neutral (ags − par) pseudo-differential feeds the SUGGESTED index — the declaration
+// difficulty-neutral (ags − par) pseudo-differential feeds the SWNG index — the declaration
 // aid an unrated golfer reasonably puts in their declared field.
 //
 // THE PAIRING TRAP (spec's own headline risk — and a correction to the task brief's own
-// arithmetic): the suggested index reuses domain's published 2020 nine-hole pairing
+// arithmetic): the swng index reuses domain's published 2020 nine-hole pairing
 // (combineNineHoleDifferentials) and the Rule 5.2a small-sample table (computeIndexDetail).
 // computeIndexDetail is UNDEFINED below THREE differentials (packages/domain/src/handicap/
-// whs.test.ts: "is undefined under three scores"; "suggestedIndex is undefined below the
+// whs.test.ts: "is undefined under three scores"; "swngIndex is undefined below the
 // 3-differential bootstrap"). Two 9-hole rounds pair into exactly ONE combined pseudo-
-// differential → still below the bootstrap → suggestedIndex ABSENT. A 9-hole course therefore
+// differential → still below the bootstrap → swngIndex ABSENT. A 9-hole course therefore
 // needs SIX finalized rounds (three oldest-first pairs → three combined pseudo-differentials)
-// before the suggested index materializes — NOT two. Every expected number below (the pars/SIs,
-// the singles-match dots, the AGS per round, and the suggested index itself) was hand-pinned and
+// before the swng index materializes — NOT two. Every expected number below (the pars/SIs,
+// the singles-match dots, the AGS per round, and the swng index itself) was hand-pinned and
 // cross-checked against the real domain engines BEFORE any live call, and is asserted verbatim:
 // a live disagreement is a BLOCKED finding to escalate, never a pin quietly adjusted to match
 // observed output (the run's-the-oracle inversion).
@@ -103,10 +103,10 @@ const PINNED_AGS_OLDEST_FIRST = [39, 41, 40, 42, 38, 40] as const;
 // nine-hole pairing folds them oldest-first — (3,5)→8, (4,6)→10, (2,4)→6 — into the three
 // combined pseudo-differentials [8, 10, 6]. computeIndexDetail over three values uses the lowest
 // 1 with a −2.0 adjustment (Rule 5.2a small-sample table): 6 − 2.0 = 4.0, differentialsUsed 1.
-// Verified against suggestedIndex(lines) directly. A single 9 (round 1 alone) and five 9s
+// Verified against swngIndex(lines) directly. A single 9 (round 1 alone) and five 9s
 // (rounds 1–5 → only two combined pairs) both stay BELOW the three-differential bootstrap, so the
-// suggested index is absent until the sixth round completes the third pair.
-const PINNED_SUGGESTED = { value: 4, differentialsUsed: 1 } as const;
+// swng index is absent until the sixth round completes the third pair.
+const PINNED_SWNG = { value: 4, differentialsUsed: 1 } as const;
 
 // AddCoursePage/HoleGrid own the keyboard-first grid (par default 4; yardage/SI blank). One
 // script-driven focus() lands on Hole 1's par, and every field-to-field move from there is a Tab
@@ -277,7 +277,7 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     // partial card would settle "incomplete" (no AGS), contributing nothing to Uma's record below.
   });
 
-  test("3: one finalized unrated 9 posts an AGS but NO differential — and a lone 9 yields no suggested index yet", async () => {
+  test("3: one finalized unrated 9 posts an AGS but NO differential — and a lone 9 yields no swng index yet", async () => {
     test.setTimeout(90_000);
     const { httpUrl } = loadWebEnv();
 
@@ -304,11 +304,11 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     // Rule 5.2a. A fresh account with only this round has no WHS index at all.
     expect(record.metrics.whsIndex).toBeUndefined();
     // A single 9 has no partner: combineNineHoleDifferentials leaves it pending → no combined
-    // pseudo-differential → below the three-differential bootstrap → no suggested index yet.
-    expect(record.metrics.suggestedIndex).toBeUndefined();
+    // pseudo-differential → below the three-differential bootstrap → no swng index yet.
+    expect(record.metrics.swngIndex).toBeUndefined();
   });
 
-  test("4: six finalized 9s pair oldest-first into the suggested index; the WHS index stays untouched", async () => {
+  test("4: six finalized 9s pair oldest-first into the swng index; the WHS index stays untouched", async () => {
     test.setTimeout(240_000); // five more sequential API rounds + the projector catch-up poll
     const { httpUrl } = loadWebEnv();
 
@@ -346,7 +346,7 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
 
     // THE GATE: the six (ags − par) pseudo-differentials [3,5,4,6,2,4] pair oldest-first into
     // [8,10,6], and computeIndexDetail takes the lowest 1 of three with a −2.0 adjustment →
-    // 6 − 2.0 = 4.0, differentialsUsed 1. The suggested index now reflects the unrated play.
-    expect(record.metrics.suggestedIndex).toEqual(PINNED_SUGGESTED);
+    // 6 − 2.0 = 4.0, differentialsUsed 1. The swng index now reflects the unrated play.
+    expect(record.metrics.swngIndex).toEqual(PINNED_SWNG);
   });
 });

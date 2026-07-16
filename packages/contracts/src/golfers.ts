@@ -91,17 +91,19 @@ const golferRoundLineFields = {
 
 const golferRoundLineSchema: z.ZodType<GolferRoundLine> = z.object(golferRoundLineFields);
 
-// The metrics read projection (unrated-courses spec §6, domain/golfer/metrics.ts's golferMetrics):
-// every derived index in one place, computed at read time (never stored). REQUIRED object, its two
-// members optional — an empty `{}` is the honest answer for a golfer with no postable rounds.
-// `whsIndex` is Rule 5.2a over rated differentials (with getMyRecord's read-time `computedAtMs`
-// stamp); `suggestedIndex` is the neutral-course `ags − par` estimate (a declaration aid, no stamp).
+// The metrics read projection (handicap-model legibility spec §2, §9; unrated-courses spec §6,
+// domain/golfer/metrics.ts's golferMetrics): every derived index in one place, computed at read
+// time (never stored). REQUIRED object, its two members optional — an empty `{}` is the honest
+// answer for a golfer with no postable rounds. `whsIndex` is Rule 5.2a over rated differentials
+// (with getMyRecord's read-time `computedAtMs` stamp); `swngIndex` is the WHS fold EXTENDED to
+// unrated rounds — real `differential` when rated, the neutral `ags − par` estimate only when
+// unrated (no stamp) — so a rated-only golfer's swngIndex equals their whsIndex exactly.
 // differentialsUsed on each is Rule 5.2a's `use` count (domain's computeIndexDetail, whs.ts) — how
 // many differentials were actually averaged, not how many were in the window.
 export interface GetMyRecordResponse {
   readonly metrics: {
     readonly whsIndex?: { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number };
-    readonly suggestedIndex?: { readonly value: number; readonly differentialsUsed: number };
+    readonly swngIndex?: { readonly value: number; readonly differentialsUsed: number };
   };
   readonly history: readonly GolferRoundLine[]; // newest first (application/src/golfers/getMyRecord.ts)
 }
@@ -109,7 +111,7 @@ export interface GetMyRecordResponse {
 export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.object({
   metrics: z.object({
     whsIndex: z.object({ value: z.number(), computedAtMs: z.number().int(), differentialsUsed: z.number().int() }).optional(),
-    suggestedIndex: z.object({ value: z.number(), differentialsUsed: z.number().int() }).optional(),
+    swngIndex: z.object({ value: z.number(), differentialsUsed: z.number().int() }).optional(),
   }),
   history: z.array(golferRoundLineSchema).readonly(),
 });

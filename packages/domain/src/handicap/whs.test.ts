@@ -12,7 +12,7 @@ import {
   courseHandicapFor,
   courseHandicapFromRatingSlopePar,
   scoreDifferential,
-  suggestedIndex,
+  swngIndex,
 } from "./whs.js";
 
 // Every conformance case below is pinned to a published USGA/R&A source, per the
@@ -264,20 +264,45 @@ describe("combineNineHoleDifferentials — 2020 published combining rule", () =>
   });
 });
 
-describe("suggestedIndex — computeIndexDetail over neutral (ags − par) pseudo-differentials", () => {
-  // unrated-courses spec §6: the declaration aid. Every ags-bearing line becomes an
-  // ags−par pseudo-differential (difficulty-neutral: slope 113, rating = par), fed through
-  // the SAME nine-hole pairing and small-sample table computeIndex uses. Mix a 9 and an 18 to
-  // exercise the pairing path, and include a no-ags line to prove it's skipped.
-  const lines = [
-    { ags: 90, par: 72, holes: 18 as const }, // pseudo 18
-    { ags: 85, par: 72, holes: 18 as const }, // pseudo 13
-    { ags: 45, par: 36, holes: 9 as const }, //  pseudo 9  (pending)
-    { ags: 44, par: 36, holes: 9 as const }, //  pseudo 8  (pairs -> 17)
-    { ags: 80, par: 72, holes: 18 as const }, // pseudo 8
-  ];
+describe("swngIndex — the WHS fold extended to unrated rounds (handicap-model legibility spec §2, §9)", () => {
+  // A rated line carries a real `differential` and contributes it AS IS; an unrated line
+  // carries no `differential` (no rating, so no differential is possible) and falls back to
+  // the difficulty-neutral ags−par pseudo-differential. Both flow through the SAME nine-hole
+  // pairing and small-sample table computeIndex uses.
 
-  it("matches computeIndexDetail on the same pseudo-differentials, pairing the two 9s", () => {
+  it("over a RATED-ONLY set, equals computeIndexDetail over the real differentials — the headline invariant: a rated-only golfer's swng index equals their WHS index exactly", () => {
+    const ratedLines = [
+      { ags: 90, differential: 15.3, par: 72, holes: 18 as const },
+      { ags: 88, differential: 15.2, par: 72, holes: 18 as const },
+      { ags: 92, differential: 16.6, par: 72, holes: 18 as const },
+    ];
+    // Same three differentials, same pinned result as the computeIndexDetail 5.2a/1 case above.
+    const whs = computeIndexDetail(combineNineHoleDifferentials(ratedLines.map((line) => ({ differential: line.differential, holes: line.holes }))));
+    expect(whs).toEqual({ value: 13.2, differentialsUsed: 1 });
+    expect(swngIndex(ratedLines)).toEqual(whs);
+  });
+
+  it("over a MIXED set, uses each rated line's real differential (not ags − par) and each unrated line's ags − par", () => {
+    const lines = [
+      { ags: 90, differential: 5.0, par: 72, holes: 18 as const }, // RATED: real differential 5.0 (ags−par would be 18)
+      { ags: 85, par: 72, holes: 18 as const }, // unrated: pseudo 13
+      { ags: 45, par: 36, holes: 9 as const }, //  unrated: pseudo 9  (pending)
+      { ags: 44, par: 36, holes: 9 as const }, //  unrated: pseudo 8  (pairs -> 17)
+    ];
+    // combined = [5, 13, 17]; length 3 -> use 1, adjustment -2.0 -> lowest 5 -> 5 - 2.0 = 3.0.
+    // (Using the real differential 5 — not the ags−par pseudo 18 — is exactly what's under test:
+    // an 18-pseudo would combine to [18, 13, 17] and yield 16.0 instead.)
+    expect(swngIndex(lines)).toEqual({ value: 3, differentialsUsed: 1 });
+  });
+
+  it("over an ALL-UNRATED set, matches the neutral ags − par pseudo-differential fold unchanged (pairing the two 9s)", () => {
+    const lines = [
+      { ags: 90, par: 72, holes: 18 as const }, // pseudo 18
+      { ags: 85, par: 72, holes: 18 as const }, // pseudo 13
+      { ags: 45, par: 36, holes: 9 as const }, //  pseudo 9  (pending)
+      { ags: 44, par: 36, holes: 9 as const }, //  pseudo 8  (pairs -> 17)
+      { ags: 80, par: 72, holes: 18 as const }, // pseudo 8
+    ];
     const pseudo = [
       { differential: 18, holes: 18 as const },
       { differential: 13, holes: 18 as const },
@@ -286,16 +311,21 @@ describe("suggestedIndex — computeIndexDetail over neutral (ags − par) pseud
       { differential: 8, holes: 18 as const },
     ];
     // combined = [18, 13, 17, 8]; length 4 -> use 1, adjustment -1.0 -> lowest 8 -> 8 - 1 = 7.0.
-    expect(suggestedIndex(lines)).toEqual({ value: 7, differentialsUsed: 1 });
-    expect(suggestedIndex(lines)).toEqual(computeIndexDetail(combineNineHoleDifferentials(pseudo)));
+    expect(swngIndex(lines)).toEqual({ value: 7, differentialsUsed: 1 });
+    expect(swngIndex(lines)).toEqual(computeIndexDetail(combineNineHoleDifferentials(pseudo)));
   });
 
-  it("skips a line with no ags — adding one leaves the suggested index unchanged", () => {
+  it("skips a line with no ags — adding one leaves the swng index unchanged", () => {
+    const lines = [
+      { ags: 90, par: 72, holes: 18 as const },
+      { ags: 85, par: 72, holes: 18 as const },
+      { ags: 80, par: 72, holes: 18 as const },
+    ];
     const withNoAgs = [...lines, { par: 72, holes: 18 as const }];
-    expect(suggestedIndex(withNoAgs)).toEqual(suggestedIndex(lines));
+    expect(swngIndex(withNoAgs)).toEqual(swngIndex(lines));
   });
 
   it("is undefined below the 3-differential bootstrap (a single ags-bearing line)", () => {
-    expect(suggestedIndex([{ ags: 90, par: 72, holes: 18 as const }])).toBeUndefined();
+    expect(swngIndex([{ ags: 90, par: 72, holes: 18 as const }])).toBeUndefined();
   });
 });

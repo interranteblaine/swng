@@ -53,7 +53,7 @@ export const getMyRecord =
         ...(metrics.whsIndex !== undefined
           ? { whsIndex: { value: metrics.whsIndex.value, computedAtMs: deps.clock.now(), differentialsUsed: metrics.whsIndex.differentialsUsed } }
           : {}),
-        ...(metrics.suggestedIndex !== undefined ? { suggestedIndex: metrics.suggestedIndex } : {}),
+        ...(metrics.swngIndex !== undefined ? { swngIndex: metrics.swngIndex } : {}),
       },
       history: sorted.reverse().map(toWireLine),
     };

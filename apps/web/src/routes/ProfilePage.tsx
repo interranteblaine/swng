@@ -50,7 +50,7 @@ function IndexTrend({ history }: { readonly history: readonly GolferRoundLine[] 
 // → renders "—") and `useLabel` is the button's accessible name (the two buttons share the visible
 // "Use this" text, so distinct aria-labels keep them individually addressable).
 const DECLARATION_AIDS: readonly { readonly label: string; readonly useLabel: string; readonly valueOf: (record: GetMyRecordResponse | undefined) => number | undefined }[] = [
-  { label: "Suggested", useLabel: "Use suggested index", valueOf: (record) => record?.metrics?.suggestedIndex?.value },
+  { label: "swng index", useLabel: "Use swng index", valueOf: (record) => record?.metrics?.swngIndex?.value },
   { label: "WHS index (computed)", useLabel: "Use WHS index", valueOf: (record) => record?.metrics?.whsIndex?.value },
 ];
 
@@ -236,7 +236,7 @@ export function ProfilePage() {
             deliberately no divergence threshold, no "you should change this" prose, and no auto-
             write: just the numbers, and the golfer decides which (if any) to declare. A metric
             with no data reads "—" and offers no button (a brand-new golfer sees "—" for both; a
-            golfer with only unrated rounds sees a Suggested value and "—" for WHS). */}
+            golfer with only unrated rounds sees a swng index value and "—" for WHS). */}
         <div className="flex flex-col gap-2" aria-label="Declaration aids">
           {DECLARATION_AIDS.map((aid) => {
             const value = aid.valueOf(record);

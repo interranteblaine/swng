@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, fixtureLinks, golferId, opId, placeholderName, roundId, suggestedIndex } from "@swng/domain";
+import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, fixtureLinks, golferId, opId, placeholderName, roundId, swngIndex } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import { createFrozenClock, createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
@@ -166,9 +166,9 @@ describe("getMyRecord", () => {
   });
 
   // unrated-courses spec §6: a wholly-unrated history (every line has an ags but no differential —
-  // no rating/slope to post one) yields a suggestedIndex (the neutral ags−par estimate) but no
+  // no rating/slope to post one) yields a swngIndex (the neutral ags−par estimate) but no
   // whsIndex (Rule 5.2a needs rated differentials, which unrated rounds never carry).
-  it("a wholly-unrated history yields metrics.suggestedIndex but no metrics.whsIndex", async () => {
+  it("a wholly-unrated history yields metrics.swngIndex but no metrics.whsIndex", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
     const unrated = [
@@ -192,9 +192,9 @@ describe("getMyRecord", () => {
 
     const record = await ctx.record({ sub: "sub-1" });
     expect(record.metrics.whsIndex).toBeUndefined();
-    expect(record.metrics.suggestedIndex).toBeDefined();
-    const expected = suggestedIndex(unrated.map((l) => ({ ags: l.ags, par: 72, holes: 18 as const })))!;
-    expect(record.metrics.suggestedIndex).toEqual({ value: expected.value, differentialsUsed: expected.differentialsUsed });
+    expect(record.metrics.swngIndex).toBeDefined();
+    const expected = swngIndex(unrated.map((l) => ({ ags: l.ags, par: 72, holes: 18 as const })))!;
+    expect(record.metrics.swngIndex).toEqual({ value: expected.value, differentialsUsed: expected.differentialsUsed });
     expect(record.history).toHaveLength(3);
   });
 

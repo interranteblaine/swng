@@ -80,19 +80,19 @@ describe("getMyRecordResponseSchema", () => {
     distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
   };
 
-  it("round-trips a record with both metrics (whsIndex + suggestedIndex) and mixed complete/incomplete history lines", () => {
+  it("round-trips a record with both metrics (whsIndex + swngIndex) and mixed complete/incomplete history lines", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: {
         whsIndex: { value: 7.2, computedAtMs: 5_000, differentialsUsed: 1 },
-        suggestedIndex: { value: 9.4, differentialsUsed: 1 },
+        swngIndex: { value: 9.4, differentialsUsed: 1 },
       },
       history: [completeLine, incompleteLine],
     });
   });
 
-  // unrated-courses spec §6: a wholly-unrated history has a suggestedIndex but no whsIndex.
-  it("round-trips a record carrying only a suggestedIndex (no whsIndex)", () => {
-    roundTrips(getMyRecordResponseSchema, { metrics: { suggestedIndex: { value: 9.4, differentialsUsed: 1 } }, history: [incompleteLine] });
+  // unrated-courses spec §6: a wholly-unrated history has a swngIndex but no whsIndex.
+  it("round-trips a record carrying only a swngIndex (no whsIndex)", () => {
+    roundTrips(getMyRecordResponseSchema, { metrics: { swngIndex: { value: 9.4, differentialsUsed: 1 } }, history: [incompleteLine] });
   });
 
   it("round-trips a bootstrap-not-met record: empty metrics object, history present", () => {

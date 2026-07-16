@@ -235,14 +235,14 @@ describe("ProfilePage — declaration aids", () => {
       }),
     );
 
-  it("renders the Suggested data point and its 'Use this' fills the declared input", async () => {
+  it("renders the swng index data point and its 'Use this' fills the declared input", async () => {
     signIn();
-    withRecord({ suggestedIndex: { value: 9.4, differentialsUsed: 3 } });
+    withRecord({ swngIndex: { value: 9.4, differentialsUsed: 3 } });
 
     renderProfilePage();
 
-    await screen.findByText(/Suggested · 9\.4/);
-    fireEvent.click(screen.getByRole("button", { name: /use suggested index/i }));
+    await screen.findByText(/swng index · 9\.4/);
+    fireEvent.click(screen.getByRole("button", { name: /use swng index/i }));
     expect((screen.getByLabelText("Declared index") as HTMLInputElement).value).toBe("9.4");
   });
 
@@ -257,15 +257,15 @@ describe("ProfilePage — declaration aids", () => {
     expect((screen.getByLabelText("Declared index") as HTMLInputElement).value).toBe("7.2");
   });
 
-  // A golfer with only unrated rounds: a Suggested value, but no WHS index yet → the WHS aid reads
+  // A golfer with only unrated rounds: a swng index value, but no WHS index yet → the WHS aid reads
   // "—" and offers no button.
   it("a metric with no data renders '—' and offers no 'Use this'", async () => {
     signIn();
-    withRecord({ suggestedIndex: { value: 9.4, differentialsUsed: 3 } });
+    withRecord({ swngIndex: { value: 9.4, differentialsUsed: 3 } });
 
     renderProfilePage();
 
-    await screen.findByText(/Suggested · 9\.4/);
+    await screen.findByText(/swng index · 9\.4/);
     expect(screen.getByText(/WHS index \(computed\) · —/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /use whs index/i })).toBeNull();
   });
@@ -276,9 +276,9 @@ describe("ProfilePage — declaration aids", () => {
 
     renderProfilePage();
 
-    await screen.findByText(/Suggested · —/);
+    await screen.findByText(/swng index · —/);
     expect(screen.getByText(/WHS index \(computed\) · —/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /use suggested index/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /use swng index/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /use whs index/i })).toBeNull();
   });
 
@@ -293,7 +293,7 @@ describe("ProfilePage — declaration aids", () => {
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", declared: 20 } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") {
-          return fakeResponse(200, { metrics: { suggestedIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } }, history: [] });
+          return fakeResponse(200, { metrics: { swngIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } }, history: [] });
         }
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -301,7 +301,7 @@ describe("ProfilePage — declaration aids", () => {
 
     renderProfilePage();
 
-    await screen.findByText(/Suggested · 9\.4/);
+    await screen.findByText(/swng index · 9\.4/);
     expect(screen.queryByText(/consider|you should|diverge|update your declared|off by|higher than|lower than|recommend/i)).toBeNull();
   });
 });

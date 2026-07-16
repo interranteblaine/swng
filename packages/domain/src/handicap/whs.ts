@@ -86,19 +86,22 @@ export const computeIndexDetail = (differentials: readonly number[]): IndexCompu
 
 export const computeIndex = (differentials: readonly number[]): number | undefined => computeIndexDetail(differentials)?.value;
 
-// The SUGGESTED index (unrated-courses spec §6): computeIndexDetail over difficulty-neutral
-// pseudo-differentials (ags − par, i.e. scoreDifferential at slope 113 / rating = par),
-// including EVERY round that has an AGS — rated or unrated. Reuses the pinned small-sample
-// table and the 2020 nine-hole pairing verbatim; read-time only, never stored. This is a
-// declaration aid (what an unrated golfer might reasonably put in the declared field), NOT an
-// effectiveIndex source.
-export const suggestedIndex = (
-  lines: readonly { readonly ags?: number; readonly par: number; readonly holes: 9 | 18 }[],
+// The SWNG index (handicap-model legibility spec §2, §9): computeIndexDetail over the WHS
+// fold EXTENDED to unrated rounds — a rated line contributes its real `differential` (the same
+// number the WHS index itself uses), and only an unrated line (no rating, so no differential is
+// possible) falls back to the difficulty-neutral pseudo-differential (ags − par, i.e.
+// scoreDifferential at slope 113 / rating = par). EVERY round with an AGS contributes, rated or
+// unrated — so a golfer who plays only rated golf gets a swng index that equals their WHS index
+// exactly; the two diverge only by unrated play. Reuses the pinned small-sample table and the
+// 2020 nine-hole pairing verbatim; read-time only, never stored. This is a declaration aid (what
+// an unrated golfer might reasonably put in the declared field), NOT an effectiveIndex source.
+export const swngIndex = (
+  lines: readonly { readonly ags?: number; readonly differential?: number; readonly par: number; readonly holes: 9 | 18 }[],
 ): IndexComputation | undefined => {
-  const pseudo = lines
+  const entries = lines
     .filter((line): line is typeof line & { ags: number } => line.ags !== undefined)
-    .map((line) => ({ differential: line.ags - line.par, holes: line.holes }));
-  return computeIndexDetail(combineNineHoleDifferentials(pseudo));
+    .map((line) => ({ differential: line.differential ?? line.ags - line.par, holes: line.holes }));
+  return computeIndexDetail(combineNineHoleDifferentials(entries));
 };
 
 // Rule 6.1a over already-known numbers — the peek carries `par` but not `holes`, so a caller

@@ -28,7 +28,13 @@ export const peekRound =
     const genesis = events.find((event) => event.kind === "round-created")!;
     return {
       courseName: state.card.courseName,
-      teeSets: state.card.teeSets.map((tee) => ({ name: tee.name, rating: tee.rating, slope: tee.slope })),
+      // rating/slope are optional as a pair on the frozen tee (unrated-courses spec §1) — spread
+      // conditionally so an unrated tee's peek omits the keys rather than carrying them as undefined.
+      teeSets: state.card.teeSets.map((tee) => ({
+        name: tee.name,
+        ...(tee.rating !== undefined ? { rating: tee.rating } : {}),
+        ...(tee.slope !== undefined ? { slope: tee.slope } : {}),
+      })),
       createdAt: genesis.hlc.wallMs,
     };
   };

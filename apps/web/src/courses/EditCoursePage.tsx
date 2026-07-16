@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router";
 import { courseId as makeCourseId } from "@swng/domain";
+import type { TeeSet } from "@swng/domain";
 import type { CourseView, SupersedeCardRequest } from "@swng/contracts";
 import { ApiError, getCourse, supersedeCard } from "../api";
 import { SignInCta } from "../auth/SignInCta";
@@ -160,9 +161,13 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
     // Mutable (not `readonly TeeSetInput[]`): SupersedeCardRequest's own inferred type is
     // mutable (createCourseRequestSchema/supersedeCardRequestSchema carry no `.readonly()` on
     // teeSets, unlike most other wire arrays), so supersedeCard's parameter expects exactly that.
+    // Every existing card is rated today (unrated-courses spec Task 1 is additive-only — this
+    // page's whole-card round-trip doesn't yet offer an unrated path), so the `!`s just narrow
+    // TeeSet.rating/slope's now-optional type back to the wire's still-required TeeSetInput.
+    const carryOver = (tee: TeeSet): TeeSetInput => ({ ...tee, rating: tee.rating!, slope: tee.slope! });
     const teeSets: TeeSetInput[] = addTee
-      ? [...view.card.teeSets.map((tee): TeeSetInput => ({ ...tee })), submittedTee]
-      : view.card.teeSets.map((tee): TeeSetInput => (tee === originalTee ? submittedTee : { ...tee }));
+      ? [...view.card.teeSets.map(carryOver), submittedTee]
+      : view.card.teeSets.map((tee) => (tee === originalTee ? submittedTee : carryOver(tee)));
 
     try {
       await auth.withAuth((token) => supersedeCard(id, { name: name.trim(), teeSets, supersedes: view.cardId }, token));

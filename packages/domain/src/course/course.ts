@@ -26,11 +26,20 @@ const validateTeeSet = (tee: TeeSet): void => {
   if (tee.name.trim().length === 0 || tee.name.length > MAX_TEE_NAME_LENGTH) {
     throw new DomainError("invalid-tee-name", `tee name must be 1-${MAX_TEE_NAME_LENGTH} characters: "${tee.name}"`);
   }
-  if (tee.rating < RATING_BOUNDS.min || tee.rating > RATING_BOUNDS.max) {
-    throw new DomainError("invalid-rating", `tee "${tee.name}" rating ${tee.rating} outside ${RATING_BOUNDS.min}..${RATING_BOUNDS.max}`);
+  // Unrated tees exist (unrated-courses spec §1): rating/slope are optional AS A PAIR — both
+  // present (rated), both absent (unrated), or exactly one present (rejected outright).
+  const ratingSet = tee.rating !== undefined;
+  const slopeSet = tee.slope !== undefined;
+  if (ratingSet !== slopeSet) {
+    throw new DomainError("rating-slope-paired", `tee "${tee.name}" must set course rating and slope together, or neither (unrated)`);
   }
-  if (!Number.isInteger(tee.slope) || tee.slope < SLOPE_BOUNDS.min || tee.slope > SLOPE_BOUNDS.max) {
-    throw new DomainError("invalid-slope", `tee "${tee.name}" slope ${tee.slope} outside ${SLOPE_BOUNDS.min}..${SLOPE_BOUNDS.max}`);
+  if (ratingSet) {
+    if (tee.rating! < RATING_BOUNDS.min || tee.rating! > RATING_BOUNDS.max) {
+      throw new DomainError("invalid-rating", `tee "${tee.name}" rating ${tee.rating} outside ${RATING_BOUNDS.min}..${RATING_BOUNDS.max}`);
+    }
+    if (!Number.isInteger(tee.slope!) || tee.slope! < SLOPE_BOUNDS.min || tee.slope! > SLOPE_BOUNDS.max) {
+      throw new DomainError("invalid-slope", `tee "${tee.name}" slope ${tee.slope} outside ${SLOPE_BOUNDS.min}..${SLOPE_BOUNDS.max}`);
+    }
   }
 
   const holeCount = tee.holes.length;

@@ -14,10 +14,15 @@ export interface TeeSet {
   // (buildCardRecord's invariant). Course-cards spec §3.
   readonly teeId?: TeeId;
   readonly name: string;
-  readonly rating: number;
-  readonly slope: number;
+  readonly rating?: number; // present ⇔ slope present (validateTeeSet enforces the pairing)
+  readonly slope?: number;
   readonly holes: readonly Hole[]; // 9 or 18, in play order
 }
+
+// A tee is rated iff both its course rating and slope are set — the one predicate every
+// rating/slope-dependent path narrows through (unrated-courses spec §3).
+export const isRated = (tee: TeeSet): tee is TeeSet & { rating: number; slope: number } =>
+  tee.rating !== undefined && tee.slope !== undefined;
 
 // Which course record and exact card this value was frozen from — creation-time facts,
 // never dereferenced for rendering or math (spec §2: frozen values are the only inputs).

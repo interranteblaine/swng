@@ -63,10 +63,11 @@ export const searchCoursesResponseSchema: z.ZodType<SearchCoursesResponse> = z.o
 
 // A pre-join preview of the round's frozen card — deliberately just enough to pick a tee
 // before JoinRound, nothing else (capability discipline): no roundId, no full CourseCard,
-// no participants.
+// no participants. `rating`/`slope` are optional as a pair (unrated-courses spec §1), mirroring
+// domain's TeeSet — a peek of an unrated tee still names it, just without numbers.
 export interface PeekRoundResponse {
   readonly courseName: string;
-  readonly teeSets: readonly { readonly name: string; readonly rating: number; readonly slope: number }[];
+  readonly teeSets: readonly { readonly name: string; readonly rating?: number; readonly slope?: number }[];
   // accounts-only identity spec §5: the round-created event's own wall time, so the join-link
   // sign-up framing can render the round the SAME way ("Casa Verde GC · Sat, Jul 12") the home list
   // and archive do. Required — a peek always reads a live round, whose log always has round-created.
@@ -75,6 +76,6 @@ export interface PeekRoundResponse {
 
 export const peekRoundResponseSchema: z.ZodType<PeekRoundResponse> = z.object({
   courseName: z.string(),
-  teeSets: z.array(z.object({ name: z.string(), rating: z.number(), slope: z.number() })).readonly(),
+  teeSets: z.array(z.object({ name: z.string(), rating: z.number().optional(), slope: z.number().optional() })).readonly(),
   createdAt: z.number().int(),
 });

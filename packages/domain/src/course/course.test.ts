@@ -70,6 +70,32 @@ describe("card validation — per-tee invariant table (each violation is a stabl
   });
 });
 
+// Unrated tees exist (unrated-courses spec, Task 1): rating/slope are optional AS A PAIR —
+// both present (rated), both absent (unrated), or exactly one present (rejected).
+describe("card validation — unrated tees (rating/slope optional as a pair)", () => {
+  const attempt = (tee: TeeSet) => () => validateCard({ courseName: "Fixture Links", teeSets: [tee] });
+
+  it("an unrated tee (both rating and slope blank) passes validation", () => {
+    const unrated: TeeSet = { name: "unrated", holes: fixtureWhite.holes };
+    expect(attempt(unrated)).not.toThrow();
+  });
+
+  it("exactly one of rating/slope set throws rating-slope-paired", () => {
+    const ratingOnly: TeeSet = { name: "half", rating: 71.1, holes: fixtureWhite.holes };
+    const slopeOnly: TeeSet = { name: "half", slope: 129, holes: fixtureWhite.holes };
+    expect(attempt(ratingOnly)).toThrowError(expect.objectContaining({ code: "rating-slope-paired" }));
+    expect(attempt(slopeOnly)).toThrowError(expect.objectContaining({ code: "rating-slope-paired" }));
+  });
+
+  it("a rated tee with out-of-bounds rating still throws invalid-rating", () => {
+    expect(attempt(validTee({ rating: 29.9 }))).toThrowError(expect.objectContaining({ code: "invalid-rating" }));
+  });
+
+  it("a rated tee with out-of-bounds slope still throws invalid-slope", () => {
+    expect(attempt(validTee({ slope: 54 }))).toThrowError(expect.objectContaining({ code: "invalid-slope" }));
+  });
+});
+
 describe("courseNameKey", () => {
   it("lowercases, trims, and collapses internal whitespace", () => {
     expect(courseNameKey(" Casa  Verde GC ")).toBe("casa verde gc");

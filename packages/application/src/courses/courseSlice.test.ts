@@ -42,8 +42,10 @@ const createInMemoryCardStore = (): CardStore => {
 };
 
 // An input tee (POST body / supersede body): the frozen fixture's numbers, no teeId — the
-// server mints (create) or the continuity rule tracks (supersede) every id.
-const whiteInput = { name: fixtureWhite.name, rating: fixtureWhite.rating, slope: fixtureWhite.slope, holes: fixtureWhite.holes };
+// server mints (create) or the continuity rule tracks (supersede) every id. fixtureWhite is
+// always rated (its own module pins concrete rating/slope literals); the `!`s just narrow past
+// TeeSet.rating/slope's now-optional type (unrated-courses spec Task 1) for this rated-only suite.
+const whiteInput = { name: fixtureWhite.name, rating: fixtureWhite.rating!, slope: fixtureWhite.slope!, holes: fixtureWhite.holes };
 const blueInput = { ...whiteInput, name: "blue", rating: 73.1, slope: 132 };
 
 const ANN_SUB = "ann-sub";

@@ -1,4 +1,5 @@
 import type { TeeSet } from "../course/card.js";
+import { isRated } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import type { HoleResult } from "../round/holeResult.js";
 import { dotsByHole, netDoubleBogey, roundHalfUp } from "../scoring/strokes.js";
@@ -33,7 +34,10 @@ export const adjustedGrossScore = (teeSet: TeeSet, courseHandicap: number, holes
 // which is identically PCC = 0 in the published formula. Unrounded: rounding to
 // the tenth is the caller's posting step, and premature rounding would compound
 // through the index.
-export const scoreDifferential = (teeSet: TeeSet, ags: number): number => (113 / teeSet.slope) * (ags - teeSet.rating);
+export const scoreDifferential = (teeSet: TeeSet, ags: number): number => {
+  if (!isRated(teeSet)) throw new DomainError("tee-unrated", `tee "${teeSet.name}" has no rating/slope — no differential to post`);
+  return (113 / teeSet.slope) * (ags - teeSet.rating);
+};
 
 // Rule 5.2a's small-sample table, verbatim (row = "records of up to maxCount
 // scores use the lowest `use`, then add `adjustment`"). The negative adjustments
@@ -85,6 +89,7 @@ export const computeIndex = (differentials: readonly number[]): number | undefin
 // Rule 6.1a: Course Handicap = Handicap Index × (Slope Rating ÷ 113) +
 // (Course Rating − par), rounded to the nearest whole number as the final step.
 export const courseHandicapFor = (index: number, teeSet: TeeSet): number => {
+  if (!isRated(teeSet)) throw new DomainError("tee-unrated", `tee "${teeSet.name}" is unrated — use round(index) for a course-handicap estimate`);
   const par = teeSet.holes.reduce((sum, hole) => sum + hole.par, 0);
   return roundHalfUp(index * (teeSet.slope / 113) + (teeSet.rating - par));
 };

@@ -24,12 +24,14 @@ export const holeSchema = z.object({
 // Exported for reuse wherever a wire tee set is needed outside a CourseCard (courses.ts'
 // tee-input payloads) — the one wire mirror of domain's TeeSet, not duplicated per caller.
 // `teeId` is optional (course-cards spec §3): pre-scrap stored events/fixtures carry no id;
-// every stored/newly-frozen card's tees do (buildCardRecord's invariant).
+// every stored/newly-frozen card's tees do (buildCardRecord's invariant). `rating`/`slope` are
+// optional AS A PAIR (unrated-courses spec §1) — domain's validateTeeSet enforces the pairing
+// and bounds; the wire schema stays structural.
 export const teeSetSchema = z.object({
   teeId: teeIdSchema.optional(),
   name: z.string(),
-  rating: z.number(),
-  slope: z.number(),
+  rating: z.number().optional(),
+  slope: z.number().optional(),
   holes: z.array(holeSchema).readonly(),
 });
 

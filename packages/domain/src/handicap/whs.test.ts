@@ -53,6 +53,14 @@ describe("scoreDifferential — published worked examples", () => {
     expect(roundHalfUp(-1.55 * 10) / 10).toBe(-1.5);
     expect(roundHalfUp(-1.56 * 10) / 10).toBe(-1.6);
   });
+
+  // Unrated tees exist (unrated-courses spec, Task 1): scoreDifferential is only legitimately
+  // called on a rated tee — an unrated tee has no rating/slope to compute a differential from.
+  it("throws tee-unrated on an unrated tee", () => {
+    const unrated: TeeSet = { name: "unrated", holes: [] };
+    expect(() => scoreDifferential(unrated, 47)).toThrowError(DomainError);
+    expect(() => scoreDifferential(unrated, 47)).toThrowError(expect.objectContaining({ code: "tee-unrated" }));
+  });
 });
 
 describe("adjustedGrossScore — fixture golden card", () => {
@@ -180,6 +188,14 @@ describe("courseHandicapFor", () => {
     const index = computeIndex([differential, differential, differential]);
     expect(index).toBe(7.9);
     expect(courseHandicapFor(index!, fixtureWhite)).toBe(9);
+  });
+
+  // Unrated tees exist (unrated-courses spec, Task 1): courseHandicapFor is only legitimately
+  // called on a rated tee — an unrated tee has no rating/slope to estimate a course handicap from.
+  it("throws tee-unrated on an unrated tee", () => {
+    const unrated: TeeSet = { name: "unrated", holes: fixtureWhite.holes };
+    expect(() => courseHandicapFor(7.0, unrated)).toThrowError(DomainError);
+    expect(() => courseHandicapFor(7.0, unrated)).toThrowError(expect.objectContaining({ code: "tee-unrated" }));
   });
 });
 

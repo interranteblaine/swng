@@ -168,6 +168,22 @@ export const ensureCourse = async (name: string, card: CourseCard, account: Acco
   return { courseId: course.courseId, cardId: course.cardId };
 };
 
+// Reads a course lineage's CURRENT reference ({courseId, cardId}) off the public GET
+// /courses/{id} (auth-none, same read ensureCourse uses on a search hit). unratedCourse.spec.ts
+// enters its course through the BROWSER (AddCoursePage — the "unrated" render is the thing under
+// test there, so it can't be back-door-seeded), then needs the cardId out-of-browser to drive
+// its record-building rounds via startRoundDirect — StartRound is a reference command
+// ({courseId, cardId}), and the browser never surfaces the cardId. Returns the exact shape
+// startRoundDirect's `course` param takes, so it threads straight through. `id` is a raw string
+// (the URL segment the spec captured), branded server-side into the response's own CourseId.
+export const getCourseDirect = async (httpUrl: string, id: string): Promise<{ courseId: CourseId; cardId: string }> => {
+  const response = await fetch(`${httpUrl}/courses/${id}`);
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`GET /courses/${id} -> ${response.status}: ${JSON.stringify(json)}`);
+  const { course } = parse(getCourseResponseSchema, json);
+  return { courseId: course.courseId, cardId: course.cardId };
+};
+
 // --- Out-of-browser joins (always as an account, always as yourself) -----------------------
 
 // Joins the round the same way JoinRoundPage's own submit handler does, but via a direct

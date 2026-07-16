@@ -15,6 +15,8 @@ export interface GolferRoundLine {
   readonly courseId?: CourseId;
   readonly tee: string;
   readonly holes: 9 | 18;
+  readonly par: number;            // sum of the frozen tee's hole pars (spec §5)
+  readonly courseHandicap: number; // participant.courseHandicap, frozen at join
   readonly ags?: number;
   readonly differential?: number;
   readonly distribution: {
@@ -58,7 +60,10 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
     // always 9 or 18 by construction — the cast documents that upstream invariant rather
     // than re-checking it here.
     holes: teeSet.holes.length as 9 | 18,
+    par: teeSet.holes.reduce((sum, hole) => sum + hole.par, 0),
+    courseHandicap: participant.courseHandicap,
     ...(handicapping?.kind === "complete" ? { ags: handicapping.ags, differential: handicapping.differential } : {}),
+    ...(handicapping?.kind === "unrated" ? { ags: handicapping.ags } : {}),
     distribution,
   };
 };

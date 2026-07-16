@@ -257,8 +257,8 @@ describe("SeasonPanel — counted rounds", () => {
 
 describe("SeasonPanel — count a round", () => {
   const myRounds: GetMyRoundsResponse["rounds"] = [
-    { roundId: roundId("round-9"), courseName: "Casa Verde GC", tee: "white", holes: 18, ags: 84, differential: 12.3, distribution, finalizedAt: 1_700_000_000_000 },
-    { roundId: roundId("round-1"), courseName: "Old Muni", tee: "blue", holes: 18, ags: 90, differential: 18.1, distribution, finalizedAt: 1_699_000_000_000 },
+    { roundId: roundId("round-9"), courseName: "Casa Verde GC", tee: "white", holes: 18, par: 72, courseHandicap: 8, ags: 84, differential: 12.3, distribution, finalizedAt: 1_700_000_000_000 },
+    { roundId: roundId("round-1"), courseName: "Old Muni", tee: "blue", holes: 18, par: 72, courseHandicap: 14, ags: 90, differential: 18.1, distribution, finalizedAt: 1_699_000_000_000 },
   ];
 
   it("lists my finalized rounds not yet counted in THIS season; the empty state is honest", async () => {

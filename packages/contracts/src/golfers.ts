@@ -79,6 +79,8 @@ const golferRoundLineFields = {
   courseId: courseIdSchema.optional(),
   tee: z.string(),
   holes: z.union([z.literal(9), z.literal(18)]),
+  par: z.number(),
+  courseHandicap: z.number(),
   ags: z.number().optional(),
   differential: z.number().optional(),
   distribution: z.object({

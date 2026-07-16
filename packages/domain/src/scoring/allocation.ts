@@ -1,5 +1,5 @@
 import type { CourseCard } from "../course/card.js";
-import { findTeeSet } from "../course/card.js";
+import { findTeeSet, isRated } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import { adjustedGrossScore, scoreDifferential } from "../handicap/whs.js";
 import type { GolferId } from "../ids.js";
@@ -83,6 +83,7 @@ export const handicappingFor = (
   cells: Readonly<Record<string, ScoreCell>>,
 ):
   | { readonly golferId: GolferId; readonly kind: "complete"; readonly ags: number; readonly differential: number }
+  | { readonly golferId: GolferId; readonly kind: "unrated"; readonly ags: number }
   | { readonly golferId: GolferId; readonly kind: "incomplete" } => {
   const teeSet = findTeeSet(card, participant.tee);
   const holes = new Map<number, HoleResult>();
@@ -92,6 +93,10 @@ export const handicappingFor = (
   }
   try {
     const ags = adjustedGrossScore(teeSet, participant.courseHandicap, holes);
+    // Unrated: the round is fully scored (AGS holds) but has no differential to post
+    // (spec §4). It stays out of the WHS index by carrying no differential, never by a
+    // downstream filter change.
+    if (!isRated(teeSet)) return { golferId: participant.golferId, kind: "unrated", ags };
     // Raw per-tee-set differential only — combining two 9-hole differentials into one
     // 18-hole-equivalent is the index projection's job (published 2020 WHS rule), not
     // settlement's; the archive stays index-independent, per this tee set alone.

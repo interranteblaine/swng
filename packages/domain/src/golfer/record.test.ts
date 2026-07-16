@@ -66,6 +66,22 @@ describe("archiveGolferLine", () => {
     expect(line.differential).toBeUndefined();
   });
 
+  it("carries par (sum of the frozen tee's hole pars) and courseHandicap (frozen at join)", () => {
+    const line = archiveGolferLine(baseArchive, G);
+    expect(line.par).toBe(72); // fixtureWhite18: 36 + 36
+    expect(line.courseHandicap).toBe(10); // baseArchive's participant courseHandicap
+  });
+
+  it("surfaces ags with NO differential when the golfer's handicapping row is unrated (unrated-courses spec)", () => {
+    const unrated: RoundArchive = { ...baseArchive, handicapping: [{ golferId: G, kind: "unrated", ags: 91 }] };
+    const line = archiveGolferLine(unrated, G);
+    expect(line.ags).toBe(91);
+    expect(line.differential).toBeUndefined();
+    // par/courseHandicap are still frozen regardless of handicapping kind.
+    expect(line.par).toBe(72);
+    expect(line.courseHandicap).toBe(10);
+  });
+
   it("excludes picked-up, conceded, and unscored holes from the distribution (only DECIDED stroke cells count)", () => {
     const sparse: RoundArchive = {
       ...baseArchive,

@@ -37,6 +37,8 @@ const lineWithDifferential = (roundIdSuffix: string, differential: number): Golf
   courseName: "Pebble Beach",
   tee: "white",
   holes: 18,
+  par: 72,
+  courseHandicap: 8,
   ags: 82,
   differential,
   distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },

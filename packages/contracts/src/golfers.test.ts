@@ -64,6 +64,8 @@ describe("getMyRecordResponseSchema", () => {
     courseName: "Casa Verde GC",
     tee: "white",
     holes: 18,
+    par: 72,
+    courseHandicap: 8,
     ags: 90,
     differential: 12.3,
     distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
@@ -74,6 +76,8 @@ describe("getMyRecordResponseSchema", () => {
     courseName: "Casa Verde GC",
     tee: "white",
     holes: 9,
+    par: 36,
+    courseHandicap: 5,
     distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
   };
 
@@ -106,7 +110,7 @@ describe("getMyRecordResponseSchema", () => {
 // accounts-only identity spec §5: createdAt (the "course + date" designation) is OPTIONAL on both
 // list responses — old projection lines / stale presence pointers carry none, tolerated as absent.
 describe("getMyRoundsResponseSchema", () => {
-  const line = { roundId: roundId("r1"), courseName: "Casa Verde GC", tee: "white", holes: 18 as const, distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 } };
+  const line = { roundId: roundId("r1"), courseName: "Casa Verde GC", tee: "white", holes: 18 as const, par: 72, courseHandicap: 8, distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 } };
 
   it("round-trips a round line carrying createdAt", () => {
     roundTrips(getMyRoundsResponseSchema, { rounds: [{ ...line, finalizedAt: 2_000, createdAt: 1_500 }] });

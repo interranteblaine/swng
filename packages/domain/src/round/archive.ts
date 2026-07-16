@@ -39,6 +39,7 @@ export interface RoundArchive {
   readonly terminatedGameIds: readonly GameId[];
   readonly handicapping: readonly (
     | { readonly golferId: GolferId; readonly kind: "complete"; readonly ags: number; readonly differential: number }
+    | { readonly golferId: GolferId; readonly kind: "unrated"; readonly ags: number }
     | { readonly golferId: GolferId; readonly kind: "incomplete" }
   )[];
 }

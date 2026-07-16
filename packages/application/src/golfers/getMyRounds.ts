@@ -18,6 +18,8 @@ const toWireLine = (
   ...(line.courseId !== undefined ? { courseId: line.courseId } : {}),
   tee: line.tee,
   holes: line.holes,
+  par: line.par,
+  courseHandicap: line.courseHandicap,
   ...(line.ags !== undefined ? { ags: line.ags } : {}),
   ...(line.differential !== undefined ? { differential: line.differential } : {}),
   distribution: line.distribution,

@@ -36,6 +36,8 @@ const makeLine = (id: ReturnType<typeof roundId>, finalizedAtMs: number, overrid
   courseName: "Casa Verde GC",
   tee: "white",
   holes: 18,
+  par: 72,
+  courseHandicap: 8,
   distribution,
   finalizedAtMs,
   ...overrides,

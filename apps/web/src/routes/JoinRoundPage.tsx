@@ -45,7 +45,7 @@ export function JoinRoundPage() {
   const [code, setCode] = useState(() => (searchParams.get("code") ?? "").toUpperCase());
   const [tee, setTee] = useState("");
   const [courseHandicap, setCourseHandicap] = useState("0");
-  // Seed-once flag (unrated-courses T5b): the suggested course handicap pre-fills the field only
+  // Seed-once flag (unrated-courses T5b): the strokes suggestion pre-fills the field only
   // while untouched — the moment the golfer types, their value wins forever.
   const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -55,8 +55,8 @@ export function JoinRoundPage() {
   // The round-created wall time from the peek — feeds roundLabel so the join-link framing carries
   // the SAME designation (course + date) as home/archive/watch (accounts-only identity spec §5).
   const [createdAt, setCreatedAt] = useState<number | undefined>(undefined);
-  // The peek's full tee sets (name + par + rating/slope), not just names — the join-side suggested
-  // course handicap (unrated-courses T5b) needs the selected tee's numbers, and the picker shows
+  // The peek's full tee sets (name + par + rating/slope), not just names — the join-side strokes
+  // suggestion (unrated-courses T5b) needs the selected tee's numbers, and the picker shows
   // each tee's rating/slope via teeNumbers.
   const [peekTees, setPeekTees] = useState<readonly PeekTee[] | undefined>(undefined);
   // The golfer's read-time metrics (GET /me/record) — the `computed` input to the suggestion; a
@@ -97,7 +97,7 @@ export function JoinRoundPage() {
     return () => clearTimeout(timer);
   }, [upperCode]);
 
-  // The suggested course handicap's `computed` input (unrated-courses T5b): one GET /me/record
+  // The strokes suggestion's `computed` input (unrated-courses T5b): one GET /me/record
   // when signed in. A nicety — a rejection leaves `record` undefined and the suggestion (if any)
   // falls back to the declared index alone; it never blocks the page.
   useEffect(() => {

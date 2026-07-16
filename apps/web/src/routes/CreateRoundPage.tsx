@@ -43,12 +43,12 @@ export function CreateRoundPage() {
   const [tee, setTee] = useState<string>("");
   const [courseError, setCourseError] = useState<string | undefined>(undefined);
   const [courseHandicap, setCourseHandicap] = useState("0");
-  // The golfer's read-time metrics (GET /me/record) — one of the two inputs to the suggested
-  // course handicap below (the other is the declared index on the golfer row). A nicety: a
+  // The golfer's read-time metrics (GET /me/record) — one of the two inputs to the strokes
+  // suggestion below (the other is the declared index on the golfer row). A nicety: a
   // failed/absent fetch just leaves this undefined and the suggestion falls back to declared
   // alone, never blocking the page (unrated-courses T5b).
   const [record, setRecord] = useState<GetMyRecordResponse | undefined>(undefined);
-  // Seed-once flag (unrated-courses T5b): the suggested course handicap pre-fills the field
+  // Seed-once flag (unrated-courses T5b): the strokes suggestion pre-fills the field
   // only while the golfer hasn't touched it — the moment they type, their value wins forever.
   const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -98,7 +98,7 @@ export function CreateRoundPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: keyed by the router's own per-navigation identity, not by `state`'s object identity
   }, [location.key]);
 
-  // The suggested course handicap's `computed` input (unrated-courses T5b): one GET /me/record
+  // The strokes suggestion's `computed` input (unrated-courses T5b): one GET /me/record
   // when signed in. Purely a nicety — a rejection just leaves `record` undefined, so the
   // suggestion (if any) falls back to the declared index alone; it never blocks the page.
   useEffect(() => {

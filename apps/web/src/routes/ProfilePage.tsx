@@ -251,7 +251,7 @@ export function ProfilePage() {
               <span className="text-sm text-slate-400">{effective.source === "declared" ? "your own" : "computed from your rounds"}</span>
             </p>
           ) : (
-            <p className="text-sm text-slate-400">No index yet — computes after 3 posted 18-hole-equivalent differentials, or set your own below.</p>
+            <p className="text-sm text-slate-400">No index yet — play a few rounds and swng will compute one, or set your own below.</p>
           )}
 
           <div className="flex flex-col gap-2" aria-label="Index sources">

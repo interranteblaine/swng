@@ -89,7 +89,7 @@ describe("ProfilePage — signed in", () => {
 
     renderProfilePage();
 
-    await waitFor(() => expect(screen.getByText(/computes after 3 posted/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/play a few rounds/i)).toBeTruthy());
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
     expect(screen.queryByRole("img", { name: "Index trend" })).toBeNull();
     expect(screen.getByText(/no rounds yet/i)).toBeTruthy();
@@ -178,7 +178,7 @@ describe("ProfilePage — signed in", () => {
     );
 
     renderProfilePage();
-    await waitFor(() => expect(screen.getByText(/computes after 3 posted/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/play a few rounds/i)).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ann Updated" } });
     fireEvent.change(screen.getByLabelText("Your own number"), { target: { value: "12" } });
@@ -211,7 +211,7 @@ describe("ProfilePage — signed in", () => {
     );
 
     renderProfilePage();
-    await waitFor(() => expect(screen.getByText(/computes after 3 posted/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/play a few rounds/i)).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 

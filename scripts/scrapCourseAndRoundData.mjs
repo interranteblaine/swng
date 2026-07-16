@@ -32,6 +32,11 @@
 // fixed same-day), so a future run drains in seconds — but expect a burst of skip logs, and
 // know that this script is WHY that skip branch exists.
 //
+// The ROUNDS table's stream is ALSO still enabled (swngStack.ts's roundsTable — enabled,
+// consumed by nothing): this script's ~130k round deletions emitted ~130k REMOVEs into it,
+// harmless only because no consumer exists. Before ANY future bulk delete, enumerate every
+// stream consumer in the blast radius first — that is the general rule this incident bought.
+//
 //   node scripts/scrapCourseAndRoundData.mjs [--stage beta] [--dry-run]
 import { createRequire } from "node:module";
 

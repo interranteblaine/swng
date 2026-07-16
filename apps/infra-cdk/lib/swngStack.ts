@@ -179,13 +179,22 @@ export class SwngStack extends Stack {
       // The event log is the source of truth for a round in flight — never delete this table
       // out from under a stack teardown.
       removalPolicy: RemovalPolicy.RETAIN,
-      // M7 Task 4 added this stream to feed the ProjectorFunction (filtered to ARCHIVE items).
-      // Snapshot realignment Task 1 moves that event source to the snapshots table below (its
-      // stream needs no filter — every item there IS a finished round) — nothing in this stack
-      // consumes this stream any longer, but removing it is not this task's call: the ARCHIVE
-      // item itself still lives here until a later task's transactional finalize stops writing
-      // it (spec §9/§11), so a consumer could plausibly still read it meanwhile. Left as a
-      // harmless no-op property, not a table replacement, either way.
+      // STILL ENABLED, CONSUMED BY NOTHING (owner-directed record, 2026-07-15). M7 Task 4
+      // added this stream to feed the ProjectorFunction (filtered to ARCHIVE items); the
+      // snapshot realignment moved that event source to the snapshots table below, and the
+      // ARCHIVE item this stream was kept alive for died with putArchive — its original
+      // reason no longer exists. It stays enabled purely because disabling it is a deliberate
+      // change to a RETAIN table that deserves its own reviewed task (candidate: the
+      // prod-stack arc), not a drive-by.
+      //
+      // POISON-FLOOD WARNING before ever attaching a consumer here: the course-cards beta
+      // scrap (scripts/scrapCourseAndRoundData.mjs, 2026-07-15) emitted ~130k REMOVE records
+      // into this stream in one pass — harmless only because nothing reads it. The snapshots
+      // stream's consumer was saturated for hours by exactly this shape the same day (1,080
+      // REMOVEs treated as poison records; see compositionRoot.ts's projector handler, which
+      // now skips REMOVEs). Any future consumer of THIS stream must handle REMOVEs and the
+      // table's mixed item kinds (EVT#/META/OPID#) from its first deploy — and bulk-delete
+      // scripts must name every stream consumer in their blast radius before running.
       stream: StreamViewType.NEW_IMAGE,
     });
     roundsTable.addGlobalSecondaryIndex({

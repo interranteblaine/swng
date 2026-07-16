@@ -112,10 +112,13 @@ describe("ProfilePage — signed in", () => {
     renderProfilePage();
 
     await waitFor(() => expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Ann"));
-    expect((screen.getByLabelText("Declared index") as HTMLInputElement).value).toBe("15");
+    // The override input (was "Declared index") is seeded from the saved declared value.
+    expect((screen.getByLabelText("Your own number") as HTMLInputElement).value).toBe("15");
 
-    expect(screen.getByText("7.2")).toBeTruthy(); // computed index
-    expect(screen.getByText(/from 1 differential/)).toBeTruthy();
+    // A declared override is active and reads plainly as "your own"; the WHS index is shown as an
+    // adoptable reference (this fixture has no swng index, so that source reads "—").
+    expect(screen.getByText("your own").closest("p")?.textContent).toContain("15");
+    expect(screen.getByText(/WHS index · 7\.2/)).toBeTruthy();
     expect(screen.getByRole("img", { name: "Index trend" })).toBeTruthy();
     expect(screen.getByRole("list", { name: "Scoring distribution" })).toBeTruthy();
 
@@ -178,7 +181,7 @@ describe("ProfilePage — signed in", () => {
     await waitFor(() => expect(screen.getByText(/computes after 3 posted/i)).toBeTruthy());
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ann Updated" } });
-    fireEvent.change(screen.getByLabelText("Declared index"), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText("Your own number"), { target: { value: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(screen.getByText("Saved.")).toBeTruthy());
@@ -219,10 +222,10 @@ describe("ProfilePage — signed in", () => {
   });
 });
 
-// The declaration aids (unrated-courses T5b): the metrics rendered beside the declared input as
-// labeled data points a golfer can one-tap into the field — NOT a nudge (no threshold, no prose,
-// no auto-write).
-describe("ProfilePage — declaration aids", () => {
+// The adoptable index sources (handicap-model legibility, model §3/§7): the swng index and WHS
+// index rendered beneath "Your index" as labeled data points a golfer can one-tap into the
+// override — NOT a nudge (no threshold, no prose, no auto-write).
+describe("ProfilePage — index sources", () => {
   const withRecord = (metrics: unknown) =>
     vi.stubGlobal(
       "fetch",
@@ -235,7 +238,7 @@ describe("ProfilePage — declaration aids", () => {
       }),
     );
 
-  it("renders the swng index data point and its 'Use this' fills the declared input", async () => {
+  it("renders the swng index data point and its 'Use this' fills the override input", async () => {
     signIn();
     withRecord({ swngIndex: { value: 9.4, differentialsUsed: 3 } });
 
@@ -243,22 +246,22 @@ describe("ProfilePage — declaration aids", () => {
 
     await screen.findByText(/swng index · 9\.4/);
     fireEvent.click(screen.getByRole("button", { name: /use swng index/i }));
-    expect((screen.getByLabelText("Declared index") as HTMLInputElement).value).toBe("9.4");
+    expect((screen.getByLabelText("Your own number") as HTMLInputElement).value).toBe("9.4");
   });
 
-  it("renders the WHS index data point and its 'Use this' fills the declared input", async () => {
+  it("renders the WHS index data point and its 'Use this' fills the override input", async () => {
     signIn();
     withRecord({ whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } });
 
     renderProfilePage();
 
-    await screen.findByText(/WHS index \(computed\) · 7\.2/);
+    await screen.findByText(/WHS index · 7\.2/);
     fireEvent.click(screen.getByRole("button", { name: /use whs index/i }));
-    expect((screen.getByLabelText("Declared index") as HTMLInputElement).value).toBe("7.2");
+    expect((screen.getByLabelText("Your own number") as HTMLInputElement).value).toBe("7.2");
   });
 
-  // A golfer with only unrated rounds: a swng index value, but no WHS index yet → the WHS aid reads
-  // "—" and offers no button.
+  // A golfer with only unrated rounds: a swng index value, but no WHS index yet → the WHS source
+  // reads "—" and offers no button.
   it("a metric with no data renders '—' and offers no 'Use this'", async () => {
     signIn();
     withRecord({ swngIndex: { value: 9.4, differentialsUsed: 3 } });
@@ -266,18 +269,18 @@ describe("ProfilePage — declaration aids", () => {
     renderProfilePage();
 
     await screen.findByText(/swng index · 9\.4/);
-    expect(screen.getByText(/WHS index \(computed\) · —/)).toBeTruthy();
+    expect(screen.getByText(/WHS index · —/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /use whs index/i })).toBeNull();
   });
 
-  it("a brand-new golfer (empty metrics) shows '—' for both aids and no 'Use this' anywhere", async () => {
+  it("a brand-new golfer (empty metrics) shows '—' for both sources and no 'Use this' anywhere", async () => {
     signIn();
     withRecord({});
 
     renderProfilePage();
 
     await screen.findByText(/swng index · —/);
-    expect(screen.getByText(/WHS index \(computed\) · —/)).toBeTruthy();
+    expect(screen.getByText(/WHS index · —/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /use swng index/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /use whs index/i })).toBeNull();
   });
@@ -303,6 +306,86 @@ describe("ProfilePage — declaration aids", () => {
 
     await screen.findByText(/swng index · 9\.4/);
     expect(screen.queryByText(/consider|you should|diverge|update your declared|off by|higher than|lower than|recommend/i)).toBeNull();
+  });
+});
+
+// "Your index" — the one active number the golfer owns (model §3/§7). Its value is the override
+// when set, else the swng index (the all-rounds default, NOT WHS), and it always shows its source.
+describe("ProfilePage — Your index (the one active number)", () => {
+  const withGolferAndMetrics = (golfer: unknown, metrics: unknown) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics, history: [] });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+  it("with nothing declared, the active value IS the swng index (the all-rounds default), sourced 'computed from your rounds' — never the WHS number", async () => {
+    signIn();
+    // Blaine's worked example (model §3): swng index 12.4 (all rounds) is the default; WHS 11.2 is a
+    // reference only.
+    withGolferAndMetrics({ golferId: "ann", name: "Ann" }, { swngIndex: { value: 12.4, differentialsUsed: 8 }, whsIndex: { value: 11.2, computedAtMs: 1_000, differentialsUsed: 6 } });
+
+    renderProfilePage();
+
+    const activeLine = (await screen.findByText("computed from your rounds")).closest("p");
+    expect(activeLine?.textContent).toContain("12.4"); // the swng index is the active value
+    expect(activeLine?.textContent).not.toContain("11.2"); // NOT the WHS index
+    // Both sources are shown as adoptable references beneath it.
+    expect(screen.getByText(/swng index · 12\.4/)).toBeTruthy();
+    expect(screen.getByText(/WHS index · 11\.2/)).toBeTruthy();
+  });
+
+  it("for a rated-only golfer (swng index == WHS index), the active value equals that shared number", async () => {
+    signIn();
+    // Model §2: a golfer who plays only rated golf has swng index == WHS index exactly.
+    withGolferAndMetrics({ golferId: "ann", name: "Ann" }, { swngIndex: { value: 7.2, differentialsUsed: 5 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } });
+
+    renderProfilePage();
+
+    const activeLine = (await screen.findByText("computed from your rounds")).closest("p");
+    expect(activeLine?.textContent).toContain("7.2");
+  });
+
+  it("a declared override is the active value and reads 'your own'", async () => {
+    signIn();
+    withGolferAndMetrics({ golferId: "ann", name: "Ann", declared: 20 }, { swngIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } });
+
+    renderProfilePage();
+
+    const activeLine = (await screen.findByText("your own")).closest("p");
+    expect(activeLine?.textContent).toContain("20");
+  });
+
+  // The exact confusion this task removes: the old page rendered the WHS value under a "swng Index"
+  // label. No element may show the WHS number under a swng-index meaning.
+  it("no mislabel — the WHS number never appears under a 'swng index' label", async () => {
+    signIn();
+    withGolferAndMetrics({ golferId: "ann", name: "Ann" }, { swngIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } });
+
+    renderProfilePage();
+
+    await screen.findByText(/swng index · 9\.4/); // the swng source shows the SWNG value
+    expect(screen.queryByText(/swng index · 7\.2/)).toBeNull(); // never the WHS value
+    expect(screen.queryByText(/swng.*7\.2/i)).toBeNull(); // no "swng …7.2" anywhere
+    expect(screen.getByText(/WHS index · 7\.2/)).toBeTruthy(); // the WHS value lives under WHS
+    // And the active number is the swng index, not WHS.
+    expect((await screen.findByText("computed from your rounds")).closest("p")?.textContent).toContain("9.4");
+  });
+
+  it("a brand-new golfer (no declared, no computed) sees no active number and an invitation to play or set their own", async () => {
+    signIn();
+    withGolferAndMetrics({ golferId: "ann", name: "Ann" }, {});
+
+    renderProfilePage();
+
+    await screen.findByText(/no index yet/i);
+    expect(screen.queryByText("computed from your rounds")).toBeNull();
+    expect(screen.queryByText("your own")).toBeNull();
   });
 });
 

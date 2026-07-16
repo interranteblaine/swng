@@ -44,14 +44,16 @@ function IndexTrend({ history }: { readonly history: readonly GolferRoundLine[] 
   );
 }
 
-// The two declaration aids beside the declared-index input (unrated-courses T5b) — each a labeled
-// data point read straight off GET /me/record's metrics, with a one-tap "Use this". Table-driven
-// so adding a metric is adding a row, never a new branch; `valueOf` pulls the number (or undefined
-// → renders "—") and `useLabel` is the button's accessible name (the two buttons share the visible
-// "Use this" text, so distinct aria-labels keep them individually addressable).
-const DECLARATION_AIDS: readonly { readonly label: string; readonly useLabel: string; readonly valueOf: (record: GetMyRecordResponse | undefined) => number | undefined }[] = [
-  { label: "swng index", useLabel: "Use swng index", valueOf: (record) => record?.metrics?.swngIndex?.value },
-  { label: "WHS index (computed)", useLabel: "Use WHS index", valueOf: (record) => record?.metrics?.whsIndex?.value },
+// The two adoptable sources shown beneath "Your index" (handicap-model legibility, model §3/§7) —
+// each a labeled data point read straight off GET /me/record's metrics, with a one-tap "Use this"
+// that copies its value into the override input. Table-driven so adding a source is adding a row,
+// never a new branch; `valueOf` pulls the number (or undefined → renders "—", no button) and
+// `useLabel` is the button's accessible name (both buttons share the visible "Use this" text, so
+// distinct aria-labels keep them individually addressable). `description` is the model's own gloss:
+// the swng index counts every round; the WHS index is the strict rated-only official number.
+const INDEX_SOURCES: readonly { readonly label: string; readonly description: string; readonly useLabel: string; readonly valueOf: (record: GetMyRecordResponse | undefined) => number | undefined }[] = [
+  { label: "swng index", description: "from all your rounds", useLabel: "Use swng index", valueOf: (record) => record?.metrics?.swngIndex?.value },
+  { label: "WHS index", description: "rated rounds, official rules", useLabel: "Use WHS index", valueOf: (record) => record?.metrics?.whsIndex?.value },
 ];
 
 type DistributionKey = keyof GolferRoundLine["distribution"];
@@ -189,12 +191,17 @@ export function ProfilePage() {
     return (
       <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-slate-950 p-6 text-slate-100">
         <h1 className="text-2xl font-bold">Profile</h1>
-        <p className="text-slate-400">Sign in to see your profile and swng Index.</p>
+        <p className="text-slate-400">Sign in to see your profile and swng index.</p>
       </main>
     );
   }
 
-  const effective = effectiveIndex({ declared: auth.golfer?.declared, computed: record?.metrics?.whsIndex?.value });
+  // "Your index" — the one number the golfer owns (model §3). Its active value is their override
+  // (`declared`) if they set one, else their swng index (the all-rounds computed number, the default
+  // — NOT the WHS index). `source: "computed"` therefore now reads as "computed from your rounds"
+  // (their swng index); "declared" reads as "your own". There is no hidden precedence: whatever this
+  // resolves to is shown on the screen, labeled with where it came from.
+  const effective = effectiveIndex({ declared: auth.golfer?.declared, computed: record?.metrics?.swngIndex?.value });
   const history = record?.history ?? [];
 
   return (
@@ -226,42 +233,59 @@ export function ProfilePage() {
           )}
         </div>
 
-        <label className="flex flex-col gap-1">
-          Declared index
-          <input value={declared} onChange={(event) => setDeclared(event.target.value)} inputMode="decimal" className="rounded-lg bg-slate-800 p-3 text-lg" />
-        </label>
+        {/* Your index (handicap-model legibility, model §3/§7): ONE number the golfer owns, always
+            on the screen with its source, never a value the system picks off-screen. The active
+            value + where it came from sits at the top; the two adoptable sources (swng index by
+            default, WHS as a reference) sit beneath with a one-tap "Use this"; the override is the
+            plain "type your own" input. No blank "declared" box standing alone, and no number the
+            page uses that isn't shown. Deliberately NO divergence threshold, no "you should change
+            this" prose, no auto-write — just the numbers, and the golfer decides. */}
+        <section className="flex flex-col gap-3">
+          <h2 className="text-lg font-semibold">Your index</h2>
 
-        {/* Declaration aids (unrated-courses T5b): the read-time metrics shown beside the declared
-            input as labeled data points a golfer can one-tap into the field — NOT a nudge. There is
-            deliberately no divergence threshold, no "you should change this" prose, and no auto-
-            write: just the numbers, and the golfer decides which (if any) to declare. A metric
-            with no data reads "—" and offers no button (a brand-new golfer sees "—" for both; a
-            golfer with only unrated rounds sees a swng index value and "—" for WHS). */}
-        <div className="flex flex-col gap-2" aria-label="Declaration aids">
-          {DECLARATION_AIDS.map((aid) => {
-            const value = aid.valueOf(record);
-            return (
-              <div key={aid.label} className="flex items-center justify-between gap-2 text-sm">
-                {/* One inline text run per row (label · value) — NOT a nested value element, so a
-                    bare value like "7.2" never becomes its own text node colliding with the "Your
-                    record" section's own index display of the same number. */}
-                <span className="text-slate-300">
-                  {aid.label} · {value !== undefined ? value : "—"}
-                </span>
-                {value !== undefined && (
-                  <button
-                    type="button"
-                    aria-label={aid.useLabel}
-                    onClick={() => setDeclared(String(value))}
-                    className="shrink-0 text-emerald-400 underline"
-                  >
-                    Use this
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
+          {effective ? (
+            <p className="flex items-baseline gap-2">
+              <span className="text-3xl font-bold">{effective.value.toFixed(1)}</span>
+              {/* The source phrasing IS the legibility — the golfer always sees where their number
+                  came from ("your own" once they set/adopt one, else "computed from your rounds"). */}
+              <span className="text-sm text-slate-400">{effective.source === "declared" ? "your own" : "computed from your rounds"}</span>
+            </p>
+          ) : (
+            <p className="text-sm text-slate-400">No index yet — computes after 3 posted 18-hole-equivalent differentials, or set your own below.</p>
+          )}
+
+          <div className="flex flex-col gap-2" aria-label="Index sources">
+            {INDEX_SOURCES.map((source) => {
+              const value = source.valueOf(record);
+              return (
+                <div key={source.label} className="flex items-center justify-between gap-2 text-sm">
+                  {/* Label · value on the outer span's own direct text nodes (so a query for
+                      "swng index · 9.4" reads one node), with the model's gloss on a nested line. A
+                      source with no data reads "—" and offers no button. */}
+                  <span className="text-slate-300">
+                    {source.label} · {value !== undefined ? value : "—"}
+                    <span className="block text-xs text-slate-500">{source.description}</span>
+                  </span>
+                  {value !== undefined && (
+                    <button
+                      type="button"
+                      aria-label={source.useLabel}
+                      onClick={() => setDeclared(String(value))}
+                      className="shrink-0 text-emerald-400 underline"
+                    >
+                      Use this
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <label className="flex flex-col gap-1">
+            Your own number
+            <input value={declared} onChange={(event) => setDeclared(event.target.value)} inputMode="decimal" className="rounded-lg bg-slate-800 p-3 text-lg" />
+          </label>
+        </section>
 
         {error && (
           <p role="alert" className="text-red-400">
@@ -308,17 +332,6 @@ export function ProfilePage() {
 
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Your record</h2>
-
-        {record?.metrics?.whsIndex ? (
-          <p>
-            swng Index <strong>{record.metrics.whsIndex.value.toFixed(1)}</strong>
-            <span className="text-slate-400"> — from {record.metrics.whsIndex.differentialsUsed} differential{record.metrics.whsIndex.differentialsUsed === 1 ? "" : "s"}</span>
-          </p>
-        ) : (
-          <p className="text-slate-400">computes after 3 posted 18-hole-equivalent differentials</p>
-        )}
-
-        <p className="text-sm text-slate-400">Effective index: {effective ? `${effective.value.toFixed(1)} (${effective.source})` : "not yet set"}</p>
 
         <IndexTrend history={history} />
         <DistributionBars history={history} />

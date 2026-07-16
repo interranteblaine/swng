@@ -24,8 +24,13 @@ export const courseViewSchema: z.ZodType<CourseView> = z.object({
 
 // Input tees: POST mints every id (no teeId accepted — .strict() rejects it); PUT takes an
 // optional teeId per the continuity rule (§3: with id = same tee, without = new, absent = removed).
+// rating/slope are optional-as-a-pair here purely STRUCTURALLY (unrated-courses spec §1) —
+// mirroring round.ts's teeSetSchema so an unrated tee can be POSTed at all. The pairing + the
+// bounds are the domain's job: validateCard rejects one-of-two with `rating-slope-paired` and
+// enforces the 30..90 / 55..155 ranges. Keeping the wire purely structural (both `.optional()`,
+// no `.refine`) is what lets that single server-side rule stay the sole authority, un-mirrored here.
 const newTeeInputSchema = z
-  .object({ name: z.string().min(1), rating: z.number(), slope: z.number(), holes: z.array(holeSchema).min(1).readonly() })
+  .object({ name: z.string().min(1), rating: z.number().optional(), slope: z.number().optional(), holes: z.array(holeSchema).min(1).readonly() })
   .strict();
 const continuingTeeInputSchema = newTeeInputSchema.extend({ teeId: z.string().min(1).optional() }).strict();
 
@@ -67,7 +72,10 @@ export const searchCoursesResponseSchema: z.ZodType<SearchCoursesResponse> = z.o
 // domain's TeeSet — a peek of an unrated tee still names it, just without numbers.
 export interface PeekRoundResponse {
   readonly courseName: string;
-  readonly teeSets: readonly { readonly name: string; readonly rating?: number; readonly slope?: number }[];
+  // `par` (each tee's summed hole pars) is always present — the join-side course-handicap
+  // suggestion (unrated-courses arc) needs a tee's par even when it has no rating/slope, so it
+  // is not optional the way rating/slope are. rating/slope stay optional as a pair (§1).
+  readonly teeSets: readonly { readonly name: string; readonly par: number; readonly rating?: number; readonly slope?: number }[];
   // accounts-only identity spec §5: the round-created event's own wall time, so the join-link
   // sign-up framing can render the round the SAME way ("Casa Verde GC · Sat, Jul 12") the home list
   // and archive do. Required — a peek always reads a live round, whose log always has round-created.
@@ -76,6 +84,6 @@ export interface PeekRoundResponse {
 
 export const peekRoundResponseSchema: z.ZodType<PeekRoundResponse> = z.object({
   courseName: z.string(),
-  teeSets: z.array(z.object({ name: z.string(), rating: z.number().optional(), slope: z.number().optional() })).readonly(),
+  teeSets: z.array(z.object({ name: z.string(), par: z.number().int(), rating: z.number().optional(), slope: z.number().optional() })).readonly(),
   createdAt: z.number().int(),
 });

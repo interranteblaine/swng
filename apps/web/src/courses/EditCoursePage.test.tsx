@@ -326,4 +326,87 @@ describe("EditCoursePage", () => {
     fireEvent.change(screen.getByLabelText(/^tee name$/i), { target: { value: "" } });
     expect(screen.getByRole("button", { name: /save changes/i }).hasAttribute("disabled")).toBe(true);
   });
+
+  // unrated-courses arc: an UNRATED card must round-trip through a supersede untouched — both the
+  // edited tee AND the carried-over other tee stay unrated (no rating/slope on the wire). This is
+  // the carryOver rework: the old placeholder THREW `tee-unrated`, so this whole flow used to be
+  // impossible (submit never even reached supersedeCard).
+  const unratedBaseView: CourseView = {
+    courseId: courseId("course-1"),
+    cardId: "card-1",
+    card: {
+      courseName: "Muni Nine",
+      teeSets: [
+        { teeId: teeId("tee-white"), name: "white", holes: fixtureWhite.holes }, // unrated (no rating/slope)
+        { teeId: teeId("tee-blue"), name: "blue", holes: fixtureWhite.holes.map((hole) => ({ ...hole, yardage: hole.yardage + 40 })) }, // unrated
+      ],
+    },
+    enteredBy: "Ann",
+    updatedAtMs: 1_700_000_000_000,
+  };
+
+  it("seeds blank rating/slope for an unrated tee (never the string 'undefined')", async () => {
+    signIn();
+    mockedGetCourse.mockResolvedValue({ course: unratedBaseView });
+    renderEditPage();
+    await awaitForm();
+
+    expect((screen.getByLabelText(/^rating$/i) as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText(/^slope$/i) as HTMLInputElement).value).toBe("");
+  });
+
+  it("supersedes an unrated card verbatim — the edited tee AND the carried-over tee both omit rating/slope", async () => {
+    signIn();
+    mockedGetCourse.mockResolvedValue({ course: unratedBaseView });
+    mockedSupersedeCard.mockResolvedValue({ course: unratedBaseView });
+    renderEditPage();
+    await awaitForm();
+
+    // Rename the (unrated) white tee but leave it unrated; blue carries over untouched.
+    fireEvent.change(screen.getByLabelText(/^tee name$/i), { target: { value: "white tees" } });
+    expect(screen.getByRole("button", { name: /save changes/i }).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(mockedSupersedeCard).toHaveBeenCalledTimes(1));
+    const [, body] = mockedSupersedeCard.mock.calls[0]!;
+    expect(body).toEqual({
+      name: "Muni Nine",
+      supersedes: "card-1",
+      teeSets: [
+        { teeId: teeId("tee-white"), name: "white tees", holes: unratedBaseView.card.teeSets[0]!.holes },
+        { teeId: teeId("tee-blue"), name: "blue", holes: unratedBaseView.card.teeSets[1]!.holes },
+      ],
+    });
+    // toEqual ignores present-but-undefined keys — assert ABSENCE explicitly (no rating: undefined).
+    expect(body.teeSets[0]).not.toHaveProperty("rating");
+    expect(body.teeSets[0]).not.toHaveProperty("slope");
+    expect(body.teeSets[1]).not.toHaveProperty("rating");
+    expect(body.teeSets[1]).not.toHaveProperty("slope");
+    expect(() => supersedeCardRequestSchema.parse(body as SupersedeCardRequest)).not.toThrow();
+  });
+
+  it("a value in exactly ONE of rating/slope surfaces the server's rating-slope-paired error on BOTH fields", async () => {
+    signIn();
+    mockedGetCourse.mockResolvedValue({ course: baseView });
+    mockedSupersedeCard.mockRejectedValue(new ApiError("rating-slope-paired", 400, 'tee "white" must set course rating and slope together, or neither (unrated)'));
+    renderEditPage();
+    await awaitForm();
+
+    fireEvent.change(screen.getByLabelText(/^slope$/i), { target: { value: "" } }); // rating kept, slope blanked
+    expect(screen.getByRole("button", { name: /save changes/i }).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(mockedSupersedeCard).toHaveBeenCalledTimes(1));
+    const alerts = await screen.findAllByRole("alert");
+    const paired = alerts.filter((el) => /rating and slope together/.test(el.textContent ?? ""));
+    expect(paired.length).toBe(2);
+  });
+
+  it("prompts that a card with no rating can leave rating/slope blank", async () => {
+    signIn();
+    mockedGetCourse.mockResolvedValue({ course: baseView });
+    renderEditPage();
+    await awaitForm();
+    expect(screen.getByText(/No course rating on the card\? Leave these blank\./)).toBeTruthy();
+  });
 });

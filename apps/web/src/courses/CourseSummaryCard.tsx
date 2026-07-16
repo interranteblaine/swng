@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import type { CourseView } from "@swng/contracts";
+import { teeNumbers } from "./teeNumbers";
 
 export interface CourseSummaryCardProps {
   readonly course: CourseView;
@@ -46,7 +47,7 @@ export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCo
         <select value={selectedTee} onChange={(event) => onSelectTee(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg">
           {course.card.teeSets.map((teeSet) => (
             <option key={teeSet.name} value={teeSet.name}>
-              {teeSet.name} — rating {teeSet.rating}, slope {teeSet.slope}
+              {teeSet.name} — {teeNumbers(teeSet)}
             </option>
           ))}
         </select>

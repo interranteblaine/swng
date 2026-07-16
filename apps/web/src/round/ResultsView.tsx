@@ -67,7 +67,15 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
             const name = state.participants.find((p) => p.golferId === row.golferId)?.name ?? row.golferId;
             return (
               <li key={row.golferId} className="text-sm text-slate-300">
-                {name} — {row.kind === "complete" ? `AGS ${row.ags}, differential ${row.differential.toFixed(1)}` : "incomplete"}
+                {name} —{" "}
+                {row.kind === "complete"
+                  ? `AGS ${row.ags}, differential ${row.differential.toFixed(1)}`
+                  : // unrated-courses arc: an unrated round still has an AGS, it just isn't posted to a
+                    // handicap (no rating/slope → no differential). Naming it "unrated (not posted)" keeps
+                    // it distinct from a genuinely undecided card, which stays "incomplete".
+                    row.kind === "unrated"
+                    ? `AGS ${row.ags} · unrated (not posted)`
+                    : "incomplete"}
               </li>
             );
           })}

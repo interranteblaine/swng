@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router";
-import { courseId as makeCourseId, DomainError, isRated } from "@swng/domain";
+import { courseId as makeCourseId } from "@swng/domain";
 import type { TeeSet } from "@swng/domain";
 import type { CourseView, SupersedeCardRequest } from "@swng/contracts";
 import { ApiError, getCourse, supersedeCard } from "../api";
@@ -9,6 +9,7 @@ import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { HoleGrid, defaultHoles, holesAreComplete, parseHoles } from "./HoleGrid";
 import type { HoleCount, HoleInput } from "./HoleGrid";
+import { teeNumbers } from "./teeNumbers";
 
 type TeeSetInput = SupersedeCardRequest["teeSets"][number];
 
@@ -16,7 +17,9 @@ type Field = "name" | "teeName" | "rating" | "slope" | "holes";
 
 // AddCoursePage's own FIELD_FOR_CODE, plus "duplicate-tee-name" (a whole-card submission can
 // collide two tee names the way a brand-new course never could — AddCoursePage posts exactly
-// one tee, so course.ts's own duplicate-name check can never fire there).
+// one tee, so course.ts's own duplicate-name check can never fire there). `rating-slope-paired`
+// is routed to BOTH fields via PAIRED_CODE (same idiom as AddCoursePage), not listed here.
+const PAIRED_CODE = "rating-slope-paired";
 const FIELD_FOR_CODE: Readonly<Record<string, Field>> = {
   "invalid-course-name": "name",
   "invalid-tee-name": "teeName",
@@ -88,8 +91,10 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
     const tee = courseView.card.teeSets.find((t) => t.name === teeToEdit) ?? courseView.card.teeSets[0];
     setSelectedTeeName(tee?.name);
     setTeeName(tee?.name ?? "");
-    setRating(tee ? String(tee.rating) : "");
-    setSlope(tee ? String(tee.slope) : "");
+    // An unrated tee (rating/slope absent) seeds BLANK inputs, not the string "undefined" — the
+    // editor round-trips it back out unrated, and the golfer can fill the numbers to rate it.
+    setRating(tee?.rating !== undefined ? String(tee.rating) : "");
+    setSlope(tee?.slope !== undefined ? String(tee.slope) : "");
     setHoles(tee ? tee.holes.map((hole) => ({ par: String(hole.par), yardage: String(hole.yardage), strokeIndex: String(hole.strokeIndex) })) : defaultHoles(18));
   };
 
@@ -131,12 +136,21 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
 
   const parsedHoles = parseHoles(holes);
   const holesComplete = holesAreComplete(parsedHoles);
+  // Optional rating/slope (unrated-courses arc): blank = unrated. Parse only to keep a NaN off the
+  // wire — a filled rating must be finite, a filled slope an integer; the pairing is the server's.
+  const ratingBlank = rating.trim().length === 0;
+  const slopeBlank = slope.trim().length === 0;
   const parsedRating = Number.parseFloat(rating);
   const parsedSlope = Number.parseInt(slope, 10);
   const holeCount: HoleCount = holes.length === 9 ? 9 : 18;
 
   const canSubmit =
-    view !== undefined && name.trim().length > 0 && teeName.trim().length > 0 && Number.isFinite(parsedRating) && Number.isInteger(parsedSlope) && holesComplete;
+    view !== undefined &&
+    name.trim().length > 0 &&
+    teeName.trim().length > 0 &&
+    (ratingBlank || Number.isFinite(parsedRating)) &&
+    (slopeBlank || Number.isInteger(parsedSlope)) &&
+    holesComplete;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -151,25 +165,25 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
     // through VERBATIM (same teeId, same everything), in its original position. Add-tee mode
     // keeps every existing tee unchanged and appends the new one id-less at the end.
     const originalTee = addTee ? undefined : view.card.teeSets.find((t) => t.name === selectedTeeName);
+    // Conditional-spread rating/slope: a blank field is OMITTED (never a NaN/undefined on the
+    // wire), so an unrated tee submits as `{ name, holes }` and a filled one carries its numbers.
+    // A value in exactly one surfaces the server's `rating-slope-paired` on the pair.
     const submittedTee: TeeSetInput = {
       ...(originalTee?.teeId !== undefined ? { teeId: originalTee.teeId } : {}),
       name: teeName.trim(),
-      rating: parsedRating,
-      slope: parsedSlope,
+      ...(ratingBlank ? {} : { rating: parsedRating }),
+      ...(slopeBlank ? {} : { slope: parsedSlope }),
       holes: parsedHoles,
     };
     // Mutable (not `readonly TeeSetInput[]`): SupersedeCardRequest's own inferred type is
     // mutable (createCourseRequestSchema/supersedeCardRequestSchema carry no `.readonly()` on
     // teeSets, unlike most other wire arrays), so supersedeCard's parameter expects exactly that.
-    // courses.ts's own create/supersede wire schema (newTeeInputSchema) still requires rating/slope
-    // as a pair — unlike round.ts's teeSetSchema, it wasn't widened by the unrated-tees task (T5
-    // widens the write path); every existing card is rated today (Task 1 is additive-only, no
-    // unrated-write UI exists yet), so `isRated` narrows TeeSet's now-optional rating/slope back to
-    // real numbers here — never an explicit `rating: undefined`/`slope: undefined` on the wire body.
-    const carryOver = (tee: TeeSet): TeeSetInput => {
-      if (!isRated(tee)) throw new DomainError("tee-unrated", `tee "${tee.name}" is unrated — editing an unrated card isn't supported yet`);
-      return { ...tee };
-    };
+    // The write schema now accepts unrated tees (rating/slope optional-as-a-pair), so a carried-
+    // over tee round-trips VERBATIM: `{ ...tee }` keeps its teeId + holes and, because TeeSet's
+    // rating/slope are optional, omits an absent number by construction rather than carrying an
+    // explicit `undefined`. No guard, no assert, no throw — an unrated card's other tees survive a
+    // supersede of one tee exactly as written.
+    const carryOver = (tee: TeeSet): TeeSetInput => ({ ...tee });
     const teeSets: TeeSetInput[] = addTee
       ? [...view.card.teeSets.map(carryOver), submittedTee]
       : view.card.teeSets.map((tee) => (tee === originalTee ? submittedTee : carryOver(tee)));
@@ -203,8 +217,14 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
     }
   };
 
-  const errorFor = (field: Field): string | undefined => (error && FIELD_FOR_CODE[error.code] === field ? error.message : undefined);
-  const generalError = error && FIELD_FOR_CODE[error.code] === undefined ? error.message : undefined;
+  const errorFor = (field: Field): string | undefined => {
+    if (!error) return undefined;
+    // The paired error lands on BOTH rating and slope (unrated-courses arc) — same routing as
+    // AddCoursePage: the golfer set one and not the other, so both are named.
+    if (error.code === PAIRED_CODE) return field === "rating" || field === "slope" ? error.message : undefined;
+    return FIELD_FOR_CODE[error.code] === field ? error.message : undefined;
+  };
+  const generalError = error && error.code !== PAIRED_CODE && FIELD_FOR_CODE[error.code] === undefined ? error.message : undefined;
 
   const title = addTee ? "Add a tee" : "Edit this card";
 
@@ -271,7 +291,7 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
             <select value={selectedTeeName ?? ""} onChange={(event) => changeTeeToEdit(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg">
               {view.card.teeSets.map((teeSet) => (
                 <option key={teeSet.name} value={teeSet.name}>
-                  {teeSet.name} — rating {teeSet.rating}, slope {teeSet.slope}
+                  {teeSet.name} — {teeNumbers(teeSet)}
                 </option>
               ))}
             </select>
@@ -313,6 +333,10 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
             </span>
           )}
         </div>
+
+        {/* rating/slope are optional as a pair (unrated-courses arc) — leaving both blank keeps
+            (or makes) this tee unrated; the card's other tees are untouched either way. */}
+        <p className="text-sm text-slate-400">No course rating on the card? Leave these blank.</p>
 
         {/* hideHoleCountToggle: this card's hole count is fixed by every OTHER tee on it
             (course.ts's validateCard) — there is no toggle here to pin the invariant with. */}

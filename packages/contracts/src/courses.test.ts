@@ -85,11 +85,53 @@ describe("searchCoursesResponseSchema", () => {
 });
 
 describe("peekRoundResponseSchema", () => {
-  it("round-trips a valid peek-round response", () => {
-    roundTrips(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white", rating: 71.2, slope: 128 }], createdAt: 1_700_000_000_000 });
+  it("round-trips a valid peek-round response carrying par", () => {
+    roundTrips(peekRoundResponseSchema, {
+      courseName: "Casa Verde GC",
+      teeSets: [{ name: "white", par: 72, rating: 71.2, slope: 128 }],
+      createdAt: 1_700_000_000_000,
+    });
+  });
+
+  // unrated-courses arc: a peek of an unrated tee still names it and its par, just without
+  // rating/slope — the pair is optional here (§1), par is always present.
+  it("round-trips a peek of an unrated tee (rating/slope absent, par present)", () => {
+    roundTrips(peekRoundResponseSchema, {
+      courseName: "Casa Verde GC",
+      teeSets: [{ name: "white", par: 72 }],
+      createdAt: 1_700_000_000_000,
+    });
+  });
+
+  it("rejects a tee missing par (par is required, unlike rating/slope)", () => {
+    expect(() =>
+      parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white", rating: 71.2, slope: 128 }], createdAt: 1 }),
+    ).toThrow(ContractError);
   });
 
   it("rejects a payload missing teeSets", () => {
     expect(() => parse(peekRoundResponseSchema, { courseName: "Casa Verde GC" })).toThrow(ContractError);
+  });
+});
+
+// unrated-courses arc: the create/supersede tee input widened rating/slope to optional-as-a-pair
+// (structural only) so an unrated tee can be POSTed at all — the domain's validateCard is the sole
+// authority on the pairing + bounds, so the wire tolerates each independently by design.
+describe("newTeeInputSchema widening (unrated write path)", () => {
+  const unratedTee = { name: "white", holes: inputTee.holes };
+
+  it("round-trips a create request whose only tee has no rating/slope", () => {
+    roundTrips(createCourseRequestSchema, { name: "Casa Verde GC", teeSets: [unratedTee] });
+  });
+
+  it("round-trips a supersede request carrying an unrated tee", () => {
+    roundTrips(supersedeCardRequestSchema, { name: "Casa Verde GC", teeSets: [{ ...unratedTee, teeId: "t-1" }], supersedes: "card-1" });
+  });
+
+  it.each([
+    ["rating alone (the pairing is the domain's job, not the wire's)", { name: "Casa Verde GC", teeSets: [{ name: "white", rating: 71.2, holes: inputTee.holes }] }],
+    ["slope alone", { name: "Casa Verde GC", teeSets: [{ name: "white", slope: 128, holes: inputTee.holes }] }],
+  ])("accepts structurally: %s", (_label, payload) => {
+    expect(() => parse(createCourseRequestSchema, payload)).not.toThrow();
   });
 });

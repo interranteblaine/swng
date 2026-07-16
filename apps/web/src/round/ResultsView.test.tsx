@@ -6,6 +6,7 @@ import {
   deviceId,
   fieldDeck18,
   fixtureLinks18,
+  fixtureWhite18,
   gameId,
   gameStrokeAllocation,
   golferId,
@@ -16,7 +17,7 @@ import {
   scoreGame,
   settleRound,
 } from "@swng/domain";
-import type { GameConfig, RoundState, ScoreCell } from "@swng/domain";
+import type { CourseCard, GameConfig, RoundState, ScoreCell } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
@@ -219,6 +220,56 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
 
     render(<ResultsView state={state} games={[]} response={undefined} />);
     expect(screen.getByText("Ann — incomplete")).toBeTruthy();
+  });
+});
+
+// unrated-courses arc: a round played on an unrated tee (no rating/slope) is fully scored and
+// has an AGS, but no differential to post to a handicap. Its handicapping row is a THIRD kind,
+// "unrated" — it must render its AGS and say it isn't posted, NEVER collapse into "incomplete"
+// (which means an undecided card, a different thing entirely).
+describe("ResultsView — unrated handicapping row", () => {
+  const ann = golferId("ann");
+
+  // An unrated 18-hole tee (fixtureWhite18's holes, with rating/slope stripped), fully scored at
+  // par by Ann — so adjustedGrossScore holds (the card is decided) but scoreDifferential is never
+  // reached (isRated is false). handicappingFor returns { kind: "unrated", ags }.
+  const unratedCard: CourseCard = { courseName: "Unrated GC", teeSets: [{ name: "white", holes: fixtureWhite18.holes }] };
+  const fullyScoredCells = (): Record<string, ScoreCell> => {
+    const cells: Record<string, ScoreCell> = {};
+    for (const hole of fixtureWhite18.holes) {
+      cells[cellKey(ann, hole.number)] = {
+        result: { kind: "strokes", strokes: hole.par },
+        recordedBy: ann,
+        hlc: { wallMs: hole.number, counter: 0, deviceId: deviceId("d") },
+        opId: opId(`op-${hole.number}`),
+      };
+    }
+    return cells;
+  };
+  const unratedState = (): RoundState => ({
+    id: roundId("r-unrated"),
+    status: "final",
+    card: unratedCard,
+    participants: [{ golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 }],
+    games: [],
+    cells: fullyScoredCells(),
+    terminatedGameIds: new Set(),
+  });
+
+  it("derives an unrated row (no response) → renders its AGS and 'unrated (not posted)', not 'incomplete'", () => {
+    render(<ResultsView state={unratedState()} games={[]} response={undefined} />);
+
+    // par-72 card, all pars, no net-double-bogey adjustment → AGS 72.
+    expect(screen.getByText(/Ann — AGS 72 · unrated \(not posted\)/)).toBeTruthy();
+    expect(screen.queryByText(/Ann — incomplete/)).toBeNull();
+  });
+
+  it("renders a server response's own unrated row verbatim (the finalize-tab path)", () => {
+    const response: FinalizeRoundResponse = { results: [], handicapping: [{ golferId: ann, kind: "unrated", ags: 84 }] };
+    render(<ResultsView state={unratedState()} games={[]} response={response} />);
+
+    expect(screen.getByText(/Ann — AGS 84 · unrated \(not posted\)/)).toBeTruthy();
+    expect(screen.queryByText(/Ann — incomplete/)).toBeNull();
   });
 });
 

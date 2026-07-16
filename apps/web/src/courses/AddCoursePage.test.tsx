@@ -274,4 +274,65 @@ describe("AddCoursePage", () => {
     await awaitForm();
     expect(screen.getByText(/SI = the Handicap\/HDCP row on your scorecard — 1 is the hardest hole\. Type it exactly as printed\./)).toBeTruthy();
   });
+
+  // unrated-courses arc: a card with no course rating is entered by leaving rating/slope blank.
+  it("prompts that a card with no rating can leave rating/slope blank", async () => {
+    signIn();
+    renderAddCourse();
+    await awaitForm();
+    expect(screen.getByText(/No course rating on the card\? Leave these blank\./)).toBeTruthy();
+  });
+
+  it("submits an UNRATED tee (rating/slope blank) with those keys OMITTED — never rating: NaN/undefined on the wire", async () => {
+    const idToken = signIn();
+    mockedCreateCourse.mockResolvedValue(courseResponse("course-2"));
+
+    renderAddCourse();
+    await awaitForm();
+
+    fireEvent.change(screen.getByLabelText(/course name/i), { target: { value: "Muni Nine" } });
+    fireEvent.change(screen.getByLabelText(/tee name/i), { target: { value: "white" } });
+    // rating + slope left blank — the whole point of the unrated path.
+    PAPER_CARD.forEach((hole, index) => fillHole(index + 1, hole));
+
+    // The button is enabled even with no rating/slope — they no longer gate submission.
+    expect(screen.getByRole("button", { name: /add course/i }).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: /add course/i }));
+
+    await waitFor(() => expect(mockedCreateCourse).toHaveBeenCalledTimes(1));
+    const [body, token] = mockedCreateCourse.mock.calls[0]!;
+    expect(body).toEqual({
+      name: "Muni Nine",
+      teeSets: [{ name: "white", holes: PAPER_CARD.map((hole, index) => ({ number: index + 1, ...hole })) }],
+    });
+    // Explicit: the keys are ABSENT, not present-and-undefined.
+    expect(body.teeSets[0]).not.toHaveProperty("rating");
+    expect(body.teeSets[0]).not.toHaveProperty("slope");
+    expect(token).toBe(idToken);
+    expect(() => createCourseRequestSchema.parse(body as CreateCourseRequest)).not.toThrow();
+  });
+
+  it("a value in exactly ONE of rating/slope submits and surfaces the server's rating-slope-paired error on BOTH fields", async () => {
+    signIn();
+    mockedCreateCourse.mockRejectedValue(new ApiError("rating-slope-paired", 400, 'tee "white" must set course rating and slope together, or neither (unrated)'));
+    renderAddCourse();
+    await awaitForm();
+
+    fireEvent.change(screen.getByLabelText(/course name/i), { target: { value: "Half Rated GC" } });
+    fireEvent.change(screen.getByLabelText(/tee name/i), { target: { value: "white" } });
+    fireEvent.change(screen.getByLabelText(/^rating$/i), { target: { value: "71.6" } }); // rating only — slope blank
+    PAPER_CARD.forEach((hole, index) => fillHole(index + 1, hole));
+
+    // One-of-two is a legal SUBMIT (the pairing is the server's call), not a client block.
+    expect(screen.getByRole("button", { name: /add course/i }).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: /add course/i }));
+
+    await waitFor(() => expect(mockedCreateCourse).toHaveBeenCalledTimes(1));
+    // The paired error names BOTH inputs — one alert beside rating, one beside slope.
+    const alerts = await screen.findAllByRole("alert");
+    const paired = alerts.filter((el) => /rating and slope together/.test(el.textContent ?? ""));
+    expect(paired.length).toBe(2);
+    expect(screen.getByLabelText(/^rating$/i).closest("label")?.parentElement?.contains(paired[0]!) || screen.getByLabelText(/^rating$/i).closest("label")?.parentElement?.contains(paired[1]!)).toBe(true);
+    expect(screen.getByLabelText(/^slope$/i).closest("label")?.parentElement?.contains(paired[0]!) || screen.getByLabelText(/^slope$/i).closest("label")?.parentElement?.contains(paired[1]!)).toBe(true);
+  });
 });

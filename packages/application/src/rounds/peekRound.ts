@@ -32,6 +32,9 @@ export const peekRound =
       // conditionally so an unrated tee's peek omits the keys rather than carrying them as undefined.
       teeSets: state.card.teeSets.map((tee) => ({
         name: tee.name,
+        // `par` is the tee's summed hole pars — always present, even for an unrated tee, so the
+        // join-side course-handicap suggestion has something to work from when rating/slope don't.
+        par: tee.holes.reduce((sum, hole) => sum + hole.par, 0),
         ...(tee.rating !== undefined ? { rating: tee.rating } : {}),
         ...(tee.slope !== undefined ? { slope: tee.slope } : {}),
       })),

@@ -77,4 +77,25 @@ describe("CourseSummaryCard", () => {
     const link = screen.getByRole("link", { name: /view course/i }) as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("/courses/course-1");
   });
+
+  // unrated-courses arc: the tee picker labels a rated tee with its numbers and an unrated tee
+  // (rating/slope absent) with "unrated" — via the shared teeNumbers helper, so it can never
+  // render a half-blank "rating , slope ".
+  it("labels a rated tee with its numbers and an unrated tee with 'unrated'", () => {
+    const mixed: CourseView = {
+      ...course,
+      card: {
+        courseName: "Mixed GC",
+        source: { cardId: cardId("card-1"), courseId: courseId("course-1") },
+        teeSets: [
+          { teeId: teeId("t-white"), name: "white", rating: 71.8, slope: 130, holes: [{ number: 1, par: 4, yardage: 380, strokeIndex: 1 }] },
+          { teeId: teeId("t-red"), name: "red", holes: [{ number: 1, par: 4, yardage: 300, strokeIndex: 1 }] }, // unrated
+        ],
+      },
+    };
+    renderCard({ course: mixed, selectedTee: "white", onSelectTee: vi.fn() });
+
+    expect(screen.getByRole("option", { name: "white — rating 71.8, slope 130" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "red — unrated" })).toBeTruthy();
+  });
 });

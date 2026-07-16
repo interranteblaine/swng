@@ -3,6 +3,7 @@ import { Link, Navigate, useParams } from "react-router";
 import { courseId as makeCourseId } from "@swng/domain";
 import type { CourseView } from "@swng/contracts";
 import { ApiError, getCourse } from "../api";
+import { teeNumbers } from "./teeNumbers";
 
 // Course-cards spec §7: the course hub — a read-only summary of a lineage's CURRENT card
 // (name, attribution, every tee's own hole table) plus the three maintenance actions a golfer
@@ -68,7 +69,7 @@ function CoursePageForId({ courseIdParam }: { readonly courseIdParam: string }) 
         <select value={tee?.name ?? ""} onChange={(event) => setSelectedTee(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg">
           {view.card.teeSets.map((teeSet) => (
             <option key={teeSet.name} value={teeSet.name}>
-              {teeSet.name} — rating {teeSet.rating}, slope {teeSet.slope}
+              {teeSet.name} — {teeNumbers(teeSet)}
             </option>
           ))}
         </select>

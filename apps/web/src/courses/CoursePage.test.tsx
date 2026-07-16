@@ -165,4 +165,26 @@ describe("CoursePage", () => {
     fireEvent.click(screen.getByRole("link", { name: "Edit this card" }));
     expect(await screen.findByText(/edit page — addTee false/)).toBeTruthy();
   });
+
+  // unrated-courses arc: a tee with no rating/slope renders "unrated" in the picker, not a
+  // half-blank "rating , slope " — via the shared teeNumbers helper. A rated tee still reads
+  // its numbers. The fixture mixes one of each so both branches are pinned in one place.
+  it("the tee picker labels a rated tee with its numbers and an unrated tee with 'unrated'", async () => {
+    const mixed: CourseView = {
+      ...view,
+      card: {
+        courseName: "Mixed GC",
+        teeSets: [
+          { teeId: teeId("t-white"), name: "white", rating: 71.8, slope: 130, holes: [{ number: 1, par: 4, yardage: 380, strokeIndex: 1 }] },
+          { teeId: teeId("t-red"), name: "red", holes: [{ number: 1, par: 4, yardage: 300, strokeIndex: 1 }] }, // no rating/slope — unrated
+        ],
+      },
+    };
+    mockedGetCourse.mockResolvedValue({ course: mixed });
+    renderPage();
+    await screen.findByRole("heading", { name: "Mixed GC" });
+
+    expect(screen.getByRole("option", { name: "white — rating 71.8, slope 130" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "red — unrated" })).toBeTruthy();
+  });
 });

@@ -4,7 +4,7 @@ import { DomainError } from "../errors.js";
 import type { HoleResult } from "../round/holeResult.js";
 import { fixtureWhite } from "../scoring/golden/fixtureCourse.js";
 import { roundHalfUp } from "../scoring/strokes.js";
-import { adjustedGrossScore, combineNineHoleDifferentials, computeIndex, computeIndexDetail, courseHandicapFor, scoreDifferential } from "./whs.js";
+import { adjustedGrossScore, combineNineHoleDifferentials, computeIndex, computeIndexDetail, courseHandicapFor, scoreDifferential, suggestedIndex } from "./whs.js";
 
 // Every conformance case below is pinned to a published USGA/R&A source, per the
 // task's source-verification step — the cited documents are the spec, not memory.
@@ -240,5 +240,41 @@ describe("combineNineHoleDifferentials — 2020 published combining rule", () =>
 
   it("returns an empty sequence for no entries", () => {
     expect(combineNineHoleDifferentials([])).toEqual([]);
+  });
+});
+
+describe("suggestedIndex — computeIndexDetail over neutral (ags − par) pseudo-differentials", () => {
+  // unrated-courses spec §6: the declaration aid. Every ags-bearing line becomes an
+  // ags−par pseudo-differential (difficulty-neutral: slope 113, rating = par), fed through
+  // the SAME nine-hole pairing and small-sample table computeIndex uses. Mix a 9 and an 18 to
+  // exercise the pairing path, and include a no-ags line to prove it's skipped.
+  const lines = [
+    { ags: 90, par: 72, holes: 18 as const }, // pseudo 18
+    { ags: 85, par: 72, holes: 18 as const }, // pseudo 13
+    { ags: 45, par: 36, holes: 9 as const }, //  pseudo 9  (pending)
+    { ags: 44, par: 36, holes: 9 as const }, //  pseudo 8  (pairs -> 17)
+    { ags: 80, par: 72, holes: 18 as const }, // pseudo 8
+  ];
+
+  it("matches computeIndexDetail on the same pseudo-differentials, pairing the two 9s", () => {
+    const pseudo = [
+      { differential: 18, holes: 18 as const },
+      { differential: 13, holes: 18 as const },
+      { differential: 9, holes: 9 as const },
+      { differential: 8, holes: 9 as const },
+      { differential: 8, holes: 18 as const },
+    ];
+    // combined = [18, 13, 17, 8]; length 4 -> use 1, adjustment -1.0 -> lowest 8 -> 8 - 1 = 7.0.
+    expect(suggestedIndex(lines)).toEqual({ value: 7, differentialsUsed: 1 });
+    expect(suggestedIndex(lines)).toEqual(computeIndexDetail(combineNineHoleDifferentials(pseudo)));
+  });
+
+  it("skips a line with no ags — adding one leaves the suggested index unchanged", () => {
+    const withNoAgs = [...lines, { par: 72, holes: 18 as const }];
+    expect(suggestedIndex(withNoAgs)).toEqual(suggestedIndex(lines));
+  });
+
+  it("is undefined below the 3-differential bootstrap (a single ags-bearing line)", () => {
+    expect(suggestedIndex([{ ags: 90, par: 72, holes: 18 as const }])).toBeUndefined();
   });
 });

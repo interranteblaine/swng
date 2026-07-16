@@ -12,12 +12,14 @@ import { golferGsi2pk, golferGsi2sk, golferIdFromPk, golferPk, golferSk, golferS
 const BATCH_GET_MAX_KEYS = 100;
 
 // A raw golfer item's shape on the core table (keys.ts's golferPk/golferSk): Golfer's nested
-// `handicap: { declared?, official? }` is flattened to top-level `declared`/`official`
-// attrs (the plan's binding item shape) rather than stored as a nested `handicap` map — same
-// spirit as courseStore's own custom encoding (name pulled out for gsi1sk) rather than a
-// literal 1:1 serialization of the domain type. `handicap.computed` is deliberately NOT
-// persisted here: nothing in application yet writes it onto a Golfer (it's sourced from
-// ProjectionStore's INDEX snapshot at read time), so there's nothing to round-trip.
+// `handicap: { declared? }` is flattened to a top-level `declared` attr (the plan's binding
+// item shape) rather than stored as a nested `handicap` map — same spirit as courseStore's own
+// custom encoding (name pulled out for gsi1sk) rather than a literal 1:1 serialization of the
+// domain type. `official` is a LEGACY on-disk attr only (unrated-courses spec §6 folded the
+// self-maintained official index into `declared`): the domain HandicapProfile no longer carries
+// it, nothing WRITES it anymore, and golferOf below folds a stored `official` up into `declared`
+// on read — kept on this item shape purely so that fold can see it. `computed` was never
+// persisted here at all — it's a read-time metric (getMyRecord's metrics.whsIndex).
 interface GolferItem {
   readonly pk: string;
   readonly sk: string;
@@ -47,9 +49,17 @@ const golferOf = (item: GolferItem): Golfer => ({
   name: item.name,
   ...(item.homeCourseId !== undefined ? { homeCourseId: courseId(item.homeCourseId) } : {}),
   ...(item.namePlaceholder === true ? { namePlaceholder: true } : {}),
+  // unrated-courses spec §6: the three-number model collapsed to one persisted number,
+  // `declared`. A legacy row carrying only `official` (an old self-maintained index, written
+  // before this fold) reads back AS `declared`; a row that has both keeps `declared` and drops
+  // the stale `official`. Old data tolerates forever, migrates never — the next whole-golfer put
+  // simply omits `official` (the WRITE path no longer emits it), retiring the attr organically.
   handicap: {
-    ...(item.declared !== undefined ? { declared: item.declared } : {}),
-    ...(item.official !== undefined ? { official: item.official } : {}),
+    ...(item.declared !== undefined
+      ? { declared: item.declared }
+      : item.official !== undefined
+        ? { declared: item.official }
+        : {}),
   },
 });
 
@@ -91,7 +101,6 @@ export const createDynamoGolferStore = (config: { client: DynamoDBDocumentClient
         // re-including it here, never by writing `false`.
         ...(golfer.namePlaceholder === true ? { namePlaceholder: true } : {}),
         ...(golfer.handicap.declared !== undefined ? { declared: golfer.handicap.declared } : {}),
-        ...(golfer.handicap.official !== undefined ? { official: golfer.handicap.official } : {}),
         // put's `sub` is a plain overwrite, not conditional — it mirrors the caller's OWN
         // golfer object exactly (matches the in-memory fake's `const { sub, ...plain } =
         // golfer` destructure). The guard above is what stops a caller from actually DROPPING

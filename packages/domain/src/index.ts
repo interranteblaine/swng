@@ -25,6 +25,7 @@ export * from "./handicap/whs.js";
 export * from "./golfer/golfer.js";
 export * from "./golfer/placeholderName.js";
 export * from "./golfer/record.js";
+export * from "./golfer/metrics.js";
 export * from "./crew/crew.js";
 export * from "./crew/ledger.js";
 // GameConfig is already re-exported via ./round/events.js (game.ts owns the

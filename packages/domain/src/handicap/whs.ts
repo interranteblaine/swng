@@ -86,6 +86,21 @@ export const computeIndexDetail = (differentials: readonly number[]): IndexCompu
 
 export const computeIndex = (differentials: readonly number[]): number | undefined => computeIndexDetail(differentials)?.value;
 
+// The SUGGESTED index (unrated-courses spec §6): computeIndexDetail over difficulty-neutral
+// pseudo-differentials (ags − par, i.e. scoreDifferential at slope 113 / rating = par),
+// including EVERY round that has an AGS — rated or unrated. Reuses the pinned small-sample
+// table and the 2020 nine-hole pairing verbatim; read-time only, never stored. This is a
+// declaration aid (what an unrated golfer might reasonably put in the declared field), NOT an
+// effectiveIndex source.
+export const suggestedIndex = (
+  lines: readonly { readonly ags?: number; readonly par: number; readonly holes: 9 | 18 }[],
+): IndexComputation | undefined => {
+  const pseudo = lines
+    .filter((line): line is typeof line & { ags: number } => line.ags !== undefined)
+    .map((line) => ({ differential: line.ags - line.par, holes: line.holes }));
+  return computeIndexDetail(combineNineHoleDifferentials(pseudo));
+};
+
 // Rule 6.1a: Course Handicap = Handicap Index × (Slope Rating ÷ 113) +
 // (Course Rating − par), rounded to the nearest whole number as the final step.
 export const courseHandicapFor = (index: number, teeSet: TeeSet): number => {

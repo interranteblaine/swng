@@ -95,9 +95,9 @@ const pollRecord = async (httpUrl: string, token: string, minHistory: number, ti
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const record = await getMyRecordDirect(httpUrl, token);
-    if (record.history.length >= minHistory && record.index !== undefined) return record;
+    if (record.history.length >= minHistory && record.metrics.whsIndex !== undefined) return record;
     if (Date.now() >= deadline) {
-      throw new Error(`/me/record still has ${record.history.length}/${minHistory} history lines (index ${record.index ? "present" : "absent"}) after ${timeoutMs}ms`);
+      throw new Error(`/me/record still has ${record.history.length}/${minHistory} history lines (whsIndex ${record.metrics.whsIndex ? "present" : "absent"}) after ${timeoutMs}ms`);
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
@@ -170,8 +170,8 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     // src/handicap/whs.ts's smallSampleTable). If the live system disagrees with either pinned
     // number, this assertion fails loudly rather than being adjusted to match — the
     // BLOCKED-don't-fudge instruction.
-    expect(record.index?.value).toBe(PINNED_INDEX);
-    expect(record.index?.differentialsUsed).toBe(PINNED_DIFFERENTIALS_USED);
+    expect(record.metrics.whsIndex?.value).toBe(PINNED_INDEX);
+    expect(record.metrics.whsIndex?.differentialsUsed).toBe(PINNED_DIFFERENTIALS_USED);
 
     preRebuildRecord = record;
   });
@@ -210,14 +210,14 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     // archive both before and after rebuild — no wall-clock or randomness anywhere in it, so
     // this holds bit-for-bit, not just toBeCloseTo.
     expect(postRebuildRecord.history).toEqual(preRebuildRecord.history);
-    expect(postRebuildRecord.index?.value).toBe(preRebuildRecord.index?.value);
-    expect(postRebuildRecord.index?.differentialsUsed).toBe(preRebuildRecord.index?.differentialsUsed);
+    expect(postRebuildRecord.metrics.whsIndex?.value).toBe(preRebuildRecord.metrics.whsIndex?.value);
+    expect(postRebuildRecord.metrics.whsIndex?.differentialsUsed).toBe(preRebuildRecord.metrics.whsIndex?.differentialsUsed);
 
     // computedAtMs is deliberately EXCLUDED from the equality above — since pre-prod
     // hardening D4a it's getMyRecord's read-time stamp (`deps.clock.now()` at each GET), so
     // two reads at different instants ALWAYS differ; it proves nothing about the rebuild. The
     // real parity proof is the history deep-equal plus the value/differentialsUsed equality
     // just above — the index recomputed from rebuilt lines landing identical.
-    expect(postRebuildRecord.index?.computedAtMs).not.toBe(preRebuildRecord.index?.computedAtMs);
+    expect(postRebuildRecord.metrics.whsIndex?.computedAtMs).not.toBe(preRebuildRecord.metrics.whsIndex?.computedAtMs);
   });
 });

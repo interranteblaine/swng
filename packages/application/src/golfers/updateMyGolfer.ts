@@ -6,9 +6,9 @@ import type { IdGenerator } from "../ports/idGenerator.js";
 import { ensureGolfer } from "./ensureGolfer.js";
 import { toGolferView } from "./golferView.js";
 
-// official is self-maintained in v1 (architecture.md §2 / the M7 plan): a golfer typing
-// their own GHIN index here IS the manual maintenance the doc describes, so it's patched
-// exactly like declared/name/homeCourseId — no separate verification flow.
+// declared is the golfer's own self-maintained index (unrated-courses spec §6 — the old
+// self-maintained `official` folded into `declared`): a golfer typing their own index here IS
+// the manual maintenance, patched exactly like name/homeCourseId — no separate verification flow.
 //
 // PUT /me get-or-creates through the ONE shared ensureGolfer (accounts-only identity spec §2):
 // a PUT before any prior GET /me still lands on a real, sub-bound row — minted with the
@@ -41,7 +41,6 @@ export const updateMyGolfer =
       handicap: {
         ...found.golfer.handicap,
         ...(command.declared !== undefined ? { declared: command.declared } : {}),
-        ...(command.official !== undefined ? { official: command.official } : {}),
       },
     };
 

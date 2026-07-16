@@ -184,7 +184,7 @@ export function ProfilePage() {
     );
   }
 
-  const effective = effectiveIndex({ declared: auth.golfer?.declared, computed: record?.index?.value });
+  const effective = effectiveIndex({ declared: auth.golfer?.declared, computed: record?.metrics?.whsIndex?.value });
   const history = record?.history ?? [];
 
   return (
@@ -267,10 +267,10 @@ export function ProfilePage() {
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Your record</h2>
 
-        {record?.index ? (
+        {record?.metrics?.whsIndex ? (
           <p>
-            swng Index <strong>{record.index.value.toFixed(1)}</strong>
-            <span className="text-slate-400"> — from {record.index.differentialsUsed} differential{record.index.differentialsUsed === 1 ? "" : "s"}</span>
+            swng Index <strong>{record.metrics.whsIndex.value.toFixed(1)}</strong>
+            <span className="text-slate-400"> — from {record.metrics.whsIndex.differentialsUsed} differential{record.metrics.whsIndex.differentialsUsed === 1 ? "" : "s"}</span>
           </p>
         ) : (
           <p className="text-slate-400">computes after 3 posted 18-hole-equivalent differentials</p>

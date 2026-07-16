@@ -830,11 +830,11 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
     expect(fetched.golfer).not.toHaveProperty("namePlaceholder");
   });
 
-  it("GET /me/record returns an empty history for a golfer who has never played a finalized round", async () => {
+  it("GET /me/record returns empty metrics and an empty history for a golfer who has never played a finalized round", async () => {
     const { dispatcher } = await setupGolfer();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/record", token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(200);
-    expect(getMyRecordResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ history: [] });
+    expect(getMyRecordResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ metrics: {}, history: [] });
   });
 });
 

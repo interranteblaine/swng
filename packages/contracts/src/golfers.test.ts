@@ -16,14 +16,13 @@ describe("golferViewSchema (via getMeResponseSchema)", () => {
     roundTrips(getMeResponseSchema, { golfer: { golferId: golferId("g1"), name: "Ann" } });
   });
 
-  it("round-trips a fully-populated golfer — declared and official only; no computed/effective (the server never persists a computed index on the golfer item)", () => {
+  it("round-trips a fully-populated golfer — declared only; no computed/effective (the server never persists a computed index on the golfer item)", () => {
     roundTrips(getMeResponseSchema, {
       golfer: {
         golferId: golferId("g1"),
         name: "Ann",
         homeCourseId: courseId("course-1"),
         declared: 12.3,
-        official: 8.1,
       },
     });
   });
@@ -81,29 +80,37 @@ describe("getMyRecordResponseSchema", () => {
     distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
   };
 
-  it("round-trips a record with a computed index and mixed complete/incomplete history lines", () => {
+  it("round-trips a record with both metrics (whsIndex + suggestedIndex) and mixed complete/incomplete history lines", () => {
     roundTrips(getMyRecordResponseSchema, {
-      index: { value: 7.2, computedAtMs: 5_000, differentialsUsed: 1 },
+      metrics: {
+        whsIndex: { value: 7.2, computedAtMs: 5_000, differentialsUsed: 1 },
+        suggestedIndex: { value: 9.4, differentialsUsed: 1 },
+      },
       history: [completeLine, incompleteLine],
     });
   });
 
-  it("round-trips a bootstrap-not-met record: no index, history present", () => {
-    roundTrips(getMyRecordResponseSchema, { history: [incompleteLine] });
+  // unrated-courses spec §6: a wholly-unrated history has a suggestedIndex but no whsIndex.
+  it("round-trips a record carrying only a suggestedIndex (no whsIndex)", () => {
+    roundTrips(getMyRecordResponseSchema, { metrics: { suggestedIndex: { value: 9.4, differentialsUsed: 1 } }, history: [incompleteLine] });
+  });
+
+  it("round-trips a bootstrap-not-met record: empty metrics object, history present", () => {
+    roundTrips(getMyRecordResponseSchema, { metrics: {}, history: [incompleteLine] });
   });
 
   it("round-trips an entirely empty record", () => {
-    roundTrips(getMyRecordResponseSchema, { history: [] });
+    roundTrips(getMyRecordResponseSchema, { metrics: {}, history: [] });
   });
 
   // course-cards spec §4: courseId (the analytics join key) is OPTIONAL on a history line —
   // pre-scrap lines carry none, tolerated as absent.
   it("round-trips a history line carrying courseId", () => {
-    roundTrips(getMyRecordResponseSchema, { history: [{ ...completeLine, courseId: courseId("course-1") }] });
+    roundTrips(getMyRecordResponseSchema, { metrics: {}, history: [{ ...completeLine, courseId: courseId("course-1") }] });
   });
 
   it("round-trips a pre-scrap history line with no courseId", () => {
-    roundTrips(getMyRecordResponseSchema, { history: [completeLine] });
+    roundTrips(getMyRecordResponseSchema, { metrics: {}, history: [completeLine] });
   });
 });
 

@@ -3,21 +3,20 @@ import type { CourseId, GolferId, GolferRoundLine, RoundId } from "@swng/domain"
 import { courseIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
 
 // The wire projection of a Golfer aggregate (application/src/golfers/golferView.ts builds
-// it): the two independently-settable handicap numbers the client itself declares
-// (declared/official) — NOT `computed` or an `effective` precedence field. Those two used to
-// ride along here, but the server has no persisted computed index on the golfer item itself
-// (it lives in the separate index projection, application/src/golfers/getMyRecord.ts), so a
-// server-side `effectiveIndex(golfer.handicap)` call here was silently WRONG whenever a real
-// computed index existed elsewhere (e.g. declared 15 + a computed 7.2 the server didn't know
-// about → wire said effective 15/declared). The web composes the true effective index
-// client-side from GET /me (declared/official) + GET /me/record (computed), via domain's own
-// effectiveIndex — see apps/web/src/routes/ProfilePage.tsx.
+// it): the ONE handicap number a golfer sets on themselves — `declared` (unrated-courses
+// spec §6 collapsed the old three-number model to two, folding the self-maintained `official`
+// into `declared`) — NOT `computed` or an `effective` precedence field. The server has no
+// persisted computed index on the golfer item itself (it's a read-time metric on the separate
+// record response, application/src/golfers/getMyRecord.ts's metrics.whsIndex), so a
+// server-side `effectiveIndex` call here would be silently WRONG whenever a real computed index
+// existed. The web composes the true effective index client-side from GET /me (declared) + GET
+// /me/record (metrics.whsIndex), via domain's own effectiveIndex — see apps/web/src/routes/
+// ProfilePage.tsx.
 export interface GolferView {
   readonly golferId: GolferId;
   readonly name: string;
   readonly homeCourseId?: CourseId;
   readonly declared?: number;
-  readonly official?: number;
   // accounts-only identity spec §2: true iff `name` is the deterministic sub-derived backstop a
   // get-or-create mint used (placeholderName(sub)), not a name the golfer chose — the web prompts
   // for a real one while it's true. Absent means false (old golfers never carry it; a PUT /me with
@@ -30,7 +29,6 @@ export const golferViewSchema: z.ZodType<GolferView> = z.object({
   name: z.string(),
   homeCourseId: courseIdSchema.optional(),
   declared: z.number().optional(),
-  official: z.number().optional(),
   namePlaceholder: z.boolean().optional(),
 });
 
@@ -55,15 +53,14 @@ export const golferResponseSchema: z.ZodType<GolferResponse> = z.object({ golfer
 // Every field optional — a partial patch (PATCH-like semantics: an absent key leaves the
 // stored value untouched; there is no way to CLEAR a set field in v1). `.strict()` like
 // courses.ts's request bodies: a client proposing golferId/computed (server-derived, never
-// client-set) is a rejection, not a silently-dropped extra key. `official` is self-
-// maintained in v1 (architecture.md §2) — a golfer typing their own GHIN index here IS the
-// manual maintenance the doc describes, so it's accepted exactly like declared.
+// client-set) is a rejection, not a silently-dropped extra key. `declared` is the golfer's own
+// self-maintained index (unrated-courses spec §6 — the old `official` folded into it): a golfer
+// typing their own index here IS the manual maintenance, no separate verification flow.
 export const updateMeRequestSchema = z
   .object({
     name: z.string().min(1).optional(),
     homeCourseId: courseIdSchema.optional(),
     declared: z.number().optional(),
-    official: z.number().optional(),
   })
   .strict();
 export type UpdateMeRequest = z.infer<typeof updateMeRequestSchema>;
@@ -94,15 +91,26 @@ const golferRoundLineFields = {
 
 const golferRoundLineSchema: z.ZodType<GolferRoundLine> = z.object(golferRoundLineFields);
 
+// The metrics read projection (unrated-courses spec §6, domain/golfer/metrics.ts's golferMetrics):
+// every derived index in one place, computed at read time (never stored). REQUIRED object, its two
+// members optional — an empty `{}` is the honest answer for a golfer with no postable rounds.
+// `whsIndex` is Rule 5.2a over rated differentials (with getMyRecord's read-time `computedAtMs`
+// stamp); `suggestedIndex` is the neutral-course `ags − par` estimate (a declaration aid, no stamp).
+// differentialsUsed on each is Rule 5.2a's `use` count (domain's computeIndexDetail, whs.ts) — how
+// many differentials were actually averaged, not how many were in the window.
 export interface GetMyRecordResponse {
-  // differentialsUsed: WHS Rule 5.2a's `use` count (domain's computeIndexDetail, whs.ts) —
-  // how many differentials were actually averaged, not how many were in the window.
-  readonly index?: { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number };
+  readonly metrics: {
+    readonly whsIndex?: { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number };
+    readonly suggestedIndex?: { readonly value: number; readonly differentialsUsed: number };
+  };
   readonly history: readonly GolferRoundLine[]; // newest first (application/src/golfers/getMyRecord.ts)
 }
 
 export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.object({
-  index: z.object({ value: z.number(), computedAtMs: z.number().int(), differentialsUsed: z.number().int() }).optional(),
+  metrics: z.object({
+    whsIndex: z.object({ value: z.number(), computedAtMs: z.number().int(), differentialsUsed: z.number().int() }).optional(),
+    suggestedIndex: z.object({ value: z.number(), differentialsUsed: z.number().int() }).optional(),
+  }),
   history: z.array(golferRoundLineSchema).readonly(),
 });
 

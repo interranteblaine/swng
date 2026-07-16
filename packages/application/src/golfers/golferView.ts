@@ -15,7 +15,6 @@ export const toGolferView = (golfer: Golfer): GolferView => ({
   name: golfer.name,
   ...(golfer.homeCourseId !== undefined ? { homeCourseId: golfer.homeCourseId } : {}),
   ...(golfer.handicap.declared !== undefined ? { declared: golfer.handicap.declared } : {}),
-  ...(golfer.handicap.official !== undefined ? { official: golfer.handicap.official } : {}),
   // Emitted only when true (accounts-only identity spec §2) — absent means the golfer has a real,
   // chosen name; never sent as `false`, matching the omit-when-unset idiom above.
   ...(golfer.namePlaceholder === true ? { namePlaceholder: true } : {}),

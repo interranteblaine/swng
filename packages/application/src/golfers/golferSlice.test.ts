@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, fixtureLinks, golferId, opId, placeholderName, roundId } from "@swng/domain";
+import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, fixtureLinks, golferId, opId, placeholderName, roundId, suggestedIndex } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import { createFrozenClock, createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
@@ -120,29 +120,31 @@ describe("updateMyGolfer", () => {
     expect(golfer.namePlaceholder).toBe(true);
   });
 
-  it("carries declared and official on the wire as independent fields — no derived effective/computed (the server has no persisted computed index to derive from; the web composes effectiveIndex itself from GET /me + GET /me/record)", async () => {
+  it("carries declared on the wire as the sole handicap field — no derived effective/computed, and no `official` (unrated-courses spec §6: the three-number model collapsed, official folded into declared; the web composes effectiveIndex itself from GET /me + GET /me/record)", async () => {
     const ctx = setup();
     await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
     const declaredOnly = await ctx.updateMe({ sub: "sub-1" }, { declared: 14.2 });
     expect(declaredOnly.golfer.declared).toBe(14.2);
     expect(declaredOnly.golfer).not.toHaveProperty("effective");
     expect(declaredOnly.golfer).not.toHaveProperty("computed");
+    expect(declaredOnly.golfer).not.toHaveProperty("official");
 
-    const withOfficial = await ctx.updateMe({ sub: "sub-1" }, { official: 8.1 });
-    expect(withOfficial.golfer.official).toBe(8.1);
-    expect(withOfficial.golfer.declared).toBe(14.2); // still on record, unaffected by the official patch
-    expect(withOfficial.golfer).not.toHaveProperty("effective");
+    // A later declared edit replaces the number and stays the only handicap field on the wire.
+    const reDeclared = await ctx.updateMe({ sub: "sub-1" }, { declared: 8.1 });
+    expect(reDeclared.golfer.declared).toBe(8.1);
+    expect(reDeclared.golfer).not.toHaveProperty("official");
+    expect(reDeclared.golfer).not.toHaveProperty("effective");
   });
 });
 
 describe("getMyRecord", () => {
-  it("returns an empty record for a sub with no golfer at all — no throw, no create", async () => {
+  it("returns an empty record (empty metrics, empty history) for a sub with no golfer at all — no throw, no create", async () => {
     const ctx = setup();
     const record = await ctx.record({ sub: "sub-1" });
-    expect(record).toEqual({ history: [] });
+    expect(record).toEqual({ metrics: {}, history: [] });
   });
 
-  it("bootstrap not met: history present, index absent below 3 differentials", async () => {
+  it("bootstrap not met: history present, whsIndex absent below 3 differentials", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
@@ -159,8 +161,41 @@ describe("getMyRecord", () => {
     });
 
     const record = await ctx.record({ sub: "sub-1" });
-    expect(record.index).toBeUndefined();
+    expect(record.metrics.whsIndex).toBeUndefined();
     expect(record.history).toHaveLength(1);
+  });
+
+  // unrated-courses spec §6: a wholly-unrated history (every line has an ags but no differential —
+  // no rating/slope to post one) yields a suggestedIndex (the neutral ags−par estimate) but no
+  // whsIndex (Rule 5.2a needs rated differentials, which unrated rounds never carry).
+  it("a wholly-unrated history yields metrics.suggestedIndex but no metrics.whsIndex", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const unrated = [
+      { roundId: roundId("r1"), ags: 96, finalizedAtMs: 1_000 },
+      { roundId: roundId("r2"), ags: 101, finalizedAtMs: 2_000 },
+      { roundId: roundId("r3"), ags: 94, finalizedAtMs: 3_000 },
+    ];
+    for (const line of unrated) {
+      await ctx.projectionStore.putLine(golfer.golferId, {
+        roundId: line.roundId,
+        courseName: "Nine Pines (unrated)",
+        tee: "no-card",
+        holes: 18,
+        par: 72,
+        courseHandicap: 20,
+        ags: line.ags, // no differential — an unrated tee posts none
+        distribution: { eagles: 0, birdies: 0, pars: 4, bogeys: 10, doublePlus: 4 },
+        finalizedAtMs: line.finalizedAtMs,
+      });
+    }
+
+    const record = await ctx.record({ sub: "sub-1" });
+    expect(record.metrics.whsIndex).toBeUndefined();
+    expect(record.metrics.suggestedIndex).toBeDefined();
+    const expected = suggestedIndex(unrated.map((l) => ({ ags: l.ags, par: 72, holes: 18 as const })))!;
+    expect(record.metrics.suggestedIndex).toEqual({ value: expected.value, differentialsUsed: expected.differentialsUsed });
+    expect(record.history).toHaveLength(3);
   });
 
   // courseId (course-cards spec §4, the analytics join key): carried when the stored line has
@@ -198,11 +233,11 @@ describe("getMyRecord", () => {
     expect(record.history[1]).not.toHaveProperty("courseId");
   });
 
-  // Below the 3-differential bootstrap (Rule 5.2a's own minimum), the index is ABSENT, not
+  // Below the 3-differential bootstrap (Rule 5.2a's own minimum), the whsIndex is ABSENT, not
   // zero — computeIndexDetail itself returns undefined under 3 (whs.ts), and getMyRecord
   // must pass that absence straight through, never coercing it into a 0 the wire schema
   // could mistake for a real (if unlikely) index value.
-  it("below the 3-differential bootstrap the index is ABSENT, not zero", async () => {
+  it("below the 3-differential bootstrap the whsIndex is ABSENT, not zero", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "bo@example.com" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
@@ -231,7 +266,7 @@ describe("getMyRecord", () => {
     });
 
     const record = await ctx.record({ sub: "sub-1" });
-    expect(record.index).toBeUndefined();
+    expect(record.metrics.whsIndex).toBeUndefined();
     expect(record.history).toHaveLength(2);
   });
 
@@ -267,7 +302,7 @@ describe("getMyRecord", () => {
     const response = await ctx.record({ sub: "sub-1" });
 
     const expected = computeIndexDetail(combineNineHoleDifferentials(seededCompleteLines.map((l) => ({ differential: l.differential, holes: 18 }))))!;
-    expect(response.index).toEqual({ value: expected.value, computedAtMs: FROZEN_NOW, differentialsUsed: expected.differentialsUsed });
+    expect(response.metrics.whsIndex).toEqual({ value: expected.value, computedAtMs: FROZEN_NOW, differentialsUsed: expected.differentialsUsed });
     expect(response.history.map((line) => line.roundId)).toEqual(["r3", "r2", "r1"]); // newest first
   });
 
@@ -319,7 +354,7 @@ describe("getMyRecord", () => {
     const response = await record({ sub: "sub-ann" });
 
     const expected = computeIndexDetail(combineNineHoleDifferentials([3, 7, 11].map((differential) => ({ differential, holes: 18 }))))!;
-    expect(response.index).toEqual({ value: expected.value, computedAtMs: FROZEN_NOW, differentialsUsed: expected.differentialsUsed });
+    expect(response.metrics.whsIndex).toEqual({ value: expected.value, computedAtMs: FROZEN_NOW, differentialsUsed: expected.differentialsUsed });
   });
 });
 

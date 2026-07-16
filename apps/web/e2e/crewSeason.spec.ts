@@ -297,9 +297,9 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // rebuild proof is the history deep-equal plus value/differentialsUsed equality below.
     const post = await getMyRecordDirect(httpUrl, al.tokens.idToken);
     expect(post.history).toEqual(pre.history);
-    expect(post.index?.value).toBe(pre.index?.value);
-    expect(post.index?.differentialsUsed).toBe(pre.index?.differentialsUsed);
-    expect(post.index?.computedAtMs).not.toBe(pre.index?.computedAtMs);
+    expect(post.metrics.whsIndex?.value).toBe(pre.metrics.whsIndex?.value);
+    expect(post.metrics.whsIndex?.differentialsUsed).toBe(pre.metrics.whsIndex?.differentialsUsed);
+    expect(post.metrics.whsIndex?.computedAtMs).not.toBe(pre.metrics.whsIndex?.computedAtMs);
 
     // Standings are computed on read from the counted rounds' own snapshots — there is no
     // season projection for a rebuild to touch, and the frozen ledger must hold verbatim,

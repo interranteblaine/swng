@@ -136,6 +136,27 @@ describe("createDynamoGolferStore", () => {
       expect(many).toEqual([{ golfer: clean, sub: legacySub, revision: 3 }]);
     });
 
+    // unrated-courses spec §6: the three-number model collapsed to one persisted number,
+    // `declared` — the self-maintained `official` folded into it. A legacy row carrying only a
+    // flattened `official` (no `declared`), written before the fold, reads back AS
+    // `handicap: { declared }`. Written as the RAW item a pre-spec write would have left
+    // (bypassing the typed put, exactly as the claim-era legacy test above does), to prove the
+    // read-side fold — not a migration — is what does the collapse.
+    it("folds a legacy flattened `official` (no declared) up into handicap.declared on read", async () => {
+      const store = newStore();
+      const id = golferId(randomUUID());
+      await local.client.send(
+        new PutCommand({
+          TableName: local.coreTable,
+          Item: { pk: golferPk(id), sk: golferSk, revision: 2, name: "Legacy Official", official: 12 },
+        }),
+      );
+
+      const clean: Golfer = { id, name: "Legacy Official", handicap: { declared: 12 } };
+      expect(await store.get(id)).toEqual({ golfer: clean, sub: undefined, revision: 2 });
+      expect(await store.getMany([id])).toEqual([{ golfer: clean, sub: undefined, revision: 2 }]);
+    });
+
     it("getBySub on an unknown sub returns undefined", async () => {
       const store = newStore();
       expect(await store.getBySub(`missing-${randomUUID()}`)).toBeUndefined();

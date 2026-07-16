@@ -82,7 +82,7 @@ describe("ProfilePage — signed in", () => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: null });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -104,7 +104,7 @@ describe("ProfilePage — signed in", () => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", declared: 15 } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { index: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 1 }, history });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 1 } }, history });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -138,7 +138,7 @@ describe("ProfilePage — signed in", () => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", declared: 15 } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { history });
+        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -169,7 +169,7 @@ describe("ProfilePage — signed in", () => {
           return fakeResponse(200, meCallCount === 1 ? { golfer: null } : { golfer: { golferId: "ann", name: "Ann Updated", declared: 12 } });
         }
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -202,7 +202,7 @@ describe("ProfilePage — signed in", () => {
         }
         if (path === "/me") return fakeResponse(200, { golfer: null });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -231,7 +231,7 @@ describe("ProfilePage — crews", () => {
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
-        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
         if (path === "/me/crews") {
           return fakeResponse(200, {
             crews: [
@@ -258,7 +258,7 @@ describe("ProfilePage — crews", () => {
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: null });
-        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -280,7 +280,7 @@ describe("ProfilePage — crews", () => {
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
-        if (path === "/me/record") return fakeResponse(200, { history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),

@@ -112,17 +112,17 @@ describe("projectArchive", () => {
     const record = getMyRecord({ golferStore: ctx.golferStore, projectionStore: ctx.projectionStore, clock: createFrozenClock(5_000) });
 
     await project(archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]));
-    expect((await record({ sub: "sub-ann" })).index).toBeUndefined();
+    expect((await record({ sub: "sub-ann" })).metrics.whsIndex).toBeUndefined();
 
     await project(archiveAt("r2", 2_000, [{ golferId: ann, differential: 10.0 }]));
-    expect((await record({ sub: "sub-ann" })).index).toBeUndefined();
+    expect((await record({ sub: "sub-ann" })).metrics.whsIndex).toBeUndefined();
 
     await project(archiveAt("r3", 3_000, [{ golferId: ann, differential: 11.0 }]));
-    const { index } = await record({ sub: "sub-ann" });
+    const { metrics } = await record({ sub: "sub-ann" });
     // 3 differentials available → Rule 5.2a uses only the lowest 1 (whs.test.ts's
     // computeIndexDetail pin), not 3. computedAtMs is the READ-time clock (D4a), never a
     // stored snapshot's.
-    expect(index).toEqual({ value: computeIndex([9.0, 10.0, 11.0]), computedAtMs: 5_000, differentialsUsed: 1 });
+    expect(metrics.whsIndex).toEqual({ value: computeIndex([9.0, 10.0, 11.0]), computedAtMs: 5_000, differentialsUsed: 1 });
   });
 
   it("is idempotent: re-putting the same history line doesn't duplicate it", async () => {
@@ -161,9 +161,9 @@ describe("projectArchive", () => {
     await project(archiveAt("r2", 2_000, [{ golferId: ann, differential: 10.0 }, { golferId: bo }]));
     await project(archiveAt("r3", 3_000, [{ golferId: ann, differential: 11.0 }, { golferId: bo }]));
 
-    expect((await record({ sub: "sub-ann" })).index).toBeDefined();
+    expect((await record({ sub: "sub-ann" })).metrics.whsIndex).toBeDefined();
     expect(await ctx.projectionStore.listLines(bo)).toHaveLength(3);
-    expect((await record({ sub: "sub-bo" })).index).toBeUndefined(); // incomplete every round — never a differential to combine
+    expect((await record({ sub: "sub-bo" })).metrics.whsIndex).toBeUndefined(); // incomplete every round — never a differential to combine
   });
 
   it("throws for a settled archive with no round-finalized event", async () => {

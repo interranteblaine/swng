@@ -139,6 +139,7 @@ export const recordScoreResponseSchema: z.ZodType<RecordScoreResponse> = z.objec
 // Mirrors RoundArchive["handicapping"]'s element union exactly (domain/round/archive.ts).
 const handicappingEntrySchema = z.discriminatedUnion("kind", [
   z.object({ golferId: golferIdSchema, kind: z.literal("complete"), ags: z.number(), differential: z.number() }),
+  z.object({ golferId: golferIdSchema, kind: z.literal("unrated"), ags: z.number() }),
   z.object({ golferId: golferIdSchema, kind: z.literal("incomplete") }),
 ]);
 

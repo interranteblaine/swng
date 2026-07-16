@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { CourseCard } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
-import { addGameRequestSchema, gameConfigInputSchema, joinRoundRequestSchema, recordScoreRequestSchema, startRoundRequestSchema } from "./commands.js";
+import {
+  addGameRequestSchema,
+  finalizeRoundResponseSchema,
+  gameConfigInputSchema,
+  joinRoundRequestSchema,
+  recordScoreRequestSchema,
+  startRoundRequestSchema,
+} from "./commands.js";
 
 const card: CourseCard = {
   courseName: "Test Links",
@@ -123,5 +130,24 @@ describe("addGameRequestSchema", () => {
 describe("gameConfigInputSchema", () => {
   it("rejects every member if it carries an id (.strict())", () => {
     expect(() => parse(gameConfigInputSchema, { kind: "singles-match", id: "sneaky", a: "ann", b: "bo" })).toThrow(ContractError);
+  });
+});
+
+describe("finalizeRoundResponseSchema", () => {
+  // Task 2 review fix: handicappingEntrySchema previously only knew the "complete"/"incomplete"
+  // arms of RoundArchive["handicapping"]'s union (domain/round/archive.ts) — an unrated golfer's
+  // row (added alongside the "unrated" course-handicapping arm) was rejected by this
+  // discriminatedUnion even though the server finalized fine, crashing the client's parse() on
+  // any round containing an unrated golfer. All three kinds must round-trip through the wire.
+  it("accepts a finalize response whose handicapping array mixes complete, unrated, and incomplete rows", () => {
+    const response = {
+      results: [{ kind: "stableford", id: "game-1", points: [] }],
+      handicapping: [
+        { golferId: "ann", kind: "complete", ags: 88, differential: 12.4 },
+        { golferId: "bo", kind: "unrated", ags: 91 },
+        { golferId: "cam", kind: "incomplete" },
+      ],
+    };
+    expect(parse(finalizeRoundResponseSchema, response)).toEqual(response);
   });
 });

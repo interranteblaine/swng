@@ -184,7 +184,7 @@ export function ProfilePage() {
     );
   }
 
-  const effective = effectiveIndex({ declared: auth.golfer?.declared, official: auth.golfer?.official, computed: record?.index?.value });
+  const effective = effectiveIndex({ declared: auth.golfer?.declared, computed: record?.index?.value });
   const history = record?.history ?? [];
 
   return (

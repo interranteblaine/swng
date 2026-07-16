@@ -35,6 +35,10 @@ export const peekRound =
         // `par` is the tee's summed hole pars — always present, even for an unrated tee, so the
         // join-side course-handicap suggestion has something to work from when rating/slope don't.
         par: tee.holes.reduce((sum, hole) => sum + hole.par, 0),
+        // `holes` is the tee's hole count — always 9 or 18 (validateCard guarantees it, same cast
+        // idiom used elsewhere). The join-side strokes derivation needs it to make the unrated
+        // estimate hole-count-correct (round(index) on 18, round(index / 2) on 9).
+        holes: tee.holes.length as 9 | 18,
         ...(tee.rating !== undefined ? { rating: tee.rating } : {}),
         ...(tee.slope !== undefined ? { slope: tee.slope } : {}),
       })),

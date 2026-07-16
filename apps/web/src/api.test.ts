@@ -712,13 +712,13 @@ describe("peekRound", () => {
     let seenUrl: string | undefined;
     stubFetch(async (url) => {
       seenUrl = String(url);
-      return fakeResponse(200, { courseName: "Pebble Beach", teeSets: [{ name: "white", par: 72, rating: 71.8, slope: 130 }], createdAt: 1_700_000_000_000 });
+      return fakeResponse(200, { courseName: "Pebble Beach", teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.8, slope: 130 }], createdAt: 1_700_000_000_000 });
     });
 
     const result = await peekRound("ABC123");
 
     expect(seenUrl).toBe(`${HTTP_URL}/rounds/peek?code=ABC123`);
-    expect(result).toEqual({ courseName: "Pebble Beach", teeSets: [{ name: "white", par: 72, rating: 71.8, slope: 130 }], createdAt: 1_700_000_000_000 });
+    expect(result).toEqual({ courseName: "Pebble Beach", teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.8, slope: 130 }], createdAt: 1_700_000_000_000 });
   });
 
   it("throws a coded ApiError on an unknown code", async () => {

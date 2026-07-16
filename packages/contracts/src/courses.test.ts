@@ -85,27 +85,35 @@ describe("searchCoursesResponseSchema", () => {
 });
 
 describe("peekRoundResponseSchema", () => {
-  it("round-trips a valid peek-round response carrying par", () => {
+  it("round-trips a valid peek-round response carrying par + holes", () => {
     roundTrips(peekRoundResponseSchema, {
       courseName: "Casa Verde GC",
-      teeSets: [{ name: "white", par: 72, rating: 71.2, slope: 128 }],
+      teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.2, slope: 128 }],
       createdAt: 1_700_000_000_000,
     });
   });
 
-  // unrated-courses arc: a peek of an unrated tee still names it and its par, just without
-  // rating/slope — the pair is optional here (§1), par is always present.
-  it("round-trips a peek of an unrated tee (rating/slope absent, par present)", () => {
+  // unrated-courses arc: a peek of an unrated tee still names it, its par, and its hole count,
+  // just without rating/slope — the pair is optional here (§1); par and holes are always present.
+  // holes lets the join-side unrated estimate be hole-count-correct (round(index / 2) on 9).
+  it("round-trips a peek of an unrated 9-hole tee (rating/slope absent, par + holes present)", () => {
     roundTrips(peekRoundResponseSchema, {
       courseName: "Casa Verde GC",
-      teeSets: [{ name: "white", par: 72 }],
+      teeSets: [{ name: "white", par: 36, holes: 9 }],
       createdAt: 1_700_000_000_000,
     });
   });
 
   it("rejects a tee missing par (par is required, unlike rating/slope)", () => {
     expect(() =>
-      parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white", rating: 71.2, slope: 128 }], createdAt: 1 }),
+      parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white", holes: 18, rating: 71.2, slope: 128 }], createdAt: 1 }),
+    ).toThrow(ContractError);
+  });
+
+  it("rejects a tee missing holes (holes is required, and must be 9 or 18)", () => {
+    expect(() => parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white", par: 72 }], createdAt: 1 })).toThrow(ContractError);
+    expect(() =>
+      parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white", par: 72, holes: 27 }], createdAt: 1 }),
     ).toThrow(ContractError);
   });
 

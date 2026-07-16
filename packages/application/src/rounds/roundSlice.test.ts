@@ -291,13 +291,20 @@ describe("round use cases — golden path over in-memory ports", () => {
     // set keeps the next field from being added silently.
     expect(Object.keys(peeked).sort()).toEqual(["courseName", "createdAt", "teeSets"]);
     expect(peeked.courseName).toBe(fixtureLinks.courseName);
-    // Each tee now carries `par` (summed hole pars) alongside its rating/slope summary — the
-    // join-side course-handicap suggestion needs it even for an unrated tee (unrated-courses arc).
+    // Each tee now carries `par` (summed hole pars) and `holes` (the hole count) alongside its
+    // rating/slope summary — the join-side strokes derivation needs both even for an unrated tee
+    // (par feeds the rated conversion, holes makes the unrated estimate hole-count-correct).
     expect(peeked.teeSets).toEqual(
-      fixtureLinks.teeSets.map((tee) => ({ name: tee.name, par: tee.holes.reduce((sum, hole) => sum + hole.par, 0), rating: tee.rating, slope: tee.slope })),
+      fixtureLinks.teeSets.map((tee) => ({
+        name: tee.name,
+        par: tee.holes.reduce((sum, hole) => sum + hole.par, 0),
+        holes: tee.holes.length,
+        rating: tee.rating,
+        slope: tee.slope,
+      })),
     );
     for (const teeSet of peeked.teeSets) {
-      expect(Object.keys(teeSet).sort()).toEqual(["name", "par", "rating", "slope"]);
+      expect(Object.keys(teeSet).sort()).toEqual(["holes", "name", "par", "rating", "slope"]);
     }
     // The genesis event's own wall time (peekRound reads it off the round-created event).
     expect(typeof peeked.createdAt).toBe("number");

@@ -108,19 +108,28 @@ export function CreateRoundPage() {
       .catch(() => {}); // withAuth already handled a terminal 401; anything else just leaves the record unset
   }, [auth.signedIn, withAuth]);
 
-  // The effective index composed client-side (arc: declared > computed) and, against the
-  // selected tee, the suggested course handicap. A rated tee gets the real Rule 6.1a figure
-  // (courseHandicapFor over the full card's holes); an unrated tee gets round(index) as a plain
-  // estimate. No effective index (a brand-new golfer) → no suggestion at all, so the field stays
-  // its plain "0".
-  const effective = effectiveIndex({ declared: golfer?.declared, computed: record?.metrics?.whsIndex?.value });
+  // "Strokes you get here" — the golfer's index turned into today's strokes, shown WITH its
+  // derivation and editable (handicap-model legibility spec §4/§7). The active index is composed
+  // client-side (arc: declared > computed) and defaults to the swng index — the SAME "Your index"
+  // the profile shows (spec §3), not the rated-only WHS index. A rated tee gets the exact Rule
+  // 6.1a figure (courseHandicapFor over the full card's holes); an unrated tee has no slope/rating
+  // to convert, so it falls back to the index itself, hole-count-correct — round(index) on 18,
+  // round(index / 2) on 9 (spec §4; the /2 is a UI presentation of the estimate, not the Rule
+  // 6.1a formula). No effective index (a brand-new golfer with no rounds and no override) → no
+  // derivation note at all, so the field stays its plain "0" and they just type their strokes.
+  const effective = effectiveIndex({ declared: golfer?.declared, computed: record?.metrics?.swngIndex?.value });
   const selectedTeeSet = courseView?.card.teeSets.find((teeSet) => teeSet.name === tee);
-  const suggestion = ((): { readonly value: number; readonly label: string } | undefined => {
+  const suggestion = ((): { readonly value: number; readonly note: string } | undefined => {
     if (!effective || !selectedTeeSet) return undefined;
+    const indexText = effective.value.toFixed(1);
     if (selectedTeeSet.rating !== undefined && selectedTeeSet.slope !== undefined) {
-      return { value: courseHandicapFor(effective.value, selectedTeeSet), label: "suggested (WHS)" };
+      const value = courseHandicapFor(effective.value, selectedTeeSet);
+      return { value, note: `${value} — from your index (${indexText}) on this course` };
     }
-    return { value: Math.round(effective.value), label: "estimated — unrated course" };
+    // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §3/§4).
+    const holeCount = selectedTeeSet.holes.length; // 9 or 18 — every card tee is one or the other
+    const value = holeCount === 9 ? Math.round(effective.value / 2) : Math.round(effective.value);
+    return { value, note: `${value} — your index (${indexText}), adjusted for ${holeCount} holes; unrated course, adjust if it plays hard/easy` };
   })();
   const suggestedValue = suggestion?.value;
 
@@ -210,12 +219,14 @@ export function CreateRoundPage() {
             </div>
           )}
 
-          {/* The suggestion note is a SIBLING of the <label>, not nested inside it — nesting
+          {/* The derivation note is a SIBLING of the <label>, not nested inside it — nesting
               would fold it into the label's own accessible name (getByLabelText for the field
-              would then have to match the note too). */}
+              would then have to match the note too). The plain label ("Strokes you get here") plus
+              the visible derivation is the legibility rule (spec §4/§7): the field is the index
+              turned into today's strokes, never a bare number and never a separate declaration. */}
           <div className="flex flex-col gap-1">
             <label className="flex flex-col gap-1">
-              Course handicap
+              Strokes you get here
               <input
                 type="number"
                 step={1}
@@ -227,7 +238,7 @@ export function CreateRoundPage() {
                 className="rounded-lg bg-slate-800 p-3 text-lg"
               />
             </label>
-            {suggestion && <span className="text-xs text-slate-500">{suggestion.label}</span>}
+            {suggestion && <span className="text-xs text-slate-500">{suggestion.note}</span>}
           </div>
 
           {error && (

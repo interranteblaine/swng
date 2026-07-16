@@ -14,8 +14,10 @@ import { roundLabel } from "../roundLabel";
 // fires one request per keystroke.
 const DEBOUNCE_MS = 250;
 
-// The peek's per-tee shape — carries `par` (always) plus rating/slope (a rated tee only), which
-// is exactly what the join-side suggested course handicap needs (no `holes` array is on the peek).
+// The peek's per-tee shape — carries `par` and `holes` (the hole count, 9 or 18) always, plus
+// rating/slope (a rated tee only), which is exactly what the join-side strokes derivation needs:
+// par + rating/slope for the rated conversion, `holes` to make the unrated estimate hole-count-
+// correct (the frozen card's holes ARRAY isn't on the peek — only its count is).
 type PeekTee = PeekRoundResponse["teeSets"][number];
 
 export function JoinRoundPage() {
@@ -105,19 +107,27 @@ export function JoinRoundPage() {
       .catch(() => {}); // withAuth already handled a terminal 401; anything else just leaves the record unset
   }, [auth.signedIn, withAuth]);
 
-  // The effective index composed client-side (arc: declared > computed) and, against the selected
-  // peek tee, the suggested course handicap. The peek carries `par` but not `holes`, so a rated
-  // tee uses courseHandicapFromRatingSlopePar (the numbers-only Rule 6.1a helper); an unrated tee
-  // gets round(index) as a plain estimate. No effective index, or a free-text tee with no peek
-  // numbers → no suggestion, so the field stays its plain "0".
-  const effective = effectiveIndex({ declared: auth.golfer?.declared, computed: record?.metrics?.whsIndex?.value });
+  // "Strokes you get here" — the golfer's index turned into today's strokes, shown WITH its
+  // derivation and editable (handicap-model legibility spec §4/§7). The active index (arc:
+  // declared > computed) defaults to the swng index — the SAME "Your index" the profile shows
+  // (spec §3), not the rated-only WHS index. The peek carries `par` + `holes` (not the holes
+  // array): a rated tee uses courseHandicapFromRatingSlopePar (the numbers-only Rule 6.1a helper);
+  // an unrated tee falls back to the index itself, hole-count-correct — round(index) on 18,
+  // round(index / 2) on 9 (spec §4; the /2 is a UI presentation of the estimate, not the Rule
+  // 6.1a formula). No effective index, or a free-text tee with no peek numbers → no derivation
+  // note, so the field stays its plain "0".
+  const effective = effectiveIndex({ declared: auth.golfer?.declared, computed: record?.metrics?.swngIndex?.value });
   const selectedTee = peekTees?.find((peekTee) => peekTee.name === tee);
-  const suggestion = ((): { readonly value: number; readonly label: string } | undefined => {
+  const suggestion = ((): { readonly value: number; readonly note: string } | undefined => {
     if (!effective || !selectedTee) return undefined;
+    const indexText = effective.value.toFixed(1);
     if (selectedTee.rating !== undefined && selectedTee.slope !== undefined) {
-      return { value: courseHandicapFromRatingSlopePar(effective.value, selectedTee.rating, selectedTee.slope, selectedTee.par), label: "suggested (WHS)" };
+      const value = courseHandicapFromRatingSlopePar(effective.value, selectedTee.rating, selectedTee.slope, selectedTee.par);
+      return { value, note: `${value} — from your index (${indexText}) on this course` };
     }
-    return { value: Math.round(effective.value), label: "estimated — unrated course" };
+    // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §3/§4).
+    const value = selectedTee.holes === 9 ? Math.round(effective.value / 2) : Math.round(effective.value);
+    return { value, note: `${value} — your index (${indexText}), adjusted for ${selectedTee.holes} holes; unrated course, adjust if it plays hard/easy` };
   })();
   const suggestedValue = suggestion?.value;
 
@@ -222,11 +232,13 @@ export function JoinRoundPage() {
             </div>
           )}
 
-          {/* The suggestion note is a SIBLING of the <label> (not nested) — nesting would fold it
-              into the label's own accessible name. */}
+          {/* The derivation note is a SIBLING of the <label> (not nested) — nesting would fold it
+              into the label's own accessible name. The plain label ("Strokes you get here") plus
+              the visible derivation is the legibility rule (spec §4/§7): the index turned into
+              today's strokes, never a bare number and never a separate declaration. */}
           <div className="flex flex-col gap-1">
             <label className="flex flex-col gap-1">
-              Course handicap
+              Strokes you get here
               <input
                 type="number"
                 step={1}
@@ -238,7 +250,7 @@ export function JoinRoundPage() {
                 className="rounded-lg bg-slate-800 p-3 text-lg"
               />
             </label>
-            {suggestion && <span className="text-xs text-slate-500">{suggestion.label}</span>}
+            {suggestion && <span className="text-xs text-slate-500">{suggestion.note}</span>}
           </div>
 
           {error && (

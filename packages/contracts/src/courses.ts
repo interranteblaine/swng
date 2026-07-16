@@ -72,10 +72,12 @@ export const searchCoursesResponseSchema: z.ZodType<SearchCoursesResponse> = z.o
 // domain's TeeSet — a peek of an unrated tee still names it, just without numbers.
 export interface PeekRoundResponse {
   readonly courseName: string;
-  // `par` (each tee's summed hole pars) is always present — the join-side course-handicap
-  // suggestion (unrated-courses arc) needs a tee's par even when it has no rating/slope, so it
-  // is not optional the way rating/slope are. rating/slope stay optional as a pair (§1).
-  readonly teeSets: readonly { readonly name: string; readonly par: number; readonly rating?: number; readonly slope?: number }[];
+  // `par` (each tee's summed hole pars) and `holes` (the tee's hole count, always 9 or 18) are
+  // always present — the join-side strokes derivation (handicap-model legibility arc) needs both
+  // even when a tee has no rating/slope: par feeds the rated conversion, and the hole count makes
+  // the unrated estimate hole-count-correct (`round(index)` on 18, `round(index / 2)` on 9). So
+  // neither is optional the way rating/slope are. rating/slope stay optional as a pair (§1).
+  readonly teeSets: readonly { readonly name: string; readonly par: number; readonly holes: 9 | 18; readonly rating?: number; readonly slope?: number }[];
   // accounts-only identity spec §5: the round-created event's own wall time, so the join-link
   // sign-up framing can render the round the SAME way ("Casa Verde GC · Sat, Jul 12") the home list
   // and archive do. Required — a peek always reads a live round, whose log always has round-created.
@@ -84,6 +86,8 @@ export interface PeekRoundResponse {
 
 export const peekRoundResponseSchema: z.ZodType<PeekRoundResponse> = z.object({
   courseName: z.string(),
-  teeSets: z.array(z.object({ name: z.string(), par: z.number().int(), rating: z.number().optional(), slope: z.number().optional() })).readonly(),
+  teeSets: z
+    .array(z.object({ name: z.string(), par: z.number().int(), holes: z.union([z.literal(9), z.literal(18)]), rating: z.number().optional(), slope: z.number().optional() }))
+    .readonly(),
   createdAt: z.number().int(),
 });

@@ -23,18 +23,23 @@ made precise.
 Both are computed by swng from the rounds the golfer actually plays. They differ in *which
 rounds* they use and *how*:
 
-- **swng index** — computed from **all** the golfer's rounds, rated and unrated, scored by
-  **result versus par** (adjusted gross score − par). It counts every round the golfer plays,
-  at the cost of ignoring how hard each course is. *Complete, but difficulty-blind.*
-  (This is the number the earlier spec called "suggested" — a name that told the golfer
-  nothing. It is renamed **swng index** everywhere: it is swng's own number for you.)
+- **swng index** — your handicap, **counting all your rounds, rated and unrated.** For rated
+  rounds it uses the *same* difficulty-adjusted differential the WHS index uses; for unrated
+  rounds — which have no rating, so no differential is possible — it falls back to result
+  versus par (adjusted gross score − par) as the best available proxy. So it strips out course
+  difficulty wherever the data allows, and it drops no round you play. **For a golfer who plays
+  only rated golf, the swng index equals the WHS index exactly** — they diverge *only* because
+  of your unrated rounds. *Complete, and as fair as the data allows.* (This is the number the
+  earlier spec called "suggested" — a name that told the golfer nothing; renamed **swng index**
+  everywhere: it is swng's own number for you.)
 - **WHS index** — computed from the golfer's **rated** rounds only, using the official World
   Handicap System formula, which adjusts for each course's difficulty (slope and rating). It
-  is the accurate, official-rules number — but it is blind to unrated golf, because the rules
-  cannot score a round played on an unrated course. *Accurate, but partial.*
+  is the strict, official-rules number — blind to unrated golf, because the rules cannot score
+  a round played on an unrated course. *Official, but partial.*
 
-They answer different questions: *"a fair number across all the golf I actually play"* (swng
-index) versus *"my official handicap under the rules"* (WHS index).
+They are the same handicap seen two ways: the swng index counts **all** your golf; the WHS
+index counts **only your rated rounds, strictly by the rules.** The difference between them is
+exactly your unrated play — nothing else.
 
 ## 3. Your index — one number, always visible, never hidden
 
@@ -147,6 +152,10 @@ codebase's projection discipline — see papercut 17), never hand-rolled in the 
 
 **Changes (legibility corrections):**
 - Rename `suggested`/`suggestedIndex` → `swngIndex` (domain `golferMetrics`, contracts, web).
+- **swng index computation** = the WHS fold, extended to unrated: each round contributes its
+  real `differential` when rated, and `ags − par` only when unrated (no rating). This replaces
+  the shipped `ags − par`-for-every-round, and makes the swng index equal the WHS index for a
+  rated-only golfer, diverging only by unrated play (§2).
 - "Your index" defaults to the **swng index** and is an explicit, on-screen active value; the
   client-side hidden `effectiveIndex = declared ?? whs` precedence is replaced by a visible
   selection (default swng index, adopt WHS, or override).

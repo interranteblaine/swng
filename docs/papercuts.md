@@ -330,3 +330,19 @@ never touch them, and `GolferRoundLine` already supports absent ags/differential
 it has zero contact with sealed rounds or card identity.
 Adjacent-but-different: SI-less cards would break dots allocation — that half needs a
 product decision (gross-only games?), not just optionality; explicitly out of this entry.
+
+### 17. Derived numbers must all flow through the metrics/projection layer — trend & distribution are still ad-hoc in the web
+
+Owner-raised (2026-07-16, reviewing the unrated-courses/metrics arc). The intended discipline
+is: **every derived number is computed in the domain/application projection (metrics) layer
+from the round-line facts; the web only renders.** The unrated arc established that layer
+(`golferMetrics` → `{ whsIndex, suggestedIndex }`), but two older derived views were left
+outside it: `ProfilePage.tsx`'s `IndexTrend` (last-20 differentials) and `DistributionBars`
+(career eagle/birdie/par/bogey/double+ totals) still compute inline in React over `history`.
+That inconsistency — some derived numbers through the disciplined fold, some hand-rolled in a
+component — is the "glossed over" pattern to eliminate: fold both into `golferMetrics` (or a
+sibling read projection) as first-class members so the profile only renders `record.metrics`,
+and every future analytic (scoring average, per-hole/per-course performance, handicap-band
+comparisons — each its own projection over snapshots) lands in that same layer, never in the
+web. Deferred by owner to revisit later; no behavior change today, purely a consolidation so
+the derived-number seam is one place, not two.

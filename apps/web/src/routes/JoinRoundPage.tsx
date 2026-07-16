@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { ApiError, joinRound, peekRound, updateMe } from "../api";
+import { courseHandicapFromRatingSlopePar, effectiveIndex } from "@swng/domain";
+import type { GetMyRecordResponse, PeekRoundResponse } from "@swng/contracts";
+import { ApiError, getMyRecord, joinRound, peekRound, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
+import { teeNumbers } from "../courses/teeNumbers";
 import { credentialStore } from "../identity";
 import { roundLabel } from "../roundLabel";
 
@@ -11,9 +14,15 @@ import { roundLabel } from "../roundLabel";
 // fires one request per keystroke.
 const DEBOUNCE_MS = 250;
 
+// The peek's per-tee shape — carries `par` (always) plus rating/slope (a rated tee only), which
+// is exactly what the join-side suggested course handicap needs (no `holes` array is on the peek).
+type PeekTee = PeekRoundResponse["teeSets"][number];
+
 export function JoinRoundPage() {
   const navigate = useNavigate();
   const auth = useAuth();
+  // Destructured for a stable effect dep (withAuth is a useCallback — useAuth.ts).
+  const { withAuth } = auth;
   const [searchParams] = useSearchParams();
 
   // The wall (accounts-only identity spec §3): joining is self-join only, from the caller's own
@@ -34,6 +43,9 @@ export function JoinRoundPage() {
   const [code, setCode] = useState(() => (searchParams.get("code") ?? "").toUpperCase());
   const [tee, setTee] = useState("");
   const [courseHandicap, setCourseHandicap] = useState("0");
+  // Seed-once flag (unrated-courses T5b): the suggested course handicap pre-fills the field only
+  // while untouched — the moment the golfer types, their value wins forever.
+  const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -41,9 +53,15 @@ export function JoinRoundPage() {
   // The round-created wall time from the peek — feeds roundLabel so the join-link framing carries
   // the SAME designation (course + date) as home/archive/watch (accounts-only identity spec §5).
   const [createdAt, setCreatedAt] = useState<number | undefined>(undefined);
-  const [teeOptions, setTeeOptions] = useState<readonly string[] | undefined>(undefined);
+  // The peek's full tee sets (name + par + rating/slope), not just names — the join-side suggested
+  // course handicap (unrated-courses T5b) needs the selected tee's numbers, and the picker shows
+  // each tee's rating/slope via teeNumbers.
+  const [peekTees, setPeekTees] = useState<readonly PeekTee[] | undefined>(undefined);
+  // The golfer's read-time metrics (GET /me/record) — the `computed` input to the suggestion; a
+  // failed/absent fetch just falls back to the declared index alone, never blocking the page.
+  const [record, setRecord] = useState<GetMyRecordResponse | undefined>(undefined);
   // Only ever true after a peek actually rejected — gates the fallback NOTE (not the fallback
-  // input itself, which is simply whatever renders whenever teeOptions is absent).
+  // input itself, which is simply whatever renders whenever peekTees is absent).
   const [peekFailed, setPeekFailed] = useState(false);
 
   // joinRoundRequestSchema expects the canonical uppercase 6-char form — uppercase here so a
@@ -53,7 +71,7 @@ export function JoinRoundPage() {
   useEffect(() => {
     setCourseName(undefined);
     setCreatedAt(undefined);
-    setTeeOptions(undefined);
+    setPeekTees(undefined);
     setPeekFailed(false);
     if (upperCode.length !== 6) return undefined; // peek only once the code looks complete
 
@@ -62,7 +80,7 @@ export function JoinRoundPage() {
         .then((response) => {
           setCourseName(response.courseName);
           setCreatedAt(response.createdAt);
-          setTeeOptions(response.teeSets.map((t) => t.name));
+          setPeekTees(response.teeSets);
           setTee(response.teeSets[0]?.name ?? "");
         })
         .catch(() => {
@@ -76,6 +94,39 @@ export function JoinRoundPage() {
 
     return () => clearTimeout(timer);
   }, [upperCode]);
+
+  // The suggested course handicap's `computed` input (unrated-courses T5b): one GET /me/record
+  // when signed in. A nicety — a rejection leaves `record` undefined and the suggestion (if any)
+  // falls back to the declared index alone; it never blocks the page.
+  useEffect(() => {
+    if (!auth.signedIn) return;
+    void withAuth((token) => getMyRecord(token))
+      .then(setRecord)
+      .catch(() => {}); // withAuth already handled a terminal 401; anything else just leaves the record unset
+  }, [auth.signedIn, withAuth]);
+
+  // The effective index composed client-side (arc: declared > computed) and, against the selected
+  // peek tee, the suggested course handicap. The peek carries `par` but not `holes`, so a rated
+  // tee uses courseHandicapFromRatingSlopePar (the numbers-only Rule 6.1a helper); an unrated tee
+  // gets round(index) as a plain estimate. No effective index, or a free-text tee with no peek
+  // numbers → no suggestion, so the field stays its plain "0".
+  const effective = effectiveIndex({ declared: auth.golfer?.declared, computed: record?.metrics?.whsIndex?.value });
+  const selectedTee = peekTees?.find((peekTee) => peekTee.name === tee);
+  const suggestion = ((): { readonly value: number; readonly label: string } | undefined => {
+    if (!effective || !selectedTee) return undefined;
+    if (selectedTee.rating !== undefined && selectedTee.slope !== undefined) {
+      return { value: courseHandicapFromRatingSlopePar(effective.value, selectedTee.rating, selectedTee.slope, selectedTee.par), label: "suggested (WHS)" };
+    }
+    return { value: Math.round(effective.value), label: "estimated — unrated course" };
+  })();
+  const suggestedValue = suggestion?.value;
+
+  // Seed the field (and re-seed on a tee change) only while untouched — a typed value is never
+  // overwritten. Primitive dep, so recomputing the same number doesn't re-fire this.
+  useEffect(() => {
+    if (touched || suggestedValue === undefined) return;
+    setCourseHandicap(String(suggestedValue));
+  }, [touched, suggestedValue]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -148,13 +199,13 @@ export function JoinRoundPage() {
             </div>
           </div>
 
-          {teeOptions ? (
+          {peekTees ? (
             <label className="flex flex-col gap-1">
               Tee
               <select value={tee} onChange={(event) => setTee(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg">
-                {teeOptions.map((teeName) => (
-                  <option key={teeName} value={teeName}>
-                    {teeName}
+                {peekTees.map((peekTee) => (
+                  <option key={peekTee.name} value={peekTee.name}>
+                    {peekTee.name} — {teeNumbers(peekTee)}
                   </option>
                 ))}
               </select>
@@ -171,16 +222,24 @@ export function JoinRoundPage() {
             </div>
           )}
 
-          <label className="flex flex-col gap-1">
-            Course handicap
-            <input
-              type="number"
-              step={1}
-              value={courseHandicap}
-              onChange={(event) => setCourseHandicap(event.target.value)}
-              className="rounded-lg bg-slate-800 p-3 text-lg"
-            />
-          </label>
+          {/* The suggestion note is a SIBLING of the <label> (not nested) — nesting would fold it
+              into the label's own accessible name. */}
+          <div className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1">
+              Course handicap
+              <input
+                type="number"
+                step={1}
+                value={courseHandicap}
+                onChange={(event) => {
+                  setTouched(true); // a typed value wins over the seed from here on
+                  setCourseHandicap(event.target.value);
+                }}
+                className="rounded-lg bg-slate-800 p-3 text-lg"
+              />
+            </label>
+            {suggestion && <span className="text-xs text-slate-500">{suggestion.label}</span>}
+          </div>
 
           {error && (
             <p role="alert" className="text-red-400">

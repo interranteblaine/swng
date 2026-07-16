@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { courseId, fixtureLinks18, fixtureWhite18, golferId, roundId } from "@swng/domain";
 import { startRoundRequestSchema } from "@swng/contracts";
-import type { CourseView, GetMeResponse } from "@swng/contracts";
+import type { CourseView, GetMeResponse, GetMyRecordResponse } from "@swng/contracts";
 import { credentialStore } from "../identity";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
@@ -17,6 +17,10 @@ vi.mock("../api", () => ({
   getCourse: vi.fn(),
   searchCourses: vi.fn(),
   getMe: vi.fn(),
+  // The suggested-course-handicap fetch (unrated-courses T5b) — defaulted to an empty record in
+  // beforeEach so the pre-existing cases (no declared, no metrics) show no suggestion and their
+  // manual handicap entry is unaffected; the suggestion cases below stub a real metric.
+  getMyRecord: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -29,15 +33,17 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, createRound, getCourse, getMe, searchCourses } from "../api";
+import { ApiError, createRound, getCourse, getMe, getMyRecord, searchCourses } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { CreateRoundPage } from "./CreateRoundPage";
+import { courseHandicapFor } from "@swng/domain";
 
 const mockedCreateRound = vi.mocked(createRound);
 const mockedGetCourse = vi.mocked(getCourse);
 const mockedSearchCourses = vi.mocked(searchCourses);
 const mockedGetMe = vi.mocked(getMe);
+const mockedGetMyRecord = vi.mocked(getMyRecord);
 
 const courseView: CourseView = {
   courseId: courseId("course-18"),
@@ -54,6 +60,8 @@ beforeEach(() => {
   mockedGetCourse.mockReset();
   mockedSearchCourses.mockReset();
   mockedGetMe.mockReset();
+  mockedGetMyRecord.mockReset();
+  mockedGetMyRecord.mockResolvedValue({ metrics: {}, history: [] });
 });
 
 afterEach(() => {
@@ -245,6 +253,98 @@ describe("CreateRoundPage — create as yourself", () => {
     // getCourse re-called (once for the initial load, once for the card-superseded re-fetch).
     await waitFor(() => expect(mockedGetCourse).toHaveBeenCalledTimes(2));
     expect(mockedGetCourse).toHaveBeenLastCalledWith(courseId("course-18"));
+  });
+});
+
+// The suggested course handicap (unrated-courses T5b): a pre-fill, editable, composed from the
+// effective index (declared > computed) against the selected tee. CreateRoundPage holds the full
+// card, so a rated tee gets the real Rule 6.1a figure and an unrated tee gets round(index).
+describe("CreateRoundPage — suggested course handicap", () => {
+  it("a rated tee pre-fills courseHandicapFor over the declared index, labeled 'suggested (WHS)'", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", declared: 12.4 } });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    const whiteTee = fixtureLinks18.teeSets.find((teeSet) => teeSet.name === "white")!;
+    const expected = String(courseHandicapFor(12.4, whiteTee));
+    await waitFor(() => expect((screen.getByLabelText(/course handicap/i) as HTMLInputElement).value).toBe(expected));
+    expect(screen.getByText("suggested (WHS)")).toBeTruthy();
+  });
+
+  it("composes the effective index from GET /me/record's whsIndex when there's no declared index", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } }); // no declared
+    mockedGetMyRecord.mockResolvedValue({ metrics: { whsIndex: { value: 9.0, computedAtMs: 1_000, differentialsUsed: 5 } }, history: [] });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(/playing as/i);
+
+    const whiteTee = fixtureLinks18.teeSets.find((teeSet) => teeSet.name === "white")!;
+    const expected = String(courseHandicapFor(9.0, whiteTee));
+    await waitFor(() => expect((screen.getByLabelText(/course handicap/i) as HTMLInputElement).value).toBe(expected));
+    expect(screen.getByText("suggested (WHS)")).toBeTruthy();
+  });
+
+  it("an unrated selected tee pre-fills round(index), labeled 'estimated — unrated course'", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", declared: 12.4 } });
+    // Same card, but the selected tee carries no rating/slope — a legitimate unrated tee.
+    const unratedCard = { ...fixtureLinks18, teeSets: [{ name: "white", holes: fixtureWhite18.holes }] };
+    mockedGetCourse.mockResolvedValue({ course: { ...courseView, card: unratedCard } });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(/playing as/i);
+
+    await waitFor(() => expect((screen.getByLabelText(/course handicap/i) as HTMLInputElement).value).toBe("12")); // round(12.4)
+    expect(screen.getByText(/estimated — unrated course/i)).toBeTruthy();
+  });
+
+  it("a typed course handicap is never overwritten by a seed that resolves later", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } }); // no declared
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+    let resolveRecord: (record: GetMyRecordResponse) => void = () => {};
+    mockedGetMyRecord.mockReturnValue(
+      new Promise<GetMyRecordResponse>((resolve) => {
+        resolveRecord = resolve;
+      }),
+    );
+    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-typed"), joinCode: "TYP111", token: "tok-typed", golferId: golferId("ann-g") });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(/playing as/i);
+
+    // Type before any suggestion is available — this value must win.
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "7" } });
+
+    // The record resolves with a whsIndex that WOULD suggest a very different value — the seed must not fire.
+    resolveRecord({ metrics: { whsIndex: { value: 20.0, computedAtMs: 1_000, differentialsUsed: 5 } }, history: [] });
+    await waitFor(() => expect(mockedGetMyRecord).toHaveBeenCalled());
+
+    expect((screen.getByLabelText(/course handicap/i) as HTMLInputElement).value).toBe("7");
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
+    expect(mockedCreateRound.mock.calls[0]![0].host.courseHandicap).toBe(7);
+  });
+
+  it("a rejected record fetch still pre-fills from the declared index alone — never blocks the page", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", declared: 12.4 } });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+    mockedGetMyRecord.mockRejectedValue(new ApiError("boom", 500, "record unavailable"));
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(/playing as/i);
+
+    const whiteTee = fixtureLinks18.teeSets.find((teeSet) => teeSet.name === "white")!;
+    const expected = String(courseHandicapFor(12.4, whiteTee));
+    await waitFor(() => expect((screen.getByLabelText(/course handicap/i) as HTMLInputElement).value).toBe(expected));
+    expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(false);
   });
 });
 

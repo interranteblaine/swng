@@ -101,12 +101,18 @@ export const suggestedIndex = (
   return computeIndexDetail(combineNineHoleDifferentials(pseudo));
 };
 
+// Rule 6.1a over already-known numbers — the peek carries `par` but not `holes`, so a caller
+// with rating/slope/par (the web's JoinRoundPage) computes a course handicap without a full
+// TeeSet. courseHandicapFor delegates to this so the Rule 6.1a formula lives in exactly ONE place.
+export const courseHandicapFromRatingSlopePar = (index: number, rating: number, slope: number, par: number): number =>
+  roundHalfUp(index * (slope / 113) + (rating - par));
+
 // Rule 6.1a: Course Handicap = Handicap Index × (Slope Rating ÷ 113) +
 // (Course Rating − par), rounded to the nearest whole number as the final step.
 export const courseHandicapFor = (index: number, teeSet: TeeSet): number => {
   if (!isRated(teeSet)) throw new DomainError("tee-unrated", `tee "${teeSet.name}" is unrated — use round(index) for a course-handicap estimate`);
   const par = teeSet.holes.reduce((sum, hole) => sum + hole.par, 0);
-  return roundHalfUp(index * (teeSet.slope / 113) + (teeSet.rating - par));
+  return courseHandicapFromRatingSlopePar(index, teeSet.rating, teeSet.slope, par);
 };
 
 // 2020 published 9-hole combining rule (see the file-level comment: the 2024

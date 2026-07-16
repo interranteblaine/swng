@@ -18,6 +18,9 @@ vi.mock("../api", () => ({
   peekRound: vi.fn().mockRejectedValue(new Error("not stubbed")),
   getMe: vi.fn(),
   updateMe: vi.fn(),
+  // The suggested-course-handicap fetch (unrated-courses T5b) — defaulted to an empty record in
+  // beforeEach; the pre-existing cases (no declared, no metrics) show no suggestion.
+  getMyRecord: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -30,13 +33,15 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { getMe, joinRound, peekRound, updateMe } from "../api";
+import { getMe, getMyRecord, joinRound, peekRound, updateMe } from "../api";
 import { JoinRoundPage } from "./JoinRoundPage";
+import { courseHandicapFromRatingSlopePar } from "@swng/domain";
 
 const mockedJoinRound = vi.mocked(joinRound);
 const mockedPeekRound = vi.mocked(peekRound);
 const mockedGetMe = vi.mocked(getMe);
 const mockedUpdateMe = vi.mocked(updateMe);
+const mockedGetMyRecord = vi.mocked(getMyRecord);
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
@@ -46,6 +51,8 @@ beforeEach(() => {
   mockedPeekRound.mockRejectedValue(new Error("not stubbed"));
   mockedGetMe.mockReset();
   mockedUpdateMe.mockReset();
+  mockedGetMyRecord.mockReset();
+  mockedGetMyRecord.mockResolvedValue({ metrics: {}, history: [] });
 });
 
 afterEach(() => {
@@ -244,6 +251,121 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
 
     await waitFor(() => expect(mockedJoinRound).toHaveBeenCalledTimes(1));
     expect(mockedJoinRound.mock.calls[0]![0]).toEqual({ code: "ZZZ999", tee: "white", courseHandicap: 5 });
+  });
+});
+
+// The suggested course handicap (unrated-courses T5b): JoinRoundPage holds only the peek tee
+// (name + par + rating/slope, no holes), so a rated tee uses courseHandicapFromRatingSlopePar and
+// an unrated tee uses round(index). The picker also shows each tee's numbers via teeNumbers.
+describe("JoinRoundPage — suggested course handicap", () => {
+  it("a rated peek tee pre-fills courseHandicapFromRatingSlopePar, labeled 'suggested (WHS)'; the picker shows the tee's numbers", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G", declared: 12.4 } });
+    mockedPeekRound.mockResolvedValue({
+      courseName: "Fixture Links 18",
+      teeSets: [{ name: "white", par: 72, rating: 71.6, slope: 128 }],
+      createdAt: 1_700_000_000_000,
+    });
+
+    renderJoin();
+    await screen.findByText(/playing as/i);
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });
+
+    // Wait for the suggestion to land (proof the peek resolved and swapped in the <select>) before
+    // inspecting the picker — the free-text <input> also carries the "Tee" label until then.
+    const expected = String(courseHandicapFromRatingSlopePar(12.4, 71.6, 128, 72));
+    await waitFor(() => expect((screen.getByLabelText(/course handicap/i) as HTMLInputElement).value).toBe(expected));
+    expect(screen.getByText("suggested (WHS)")).toBeTruthy();
+
+    const teeSelect = screen.getByLabelText(/^tee$/i) as HTMLSelectElement;
+    expect(teeSelect.tagName).toBe("SELECT");
+    expect(teeSelect.options[0]!.textContent).toMatch(/rating 71.6, slope 128/); // teeNumbers in the picker
+  });
+
+  it("an unrated peek tee pre-fills round(index), labeled 'estimated — unrated course'; the picker reads 'unrated'", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G", declared: 12.4 } });
+    mockedPeekRound.mockResolvedValue({
+      courseName: "Muni",
+      teeSets: [{ name: "white", par: 71 }], // no rating/slope
+      createdAt: 1_700_000_000_000,
+    });
+
+    renderJoin();
+    await screen.findByText(/playing as/i);
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });
+
+    await waitFor(() => expect((screen.getByLabelText(/course handicap/i) as HTMLInputElement).value).toBe("12")); // round(12.4)
+    expect(screen.getByText(/estimated — unrated course/i)).toBeTruthy();
+
+    const teeSelect = screen.getByLabelText(/^tee$/i) as HTMLSelectElement;
+    expect(teeSelect.options[0]!.textContent).toMatch(/unrated/);
+  });
+
+  it("composes the effective index from GET /me/record's whsIndex when there's no declared index", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
+    mockedGetMyRecord.mockResolvedValue({ metrics: { whsIndex: { value: 9.0, computedAtMs: 1_000, differentialsUsed: 5 } }, history: [] });
+    mockedPeekRound.mockResolvedValue({
+      courseName: "Fixture Links 18",
+      teeSets: [{ name: "white", par: 72, rating: 71.6, slope: 128 }],
+      createdAt: 1_700_000_000_000,
+    });
+
+    renderJoin();
+    await screen.findByText(/playing as/i);
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });
+    await screen.findByLabelText(/^tee$/i);
+
+    const expected = String(courseHandicapFromRatingSlopePar(9.0, 71.6, 128, 72));
+    await waitFor(() => expect((screen.getByLabelText(/course handicap/i) as HTMLInputElement).value).toBe(expected));
+  });
+
+  it("a typed course handicap is never overwritten by the peek/record seed", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G", declared: 12.4 } });
+    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-typed"), token: "tok-typed", golferId: golferId("bo-g") });
+    mockedPeekRound.mockResolvedValue({
+      courseName: "Fixture Links 18",
+      teeSets: [{ name: "white", par: 72, rating: 71.6, slope: 128 }],
+      createdAt: 1_700_000_000_000,
+    });
+
+    renderJoin();
+    await screen.findByText(/playing as/i);
+
+    // Type before the peek arrives — this value must win over any later seed.
+    fireEvent.change(screen.getByLabelText(/course handicap/i), { target: { value: "3" } });
+
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });
+    await screen.findByLabelText(/^tee$/i); // peek resolved (its suggestion would differ from 3)
+    await waitFor(() => expect(mockedPeekRound).toHaveBeenCalled());
+
+    expect((screen.getByLabelText(/course handicap/i) as HTMLInputElement).value).toBe("3");
+
+    fireEvent.click(screen.getByRole("button", { name: /join round/i }));
+    await waitFor(() => expect(mockedJoinRound).toHaveBeenCalledTimes(1));
+    expect(mockedJoinRound.mock.calls[0]![0].courseHandicap).toBe(3);
+  });
+
+  it("a rejected record fetch still pre-fills from the declared index alone — joining is never blocked", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G", declared: 12.4 } });
+    mockedGetMyRecord.mockRejectedValue(new Error("record unavailable"));
+    mockedPeekRound.mockResolvedValue({
+      courseName: "Fixture Links 18",
+      teeSets: [{ name: "white", par: 72, rating: 71.6, slope: 128 }],
+      createdAt: 1_700_000_000_000,
+    });
+
+    renderJoin();
+    await screen.findByText(/playing as/i);
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });
+    await screen.findByLabelText(/^tee$/i);
+
+    const expected = String(courseHandicapFromRatingSlopePar(12.4, 71.6, 128, 72));
+    await waitFor(() => expect((screen.getByLabelText(/course handicap/i) as HTMLInputElement).value).toBe(expected));
+    expect(screen.getByRole("button", { name: /join round/i }).hasAttribute("disabled")).toBe(false);
   });
 });
 

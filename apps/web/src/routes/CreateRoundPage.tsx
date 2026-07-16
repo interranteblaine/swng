@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import type { CourseId } from "@swng/domain";
-import { cardId } from "@swng/domain";
-import type { CourseView, StartRoundResponse } from "@swng/contracts";
-import { ApiError, createRound, getCourse } from "../api";
+import { cardId, courseHandicapFor, effectiveIndex } from "@swng/domain";
+import type { CourseView, GetMyRecordResponse, StartRoundResponse } from "@swng/contracts";
+import { ApiError, createRound, getCourse, getMyRecord } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
@@ -35,11 +35,22 @@ export function CreateRoundPage() {
   // quiet placeholder and submit stays disabled — the M8 defect (a submit renaming a
   // half-loaded profile) is structurally impossible now that no name is ever typed here.
   const golfer = auth.golfer ?? undefined;
+  // Destructured for a stable effect dep (withAuth is a useCallback — useAuth.ts), rather than
+  // `auth` itself, which is a fresh object literal every render (ProfilePage's own precedent).
+  const { withAuth } = auth;
 
   const [courseView, setCourseView] = useState<CourseView | undefined>(undefined);
   const [tee, setTee] = useState<string>("");
   const [courseError, setCourseError] = useState<string | undefined>(undefined);
   const [courseHandicap, setCourseHandicap] = useState("0");
+  // The golfer's read-time metrics (GET /me/record) — one of the two inputs to the suggested
+  // course handicap below (the other is the declared index on the golfer row). A nicety: a
+  // failed/absent fetch just leaves this undefined and the suggestion falls back to declared
+  // alone, never blocking the page (unrated-courses T5b).
+  const [record, setRecord] = useState<GetMyRecordResponse | undefined>(undefined);
+  // Seed-once flag (unrated-courses T5b): the suggested course handicap pre-fills the field
+  // only while the golfer hasn't touched it — the moment they type, their value wins forever.
+  const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -86,6 +97,40 @@ export function CreateRoundPage() {
     if (state?.courseId) selectCourse(state.courseId);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: keyed by the router's own per-navigation identity, not by `state`'s object identity
   }, [location.key]);
+
+  // The suggested course handicap's `computed` input (unrated-courses T5b): one GET /me/record
+  // when signed in. Purely a nicety — a rejection just leaves `record` undefined, so the
+  // suggestion (if any) falls back to the declared index alone; it never blocks the page.
+  useEffect(() => {
+    if (!auth.signedIn) return;
+    void withAuth((token) => getMyRecord(token))
+      .then(setRecord)
+      .catch(() => {}); // withAuth already handled a terminal 401; anything else just leaves the record unset
+  }, [auth.signedIn, withAuth]);
+
+  // The effective index composed client-side (arc: declared > computed) and, against the
+  // selected tee, the suggested course handicap. A rated tee gets the real Rule 6.1a figure
+  // (courseHandicapFor over the full card's holes); an unrated tee gets round(index) as a plain
+  // estimate. No effective index (a brand-new golfer) → no suggestion at all, so the field stays
+  // its plain "0".
+  const effective = effectiveIndex({ declared: golfer?.declared, computed: record?.metrics?.whsIndex?.value });
+  const selectedTeeSet = courseView?.card.teeSets.find((teeSet) => teeSet.name === tee);
+  const suggestion = ((): { readonly value: number; readonly label: string } | undefined => {
+    if (!effective || !selectedTeeSet) return undefined;
+    if (selectedTeeSet.rating !== undefined && selectedTeeSet.slope !== undefined) {
+      return { value: courseHandicapFor(effective.value, selectedTeeSet), label: "suggested (WHS)" };
+    }
+    return { value: Math.round(effective.value), label: "estimated — unrated course" };
+  })();
+  const suggestedValue = suggestion?.value;
+
+  // Seed the field (and re-seed on a tee change) only while untouched — a typed value is never
+  // overwritten (`touched` gates it). The suggested value is a primitive dep, so a re-render that
+  // recomputes the same number doesn't re-fire this.
+  useEffect(() => {
+    if (touched || suggestedValue === undefined) return;
+    setCourseHandicap(String(suggestedValue));
+  }, [touched, suggestedValue]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -165,16 +210,25 @@ export function CreateRoundPage() {
             </div>
           )}
 
-          <label className="flex flex-col gap-1">
-            Course handicap
-            <input
-              type="number"
-              step={1}
-              value={courseHandicap}
-              onChange={(event) => setCourseHandicap(event.target.value)}
-              className="rounded-lg bg-slate-800 p-3 text-lg"
-            />
-          </label>
+          {/* The suggestion note is a SIBLING of the <label>, not nested inside it — nesting
+              would fold it into the label's own accessible name (getByLabelText for the field
+              would then have to match the note too). */}
+          <div className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1">
+              Course handicap
+              <input
+                type="number"
+                step={1}
+                value={courseHandicap}
+                onChange={(event) => {
+                  setTouched(true); // a typed value wins over the seed from here on
+                  setCourseHandicap(event.target.value);
+                }}
+                className="rounded-lg bg-slate-800 p-3 text-lg"
+              />
+            </label>
+            {suggestion && <span className="text-xs text-slate-500">{suggestion.label}</span>}
+          </div>
 
           {error && (
             <p role="alert" className="text-red-400">

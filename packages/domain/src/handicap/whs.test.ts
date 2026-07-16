@@ -4,7 +4,16 @@ import { DomainError } from "../errors.js";
 import type { HoleResult } from "../round/holeResult.js";
 import { fixtureWhite } from "../scoring/golden/fixtureCourse.js";
 import { roundHalfUp } from "../scoring/strokes.js";
-import { adjustedGrossScore, combineNineHoleDifferentials, computeIndex, computeIndexDetail, courseHandicapFor, scoreDifferential, suggestedIndex } from "./whs.js";
+import {
+  adjustedGrossScore,
+  combineNineHoleDifferentials,
+  computeIndex,
+  computeIndexDetail,
+  courseHandicapFor,
+  courseHandicapFromRatingSlopePar,
+  scoreDifferential,
+  suggestedIndex,
+} from "./whs.js";
 
 // Every conformance case below is pinned to a published USGA/R&A source, per the
 // task's source-verification step — the cited documents are the spec, not memory.
@@ -196,6 +205,18 @@ describe("courseHandicapFor", () => {
     const unrated: TeeSet = { name: "unrated", holes: fixtureWhite.holes };
     expect(() => courseHandicapFor(7.0, unrated)).toThrowError(DomainError);
     expect(() => courseHandicapFor(7.0, unrated)).toThrowError(expect.objectContaining({ code: "tee-unrated" }));
+  });
+
+  // The delegation the numbers-only helper introduces (unrated-courses T5b): the peek-side
+  // caller (JoinRoundPage) has rating/slope/par but no `holes`, so courseHandicapFor is defined
+  // in terms of courseHandicapFromRatingSlopePar over the tee's summed par — the two MUST agree
+  // for a rated tee (the worked-example pins above stay green precisely because it's behavior-
+  // preserving). Several indexes cover the plus/scratch/handicap range in one sweep.
+  it("courseHandicapFor agrees with courseHandicapFromRatingSlopePar over the tee's summed par", () => {
+    const par = fixtureWhite.holes.reduce((sum, hole) => sum + hole.par, 0);
+    for (const index of [-2.0, 0, 7.0, 12.4, 24.8]) {
+      expect(courseHandicapFor(index, fixtureWhite)).toBe(courseHandicapFromRatingSlopePar(index, fixtureWhite.rating!, fixtureWhite.slope!, par));
+    }
   });
 });
 

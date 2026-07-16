@@ -219,6 +219,93 @@ describe("ProfilePage — signed in", () => {
   });
 });
 
+// The declaration aids (unrated-courses T5b): the metrics rendered beside the declared input as
+// labeled data points a golfer can one-tap into the field — NOT a nudge (no threshold, no prose,
+// no auto-write).
+describe("ProfilePage — declaration aids", () => {
+  const withRecord = (metrics: unknown) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics, history: [] });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+  it("renders the Suggested data point and its 'Use this' fills the declared input", async () => {
+    signIn();
+    withRecord({ suggestedIndex: { value: 9.4, differentialsUsed: 3 } });
+
+    renderProfilePage();
+
+    await screen.findByText(/Suggested · 9\.4/);
+    fireEvent.click(screen.getByRole("button", { name: /use suggested index/i }));
+    expect((screen.getByLabelText("Declared index") as HTMLInputElement).value).toBe("9.4");
+  });
+
+  it("renders the WHS index data point and its 'Use this' fills the declared input", async () => {
+    signIn();
+    withRecord({ whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } });
+
+    renderProfilePage();
+
+    await screen.findByText(/WHS index \(computed\) · 7\.2/);
+    fireEvent.click(screen.getByRole("button", { name: /use whs index/i }));
+    expect((screen.getByLabelText("Declared index") as HTMLInputElement).value).toBe("7.2");
+  });
+
+  // A golfer with only unrated rounds: a Suggested value, but no WHS index yet → the WHS aid reads
+  // "—" and offers no button.
+  it("a metric with no data renders '—' and offers no 'Use this'", async () => {
+    signIn();
+    withRecord({ suggestedIndex: { value: 9.4, differentialsUsed: 3 } });
+
+    renderProfilePage();
+
+    await screen.findByText(/Suggested · 9\.4/);
+    expect(screen.getByText(/WHS index \(computed\) · —/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /use whs index/i })).toBeNull();
+  });
+
+  it("a brand-new golfer (empty metrics) shows '—' for both aids and no 'Use this' anywhere", async () => {
+    signIn();
+    withRecord({});
+
+    renderProfilePage();
+
+    await screen.findByText(/Suggested · —/);
+    expect(screen.getByText(/WHS index \(computed\) · —/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /use suggested index/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /use whs index/i })).toBeNull();
+  });
+
+  // The aids are data points, not a nudge: even when the declared index diverges sharply from both,
+  // there is deliberately no threshold, no divergence prose, no "you should" sentence, no auto-write.
+  it("shows only the numbers — no divergence nudge or threshold copy", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", declared: 20 } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") {
+          return fakeResponse(200, { metrics: { suggestedIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } }, history: [] });
+        }
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    await screen.findByText(/Suggested · 9\.4/);
+    expect(screen.queryByText(/consider|you should|diverge|update your declared|off by|higher than|lower than|recommend/i)).toBeNull();
+  });
+});
+
 // Moved here from HomePage (spec §11a, owner ruling: a crew is a grouping/competition only, off
 // the play surface) — same list/New-crew-link behavior HomePage's own crews suite pinned before
 // this move. Crew membership (invited in, accountable out — spec §2/§3): the join-by-code form

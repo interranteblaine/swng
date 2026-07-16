@@ -44,6 +44,16 @@ function IndexTrend({ history }: { readonly history: readonly GolferRoundLine[] 
   );
 }
 
+// The two declaration aids beside the declared-index input (unrated-courses T5b) — each a labeled
+// data point read straight off GET /me/record's metrics, with a one-tap "Use this". Table-driven
+// so adding a metric is adding a row, never a new branch; `valueOf` pulls the number (or undefined
+// → renders "—") and `useLabel` is the button's accessible name (the two buttons share the visible
+// "Use this" text, so distinct aria-labels keep them individually addressable).
+const DECLARATION_AIDS: readonly { readonly label: string; readonly useLabel: string; readonly valueOf: (record: GetMyRecordResponse | undefined) => number | undefined }[] = [
+  { label: "Suggested", useLabel: "Use suggested index", valueOf: (record) => record?.metrics?.suggestedIndex?.value },
+  { label: "WHS index (computed)", useLabel: "Use WHS index", valueOf: (record) => record?.metrics?.whsIndex?.value },
+];
+
 type DistributionKey = keyof GolferRoundLine["distribution"];
 const DISTRIBUTION_ROWS: readonly { readonly key: DistributionKey; readonly label: string }[] = [
   { key: "eagles", label: "Eagle or better" },
@@ -220,6 +230,38 @@ export function ProfilePage() {
           Declared index
           <input value={declared} onChange={(event) => setDeclared(event.target.value)} inputMode="decimal" className="rounded-lg bg-slate-800 p-3 text-lg" />
         </label>
+
+        {/* Declaration aids (unrated-courses T5b): the read-time metrics shown beside the declared
+            input as labeled data points a golfer can one-tap into the field — NOT a nudge. There is
+            deliberately no divergence threshold, no "you should change this" prose, and no auto-
+            write: just the numbers, and the golfer decides which (if any) to declare. A metric
+            with no data reads "—" and offers no button (a brand-new golfer sees "—" for both; a
+            golfer with only unrated rounds sees a Suggested value and "—" for WHS). */}
+        <div className="flex flex-col gap-2" aria-label="Declaration aids">
+          {DECLARATION_AIDS.map((aid) => {
+            const value = aid.valueOf(record);
+            return (
+              <div key={aid.label} className="flex items-center justify-between gap-2 text-sm">
+                {/* One inline text run per row (label · value) — NOT a nested value element, so a
+                    bare value like "7.2" never becomes its own text node colliding with the "Your
+                    record" section's own index display of the same number. */}
+                <span className="text-slate-300">
+                  {aid.label} · {value !== undefined ? value : "—"}
+                </span>
+                {value !== undefined && (
+                  <button
+                    type="button"
+                    aria-label={aid.useLabel}
+                    onClick={() => setDeclared(String(value))}
+                    className="shrink-0 text-emerald-400 underline"
+                  >
+                    Use this
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
 
         {error && (
           <p role="alert" className="text-red-400">

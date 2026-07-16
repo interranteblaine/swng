@@ -22,6 +22,8 @@ describe("toHttpError — course validation DomainErrors map to coded 400s", () 
     "invalid-yardage",
     "invalid-stroke-index",
     "duplicate-tee-name",
+    // task-1 (unrated courses): validateTeeSet's pairing rule — exactly one of rating/slope set.
+    "rating-slope-paired",
   ] as const;
 
   it.each(courseValidationCodes)("maps %s to 400 with the code in the body", (code) => {
@@ -29,6 +31,19 @@ describe("toHttpError — course validation DomainErrors map to coded 400s", () 
     const result = toHttpError(error, logger);
     expect(result.statusCode).toBe(400);
     expect(JSON.parse(result.body)).toEqual({ code, message: `${code}: some detail` });
+  });
+
+  // task-1 (unrated courses): whs.ts's scoreDifferential/courseHandicapFor throw this on an
+  // unrated tee — NOT thrown by course.ts, so it's pinned here as its own case rather than
+  // folded into courseValidationCodes above (whose doc comment above names course.ts as the
+  // sole source for that list).
+  it("maps tee-unrated to 400", () => {
+    const result = toHttpError(new DomainError("tee-unrated", "tee \"blue\" is unrated — use round(index) for a course-handicap estimate"), logger);
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body)).toEqual({
+      code: "tee-unrated",
+      message: 'tee "blue" is unrated — use round(index) for a course-handicap estimate',
+    });
   });
 
   // Pre-existing DomainError mappings must survive this addition unchanged.

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router";
-import { courseId as makeCourseId } from "@swng/domain";
+import { courseId as makeCourseId, DomainError, isRated } from "@swng/domain";
 import type { TeeSet } from "@swng/domain";
 import type { CourseView, SupersedeCardRequest } from "@swng/contracts";
 import { ApiError, getCourse, supersedeCard } from "../api";
@@ -161,10 +161,15 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
     // Mutable (not `readonly TeeSetInput[]`): SupersedeCardRequest's own inferred type is
     // mutable (createCourseRequestSchema/supersedeCardRequestSchema carry no `.readonly()` on
     // teeSets, unlike most other wire arrays), so supersedeCard's parameter expects exactly that.
-    // Every existing card is rated today (unrated-courses spec Task 1 is additive-only — this
-    // page's whole-card round-trip doesn't yet offer an unrated path), so the `!`s just narrow
-    // TeeSet.rating/slope's now-optional type back to the wire's still-required TeeSetInput.
-    const carryOver = (tee: TeeSet): TeeSetInput => ({ ...tee, rating: tee.rating!, slope: tee.slope! });
+    // courses.ts's own create/supersede wire schema (newTeeInputSchema) still requires rating/slope
+    // as a pair — unlike round.ts's teeSetSchema, it wasn't widened by the unrated-tees task (T5
+    // widens the write path); every existing card is rated today (Task 1 is additive-only, no
+    // unrated-write UI exists yet), so `isRated` narrows TeeSet's now-optional rating/slope back to
+    // real numbers here — never an explicit `rating: undefined`/`slope: undefined` on the wire body.
+    const carryOver = (tee: TeeSet): TeeSetInput => {
+      if (!isRated(tee)) throw new DomainError("tee-unrated", `tee "${tee.name}" is unrated — editing an unrated card isn't supported yet`);
+      return { ...tee };
+    };
     const teeSets: TeeSetInput[] = addTee
       ? [...view.card.teeSets.map(carryOver), submittedTee]
       : view.card.teeSets.map((tee) => (tee === originalTee ? submittedTee : carryOver(tee)));

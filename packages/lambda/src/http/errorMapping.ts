@@ -116,6 +116,15 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   "invalid-tee-name": 400,
   "invalid-rating": 400,
   "invalid-slope": 400,
+  // task-1 (unrated courses): validateTeeSet's own pairing rule — rating and slope must be
+  // present together or both absent. A bad-body precondition the client can correct, same
+  // 400 bucket as invalid-rating/invalid-slope above.
+  "rating-slope-paired": 400,
+  // task-1 (unrated courses): whs.ts's scoreDifferential/courseHandicapFor — an unrated tee has
+  // no differential to post. Same client-correctable-input 400 bucket as rating-slope-paired
+  // above (the finalize-path throw is uncaught until T2's handicappingFor `unrated` arm — not
+  // this task's concern).
+  "tee-unrated": 400,
   "invalid-hole-count": 400,
   "invalid-hole-numbering": 400,
   "invalid-par": 400,

@@ -42,10 +42,11 @@ declares.** Three kinds of numbers, never blended, each labeled for what it is:
 - **WHS-standard computations** — the `computed` index (Rule 5.2a over *rated* differentials
   only) and `courseHandicapFor` on rated tees. Shown whenever the data supports them, always
   labeled WHS. The standard, not the authority.
-- **Soft data points** — descriptive numbers that work across rated *and* unrated golf because
-  they need only par + stroke index + the golfer's own course handicap: the **suggested
-  index**, scoring-versus-par, distribution, trend. Shown beside every decision the golfer
-  makes — above all, beside the "declare your index" field.
+- **Soft data points (metrics)** — descriptive numbers computed over the golfer's own rounds
+  (a *read projection*, §6): the **suggested index**, scoring-versus-par, distribution, trend.
+  They work across rated *and* unrated golf because they need only par + stroke index + the
+  golfer's own course handicap. Shown as labeled data points beside every decision the golfer
+  makes — above all beside the declared-index field; a metric with no data shows `—`.
 - **The golfer's declaration** — the index they choose to play off, and the course handicap
   they accept or overtype per round. One-tap acceptance of a suggestion is always offered; so
   is ignoring it.
@@ -129,32 +130,54 @@ Both are trivially available in `archiveGolferLine` (`par` from the frozen card'
 Everything a soft data point needs — AGS, par, course handicap, per-hole distribution — is on
 the line, computable at read time, across rated and unrated rounds uniformly.
 
-## 6. The suggested index — one engine, neutral inputs
+## 6. The metrics projection — one read over your rounds
 
-The **suggested index** is the declaration aid: "based on your rounds, a reasonable index is
-~8.2." It reuses the *exact* pinned WHS machinery, applied to **neutral-course
-pseudo-differentials** so it works identically for rated and unrated rounds:
+The suggested index is not a bespoke field; it is the second member of a family. swng already
+uses two projection kinds, and this arc names them:
+
+- The **write projection** the projector already materializes: each finalized round's snapshot
+  fact mapped to a `GolferRoundLine` and written to the projections store (§5).
+- The **read projection**: a pure computation folded over those lines at read time,
+  materialized nowhere — the shape the WHS index has had since pre-prod hardening D4a. This
+  arc makes it first-class and extensible:
 
 ```
-pseudo-differential(line) = line.ags − line.par        // = scoreDifferential at slope 113, rating = par
+golferMetrics(lines): GolferMetrics             // domain, pure, read-time — the read projection
+GolferMetrics = { whsIndex?, suggestedIndex? }  // one member per derived metric; grows to N
+```
+
+v1 has two members; both are `{ value, differentialsUsed }`:
+
+- **`whsIndex`** — Rule 5.2a over *rated* differentials only (the existing `differential !==
+  undefined` filter). The WHS standard, unchanged in math — this arc only *names* the
+  read-time index computation that today sits inline in `getMyRecord` and moves it into
+  `golferMetrics`.
+- **`suggestedIndex`** — the declaration aid ("based on your rounds, a reasonable index is
+  ~8.2"). The *exact* pinned WHS machinery applied to **neutral-course pseudo-differentials**
+  so it works identically for rated and unrated rounds:
+
+```
+pseudo-differential(line) = line.ags − line.par     // = scoreDifferential at slope 113, rating = par
 suggestedIndex(lines)     = computeIndexDetail( combineNineHoleDifferentials(
                               lines with an ags, mapped to { differential: ags − par, holes } ) )
 ```
+  - Reuses `combineNineHoleDifferentials` (2020 nine-hole pairing) and `computeIndexDetail`
+    (Rule 5.2a best-of-window) verbatim — the small-sample table is never re-derived; same
+    best-8-of-20 shape as the WHS index, just on difficulty-neutral numbers.
+  - **Every round with an AGS contributes**, rated or unrated. This is precisely why it "works
+    for all" (owner): AGS always exists once holes are decided.
+  - **Honest limitation, stated in the UI:** ignoring rating/slope, it over- or under-states
+    difficulty on hard/easy rated courses. Where rated data exists, `whsIndex` is more
+    accurate — and both are shown. Labeled *estimated / based on your rounds*.
 
-- Reuses `combineNineHoleDifferentials` (2020 nine-hole pairing) and `computeIndexDetail`
-  (Rule 5.2a best-of-window) verbatim — the small-sample table is never re-derived. The
-  suggested index therefore has the same best-8-of-20 shape as the WHS index, just on
-  difficulty-neutral numbers.
-- **Every round with an AGS contributes**, rated or unrated. This is precisely why it "works
-  for all" (owner): AGS always exists once holes are decided.
-- **Honest limitation, stated in the UI:** ignoring rating/slope, the suggested index over- or
-  under-states difficulty on hard/easy rated courses. Where rated data exists, the WHS
-  `computed` index is more accurate — and both are shown. The suggested index is "the best we
-  can say when we set course difficulty aside," most valuable to the unrated-heavy golfer, and
-  always labeled *estimated / based on your rounds*.
-- Computed at **read time** in `getMyRecord`, never stored — same discipline as the WHS index
-  (pre-prod hardening D4a). Surfaced as `suggested?: { value, differentialsUsed }` alongside
-  the existing `index`.
+- **Why a projection, not two special-case fields:** the numbers swng surfaces — the two
+  indexes here, and scoring-versus-par / distribution / trend next — are all the same kind of
+  thing: a read over the golfer's round lines. `golferMetrics` is their one home; adding a
+  metric is adding a member, not carving a new pathway. The descriptive stats (§9) become
+  members of `GolferMetrics` when a surface needs them (§12) — never built speculatively.
+- **Read-time only, never stored** — same discipline as the WHS index (D4a). `getMyRecord`
+  returns `metrics: GolferMetrics`; the application stamps `computedAtMs` onto `whsIndex` when
+  it builds the response (the domain function stays a pure fold, no clock).
 
 ## 7. The three-number model in the record: declare wins, official collapses
 
@@ -173,7 +196,8 @@ field (never populated — it was always read-time) and `official` are removed.
 
 ```ts
 export interface HandicapProfile { readonly declared?: number }
-// effectiveIndex composes the stored declared with the read-time computed (as the web already does):
+// effectiveIndex composes the stored declared with the read-time computed — `computed` is
+// sourced at the call site from `metrics.whsIndex.value` (§6), as the web already composes it:
 export const effectiveIndex = (input: { declared?: number; computed?: number }):
   | { value: number; source: "declared" | "computed" } | undefined =>
   input.declared !== undefined ? { value: input.declared, source: "declared" }
@@ -181,9 +205,11 @@ export const effectiveIndex = (input: { declared?: number; computed?: number }):
   : undefined;
 ```
 
-- **Divergence nudge** (a data point, never an auto-change): when both exist and differ,
-  ProfilePage shows "Your WHS computed index is 15.2; you're playing off 20 — update?" One tap
-  adopts the computed value into `declared`; ignoring it is fine.
+- **Data points beside the declaration — never a nudge.** ProfilePage renders the
+  declared-index field alongside the metrics (§6) as plain labeled values — `Suggested · 8.2`,
+  `WHS index (computed) · 15.2` — each with a one-tap **Use this** that copies the value into
+  the declared field. A metric with no data renders `—` (nothing to suggest). No prose
+  sentence, no divergence threshold, no auto-write: just the numbers, and the golfer decides.
 - **Old stored golfers fold on read:** a golfer row carrying a legacy `official` (and no
   `declared`) deserializes as `declared` — the value is preserved under the new semantics,
   contract-tested, no migration script. A stored `computed` is dropped (it was never
@@ -222,9 +248,9 @@ discipline**, not a new store: once the line carries `ags`, `par`, and `courseHa
   "handicap differential" column. These are labeled WHS and are honest about what they can
   include.
 
-This spec surfaces the suggested index and the declaration nudge (§6, §7) and specifies the
-rule; a broad cross-player stats/leaderboard page is **out of scope** here (§12) — the point is
-that the *data* now supports it uniformly.
+This spec surfaces the metrics projection (§6) and the declaration data points (§7) and
+specifies the rule; a broad cross-player stats/leaderboard page is **out of scope** here (§12)
+— the point is that the *data* now supports it uniformly.
 
 ## 10. Rollout
 
@@ -251,12 +277,15 @@ Additive and mostly forward-only; **no migration scripts**.
 2. **An unrated round produces an AGS and no differential** — it is `complete`-shaped for
    scoring and games, `unrated`-shaped for posting; it can never reach the WHS `computed`
    index.
-3. **The WHS `computed` index is rated-differentials-only** — structurally, via the existing
-   `differential !== undefined` filter; unrated rounds cannot move it.
-4. **The suggested index reuses the pinned WHS engine on neutral pseudo-differentials**
-   (`ags − par`), includes every round with an AGS, and is read-time only (never stored).
+3. **The WHS index (`metrics.whsIndex`) is rated-differentials-only** — structurally, via the
+   existing `differential !== undefined` filter; unrated rounds cannot move it.
+4. **Derived indexes are a read projection (`golferMetrics`), never materialized** — `getMyRecord`
+   folds `metrics` over the round lines at read time and stores nothing (D4a discipline). The
+   suggested index reuses the pinned WHS engine on neutral pseudo-differentials (`ags − par`)
+   and includes every round with an AGS.
 5. **The golfer's `declared` index overrides `computed`** — `effectiveIndex = declared ??
-   computed`; the system never overwrites a declaration, only nudges.
+   computed` (`computed` = `metrics.whsIndex.value`); the system never overwrites a
+   declaration. Metrics are shown as data points (`—` when absent), never asserted or nudged.
 6. **`official` is gone; a legacy stored `official` folds to `declared` on read** — no
    migration, value preserved.
 7. **Every scoring path is unchanged on rated tees** — games, dots, AGS, differentials, the
@@ -277,7 +306,13 @@ Additive and mostly forward-only; **no migration scripts**.
   plays off. Manufacturing a second authoritative index is the failure mode the verify badge
   taught us to avoid.
 - **A broad cross-player stats / leaderboard surface.** The data now supports rated-vs-unrated
-  head-to-head (§9); the surface itself is a later arc.
+  head-to-head (§9); the surface itself is a later arc. The descriptive metrics it needs
+  (scoring-versus-par, distribution, trend) are further members of `GolferMetrics` (§6), added
+  when that surface exists — not built ahead of it.
+- **Materializing metrics into the projection store.** `golferMetrics` is a read projection;
+  the handicap metrics are window-based reads (best-8-of-20), cheap, and rebuild-free by
+  construction. A future per-round, expensive-to-compute metric could be materialized as a
+  write projection instead — that is a deliberate later call, not this arc's.
 - **PCC, the 2024 nine-hole expected-differential ingestion.** Unchanged; unrated nine-hole
   rounds simply never enter `combineNineHoleDifferentials` (they carry no differential).
 - **Prod-stack work.** Separate arc.

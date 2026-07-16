@@ -377,6 +377,53 @@ suites use it). The hostname was handed over from the old POC distribution
 untouched; its own cert was not reused). Prod later gets `swng.golf` as one `STAGE_WEB`
 entry in the prod-stack task.
 
+Course cards are real — the stored unit is the frozen unit (2026-07-15, spec
+`docs/superpowers/specs/2026-07-15-course-cards-design.md`, plan
+`2026-07-15-course-cards.md`, ten SDD tasks, commits `6dc2d3f..8b6c5bc`): the course system
+stores exactly one kind of thing — **immutable cards, in lineages**. A `CardRecord` wraps
+the exact `CourseCard` value rounds freeze (no translation function exists, pinned by a
+same-object-reference test); a course is a lineage's CURRENT pointer over write-once
+`CARD#` items; every maintenance act (add tee / fix numbers / rename) is one whole-card
+supersession guarded by ONE concurrency rule — the pointer must still name the card the
+caller reviewed, else 409 `card-superseded` (M6's anti-transplant pin promoted; the
+revision counter, per-tee versions, and courses' `retryOnConflict` all deleted). **Tee
+identity is recorded at write time, never inferred** (`TeeId` server-minted; a
+supersession's submitted ids must exist in the superseded card; the editor threads ids by
+editing in place). **StartRound is a reference command** — `{course: {courseId, cardId},
+host}`; the server resolves the lineage, 409s on a stale cardId, and freezes `record.card`
+VERBATIM; the old client-authored `card:` shape is gone with no tolerate path.
+Verification is deleted whole (the `window.prompt` counter claimed authority the model
+never had — the trust model is **transcription, not authority**, spec §2); course writes
+are golfer-gated with `enteredBy` derived via `ensureGolfer` and frozen at write. Routes
+37→36 HTTP (38 total): −verify, −add-tee, +`PUT /courses/{courseId}`; controller
+adjudication (spec §4-annotated, owner-upheld): course writes STAY in the tightened
+throttle set (9→8), matching the `POST /rounds` precedent. Every snapshot now records
+`(courseId, cardId, teeId per tee)` inside its frozen card and `GolferRoundLine` carries
+`courseId?` end-to-end — analytics join keys recorded from day one because sealing makes
+them unbackfillable; the owner-amended scrap (`scripts/scrapCourseAndRoundData.mjs`: 209
+course items, ~130k round items, 1,080 snapshots incl. the 752 POC-era archives, 1,526
+projection rows; zero-proof re-run) means **no legacy snapshot tier exists**. `@swng/web`
+gains the Courses surface: `/courses/:courseId` (card + attribution + start/edit/add-a-tee),
+a whole-card editor (single-tee UX over the whole-card wire; no hole-count toggle on an
+existing card — the same-hole-count invariant pinned structurally), AddCoursePage landing
+on the hub; `courseEntry.spec.ts` rewritten (dots table byte-preserved; a task reviewer
+caught a URL-wait matching `/courses/new` that would have silently skipped the dots gate on
+every live run). Two beta deploys (#10 routes+lambdas, #11 the projector fix) plus
+`publishWeb.mjs` (the web ships separately — a stale-bundle miss caught in the controller's
+live walk). Two live incidents fixed same-day: five e2e search locators broke on
+CourseSearch's new "name · N holes" text (string-level, typecheck-invisible), and the
+scrap's 1,080 snapshot REMOVEs saturated the projector shard for hours (the handler treated
+NEW_IMAGE-less records as poison) — the projector now skips REMOVEs (`8b6c5bc`,
+regression-pinned; INSERT/MODIFY keep the full poison discipline). Gates: `pnpm validate` +
+`pnpm test:contract` (89) green at every commit and at HEAD; `pnpm e2e:beta` 16/16 ×3; the
+full field suite green (courseEntry 8, fieldTest 14, crewSeason 9 — frozen standings
+byte-identical, rebuild parity — plus 22 across identityRecord/primaryPath/killNetwork/
+shareLink); a controller browser walk on beta.swng.golf re-entered the REAL Casa Verde GC
+by hand through the new entry flow (zero console errors, two-tap scoring, scrap-round
+confirm). Recorded, not scheduled: papercuts 13–15, and **papercut 16 — unrated courses are
+unusable (owner field report, a real product gap; owner-ruled design session, queued after
+this workstream)**.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

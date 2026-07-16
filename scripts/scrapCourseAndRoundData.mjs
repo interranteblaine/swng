@@ -24,6 +24,14 @@
 // controller may separately re-run `dropCrewData.mjs` at their discretion if a clean crew
 // slate is also wanted.
 //
+// Operational lesson from the first run (2026-07-15, live incident): deleting snapshots
+// emits one REMOVE per item onto the snapshots table's stream — 1,080 of them saturated the
+// projector's shard for hours because the handler then treated any record without a
+// NEW_IMAGE as a poison record (bisect + 10 retries each), starving new rounds' history
+// lines behind the backlog. The projector now skips REMOVEs (compositionRoot.ts's handler,
+// fixed same-day), so a future run drains in seconds — but expect a burst of skip logs, and
+// know that this script is WHY that skip branch exists.
+//
 //   node scripts/scrapCourseAndRoundData.mjs [--stage beta] [--dry-run]
 import { createRequire } from "node:module";
 

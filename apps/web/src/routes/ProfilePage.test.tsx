@@ -360,6 +360,28 @@ describe("ProfilePage — Your index (the one active number)", () => {
     expect(activeLine?.textContent).toContain("from all your rounds");
   });
 
+  // A plus handicap (an index below scratch) renders golf's + convention through the domain
+  // (formatHandicapIndex) — never a bare "-1.2". The active number AND the source rows read it,
+  // active or not.
+  it("a plus handicap (below scratch) renders the + convention on the active number and the source rows — never a bare -1.2", async () => {
+    signIn();
+    withGolferAndMetrics(
+      { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } },
+      { swngIndex: { value: -1.2, differentialsUsed: 8 }, whsIndex: { value: -0.4, computedAtMs: 1_000, differentialsUsed: 6 } },
+    );
+
+    renderProfilePage();
+
+    // The active big-number span reads +1.2 (anchor on the exact span, as the swng ROW reads the
+    // combined "swng index · +1.2").
+    const activeLine = (await screen.findByText("+1.2")).closest("p");
+    expect(activeLine?.textContent).toContain("from all your rounds");
+    expect(screen.queryByText("-1.2")).toBeNull(); // never the bare negative
+    // Both source rows render through the same convention — active or not.
+    expect(screen.getByText(/swng index · \+1\.2/)).toBeTruthy();
+    expect(screen.getByText(/WHS index · \+0\.4/)).toBeTruthy();
+  });
+
   it("a declared override is the active value and reads 'your own'", async () => {
     signIn();
     withGolferAndMetrics(

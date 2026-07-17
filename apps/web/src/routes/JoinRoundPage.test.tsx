@@ -351,6 +351,31 @@ describe("JoinRoundPage — strokes you get here", () => {
     expect(screen.getByText(/from your WHS index \(10\.0\), adjusted for 9 holes; unrated course/i)).toBeTruthy();
   });
 
+  // A plus-handicap golfer (index below scratch): the note names the + index (formatHandicapIndex)
+  // and, because the course handicap comes out negative, leads with the give-back ("You give N")
+  // instead of a bare number — both through the domain, no `< 0` decided in the view (spec §3).
+  it("a plus-handicap golfer's note reads the + index and, when the course handicap is negative, a 'You give N' lead", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("plus-g"), name: "Plus G", indexSource: { kind: "declared", value: -1.2 } } });
+    mockedPeekRound.mockResolvedValue({
+      courseName: "Fixture Links 18",
+      teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.6, slope: 128 }],
+      createdAt: 1_700_000_000_000,
+    });
+
+    renderJoin();
+    await screen.findByText(/playing as/i);
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });
+
+    const value = courseHandicapFromRatingSlopePar(-1.2, 71.6, 128, 72);
+    expect(value).toBeLessThan(0); // a plus index on this rated tee gives strokes back
+    // The seeded strokes field keeps the SIGNED numeric value the engine consumes (waited on, since
+    // the seed lands via an effect after the note renders).
+    await waitFor(() => expect((screen.getByLabelText(/strokes you get here/i) as HTMLInputElement).value).toBe(String(value)));
+    // The + index in the note, and a give-back lead (never a bare negative number).
+    expect(screen.getByText(`You give ${-value} — from your index (+1.2) on this course`)).toBeTruthy();
+  });
+
   it("defaults the active index to GET /me/record's swngIndex when there's no declared override", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });

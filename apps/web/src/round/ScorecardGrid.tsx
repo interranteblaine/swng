@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cellKey, findTeeSet } from "@swng/domain";
+import { cellKey, findTeeSet, strokeGrant } from "@swng/domain";
 import type { CourseCard, GameState, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { gameDots } from "./dots";
 import { ScorePad } from "./ScorePad";
@@ -71,7 +71,7 @@ interface CellProps {
 // A tappable scorecard cell — dots above, gross (large) + net (small, only where dots apply)
 // below. This IS the "tap 1" of the two-tap contract; ScorePad below is "tap 2".
 function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
-  const net = cell?.result.kind === "strokes" && dots > 0 ? cell.result.strokes - dots : undefined;
+  const net = cell?.result.kind === "strokes" && dots !== 0 ? cell.result.strokes - dots : undefined;
 
   return (
     <button
@@ -81,11 +81,17 @@ function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
       disabled={readOnly}
       className="flex min-h-14 min-w-14 flex-col items-center justify-center gap-0.5 rounded-md bg-slate-800 px-1 py-1 active:bg-slate-700 disabled:active:bg-slate-800"
     >
-      {dots > 0 && (
-        <span aria-hidden className="text-[10px] leading-none text-amber-400">
-          {"●".repeat(dots)}
-        </span>
-      )}
+      {(() => {
+        const grant = strokeGrant(dots);
+        if (grant.kind === "none") return null;
+        // received strokes are filled ●; GIVEN strokes (a plus handicap) are hollow ○ — on the
+        // screen now, not silently dropped. net = gross − dots already reads gross + 1 for a give.
+        return (
+          <span aria-hidden className="text-[10px] leading-none text-amber-400">
+            {(grant.kind === "receives" ? "●" : "○").repeat(grant.count)}
+          </span>
+        );
+      })()}
       {cell ? (
         <span className={cell.result.kind === "strokes" ? "text-lg font-semibold text-slate-100" : "text-sm font-semibold text-amber-300"}>{glyphFor(cell.result)}</span>
       ) : (

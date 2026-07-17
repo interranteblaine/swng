@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { courseHandicapFromRatingSlopePar, resolveIndex } from "@swng/domain";
+import { courseHandicapFromRatingSlopePar, formatHandicapIndex, resolveIndex, strokeGrant } from "@swng/domain";
 import type { GetMyRecordResponse, PeekRoundResponse } from "@swng/contracts";
 import { ApiError, getMyRecord, joinRound, peekRound, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";
@@ -121,15 +121,21 @@ export function JoinRoundPage() {
   const selectedTee = peekTees?.find((peekTee) => peekTee.name === tee);
   const suggestion = ((): { readonly value: number; readonly note: string } | undefined => {
     if (resolved.value === undefined || !selectedTee) return undefined;
-    const indexText = resolved.value.toFixed(1);
+    const indexText = formatHandicapIndex(resolved.value); // +1.2 for a plus index — the domain owns the convention
     const sourceNoun = resolved.kind === "whs" ? "WHS index" : "index"; // spec §6: name a WHS source
+    // The strokes lead reads through strokeGrant: a plus player GIVES strokes ("You give N"),
+    // everyone else just receives the plain number — the view never tests the sign itself (spec §3).
+    const lead = (value: number): string => {
+      const grant = strokeGrant(value);
+      return grant.kind === "gives" ? `You give ${grant.count}` : `${value}`;
+    };
     if (selectedTee.rating !== undefined && selectedTee.slope !== undefined) {
       const value = courseHandicapFromRatingSlopePar(resolved.value, selectedTee.rating, selectedTee.slope, selectedTee.par);
-      return { value, note: `${value} — from your ${sourceNoun} (${indexText}) on this course` };
+      return { value, note: `${lead(value)} — from your ${sourceNoun} (${indexText}) on this course` };
     }
     // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §4).
     const value = selectedTee.holes === 9 ? Math.round(resolved.value / 2) : Math.round(resolved.value);
-    return { value, note: `${value} — from your ${sourceNoun} (${indexText}), adjusted for ${selectedTee.holes} holes; unrated course, adjust if it plays hard/easy` };
+    return { value, note: `${lead(value)} — from your ${sourceNoun} (${indexText}), adjusted for ${selectedTee.holes} holes; unrated course, adjust if it plays hard/easy` };
   })();
   const suggestedValue = suggestion?.value;
 

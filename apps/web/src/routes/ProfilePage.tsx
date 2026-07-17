@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import { Link } from "react-router";
 import type { GetMyRecordResponse, ListMyCrewsResponse } from "@swng/contracts";
 import type { CourseId, GolferRoundLine, IndexSource } from "@swng/domain";
-import { resolveIndex } from "@swng/domain";
+import { formatHandicapIndex, resolveIndex } from "@swng/domain";
 import { getCourse, getMyRecord, listMyCrews, updateMe } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
@@ -280,7 +280,7 @@ export function ProfilePage() {
 
           {resolved.value !== undefined ? (
             <p className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold">{resolved.value.toFixed(1)}</span>
+              <span className="text-3xl font-bold">{formatHandicapIndex(resolved.value)}</span>
               {/* The source phrasing IS the legibility — the golfer always sees WHICH number they're
                   on: "your own" (declared), "your WHS index" (whs), or "from all your rounds" (swng). */}
               <span className="text-sm text-slate-400">
@@ -307,7 +307,7 @@ export function ProfilePage() {
               return (
                 <div key={source.label} className="flex items-center justify-between gap-2 text-sm">
                   <span className="text-slate-300">
-                    {source.label} · {value !== undefined ? value.toFixed(1) : "—"}
+                    {source.label} · {value !== undefined ? formatHandicapIndex(value) : "—"}
                     <span className="block text-xs text-slate-500">{source.description}</span>
                   </span>
                   {active ? (

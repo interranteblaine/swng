@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import type { CourseId } from "@swng/domain";
-import { cardId, courseHandicapFor, resolveIndex } from "@swng/domain";
+import { cardId, courseHandicapFor, formatHandicapIndex, resolveIndex, strokeGrant } from "@swng/domain";
 import type { CourseView, GetMyRecordResponse, StartRoundResponse } from "@swng/contracts";
 import { ApiError, createRound, getCourse, getMyRecord } from "../api";
 import { SignInCta } from "../auth/SignInCta";
@@ -121,16 +121,22 @@ export function CreateRoundPage() {
   const selectedTeeSet = courseView?.card.teeSets.find((teeSet) => teeSet.name === tee);
   const suggestion = ((): { readonly value: number; readonly note: string } | undefined => {
     if (resolved.value === undefined || !selectedTeeSet) return undefined;
-    const indexText = resolved.value.toFixed(1);
+    const indexText = formatHandicapIndex(resolved.value); // +1.2 for a plus index — the domain owns the convention
     const sourceNoun = resolved.kind === "whs" ? "WHS index" : "index"; // spec §6: name a WHS source
+    // The strokes lead reads through strokeGrant: a plus player GIVES strokes ("You give N"),
+    // everyone else just receives the plain number — the view never tests the sign itself (spec §3).
+    const lead = (value: number): string => {
+      const grant = strokeGrant(value);
+      return grant.kind === "gives" ? `You give ${grant.count}` : `${value}`;
+    };
     if (selectedTeeSet.rating !== undefined && selectedTeeSet.slope !== undefined) {
       const value = courseHandicapFor(resolved.value, selectedTeeSet);
-      return { value, note: `${value} — from your ${sourceNoun} (${indexText}) on this course` };
+      return { value, note: `${lead(value)} — from your ${sourceNoun} (${indexText}) on this course` };
     }
     // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §4).
     const holeCount = selectedTeeSet.holes.length; // 9 or 18 — every card tee is one or the other
     const value = holeCount === 9 ? Math.round(resolved.value / 2) : Math.round(resolved.value);
-    return { value, note: `${value} — from your ${sourceNoun} (${indexText}), adjusted for ${holeCount} holes; unrated course, adjust if it plays hard/easy` };
+    return { value, note: `${lead(value)} — from your ${sourceNoun} (${indexText}), adjusted for ${holeCount} holes; unrated course, adjust if it plays hard/easy` };
   })();
   const suggestedValue = suggestion?.value;
 

@@ -155,6 +155,38 @@ describe("ScorecardGrid — dots", () => {
     expect(within(cell).getByText("4")).toBeTruthy(); // net = 5 - 1 dot
   });
 
+  // A plus handicap (course handicap below 0) GIVES a stroke back rather than receiving one. Before
+  // this it drew nothing at all (the `dots > 0` guard) — now it renders through strokeGrant as a
+  // hollow ○, and the net reads gross + 1 (net = gross − dots, and dots is negative here). In skins
+  // (full allowance) a -1 course handicap allocates exactly one give-back on the easiest hole (SI 18).
+  it("renders a plus player's GIVEN stroke as a hollow ○ with net = gross + 1 (the give-back finally on the screen)", () => {
+    const annPlus = participant(ANN, "Ann", "white", -1); // a plus handicap: gives a stroke back
+    const boScratch = participant(BO, "Bo", "white", 0);
+    const skins: GameConfig = { kind: "skins", id: gameId("skins"), players: [ANN, BO] };
+    const si18Hole = fixtureWhite18.holes.find((h) => h.strokeIndex === 18)!; // the easiest hole — where a single give-back lands
+    const state: RoundState = {
+      id: roundId("round-giveback"),
+      status: "live",
+      card: fixtureLinks18,
+      participants: [annPlus, boScratch],
+      games: [skins],
+      cells: { [cellKey(ANN, si18Hole.number)]: scoreCell({ kind: "strokes", strokes: 5 }, ANN) },
+      terminatedGameIds: new Set(),
+    };
+    const activeGame: GameState = { kind: "skins", id: skins.id, lines: [], carrying: 0, carriedOut: 0, complete: false };
+
+    // The domain allocates exactly one give-back (-1) on the SI-18 hole for a -1 course handicap.
+    expect(gameDots(skins, state.participants, fixtureLinks18).get(ANN)!.get(si18Hole.number)).toBe(-1);
+
+    render(<ScorecardGrid state={state} activeGame={activeGame} recordScore={vi.fn()} />);
+
+    const cell = cellButton("Ann", si18Hole.number);
+    expect(cell.textContent).toMatch("○"); // a GIVEN stroke draws hollow...
+    expect(cell.textContent).not.toMatch("●"); // ...never a filled received-stroke glyph
+    expect(within(cell).getByText("5")).toBeTruthy(); // gross
+    expect(within(cell).getByText("6")).toBeTruthy(); // net = 5 − (−1) = gross + 1
+  });
+
   it("a player whose relative playing handicap is 19+ gets a second dot on the SI-1 hole, but only one on SI-18", () => {
     // singles-match plays full (100%) allowance and its dots are relative — chHigh - chLow —
     // so a 19-course-handicap gap against a 0-handicap opponent lands Bo's relative playing

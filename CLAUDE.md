@@ -472,6 +472,48 @@ PRE-EXISTING auth-flow transients the walk made visible, arc-diff-verified to to
 → **papercut 18**). Papercut 17 (fold trend/distribution into the same metrics layer) deferred
 by owner. On local `main`, never pushed.
 
+The index is a SOURCE you choose, resolved live — the drift bug is now unrepresentable
+(post-handicap-model, 2026-07-16, spec
+`docs/superpowers/specs/2026-07-16-handicap-index-source-model-design.md`, plan
+`2026-07-16-handicap-index-source-model.md`, two SDD tasks, commit `799ec85`): the owner
+caught a real defect in the shipped legibility model — "Use this" on WHS wrote today's WHS
+value into the lone `HandicapProfile.declared?: number` primitive, so adopting your official
+handicap **froze a copy that silently drifts** from the WHS row as you post rounds. The fix
+models the index as a SYSTEM, not a primitive: `IndexSource = {kind:"swng"} | {kind:"whs"} |
+{kind:"declared"; value}` persisted on the profile, resolved live on every read by one pure
+domain function `resolveIndex(source, metrics)` over the metrics read-projection. **The
+invariant is "never store a computed number"** — swng/WHS are live views (adopting WHS now
+TRACKS the live WHS number; drift is structurally impossible), and `declared` is the only
+asserted number, a **permanent peer** (owner call — a system you can correct is more
+trustworthy than one you can't). `undefined` is first-class (a computed source with no data →
+`undefined`, never `0`); a missing/malformed stored source defaults to `{kind:"swng"}`. The
+change landed as ONE atomic commit through domain → contracts → application → adapters → web
+(the domain type is imported everywhere), with **no migration** (beta disposable, no prod
+pool — `effectiveIndex`, the wire `declared` field, and the adapter's legacy
+`official`/`declared` fold are DELETED, not phased out; old golfer rows fold to swng). Every
+number on screen carries its source ("from all your rounds" / "your WHS index" / "your own");
+ProfilePage "Use this" sets the SOURCE and leaves the override box empty (the anti-drift fix,
+pinned by a ProfilePage test that asserts adopt-WHS tracks the live metric and Save posts
+`{kind:"whs"}`, not a copied number), and Create/Join derive strokes from the one resolver,
+naming a WHS source in the note. Task 2 (e2e reconciliation) was a controller-verified
+zero-diff — the prior arc had already aligned the profile-index assertions and the
+swng/declared derivation copy was unchanged. Gated: `pnpm validate` green at every commit and
+at HEAD, `pnpm test:contract` 93 (golferStore round-trips whs/declared + the `getBySub` read
+path + no-source→swng); final whole-branch review "READY TO DEPLOY — YES" (0 Critical/0
+Important; invariant traced durable at every write path; deploy-order verdict LAMBDA-FIRST
+since the now-required `indexSource` wire field breaks an old bundle only web-first). Close-out
+was a CONTROLLER-RUN gate, **no data wipe** (golfer-wire-only change; unlike the prior arc it
+adds no now-required round-line fields, and non-wiped beta golfer rows fold to `{kind:"swng"}`
+— contract-pinned): `deploy:beta` LAMBDA-FIRST (`UPDATE_COMPLETE`, all 5 lambdas) → `publishWeb`
+(bundle `index-CZ_h5Iv7.js`, CF invalidation — stale-bundle window closed) → `e2e:beta` 16/16
+×2 → `e2e:field` 57 passed / 1 documented-skip (all 8 specs) → a controller browser walk on the
+DEPLOYED `beta.swng.golf` (real PKCE sign-in, get-or-create minting "Golfer 9422" with
+`indexSource` proving the required-field parse, the "Your index" source UI rendering
+swng-"in use" / WHS-"—"-no-button / `undefined`-as-"—", a declared 12.4 round-tripping to
+`GET /me` as `indexSource:{kind:"declared",value:12.4}` with no legacy `declared` primitive,
+console clean, zero CSP violations; throwaway Cognito user deleted). On local `main`, never
+pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

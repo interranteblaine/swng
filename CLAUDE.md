@@ -424,6 +424,54 @@ confirm). Recorded, not scheduled: papercuts 13–15, and **papercut 16 — unra
 unusable (owner field report, a real product gap; owner-ruled design session, queued after
 this workstream)**.
 
+The handicap model is real, and legible — one index you own, the strokes it becomes
+(post-course-cards, 2026-07-16, two SDD arcs: the unrated-courses plumbing then the legibility
+correction; specs `2026-07-15-unrated-courses-handicap-model-design.md` for the plumbing,
+superseded on model + surfaces by `2026-07-16-handicap-index-strokes-model-design.md` — the
+plain-language SOURCE OF TRUTH). **Papercut 16's rating half is closed:** an **unrated course**
+(rating/slope optional-as-a-pair, an `isRated` predicate, `validateTeeSet` paired-then-bounds)
+now enters, submits, and plays end to end — games/dots come straight from stroke index + course
+handicap exactly as a rated card (allocation never depended on slope/rating), and a finalized
+unrated round posts an adjusted gross score and **no differential** (it cannot move the WHS
+index — true to the rules), but still feeds every stat. Two computed numbers, one owned: the
+**swng index** = the WHS fold EXTENDED to unrated (each line contributes its real `differential`
+when rated, `ags − par` when unrated) — so it **equals the WHS index exactly for a rated-only
+golfer** and diverges only by unrated play; the **WHS index** stays rated-rounds-only by the
+official formula. Both are a **metrics read projection** (`domain/golfer/metrics.ts`
+`golferMetrics(lines) → { whsIndex?, swngIndex? }`, computed on read, extensible to N future
+analytics — papercut 17), renamed from the illegible "suggested" everywhere. The golfer sees
+ONE **"Your index"** (`effectiveIndex({declared, computed})` with `computed` sourced from
+`swngIndex` at all three surfaces) — it **defaults to the swng index**, shows the WHS index
+beside it as an adoptable reference ("Use this"), takes an override, and **every number used is
+shown with its source** ("computed from your rounds" / "your own"): no hidden `declared ?? whs`
+precedence, `—` when there's no data (no nudge, just data). **Strokes** are that index turned
+into one round's play — labeled **"Strokes you get here,"** shown WITH its derivation
+("13 — from your index (12.4) on this course"; unrated → "6 — your index (12.4), adjusted for
+9 holes; unrated course, adjust if it plays hard/easy"), editable at the tee, frozen into the
+round, never stuffed into the profile; the unrated estimate is hole-count-correct
+(`round(index)` on 18, **`round(index/2)` on 9**). Every round line now records `par` +
+`courseHandicap` (the facts cross-player analytics need — unbackfillable once sealed, so
+recorded from day one); `PeekRound` gains `par` + `holes`; the sealed round/snapshot is
+untouched beyond the additive unrated arm. Gated: `pnpm validate` green at every commit and at
+HEAD, `pnpm test:contract` 90, each task independently reviewed, each arc a clean whole-branch
+review ("READY TO DEPLOY — YES"). Close-out is a CONTROLLER-RUN milestone gate
+(finishing-a-development-branch frame, 2026-07-16), not owner-triggered: `deploy:beta` LAMBDA
+FIRST (peek `holes` + line `par`/`courseHandicap` now required; `UPDATE_COMPLETE` 48.9s) → the
+beta refresh is the owner's **WIPE + RESEED** (`scrapCourseAndRoundData.mjs`: 17 courses / 4886
+rounds / 39 snapshots / 129 projections deleted, golfers/crews/SUB# kept), **not** a
+`rebuildProjections` backfill (owner call — legacy pre-arc lines lacked the now-required fields;
+a clean slate is cheaper and honest) → `publishWeb` (bundle `index-C_3IrclE.js`, CloudFront
+invalidation) → `e2e:beta` 16/16 ×2 → `e2e:field` 57 passed / 1 documented-skip (all 8 specs,
+incl. the new `unratedCourse.spec.ts` 4/4 — a real 9-hole `Sandy Hollow Nine` with blank
+rating/slope entered, played, and its six-9s-into-a-swng-index bootstrap all live against beta)
+→ a controller browser walk on the DEPLOYED `beta.swng.golf` (real Hosted-UI PKCE sign-in
+round-trip, accounts-only get-or-create minting "Golfer 8038", the "Your index" section with
+its two named sources + override, and "Strokes you get here: 6" derived live from a declared
+12.4 on the unrated 9-holer — the whole wire on the screen; console clean but for two
+PRE-EXISTING auth-flow transients the walk made visible, arc-diff-verified to touch no auth code
+→ **papercut 18**). Papercut 17 (fold trend/distribution into the same metrics layer) deferred
+by owner. On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

@@ -308,7 +308,15 @@ From the course-cards arc's final review (2026-07-15). Comment-only: `ports/golf
 AddCoursePage's own post-add summary" (that page no longer renders the component). Sweep
 opportunistically next time each file is touched.
 
-### 16. Unrated courses are UNUSABLE — a real product gap, design session required
+### 16. Unrated courses are UNUSABLE — a real product gap, design session required — RATING HALF ADDRESSED (unrated-courses + handicap-model arcs, 2026-07-16; SI-less half still open)
+
+**Update (2026-07-16):** the design session happened (specs `2026-07-15-unrated-courses-
+handicap-model-design.md` + `2026-07-16-handicap-index-strokes-model-design.md`) and shipped —
+an unrated course now enters, joins, plays games/dots, and shows an honest non-posting history
+line (adjusted gross score, no differential), with a legible one-owned-index/strokes model
+(see CLAUDE.md). The **rating half is closed**. The **SI-less-card half named below stays
+open** (dots allocation needs a stroke index; gross-only-or-by-agreement is still a product
+decision) — its own future workstream.
 
 Owner-raised (2026-07-15, during the course-cards rollout), then escalated same day with a
 field report: the owner played a 9-hole unrated course — a favorite pre-work spot — and the
@@ -346,3 +354,19 @@ and every future analytic (scoring average, per-hole/per-course performance, han
 comparisons — each its own projection over snapshots) lands in that same layer, never in the
 web. Deferred by owner to revisit later; no behavior change today, purely a consolidation so
 the derived-number seam is one place, not two.
+
+### 18. Sign-in leaves a stray `400 @ /oauth2/token` in the console (duplicate code-exchange)
+
+Surfaced by the controller browser walk on the DEPLOYED beta bundle (2026-07-16,
+handicap-model close-out). A real Hosted-UI PKCE sign-in on `https://beta.swng.golf/`
+succeeds fully (tokens stored, `GET /me` authenticated, the whole session works), but the
+console carries one `400` from the Cognito `/oauth2/token` endpoint — a SECOND exchange of the
+already-consumed single-use authorization code during the `/auth/callback` handling. (A
+companion `401 @ /me` is the benign pre-auth anonymous probe on the signed-out landing page and
+is not this papercut.) It is **not** a regression from the unrated/legibility arcs — those
+touched no auth/callback/token/cognito file (verified by diff) — it is pre-existing auth-flow
+behavior the walk simply made visible. User-invisible today (sign-in works), but a stray 400 on
+every sign-in is exactly the "thoughtful and intentional" bar this codebase holds: the callback
+handler should exchange the code exactly once (guard the effect against a double-run / re-render
+so the consumed code is never re-POSTed). Deferred — auth-flow scope, not this arc; recorded so
+it is not lost.

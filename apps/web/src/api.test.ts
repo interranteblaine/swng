@@ -740,14 +740,14 @@ describe("getMe", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+      return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
     });
 
     const result = await getMe("tok-me");
 
     expect(seenUrl).toBe(`${HTTP_URL}/me`);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
-    expect(result).toEqual({ golfer: { golferId: golferId("ann"), name: "Ann" } });
+    expect(result).toEqual({ golfer: { golferId: golferId("ann"), name: "Ann", indexSource: { kind: "swng" } } });
   });
 
   // GET /me NEVER creates (the plan's amendment) — a signed-in user with no golfer row gets
@@ -768,10 +768,10 @@ describe("updateMe", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann Updated", declared: 12.3 } });
+      return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann Updated", indexSource: { kind: "declared", value: 12.3 } } });
     });
 
-    const input: UpdateMeRequest = { name: "Ann Updated", declared: 12.3 };
+    const input: UpdateMeRequest = { name: "Ann Updated", indexSource: { kind: "declared", value: 12.3 } };
     const result = await updateMe("tok-me", input);
 
     expect(seenUrl).toBe(`${HTTP_URL}/me`);

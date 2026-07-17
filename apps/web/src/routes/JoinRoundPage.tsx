@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { courseHandicapFromRatingSlopePar, effectiveIndex } from "@swng/domain";
+import { courseHandicapFromRatingSlopePar, resolveIndex } from "@swng/domain";
 import type { GetMyRecordResponse, PeekRoundResponse } from "@swng/contracts";
 import { ApiError, getMyRecord, joinRound, peekRound, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";
@@ -59,8 +59,9 @@ export function JoinRoundPage() {
   // suggestion (unrated-courses T5b) needs the selected tee's numbers, and the picker shows
   // each tee's rating/slope via teeNumbers.
   const [peekTees, setPeekTees] = useState<readonly PeekTee[] | undefined>(undefined);
-  // The golfer's read-time metrics (GET /me/record) — the `computed` input to the suggestion; a
-  // failed/absent fetch just falls back to the declared index alone, never blocking the page.
+  // The golfer's read-time metrics (GET /me/record) — the live input resolveIndex reads for a
+  // swng/whs source; a failed/absent fetch just leaves a computed source with no value, so the
+  // golfer types their own strokes, never blocking the page.
   const [record, setRecord] = useState<GetMyRecordResponse | undefined>(undefined);
   // Only ever true after a peek actually rejected — gates the fallback NOTE (not the fallback
   // input itself, which is simply whatever renders whenever peekTees is absent).
@@ -97,9 +98,9 @@ export function JoinRoundPage() {
     return () => clearTimeout(timer);
   }, [upperCode]);
 
-  // The strokes suggestion's `computed` input (unrated-courses T5b): one GET /me/record
-  // when signed in. A nicety — a rejection leaves `record` undefined and the suggestion (if any)
-  // falls back to the declared index alone; it never blocks the page.
+  // The metrics resolveIndex reads for a swng/whs source (unrated-courses T5b): one GET /me/record
+  // when signed in. A nicety — a rejection leaves `record` undefined, so a computed source resolves
+  // to no value (the golfer types their own strokes); it never blocks the page.
   useEffect(() => {
     if (!auth.signedIn) return;
     void withAuth((token) => getMyRecord(token))
@@ -108,26 +109,27 @@ export function JoinRoundPage() {
   }, [auth.signedIn, withAuth]);
 
   // "Strokes you get here" — the golfer's index turned into today's strokes, shown WITH its
-  // derivation and editable (handicap-model legibility spec §4/§7). The active index (arc:
-  // declared > computed) defaults to the swng index — the SAME "Your index" the profile shows
-  // (spec §3), not the rated-only WHS index. The peek carries `par` + `holes` (not the holes
-  // array): a rated tee uses courseHandicapFromRatingSlopePar (the numbers-only Rule 6.1a helper);
-  // an unrated tee falls back to the index itself, hole-count-correct — round(index) on 18,
-  // round(index / 2) on 9 (spec §4; the /2 is a UI presentation of the estimate, not the Rule
-  // 6.1a formula). No effective index, or a free-text tee with no peek numbers → no derivation
-  // note, so the field stays its plain "0".
-  const effective = effectiveIndex({ declared: auth.golfer?.declared, computed: record?.metrics?.swngIndex?.value });
+  // derivation and editable (index-source model spec §6). The active index is resolved from the
+  // golfer's CHOSEN source + the live metrics via the ONE domain resolver (the same one the profile
+  // and CreateRoundPage call) — swng by default, whs if adopted, or a declared value. The peek
+  // carries `par` + `holes` (not the holes array): a rated tee uses courseHandicapFromRatingSlopePar
+  // (the numbers-only Rule 6.1a helper); an unrated tee falls back to the index itself,
+  // hole-count-correct — round(index) on 18, round(index / 2) on 9 (spec §4; the /2 is a UI
+  // presentation of the estimate). No resolved value, or a free-text tee with no peek numbers → no
+  // derivation note, so the field stays its plain "0".
+  const resolved = resolveIndex(auth.golfer?.indexSource, record?.metrics ?? {});
   const selectedTee = peekTees?.find((peekTee) => peekTee.name === tee);
   const suggestion = ((): { readonly value: number; readonly note: string } | undefined => {
-    if (!effective || !selectedTee) return undefined;
-    const indexText = effective.value.toFixed(1);
+    if (resolved.value === undefined || !selectedTee) return undefined;
+    const indexText = resolved.value.toFixed(1);
+    const sourceNoun = resolved.kind === "whs" ? "WHS index" : "index"; // spec §6: name a WHS source
     if (selectedTee.rating !== undefined && selectedTee.slope !== undefined) {
-      const value = courseHandicapFromRatingSlopePar(effective.value, selectedTee.rating, selectedTee.slope, selectedTee.par);
-      return { value, note: `${value} — from your index (${indexText}) on this course` };
+      const value = courseHandicapFromRatingSlopePar(resolved.value, selectedTee.rating, selectedTee.slope, selectedTee.par);
+      return { value, note: `${value} — from your ${sourceNoun} (${indexText}) on this course` };
     }
-    // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §3/§4).
-    const value = selectedTee.holes === 9 ? Math.round(effective.value / 2) : Math.round(effective.value);
-    return { value, note: `${value} — your index (${indexText}), adjusted for ${selectedTee.holes} holes; unrated course, adjust if it plays hard/easy` };
+    // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §4).
+    const value = selectedTee.holes === 9 ? Math.round(resolved.value / 2) : Math.round(resolved.value);
+    return { value, note: `${value} — from your ${sourceNoun} (${indexText}), adjusted for ${selectedTee.holes} holes; unrated course, adjust if it plays hard/easy` };
   })();
   const suggestedValue = suggestion?.value;
 

@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { courseId, golferId, roundId } from "@swng/domain";
 import type { GolferRoundLine } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
-import { getMeResponseSchema, getMyLiveRoundsResponseSchema, getMyRecordResponseSchema, getMyRoundsResponseSchema, updateMeRequestSchema } from "./golfers.js";
+import { getMeResponseSchema, getMyLiveRoundsResponseSchema, getMyRecordResponseSchema, getMyRoundsResponseSchema, golferViewSchema, updateMeRequestSchema } from "./golfers.js";
 
 // parse(JSON.parse(JSON.stringify(x))) === x — the wire round-trip every schema here has to
 // survive unchanged, same pattern as courses.test.ts / round.test.ts.
@@ -12,17 +12,17 @@ const roundTrips = <S extends z.ZodType>(schema: S, value: z.infer<S>): void => 
 };
 
 describe("golferViewSchema (via getMeResponseSchema)", () => {
-  it("round-trips a bare golfer (no home course, no handicap fields set)", () => {
-    roundTrips(getMeResponseSchema, { golfer: { golferId: golferId("g1"), name: "Ann" } });
+  it("round-trips a bare golfer on the default swng source (no home course)", () => {
+    roundTrips(getMeResponseSchema, { golfer: { golferId: golferId("g1"), name: "Ann", indexSource: { kind: "swng" } } });
   });
 
-  it("round-trips a fully-populated golfer — declared only; no computed/effective (the server never persists a computed index on the golfer item)", () => {
+  it("round-trips a fully-populated golfer on a declared source (index-source model spec §3)", () => {
     roundTrips(getMeResponseSchema, {
       golfer: {
         golferId: golferId("g1"),
         name: "Ann",
         homeCourseId: courseId("course-1"),
-        declared: 12.3,
+        indexSource: { kind: "declared", value: 12.3 },
       },
     });
   });
@@ -35,13 +35,38 @@ describe("golferViewSchema (via getMeResponseSchema)", () => {
 
   // accounts-only identity spec §2: namePlaceholder rides the view, emitted only when true.
   it("round-trips a golfer carrying namePlaceholder: true", () => {
-    roundTrips(getMeResponseSchema, { golfer: { golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } });
+    roundTrips(getMeResponseSchema, { golfer: { golferId: golferId("g1"), name: "Golfer 4821", indexSource: { kind: "swng" }, namePlaceholder: true } });
+  });
+});
+
+// The index-source discriminated union (index-source model spec §3): each kind round-trips; a
+// bad kind is rejected; a `declared` source missing its `value` is rejected (the union's own
+// per-arm shape enforcement).
+describe("golferViewSchema — indexSource discriminated union", () => {
+  const view = (indexSource: unknown) => ({ golferId: golferId("g1"), name: "Ann", indexSource });
+
+  it("accepts each kind: swng, whs, declared", () => {
+    expect(() => parse(golferViewSchema, view({ kind: "swng" }))).not.toThrow();
+    expect(() => parse(golferViewSchema, view({ kind: "whs" }))).not.toThrow();
+    expect(() => parse(golferViewSchema, view({ kind: "declared", value: 8 }))).not.toThrow();
+  });
+
+  it("rejects an unknown kind", () => {
+    expect(() => parse(golferViewSchema, view({ kind: "nope" }))).toThrow(ContractError);
+  });
+
+  it("rejects a declared source missing its value", () => {
+    expect(() => parse(golferViewSchema, view({ kind: "declared" }))).toThrow(ContractError);
   });
 });
 
 describe("updateMeRequestSchema", () => {
-  it("round-trips a partial patch (only declared set)", () => {
-    roundTrips(updateMeRequestSchema, { declared: 14.2 });
+  it("round-trips a partial patch (only indexSource set — a declared assertion)", () => {
+    roundTrips(updateMeRequestSchema, { indexSource: { kind: "declared", value: 14.2 } });
+  });
+
+  it("round-trips a patch adopting a computed source (whs)", () => {
+    roundTrips(updateMeRequestSchema, { indexSource: { kind: "whs" } });
   });
 
   it("round-trips an empty patch", () => {

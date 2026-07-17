@@ -31,7 +31,7 @@ const newStore = () => createDynamoGolferStore({ client: local.client, tableName
 const makeGolfer = (overrides: Partial<Golfer> = {}): Golfer => ({
   id: golferId(randomUUID()),
   name: "Cal",
-  handicap: {},
+  handicap: { indexSource: { kind: "swng" } },
   ...overrides,
 });
 
@@ -39,7 +39,7 @@ describe("createDynamoGolferStore", () => {
   describe("put/get round-trip", () => {
     it("put (create, sub-less) + get round-trip", async () => {
       const store = newStore();
-      const golfer = makeGolfer({ handicap: { declared: 12.3 } });
+      const golfer = makeGolfer({ handicap: { indexSource: { kind: "declared", value: 12.3 } } });
 
       await store.put(golfer, undefined);
 
@@ -119,6 +119,9 @@ describe("createDynamoGolferStore", () => {
             sk: golferSk,
             revision: 3,
             name: "Legacy Ghost",
+            // A pre-source-model flattened `declared` attr — no `indexSource` map at all. Nothing
+            // reads it anymore (index-source model spec §8: no migration); the row folds to the
+            // default swng source, losing a value nobody will miss.
             declared: 14,
             // Claim-era attributes an old write left on the row — never part of the domain Golfer:
             sub: legacySub,
@@ -130,31 +133,60 @@ describe("createDynamoGolferStore", () => {
         }),
       );
 
-      const clean: Golfer = { id, name: "Legacy Ghost", handicap: { declared: 14 } };
+      const clean: Golfer = { id, name: "Legacy Ghost", handicap: { indexSource: { kind: "swng" } } };
       expect(await store.get(id)).toEqual({ golfer: clean, sub: legacySub, revision: 3 });
       const many = await store.getMany([id]);
       expect(many).toEqual([{ golfer: clean, sub: legacySub, revision: 3 }]);
     });
 
-    // unrated-courses spec §6: the three-number model collapsed to one persisted number,
-    // `declared` — the self-maintained `official` folded into it. A legacy row carrying only a
-    // flattened `official` (no `declared`), written before the fold, reads back AS
-    // `handicap: { declared }`. Written as the RAW item a pre-spec write would have left
-    // (bypassing the typed put, exactly as the claim-era legacy test above does), to prove the
-    // read-side fold — not a migration — is what does the collapse.
-    it("folds a legacy flattened `official` (no declared) up into handicap.declared on read", async () => {
-      const store = newStore();
-      const id = golferId(randomUUID());
-      await local.client.send(
-        new PutCommand({
-          TableName: local.coreTable,
-          Item: { pk: golferPk(id), sk: golferSk, revision: 2, name: "Legacy Official", official: 12 },
-        }),
-      );
+    // index-source model spec §3/§8: the persisted source of truth is the `indexSource` map — the
+    // CHOICE a golfer made, never a computed value. A `whs` source and a `declared` source both
+    // round-trip verbatim; a row with NO stored source (a stale/pre-model row) defaults to swng.
+    describe("indexSource (index-source model spec §3/§8)", () => {
+      it("a put on the whs source round-trips { kind: 'whs' } — the choice, no cached number", async () => {
+        const store = newStore();
+        const golfer = makeGolfer({ handicap: { indexSource: { kind: "whs" } } });
 
-      const clean: Golfer = { id, name: "Legacy Official", handicap: { declared: 12 } };
-      expect(await store.get(id)).toEqual({ golfer: clean, sub: undefined, revision: 2 });
-      expect(await store.getMany([id])).toEqual([{ golfer: clean, sub: undefined, revision: 2 }]);
+        await store.put(golfer, undefined);
+
+        expect((await store.get(golfer.id))?.golfer.handicap).toEqual({ indexSource: { kind: "whs" } });
+        expect(await store.getMany([golfer.id])).toEqual([{ golfer, sub: undefined, revision: 1 }]);
+      });
+
+      it("a put on a declared source round-trips its asserted value", async () => {
+        const store = newStore();
+        const golfer = makeGolfer({ handicap: { indexSource: { kind: "declared", value: 8 } } });
+
+        await store.put(golfer, undefined);
+
+        expect((await store.get(golfer.id))?.golfer.handicap).toEqual({ indexSource: { kind: "declared", value: 8 } });
+      });
+
+      it("a stored item with NO indexSource reads back on the default swng source (no migration)", async () => {
+        const store = newStore();
+        const id = golferId(randomUUID());
+        await local.client.send(
+          new PutCommand({ TableName: local.coreTable, Item: { pk: golferPk(id), sk: golferSk, revision: 2, name: "No Source" } }),
+        );
+
+        const clean: Golfer = { id, name: "No Source", handicap: { indexSource: { kind: "swng" } } };
+        expect(await store.get(id)).toEqual({ golfer: clean, sub: undefined, revision: 2 });
+        expect(await store.getMany([id])).toEqual([{ golfer: clean, sub: undefined, revision: 2 }]);
+      });
+
+      // The production read path (getBySub) folds the source identically to get/getMany — closing
+      // the review's open gap. Write via put+bindSub, read via the SUB# pointer path.
+      it("getBySub returns the same folded source as get — a declared source written then read by sub", async () => {
+        const store = newStore();
+        const golfer = makeGolfer({ handicap: { indexSource: { kind: "declared", value: 8 } } });
+        const sub = `sub-${randomUUID()}`;
+        await store.put(golfer, undefined);
+        await store.bindSub(golfer.id, sub);
+
+        const bound = await store.getBySub(sub);
+        expect(bound?.golfer.handicap).toEqual({ indexSource: { kind: "declared", value: 8 } });
+        expect(bound?.golfer.handicap).toEqual((await store.get(golfer.id))?.golfer.handicap);
+      });
     });
 
     it("getBySub on an unknown sub returns undefined", async () => {
@@ -239,7 +271,7 @@ describe("createDynamoGolferStore", () => {
   describe("bindSub", () => {
     it("binds sub to an existing sub-less row, bumping revision, resolvable via getBySub", async () => {
       const store = newStore();
-      const golfer = makeGolfer({ name: "Ghost Golfer", handicap: { declared: 18 } });
+      const golfer = makeGolfer({ name: "Ghost Golfer", handicap: { indexSource: { kind: "declared", value: 18 } } });
       await store.put(golfer, undefined);
       const sub = `sub-${randomUUID()}`;
 

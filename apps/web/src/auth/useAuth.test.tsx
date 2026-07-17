@@ -82,7 +82,7 @@ describe("AuthProvider / useAuth — signed out", () => {
 describe("AuthProvider / useAuth — signed in", () => {
   it("loads saved tokens, GETs /me once, and exposes the returned golfer", async () => {
     tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1", email: "ann@example.com" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
-    const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } }));
+    const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } }));
     vi.stubGlobal("fetch", fetchSpy);
 
     render(
@@ -121,7 +121,7 @@ describe("AuthProvider / useAuth — signed in", () => {
     tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } })),
+      vi.fn(async () => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } })),
     );
 
     render(
@@ -146,7 +146,7 @@ describe("AuthProvider / useAuth — signed in", () => {
     tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } })),
+      vi.fn(async () => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } })),
     );
 
     render(
@@ -176,7 +176,7 @@ describe("AuthProvider / useAuth — signed in", () => {
       "fetch",
       vi.fn(async () => {
         call += 1;
-        return fakeResponse(200, { golfer: { golferId: "ann", name: call === 1 ? "Ann" : "Ann Updated" } });
+        return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: call === 1 ? "Ann" : "Ann Updated" } });
       }),
     );
 
@@ -242,7 +242,7 @@ describe("AuthProvider / useAuth — 401 anywhere: one silent refresh retry, the
         }
         if (path === "/me") {
           calls.push("refreshed");
-          return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+          return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
         }
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -267,7 +267,7 @@ describe("AuthProvider / useAuth — 401 anywhere: one silent refresh retry, the
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } }); // mount fetch succeeds
+        if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } }); // mount fetch succeeds
         if (path === "/me/record") return fakeResponse(401, { code: "invalid-token", message: "expired" });
         if (path === "/oauth2/token") return fakeResponse(400, { error: "invalid_grant" }); // refresh fails
         throw new Error(`unexpected fetch ${path}`);

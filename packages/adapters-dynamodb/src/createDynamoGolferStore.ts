@@ -12,22 +12,21 @@ import { golferGsi2pk, golferGsi2sk, golferIdFromPk, golferPk, golferSk, golferS
 const BATCH_GET_MAX_KEYS = 100;
 
 // A raw golfer item's shape on the core table (keys.ts's golferPk/golferSk): Golfer's nested
-// `handicap: { declared? }` is flattened to a top-level `declared` attr (the plan's binding
-// item shape) rather than stored as a nested `handicap` map — same spirit as courseStore's own
-// custom encoding (name pulled out for gsi1sk) rather than a literal 1:1 serialization of the
-// domain type. `official` is a LEGACY on-disk attr only (unrated-courses spec §6 folded the
-// self-maintained official index into `declared`): the domain HandicapProfile no longer carries
-// it, nothing WRITES it anymore, and golferOf below folds a stored `official` up into `declared`
-// on read — kept on this item shape purely so that fold can see it. `computed` was never
-// persisted here at all — it's a read-time metric (getMyRecord's metrics.whsIndex).
+// `handicap: { indexSource }` is stored as a small `indexSource` map attr (index-source model
+// spec §3/§8) — the CHOICE, never a computed value. Read defensively as `{ kind, value? }`
+// because it's stored data (a stale/partial row's map is tolerate-and-default, not trusted): an
+// absent or malformed source folds to `{ kind: "swng" }` in golferOf below. The old flattened
+// `declared`/`official` attrs are gone (no users / no prod → no legacy migration; a stray beta
+// row simply loses a declared value nobody will miss, and its next put writes a well-formed
+// source). `computed` was never persisted here at all — it's a read-time metric (getMyRecord's
+// metrics.whsIndex).
 interface GolferItem {
   readonly pk: string;
   readonly sk: string;
   readonly revision: number;
   readonly name: string;
   readonly homeCourseId?: string;
-  readonly declared?: number;
-  readonly official?: number;
+  readonly indexSource?: { readonly kind: string; readonly value?: number };
   // accounts-only identity spec §2: true iff `name` is the sub-derived placeholder a mint used.
   // Written only when true, tolerated as absent on read — old rows never carry it, no migration.
   readonly namePlaceholder?: boolean;
@@ -49,17 +48,18 @@ const golferOf = (item: GolferItem): Golfer => ({
   name: item.name,
   ...(item.homeCourseId !== undefined ? { homeCourseId: courseId(item.homeCourseId) } : {}),
   ...(item.namePlaceholder === true ? { namePlaceholder: true } : {}),
-  // unrated-courses spec §6: the three-number model collapsed to one persisted number,
-  // `declared`. A legacy row carrying only `official` (an old self-maintained index, written
-  // before this fold) reads back AS `declared`; a row that has both keeps `declared` and drops
-  // the stale `official`. Old data tolerates forever, migrates never — the next whole-golfer put
-  // simply omits `official` (the WRITE path no longer emits it), retiring the attr organically.
+  // index-source model spec §3/§8: the persisted source of truth is `indexSource` (a small map).
+  // No users / no prod, so NO legacy migration — an absent or malformed stored source simply
+  // defaults to swng (old beta rows lose a declared value nobody will miss); the next put writes
+  // a well-formed source. Read each arm explicitly so a partial map (e.g. a `declared` kind with
+  // no `value`) can never fabricate a broken source — it too falls through to swng.
   handicap: {
-    ...(item.declared !== undefined
-      ? { declared: item.declared }
-      : item.official !== undefined
-        ? { declared: item.official }
-        : {}),
+    indexSource:
+      item.indexSource?.kind === "whs"
+        ? { kind: "whs" }
+        : item.indexSource?.kind === "declared" && item.indexSource.value !== undefined
+          ? { kind: "declared", value: item.indexSource.value }
+          : { kind: "swng" },
   },
 });
 
@@ -100,7 +100,10 @@ export const createDynamoGolferStore = (config: { client: DynamoDBDocumentClient
         // Written only when true (spec §2, absent = false) — a real-name PUT drops it by NOT
         // re-including it here, never by writing `false`.
         ...(golfer.namePlaceholder === true ? { namePlaceholder: true } : {}),
-        ...(golfer.handicap.declared !== undefined ? { declared: golfer.handicap.declared } : {}),
+        // The chosen index source stored verbatim as a small map — the CHOICE, never a computed
+        // value (index-source model spec §2/§8). Always defined on a domain Golfer; the spread is
+        // belt-and-suspenders, and a partial/absent stored map folds to swng on read (golferOf).
+        ...(golfer.handicap.indexSource !== undefined ? { indexSource: golfer.handicap.indexSource } : {}),
         // put's `sub` is a plain overwrite, not conditional — it mirrors the caller's OWN
         // golfer object exactly (matches the in-memory fake's `const { sub, ...plain } =
         // golfer` destructure). The guard above is what stops a caller from actually DROPPING

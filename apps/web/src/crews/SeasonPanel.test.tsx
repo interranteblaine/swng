@@ -88,7 +88,7 @@ const renderPanel = (myGolferId = ANN) =>
 describe("SeasonPanel — standings", () => {
   it("renders the ledger sorted by wins then points (both descending)", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
       seasonId: "season-1",
       name: "2026",
@@ -114,7 +114,7 @@ describe("SeasonPanel — standings", () => {
   // off it, whatever it happens to carry).
   it("never renders a guest label for any ledger row", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
       seasonId: "season-1",
       name: "2026",
@@ -135,7 +135,7 @@ describe("SeasonPanel — standings", () => {
 
   it("renders head-to-head as 'Ann 5–5–2 vs Bo', names resolved from the ledger", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
       seasonId: "season-1",
       name: "2026",
@@ -158,7 +158,7 @@ describe("SeasonPanel — standings", () => {
   // contributor is off the current roster (the ledger is empty for a DIFFERENT reason).
   it("zero counted rounds: shows the build-up explainer, not an empty table", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
 
     renderPanel();
@@ -169,7 +169,7 @@ describe("SeasonPanel — standings", () => {
 
   it("counted rounds exist but an empty ledger (every contributor off the roster): tells the truth instead of the build-up copy", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
       seasonId: "season-1",
       name: "2026",
@@ -188,7 +188,7 @@ describe("SeasonPanel — standings", () => {
 
   it("a standings load failure renders an honest quiet message, never a thrown render", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockRejectedValue(new Error("network down"));
 
     renderPanel();
@@ -201,7 +201,7 @@ describe("SeasonPanel — standings", () => {
 describe("SeasonPanel — counted rounds", () => {
   it("counted-round rows link to /rounds/<id>/archive; remove shows ONLY on the caller's own appended rows", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
       seasonId: "season-1",
       name: "2026",
@@ -231,7 +231,7 @@ describe("SeasonPanel — counted rounds", () => {
 
   it("removing a counted round DELETEs it and refreshes standings", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings
       .mockResolvedValueOnce({
         seasonId: "season-1",
@@ -263,7 +263,7 @@ describe("SeasonPanel — count a round", () => {
 
   it("lists my finalized rounds not yet counted in THIS season; the empty state is honest", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
       seasonId: "season-1",
       name: "2026",
@@ -286,7 +286,7 @@ describe("SeasonPanel — count a round", () => {
 
   it("no uncounted finalized rounds: the empty state says so", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
     mockedGetMyRounds.mockResolvedValue({ rounds: [] });
 
@@ -300,7 +300,7 @@ describe("SeasonPanel — count a round", () => {
 
   it("picking a round POSTs the append and refreshes standings", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings
       .mockResolvedValueOnce({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] })
       .mockResolvedValueOnce({
@@ -326,7 +326,7 @@ describe("SeasonPanel — count a round", () => {
 
   it("409 round-already-counted surfaces as 'Already counted for this season.' — never raw error text (M9 discipline)", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
     mockedGetMyRounds.mockResolvedValue({ rounds: myRounds });
     mockedAppendCountedRound.mockRejectedValue(new ApiError("round-already-counted", 409, "round round-9 is already counted in season season-1 of crew crew-1"));
@@ -344,7 +344,7 @@ describe("SeasonPanel — count a round", () => {
 
   it("409 season-closed surfaces as 'This season is closed.' — never raw error text (M9 discipline)", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
     mockedGetMyRounds.mockResolvedValue({ rounds: myRounds });
     mockedAppendCountedRound.mockRejectedValue(new ApiError("season-closed", 409, "season season-1 of crew crew-1 is closed"));
@@ -362,7 +362,7 @@ describe("SeasonPanel — count a round", () => {
 
   it("a closed season renders with a closed badge in the heading", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
       seasonId: "season-1",
       name: "2026",

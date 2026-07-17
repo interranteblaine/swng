@@ -1,5 +1,6 @@
 import { combineNineHoleDifferentials, computeIndexDetail, swngIndex } from "../handicap/whs.js";
 import type { GolferRoundLine } from "./record.js";
+import type { IndexSource } from "./golfer.js";
 
 // One derived number over the golfer's rounds; difficulty labeling lives in the UI, not here.
 export interface IndexMetric {
@@ -31,4 +32,30 @@ export const golferMetrics = (lines: readonly GolferRoundLine[]): GolferMetrics 
     ...(whs !== undefined ? { whsIndex: { value: whs.value, differentialsUsed: whs.differentialsUsed } } : {}),
     ...(swng !== undefined ? { swngIndex: { value: swng.value, differentialsUsed: swng.differentialsUsed } } : {}),
   };
+};
+
+// "Your index" is never stored — it is resolved every read from the chosen source and the live
+// metrics (index-source model spec §4). `undefined` is first-class: a computed source with no
+// data yet resolves to `undefined`, NOT 0. A missing source defaults to swng — the model's
+// default (spec §3). The `metrics` param is STRUCTURAL (just the two `{ value }` members) so both
+// the domain `GolferMetrics` above and the richer wire metrics (getMyRecord's response, which
+// also carries `computedAtMs`/`differentialsUsed`) satisfy it without a conversion step.
+export interface ResolvedIndex {
+  readonly value: number | undefined;
+  readonly kind: IndexSource["kind"];
+}
+
+export const resolveIndex = (
+  source: IndexSource | undefined,
+  metrics: { readonly whsIndex?: { readonly value: number }; readonly swngIndex?: { readonly value: number } },
+): ResolvedIndex => {
+  const chosen = source ?? { kind: "swng" as const };
+  switch (chosen.kind) {
+    case "swng":
+      return { value: metrics.swngIndex?.value, kind: "swng" };
+    case "whs":
+      return { value: metrics.whsIndex?.value, kind: "whs" };
+    case "declared":
+      return { value: chosen.value, kind: "declared" };
+  }
 };

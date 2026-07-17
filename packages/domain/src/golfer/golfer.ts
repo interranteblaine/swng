@@ -1,12 +1,17 @@
 import type { CourseId, GolferId } from "../ids.js";
 
-// The one number a golfer sets on themselves: their own declared index (unrated-courses
-// spec §6 — the three-number model collapsed to two, `declared` overriding `computed`, with
-// the old self-maintained `official` folded into `declared`). `computed` is NOT stored on
-// the golfer at all — it's a read-time metric (golfer/metrics.ts's whsIndex) the application
-// composes against this declared value; effectiveIndex below is what picks the one that counts.
+// The index a golfer is ON — a source they choose, resolved live (index-source model spec §3).
+// swng/whs are computed views (resolveIndex, metrics.ts); declared is the one number a golfer
+// asserts. Never a stored computed value — the invariant this type exists to enforce (spec §2):
+// the profile persists the CHOICE, and the value is resolved fresh from the live metrics on
+// every read, so an adopted computed source can never drift from the number it names.
+export type IndexSource =
+  | { readonly kind: "swng" }
+  | { readonly kind: "whs" }
+  | { readonly kind: "declared"; readonly value: number };
+
 export interface HandicapProfile {
-  readonly declared?: number;
+  readonly indexSource: IndexSource;
 }
 
 // One identity for a playing life (architecture.md §2). Ghost vs. claimed account is an
@@ -23,17 +28,3 @@ export interface Golfer {
   // migrated. Emitted only when true; cleared by DROPPING it, never by writing `false`.
   readonly namePlaceholder?: boolean;
 }
-
-// Precedence: declared (a golfer's own index, self-maintained — what they'd tell you they
-// play off) always wins > computed (swng's own read-time whsIndex from their posted rounds,
-// golfer/metrics.ts). undefined only when neither is set; there is no default of 0 — an
-// unrated golfer stays honestly unrated. Takes the two numbers as a plain input rather than a
-// HandicapProfile because `computed` never lives on the profile: the caller (the web's
-// ProfilePage) composes the stored `declared` with the read-time whsIndex it fetched separately.
-export const effectiveIndex = (
-  input: { readonly declared?: number; readonly computed?: number },
-): { readonly value: number; readonly source: "declared" | "computed" } | undefined => {
-  if (input.declared !== undefined) return { value: input.declared, source: "declared" };
-  if (input.computed !== undefined) return { value: input.computed, source: "computed" };
-  return undefined;
-};

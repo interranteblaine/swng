@@ -240,7 +240,7 @@ export const createInMemoryGolferStore = (): GolferStore => {
 // to a sub needs the same two-step dance — collapsed back to one call here rather than
 // copy-pasted at every call site (conventions §0: three-plus call sites is the extraction trigger).
 export const putAndBindGolfer = async (store: GolferStore, id: GolferId, sub: string, name: string): Promise<void> => {
-  await store.put({ id, name, handicap: {} }, undefined);
+  await store.put({ id, name, handicap: { indexSource: { kind: "swng" } } }, undefined);
   await store.bindSub(id, sub);
 };
 

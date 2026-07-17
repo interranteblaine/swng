@@ -79,13 +79,13 @@ describe("namePlaceholder lifecycle", () => {
     expect(reread.golfer).not.toHaveProperty("namePlaceholder");
   });
 
-  it("a PUT /me that leaves the name untouched (a declared-index-only edit) PRESERVES the flag", async () => {
+  it("a PUT /me that leaves the name untouched (an index-source-only edit) PRESERVES the flag", async () => {
     const ctx = setup();
     await ctx.getMe({ sub: "sub-1" }); // mint with the flag
 
-    const patched = await ctx.updateMe({ sub: "sub-1" }, { declared: 12.0 });
+    const patched = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "declared", value: 12.0 } });
     expect(patched.golfer.namePlaceholder).toBe(true);
-    expect(patched.golfer.declared).toBe(12.0);
+    expect(patched.golfer.indexSource).toEqual({ kind: "declared", value: 12.0 });
   });
 });
 
@@ -97,43 +97,46 @@ describe("updateMyGolfer", () => {
     // the declared-only patch.
     await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
 
-    const updated = await ctx.updateMe({ sub: "sub-1" }, { declared: 14.2 });
+    const updated = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "declared", value: 14.2 } });
     expect(updated.golfer.name).toBe(placeholderName("sub-1")); // untouched — still the placeholder, never "ann"
-    expect(updated.golfer.declared).toBe(14.2);
+    expect(updated.golfer.indexSource).toEqual({ kind: "declared", value: 14.2 });
 
     const renamed = await ctx.updateMe({ sub: "sub-1" }, { name: "Annika" });
     expect(renamed.golfer.name).toBe("Annika");
-    expect(renamed.golfer.declared).toBe(14.2); // untouched by the second patch
+    expect(renamed.golfer.indexSource).toEqual({ kind: "declared", value: 14.2 }); // untouched by the second patch
   });
 
   it("get-or-creates on the first PUT /me — one shared ensureGolfer path (GET /me get-or-creates too)", async () => {
     const ctx = setup();
-    const updated = await ctx.updateMe({ sub: "sub-1", email: "bo@example.com" }, { declared: 9.1 });
-    expect(updated.golfer.declared).toBe(9.1);
+    const updated = await ctx.updateMe({ sub: "sub-1", email: "bo@example.com" }, { indexSource: { kind: "declared", value: 9.1 } });
+    expect(updated.golfer.indexSource).toEqual({ kind: "declared", value: 9.1 });
   });
 
-  it("creates with the sub-derived placeholder name, NEVER the email localpart (Cognito is a pure authenticator)", async () => {
+  it("creates with the sub-derived placeholder name, NEVER the email localpart (Cognito is a pure authenticator), on the default swng source", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
     expect(golfer.name).toBe(placeholderName("sub-1"));
     expect(golfer.name).not.toBe("ann");
     expect(golfer.namePlaceholder).toBe(true);
+    // A fresh mint is on the default source (index-source model spec §3).
+    expect(golfer.indexSource).toEqual({ kind: "swng" });
   });
 
-  it("carries declared on the wire as the sole handicap field — no derived effective/computed, and no `official` (unrated-courses spec §6: the three-number model collapsed, official folded into declared; the web composes effectiveIndex itself from GET /me + GET /me/record)", async () => {
+  it("carries indexSource on the wire as the sole handicap field — no declared/computed/effective/official (index-source model spec §3); adopting a computed source stores the SOURCE, not a value", async () => {
     const ctx = setup();
     await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
-    const declaredOnly = await ctx.updateMe({ sub: "sub-1" }, { declared: 14.2 });
-    expect(declaredOnly.golfer.declared).toBe(14.2);
+    const declaredOnly = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "declared", value: 14.2 } });
+    expect(declaredOnly.golfer.indexSource).toEqual({ kind: "declared", value: 14.2 });
+    expect(declaredOnly.golfer).not.toHaveProperty("declared");
     expect(declaredOnly.golfer).not.toHaveProperty("effective");
     expect(declaredOnly.golfer).not.toHaveProperty("computed");
     expect(declaredOnly.golfer).not.toHaveProperty("official");
 
-    // A later declared edit replaces the number and stays the only handicap field on the wire.
-    const reDeclared = await ctx.updateMe({ sub: "sub-1" }, { declared: 8.1 });
-    expect(reDeclared.golfer.declared).toBe(8.1);
-    expect(reDeclared.golfer).not.toHaveProperty("official");
-    expect(reDeclared.golfer).not.toHaveProperty("effective");
+    // Adopting WHS stores the SOURCE — no computed number is copied into the profile (spec §2, the
+    // whole point): the wire carries `{ kind: "whs" }`, never a cached value.
+    const onWhs = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "whs" } });
+    expect(onWhs.golfer.indexSource).toEqual({ kind: "whs" });
+    expect(onWhs.golfer).not.toHaveProperty("declared");
   });
 });
 
@@ -347,7 +350,7 @@ describe("getMyRecord", () => {
       listLive: async () => [],
     };
     const golferStore = createInMemoryGolferStore();
-    await golferStore.put({ id: golferId("ann"), name: "Ann", handicap: {} }, undefined);
+    await golferStore.put({ id: golferId("ann"), name: "Ann", handicap: { indexSource: { kind: "swng" } } }, undefined);
     await golferStore.bindSub(golferId("ann"), "sub-ann");
     const record = getMyRecord({ golferStore, projectionStore: outOfOrderStore, clock: createFrozenClock(FROZEN_NOW) });
 

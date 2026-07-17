@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { combineNineHoleDifferentials, computeIndexDetail, swngIndex } from "../handicap/whs.js";
 import { roundId } from "../ids.js";
 import type { GolferRoundLine } from "./record.js";
-import { golferMetrics } from "./metrics.js";
+import { golferMetrics, resolveIndex } from "./metrics.js";
+import type { IndexSource } from "./golfer.js";
 
 // A minimal 18-hole line — every metric golferMetrics reads (differential for whsIndex, ags +
 // par + holes for swngIndex) is overridable; the rest is filler the fold never touches.
@@ -70,5 +71,42 @@ describe("golferMetrics — the read projection (handicap-model legibility spec 
 
   it("an empty history yields {} — no whsIndex, no swngIndex", () => {
     expect(golferMetrics([])).toEqual({});
+  });
+});
+
+// resolveIndex (index-source model spec §4): "Your index" is never stored — it is resolved on
+// every read from the golfer's chosen SOURCE and the live metrics. Each kind resolves to the
+// right member; a computed source with no metric yet resolves to `undefined` (first-class, NOT
+// 0); a missing source defaults to swng. The no-drift test is the whole point of the model.
+describe("resolveIndex — the source resolved live over metrics (index-source model spec §4)", () => {
+  it("swng resolves to metrics.swngIndex?.value", () => {
+    expect(resolveIndex({ kind: "swng" }, { swngIndex: { value: 12.4 }, whsIndex: { value: 11.2 } })).toEqual({ value: 12.4, kind: "swng" });
+  });
+
+  it("whs resolves to metrics.whsIndex?.value", () => {
+    expect(resolveIndex({ kind: "whs" }, { swngIndex: { value: 12.4 }, whsIndex: { value: 11.2 } })).toEqual({ value: 11.2, kind: "whs" });
+  });
+
+  it("declared resolves to its own asserted value, ignoring the metrics entirely", () => {
+    expect(resolveIndex({ kind: "declared", value: 8 }, { swngIndex: { value: 12.4 }, whsIndex: { value: 11.2 } })).toEqual({ value: 8, kind: "declared" });
+  });
+
+  it("a computed source with no metric resolves to { value: undefined } — NOT 0", () => {
+    expect(resolveIndex({ kind: "swng" }, {})).toEqual({ value: undefined, kind: "swng" });
+    expect(resolveIndex({ kind: "whs" }, {})).toEqual({ value: undefined, kind: "whs" });
+  });
+
+  it("a missing (undefined) source defaults to swng — the model's default", () => {
+    expect(resolveIndex(undefined, { swngIndex: { value: 9.4 } })).toEqual({ value: 9.4, kind: "swng" });
+    expect(resolveIndex(undefined, {})).toEqual({ value: undefined, kind: "swng" });
+  });
+
+  // The headline invariant (spec §2, "never store a computed number"): the SAME whs source, held
+  // fixed, follows two different metrics snapshots. A stored copy could not do this by construction
+  // — there is nowhere to store one. This is what makes drift unrepresentable.
+  it("no-drift: one fixed whs source follows two different metrics snapshots", () => {
+    const source: IndexSource = { kind: "whs" };
+    expect(resolveIndex(source, { whsIndex: { value: 11.2 } }).value).toBe(11.2);
+    expect(resolveIndex(source, { whsIndex: { value: 10.6 } }).value).toBe(10.6);
   });
 });

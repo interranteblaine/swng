@@ -1,22 +1,27 @@
 import { z } from "zod";
-import type { CourseId, GolferId, GolferRoundLine, RoundId } from "@swng/domain";
+import type { CourseId, GolferId, GolferRoundLine, IndexSource, RoundId } from "@swng/domain";
 import { courseIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
 
-// The wire projection of a Golfer aggregate (application/src/golfers/golferView.ts builds
-// it): the ONE handicap number a golfer sets on themselves — `declared` (unrated-courses
-// spec §6 collapsed the old three-number model to two, folding the self-maintained `official`
-// into `declared`) — NOT `computed` or an `effective` precedence field. The server has no
-// persisted computed index on the golfer item itself (it's a read-time metric on the separate
-// record response, application/src/golfers/getMyRecord.ts's metrics.whsIndex), so a
-// server-side `effectiveIndex` call here would be silently WRONG whenever a real computed index
-// existed. The web composes the true effective index client-side from GET /me (declared) + GET
-// /me/record (metrics.whsIndex), via domain's own effectiveIndex — see apps/web/src/routes/
-// ProfilePage.tsx.
+// The index a golfer is ON is a SOURCE they choose (index-source model spec §3): swng/whs are
+// live computed views, declared is the one number a golfer asserts. The wire carries the
+// CHOICE, never a computed value — the "never store a computed number" invariant (spec §2) is
+// the whole design. The concrete value the golfer sees is resolved client-side from this source
+// + GET /me/record's metrics via domain's `resolveIndex`, so an adopted swng/whs source always
+// tracks the live number it names (apps/web/src/routes/ProfilePage.tsx).
+const indexSourceSchema: z.ZodType<IndexSource> = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("swng") }),
+  z.object({ kind: z.literal("whs") }),
+  z.object({ kind: z.literal("declared"), value: z.number() }),
+]);
+
+// The wire projection of a Golfer aggregate (application/src/golfers/golferView.ts builds it) —
+// `indexSource` is the golfer's chosen index source (above), REQUIRED (every golfer has one; a
+// fresh mint defaults to `{ kind: "swng" }`).
 export interface GolferView {
   readonly golferId: GolferId;
   readonly name: string;
   readonly homeCourseId?: CourseId;
-  readonly declared?: number;
+  readonly indexSource: IndexSource;
   // accounts-only identity spec §2: true iff `name` is the deterministic sub-derived backstop a
   // get-or-create mint used (placeholderName(sub)), not a name the golfer chose — the web prompts
   // for a real one while it's true. Absent means false (old golfers never carry it; a PUT /me with
@@ -28,7 +33,7 @@ export const golferViewSchema: z.ZodType<GolferView> = z.object({
   golferId: golferIdSchema,
   name: z.string(),
   homeCourseId: courseIdSchema.optional(),
-  declared: z.number().optional(),
+  indexSource: indexSourceSchema,
   namePlaceholder: z.boolean().optional(),
 });
 
@@ -53,14 +58,15 @@ export const golferResponseSchema: z.ZodType<GolferResponse> = z.object({ golfer
 // Every field optional — a partial patch (PATCH-like semantics: an absent key leaves the
 // stored value untouched; there is no way to CLEAR a set field in v1). `.strict()` like
 // courses.ts's request bodies: a client proposing golferId/computed (server-derived, never
-// client-set) is a rejection, not a silently-dropped extra key. `declared` is the golfer's own
-// self-maintained index (unrated-courses spec §6 — the old `official` folded into it): a golfer
-// typing their own index here IS the manual maintenance, no separate verification flow.
+// client-set) is a rejection, not a silently-dropped extra key. `indexSource` is the golfer's
+// chosen index source (index-source model spec §3): picking a computed source (`{kind:"swng"}`/
+// `{kind:"whs"}`) or asserting their own (`{kind:"declared", value}`) — never a stored computed
+// number, so adopting WHS tracks WHS with no copy to go stale (spec §2).
 export const updateMeRequestSchema = z
   .object({
     name: z.string().min(1).optional(),
     homeCourseId: courseIdSchema.optional(),
-    declared: z.number().optional(),
+    indexSource: indexSourceSchema.optional(),
   })
   .strict();
 export type UpdateMeRequest = z.infer<typeof updateMeRequestSchema>;

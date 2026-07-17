@@ -93,9 +93,9 @@ export const computeIndex = (differentials: readonly number[]): number | undefin
 // scoreDifferential at slope 113 / rating = par). EVERY round with an AGS contributes, rated or
 // unrated — so a golfer who plays only rated golf gets a swng index that equals their WHS index
 // exactly; the two diverge only by unrated play. Reuses the pinned small-sample table and the
-// 2020 nine-hole pairing verbatim; read-time only, never stored. This IS the default `computed`
-// input to effectiveIndex — the number a golfer plays off unless they've set their own `declared`
-// override.
+// 2020 nine-hole pairing verbatim; read-time only, never stored. This IS the `swng` source's
+// number in resolveIndex (golfer/metrics.ts) — the index a golfer plays off when their chosen
+// source is swng (the default), unless they've adopted the WHS source or asserted their own.
 export const swngIndex = (
   lines: readonly { readonly ags?: number; readonly differential?: number; readonly par: number; readonly holes: 9 | 18 }[],
 ): IndexComputation | undefined => {

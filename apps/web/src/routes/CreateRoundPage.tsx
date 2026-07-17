@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import type { CourseId } from "@swng/domain";
-import { cardId, courseHandicapFor, effectiveIndex } from "@swng/domain";
+import { cardId, courseHandicapFor, resolveIndex } from "@swng/domain";
 import type { CourseView, GetMyRecordResponse, StartRoundResponse } from "@swng/contracts";
 import { ApiError, createRound, getCourse, getMyRecord } from "../api";
 import { SignInCta } from "../auth/SignInCta";
@@ -43,10 +43,10 @@ export function CreateRoundPage() {
   const [tee, setTee] = useState<string>("");
   const [courseError, setCourseError] = useState<string | undefined>(undefined);
   const [courseHandicap, setCourseHandicap] = useState("0");
-  // The golfer's read-time metrics (GET /me/record) — one of the two inputs to the strokes
-  // suggestion below (the other is the declared index on the golfer row). A nicety: a
-  // failed/absent fetch just leaves this undefined and the suggestion falls back to declared
-  // alone, never blocking the page (unrated-courses T5b).
+  // The golfer's read-time metrics (GET /me/record) — the live input resolveIndex reads for a
+  // swng/whs source. A nicety: a failed/absent fetch just leaves this undefined, so a computed
+  // source resolves to no value and the strokes field stays typeable, never blocking the page
+  // (index-source model spec §4; unrated-courses T5b).
   const [record, setRecord] = useState<GetMyRecordResponse | undefined>(undefined);
   // Seed-once flag (unrated-courses T5b): the strokes suggestion pre-fills the field
   // only while the golfer hasn't touched it — the moment they type, their value wins forever.
@@ -98,9 +98,9 @@ export function CreateRoundPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: keyed by the router's own per-navigation identity, not by `state`'s object identity
   }, [location.key]);
 
-  // The strokes suggestion's `computed` input (unrated-courses T5b): one GET /me/record
-  // when signed in. Purely a nicety — a rejection just leaves `record` undefined, so the
-  // suggestion (if any) falls back to the declared index alone; it never blocks the page.
+  // The metrics resolveIndex reads for a swng/whs source (unrated-courses T5b): one GET /me/record
+  // when signed in. Purely a nicety — a rejection just leaves `record` undefined, so a computed
+  // source resolves to no value (the golfer types their own strokes); it never blocks the page.
   useEffect(() => {
     if (!auth.signedIn) return;
     void withAuth((token) => getMyRecord(token))
@@ -109,27 +109,28 @@ export function CreateRoundPage() {
   }, [auth.signedIn, withAuth]);
 
   // "Strokes you get here" — the golfer's index turned into today's strokes, shown WITH its
-  // derivation and editable (handicap-model legibility spec §4/§7). The active index is composed
-  // client-side (arc: declared > computed) and defaults to the swng index — the SAME "Your index"
-  // the profile shows (spec §3), not the rated-only WHS index. A rated tee gets the exact Rule
-  // 6.1a figure (courseHandicapFor over the full card's holes); an unrated tee has no slope/rating
-  // to convert, so it falls back to the index itself, hole-count-correct — round(index) on 18,
-  // round(index / 2) on 9 (spec §4; the /2 is a UI presentation of the estimate, not the Rule
-  // 6.1a formula). No effective index (a brand-new golfer with no rounds and no override) → no
-  // derivation note at all, so the field stays its plain "0" and they just type their strokes.
-  const effective = effectiveIndex({ declared: golfer?.declared, computed: record?.metrics?.swngIndex?.value });
+  // derivation and editable (index-source model spec §6). The active index is resolved from the
+  // golfer's CHOSEN source + the live metrics via the ONE domain resolver (the same one the profile
+  // and JoinRoundPage call) — swng by default, whs if adopted, or a declared value. A rated tee
+  // gets the exact Rule 6.1a figure (courseHandicapFor over the full card's holes); an unrated tee
+  // has no slope/rating to convert, so it falls back to the index itself, hole-count-correct —
+  // round(index) on 18, round(index / 2) on 9 (the /2 is a UI presentation of the estimate, not the
+  // Rule 6.1a formula). No resolved value (a brand-new golfer, or a computed source with no data)
+  // → no derivation note, so the field stays its plain "0" and they just type their strokes.
+  const resolved = resolveIndex(golfer?.indexSource, record?.metrics ?? {});
   const selectedTeeSet = courseView?.card.teeSets.find((teeSet) => teeSet.name === tee);
   const suggestion = ((): { readonly value: number; readonly note: string } | undefined => {
-    if (!effective || !selectedTeeSet) return undefined;
-    const indexText = effective.value.toFixed(1);
+    if (resolved.value === undefined || !selectedTeeSet) return undefined;
+    const indexText = resolved.value.toFixed(1);
+    const sourceNoun = resolved.kind === "whs" ? "WHS index" : "index"; // spec §6: name a WHS source
     if (selectedTeeSet.rating !== undefined && selectedTeeSet.slope !== undefined) {
-      const value = courseHandicapFor(effective.value, selectedTeeSet);
-      return { value, note: `${value} — from your index (${indexText}) on this course` };
+      const value = courseHandicapFor(resolved.value, selectedTeeSet);
+      return { value, note: `${value} — from your ${sourceNoun} (${indexText}) on this course` };
     }
-    // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §3/§4).
+    // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §4).
     const holeCount = selectedTeeSet.holes.length; // 9 or 18 — every card tee is one or the other
-    const value = holeCount === 9 ? Math.round(effective.value / 2) : Math.round(effective.value);
-    return { value, note: `${value} — your index (${indexText}), adjusted for ${holeCount} holes; unrated course, adjust if it plays hard/easy` };
+    const value = holeCount === 9 ? Math.round(resolved.value / 2) : Math.round(resolved.value);
+    return { value, note: `${value} — from your ${sourceNoun} (${indexText}), adjusted for ${holeCount} holes; unrated course, adjust if it plays hard/easy` };
   })();
   const suggestedValue = suggestion?.value;
 

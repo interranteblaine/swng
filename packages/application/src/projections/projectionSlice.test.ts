@@ -221,7 +221,7 @@ describe("projectArchive", () => {
     const logger = createNullLogger();
     // ann is a real account; bo has a golfer row but NO sub (still a ghost).
     const golferStore = await accountsFor(ann);
-    await golferStore.put({ id: bo, name: "Bo Ghost", handicap: {} }, undefined); // sub-less row
+    await golferStore.put({ id: bo, name: "Bo Ghost", handicap: { indexSource: { kind: "swng" } } }, undefined); // sub-less row
     // Pre-existing presence for the ghost — presence-cleanup clears it regardless of account status.
     await projectionStore.putLive(bo, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600, expiresAtSec: 9_999_999_999 });
 

@@ -94,7 +94,7 @@ describe("HomePage", () => {
 
   it("signed in: shows the Start a round link to /create", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
 
     renderHome();
 
@@ -133,7 +133,7 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
     // something."
     credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
 
     renderHome();
@@ -152,7 +152,7 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
   // UTC-only string.
   it("gives two same-course same-day rounds distinct labels (course · date · time)", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
     const morningAt = Date.UTC(2025, 6, 12, 12, 0);
     const afternoonAt = Date.UTC(2025, 6, 12, 18, 0);
     mockedGetMyLiveRounds.mockResolvedValue({
@@ -176,7 +176,7 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
 
   it("distinguishes same-course rounds on DIFFERENT days by date alone — no tee time appended", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
     const day1At = Date.UTC(2025, 6, 12, 12, 0);
     const day2At = Date.UTC(2025, 6, 13, 12, 0);
     mockedGetMyLiveRounds.mockResolvedValue({
@@ -199,7 +199,7 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
   it("signed in with a golfer but no live rounds: shows the empty state, never falling back to the device credential list", async () => {
     credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
 
     renderHome();
@@ -228,7 +228,7 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
 describe("HomePage — tapping a live round re-mints a scoring credential when this device has none (Task 14)", () => {
   it("no local credential: mints a token, stores it via credentialStore, and enters — no raw Link navigation", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
     mockedMintParticipantToken.mockResolvedValue({ roundId: roundId("live-1"), token: "fresh-token", golferId: golferId("ann-g") });
 
@@ -246,7 +246,7 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
   it("a local credential already exists: navigates directly, never calling the re-mint", async () => {
     credentialStore.save(roundId("live-1"), { token: "existing-token", golferId: golferId("ann-g"), name: "Ann G", joinCode: "XYZ123" });
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
 
     renderHome();
@@ -262,7 +262,7 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
 
   it("a 403 not-a-participant surfaces human copy, never the raw server text", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
     mockedMintParticipantToken.mockRejectedValue(new ApiError("not-a-participant", 403, "golfer ann-g is not a participant in round live-1"));
 
@@ -280,7 +280,7 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
 
   it("a 409 round-final surfaces finished copy with an archive link and removes the row from live rounds", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
     mockedMintParticipantToken.mockRejectedValue(new ApiError("round-final", 409, "round live-1 is finalized"));
 
@@ -338,7 +338,7 @@ describe("HomePage — GET /me loading window never flashes the device list (fix
     expect(screen.getByRole("status", { name: /loading your rounds/i })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
 
-    resolveGetMe({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    resolveGetMe({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
 
     const link = await screen.findByRole("link", { name: /casa verde gc/i });
     expect(link.getAttribute("href")).toBe("/round/live-1");
@@ -402,7 +402,7 @@ describe("HomePage — no crews section, in any auth state (spec §11a)", () => 
 
   it("signed in with a real account golfer: no crews section anywhere on the page", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
 
     renderHome();

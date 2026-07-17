@@ -259,7 +259,7 @@ describe("SetupPanel — share the code, not add a player", () => {
     signIn();
     const fetchMock = vi.fn(async (url: string) => {
       const path = new URL(url).pathname;
-      if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+      if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
       throw new Error(`unexpected fetch ${path}`);
     });
     vi.stubGlobal("fetch", fetchMock);

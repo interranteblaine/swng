@@ -102,7 +102,7 @@ describe("ProfilePage — signed in", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", declared: 15 } });
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "declared", value: 15 } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") return fakeResponse(200, { metrics: { whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 1 } }, history });
         throw new Error(`unexpected fetch ${path}`);
@@ -139,7 +139,7 @@ describe("ProfilePage — signed in", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", declared: 15 } });
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "declared", value: 15 } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") return fakeResponse(200, { metrics: {}, history });
         throw new Error(`unexpected fetch ${path}`);
@@ -165,11 +165,11 @@ describe("ProfilePage — signed in", () => {
         const path = new URL(url).pathname;
         calls.push(`${init?.method ?? "GET"} ${path}`);
         if (path === "/me" && init?.method === "PUT") {
-          return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann Updated", declared: 12 } });
+          return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann Updated", indexSource: { kind: "declared", value: 12 } } });
         }
         if (path === "/me") {
           meCallCount += 1;
-          return fakeResponse(200, meCallCount === 1 ? { golfer: null } : { golfer: { golferId: "ann", name: "Ann Updated", declared: 12 } });
+          return fakeResponse(200, meCallCount === 1 ? { golfer: null } : { golfer: { golferId: "ann", name: "Ann Updated", indexSource: { kind: "declared", value: 12 } } });
         }
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
@@ -222,42 +222,37 @@ describe("ProfilePage — signed in", () => {
   });
 });
 
-// The adoptable index sources (handicap-model legibility, model §3/§7): the swng index and WHS
-// index rendered beneath "Your index" as labeled data points a golfer can one-tap into the
-// override — NOT a nudge (no threshold, no prose, no auto-write).
+// The adoptable index sources (index-source model spec §3/§6): the swng index and WHS index
+// rendered beneath "Your index" as labeled data points, each with a one-tap "Use this" that sets
+// the golfer's index SOURCE — never a value copied into the override box. The active source shows
+// "in use" and offers no button. NOT a nudge (no threshold, no prose, no auto-write).
 describe("ProfilePage — index sources", () => {
   const withRecord = (metrics: unknown) =>
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+        if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") return fakeResponse(200, { metrics, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
 
-  it("renders the swng index data point and its 'Use this' fills the override input", async () => {
+  it("the default swng source is marked 'in use' with no button; the WHS reference offers a 'Use this' and the override stays empty", async () => {
     signIn();
-    withRecord({ swngIndex: { value: 9.4, differentialsUsed: 3 } });
+    withRecord({ swngIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } });
 
     renderProfilePage();
 
     await screen.findByText(/swng index · 9\.4/);
-    fireEvent.click(screen.getByRole("button", { name: /use swng index/i }));
-    expect((screen.getByLabelText("Your own number") as HTMLInputElement).value).toBe("9.4");
-  });
-
-  it("renders the WHS index data point and its 'Use this' fills the override input", async () => {
-    signIn();
-    withRecord({ whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } });
-
-    renderProfilePage();
-
-    await screen.findByText(/WHS index · 7\.2/);
-    fireEvent.click(screen.getByRole("button", { name: /use whs index/i }));
-    expect((screen.getByLabelText("Your own number") as HTMLInputElement).value).toBe("7.2");
+    // swng is the default active source — marked "in use", no adopt button.
+    expect(screen.getByText("in use")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /use swng index/i })).toBeNull();
+    // WHS is an adoptable reference — it has a button.
+    expect(screen.getByRole("button", { name: /use whs index/i })).toBeTruthy();
+    // Nothing was copied into the override — the whole model (a source, not a value).
+    expect((screen.getByLabelText("Your own number") as HTMLInputElement).value).toBe("");
   });
 
   // A golfer with only unrated rounds: a swng index value, but no WHS index yet → the WHS source
@@ -293,7 +288,7 @@ describe("ProfilePage — index sources", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", declared: 20 } });
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "declared", value: 20 } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") {
           return fakeResponse(200, { metrics: { swngIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } }, history: [] });
@@ -309,8 +304,9 @@ describe("ProfilePage — index sources", () => {
   });
 });
 
-// "Your index" — the one active number the golfer owns (model §3/§7). Its value is the override
-// when set, else the swng index (the all-rounds default, NOT WHS), and it always shows its source.
+// "Your index" — the one active number the golfer owns (index-source model spec §3/§6). Its value
+// is resolved live from the chosen SOURCE: swng by default, whs when adopted, or a declared
+// override — always shown with its source, never a copied value.
 describe("ProfilePage — Your index (the one active number)", () => {
   const withGolferAndMetrics = (golfer: unknown, metrics: unknown) =>
     vi.stubGlobal(
@@ -324,36 +320,48 @@ describe("ProfilePage — Your index (the one active number)", () => {
       }),
     );
 
-  it("with nothing declared, the active value IS the swng index (the all-rounds default), sourced 'computed from your rounds' — never the WHS number", async () => {
+  it("on the default swng source, the active value IS the swng index (the all-rounds default), sourced 'from all your rounds' — never the WHS number", async () => {
     signIn();
-    // Blaine's worked example (model §3): swng index 12.4 (all rounds) is the default; WHS 11.2 is a
+    // Blaine's worked example (spec §3): swng index 12.4 (all rounds) is the default; WHS 11.2 is a
     // reference only.
-    withGolferAndMetrics({ golferId: "ann", name: "Ann" }, { swngIndex: { value: 12.4, differentialsUsed: 8 }, whsIndex: { value: 11.2, computedAtMs: 1_000, differentialsUsed: 6 } });
+    withGolferAndMetrics(
+      { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } },
+      { swngIndex: { value: 12.4, differentialsUsed: 8 }, whsIndex: { value: 11.2, computedAtMs: 1_000, differentialsUsed: 6 } },
+    );
 
     renderProfilePage();
 
-    const activeLine = (await screen.findByText("computed from your rounds")).closest("p");
-    expect(activeLine?.textContent).toContain("12.4"); // the swng index is the active value
+    // Anchor on the active big-number span (exact "12.4"); the swng source ROW reads "swng index ·
+    // 12.4", so this uniquely finds the active line even though "from all your rounds" also labels
+    // the swng row (the active label and the menu gloss share that phrase).
+    const activeLine = (await screen.findByText("12.4")).closest("p");
+    expect(activeLine?.textContent).toContain("from all your rounds"); // the active line's source label
     expect(activeLine?.textContent).not.toContain("11.2"); // NOT the WHS index
-    // Both sources are shown as adoptable references beneath it.
+    // Both sources are shown as data points beneath it.
     expect(screen.getByText(/swng index · 12\.4/)).toBeTruthy();
     expect(screen.getByText(/WHS index · 11\.2/)).toBeTruthy();
   });
 
   it("for a rated-only golfer (swng index == WHS index), the active value equals that shared number", async () => {
     signIn();
-    // Model §2: a golfer who plays only rated golf has swng index == WHS index exactly.
-    withGolferAndMetrics({ golferId: "ann", name: "Ann" }, { swngIndex: { value: 7.2, differentialsUsed: 5 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } });
+    // Spec §2: a golfer who plays only rated golf has swng index == WHS index exactly.
+    withGolferAndMetrics(
+      { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } },
+      { swngIndex: { value: 7.2, differentialsUsed: 5 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } },
+    );
 
     renderProfilePage();
 
-    const activeLine = (await screen.findByText("computed from your rounds")).closest("p");
-    expect(activeLine?.textContent).toContain("7.2");
+    const activeLine = (await screen.findByText("7.2")).closest("p");
+    expect(activeLine?.textContent).toContain("from all your rounds");
   });
 
   it("a declared override is the active value and reads 'your own'", async () => {
     signIn();
-    withGolferAndMetrics({ golferId: "ann", name: "Ann", declared: 20 }, { swngIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } });
+    withGolferAndMetrics(
+      { golferId: "ann", name: "Ann", indexSource: { kind: "declared", value: 20 } },
+      { swngIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } },
+    );
 
     renderProfilePage();
 
@@ -361,11 +369,86 @@ describe("ProfilePage — Your index (the one active number)", () => {
     expect(activeLine?.textContent).toContain("20");
   });
 
+  // THE ANTI-DRIFT TEST (index-source model spec §2): adopting WHS puts the golfer ON the WHS
+  // source — the active value IS the live WHS metric (resolved fresh, not copied), the override box
+  // stays EMPTY, and Save persists the SOURCE `{kind:"whs"}`, never a number that could later drift
+  // from the WHS row below it. This is the entire reason the model exists.
+  it("'Use WHS index' sets the SOURCE (active value tracks the metric, override stays empty) and Save posts indexSource {kind:'whs'} — no copied value", async () => {
+    signIn();
+    const bodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/me" && init?.method === "PUT") {
+          bodies.push(JSON.parse(String(init.body)));
+          return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "whs" } } });
+        }
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { swngIndex: { value: 12.4, differentialsUsed: 8 }, whsIndex: { value: 11.2, computedAtMs: 1_000, differentialsUsed: 6 } }, history: [] });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    // Starts on swng: active 12.4 "from all your rounds" (anchor on the exact big-number span).
+    const activeStart = (await screen.findByText("12.4")).closest("p");
+    expect(activeStart?.textContent).toContain("from all your rounds");
+
+    fireEvent.click(screen.getByRole("button", { name: /use whs index/i }));
+
+    // Now ON WHS: the active value is the live WHS metric 11.2, labeled "your WHS index".
+    const activeAfter = (await screen.findByText("your WHS index")).closest("p");
+    expect(activeAfter?.textContent).toContain("11.2");
+    // The override box is STILL empty — nothing was copied (the anti-drift invariant).
+    expect((screen.getByLabelText("Your own number") as HTMLInputElement).value).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByText("Saved.")).toBeTruthy());
+    expect(bodies[0]).toMatchObject({ indexSource: { kind: "whs" } });
+  });
+
+  it("typing an override makes it the active value ('your own') and Save posts indexSource {kind:'declared'}", async () => {
+    signIn();
+    const bodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/me" && init?.method === "PUT") {
+          bodies.push(JSON.parse(String(init.body)));
+          return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "declared", value: 8 } } });
+        }
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { swngIndex: { value: 12.4, differentialsUsed: 8 } }, history: [] });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+    await screen.findByText("12.4"); // swng active value settled
+
+    fireEvent.change(screen.getByLabelText("Your own number"), { target: { value: "8" } });
+
+    const activeLine = (await screen.findByText("your own")).closest("p");
+    expect(activeLine?.textContent).toContain("8.0");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByText("Saved.")).toBeTruthy());
+    expect(bodies[0]).toMatchObject({ indexSource: { kind: "declared", value: 8 } });
+  });
+
   // The exact confusion this task removes: the old page rendered the WHS value under a "swng Index"
   // label. No element may show the WHS number under a swng-index meaning.
   it("no mislabel — the WHS number never appears under a 'swng index' label", async () => {
     signIn();
-    withGolferAndMetrics({ golferId: "ann", name: "Ann" }, { swngIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } });
+    withGolferAndMetrics(
+      { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } },
+      { swngIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } },
+    );
 
     renderProfilePage();
 
@@ -373,19 +456,34 @@ describe("ProfilePage — Your index (the one active number)", () => {
     expect(screen.queryByText(/swng index · 7\.2/)).toBeNull(); // never the WHS value
     expect(screen.queryByText(/swng.*7\.2/i)).toBeNull(); // no "swng …7.2" anywhere
     expect(screen.getByText(/WHS index · 7\.2/)).toBeTruthy(); // the WHS value lives under WHS
-    // And the active number is the swng index, not WHS.
-    expect((await screen.findByText("computed from your rounds")).closest("p")?.textContent).toContain("9.4");
+    // And the active number is the swng index, not WHS (anchor on the exact big-number span).
+    expect((await screen.findByText("9.4")).closest("p")?.textContent).toContain("from all your rounds");
   });
 
-  it("a brand-new golfer (no declared, no computed) sees no active number and an invitation to play or set their own", async () => {
+  // A computed source with no data resolves to undefined (first-class, not 0) — the "No WHS index
+  // yet" copy names the source the golfer is on, never a bare blank or a 0.
+  it("a golfer on WHS with no whsIndex yet sees the 'No WHS index yet' copy and no active number", async () => {
     signIn();
-    withGolferAndMetrics({ golferId: "ann", name: "Ann" }, {});
+    withGolferAndMetrics({ golferId: "ann", name: "Ann", indexSource: { kind: "whs" } }, {});
+
+    renderProfilePage();
+
+    await screen.findByText(/no whs index yet/i);
+    expect(screen.queryByText("your WHS index")).toBeNull();
+  });
+
+  it("a brand-new golfer (no computed metrics, default swng source) sees no active number and an invitation to play or set their own", async () => {
+    signIn();
+    withGolferAndMetrics({ golferId: "ann", name: "Ann", indexSource: { kind: "swng" } }, {});
 
     renderProfilePage();
 
     await screen.findByText(/no index yet/i);
-    expect(screen.queryByText("computed from your rounds")).toBeNull();
+    // No active-value paragraph (resolved value undefined) — no "your own", no WHS active label.
+    // ("from all your rounds" still appears as the swng source's MENU description — that's the row,
+    // not an active number, so it is not asserted absent here.)
     expect(screen.queryByText("your own")).toBeNull();
+    expect(screen.queryByText("your WHS index")).toBeNull();
   });
 });
 
@@ -400,7 +498,7 @@ describe("ProfilePage — crews", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+        if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
         if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
         if (path === "/me/crews") {
           return fakeResponse(200, {
@@ -449,7 +547,7 @@ describe("ProfilePage — crews", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
+        if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
         if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         throw new Error(`unexpected fetch ${path}`);

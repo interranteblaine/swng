@@ -514,6 +514,45 @@ swng-"in use" / WHS-"—"-no-button / `undefined`-as-"—", a declared 12.4 roun
 console clean, zero CSP violations; throwaway Cognito user deleted). On local `main`, never
 pushed.
 
+The index picker commits on tap, and a plus handicap is golf-truth the domain owns (post-index-
+source, 2026-07-17, spec
+`docs/superpowers/specs/2026-07-17-index-source-one-tap-commit-plus-handicap-design.md`, plan
+`2026-07-17-index-source-one-tap-commit-plus-handicap.md`, 4 tasks + a review-caught fix, commits
+`72d3a38..ffb6224`): the owner caught two defects on the LIVE surface that the prior arc's shallow
+walk (a declared positive index, both computed rows "—") never exercised. **One:** the index
+picker's "Use this" only mutated browser state — it looked committed but reverted on reload, and a
+separate Save fired THREE requests. Fixed to **one tap = one commit**: "Use this"/"Use this number"
+each do one `PUT /me` and update the client from that response via a new `auth.applyGolfer` (no GET
+/me refetch — `updateMe` already returns the golfer); the active source is `auth.golfer.indexSource`
+(no staged `pendingSource`, so nothing to revert); name/home keep their own Save (minus
+`indexSource`). **Two:** a plus handicap (index below 0, better than scratch) had no home in the
+model — it rendered as a bare `-1.2`, its strokes as "get -2," and on the scorecard a plus player's
+give-back strokes silently didn't draw. The owner's ruling — **make illegal states unrepresentable;
+the UI is thin, the truth is in the model** — moved the golf convention OUT of scattered view logic
+into ONE tested `@swng/domain/handicap/present.ts`: `formatHandicapIndex` (`-1.2 → "+1.2"`),
+`formatCourseHandicap` (integer, `-2 → "+2"`), `strokeGrant` (a signed count → receives/gives/none).
+EVERY surface renders through them — profile, create/join (`You give N — from your index (+1.2)`),
+the scorecard Cell (given strokes draw hollow `○`, net = gross+1 — the invisible-give-back hole
+designed out), AND the setup roster (`CH +2`, `gives N`). Enforced by a **whole-`apps/web/src`-tree**
+grep gate (no bare signed index/course-handicap render survives; the per-round differential and an
+editable `<input>` value are the only carved-out signed numbers). The stored/wire number is
+unchanged (`-1.2` is the standard plus encoding); nothing in the API, the model, or the handicap
+engine (`allocateStrokes`/`courseHandicapFor` were already correct) changed — this is presentation +
+interaction only, so **no `deploy:beta`**, just `publishWeb`. The whole-branch review caught the ONE
+surface the spec's enumerated file-list had missed — `SetupPanel` still showing `CH -2` — and it was
+fixed in-arc (the `formatCourseHandicap` helper), completing the invariant rather than scoping the
+hole out. Gated: `pnpm validate` green at every commit + at HEAD (web 449 / domain 249), each task
+independently reviewed, the whole-branch review "Ready to ship — with the SetupPanel fix." Close-out
+(web-only, no wipe, no backend deploy): `publishWeb` (bundle `index-BiQ5zUYs.js`, CF invalidation) →
+`e2e:beta` 16/16 ×2 (backend-regression sanity) → `e2e:field` 57 pass / 1 skip → a controller browser
+walk on the DEPLOYED `beta.swng.golf` driving a REAL plus handicap this time (the lesson from the
+shipped miss): declared `-1.2` committed with **exactly one `PUT /me`** (network-panel-verified, the
+three-request fan-out gone), rendered `+1.2 · your own`, **survived a reload with no revert**, then
+a round on rated Casa Verde GC showed `You give 2 — from your index (+1.2) on this course` and the
+roster `CH +2`; console clean, zero CSP violations; throwaway user deleted (the scorecard `○`
+give-back is unit-verified with a domain cross-check, not staged live — it needs a two-player
+give-back game). On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

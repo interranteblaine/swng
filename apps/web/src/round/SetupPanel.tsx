@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { defaultAllowance, golferId } from "@swng/domain";
+import { defaultAllowance, formatCourseHandicap, golferId, strokeGrant } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";
@@ -73,7 +73,7 @@ export function SetupPanel({ state, joinCode, onAddGame }: SetupPanelProps) {
               <li key={p.golferId} className="flex flex-col gap-1">
                 <span className="flex items-center gap-2">
                   <span>
-                    {p.name} — {p.tee} — CH {p.courseHandicap}
+                    {p.name} — {p.tee} — CH {formatCourseHandicap(p.courseHandicap)}
                   </span>
                   {/* A departed participant (accounts-only identity spec §4) stays on the roster
                       WITH their seat data — their played holes are facts — plus this "left"
@@ -84,11 +84,17 @@ export function SetupPanel({ state, joinCode, onAddGame }: SetupPanelProps) {
                 {hasGames && (
                   <span className="flex flex-wrap gap-2 text-sm text-slate-400">
                     {badges.length > 0 ? (
-                      badges.map((b) => (
-                        <span key={b.id} className="rounded-full bg-slate-800 px-2 py-0.5">
-                          {b.label}: {b.total} dots
-                        </span>
-                      ))
+                      badges.map((b) => {
+                        // A give-back total (a plus player in a full-handicap game) reads "gives N"
+                        // through the domain's strokeGrant, never a bare "-N dots"; a normal
+                        // (receives/none) total renders byte-identically to before.
+                        const grant = strokeGrant(b.total);
+                        return (
+                          <span key={b.id} className="rounded-full bg-slate-800 px-2 py-0.5">
+                            {grant.kind === "gives" ? `${b.label}: gives ${grant.count}` : `${b.label}: ${b.total} dots`}
+                          </span>
+                        );
+                      })
                     ) : (
                       <span>Not yet in a game</span>
                     )}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatHandicapIndex, strokeGrant } from "./present.js";
+import { formatCourseHandicap, formatHandicapIndex, strokeGrant } from "./present.js";
 
 describe("formatHandicapIndex", () => {
   it("renders a normal index plainly, scratch as 0.0", () => {
@@ -9,6 +9,17 @@ describe("formatHandicapIndex", () => {
   it("renders a plus handicap (below 0) with a + and no minus", () => {
     expect(formatHandicapIndex(-1.2)).toBe("+1.2");
     expect(formatHandicapIndex(-0.4)).toBe("+0.4");
+  });
+});
+
+describe("formatCourseHandicap", () => {
+  it("renders a normal integer course handicap plainly, scratch as 0 — no decimals", () => {
+    expect(formatCourseHandicap(13)).toBe("13");
+    expect(formatCourseHandicap(0)).toBe("0");
+  });
+  it("renders a plus course handicap (below 0) with a + and no minus", () => {
+    expect(formatCourseHandicap(-1)).toBe("+1");
+    expect(formatCourseHandicap(-2)).toBe("+2");
   });
 });
 

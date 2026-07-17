@@ -7,6 +7,11 @@
 export const formatHandicapIndex = (value: number): string =>
   value < 0 ? `+${(-value).toFixed(1)}` : value.toFixed(1);
 
+// A course handicap is an INTEGER; a negative one is a "plus" course handicap — golf writes it "+1"
+// (the player gives that many strokes). Distinct from formatHandicapIndex (a 1-dp index).
+export const formatCourseHandicap = (value: number): string =>
+  value < 0 ? `+${-value}` : String(value);
+
 // A signed stroke count (a course handicap, or a hole's dots) is strokes RECEIVED when positive,
 // GIVEN when negative (a plus handicap gives strokes back), none at 0. The ONE place a sign becomes
 // give/receive — the strokes note and the scorecard both read this, neither re-decides it.

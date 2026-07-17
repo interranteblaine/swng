@@ -272,3 +272,45 @@ describe("SetupPanel — share the code, not add a player", () => {
     for (const call of fetchMock.mock.calls) expect(new URL(String(call[0])).pathname).toBe("/me");
   });
 });
+
+// index-source one-tap + plus-handicap arc: the setup roster is a LIVE render surface too. A plus
+// player (course handicap below 0) must show through the domain's sign conventions — a plus course
+// handicap reads "CH +1" (never a bare "CH -1"), and a give-back dot total reads "gives N" (never a
+// bare "-N dots"). A normal (positive/zero) participant's row and badge are byte-unchanged.
+describe("SetupPanel — a plus handicap renders through the domain (CH +N, gives N)", () => {
+  const PLUS = golferId("plus");
+  const NORMAL = golferId("normal");
+
+  it("renders a plus course handicap as 'CH +1', never a bare 'CH -1' — a normal handicap stays plain 'CH 13'", () => {
+    const state = baseState({ participants: [participant(PLUS, "Plus", "white", -1), participant(NORMAL, "Norm", "white", 13)] });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+
+    const plusRow = screen.getAllByRole("listitem").find((li) => /Plus/.test(li.textContent ?? ""));
+    expect(plusRow).toBeTruthy();
+    expect(plusRow!.textContent).toMatch(/CH \+1\b/);
+    expect(plusRow!.textContent).not.toMatch(/CH -1/);
+
+    // A normal positive handicap is byte-unchanged — a plain "CH 13", no sign.
+    const normRow = screen.getAllByRole("listitem").find((li) => /Norm/.test(li.textContent ?? ""));
+    expect(normRow!.textContent).toMatch(/CH 13\b/);
+    expect(normRow!.textContent).not.toMatch(/\+/);
+  });
+
+  it("renders a plus player's give-back dot total as 'gives N', never a bare '-N dots'; a normal total is unchanged", () => {
+    // Skins is full-handicap (allowance 1): a plus player (CH -1) gives one stroke, so the dot
+    // total is -1 — the exact bare-negative the arc closes everywhere else.
+    const skins: GameConfig = { kind: "skins", id: gameId("game-1"), players: [PLUS, NORMAL] };
+    const state = baseState({ participants: [participant(PLUS, "Plus", "white", -1), participant(NORMAL, "Norm", "white", 5)], games: [skins] });
+    const games: GameState[] = [{ kind: "skins", id: gameId("game-1"), lines: [], carrying: 0, carriedOut: 0, complete: false }];
+    renderPanel({ state, games, joinCode: "ABC123", onAddGame: noopAddGame });
+
+    const plusRow = screen.getAllByRole("listitem").find((li) => /Plus/.test(li.textContent ?? ""));
+    expect(plusRow).toBeTruthy();
+    expect(within(plusRow!).getByText("Skins: gives 1")).toBeTruthy();
+    expect(plusRow!.textContent).not.toMatch(/-1 dots/);
+
+    // A normal (receives) dot total is byte-identical to before: "{label}: N dots".
+    const normRow = screen.getAllByRole("listitem").find((li) => /Norm/.test(li.textContent ?? ""));
+    expect(within(normRow!).getByText("Skins: 5 dots")).toBeTruthy();
+  });
+});

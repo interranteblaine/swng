@@ -124,12 +124,11 @@ a round you already played (strokes spec §4, unchanged).
 - **`@swng/application`**: `updateMyGolfer` writes the chosen source; `golferView`/`toGolferView`
   maps `HandicapProfile.indexSource` to the wire. `getMyRecord` is unchanged (it already returns
   `metrics`; the client resolves).
-- **`adapters-dynamodb`** (`createDynamoGolferStore.ts`): serialize/deserialize `indexSource`.
-  Deserialization **tolerates the old shape** — a stored `declared: <number>` (or the legacy
-  `official`) maps to `{kind:"declared", value}`; absent maps to `{kind:"swng"}`. Because beta is
-  wiped and no prod pool exists, there is effectively no data to migrate; the tolerate path is
-  defensive and drops on the next whole-document put (the established pattern), never a migration
-  script.
+- **`adapters-dynamodb`** (`createDynamoGolferStore.ts`): serialize/deserialize `indexSource` as a
+  small map; an absent or malformed stored source **defaults to `{kind:"swng"}`** (one line). There
+  are **no users and no prod pool**, so there is NO migration — the store does not read the old
+  `declared`/`official` attrs at all; a stray beta row loses a declared value nobody will miss, and
+  its next put writes a well-formed source. No shim, no dual-carry, no tolerate-legacy fold.
 - **`@swng/web`**: `ProfilePage` "Use this" sets the source, not a text copy; the override sets
   `declared`; the active source is marked. `CreateRoundPage`/`JoinRoundPage` call `resolveIndex`.
   The three surfaces call the ONE resolver — collapsing the Create↔Join "which number"

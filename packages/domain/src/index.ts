@@ -22,6 +22,7 @@ export * from "./scoring/golden/fixtureCourse.js";
 export * from "./scoring/golden/deck.js";
 export * from "./scoring/golden/fieldDeck18.js";
 export * from "./handicap/whs.js";
+export * from "./handicap/present.js";
 export * from "./golfer/golfer.js";
 export * from "./golfer/placeholderName.js";
 export * from "./golfer/record.js";

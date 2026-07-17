@@ -22,6 +22,9 @@ export interface AuthContextValue {
   // needs the context to reflect it immediately, without waiting for a future remount's one-shot
   // fetch.
   readonly refetch: () => Promise<void>;
+  // Replace `golfer` from a view the caller already holds (a PUT /me response) — no network.
+  // The one-request counterpart to `refetch` for a caller that just wrote the row itself.
+  readonly applyGolfer: (view: GolferView) => void;
   // Every other golfer-tier call (updateMe/getMyRecord/…) goes through this instead of pulling
   // the raw token — the ONE place "401 anywhere -> one silent refresh-token retry, then
   // signed-out" (brief) lives, rather than every call site re-implementing it.
@@ -136,6 +139,8 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     }
   }, [withAuth]);
 
+  const applyGolfer = useCallback((view: GolferView) => setGolfer(view), []);
+
   // GET-/me's once per session (brief) — fires when tokens first appear (a fresh load with a
   // saved session) and again whenever completeSignIn resets the guard (a NEW sign-in is a new
   // session), but never on every render.
@@ -174,6 +179,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     signIn,
     signOut,
     refetch,
+    applyGolfer,
     withAuth,
     completeSignIn,
   };

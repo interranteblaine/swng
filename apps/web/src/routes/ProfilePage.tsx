@@ -46,9 +46,10 @@ function IndexTrend({ history }: { readonly history: readonly GolferRoundLine[] 
 
 // The two adoptable computed sources shown beneath "Your index" (index-source model spec §6) —
 // each a labeled data point read straight off GET /me/record's metrics, with a one-tap "Use this"
-// that sets the golfer's index SOURCE (`{kind}`), NOT a value copied into a box: adopting swng/whs
-// puts you ON that live source, so the number tracks and can never drift (spec §2, the anti-drift
-// fix). Table-driven so adding a source is adding a row, never a new branch; `valueOf` pulls the
+// that COMMITS the golfer's index SOURCE (`{kind}`) in one PUT /me (index-source one-tap spec §2),
+// NOT a value copied into a box: adopting swng/whs puts you ON that live source, so the number
+// tracks and can never drift, and the tap itself saves (no staged selection, no separate Save, no
+// revert). Table-driven so adding a source is adding a row, never a new branch; `valueOf` pulls the
 // number (or undefined → renders "—", no button) and `useLabel` is the button's accessible name
 // (both buttons share the visible "Use this" text, so distinct aria-labels keep them individually
 // addressable). `description` is the model's own gloss: the swng index counts every round; the WHS
@@ -92,12 +93,13 @@ function DistributionBars({ history }: { readonly history: readonly GolferRoundL
   );
 }
 
-// Name + home course + index SOURCE (PUT /me), the computed record (index, bootstrap explainer,
+// Name + home course (the Save button) plus the computed record (index, bootstrap explainer,
 // trend, distribution, history) — the ProfilePage contract. The index a golfer is on is a source
-// they choose (index-source model spec §3), resolved live; Save persists the CHOICE, never a
-// computed value. Since the wall (accounts-only identity spec §2) GET /me get-or-creates the
-// caller's golfer on first touch (ensureGolfer), this page always edits an EXISTING golfer — Save
-// (updateMe) is an update, never the create path.
+// they choose (index-source model spec §3), resolved live; picking a source COMMITS it on the tap
+// in its own PUT /me (index-source one-tap spec §2 — toggles commit, text fields Save), so the
+// name/home Save no longer carries indexSource. Since the wall (accounts-only identity spec §2)
+// GET /me get-or-creates the caller's golfer on first touch (ensureGolfer), this page always edits
+// an EXISTING golfer — updateMe is an update, never the create path.
 export function ProfilePage() {
   const auth = useAuth();
   // Destructured so the record-fetch effect below lists a stable function reference as its
@@ -109,11 +111,12 @@ export function ProfilePage() {
   const [name, setName] = useState("");
   const [homeCourse, setHomeCourse] = useState<{ readonly id: CourseId; readonly name: string } | undefined>(undefined);
   const [pickingCourse, setPickingCourse] = useState(false);
-  // The chosen COMPUTED source (swng/whs) — which live source the golfer is on when they haven't
-  // asserted their own number. `declared` is the override text: non-empty ⟺ a declared source
-  // wins (index-source model spec §3/§6). Together they are the golfer's IndexSource, resolved live.
-  const [computedChoice, setComputedChoice] = useState<"swng" | "whs">("swng");
-  const [declared, setDeclared] = useState("");
+  // The override text buffer (not a staged source): editing it stages nothing; "Use this number"
+  // commits it. Text-entry state only — the golfer's active index source is auth.golfer.indexSource,
+  // the committed truth (index-source one-tap spec §2), never mirrored here.
+  const [declaredDraft, setDeclaredDraft] = useState("");
+  const [committing, setCommitting] = useState(false);
+  const [commitError, setCommitError] = useState<string | undefined>(undefined);
   const [hydrated, setHydrated] = useState(false);
   const [record, setRecord] = useState<GetMyRecordResponse | undefined>(undefined);
   const [saving, setSaving] = useState(false);
@@ -137,11 +140,10 @@ export function ProfilePage() {
     if (hydrated) return;
     if (auth.golfer === undefined) return;
     setName(auth.golfer?.name ?? "");
-    // Hydrate the source: a whs source arms the whs computed choice; a declared source fills the
-    // override; swng (or a null/absent golfer) is the default. Never a copied computed VALUE.
+    // Seed the override buffer once from the committed source (its declared value if the golfer is
+    // on a declared source, else empty) — a text field's initial contents, not a staged source.
     const source = auth.golfer?.indexSource ?? { kind: "swng" as const };
-    setComputedChoice(source.kind === "whs" ? "whs" : "swng");
-    setDeclared(source.kind === "declared" ? String(source.value) : "");
+    setDeclaredDraft(source.kind === "declared" ? String(source.value) : "");
     setHydrated(true);
 
     const homeCourseId = auth.golfer?.homeCourseId;
@@ -169,13 +171,27 @@ export function ProfilePage() {
       .catch(() => {}); // degrade silently — see the state's own comment
   }, [auth.signedIn, withAuth]);
 
-  // The golfer's chosen index source (index-source model spec §3): a non-empty, finite override
-  // is a declared assertion; otherwise the armed computed source (swng/whs). This IS what Save
-  // persists and what the active-value paragraph resolves — one source, one place, no drift.
-  const parsedOverride = declared.trim() === "" ? undefined : Number.parseFloat(declared.trim());
-  const pendingSource: IndexSource =
-    parsedOverride !== undefined && Number.isFinite(parsedOverride) ? { kind: "declared", value: parsedOverride } : { kind: computedChoice };
-  const resolved = resolveIndex(pendingSource, record?.metrics ?? {});
+  // The active source is the COMMITTED one — auth.golfer.indexSource — resolved live. No pending
+  // copy: tapping a source SAVES it (commit, below), so there is nothing to stage or revert.
+  const activeSource = auth.golfer?.indexSource ?? { kind: "swng" as const };
+  const resolved = resolveIndex(activeSource, record?.metrics ?? {});
+
+  // One tap commits (index-source one-tap spec §2): one PUT /me carrying just the picked source,
+  // then apply the PUT's OWN response to auth in place — no GET /me refetch. auth.golfer is updated
+  // only on success, so a failed commit leaves the prior source active (no optimism to roll back).
+  const commit = async (source: IndexSource) => {
+    setCommitting(true);
+    setCommitError(undefined);
+    try {
+      const response = await withAuth((token) => updateMe(token, { indexSource: source }));
+      auth.applyGolfer(response.golfer); // one request: the PUT's own response updates the client
+      setDeclaredDraft(source.kind === "declared" ? String(source.value) : "");
+    } catch {
+      setCommitError("Couldn't save your index — try again."); // active source unchanged (applied only on success)
+    } finally {
+      setCommitting(false);
+    }
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -184,14 +200,16 @@ export function ProfilePage() {
     setSaved(false);
     setError(undefined);
     try {
-      await auth.withAuth((token) =>
+      // Name + home only — the index source commits on its own tap now (index-source one-tap spec
+      // §2), so it is NOT in this body. Apply the PUT's own response in place (one request per
+      // action): no GET /me refetch, same as commit above.
+      const response = await auth.withAuth((token) =>
         updateMe(token, {
           name: name.trim(),
           ...(homeCourse ? { homeCourseId: homeCourse.id } : {}),
-          indexSource: pendingSource,
         }),
       );
-      await auth.refetch(); // the header chrome and this page both read auth.golfer — refresh it now, not on next remount
+      auth.applyGolfer(response.golfer);
       setSaved(true);
     } catch {
       // Never the raw caught.message — a golfer revision-mismatch 409 names the golfer's raw
@@ -213,10 +231,10 @@ export function ProfilePage() {
   }
 
   // "Your index" (index-source model spec §3/§6) — one active number, ALWAYS shown with its
-  // source, resolved live above (`resolved`) from `pendingSource` + the metrics. A declared
-  // override reads "your own"; a whs source reads "your WHS index"; swng reads "from all your
-  // rounds". There is no hidden precedence — whatever the chosen source resolves to is what's
-  // shown, and adopting a computed source tracks it because it's resolved, never copied.
+  // source, resolved live above (`resolved`) from `activeSource` (the COMMITTED source) + the
+  // metrics. A declared override reads "your own"; a whs source reads "your WHS index"; swng reads
+  // "from all your rounds". There is no hidden precedence — whatever the committed source resolves
+  // to is what's shown, and adopting a computed source tracks it because it's resolved, never copied.
   const history = record?.history ?? [];
 
   return (
@@ -248,14 +266,15 @@ export function ProfilePage() {
           )}
         </div>
 
-        {/* Your index (index-source model spec §3/§6): ONE number the golfer owns, always on the
-            screen with its source, resolved live from the chosen SOURCE — never a value the system
-            picks off-screen, never a copy that can drift. The active value + where it came from sits
-            at the top; the two computed sources (swng by default, WHS as a reference) sit beneath
-            with a one-tap "Use this" that sets the SOURCE (not a copied value) and marks the active
-            one "in use"; the override is the plain "type your own" input. Deliberately NO divergence
-            threshold, no "you should change this" prose, no auto-write — just the numbers, resolved
-            fresh, and the golfer decides. */}
+        {/* Your index (index-source model spec §3/§6, one-tap-commit spec §2): ONE number the golfer
+            owns, always on the screen with its source, resolved live from the COMMITTED source
+            (activeSource) — never a value the system picks off-screen, never a copy that can drift.
+            The active value + where it came from sits at the top; the two computed sources (swng by
+            default, WHS as a reference) sit beneath with a one-tap "Use this" that COMMITS that
+            source in one request and marks the active one "in use" — no staged selection, no separate
+            Save, no revert; the override is the plain "type your own" input with its own "Use this
+            number" commit. Deliberately NO divergence threshold, no "you should change this" prose, no
+            auto-write — just the numbers, resolved fresh, and the golfer decides. */}
         <section className="flex flex-col gap-3">
           <h2 className="text-lg font-semibold">Your index</h2>
 
@@ -278,19 +297,17 @@ export function ProfilePage() {
             </p>
           )}
 
+          {/* Each source row: "Use this" COMMITS that source in one tap (index-source one-tap spec
+              §2) — no staged selection, no separate Save, no revert. The active row (activeSource,
+              the committed truth) shows "in use" and no button. */}
           <div className="flex flex-col gap-2" aria-label="Index sources">
             {INDEX_SOURCES.map((source) => {
               const value = source.valueOf(record);
-              // Active ⟺ no override typed AND this is the armed computed choice — the "in use"
-              // marker, and the one row that shows no "Use this" button.
-              const active = declared.trim() === "" && computedChoice === source.kind;
+              const active = activeSource.kind === source.kind;
               return (
                 <div key={source.label} className="flex items-center justify-between gap-2 text-sm">
-                  {/* Label · value on the outer span's own direct text nodes (so a query for
-                      "swng index · 9.4" reads one node), with the model's gloss on a nested line. A
-                      source with no data reads "—" and offers no button. */}
                   <span className="text-slate-300">
-                    {source.label} · {value !== undefined ? value : "—"}
+                    {source.label} · {value !== undefined ? value.toFixed(1) : "—"}
                     <span className="block text-xs text-slate-500">{source.description}</span>
                   </span>
                   {active ? (
@@ -300,13 +317,9 @@ export function ProfilePage() {
                       <button
                         type="button"
                         aria-label={source.useLabel}
-                        // Sets the SOURCE (not a copied value) and clears any override — this is the
-                        // anti-drift fix: on WHS, the shown number IS the live WHS metric, resolved.
-                        onClick={() => {
-                          setComputedChoice(source.kind);
-                          setDeclared("");
-                        }}
-                        className="shrink-0 text-emerald-400 underline"
+                        disabled={committing}
+                        onClick={() => void commit({ kind: source.kind })}
+                        className="shrink-0 text-emerald-400 underline disabled:opacity-50"
                       >
                         Use this
                       </button>
@@ -317,10 +330,37 @@ export function ProfilePage() {
             })}
           </div>
 
+          {/* The override: a plain text buffer (declaredDraft) that stages nothing — "Use this
+              number" is its own commit tap, consistent with the rows above. */}
           <label className="flex flex-col gap-1">
             Your own number
-            <input value={declared} onChange={(event) => setDeclared(event.target.value)} inputMode="decimal" className="rounded-lg bg-slate-800 p-3 text-lg" />
+            <input value={declaredDraft} onChange={(event) => setDeclaredDraft(event.target.value)} inputMode="decimal" className="rounded-lg bg-slate-800 p-3 text-lg" />
           </label>
+          {(() => {
+            const parsed = declaredDraft.trim() === "" ? undefined : Number.parseFloat(declaredDraft.trim());
+            const valid = parsed !== undefined && Number.isFinite(parsed);
+            const declaredActive = activeSource.kind === "declared";
+            return (
+              <div className="flex items-center justify-between gap-2 text-sm">
+                {declaredActive && <span className="text-xs text-emerald-400">your own number — in use</span>}
+                {valid && (
+                  <button
+                    type="button"
+                    disabled={committing}
+                    onClick={() => void commit({ kind: "declared", value: parsed })}
+                    className="ml-auto shrink-0 text-emerald-400 underline disabled:opacity-50"
+                  >
+                    Use this number
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+          {commitError && (
+            <p role="alert" className="text-sm text-red-400">
+              {commitError}
+            </p>
+          )}
         </section>
 
         {error && (

@@ -155,22 +155,21 @@ describe("ProfilePage — signed in", () => {
     expect(secondLink.getAttribute("href")).toBe(`/rounds/${history[1]!.roundId}/archive`);
   });
 
-  it("saving the form PUTs /me, then re-fetches /me", async () => {
+  // The name/home Save (index-source one-tap spec §2): the index source commits on its own tap now,
+  // so this Save posts ONLY { name, homeCourseId } — never an indexSource — and applies the PUT's own
+  // response in place (applyGolfer), so there is exactly ONE GET /me (the mount), no post-save refetch.
+  it("the name/home Save PUTs /me with no indexSource and does not refetch /me (applies the response in place)", async () => {
     signIn();
-    const calls: string[] = [];
-    let meCallCount = 0;
+    const calls: { method: string; path: string; body?: unknown }[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         const path = new URL(url).pathname;
-        calls.push(`${init?.method ?? "GET"} ${path}`);
+        calls.push({ method: init?.method ?? "GET", path, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
         if (path === "/me" && init?.method === "PUT") {
-          return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann Updated", indexSource: { kind: "declared", value: 12 } } });
+          return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann Updated", indexSource: { kind: "swng" } } });
         }
-        if (path === "/me") {
-          meCallCount += 1;
-          return fakeResponse(200, meCallCount === 1 ? { golfer: null } : { golfer: { golferId: "ann", name: "Ann Updated", indexSource: { kind: "declared", value: 12 } } });
-        }
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
         throw new Error(`unexpected fetch ${path}`);
@@ -178,16 +177,21 @@ describe("ProfilePage — signed in", () => {
     );
 
     renderProfilePage();
-    await waitFor(() => expect(screen.getByText(/play a few rounds/i)).toBeTruthy());
+    await waitFor(() => expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Ann"));
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ann Updated" } });
+    // Typing in the override changes nothing about this Save's body — it is not a staged source.
     fireEvent.change(screen.getByLabelText("Your own number"), { target: { value: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(screen.getByText("Saved.")).toBeTruthy());
-    expect(calls).toContain("PUT /me");
-    // The re-fetch after save is a real GET /me, not just a locally-applied echo of the PUT response.
-    expect(calls.filter((c) => c === "GET /me").length).toBeGreaterThanOrEqual(2);
+
+    const put = calls.find((c) => c.method === "PUT" && c.path === "/me");
+    expect(put).toBeTruthy();
+    expect(put?.body).toEqual({ name: "Ann Updated" }); // no indexSource, no homeCourseId (none picked)
+    expect(put?.body).not.toHaveProperty("indexSource");
+    // applyGolfer, not refetch: exactly one GET /me total (the mount) — no second fetch after save.
+    expect(calls.filter((c) => c.method === "GET" && c.path === "/me")).toHaveLength(1);
   });
 
   it("a failed save shows a fixed human message, never the raw server error text (e.g. a golfer revision-mismatch line naming the internal id)", async () => {
@@ -369,19 +373,20 @@ describe("ProfilePage — Your index (the one active number)", () => {
     expect(activeLine?.textContent).toContain("20");
   });
 
-  // THE ANTI-DRIFT TEST (index-source model spec §2): adopting WHS puts the golfer ON the WHS
-  // source — the active value IS the live WHS metric (resolved fresh, not copied), the override box
-  // stays EMPTY, and Save persists the SOURCE `{kind:"whs"}`, never a number that could later drift
-  // from the WHS row below it. This is the entire reason the model exists.
-  it("'Use WHS index' sets the SOURCE (active value tracks the metric, override stays empty) and Save posts indexSource {kind:'whs'} — no copied value", async () => {
+  // THE ANTI-REVERT TEST (index-source one-tap spec §2): picking "Use this" on the WHS row COMMITS
+  // the source in ONE request (a PUT /me with just {indexSource:{kind:"whs"}}) and applies the PUT's
+  // own response to auth in place — NO GET /me refetch. The active value tracks the live WHS metric,
+  // the WHS row reads "in use", and a reload-equivalent re-render KEEPS WHS: the committed truth
+  // lives in auth.golfer, not a staged local copy a reload would drop. This is the whole fix.
+  it("'Use WHS index' commits in one request (one PUT, no GET /me) and does not revert on re-render", async () => {
     signIn();
-    const bodies: unknown[] = [];
+    const calls: { method: string; path: string; body?: unknown }[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         const path = new URL(url).pathname;
+        calls.push({ method: init?.method ?? "GET", path, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
         if (path === "/me" && init?.method === "PUT") {
-          bodies.push(JSON.parse(String(init.body)));
           return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "whs" } } });
         }
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
@@ -396,29 +401,44 @@ describe("ProfilePage — Your index (the one active number)", () => {
     // Starts on swng: active 12.4 "from all your rounds" (anchor on the exact big-number span).
     const activeStart = (await screen.findByText("12.4")).closest("p");
     expect(activeStart?.textContent).toContain("from all your rounds");
+    const getMeBefore = calls.filter((c) => c.method === "GET" && c.path === "/me").length;
 
     fireEvent.click(screen.getByRole("button", { name: /use whs index/i }));
 
-    // Now ON WHS: the active value is the live WHS metric 11.2, labeled "your WHS index".
+    // Exactly ONE PUT /me carrying just the WHS source; NO additional GET /me (applyGolfer, not refetch).
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path === "/me")).toBe(true));
+    const puts = calls.filter((c) => c.method === "PUT" && c.path === "/me");
+    expect(puts).toHaveLength(1);
+    expect(puts[0]?.body).toEqual({ indexSource: { kind: "whs" } });
+    expect(calls.filter((c) => c.method === "GET" && c.path === "/me").length).toBe(getMeBefore);
+
+    // Now ON WHS: the active value is the live WHS metric 11.2, "your WHS index"; the WHS row is "in use".
     const activeAfter = (await screen.findByText("your WHS index")).closest("p");
     expect(activeAfter?.textContent).toContain("11.2");
-    // The override box is STILL empty — nothing was copied (the anti-drift invariant).
+    expect(screen.getByText(/WHS index · 11\.2/).closest("div")?.textContent).toContain("in use");
+    // The override box is STILL empty — nothing was copied (the source, never a value).
     expect((screen.getByLabelText("Your own number") as HTMLInputElement).value).toBe("");
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(screen.getByText("Saved.")).toBeTruthy());
-    expect(bodies[0]).toMatchObject({ indexSource: { kind: "whs" } });
+    // Reload-equivalent re-render (an unrelated state change): WHS is STILL in use — the commit stuck,
+    // and the re-render neither re-committed nor refetched.
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ann again" } });
+    expect((await screen.findByText("your WHS index")).closest("p")?.textContent).toContain("11.2");
+    expect(calls.filter((c) => c.method === "PUT" && c.path === "/me")).toHaveLength(1);
+    expect(calls.filter((c) => c.method === "GET" && c.path === "/me").length).toBe(getMeBefore);
   });
 
-  it("typing an override makes it the active value ('your own') and Save posts indexSource {kind:'declared'}", async () => {
+  // The override commits on its own tap (index-source one-tap spec §2): typing stages nothing — the
+  // active source stays swng until "Use this number" is tapped, which fires ONE PUT and makes the
+  // declared value active. "Use this number" appears only once a valid number is present.
+  it("typing an override then 'Use this number' commits {kind:'declared', value} in one request", async () => {
     signIn();
-    const bodies: unknown[] = [];
+    const calls: { method: string; path: string; body?: unknown }[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
         const path = new URL(url).pathname;
+        calls.push({ method: init?.method ?? "GET", path, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
         if (path === "/me" && init?.method === "PUT") {
-          bodies.push(JSON.parse(String(init.body)));
           return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "declared", value: 8 } } });
         }
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
@@ -431,14 +451,53 @@ describe("ProfilePage — Your index (the one active number)", () => {
     renderProfilePage();
     await screen.findByText("12.4"); // swng active value settled
 
+    // No commit button until a valid number is typed.
+    expect(screen.queryByRole("button", { name: "Use this number" })).toBeNull();
+
     fireEvent.change(screen.getByLabelText("Your own number"), { target: { value: "8" } });
+
+    // Typing alone stages nothing — still on swng (active 12.4) until the commit tap.
+    expect((await screen.findByText("12.4")).closest("p")?.textContent).toContain("from all your rounds");
+
+    fireEvent.click(screen.getByRole("button", { name: "Use this number" }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path === "/me")).toBe(true));
+    const puts = calls.filter((c) => c.method === "PUT" && c.path === "/me");
+    expect(puts).toHaveLength(1);
+    expect(puts[0]?.body).toEqual({ indexSource: { kind: "declared", value: 8 } });
 
     const activeLine = (await screen.findByText("your own")).closest("p");
     expect(activeLine?.textContent).toContain("8.0");
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(screen.getByText("Saved.")).toBeTruthy());
-    expect(bodies[0]).toMatchObject({ indexSource: { kind: "declared", value: 8 } });
+  // A rejected PUT applies nothing (auth.golfer updates only on success), so the prior source stays
+  // active — no optimism to roll back — and an inline error sits by the section.
+  it("a rejected commit leaves the prior source active and shows the inline error", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/me" && init?.method === "PUT") {
+          return { ok: false, status: 409, json: async () => ({ code: "golfer-revision-mismatch", message: "boom" }) } as unknown as Response;
+        }
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { swngIndex: { value: 12.4, differentialsUsed: 8 }, whsIndex: { value: 11.2, computedAtMs: 1_000, differentialsUsed: 6 } }, history: [] });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+    const activeStart = (await screen.findByText("12.4")).closest("p");
+    expect(activeStart?.textContent).toContain("from all your rounds");
+
+    fireEvent.click(screen.getByRole("button", { name: /use whs index/i }));
+
+    await waitFor(() => expect(screen.getByText("Couldn't save your index — try again.")).toBeTruthy());
+    // Still on swng — the failed commit changed nothing, and no WHS active label appeared.
+    expect(screen.getByText("12.4").closest("p")?.textContent).toContain("from all your rounds");
+    expect(screen.queryByText("your WHS index")).toBeNull();
   });
 
   // The exact confusion this task removes: the old page rendered the WHS value under a "swng Index"

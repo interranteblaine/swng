@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { golferId } from "@swng/domain";
 import { getMyRecord } from "../api";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 import { tokenStore } from "./tokenStore";
@@ -33,6 +34,9 @@ function Harness() {
       </button>
       <button type="button" onClick={() => void auth.refetch()}>
         Refetch
+      </button>
+      <button type="button" onClick={() => auth.applyGolfer({ golferId: golferId("ann"), name: "Ann Applied", indexSource: { kind: "whs" } })}>
+        Apply golfer
       </button>
       <button
         type="button"
@@ -191,6 +195,28 @@ describe("AuthProvider / useAuth — signed in", () => {
 
     await waitFor(() => expect(screen.getByTestId("golfer").textContent).toBe("Ann Updated"));
     expect(call).toBe(2);
+  });
+
+  // applyGolfer replaces `golfer` in place from a view the caller already holds (a PUT /me
+  // response) — the one-request counterpart to refetch: NO GET /me fires across the call.
+  it("applyGolfer() sets the golfer in place with no GET /me refetch", async () => {
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+    const fetchSpy = vi.fn(async () => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    render(
+      <AuthProvider>
+        <Harness />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("golfer").textContent).toBe("Ann"));
+    // The one mount GET /me has fired; applyGolfer must not add a second network call.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply golfer" }));
+
+    await waitFor(() => expect(screen.getByTestId("golfer").textContent).toBe("Ann Applied"));
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // no refetch — the view was applied directly
   });
 });
 

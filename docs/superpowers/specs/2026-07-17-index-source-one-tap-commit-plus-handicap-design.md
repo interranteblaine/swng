@@ -86,6 +86,11 @@ barrel:
 export const formatHandicapIndex = (value: number): string =>
   value < 0 ? `+${(-value).toFixed(1)}` : value.toFixed(1);
 
+// A course handicap is an INTEGER; a negative one is a "plus" course handicap — golf writes it "+1"
+// (the player gives that many strokes). Distinct from formatHandicapIndex (a 1-dp index).
+export const formatCourseHandicap = (value: number): string =>
+  value < 0 ? `+${-value}` : String(value);
+
 // A signed stroke count (a course handicap, or a hole's dots) is strokes RECEIVED when positive,
 // GIVEN when negative (a plus handicap gives strokes back), none at 0. The ONE place a sign becomes
 // give/receive — every surface (the strokes note, the scorecard) reads this, never re-decides it.
@@ -110,6 +115,19 @@ Every surface renders through them, thin:
   correct for both signs — a given stroke makes net = gross + 1). **This is the hole designed out:**
   give-back renders through the same source as everything else, so "visible here, invisible there"
   is not representable.
+- **Setup roster (RoundPage `SetupPanel`)** — the per-player course-handicap line renders through
+  `formatCourseHandicap` (`CH +1`, not `CH -1`) and the per-game dot badge through `strokeGrant`
+  (`gives N` for a give-back total, the plain `N dots` otherwise). This surface was NOT in the
+  first draft of §3 and was caught by the whole-branch review's missed-surface audit — the
+  invariant is "no view shows a bare signed handicap," and the grep gate that enforces it must span
+  the **whole `apps/web/src` tree**, not just an enumerated file list, or a surface can drift while
+  the gate keeps passing.
+
+Course handicaps are integers, so they render through `formatCourseHandicap`, NOT
+`formatHandicapIndex` (which is 1-dp) — the two are distinct. The only signed numbers a view may
+still show raw are the per-round **differential** (not a handicap) and an **editable `<input>`
+value** (which must hold the true signed number the engine consumes; its note carries the "+"/give
+meaning).
 
 **Raw differentials stay signed** — a differential is a per-round number, not a handicap, so a
 negative differential in the history line is left as-is (no `formatHandicapIndex`).
@@ -132,8 +150,9 @@ lives and adds the scorecard's give-back render — never the math.
 
 ## 5. System boundaries (blast radius)
 
-- **`@swng/domain`:** new `handicap/present.ts` (`formatHandicapIndex`, `strokeGrant`, `StrokeGrant`)
-  + barrel export + tests. Pure functions, no dependency on anything but numbers.
+- **`@swng/domain`:** new `handicap/present.ts` (`formatHandicapIndex`, `formatCourseHandicap`,
+  `strokeGrant`, `StrokeGrant`) + barrel export + tests. Pure functions, no dependency on anything
+  but numbers.
 - **`@swng/web`:**
   - `auth/useAuth.ts`: add `applyGolfer(view: GolferView)` (a `setGolfer` wrapper).
   - `routes/ProfilePage.tsx`: instant `commit(source)` per row + the override's "Use this number";
@@ -143,6 +162,8 @@ lives and adds the scorecard's give-back render — never the math.
     the `strokeGrant`-driven give-strokes lead.
   - `round/ScorecardGrid.tsx`: the Cell renders dots through `strokeGrant` (● received / ○ given /
     none) and shows net whenever dots ≠ 0.
+  - `round/SetupPanel.tsx`: the roster course-handicap line through `formatCourseHandicap`, the
+    per-game dot badge through `strokeGrant` (added in the review-caught fix).
 - **No wire/schema/storage change → no `deploy:beta`, no migration, no deploy-order sensitivity.**
   The close-out is `publishWeb` (which rebuilds domain + web topologically) + gates + a **real
   walk** — a golfer driven to an actual computed index, a plus one included.

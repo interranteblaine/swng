@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { defaultAllowance, formatCourseHandicap, golferId, strokeGrant } from "@swng/domain";
+import { defaultAllowance } from "@swng/client";
+import { formatCourseHandicap, golferId, strokeGrant } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";

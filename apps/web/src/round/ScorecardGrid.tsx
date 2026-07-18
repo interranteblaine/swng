@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { cellKey, findTeeSet, netStrokes, strokeGrant } from "@swng/domain";
+import { netStrokes } from "@swng/client";
+import { cellKey, findTeeSet, strokeGrant } from "@swng/domain";
 import type { CourseCard, GameState, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { gameDots } from "./dots";
 import { ScorePad } from "./ScorePad";

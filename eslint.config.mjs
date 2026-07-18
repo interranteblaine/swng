@@ -90,6 +90,84 @@ export default [
     ["ts", "tsx"],
   ),
   {
+    // The golf-compute fence (the "one on-device seam" arc): golf logic is one tested copy in
+    // @swng/domain, and the web runs it on-device ONLY through @swng/client (foldAndScore + the
+    // compute re-exports). This BANS the web importing those compute VALUES straight from
+    // @swng/domain — a future hand-rolled golf computation in the web then fails `pnpm lint`. It
+    // uses @typescript-eslint's own no-restricted-imports (not the base rule the layer() above
+    // uses) purely for `allowTypeImports`: `import type { ... } from "@swng/domain"` stays legal
+    // (types carry no logic), and so do the presentation formatters / id constructors / pure
+    // structural accessors (cellKey/findTeeSet/gameMembers) / DomainError — none compute a golf
+    // RESULT. This is a SEPARATE rule name from the layer() block's base `no-restricted-imports`,
+    // so the two coexist without overriding each other: the base rule keeps enforcing package
+    // LAYERING (patterns), this one enforces the domain-compute banlist (paths/importNames), and
+    // they ban disjoint things so nothing double-reports. Test files are exempt (see `ignores`) —
+    // a test is an oracle that legitimately computes expected values straight from @swng/domain
+    // (scoreGame/settleRound/reduceRound/the golden decks), which @swng/client does not re-export;
+    // the boundary being sealed is the PRODUCT on-device compute path, matching Task 5's own
+    // grep, which excludes `.test.`.
+    files: ["apps/web/src/**/*.{ts,tsx}"],
+    ignores: ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@swng/domain",
+              allowTypeImports: true,
+              importNames: [
+                // the fold + the five scoring engines + settlement/result readers
+                "scoreGame",
+                "reduceRound",
+                "settleRound",
+                "resultOf",
+                "unresolvedGames",
+                "scoreStrokePlay",
+                "scoreStableford",
+                "scoreSkins",
+                "scoreSinglesMatch",
+                "scoreFourballMatch",
+                "matchLadder",
+                // stroke allocation + net arithmetic
+                "gameStrokeAllocation",
+                "totalDots",
+                "handicappingFor",
+                "allocateStrokes",
+                "dotsByHole",
+                "strokesReceivedOnHole",
+                "netDoubleBogey",
+                "netStrokes",
+                "roundHalfUp",
+                // handicap allowances
+                "defaultAllowance",
+                "playingHandicap",
+                // WHS / handicap-index math + course handicaps
+                "adjustedGrossScore",
+                "scoreDifferential",
+                "computeIndexDetail",
+                "computeIndex",
+                "swngIndex",
+                "courseHandicapFor",
+                "courseHandicapFromRatingSlopePar",
+                "unratedCourseHandicap",
+                "combineNineHoleDifferentials",
+                // golfer metrics + per-round archive line
+                "golferMetrics",
+                "archiveGolferLine",
+                // crew season aggregation
+                "crewContribution",
+                "aggregateSeason",
+              ],
+              message:
+                "Golf compute runs on-device via @swng/client (the one sanctioned client-side path) — import it from @swng/client, not @swng/domain. See docs/architecture.md 'Where golf logic lives'.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // eslint-plugin-react-hooks@7's own `configs.recommended-latest`/`configs.recommended`
     // ship a legacy `plugins: ["react-hooks"]` array — flat config rejects that outright
     // (ESLint: "plugins" must be an object) — so it can't be spread in directly. Wiring the

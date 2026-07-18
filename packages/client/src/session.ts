@@ -1,28 +1,13 @@
 import { opId, reduceRound, scoreGame } from "@swng/domain";
-import type { DeviceId, GameConfig, GameState, GolferId, HoleResult, RoundEvent, RoundId, RoundState } from "@swng/domain";
+import type { DeviceId, GameState, GolferId, HoleResult, RoundEvent, RoundId, RoundState } from "@swng/domain";
 import { createHlcSource } from "./hlc.js";
 import { createMemoryOutboxStore } from "./outbox.js";
 import type { OutboxStore, PersistedSync } from "./outbox.js";
+// The known-game-kinds set lives in scoring.ts now — ONE list shared by this live fold and
+// foldAndScore's read-only one, not two copies to keep in sync. See its doc comment there.
+import { KNOWN_GAME_KINDS } from "./scoring.js";
 import { TransportError } from "./transport.js";
 import type { RoundTransport } from "./transport.js";
-
-// scoreGame throws on a kind it doesn't recognize (M2 lesson, carried to the client): a
-// build must survive a round containing a future game kind rather than crashing games().
-// Derived from the same union scoreGame switches on (scoring/game.ts) — the two lists
-// must never drift, so this is the one place that names them. Written as a `satisfies
-// Record<GameConfig["kind"], true>` object rather than a plain string array so that a
-// future domain change extending the `GameConfig["kind"]` union fails THIS build (a
-// missing key) instead of silently vanishing from games() — a new game kind arriving on
-// the wire would otherwise just be dropped by the KNOWN_GAME_KINDS filter with no compiler
-// signal that this list needs updating.
-const KNOWN_GAME_KINDS_BY_KIND = {
-  "stroke-play": true,
-  "singles-match": true,
-  stableford: true,
-  "fourball-match": true,
-  skins: true,
-} satisfies Record<GameConfig["kind"], true>;
-const KNOWN_GAME_KINDS: ReadonlySet<GameConfig["kind"]> = new Set(Object.keys(KNOWN_GAME_KINDS_BY_KIND) as GameConfig["kind"][]);
 
 export interface RejectedOp {
   readonly event: RoundEvent;

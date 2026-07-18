@@ -1,4 +1,4 @@
-import { unresolvedGames as domainUnresolvedGames } from "@swng/domain";
+import { unresolvedGames as domainUnresolvedGames } from "@swng/client";
 import type { GameId, GameState, GolferId, RoundState, UnresolvedGameMissing } from "@swng/domain";
 import { describeGame } from "../games/describeGame";
 

@@ -142,6 +142,24 @@ governing bodies do not publish, and swng does not ship unverifiable constants. 
 deliberately omitted — the swng Index is honest-unofficial (`product.md` §10).
 Index history is a projection of `IndexSnapshot`s recomputed at each finalize.
 
+### Where golf logic lives
+
+Golf logic — the fold, the five scoring engines, stroke allocation, the WHS/handicap math,
+the metrics projection — is **one tested copy in `@swng/domain`**, and nothing re-derives it.
+The server runs it behind the API for reads and finalize; the web runs it **on-device** for
+the offline round (scoring must work with no signal), but only through **`@swng/client`**, the
+one sanctioned client-side compute seam. `@swng/client` exposes `foldAndScore` (the read-only
+cousin of `RoundSession`'s live `reduceRound → scoreGame` fold, used by the spectator watch
+page and the archived-round page) and re-exports the round-compute the web needs
+(`gameStrokeAllocation`, `netStrokes`, `totalDots`, `handicappingFor`, the course-handicap
+functions, `defaultAllowance`, `unresolvedGames`). An ESLint fence
+(`@typescript-eslint/no-restricted-imports` on `apps/web/src`) forbids the web importing those
+compute values straight from `@swng/domain`, so a future hand-rolled golf computation in the
+web fails `pnpm lint`. Presentation formatters (`formatHandicapIndex`, `formatCourseHandicap`,
+`strokeGrant`, `resolveIndex`), id constructors, pure structural accessors (`cellKey`,
+`findTeeSet`, `gameMembers`), and all `import type`s stay importable from `@swng/domain`
+directly — they compute no golf result.
+
 ### Crew — plain entity, no event sourcing
 
 A roster of real accounts — like everything else now: every round participant is an account,

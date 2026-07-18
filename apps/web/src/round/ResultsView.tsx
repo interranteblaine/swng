@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { handicappingFor } from "@swng/domain";
+import { handicappingFor } from "@swng/client";
 import type { GameId, GameState, RoundState } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
 import { ScorecardGrid } from "./ScorecardGrid";

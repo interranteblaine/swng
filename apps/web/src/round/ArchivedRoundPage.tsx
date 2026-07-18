@@ -1,17 +1,12 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
-import { reduceRound, roundId as makeRoundId, scoreGame } from "@swng/domain";
-import type { GameConfig, GameState, RoundEvent, RoundId, RoundState } from "@swng/domain";
+import { foldAndScore } from "@swng/client";
+import { roundId as makeRoundId } from "@swng/domain";
+import type { GameState, RoundEvent, RoundId, RoundState } from "@swng/domain";
 import { ApiError, getRoundArchive } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { roundLabel } from "../roundLabel";
 import { ResultsView } from "./ResultsView";
-
-// Same forward-compat guard as watch/useWatchRound.ts's own KNOWN_GAME_KINDS (its doc comment
-// explains why this small, five-literal set is duplicated locally rather than exported from
-// @swng/client) — a finalized round holding a future game kind must not crash this read-only
-// page.
-const KNOWN_GAME_KINDS: ReadonlySet<GameConfig["kind"]> = new Set(["stroke-play", "singles-match", "stableford", "fourball-match", "skins"]);
 
 // The genesis event's own wallMs, searched from the raw log — the round's created-at, which the
 // canonical designation (accounts-only identity spec §5) renders the round by everywhere. The
@@ -31,9 +26,9 @@ interface ArchiveView {
 // finalized round, reached from ProfilePage's own history links — "golfer"-gated (the
 // caller's account Bearer, via useAuth's withAuth), never a round-scoped participant/
 // spectator credential the way RoundPage/WatchPage are. No session, no outbox, no edit
-// affordances: this fetches the archive's event log exactly once, folds it via the domain
-// `reduceRound` (mirroring WatchPage.tsx's own fold-then-ResultsView composition, not a new
-// one), and renders ResultsView over the result — the fold never mutates and nothing here
+// affordances: this fetches the archive's event log exactly once, folds it via @swng/client's
+// `foldAndScore` (the one on-device compute seam — mirroring WatchPage.tsx's own
+// fold-then-ResultsView composition, not a new one), and renders ResultsView over the result — the fold never mutates and nothing here
 // ever calls a write endpoint.
 export function ArchivedRoundPage() {
   const { roundId: param } = useParams<{ roundId: string }>();
@@ -49,8 +44,7 @@ export function ArchivedRoundPage() {
 
     void withAuth((token) => getRoundArchive(token, id))
       .then(({ events }) => {
-        const state = reduceRound(events);
-        const games = state.games.filter((gameConfig) => KNOWN_GAME_KINDS.has(gameConfig.kind)).map((gameConfig) => scoreGame(gameConfig, state));
+        const { state, games } = foldAndScore(events);
         setView({ state, games, createdAtMs: createdAtMsOf(events) });
       })
       .catch((caught) => {

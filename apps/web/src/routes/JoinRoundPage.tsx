@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { courseHandicapFromRatingSlopePar, formatHandicapIndex, resolveIndex, strokeGrant, unratedCourseHandicap } from "@swng/domain";
+import { courseHandicapFromRatingSlopePar, unratedCourseHandicap } from "@swng/client";
+import { formatHandicapIndex, resolveIndex, strokeGrant } from "@swng/domain";
 import type { GetMyRecordResponse, PeekRoundResponse } from "@swng/contracts";
 import { ApiError, getMyRecord, joinRound, peekRound, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";

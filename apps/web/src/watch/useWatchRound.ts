@@ -1,17 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { createHttpTransport } from "@swng/client";
+import { createHttpTransport, foldAndScore } from "@swng/client";
 import type { RoundTransport } from "@swng/client";
-import { reduceRound, scoreGame } from "@swng/domain";
-import type { GameConfig, GameState, RoundEvent, RoundId, RoundState } from "@swng/domain";
+import type { GameState, RoundEvent, RoundId, RoundState } from "@swng/domain";
 import { config } from "../config";
-
-// scoreGame throws on a kind it doesn't recognize (@swng/client's session.ts carries the same
-// forward-compat guard, its own doc comment) — a round containing a future game kind must not
-// crash a spectator's whole watch page, so unrecognized kinds are filtered out here rather than
-// letting scoreGame throw. This is a small, deliberately local duplicate of session.ts's own
-// KNOWN_GAME_KINDS_BY_KIND (not exported from @swng/client) — five literals, not worth a new
-// cross-package export for.
-const KNOWN_GAME_KINDS: ReadonlySet<GameConfig["kind"]> = new Set(["stroke-play", "singles-match", "stableford", "fourball-match", "skins"]);
 
 export interface WatchRoundView {
   readonly hydrated: boolean;
@@ -140,12 +131,14 @@ export const createUseWatchRound = (
       // resolveSessionConfig).
     }, [roundId, token]);
 
-    // reduceRound throws until a genesis (round-created) event exists (domain's own contract)
-    // — a share link is only ever minted for an already-started round, but the very first pull
-    // could still race a partial/empty log, so this guards the same way session.ts's own
-    // hydrated() check does.
-    const state = events.length > 0 ? reduceRound(events) : undefined;
-    const games = state ? state.games.filter((gameConfig) => KNOWN_GAME_KINDS.has(gameConfig.kind)).map((gameConfig) => scoreGame(gameConfig, state)) : EMPTY_GAMES;
+    // foldAndScore (via reduceRound) throws until a genesis (round-created) event exists
+    // (domain's own contract) — a share link is only ever minted for an already-started round,
+    // but the very first pull could still race a partial/empty log, so this guards on
+    // events.length the same way session.ts's own hydrated() check does. The known-kind filter
+    // lives inside foldAndScore now (the one on-device compute seam), not a local copy here.
+    const folded = events.length > 0 ? foldAndScore(events) : undefined;
+    const state = folded?.state;
+    const games = folded?.games ?? EMPTY_GAMES;
     const createdAt = events.find((event) => event.kind === "round-created")?.hlc.wallMs;
 
     return { hydrated: pulledOnce && state !== undefined, error: pullError, state, games, createdAt };

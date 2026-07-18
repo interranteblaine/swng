@@ -97,25 +97,26 @@ const golferRoundLineFields = {
 
 const golferRoundLineSchema: z.ZodType<GolferRoundLine> = z.object(golferRoundLineFields);
 
-// The metrics read projection (handicap-model legibility spec §2, §9; unrated-courses spec §6,
-// domain/golfer/metrics.ts's golferMetrics): every derived index in one place, computed at read
-// time (never stored). REQUIRED object; `whsIndex`/`swngIndex` stay optional — an empty `{}`
-// (plus zeroed distribution/empty trend) is the honest answer for a golfer with no postable
-// rounds. `whsIndex` is Rule 5.2a over rated differentials (with getMyRecord's read-time
-// `computedAtMs` stamp); `swngIndex` is the WHS fold EXTENDED to unrated rounds — real
-// `differential` when rated, the neutral `ags − par` estimate only when unrated (no stamp) — so a
-// rated-only golfer's swngIndex equals their whsIndex exactly. differentialsUsed on each is Rule
-// 5.2a's `use` count (domain's computeIndexDetail, whs.ts) — how many differentials were actually
-// averaged, not how many were in the window. `distribution` (career scoring buckets, summed
-// across ALL lines) and `trend` (posted differentials, oldest → newest, newest ≤20) are REQUIRED
-// — papercut 17, the analytics move from ProfilePage's own hand-computed reduce into this served
-// projection; both always present, zeros/`[]` rather than absent.
+// The metrics read projection (handicap-model legibility spec §2, §9; unrated-courses spec §6;
+// papercut 17, domain/golfer/metrics.ts's golferMetrics): every derived index in one place,
+// computed at read time (never stored). REQUIRED object; `whsIndex`/`swngIndex` stay optional —
+// an empty `{}` (plus a zeroed typicalEighteen/empty indexHistory) is the honest answer for a
+// golfer with no postable rounds. `whsIndex` is Rule 5.2a over rated differentials (with
+// getMyRecord's read-time `computedAtMs` stamp); `swngIndex` is the WHS fold EXTENDED to unrated
+// rounds — real `differential` when rated, the neutral `ags − par` estimate only when unrated (no
+// stamp) — so a rated-only golfer's swngIndex equals their whsIndex exactly. differentialsUsed on
+// each is Rule 5.2a's `use` count (domain's computeIndexDetail, whs.ts) — how many differentials
+// were actually averaged, not how many were in the window. `typicalEighteen` (career scoring
+// buckets, summed across ALL lines and normalized to a per-18-hole rate) and `indexHistory` ("your
+// index over time" — one point per round, oldest → newest, each recomputed from every line up to
+// and including it; the headline whsIndex/swngIndex above is exactly indexHistory's own last
+// point) are REQUIRED — both always present, zeros/`[]` rather than absent.
 export interface GetMyRecordResponse {
   readonly metrics: {
     readonly whsIndex?: { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number };
     readonly swngIndex?: { readonly value: number; readonly differentialsUsed: number };
-    readonly distribution: { readonly eagles: number; readonly birdies: number; readonly pars: number; readonly bogeys: number; readonly doublePlus: number };
-    readonly trend: readonly number[];
+    readonly typicalEighteen: { readonly eagles: number; readonly birdies: number; readonly pars: number; readonly bogeys: number; readonly doublePlus: number };
+    readonly indexHistory: readonly { readonly roundId: RoundId; readonly swngIndex?: number; readonly whsIndex?: number }[];
   };
   readonly history: readonly GolferRoundLine[]; // newest first (application/src/golfers/getMyRecord.ts)
 }
@@ -124,14 +125,14 @@ export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.objec
   metrics: z.object({
     whsIndex: z.object({ value: z.number(), computedAtMs: z.number().int(), differentialsUsed: z.number().int() }).optional(),
     swngIndex: z.object({ value: z.number(), differentialsUsed: z.number().int() }).optional(),
-    distribution: z.object({
+    typicalEighteen: z.object({
       eagles: z.number().int(),
       birdies: z.number().int(),
       pars: z.number().int(),
       bogeys: z.number().int(),
       doublePlus: z.number().int(),
     }),
-    trend: z.array(z.number()).readonly(),
+    indexHistory: z.array(z.object({ roundId: roundIdSchema, swngIndex: z.number().optional(), whsIndex: z.number().optional() })).readonly(),
   }),
   history: z.array(golferRoundLineSchema).readonly(),
 });

@@ -105,59 +105,67 @@ describe("getMyRecordResponseSchema", () => {
     distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
   };
 
-  // Both required (papercut 17): a zeroed distribution + empty trend, unless a fixture asserts
-  // otherwise below.
-  const zeroDistribution = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
+  // Both required (papercut 17): a zeroed typicalEighteen + empty indexHistory, unless a fixture
+  // asserts otherwise below.
+  const zeroTypicalEighteen = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
 
-  it("round-trips a record with both metrics (whsIndex + swngIndex), a scoring distribution, a trend, and mixed complete/incomplete history lines", () => {
+  it("round-trips a record with both metrics (whsIndex + swngIndex), a typicalEighteen shape, an indexHistory with both indices, and mixed complete/incomplete history lines", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: {
         whsIndex: { value: 7.2, computedAtMs: 5_000, differentialsUsed: 1 },
         swngIndex: { value: 9.4, differentialsUsed: 1 },
-        distribution: { eagles: 0, birdies: 3, pars: 20, bogeys: 12, doublePlus: 2 },
-        trend: [9.0, 11.0, 14.0],
+        typicalEighteen: { eagles: 0, birdies: 3, pars: 20, bogeys: 12, doublePlus: 2 },
+        indexHistory: [{ roundId: roundId("r1"), swngIndex: 9.4, whsIndex: 7.2 }],
       },
       history: [completeLine, incompleteLine],
     });
   });
 
-  // unrated-courses spec §6: a wholly-unrated history has a swngIndex but no whsIndex.
-  it("round-trips a record carrying only a swngIndex (no whsIndex)", () => {
+  // unrated-courses spec §6: a wholly-unrated history has a swngIndex but no whsIndex — same
+  // absence shows up per-point in indexHistory.
+  it("round-trips a record carrying only a swngIndex (no whsIndex), indexHistory point with only swngIndex", () => {
     roundTrips(getMyRecordResponseSchema, {
-      metrics: { swngIndex: { value: 9.4, differentialsUsed: 1 }, distribution: zeroDistribution, trend: [] },
+      metrics: {
+        swngIndex: { value: 9.4, differentialsUsed: 1 },
+        typicalEighteen: zeroTypicalEighteen,
+        indexHistory: [{ roundId: roundId("r2"), swngIndex: 9.4 }],
+      },
       history: [incompleteLine],
     });
   });
 
-  it("round-trips a bootstrap-not-met record: no computed indexes, zeroed distribution, empty trend, history present", () => {
-    roundTrips(getMyRecordResponseSchema, { metrics: { distribution: zeroDistribution, trend: [] }, history: [incompleteLine] });
+  it("round-trips a bootstrap-not-met record: no computed indexes, zeroed typicalEighteen, empty indexHistory, history present", () => {
+    roundTrips(getMyRecordResponseSchema, {
+      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [] },
+      history: [incompleteLine],
+    });
   });
 
   it("round-trips an entirely empty record", () => {
-    roundTrips(getMyRecordResponseSchema, { metrics: { distribution: zeroDistribution, trend: [] }, history: [] });
+    roundTrips(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [] }, history: [] });
   });
 
   // course-cards spec §4: courseId (the analytics join key) is OPTIONAL on a history line —
   // pre-scrap lines carry none, tolerated as absent.
   it("round-trips a history line carrying courseId", () => {
     roundTrips(getMyRecordResponseSchema, {
-      metrics: { distribution: zeroDistribution, trend: [] },
+      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [] },
       history: [{ ...completeLine, courseId: courseId("course-1") }],
     });
   });
 
   it("round-trips a pre-scrap history line with no courseId", () => {
-    roundTrips(getMyRecordResponseSchema, { metrics: { distribution: zeroDistribution, trend: [] }, history: [completeLine] });
+    roundTrips(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [] }, history: [completeLine] });
   });
 
-  // Both distribution and trend are REQUIRED — a metrics object missing either is rejected, not
-  // silently defaulted.
-  it("rejects a metrics object missing distribution", () => {
-    expect(() => parse(getMyRecordResponseSchema, { metrics: { trend: [] }, history: [] })).toThrow(ContractError);
+  // Both typicalEighteen and indexHistory are REQUIRED — a metrics object missing either is
+  // rejected, not silently defaulted.
+  it("rejects a metrics object missing typicalEighteen", () => {
+    expect(() => parse(getMyRecordResponseSchema, { metrics: { indexHistory: [] }, history: [] })).toThrow(ContractError);
   });
 
-  it("rejects a metrics object missing trend", () => {
-    expect(() => parse(getMyRecordResponseSchema, { metrics: { distribution: zeroDistribution }, history: [] })).toThrow(ContractError);
+  it("rejects a metrics object missing indexHistory", () => {
+    expect(() => parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen }, history: [] })).toThrow(ContractError);
   });
 });
 

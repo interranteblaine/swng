@@ -1,5 +1,5 @@
 import type { GolferRoundLine } from "@swng/domain";
-import { golferMetrics } from "@swng/domain";
+import { golferMetrics, postedDifferential } from "@swng/domain";
 import type { GetMyRecordResponse } from "@swng/contracts";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { Clock } from "../ports/clock.js";
@@ -21,19 +21,22 @@ const toWireLine = (line: GolferRoundLine & { readonly finalizedAtMs: number }):
   par: line.par,
   courseHandicap: line.courseHandicap,
   ...(line.ags !== undefined ? { ags: line.ags } : {}),
-  ...(line.differential !== undefined ? { differential: line.differential } : {}),
+  // A posted differential is a one-decimal value (postedDifferential's own doc comment) — the
+  // wire NEVER carries the raw full-precision figure the index fold averages internally. Only
+  // this display step rounds; golferMetrics below still folds the RAW `sorted` lines.
+  ...(line.differential !== undefined ? { differential: postedDifferential(line.differential) } : {}),
   distribution: line.distribution,
 });
 
 // No get-or-create here (unlike getMyGolfer/updateMyGolfer) — viewing an obviously-empty
 // record for a sub that's never even signed in far enough to have a golfer row needs no item to
-// exist; a zeroed distribution + empty trend (papercut 17's now-required members) alongside no
-// computed indexes is already the honest answer.
+// exist; a zeroed typicalEighteen + empty indexHistory (papercut 17's now-required members)
+// alongside no computed indexes is already the honest answer.
 export const getMyRecord =
   (deps: { golferStore: GolferStore; projectionStore: ProjectionStore; clock: Clock }) =>
   async (claims: AccountClaims): Promise<GetMyRecordResponse> => {
     const found = await deps.golferStore.getBySub(claims.sub);
-    if (!found) return { metrics: { distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, trend: [] }, history: [] };
+    if (!found) return { metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] }, history: [] };
 
     const lines = await deps.projectionStore.listLines(found.golfer.id);
     // listLines is UNORDERED (ports/projectionStore.ts) — sortLines (projections/
@@ -55,8 +58,8 @@ export const getMyRecord =
           ? { whsIndex: { value: metrics.whsIndex.value, computedAtMs: deps.clock.now(), differentialsUsed: metrics.whsIndex.differentialsUsed } }
           : {}),
         ...(metrics.swngIndex !== undefined ? { swngIndex: metrics.swngIndex } : {}),
-        distribution: metrics.distribution,
-        trend: metrics.trend,
+        typicalEighteen: metrics.typicalEighteen,
+        indexHistory: metrics.indexHistory,
       },
       history: sorted.reverse().map(toWireLine),
     };

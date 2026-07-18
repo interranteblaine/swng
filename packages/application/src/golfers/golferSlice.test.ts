@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, fixtureLinks, golferId, golferMetrics, opId, placeholderName, roundId, swngIndex } from "@swng/domain";
+import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, fixtureLinks, golferId, golferMetrics, opId, placeholderName, postedDifferential, roundId, swngIndex } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import { createFrozenClock, createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
@@ -141,10 +141,10 @@ describe("updateMyGolfer", () => {
 });
 
 describe("getMyRecord", () => {
-  it("returns an empty record (no computed indexes, zeroed distribution, empty trend, empty history) for a sub with no golfer at all — no throw, no create", async () => {
+  it("returns an empty record (no computed indexes, zeroed typicalEighteen, empty indexHistory, empty history) for a sub with no golfer at all — no throw, no create", async () => {
     const ctx = setup();
     const record = await ctx.record({ sub: "sub-1" });
-    expect(record).toEqual({ metrics: { distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, trend: [] }, history: [] });
+    expect(record).toEqual({ metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] }, history: [] });
   });
 
   it("bootstrap not met: history present, whsIndex absent below 3 differentials", async () => {
@@ -360,62 +360,66 @@ describe("getMyRecord", () => {
     expect(response.metrics.whsIndex).toEqual({ value: expected.value, computedAtMs: FROZEN_NOW, differentialsUsed: expected.differentialsUsed });
   });
 
-  // Papercut 17 — distribution + trend are the SAME golferMetrics fold as whsIndex/swngIndex
-  // above, just two more members: this proves the wire's distribution/trend agree byte-for-byte
-  // with calling golferMetrics directly over the same (sorted) lines, for a mixed
-  // rated/unrated/incomplete fixture (a rated round, an unrated ags-bearing round, and a
-  // no-ags-at-all incomplete round).
-  it("distribution + trend on the wire equal golferMetrics(sorted) for a mixed rated/unrated/incomplete history", async () => {
+  // Papercut 17 (task 3, the wire cut) — typicalEighteen + indexHistory are the SAME
+  // golferMetrics fold as whsIndex/swngIndex above, just two more members: this proves the
+  // wire's typicalEighteen/indexHistory agree byte-for-byte with calling golferMetrics
+  // directly over the same (sorted, RAW) lines, for a mixed rated/unrated/incomplete
+  // fixture (six rated rounds, one unrated ags-bearing round, one no-ags-at-all incomplete
+  // card). It ALSO proves the posted (0.1-rounded) wire differential never leaks into the
+  // index fold: r3/r6's raw differentials (3.0, 3.05) are deliberately the two LOWEST rated
+  // values in a 6-differential window (use=2), so folding the POSTED values (3.0, 3.1)
+  // instead of the raw ones would shift both whsIndex and swngIndex by a full tenth
+  // (2.0->2.1, 3.0->3.1) — a real, not merely notional, regression trap for "getMyRecord
+  // accidentally computes golferMetrics over toWireLine's rounded output" rather than the
+  // raw `sorted` lines.
+  it("typicalEighteen + indexHistory on the wire equal golferMetrics(sorted); the headline index is computed from RAW differentials even though the wire differential is posted to 0.1", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const line = (id: string, ms: number, extra: { ags?: number; differential?: number }) => ({
+      roundId: roundId(id),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 18 as const,
+      par: 72,
+      courseHandicap: 8,
+      distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 5, doublePlus: 2 },
+      finalizedAtMs: ms,
+      ...extra,
+    });
     const stored = [
-      {
-        roundId: roundId("r1"),
-        courseName: "Casa Verde GC",
-        tee: "white",
-        holes: 18 as const,
-        par: 72,
-        courseHandicap: 8,
-        ags: 90,
-        differential: 9.0,
-        distribution: { eagles: 1, birdies: 2, pars: 10, bogeys: 4, doublePlus: 1 },
-        finalizedAtMs: 1_000,
-      },
-      {
-        roundId: roundId("r2"),
-        courseName: "Nine Pines (unrated)",
-        tee: "no-card",
-        holes: 18 as const,
-        par: 72,
-        courseHandicap: 20,
-        ags: 100, // unrated — no differential
-        distribution: { eagles: 0, birdies: 1, pars: 8, bogeys: 6, doublePlus: 3 },
-        finalizedAtMs: 2_000,
-      },
-      {
-        roundId: roundId("r3"),
-        courseName: "Casa Verde GC",
-        tee: "white",
-        holes: 18 as const,
-        par: 72,
-        courseHandicap: 8,
-        // no ags, no differential — an incomplete card
-        distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
-        finalizedAtMs: 3_000,
-      },
+      line("r1", 1_000, { ags: 110, differential: 20.0 }),
+      line("r2", 2_000, { ags: 111, differential: 21.0 }),
+      line("r3", 3_000, { ags: 75, differential: 3.0 }), // one of the two lowest rated differentials
+      { ...line("r4", 4_000, { ags: 97 }), courseName: "Nine Pines (unrated)", tee: "no-card", courseHandicap: 20 }, // unrated — no differential
+      line("r5", 5_000, { ags: 112, differential: 22.0 }),
+      line("r6", 6_000, { ags: 76, differential: 3.05 }), // the OTHER lowest — raw, non-tenth: pins the wire rounding below
+      line("r7", 7_000, { ags: 113, differential: 23.0 }),
+      { ...line("r8", 8_000, {}), distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 } }, // incomplete — no ags, no differential
     ];
-    for (const line of stored) await ctx.projectionStore.putLine(golfer.golferId, line);
+    for (const l of stored) await ctx.projectionStore.putLine(golfer.golferId, l);
 
     const record = await ctx.record({ sub: "sub-1" });
 
-    // The oracle: golferMetrics over the SAME lines, sorted oldest -> newest (getMyRecord's own
-    // sortLines contract), the identical fold getMyRecord itself runs.
+    // The oracle: golferMetrics over the SAME (raw) lines, sorted oldest -> newest — the
+    // identical fold getMyRecord itself runs (its own sortLines contract).
     const sortedOldestFirst = [...stored].sort((a, b) => a.finalizedAtMs - b.finalizedAtMs);
     const expected = golferMetrics(sortedOldestFirst);
-    expect(record.metrics.distribution).toEqual(expected.distribution);
-    expect(record.metrics.trend).toEqual(expected.trend);
-    expect(record.metrics.distribution).toEqual({ eagles: 1, birdies: 3, pars: 18, bogeys: 10, doublePlus: 4 });
-    expect(record.metrics.trend).toEqual([9.0]);
+    expect(record.metrics.typicalEighteen).toEqual(expected.typicalEighteen);
+    expect(record.metrics.indexHistory).toEqual(expected.indexHistory);
+
+    // The headline still agrees with the RAW-line oracle: best-2-of-6 rated differentials are
+    // {3.0, 3.05} (avg 3.025, adjustment -1.0) -> whsIndex 2.0; best-2-of-7 ags-bearing entries
+    // are the same pair (adjustment 0) -> swngIndex 3.0. Folding the POSTED pair {3.0, 3.1}
+    // instead would land on 2.1 / 3.0->3.1 respectively — a materially different number.
+    expect(record.metrics.whsIndex).toEqual({ ...expected.whsIndex, value: 2.0, differentialsUsed: 2, computedAtMs: FROZEN_NOW });
+    expect(record.metrics.swngIndex).toEqual({ ...expected.swngIndex, value: 3.0, differentialsUsed: 2 });
+
+    // The wire differential is the POSTED (0.1) value, never the raw float: r6's raw 3.05 posts
+    // as 3.1 (postedDifferential's own ".05 rounds up" rule), while r3's raw 3.0 is already a
+    // tenth and posts unchanged — yet the headline above used the RAW 3.0/3.05, not 3.0/3.1.
+    expect(record.history.find((l) => l.roundId === roundId("r6"))?.differential).toBe(postedDifferential(3.05));
+    expect(record.history.find((l) => l.roundId === roundId("r6"))?.differential).toBe(3.1);
+    expect(record.history.find((l) => l.roundId === roundId("r3"))?.differential).toBe(3.0);
   });
 });
 

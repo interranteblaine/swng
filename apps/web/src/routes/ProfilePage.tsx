@@ -46,19 +46,20 @@ function IndexOverTime({
 
   // The SAME point index maps to the same x whichever series it belongs to, so the two lines
   // stay comparable; a LOWER index sits LOWER on screen (improving play trends the line down).
-  const coordsFor = (key: "swngIndex" | "whsIndex") =>
+  const pointsFor = (key: "swngIndex" | "whsIndex"): readonly { readonly x: number; readonly y: number }[] =>
     points
       .map((point, i) => ({ i, value: point[key] }))
       .filter((entry): entry is { i: number; value: number } => entry.value !== undefined)
-      .map(({ i, value }) => {
-        const x = n <= 1 ? 0 : (i / (n - 1)) * width;
-        const y = max === min ? height / 2 : height - ((value - min) / (max - min)) * height;
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(" ");
+      .map(({ i, value }) => ({
+        x: n <= 1 ? 0 : (i / (n - 1)) * width,
+        y: max === min ? height / 2 : height - ((value - min) / (max - min)) * height,
+      }));
+  const asLine = (pts: readonly { readonly x: number; readonly y: number }[]) => pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
 
-  const swngLine = coordsFor("swngIndex");
-  const whsLine = coordsFor("whsIndex");
+  const swngPts = pointsFor("swngIndex");
+  const whsPts = pointsFor("whsIndex");
+  const swngLine = asLine(swngPts);
+  const whsLine = asLine(whsPts);
   const latestSwng = [...points].reverse().find((point) => point.swngIndex !== undefined)?.swngIndex;
   const latestWhs = [...points].reverse().find((point) => point.whsIndex !== undefined)?.whsIndex;
 
@@ -98,6 +99,14 @@ function IndexOverTime({
             className="text-slate-400"
           />
         )}
+        {/* Per-round markers (● swng filled, ○ WHS hollow) so a single-vertex series stays visible:
+            a lone point — e.g. one rated round among unrated play — draws no line, but its dot shows. */}
+        {swngPts.map((p, i) => (
+          <circle key={`s${i}`} data-testid="index-dot-swng" cx={p.x} cy={p.y} r={2.5} fill="currentColor" className="text-emerald-400" />
+        ))}
+        {whsPts.map((p, i) => (
+          <circle key={`w${i}`} data-testid="index-dot-whs" cx={p.x} cy={p.y} r={2.5} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-slate-400" />
+        ))}
       </svg>
       <p className="text-sm text-slate-300">
         swng {latestSwng !== undefined ? formatHandicapIndex(latestSwng) : "—"} · WHS {latestWhs !== undefined ? formatHandicapIndex(latestWhs) : "—"}

@@ -259,6 +259,34 @@ describe("ProfilePage — signed in", () => {
     expect(vertexCount(screen.getByTestId("index-line-whs"))).toBe(7); // 10 minus the 3 unrated rounds
   });
 
+  // A single WHS vertex (a golfer with 8+ rounds but only ONE rated) draws no line — a lone point
+  // has no segment — so the redesign must still render its MARKER, or a real WHS value shows nothing.
+  it("a lone WHS point (one rated round among unrated play) still renders a visible WHS marker", async () => {
+    signIn();
+    const history: GolferRoundLine[] = Array.from({ length: 8 }, (_, i) => lineWithDifferential(String(i + 1), 10 + i));
+    const indexHistory: GetMyRecordResponse["metrics"]["indexHistory"] = history.map((line, i) => ({
+      roundId: line.roundId,
+      swngIndex: 12 - i * 0.2,
+      ...(i === 4 ? { whsIndex: 11.3 } : {}), // exactly one rated round → the WHS series is a single point
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras, indexHistory }, history });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    await waitFor(() => expect(screen.getByTestId("index-chart")).toBeTruthy());
+    expect(screen.queryAllByTestId("index-dot-whs")).toHaveLength(1); // the lone rated round's mark IS drawn
+    expect(screen.queryAllByTestId("index-dot-swng")).toHaveLength(8); // swng has every round
+  });
+
   // "Your typical 18" — the career scoring shape (metrics.typicalEighteen), always present
   // (zeroed rather than absent below any bootstrap).
   it("renders the typical-18 line from metrics.typicalEighteen", async () => {

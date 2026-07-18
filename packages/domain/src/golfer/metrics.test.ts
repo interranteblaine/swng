@@ -142,26 +142,27 @@ describe("golferMetrics — indexHistory (the rolling swng + WHS index, recomput
     expect(history).toHaveLength(lines.length);
     lines.forEach((l, k) => {
       const prefixMetrics = golferMetrics(lines.slice(0, k + 1));
-      expect(history[k].roundId).toBe(l.roundId);
-      expect(history[k].swngIndex).toEqual(prefixMetrics.swngIndex?.value);
-      expect(history[k].whsIndex).toEqual(prefixMetrics.whsIndex?.value);
+      const point = history[k]!; // length asserted above; k is in range
+      expect(point.roundId).toBe(l.roundId);
+      expect(point.swngIndex).toEqual(prefixMetrics.swngIndex?.value);
+      expect(point.whsIndex).toEqual(prefixMetrics.whsIndex?.value);
     });
   });
 
   it("before any rated round exists, whsIndex is absent but swngIndex is present once bootstrapped (3rd unrated round)", () => {
     const history = golferMetrics(lines).indexHistory;
-    expect(history[0].swngIndex).toBeUndefined(); // only 1 ags-bearing line — below the 3-line bootstrap
-    expect(history[1].swngIndex).toBeUndefined(); // only 2
-    expect(history[2].swngIndex).toBeDefined(); // 3rd unrated round: swng bootstraps
-    expect(history[2].whsIndex).toBeUndefined(); // no rated round has happened yet
+    expect(history[0]!.swngIndex).toBeUndefined(); // only 1 ags-bearing line — below the 3-line bootstrap
+    expect(history[1]!.swngIndex).toBeUndefined(); // only 2
+    expect(history[2]!.swngIndex).toBeDefined(); // 3rd unrated round: swng bootstraps
+    expect(history[2]!.whsIndex).toBeUndefined(); // no rated round has happened yet
   });
 
   it("an unrated round in the middle of rated play holds whsIndex flat (equal to the prior point) while swngIndex keeps moving", () => {
     const history = golferMetrics(lines).indexHistory;
     // k=5 is the 3rd rated round (whs bootstraps); k=6 is the mid-sequence unrated round.
-    expect(history[5].whsIndex).toBeDefined();
-    expect(history[6].whsIndex).toEqual(history[5].whsIndex); // flat — the unrated round can't move it
-    expect(history[6].swngIndex).not.toEqual(history[5].swngIndex); // swng DID move — it folds every ags line
+    expect(history[5]!.whsIndex).toBeDefined();
+    expect(history[6]!.whsIndex).toEqual(history[5]!.whsIndex); // flat — the unrated round can't move it
+    expect(history[6]!.swngIndex).not.toEqual(history[5]!.swngIndex); // swng DID move — it folds every ags line
   });
 
   it("every present value is rounded to one decimal (no long floats)", () => {

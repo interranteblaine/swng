@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import type { GetMyRecordResponse } from "@swng/contracts";
+import { postedDifferential } from "@swng/domain";
 import type { CourseCard, RoundId } from "@swng/domain";
 import {
   createScoreOps,
@@ -156,9 +157,13 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     // PINNED_DIFFERENTIALS reversed. Derived from the pinned constant rather than re-typed
     // literals, so a future re-ordering of the play sequence fails this assertion loudly
     // instead of silently passing a stale expectation.
+    // The WIRE serves the POSTED differential — one decimal (record-redesign arc 2026-07-18): a
+    // golfer's record reads 9.2, not the raw 9.18125. The index still folds the RAW full-precision
+    // lines (PINNED_INDEX below is unchanged), so only the DISPLAYED value rounds — assert the exact
+    // posted value via the domain's own postedDifferential, not the raw pin.
     const expectedNewestFirst = [PINNED_DIFFERENTIALS[2], PINNED_DIFFERENTIALS[1], PINNED_DIFFERENTIALS[0]];
     for (const [i, value] of record.history.map((line) => line.differential).entries()) {
-      expect(value, `history[${i}].differential`).toBeCloseTo(expectedNewestFirst[i]!, 6);
+      expect(value, `history[${i}].differential`).toBeCloseTo(postedDifferential(expectedNewestFirst[i]!), 6);
     }
 
     // Round 3 finalized last -> newest -> history[0]; round 1 first -> oldest -> history[2].

@@ -597,11 +597,17 @@ wire unchanged): `validate` exit 0 → `deploy:beta` LAMBDA-FIRST (`swng-beta` U
 `publish:web:beta` (bundle `index-Cch4tjcy.js`, CF invalidation `I6UVS2YVBIIR0M3GTWHYCUITJ`, served
 live at beta.swng.golf) → `e2e:beta` 16/16 ×2 → `e2e:field` 57 passed / 1 documented-skip (all 8
 specs; `identityRecord` proves the required-metrics wire parses live on the new lambda+bundle,
-`courseEntry` proves net=gross−dots renders, `fieldTest` proves live standings). The interactive
-visual browser walk (the trend SVG + distribution bars painting for a golfer with history) is the one
-close-out step no browser-automation tool was connected to drive; its substance is covered by the
-live e2e (the metrics wire) + `ProfilePage` unit render tests + the byte-identical review, and the
-DOM is unchanged. Accumulated Minors all ride-as-note (dup zero-distribution literal, a now-sharper
+`courseEntry` proves net=gross−dots renders, `fieldTest` proves live standings) → a controller
+browser walk on the DEPLOYED `beta.swng.golf` (real Hosted-UI PKCE sign-in, get-or-create minting
+"Golfer 9694" — proving the required-`metrics` `GET /me/record` parses; Profile's served
+"Scoring distribution" list renders zeros with no crash and the "Your index" sources show; a live
+Casa Verde GC round showing CH 9's ● dots on exactly the nine hardest holes, the "Stableford … 2 pts
+thru 1" chip, net "●54" on a scored 1-dot hole, and the finalize dialog's
+"Stableford — holes 1–2, 4–18 unscored" readiness line — T1/T2/T3/T4/T5 all live; console clean but
+for the two pre-existing papercut-18 auth transients; round scrapped, throwaway Cognito user deleted).
+Only the trend SVG + non-zero distribution bars (which need ≥2 rated finalized rounds) were left to
+the `ProfilePage` unit render tests + the byte-identical review rather than hand-built live; the DOM
+is unchanged. Accumulated Minors all ride-as-note (dup zero-distribution literal, a now-sharper
 `RoundPage` comment, the banlist-not-allowlist fence form, and `unresolvedGames` now throwing on an
 unknown game kind exactly as `settleRound` always has — unreachable with the five known kinds). On
 local `main`, never pushed.

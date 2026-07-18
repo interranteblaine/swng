@@ -1,4 +1,7 @@
+import type { IndexComputation } from "../handicap/whs.js";
 import { combineNineHoleDifferentials, computeIndexDetail, swngIndex } from "../handicap/whs.js";
+import type { RoundId } from "../ids.js";
+import { roundHalfUp } from "../scoring/strokes.js";
 import type { GolferRoundLine } from "./record.js";
 import type { IndexSource } from "./golfer.js";
 
@@ -8,10 +11,9 @@ export interface IndexMetric {
   readonly differentialsUsed: number;
 }
 
-// A career scoring profile: par-relative hole buckets, summed across every round line (papercut
-// 17 — the same shape GolferRoundLine.distribution already carries per round; this is a sum, not
-// a recomputation from cells).
-export interface ScoringDistribution {
+// A scoring profile shaped like GolferRoundLine.distribution — used both per-round (there) and
+// as a normalized career rate here (typicalEighteen).
+export interface ScoringShape {
   readonly eagles: number;
   readonly birdies: number;
   readonly pars: number;
@@ -19,35 +21,53 @@ export interface ScoringDistribution {
   readonly doublePlus: number;
 }
 
-const zeroDistribution: ScoringDistribution = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
+const ZERO_SHAPE: ScoringShape = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
 
-// The metrics projection (handicap-model legibility spec §2, §9; unrated-courses spec §6): a
-// read over the golfer's round lines producing every derived index in one place. `whsIndex` is
-// Rule 5.2a over RATED differentials only (the existing `differential !== undefined` filter —
-// unrated rounds carry none, so they cannot reach it); `swngIndex` is the WHS fold EXTENDED to
-// unrated rounds — real `differential` when rated, `ags − par` only when unrated — over every
-// ags-bearing round, so a rated-only golfer's swngIndex equals their whsIndex exactly.
-// `distribution` and `trend` (papercut 17) are REQUIRED — always present, zeros/`[]` when there's
-// no data, unlike the optional index members above which stay absent below their own bootstrap.
-// `distribution` is a career total (every line, rated or unrated); `trend` is the posted
-// (rated) differentials, oldest → newest (the order `lines` itself arrives in — getMyRecord's own
-// sortLines contract), capped at the newest 20. Grows to N members when a surface needs them —
-// adding a metric is adding a field here, not carving a new pathway. Read-time only, never
-// stored: the fold is pure (no clock); the application stamps time on the wire.
+// One point on "your index over time": the golfer's index AS OF this round — recomputed from the
+// rounds up to and including it. swngIndex covers every round; whsIndex holds flat across unrated
+// rounds and is absent only before any rated round exists. Both 0.1 (the engines round).
+export interface IndexPoint {
+  readonly roundId: RoundId;
+  readonly swngIndex?: number;
+  readonly whsIndex?: number;
+}
+
+// The metrics projection (handicap-model legibility spec §2, §9; unrated-courses spec §6;
+// papercut 17 — the record grows to a rolling chart): a read over the golfer's round lines
+// producing every derived index in one place. `whsIndex` is Rule 5.2a over RATED differentials
+// only (the existing `differential !== undefined` filter — unrated rounds carry none, so they
+// cannot reach it); `swngIndex` is the WHS fold EXTENDED to unrated rounds — real `differential`
+// when rated, `ags − par` only when unrated — over every ags-bearing round, so a rated-only
+// golfer's swngIndex equals their whsIndex exactly. `typicalEighteen` and `indexHistory` are
+// REQUIRED — always present, zeros/`[]` when there's no data, unlike the optional index members
+// above which stay absent below their own bootstrap. `typicalEighteen` is the career scoring
+// buckets (every line, rated or unrated) normalized to a per-18-hole rate, so a golfer who plays
+// mostly 9s isn't shown a deflated total. `indexHistory` is "your index over time" — one point
+// per round, oldest → newest (the order `lines` itself arrives in — getMyRecord's own sortLines
+// contract), each recomputed from every line up to and including it; the headline whsIndex/
+// swngIndex above is exactly `indexHistory`'s own last point. Grows to N members when a surface
+// needs them — adding a metric is adding a field here, not carving a new pathway. Read-time only,
+// never stored: the fold is pure (no clock); the application stamps time on the wire.
 export interface GolferMetrics {
   readonly whsIndex?: IndexMetric;
   readonly swngIndex?: IndexMetric;
-  readonly distribution: ScoringDistribution;
-  readonly trend: readonly number[];
+  readonly typicalEighteen: ScoringShape; // per-18 rate (zeros when no decided holes)
+  readonly indexHistory: readonly IndexPoint[]; // oldest → newest
 }
 
-export const golferMetrics = (lines: readonly GolferRoundLine[]): GolferMetrics => {
+// The current whs + swng index detail from a set of lines — ONE fold, reused by the headline
+// (all lines) and by each indexHistory prefix, so the WHS/swng math is never written twice.
+const detailsOf = (lines: readonly GolferRoundLine[]): { whs?: IndexComputation; swng?: IndexComputation } => {
   const rated = lines.filter((line) => line.differential !== undefined);
   const whs = computeIndexDetail(
     combineNineHoleDifferentials(rated.map((line) => ({ differential: line.differential!, holes: line.holes }))),
   );
   const swng = swngIndex(lines);
-  const distribution = lines.reduce<ScoringDistribution>(
+  return { ...(whs !== undefined ? { whs } : {}), ...(swng !== undefined ? { swng } : {}) };
+};
+
+const typicalEighteenOf = (lines: readonly GolferRoundLine[]): ScoringShape => {
+  const t = lines.reduce(
     (acc, l) => ({
       eagles: acc.eagles + l.distribution.eagles,
       birdies: acc.birdies + l.distribution.birdies,
@@ -55,13 +75,35 @@ export const golferMetrics = (lines: readonly GolferRoundLine[]): GolferMetrics 
       bogeys: acc.bogeys + l.distribution.bogeys,
       doublePlus: acc.doublePlus + l.distribution.doublePlus,
     }),
-    zeroDistribution,
+    ZERO_SHAPE,
   );
+  const holes = t.eagles + t.birdies + t.pars + t.bogeys + t.doublePlus;
+  if (holes === 0) return ZERO_SHAPE;
+  const per18 = (n: number) => roundHalfUp((n / holes) * 18);
+  return {
+    eagles: per18(t.eagles),
+    birdies: per18(t.birdies),
+    pars: per18(t.pars),
+    bogeys: per18(t.bogeys),
+    doublePlus: per18(t.doublePlus),
+  };
+};
+
+export const golferMetrics = (lines: readonly GolferRoundLine[]): GolferMetrics => {
+  const { whs, swng } = detailsOf(lines);
+  const indexHistory: readonly IndexPoint[] = lines.map((line, k) => {
+    const d = detailsOf(lines.slice(0, k + 1));
+    return {
+      roundId: line.roundId,
+      ...(d.swng !== undefined ? { swngIndex: d.swng.value } : {}),
+      ...(d.whs !== undefined ? { whsIndex: d.whs.value } : {}),
+    };
+  });
   return {
     ...(whs !== undefined ? { whsIndex: { value: whs.value, differentialsUsed: whs.differentialsUsed } } : {}),
     ...(swng !== undefined ? { swngIndex: { value: swng.value, differentialsUsed: swng.differentialsUsed } } : {}),
-    distribution,
-    trend: rated.map((line) => line.differential!).slice(-20),
+    typicalEighteen: typicalEighteenOf(lines),
+    indexHistory,
   };
 };
 

@@ -11,6 +11,7 @@ import {
   computeIndexDetail,
   courseHandicapFor,
   courseHandicapFromRatingSlopePar,
+  postedDifferential,
   scoreDifferential,
   swngIndex,
   unratedCourseHandicap,
@@ -70,6 +71,18 @@ describe("scoreDifferential — published worked examples", () => {
     const unrated: TeeSet = { name: "unrated", holes: [] };
     expect(() => scoreDifferential(unrated, 47)).toThrowError(DomainError);
     expect(() => scoreDifferential(unrated, 47)).toThrowError(expect.objectContaining({ code: "tee-unrated" }));
+  });
+});
+
+describe("postedDifferential — the 0.1-rounded DISPLAY value (scoreDifferential itself stays unrounded)", () => {
+  it("rounds a long-float differential to one decimal, half-up", () => {
+    expect(postedDifferential(23.563565891472873)).toBe(23.6);
+    expect(postedDifferential(0.7883720930232608)).toBe(0.8);
+    expect(postedDifferential(8.672093023255819)).toBe(8.7);
+  });
+
+  it("rounds a minus differential toward zero at .05, matching roundHalfUp elsewhere in this file", () => {
+    expect(postedDifferential(-1.25)).toBe(-1.2);
   });
 });
 

@@ -39,6 +39,11 @@ export const scoreDifferential = (teeSet: TeeSet, ags: number): number => {
   return (113 / teeSet.slope) * (ags - teeSet.rating);
 };
 
+// A posted Score Differential is a one-decimal value — a golfer's record reads 23.6, not the raw
+// full-precision figure the index averages internally (scoreDifferential stays unrounded on purpose;
+// see its comment). Round only where the differential is SHOWN, never before it feeds the index.
+export const postedDifferential = (differential: number): number => roundHalfUp(differential * 10) / 10;
+
 // Rule 5.2a's small-sample table, verbatim (row = "records of up to maxCount
 // scores use the lowest `use`, then add `adjustment`"). The negative adjustments
 // exist because a 3–6 score sample overrepresents best play; from 7 up the table

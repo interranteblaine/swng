@@ -553,6 +553,59 @@ roster `CH +2`; console clean, zero CSP violations; throwaway user deleted (the 
 give-back is unit-verified with a domain cross-check, not staged live — it needs a two-player
 give-back game). On local `main`, never pushed.
 
+The domain boundary is restored — golf logic lives in `@swng/domain`, the web renders
+(post-plus-handicap, 2026-07-18, spec
+`docs/superpowers/specs/2026-07-18-restore-domain-boundary-design.md`, plan
+`2026-07-18-restore-domain-boundary.md`, 7 tasks + one review-caught fix, commits
+`e873642..ac880ea`): NOT a feature and NOT "papercut 17" — a correction to a broken architecture
+boundary. The layering lint only ever checked import *direction* (the web MAY import the domain),
+never whether a React view *re-derived* a golf result inline, so across milestones golf math leaked
+into `apps/web`: the profile hand-computed your scoring distribution + index trend, `describeGame`
+re-summed par/leaders/skins-carry, the scorecard computed net, the finalize dialog re-mirrored
+`settleRound`'s must-resolve set, two pages hand-rolled the unrated course-handicap estimate, and
+the watch/archived screens reached past `@swng/client` straight into `@swng/domain`'s
+`reduceRound`/`scoreGame`. The invariant restored: **golf logic is ONE tested copy in
+`@swng/domain`; the server runs it behind the API for reads + finalize; the web runs it on-device
+for the offline round ONLY through `@swng/client` (the one sanctioned client-side compute seam);
+`apps/web` renders and computes no golf result — enforced by construction, an ESLint fence.** Ten
+leaks moved, byte-identical (relocation, never recomputation — the field oracle decks are the
+backstop). T1: `golferMetrics` grew `distribution` + `trend` (required), served on `GET /me/record`,
+rendered by `ProfilePage` (papercut 17 absorbed — the ONLY wire change, so the deploy is
+lambda-first). T2: the scored `GameState` carries `relativeToPar` (a LIVE-scored line only),
+game-level `leaders` (stroke/stableford), and skins `holesDecided`, so `describeGame` is pure
+formatting — a review caught that `relativeToPar` had ridden the shared `StrokePlayLine` into the
+SETTLED `GameResult`'s wire schema (a required field old snapshots lack → a finalize-replay parse
+throw, violating tolerate-old-data); fixed by decoupling `ScoredStrokePlayLine` from the lean
+settled line (`resultOf` strips it) so the **settlement wire is byte-unchanged** (`round.ts` net-zero
+across the arc). T3: finalize-readiness is a domain `unresolvedGames(state)` sharing ONE
+`mustResolve`/`resolvedResultOf` predicate with `settleRound` (a reuse-proof test pins that it names
+exactly the game settle throws on); the web is a thin formatter. T4: `netStrokes`, `totalDots`,
+`unratedCourseHandicap`, and `gameMembers` (deduping the web's line-identical `gamePlayers`) become
+domain functions. T5: `@swng/client` gains `foldAndScore` (the read-only cousin of `RoundSession`'s
+live fold, reusing the ONE shared `KNOWN_GAME_KINDS`) + re-exports the on-device round-compute; nine
+web files re-point off `@swng/domain`; an ESLint fence
+(`@typescript-eslint/no-restricted-imports` on `apps/web/src`, `allowTypeImports`, a banlist over
+every barrel-exported golf-compute name — presentation formatters, id constructors, pure accessors
+`cellKey`/`findTeeSet`/`gameMembers`, and all `import type` stay allowed) fails `pnpm lint` on any
+future direct-compute leak (proven biting; layering rule coexists). T6: the boundary is written down
+in `architecture.md` ("Where golf logic lives") + `engineering-conventions.md`. T7: e2e
+reconciliation was zero-diff (no spec asserts a changed number/DOM; typecheck green). Each task
+independently reviewed; whole-branch review "READY TO DEPLOY — YES" (0 Critical/0 Important — boundary
+whole, fence comprehensive, every moved number hand-verified byte-identical, no two-copy drift).
+Close-out (controller-run, **NO data wipe** — analytics compute-on-read from existing lines, settlement
+wire unchanged): `validate` exit 0 → `deploy:beta` LAMBDA-FIRST (`swng-beta` UPDATE 52.75s) →
+`publish:web:beta` (bundle `index-Cch4tjcy.js`, CF invalidation `I6UVS2YVBIIR0M3GTWHYCUITJ`, served
+live at beta.swng.golf) → `e2e:beta` 16/16 ×2 → `e2e:field` 57 passed / 1 documented-skip (all 8
+specs; `identityRecord` proves the required-metrics wire parses live on the new lambda+bundle,
+`courseEntry` proves net=gross−dots renders, `fieldTest` proves live standings). The interactive
+visual browser walk (the trend SVG + distribution bars painting for a golfer with history) is the one
+close-out step no browser-automation tool was connected to drive; its substance is covered by the
+live e2e (the metrics wire) + `ProfilePage` unit render tests + the byte-identical review, and the
+DOM is unchanged. Accumulated Minors all ride-as-note (dup zero-distribution literal, a now-sharper
+`RoundPage` comment, the banlist-not-allowlist fence form, and `unresolvedGames` now throwing on an
+unknown game kind exactly as `settleRound` always has — unreachable with the five known kinds). On
+local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

@@ -19,11 +19,14 @@ describe("resultOf", () => {
       [B]: [5, 4, 4, 5, 4, 4, 4, 6, 5],
     });
     const result = resultOf(state!);
+    // Settlement strips the live-only relativeToPar (game.ts's ScoredStrokePlayLine doc
+    // comment) — mirror that stripping here rather than comparing against the raw state lines.
+    const liveLines = (state as { lines: readonly { relativeToPar: number }[] }).lines;
     expect(result).toEqual({
       kind: "stroke-play",
       id: gameId("g1"),
       scoring: "gross",
-      lines: (state as { lines: unknown }).lines,
+      lines: liveLines.map(({ relativeToPar: _relativeToPar, ...line }) => line),
     });
   });
 

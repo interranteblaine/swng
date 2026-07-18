@@ -35,11 +35,18 @@ export interface StrokePlayLine {
   readonly thru: number;
   readonly gross: RunningTotal;
   readonly net?: RunningTotal;
+}
+
+// The live-scored stroke-play line: StrokePlayLine plus a mid-round "thru N, +3" progress
+// figure. This stays OFF the settled StrokePlayLine/GameResult on purpose — relativeToPar is
+// a live-standings concern, not a fact of a sealed settlement, and the settled line must stay
+// lean so old stored snapshots (no relativeToPar) keep parsing (tolerate-old-data invariant).
+export type ScoredStrokePlayLine = StrokePlayLine & {
   // Scored total (net when the game is net-scored, else gross) minus par over the first
   // `thru` holes of the player's own tee — golf's own vs-par notation. Computed here so
   // describeGame (and any other view) never re-derives it from the course card.
   readonly relativeToPar: number;
-}
+};
 
 export interface StablefordLine {
   readonly golferId: GolferId;
@@ -64,7 +71,7 @@ export type GameState =
       readonly kind: "stroke-play";
       readonly id: GameId;
       readonly scoring: "gross" | "net";
-      readonly lines: readonly StrokePlayLine[];
+      readonly lines: readonly ScoredStrokePlayLine[];
       readonly complete: boolean;
       // The golferId(s) at the lowest total (net when net-scored, else gross), ties included —
       // plural because medal play (unlike match play's single opponent) can tie for the lead.

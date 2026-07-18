@@ -171,7 +171,6 @@ const strokePlayLineSchema = z.object({
   thru: z.number(),
   gross: runningTotalSchema,
   net: runningTotalSchema.optional(),
-  relativeToPar: z.number(),
 });
 
 const matchOutcomeSchema = z.union([z.object({ winner: golferIdSchema, closing: z.string() }), z.object({ halved: z.literal(true) })]);

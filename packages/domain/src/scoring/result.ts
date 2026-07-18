@@ -25,7 +25,11 @@ export type GameResult =
 export const resultOf = (state: GameState): GameResult | undefined => {
   switch (state.kind) {
     case "stroke-play":
-      return state.complete ? { kind: state.kind, id: state.id, scoring: state.scoring, lines: state.lines } : undefined;
+      // Settlement strips the live-only relativeToPar — the settled StrokePlayLine stays lean
+      // (see game.ts's ScoredStrokePlayLine doc comment).
+      return state.complete
+        ? { kind: state.kind, id: state.id, scoring: state.scoring, lines: state.lines.map(({ relativeToPar: _relativeToPar, ...line }) => line) }
+        : undefined;
     case "singles-match":
       return state.outcome ? { kind: state.kind, id: state.id, outcome: state.outcome, thru: state.thru } : undefined;
     case "stableford":

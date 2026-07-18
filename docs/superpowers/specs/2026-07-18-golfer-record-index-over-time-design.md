@@ -89,9 +89,8 @@ metrics: {
   whsIndex?:  { value; computedAtMs; differentialsUsed };   // unchanged
   swngIndex?: { value; differentialsUsed };                 // unchanged
   typicalEighteen: { eagles; birdies; pars; bogeys; doublePlus };  // per-18, required
-  indexHistory: readonly {                                   // oldest→newest, required ([] if none)
+  indexHistory: readonly {                                   // oldest→newest (round sequence IS the x-axis; no calendar date), required ([] if none)
     readonly roundId: RoundId;
-    readonly finalizedAtMs: number;
     readonly swngIndex?: number;   // swng index as of this round (rounded 0.1); absent only if no ags-bearing round in the prefix
     readonly whsIndex?: number;    // WHS index as of this round (rounded 0.1); holds flat across unrated rounds; absent only before any rated round exists
   }[];

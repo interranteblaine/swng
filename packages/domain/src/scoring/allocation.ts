@@ -69,6 +69,11 @@ export const gameStrokeAllocation = (
   }
 };
 
+// dotsByHole's allocation always sums exactly to its input strokes value (allocateStrokes' own
+// documented invariant, strokes.ts) — summing here is safe rather than re-deriving a parallel
+// "total dots" formula that could drift from the per-hole one above.
+export const totalDots = (perHole: ReadonlyMap<number, number>): number => [...perHole.values()].reduce((sum, dots) => sum + dots, 0);
+
 // A differential can only be posted once every tee-set hole has decided (a stroke count, a
 // pickup, or a concession — adjustedGrossScore's own rule). Mid-round, or for a golfer who
 // never finished, that's not an error — it's the ordinary "incomplete" case a v1 crew hits

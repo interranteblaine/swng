@@ -13,6 +13,7 @@ import {
   courseHandicapFromRatingSlopePar,
   scoreDifferential,
   swngIndex,
+  unratedCourseHandicap,
 } from "./whs.js";
 
 // Every conformance case below is pinned to a published USGA/R&A source, per the
@@ -217,6 +218,37 @@ describe("courseHandicapFor", () => {
     for (const index of [-2.0, 0, 7.0, 12.4, 24.8]) {
       expect(courseHandicapFor(index, fixtureWhite)).toBe(courseHandicapFromRatingSlopePar(index, fixtureWhite.rating!, fixtureWhite.slope!, par));
     }
+  });
+});
+
+describe("unratedCourseHandicap — the unrated estimate (handicap-model legibility spec §4)", () => {
+  it("18 holes: round(index), plain Math.round", () => {
+    expect(unratedCourseHandicap(12.4, 18)).toBe(Math.round(12.4));
+    expect(unratedCourseHandicap(12.4, 18)).toBe(12);
+  });
+
+  it("9 holes: round(index / 2)", () => {
+    expect(unratedCourseHandicap(12.4, 9)).toBe(Math.round(12.4 / 2));
+    expect(unratedCourseHandicap(12.4, 9)).toBe(6);
+  });
+
+  // A plus index (below 0, "golf-truth" already owned by the domain per present.ts) walks
+  // both branches too — the estimate has no special-case for a negative index.
+  it("a plus index (negative), both branches", () => {
+    expect(unratedCourseHandicap(-1.2, 18)).toBe(Math.round(-1.2));
+    expect(unratedCourseHandicap(-1.2, 18)).toBe(-1);
+    expect(unratedCourseHandicap(-1.2, 9)).toBe(Math.round(-1.2 / 2));
+    expect(unratedCourseHandicap(-1.2, 9)).toBe(-1);
+  });
+
+  // Preserve Math.round's exact half-rounding (JS rounds .5 toward +Infinity, unlike
+  // roundHalfUp elsewhere in this file which rounds minus-.5 toward zero) — a regression
+  // here would silently change a live-shipped estimate.
+  it("preserves plain Math.round's half-rounding exactly, including at .5 boundaries", () => {
+    expect(unratedCourseHandicap(2.5, 18)).toBe(3); // Math.round(2.5) === 3
+    expect(unratedCourseHandicap(-2.5, 18)).toBe(-2); // Math.round(-2.5) === -2
+    expect(unratedCourseHandicap(5.0, 9)).toBe(3); // round(5.0 / 2) = round(2.5) = 3
+    expect(unratedCourseHandicap(-5.0, 9)).toBe(-2); // round(-5.0 / 2) = round(-2.5) = -2
   });
 });
 

@@ -11,7 +11,7 @@ import { fieldDeck18 } from "./golden/fieldDeck18.js";
 import { fixtureLinks, fixtureLinks18, fixtureWhite } from "./golden/fixtureCourse.js";
 import { playGoldenRoundLog } from "./golden/deck.js";
 import type { FixtureScores } from "./golden/deck.js";
-import { gameStrokeAllocation, handicappingFor } from "./allocation.js";
+import { gameStrokeAllocation, handicappingFor, totalDots } from "./allocation.js";
 import type { GameConfig } from "./game.js";
 
 // The M5 field deck: fourball 90%-allowance playing handicaps 7/2/14/5 give relative
@@ -80,6 +80,27 @@ describe("gameStrokeAllocation", () => {
     };
     const allocation = gameStrokeAllocation(grossStrokePlay, players, fixtureLinks18);
     expect(allocation).toEqual(new Map());
+  });
+});
+
+describe("totalDots", () => {
+  it("sums a per-hole allocation to the total strokes it was built from", () => {
+    const perHole = dotsByHole(11, whiteTeeSet); // 18 holes: 11 wraps to 1 everywhere + extra on SI 1-11 — sums back to 11
+    expect(totalDots(perHole)).toBe(11);
+  });
+  it("sums to zero for an empty allocation (e.g. gross stroke-play)", () => {
+    expect(totalDots(new Map())).toBe(0);
+  });
+  it("sums a plus-handicap (negative) allocation back to the negative total", () => {
+    const perHole = dotsByHole(-4, whiteTeeSet);
+    expect(totalDots(perHole)).toBe(-4);
+  });
+  it("agrees with gameStrokeAllocation's own per-golfer allocation on the fourball fixture (5/0/12/3)", () => {
+    const allocation = gameStrokeAllocation(fourball, players, fixtureLinks18);
+    const expectedRelative: Readonly<Record<string, number>> = { [ann]: 5, [bo]: 0, [cal]: 12, [dee]: 3 };
+    for (const [id, relative] of Object.entries(expectedRelative)) {
+      expect(totalDots(allocation.get(golferId(id))!)).toBe(relative);
+    }
   });
 });
 

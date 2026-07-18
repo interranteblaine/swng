@@ -4,7 +4,7 @@ import { DomainError } from "../errors.js";
 import type { GameId, GolferId, RoundId } from "../ids.js";
 import { handicappingFor } from "../scoring/allocation.js";
 import type { GameConfig } from "../scoring/game.js";
-import { scoreGame } from "../scoring/game.js";
+import { gameMembers, scoreGame } from "../scoring/game.js";
 import type { GameResult } from "../scoring/result.js";
 import { resultOf } from "../scoring/result.js";
 import type { RosterEntry } from "./participant.js";
@@ -43,24 +43,6 @@ export interface RoundArchive {
     | { readonly golferId: GolferId; readonly kind: "incomplete" }
   )[];
 }
-
-// Every golferId a game config references — the union across all five kinds' player fields
-// (players[] for the medal family, a/b for singles, the two pairs for fourball). Used only
-// by the departure omission rule below, and unconditional on termination: a config still
-// "references" its players even if the game was later terminated. Exhaustive by kind — a new
-// game kind must add its own arm here (TS flags the missing return path).
-const gameMembers = (config: GameConfig): readonly GolferId[] => {
-  switch (config.kind) {
-    case "stroke-play":
-    case "stableford":
-    case "skins":
-      return config.players;
-    case "singles-match":
-      return [config.a, config.b];
-    case "fourball-match":
-      return [...config.a, ...config.b];
-  }
-};
 
 // The must-resolve set: every configured game except one explicitly terminated (a terminated
 // game is never waiting on a result that will never come — it stays in `state.games` for

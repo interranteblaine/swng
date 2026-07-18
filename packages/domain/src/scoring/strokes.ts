@@ -38,3 +38,9 @@ export const strokesReceivedOnHole = (strokes: number, teeSet: TeeSet, hole: num
 };
 
 export const netDoubleBogey = (par: number, strokesReceived: number): number => par + 2 + strokesReceived;
+
+// A cell's net score: gross minus the dots allocated on that hole. Correct for BOTH received
+// strokes (positive dots — net < gross, the ordinary case) and GIVEN strokes on a plus handicap
+// (negative dots — net = gross + |dots|, the give-back). Callers decide WHEN to show a net
+// (e.g. only where dots !== 0); this is only the arithmetic.
+export const netStrokes = (gross: number, dots: number): number => gross - dots;

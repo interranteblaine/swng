@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TeeSet } from "../course/card.js";
-import { allocateStrokes, dotsByHole, netDoubleBogey, roundHalfUp, strokesReceivedOnHole } from "./strokes.js";
+import { allocateStrokes, dotsByHole, netDoubleBogey, netStrokes, roundHalfUp, strokesReceivedOnHole } from "./strokes.js";
 
 // 9 holes; strokeIndex permutation [5,1,9,3,7,8,2,4,6]
 const nine: TeeSet = {
@@ -61,5 +61,19 @@ describe("strokesReceivedOnHole / netDoubleBogey", () => {
   it("caps a hole at par + 2 + strokes received", () => {
     expect(netDoubleBogey(5, 1)).toBe(8);
     expect(netDoubleBogey(4, 0)).toBe(6);
+  });
+});
+
+describe("netStrokes", () => {
+  it("positive dots (received strokes): net is less than gross", () => {
+    expect(netStrokes(5, 1)).toBe(4);
+    expect(netStrokes(6, 2)).toBe(4);
+  });
+  it("negative dots (a plus handicap giving strokes back): net is greater than gross", () => {
+    expect(netStrokes(5, -1)).toBe(6);
+    expect(netStrokes(4, -2)).toBe(6);
+  });
+  it("zero dots: net equals gross", () => {
+    expect(netStrokes(5, 0)).toBe(5);
   });
 });

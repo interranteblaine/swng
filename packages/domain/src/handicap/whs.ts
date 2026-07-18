@@ -119,6 +119,14 @@ export const courseHandicapFor = (index: number, teeSet: TeeSet): number => {
   return courseHandicapFromRatingSlopePar(index, teeSet.rating, teeSet.slope, par);
 };
 
+// The unrated estimate (handicap-model legibility spec §4): no rating/slope means no Rule 6.1a
+// formula to convert index → course handicap, so the index itself stands in for the estimate —
+// halved for a 9-hole card (round(index/2)), used as-is for 18 (round(index)). This is a
+// UI-facing estimate, not a WHS Rule, so it uses plain Math.round (its exact half-rounding —
+// Math.round(2.5)===3, Math.round(-2.5)===-2 — is preserved deliberately, not "improved" to
+// roundHalfUp) rather than the Rules' own roundHalfUp used elsewhere in this file.
+export const unratedCourseHandicap = (index: number, holeCount: number): number => (holeCount === 9 ? Math.round(index / 2) : Math.round(index));
+
 // 2020 published 9-hole combining rule (see the file-level comment: the 2024
 // expected-differential ingestion has no published formula, so swng combines raw
 // 9-hole differentials at the index projection instead of ingesting them directly).

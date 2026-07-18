@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import type { CourseId } from "@swng/domain";
-import { cardId, courseHandicapFor, formatHandicapIndex, resolveIndex, strokeGrant } from "@swng/domain";
+import { cardId, courseHandicapFor, formatHandicapIndex, resolveIndex, strokeGrant, unratedCourseHandicap } from "@swng/domain";
 import type { CourseView, GetMyRecordResponse, StartRoundResponse } from "@swng/contracts";
 import { ApiError, createRound, getCourse, getMyRecord } from "../api";
 import { SignInCta } from "../auth/SignInCta";
@@ -135,7 +135,7 @@ export function CreateRoundPage() {
     }
     // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §4).
     const holeCount = selectedTeeSet.holes.length; // 9 or 18 — every card tee is one or the other
-    const value = holeCount === 9 ? Math.round(resolved.value / 2) : Math.round(resolved.value);
+    const value = unratedCourseHandicap(resolved.value, holeCount);
     return { value, note: `${lead(value)} — from your ${sourceNoun} (${indexText}), adjusted for ${holeCount} holes; unrated course, adjust if it plays hard/easy` };
   })();
   const suggestedValue = suggestion?.value;

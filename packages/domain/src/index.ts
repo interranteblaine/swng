@@ -34,4 +34,4 @@ export * from "./crew/ledger.js";
 // reference) — re-export game.ts's other members individually so `export *`
 // here doesn't collide on GameConfig.
 export type { GameState, RunningTotal, StrokePlayLine, StablefordLine, SkinsLine, MatchOutcome, FourballOutcome, GameConfigDraft } from "./scoring/game.js";
-export { scoreGame } from "./scoring/game.js";
+export { gameMembers, scoreGame } from "./scoring/game.js";

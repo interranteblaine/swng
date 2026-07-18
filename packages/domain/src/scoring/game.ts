@@ -119,6 +119,24 @@ export type GameState =
       readonly holesDecided: number;
     };
 
+// Every golferId a game config references — the union across all five kinds' player fields
+// (players[] for the medal family, a/b for singles, the two pairs for fourball). Exhaustive by
+// kind — a new game kind must add its own arm here (TS flags the missing return path). The ONE
+// implementation: settleRound's departure-omission rule and the finalize-readiness view
+// (round/archive.ts) both call this rather than each re-deriving the same per-kind switch.
+export const gameMembers = (config: GameConfig): readonly GolferId[] => {
+  switch (config.kind) {
+    case "stroke-play":
+    case "stableford":
+    case "skins":
+      return config.players;
+    case "singles-match":
+      return [config.a, config.b];
+    case "fourball-match":
+      return [...config.a, ...config.b];
+  }
+};
+
 // Dispatch by kind, not a per-format if/else — each engine owns exactly one entry here.
 export const scoreGame = (config: GameConfig, state: RoundState): GameState => {
   switch (config.kind) {

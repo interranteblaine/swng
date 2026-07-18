@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { cellKey, findTeeSet, strokeGrant } from "@swng/domain";
+import { cellKey, findTeeSet, netStrokes, strokeGrant } from "@swng/domain";
 import type { CourseCard, GameState, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { gameDots } from "./dots";
 import { ScorePad } from "./ScorePad";
@@ -71,7 +71,7 @@ interface CellProps {
 // A tappable scorecard cell — dots above, gross (large) + net (small, only where dots apply)
 // below. This IS the "tap 1" of the two-tap contract; ScorePad below is "tap 2".
 function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
-  const net = cell?.result.kind === "strokes" && dots !== 0 ? cell.result.strokes - dots : undefined;
+  const net = cell?.result.kind === "strokes" && dots !== 0 ? netStrokes(cell.result.strokes, dots) : undefined;
 
   return (
     <button

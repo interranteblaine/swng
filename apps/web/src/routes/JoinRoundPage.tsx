@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { courseHandicapFromRatingSlopePar, formatHandicapIndex, resolveIndex, strokeGrant } from "@swng/domain";
+import { courseHandicapFromRatingSlopePar, formatHandicapIndex, resolveIndex, strokeGrant, unratedCourseHandicap } from "@swng/domain";
 import type { GetMyRecordResponse, PeekRoundResponse } from "@swng/contracts";
 import { ApiError, getMyRecord, joinRound, peekRound, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";
@@ -134,7 +134,7 @@ export function JoinRoundPage() {
       return { value, note: `${lead(value)} — from your ${sourceNoun} (${indexText}) on this course` };
     }
     // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §4).
-    const value = selectedTee.holes === 9 ? Math.round(resolved.value / 2) : Math.round(resolved.value);
+    const value = unratedCourseHandicap(resolved.value, selectedTee.holes);
     return { value, note: `${lead(value)} — from your ${sourceNoun} (${indexText}), adjusted for ${selectedTee.holes} holes; unrated course, adjust if it plays hard/easy` };
   })();
   const suggestedValue = suggestion?.value;

@@ -83,7 +83,11 @@ worse than no name.
   Naive wall-clock comparison (ISO-string `updatedAt` ordering and kin) appears nowhere.
 - **Invariants live at a known layer.** `domain` enforces domain invariants; `application`
   enforces authorization and orchestration; the view layer computes nothing it can import.
-  Scoring math exists exactly once, in `domain`.
+  Golf logic exists exactly once, in `domain`: the server runs it behind the API for reads and
+  finalize, and the web runs it **on-device** for the offline round only through `@swng/client`
+  (the one sanctioned client-side compute seam — `foldAndScore` plus the round-compute
+  re-exports), never re-deriving a golf result in a view. See `architecture.md`'s "Where golf
+  logic lives"; a lint fence (§6) makes it enforceable.
 - **Typed errors, mapped once.** `DomainError`/`ApplicationError` with codes; code → HTTP
   status in one boundary module.
 - **Comment the why, never the what.** Non-obvious decisions get a short why-comment;
@@ -106,7 +110,11 @@ The rules an agent can violate silently, checked mechanically (lint) or held as 
 constraints at review:
 
 1. Layer direction is lint-enforced; `domain` imports nothing; AWS SDKs only in adapters;
-   browser-shared packages (`domain`, `contracts`, `client`) use no Node built-ins.
+   browser-shared packages (`domain`, `contracts`, `client`) use no Node built-ins. The web
+   imports golf **compute** only from `@swng/client`, never `@swng/domain` directly — the
+   compute fence (`@typescript-eslint/no-restricted-imports` on `apps/web/src`) fails `pnpm lint`
+   on any domain-compute import; presentation formatters, id constructors, pure accessors
+   (`cellKey`/`findTeeSet`/`gameMembers`), and `import type`s stay allowed.
 2. Review-enforced naming: thin stores are `…Store` (`Repository` only for the real
    pattern); adapters are `create<Tech><Capability>`, never `…Port`; no misleading field
    names; no `| null` state unions — explicit enums.

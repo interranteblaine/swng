@@ -8,33 +8,122 @@ import { getCourse, getMyRecord, listMyCrews, updateMe } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 
-// A dependency-free inline SVG (brief: "no chart lib") — a plain polyline is enough to show a
-// trend; nothing here is precise enough (or needs to be) to warrant an axis/tooltip library.
-// `points` is the served metrics projection's own `trend` (papercut 17, domain/golfer/
-// metrics.ts's golferMetrics) — already the newest ≤20 posted differentials, oldest → newest
-// (left to right); this component renders it, it no longer derives it from `history`.
-function IndexTrend({ points }: { readonly points: readonly number[] }) {
-  if (points.length < 2) return null; // nothing to trend with 0-1 posted differentials
+// "Your index over time" (metrics-projection-grows spec, papercut 17's follow-on) — a
+// dependency-free inline SVG (no chart lib needed: two plain polylines are enough to show
+// swng drifting under/over WHS). `points` is the served metrics projection's own `indexHistory`
+// (domain/golfer/metrics.ts's golferMetrics) — one point per round, oldest → newest, each
+// carrying the golfer's swng/WHS index AS OF that round; this component only renders it, it
+// never derives index math (SVG coordinate placement is presentation, not golf compute). Below
+// INDEX_HISTORY_MIN_ROUNDS rounds the chart is GATED, not drawn — a 1-3 point sparkline is noise,
+// not a trend (the exact defect this redesign replaces: the OLD page plotted an unlabeled
+// score-differential line from round one).
+const INDEX_HISTORY_MIN_ROUNDS = 8;
+
+function IndexOverTime({
+  points,
+  roundsPlayed,
+}: {
+  readonly points: GetMyRecordResponse["metrics"]["indexHistory"];
+  readonly roundsPlayed: number;
+}) {
+  if (roundsPlayed < INDEX_HISTORY_MIN_ROUNDS) {
+    return (
+      <div className="flex flex-col gap-1">
+        <h3 className="text-base font-semibold">Your index over time</h3>
+        <p className="text-sm text-slate-400">
+          {`Your index history shows up at ${INDEX_HISTORY_MIN_ROUNDS} rounds — you've played ${roundsPlayed}. Keep going.`}
+        </p>
+      </div>
+    );
+  }
 
   const width = 280;
-  const height = 72;
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const span = max - min || 1; // every point identical: avoid a divide-by-zero flatline crash
-  const coords = points
-    .map((value, index) => {
-      const x = (index / (points.length - 1)) * width;
-      const y = height - ((value - min) / span) * height;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+  const height = 96;
+  const n = points.length;
+  const values = points.flatMap((point) => [point.swngIndex, point.whsIndex].filter((value): value is number => value !== undefined));
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  // The SAME point index maps to the same x whichever series it belongs to, so the two lines
+  // stay comparable; a LOWER index sits LOWER on screen (improving play trends the line down).
+  const coordsFor = (key: "swngIndex" | "whsIndex") =>
+    points
+      .map((point, i) => ({ i, value: point[key] }))
+      .filter((entry): entry is { i: number; value: number } => entry.value !== undefined)
+      .map(({ i, value }) => {
+        const x = n <= 1 ? 0 : (i / (n - 1)) * width;
+        const y = max === min ? height / 2 : height - ((value - min) / (max - min)) * height;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(" ");
+
+  const swngLine = coordsFor("swngIndex");
+  const whsLine = coordsFor("whsIndex");
+  const latestSwng = [...points].reverse().find((point) => point.swngIndex !== undefined)?.swngIndex;
+  const latestWhs = [...points].reverse().find((point) => point.whsIndex !== undefined)?.whsIndex;
 
   return (
-    <svg role="img" aria-label="Index trend" viewBox={`0 0 ${width} ${height}`} width={width} height={height} className="rounded-lg bg-slate-900 text-emerald-400">
-      <polyline points={coords} fill="none" stroke="currentColor" strokeWidth={2} />
-    </svg>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-base font-semibold">Your index over time</h3>
+        <span className="text-xs text-slate-500">
+          your last {n} round{n === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="flex items-center gap-3 text-xs text-slate-400">
+        <span>● swng</span>
+        <span>○ WHS</span>
+      </div>
+      <svg
+        data-testid="index-chart"
+        role="img"
+        aria-label="Your index over time"
+        viewBox={`0 0 ${width} ${height}`}
+        width={width}
+        height={height}
+        className="rounded-lg bg-slate-900"
+      >
+        {swngLine && (
+          <polyline data-testid="index-line-swng" aria-label="swng index" points={swngLine} fill="none" stroke="currentColor" strokeWidth={2} className="text-emerald-400" />
+        )}
+        {whsLine && (
+          <polyline
+            data-testid="index-line-whs"
+            aria-label="WHS index"
+            points={whsLine}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeDasharray="3 3"
+            className="text-slate-400"
+          />
+        )}
+      </svg>
+      <p className="text-sm text-slate-300">
+        swng {latestSwng !== undefined ? formatHandicapIndex(latestSwng) : "—"} · WHS {latestWhs !== undefined ? formatHandicapIndex(latestWhs) : "—"}
+      </p>
+    </div>
   );
 }
+
+// Local presentation-only helpers for the record section below — arithmetic view logic over
+// numbers the wire already computed (ags − par; a literal join of already-summed typicalEighteen
+// buckets), never golf rules, so no `@swng/domain` compute import is warranted (the ESLint
+// compute fence stays clean).
+const vsPar = (ags: number, par: number): string => {
+  const d = ags - par;
+  return d === 0 ? "E" : d > 0 ? `+${d}` : `${d}`;
+};
+
+const ZERO_TYPICAL_EIGHTEEN: GetMyRecordResponse["metrics"]["typicalEighteen"] = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
+
+// "Your typical 18" (metrics.typicalEighteen — always present, zeroed rather than absent below
+// any bootstrap): the career scoring shape normalized to one 18-hole round, so a golfer who
+// mostly plays 9s isn't shown a deflated total.
+const describeTypicalEighteen = (typical: GetMyRecordResponse["metrics"]["typicalEighteen"]): string => {
+  const eaglePrefix = typical.eagles > 0 ? `${typical.eagles} eagle+ · ` : "";
+  return `In a typical 18: ${eaglePrefix}${typical.birdies} birdies · ${typical.pars} pars · ${typical.bogeys} bogeys · ${typical.doublePlus} double+`;
+};
 
 // The two adoptable computed sources shown beneath "Your index" (index-source model spec §6) —
 // each a labeled data point read straight off GET /me/record's metrics, with a one-tap "Use this"
@@ -51,38 +140,9 @@ const INDEX_SOURCES: readonly { readonly kind: "swng" | "whs"; readonly label: s
   { kind: "whs", label: "WHS index", description: "rated rounds, official rules", useLabel: "Use WHS index", valueOf: (record) => record?.metrics?.whsIndex?.value },
 ];
 
-type DistributionKey = keyof GetMyRecordResponse["metrics"]["distribution"];
-const DISTRIBUTION_ROWS: readonly { readonly key: DistributionKey; readonly label: string }[] = [
-  { key: "eagles", label: "Eagle or better" },
-  { key: "birdies", label: "Birdie" },
-  { key: "pars", label: "Par" },
-  { key: "bogeys", label: "Bogey" },
-  { key: "doublePlus", label: "Double bogey+" },
-];
-
-// The career scoring totals ARE the served metrics projection's own `distribution` (papercut 17,
-// domain/golfer/metrics.ts's golferMetrics — summed across every round line, rated or unrated
-// alike). This component only renders it; the `Math.max(1, …)` bar-width scaling is view-only and
-// stays here.
-function DistributionBars({ distribution }: { readonly distribution: GetMyRecordResponse["metrics"]["distribution"] }) {
-  const max = Math.max(1, ...DISTRIBUTION_ROWS.map((row) => distribution[row.key]));
-
-  return (
-    <ul aria-label="Scoring distribution" className="flex flex-col gap-1">
-      {DISTRIBUTION_ROWS.map((row) => (
-        <li key={row.key} className="flex items-center gap-2 text-sm text-slate-300">
-          <span className="w-32 shrink-0 text-slate-400">{row.label}</span>
-          <span className="h-3 min-w-[2px] rounded bg-emerald-700" style={{ width: `${(distribution[row.key] / max) * 100}%` }} />
-          <span>{distribution[row.key]}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 // Name + home course (the Save button) plus the computed record (index, bootstrap explainer,
-// trend, distribution, history) — the ProfilePage contract. The index a golfer is on is a source
-// they choose (index-source model spec §3), resolved live; picking a source COMMITS it on the tap
+// index-over-time chart, typical 18, history) — the ProfilePage contract. The index a golfer is
+// on is a source they choose (index-source model spec §3), resolved live; picking a source COMMITS it on the tap
 // in its own PUT /me (index-source one-tap spec §2 — toggles commit, text fields Save), so the
 // name/home Save no longer carries indexSource. Since the wall (accounts-only identity spec §2)
 // GET /me get-or-creates the caller's golfer on first touch (ensureGolfer), this page always edits
@@ -396,8 +456,9 @@ export function ProfilePage() {
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Your record</h2>
 
-        <IndexTrend points={record?.metrics.trend ?? []} />
-        <DistributionBars distribution={record?.metrics.distribution ?? { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }} />
+        <IndexOverTime points={record?.metrics.indexHistory ?? []} roundsPlayed={record?.history.length ?? 0} />
+
+        <p className="text-sm text-slate-300">{describeTypicalEighteen(record?.metrics.typicalEighteen ?? ZERO_TYPICAL_EIGHTEEN)}</p>
 
         <div>
           <h3 className="text-base font-semibold">History</h3>
@@ -407,9 +468,15 @@ export function ProfilePage() {
                 <li key={line.roundId} className="text-sm text-slate-300">
                   {/* Projection-realignment Task 6: every history line opens its own
                       ArchivedRoundPage — the "open one finalized round" half of this task,
-                      reached from the "list my rounds" half already rendered here. */}
+                      reached from the "list my rounds" half already rendered here. Score-first
+                      (metrics-projection-grows spec): the score leads, course/tee follow — a
+                      golfer scans results, not metadata. `vsPar`/differential are presentation
+                      only, no domain compute import. */}
                   <Link to={`/rounds/${line.roundId}/archive`} className="underline decoration-slate-600 underline-offset-2 hover:decoration-slate-400">
-                    {line.courseName} — {line.tee} — AGS {line.ags ?? "—"} — differential {line.differential !== undefined ? line.differential.toFixed(1) : "—"}
+                    {line.courseName} · {line.tee}
+                    {line.ags !== undefined && ` · ${line.ags} (${vsPar(line.ags, line.par)})`}
+                    {line.holes === 9 && " · 9 holes"}
+                    {line.differential !== undefined && ` · ${line.differential.toFixed(1)}`}
                   </Link>
                 </li>
               ))}

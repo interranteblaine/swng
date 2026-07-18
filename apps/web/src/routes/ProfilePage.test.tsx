@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { roundId } from "@swng/domain";
 import type { GolferRoundLine } from "@swng/domain";
+import type { GetMyRecordResponse } from "@swng/contracts";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
@@ -10,12 +11,13 @@ import { ProfilePage } from "./ProfilePage";
 
 const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
 
-// GetMyRecordResponse.metrics.distribution/trend are REQUIRED on the wire now (papercut 17) —
-// api.ts's getMyRecord parses every /me/record response through the real zod schema, so a mock
-// missing either field throws at runtime and silently leaves `record` unset (the effect's own
-// `.catch(() => {})`). Every /me/record fixture below spreads this in; tests that care about a
-// SPECIFIC distribution/trend override it explicitly.
-const emptyMetricsExtras = { distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, trend: [] as readonly number[] };
+// GetMyRecordResponse.metrics.typicalEighteen/indexHistory are REQUIRED on the wire now
+// (metrics-projection-grows spec, papercut 17's follow-on) — api.ts's getMyRecord parses every
+// /me/record response through the real zod schema, so a mock missing either field throws at
+// runtime and silently leaves `record` unset (the effect's own `.catch(() => {})`). Every
+// /me/record fixture below spreads this in; tests that care about a SPECIFIC typicalEighteen/
+// indexHistory override it explicitly.
+const emptyMetricsExtras = { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] as GetMyRecordResponse["metrics"]["indexHistory"] };
 
 // ProfilePage's history lines are now react-router <Link>s (projection-realignment Task 6) —
 // every render needs a Router ancestor, same MemoryRouter-wrapping idiom WatchPage.test.tsx's
@@ -81,7 +83,7 @@ describe("ProfilePage — signed out", () => {
 });
 
 describe("ProfilePage — signed in", () => {
-  it("first-time golfer (golfer: null): blank form, bootstrap explainer, no trend SVG", async () => {
+  it("first-time golfer (golfer: null): blank form, bootstrap explainer, no chart", async () => {
     signIn();
     vi.stubGlobal(
       "fetch",
@@ -98,20 +100,16 @@ describe("ProfilePage — signed in", () => {
 
     await waitFor(() => expect(screen.getByText(/play a few rounds/i)).toBeTruthy());
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
-    expect(screen.queryByRole("img", { name: "Index trend" })).toBeNull();
+    expect(screen.queryByTestId("index-chart")).toBeNull();
     expect(screen.getByText(/no rounds yet/i)).toBeTruthy();
   });
 
-  it("renders the pre-filled form, computed index, trend SVG, distribution bars, and newest-first history", async () => {
+  it("renders the pre-filled form, computed index, and newest-first history (chart gated at 3 rounds)", async () => {
     signIn();
     const history: GolferRoundLine[] = [lineWithDifferential("1", 9.2), lineWithDifferential("2", 11.8), lineWithDifferential("3", 14.5)]; // newest-first, per the wire contract
-    // The metrics projection's own distribution/trend (papercut 17) — trend is oldest -> newest
-    // (left to right), the mirror of the newest-first history above; distribution is the 3
-    // identical per-line buckets (lineWithDifferential) summed.
     const metrics = {
       whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 1 },
-      distribution: { eagles: 0, birdies: 3, pars: 30, bogeys: 18, doublePlus: 3 },
-      trend: [14.5, 11.8, 9.2],
+      ...emptyMetricsExtras,
     };
     vi.stubGlobal(
       "fetch",
@@ -134,14 +132,15 @@ describe("ProfilePage — signed in", () => {
     // adoptable reference (this fixture has no swng index, so that source reads "—").
     expect(screen.getByText("your own").closest("p")?.textContent).toContain("15");
     expect(screen.getByText(/WHS index · 7\.2/)).toBeTruthy();
-    expect(screen.getByRole("img", { name: "Index trend" })).toBeTruthy();
-    expect(screen.getByRole("list", { name: "Scoring distribution" })).toBeTruthy();
+
+    // 3 rounds is under the 8-round chart gate — no chart yet.
+    expect(screen.queryByTestId("index-chart")).toBeNull();
 
     // History renders newest-first, exactly as the wire response ordered it (no re-sort).
-    const historyItems = screen.getAllByText(/Pebble Beach — white/);
-    expect(historyItems[0]?.textContent).toMatch(/differential 9.2/);
-    expect(historyItems[1]?.textContent).toMatch(/differential 11.8/);
-    expect(historyItems[2]?.textContent).toMatch(/differential 14.5/);
+    const historyLinks = screen.getAllByRole("link", { name: /Pebble Beach/ });
+    expect(historyLinks[0]?.textContent).toContain("9.2");
+    expect(historyLinks[1]?.textContent).toContain("11.8");
+    expect(historyLinks[2]?.textContent).toContain("14.5");
   });
 
   // Projection-realignment Task 6 (Step 1's own structural pin): every history line is a
@@ -163,11 +162,147 @@ describe("ProfilePage — signed in", () => {
 
     renderProfilePage();
 
-    const firstLink = await waitFor(() => screen.getByRole("link", { name: /Pebble Beach — white — AGS 82 — differential 9.2/ }));
+    // Both lines share the same course/tee/ags/par (Pebble Beach · white · 82 (+10)) and differ
+    // only by their differential, so each link's accessible name anchors on that trailing detail.
+    const firstLink = await waitFor(() => screen.getByRole("link", { name: /Pebble Beach · white · 82 \(\+10\) · 9\.2/ }));
     expect(firstLink.getAttribute("href")).toBe(`/rounds/${history[0]!.roundId}/archive`);
 
-    const secondLink = screen.getByRole("link", { name: /differential 11.8/ });
+    const secondLink = screen.getByRole("link", { name: /Pebble Beach · white · 82 \(\+10\) · 11\.8/ });
     expect(secondLink.getAttribute("href")).toBe(`/rounds/${history[1]!.roundId}/archive`);
+  });
+
+  // The chart gate (metrics-projection-grows spec): a golfer's index chart is HELD BACK below
+  // INDEX_HISTORY_MIN_ROUNDS rounds — a 1-3 point sparkline is noise, not a trend (the exact
+  // defect this redesign replaces: the OLD page plotted an unlabeled differential line from round
+  // one). No <svg>/<polyline> renders at all; the gate copy names both the threshold and where the
+  // golfer stands.
+  it("fewer than 8 rounds: the chart is gated with a 'keep going' message, no svg/polyline anywhere", async () => {
+    signIn();
+    const history: GolferRoundLine[] = [lineWithDifferential("1", 9.2), lineWithDifferential("2", 11.8), lineWithDifferential("3", 14.5)];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras }, history });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    await waitFor(() => expect(screen.getByText("Your index history shows up at 8 rounds — you've played 3. Keep going.")).toBeTruthy());
+    expect(screen.queryByTestId("index-chart")).toBeNull();
+    expect(document.querySelectorAll("polyline").length).toBe(0);
+    expect(document.querySelectorAll("svg").length).toBe(0);
+  });
+
+  // 8+ rounds turns the gate off: a real chart with two distinguishable series (swng + WHS),
+  // sourced straight from the served metrics.indexHistory — this component never derives index
+  // math itself.
+  it("8+ rounds: renders a chart with a swng polyline and a WHS polyline", async () => {
+    signIn();
+    const history: GolferRoundLine[] = Array.from({ length: 8 }, (_, i) => lineWithDifferential(String(i + 1), 10 + i));
+    const indexHistory: GetMyRecordResponse["metrics"]["indexHistory"] = history.map((line, i) => ({
+      roundId: line.roundId,
+      swngIndex: 12 - i * 0.3,
+      whsIndex: 12.5 - i * 0.2,
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras, indexHistory }, history });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    await waitFor(() => expect(screen.getByTestId("index-chart")).toBeTruthy());
+    expect(screen.getByTestId("index-line-swng")).toBeTruthy();
+    expect(screen.getByTestId("index-line-whs")).toBeTruthy();
+    expect(screen.queryByText(/your index history shows up at 8 rounds/i)).toBeNull();
+  });
+
+  // "Your typical 18" — the career scoring shape (metrics.typicalEighteen), always present
+  // (zeroed rather than absent below any bootstrap).
+  it("renders the typical-18 line from metrics.typicalEighteen", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") {
+          return fakeResponse(200, { metrics: { indexHistory: [], typicalEighteen: { eagles: 0, birdies: 2, pars: 8, bogeys: 5, doublePlus: 3 } }, history: [] });
+        }
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    const typicalLine = await waitFor(() => screen.getByText(/2 birdies/).closest("p"));
+    expect(typicalLine?.textContent).toContain("2 birdies");
+    expect(typicalLine?.textContent).toContain("8 pars");
+    expect(typicalLine?.textContent).toContain("5 bogeys");
+    expect(typicalLine?.textContent).toContain("3 double+");
+    expect(typicalLine?.textContent).not.toMatch(/eagle/); // 0 eagles: the prefix is omitted, not "0 eagle+"
+  });
+
+  // History rows lead with the score, not just the course — the redesign's whole point (a golfer
+  // scans scores first, details second). A 9-hole round gets a marker; a rated round's already-
+  // rounded (0.1) differential renders as a short secondary detail, never a long float.
+  it("history rows lead with the score: AGS (vs par), a 9-hole marker, and a short differential", async () => {
+    signIn();
+    const eighteen: GolferRoundLine = {
+      roundId: roundId("round-18"),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 18,
+      par: 72,
+      courseHandicap: 9,
+      ags: 81,
+      differential: 8.7,
+      distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
+    };
+    const nine: GolferRoundLine = {
+      roundId: roundId("round-9"),
+      courseName: "Sandy Hollow Nine",
+      tee: "white",
+      holes: 9,
+      par: 36,
+      courseHandicap: 5,
+      ags: 47,
+      distribution: { eagles: 0, birdies: 0, pars: 4, bogeys: 3, doublePlus: 2 },
+    };
+    const history = [eighteen, nine];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras }, history });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    const eighteenLink = await waitFor(() => screen.getByRole("link", { name: /Casa Verde GC/ }));
+    expect(eighteenLink.textContent).toContain("81 (+9)");
+    expect(eighteenLink.textContent).toContain("8.7");
+    expect(eighteenLink.textContent).not.toMatch(/8\.7\d/); // never a long float — pinned to one decimal
+
+    const nineLink = screen.getByRole("link", { name: /Sandy Hollow Nine/ });
+    expect(nineLink.textContent).toContain("47 (+11)");
+    expect(nineLink.textContent).toContain("9 holes");
   });
 
   // The name/home Save (index-source one-tap spec §2): the index source commits on its own tap now,

@@ -43,9 +43,10 @@ const mockedGetMe = vi.mocked(getMe);
 const mockedUpdateMe = vi.mocked(updateMe);
 const mockedGetMyRecord = vi.mocked(getMyRecord);
 
-// GetMyRecordResponse.metrics.distribution/trend are required (papercut 17) — these tests only
-// exercise the whsIndex/swngIndex suggestion, so every fixture here spreads a zeroed/empty pair.
-const zeroMetrics = { distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, trend: [] } as const;
+// GetMyRecordResponse.metrics.typicalEighteen/indexHistory are required (metrics-projection-grows
+// spec) — these tests only exercise the whsIndex/swngIndex suggestion, so every fixture here
+// spreads a zeroed/empty pair.
+const zeroMetrics = { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] } as const;
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());

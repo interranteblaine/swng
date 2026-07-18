@@ -158,6 +158,10 @@ export default [
                 // crew season aggregation
                 "crewContribution",
                 "aggregateSeason",
+                // golden-deck runners (barrel-exported, run domain compute — nonsensical in
+                // product, but fenced so the ban covers EVERY barrel-exported golf computation)
+                "playGoldenRound",
+                "playGoldenRoundLog",
               ],
               message:
                 "Golf compute runs on-device via @swng/client (the one sanctioned client-side path) — import it from @swng/client, not @swng/domain. See docs/architecture.md 'Where golf logic lives'.",

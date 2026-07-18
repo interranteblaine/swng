@@ -124,15 +124,17 @@ describe("golferMetrics — indexHistory (the rolling swng + WHS index, recomput
   // Oldest → newest: 3 unrated 18s (bootstraps swng before any rated round exists), then 3 rated
   // 18s (bootstraps whs), then an unrated 18 in the middle of rated play (whs must hold flat;
   // swng keeps moving because it folds every ags-bearing line).
+  // Distinct roundIds per line so the self-consistency test's `history[k].roundId === lines[k].roundId`
+  // actually pins that IndexPoint carries THIS round's id (not a shared default that passes trivially).
   const lines = [
-    line({ holes: 18, ags: 90 }), // pseudo diff 18 — unrated
-    line({ holes: 18, ags: 85 }), // pseudo diff 13 — unrated
-    line({ holes: 18, ags: 80 }), // pseudo diff 8  — unrated (3rd: swng bootstraps here)
-    line({ holes: 18, ags: 90, differential: 9.0 }), // rated
-    line({ holes: 18, ags: 95, differential: 14.0 }), // rated
-    line({ holes: 18, ags: 92, differential: 11.0 }), // rated (3rd rated: whs bootstraps here)
-    line({ holes: 18, ags: 100 }), // unrated, mid-sequence — whs must hold flat, swng moves
-    line({ holes: 18, ags: 88, differential: 8.0 }), // rated again — whs resumes moving
+    line({ roundId: roundId("r0"), holes: 18, ags: 90 }), // pseudo diff 18 — unrated
+    line({ roundId: roundId("r1"), holes: 18, ags: 85 }), // pseudo diff 13 — unrated
+    line({ roundId: roundId("r2"), holes: 18, ags: 80 }), // pseudo diff 8  — unrated (3rd: swng bootstraps here)
+    line({ roundId: roundId("r3"), holes: 18, ags: 90, differential: 9.0 }), // rated
+    line({ roundId: roundId("r4"), holes: 18, ags: 95, differential: 14.0 }), // rated
+    line({ roundId: roundId("r5"), holes: 18, ags: 92, differential: 11.0 }), // rated (3rd rated: whs bootstraps here)
+    line({ roundId: roundId("r6"), holes: 18, ags: 100 }), // unrated, mid-sequence — whs must hold flat, swng moves
+    line({ roundId: roundId("r7"), holes: 18, ags: 88, differential: 8.0 }), // rated again — whs resumes moving
   ];
 
   it("self-consistency: indexHistory[k] equals golferMetrics(lines.slice(0, k+1))'s own headline swngIndex/whsIndex", () => {

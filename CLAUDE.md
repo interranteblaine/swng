@@ -612,6 +612,55 @@ is unchanged. Accumulated Minors all ride-as-note (dup zero-distribution literal
 unknown game kind exactly as `settleRound` always has — unreachable with the five known kinds). On
 local `main`, never pushed.
 
+The golfer's record is redesigned — your index over time, not a differential sparkline
+(post-domain-boundary, 2026-07-18, spec
+`docs/superpowers/specs/2026-07-18-golfer-record-index-over-time-design.md`, plan
+`2026-07-18-golfer-record-index-over-time.md`, 5 SDD tasks, commits `a4d4209..3c1c5cd`): a
+**design correction**, not a feature — the owner caught that `metrics.trend` (shipped an hour
+earlier in the domain-boundary arc) was an unlabeled, ambiguous `number[]` on the wire. The
+diagnosis went deeper than the field: the profile's "Your record" was never *designed* — it was
+the sum of what each component happened to render, and `trend` was a **rendering** (score
+differentials reordered for a sparkline) frozen onto the wire, drawing a confident line through
+noise. Differentials are handicap plumbing no golfer thinks in. **The redesign, owner-approved via
+mockup:** delete the differential trend entirely; replace it with **"your index over time"** — a
+rolling chart of the golfer's **swng AND WHS index, each recomputed as of every round** (rounds
+`0..k` folded through the same engine at each `k`, via ONE shared `detailsOf` so the headline is
+definitionally the last point and can't drift), **two lines always, no source-following/no choice —
+just data** (swng covers every round; WHS holds flat across unrated rounds and is absent before any
+rated round; they coincide for a rated-only golfer and diverge only on unrated play), **gated under
+8 finalized rounds** (below it a "keep going" message — refusing to draw noise is the trust). The
+headline index + source picker are untouched (that's the *stroke claim*; the chart is *data*, so a
+`declared` golfer still sees both computed lines). The career-total distribution becomes **"your
+typical 18"** (per-18 normalized, reads the same at 5 rounds or 500); **history rows lead with the
+score** (`Casa Verde · white · 81 (+9)`); and the **posted differential is canonicalized to its
+real 0.1** where shown (`23.6`, never the raw `23.563565891472873`) — the model owns the golf
+convention (`postedDifferential`), while the index keeps folding the RAW full-precision lines
+(deliberate, tested — `scoreDifferential` untouched, `golferMetrics(sorted)` gets raw; a `3.0/3.05`
+fixture proves a rounded-line regression would shift the index a full 0.1). This is boundary-clean:
+`indexHistory`/`typicalEighteen` are genuine domain computations served on `GET /me/record`
+(unlike the old `trend`, a rendering that shouldn't have been on the wire at all — the arc's own
+lesson), and the web plots served numbers computing no golf result (the ESLint compute fence still
+holds). Gated: `pnpm validate` green at every commit + at HEAD; `test:contract` 93; each task
+independently reviewed; whole-branch review "READY TO DEPLOY — YES" (0 Critical/0 Important — one
+fold no drift, the 0.1 split genuinely two paths, per-round `GolferRoundLine.distribution` survives,
+O(N²) prefix recompute acceptable for a read-time whole-career projection). Close-out was a
+CONTROLLER-RUN gate: `deploy:beta` lambda + `publish:web:beta` together (the `metrics` wire both
+ADDS required `indexHistory`/`typicalEighteen` and DROPS required `trend`/`distribution` — no clean
+single order; symmetric self-healing stale-bundle window, **NO wipe** — all compute-on-read) →
+`e2e:beta` 16/16 ×2 → `e2e:field` (first run caught a **Task-5 reconciliation miss**: `identityRecord.spec`
+asserted `history[].differential` to 6 decimals against the raw pins, which the new 0.1 posted value
+breaks — fixed to assert `postedDifferential(pinned)`, `3c1c5cd`; re-run **57 passed / 1
+documented-skip**) → a controller LIVE WALK on DEPLOYED `beta.swng.golf` (a throwaway 8-rated-round
+golfer seeded via the API, profile screenshot inspected: the "index over time" chart drew — swng+WHS
+polylines overlapping as designed for an all-rated golfer, 6 dots on the bootstrapped points [the
+first 2 pre-bootstrap rounds correctly dotless], rolling values peaking then descending [worse→better,
+y-direction correct], the legend + "swng 8.7 · WHS 8.7" summary, the typical-18 line, and score-first
+history with the **posted 0.1 differential live** [`82 (+10) · 9.2`, not `9.18125`]; the two-line
+*divergence* wasn't shown live [all-rated → overlap] but is unit-pinned by the mixed-`indexHistory`
+and lone-WHS-marker tests) → this docs sweep. Minor visual note: the shipped chart is a compact
+sparkline without y-axis tick labels (the ASCII mockup had them) — the trend direction + current
+values read clearly, accepted. On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

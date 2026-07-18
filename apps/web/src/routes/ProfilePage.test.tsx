@@ -228,6 +228,37 @@ describe("ProfilePage — signed in", () => {
     expect(screen.queryByText(/your index history shows up at 8 rounds/i)).toBeNull();
   });
 
+  // The signature of the two-line design: swng folds EVERY round, WHS only rated ones, so an
+  // unrated round leaves a swng vertex with no WHS counterpart. The chart plots them independently
+  // — swng across all rounds, WHS across only the points that carry a whsIndex.
+  it("8+ rounds with unrated play: the swng line spans every round, the WHS line only the rated ones", async () => {
+    signIn();
+    const history: GolferRoundLine[] = Array.from({ length: 10 }, (_, i) => lineWithDifferential(String(i + 1), 10 + i));
+    const unrated = new Set([2, 5, 7]); // three unrated rounds — no whsIndex on those points
+    const indexHistory: GetMyRecordResponse["metrics"]["indexHistory"] = history.map((line, i) => ({
+      roundId: line.roundId,
+      swngIndex: 12 - i * 0.2,
+      ...(unrated.has(i) ? {} : { whsIndex: 12.5 - i * 0.15 }),
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras, indexHistory }, history });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    await waitFor(() => expect(screen.getByTestId("index-line-swng")).toBeTruthy());
+    const vertexCount = (el: Element) => (el.getAttribute("points") ?? "").trim().split(/\s+/).filter(Boolean).length;
+    expect(vertexCount(screen.getByTestId("index-line-swng"))).toBe(10); // every round
+    expect(vertexCount(screen.getByTestId("index-line-whs"))).toBe(7); // 10 minus the 3 unrated rounds
+  });
+
   // "Your typical 18" — the career scoring shape (metrics.typicalEighteen), always present
   // (zeroed rather than absent below any bootstrap).
   it("renders the typical-18 line from metrics.typicalEighteen", async () => {

@@ -19,21 +19,42 @@ describe("stableford — golden cards", () => {
       [A]: [5, 6, 3, "picked-up", 5, 4, 5, 6, 5],
       [B]: [4, 4, 3, 5, 5, 3, 4, 5, 4],
     });
+    // Bo's higher points total (19 > 15) leads outright.
     expect(state).toMatchObject({
       kind: "stableford", complete: true,
       lines: [
         { golferId: A, thru: 9, points: 15 },
         { golferId: B, thru: 9, points: 19 },
       ],
+      leaders: [B],
     });
   });
 
   it("mid-round points run over decided holes only", () => {
     const [state] = playGoldenRound(fixtureLinks, players, [game], { [A]: [5, 6], [B]: [4] });
+    // Ann's higher points (3 > 2) leads mid-round.
     expect(state).toMatchObject({
       complete: false,
       lines: [{ golferId: A, thru: 2, points: 3 }, { golferId: B, thru: 1, points: 2 }],
+      leaders: [A],
     });
+  });
+
+  it("a tie for the lead lists every tied golferId", () => {
+    // Same course handicap (so identical dots) and identical scores guarantee a tie without
+    // hand-computing net/points arithmetic for two different handicaps.
+    const D = golferId("dee");
+    const E = golferId("eve");
+    const equalHandicapPlayers = [
+      { golferId: D, name: "Dee", tee: "white", courseHandicap: 5 },
+      { golferId: E, name: "Eve", tee: "white", courseHandicap: 5 },
+    ];
+    const tieGame = { kind: "stableford", id: gameId("s4"), players: [D, E] } as const;
+    const [state] = playGoldenRound(fixtureLinks, equalHandicapPlayers, [tieGame], {
+      [D]: [5, 6, 3, "picked-up", 5, 4, 5, 6, 5],
+      [E]: [5, 6, 3, "picked-up", 5, 4, 5, 6, 5],
+    });
+    expect(state).toMatchObject({ kind: "stableford", complete: true, leaders: [D, E] });
   });
 
   it("counts decided holes anywhere on the card, not just a dense prefix: a mid-card gap still totals across it", () => {

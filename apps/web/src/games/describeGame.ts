@@ -1,4 +1,4 @@
-import { cellKey, DomainError, findTeeSet } from "@swng/domain";
+import { DomainError } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 
 export interface GameDescription {
@@ -7,14 +7,17 @@ export interface GameDescription {
 }
 
 // The brief sketches this as `describeGame(state: GameState, participants)`. GameState alone
-// turns out not to carry everything two of the five kinds need to render their brief-mandated
-// target strings: stroke-play's "(E)"/"(+N)" needs each hole's par (only on CourseCard, via
-// each player's own tee), and fourball-match's outcome/leader are bare "a"/"b" literals (unlike
-// singles-match, which already resolves to a real GolferId inside the engine) that only mean
-// something once matched back to the GameConfig's `a`/`b` pairs. RoundState already carries
-// card + participants + games (the exact "look the frozen config up from state.games" idiom
-// ScorecardGrid.tsx's activeConfig lookup already established), so this takes the whole round
-// instead of a bare participants array — one extra field of context, not a new kind-switch site.
+// turns out not to carry everything every kind needs to render: every kind needs
+// round.participants to turn a GolferId into a display name (nameOf), and fourball-match's
+// outcome/leader are bare "a"/"b" literals (unlike singles-match, which already resolves to a
+// real GolferId inside the engine) that only mean something once matched back to the
+// GameConfig's `a`/`b` pairs via round.games. RoundState already carries participants + games
+// (the exact "look the frozen config up from state.games" idiom ScorecardGrid.tsx's
+// activeConfig lookup already established), so this takes the whole round instead of a bare
+// participants array — one extra field of context, not a new kind-switch site. Every number
+// this module renders — relative-to-par, the medal-play leader(s), skins' holesDecided — is
+// computed once in the matching scoring engine (game.ts's GameState) and read here as-is:
+// this module is pure string formatting, never math.
 export const describeGame = (game: GameState, round: RoundState): GameDescription => {
   switch (game.kind) {
     case "stroke-play":
@@ -43,23 +46,15 @@ const vsPar = (relative: number): string => (relative === 0 ? "(E)" : relative >
 type StrokePlay = Extract<GameState, { kind: "stroke-play" }>;
 
 const describeStrokePlay = (game: StrokePlay, round: RoundState): string => {
-  const entries = game.lines.map((line) => {
-    const participant = round.participants.find((p) => p.golferId === line.golferId);
-    // Net is only present when the config scored net, and always populated in that case
-    // (strokePlay.ts's own invariant) — the non-null assertion mirrors that contract.
-    const totals = game.scoring === "net" ? line.net! : line.gross;
-    // Par "thru" the holes actually counted so far: teeSet holes are in card order and the
-    // scoring UI only ever fills them forward (ScorecardGrid's own "current hole" heuristic
-    // makes the same forward-sequential assumption), so the first `thru` holes is the best
-    // available par baseline without exposing which specific holes GameState summed.
-    const par = participant ? findTeeSet(round.card, participant.tee).holes.slice(0, line.thru).reduce((sum, h) => sum + h.par, 0) : 0;
-    return { golferId: line.golferId, thru: line.thru, total: totals.total, relative: totals.total - par };
-  });
-  if (entries.length === 0) return "No scores yet";
-  const lowest = Math.min(...entries.map((e) => e.total));
-  return entries
-    .filter((e) => e.total === lowest)
-    .map((e) => `${nameOf(round.participants, e.golferId)} ${e.total}${game.complete ? "" : ` thru ${e.thru}`} ${vsPar(e.relative)}`)
+  if (game.lines.length === 0) return "No scores yet";
+  return game.lines
+    .filter((line) => game.leaders.includes(line.golferId))
+    .map((line) => {
+      // Net is only present when the config scored net, and always populated in that case
+      // (strokePlay.ts's own invariant) — the non-null assertion mirrors that contract.
+      const total = game.scoring === "net" ? line.net!.total : line.gross.total;
+      return `${nameOf(round.participants, line.golferId)} ${total}${game.complete ? "" : ` thru ${line.thru}`} ${vsPar(line.relativeToPar)}`;
+    })
     .join(" · ");
 };
 
@@ -67,9 +62,8 @@ type Stableford = Extract<GameState, { kind: "stableford" }>;
 
 const describeStableford = (game: Stableford, round: RoundState): string => {
   if (game.lines.length === 0) return "No scores yet";
-  const highest = Math.max(...game.lines.map((l) => l.points));
   return game.lines
-    .filter((l) => l.points === highest)
+    .filter((l) => game.leaders.includes(l.golferId))
     .map((l) => `${nameOf(round.participants, l.golferId)} ${l.points} pts${game.complete ? "" : ` thru ${l.thru}`}`)
     .join(" · ");
 };
@@ -103,22 +97,6 @@ const describeFourball = (game: FourballMatch, round: RoundState): string => {
 };
 
 type Skins = Extract<GameState, { kind: "skins" }>;
-type SkinsConfig = Extract<GameConfig, { kind: "skins" }>;
-
-// Skins' own GameState doesn't carry a `thru` (unlike every other kind) — this replays the
-// exact same "every player recorded, in card order, stop at the first gap" walk scoreSkins.ts
-// uses internally, purely to name which hole a live carry is riding into. Presentation-only:
-// it never touches skins-won math, so it can't disagree with the engine's own settlement.
-const skinsHolesDecided = (round: RoundState, config: SkinsConfig): number => {
-  const first = round.participants.find((p) => p.golferId === config.players[0]);
-  const holes = first ? findTeeSet(round.card, first.tee).holes : [];
-  let count = 0;
-  for (const hole of holes) {
-    if (!config.players.every((golfer) => cellKey(golfer, hole.number) in round.cells)) break;
-    count += 1;
-  }
-  return count;
-};
 
 const describeSkins = (game: Skins, round: RoundState): string => {
   const won = game.lines.filter((l) => l.skins > 0);
@@ -126,9 +104,6 @@ const describeSkins = (game: Skins, round: RoundState): string => {
 
   if (game.complete) return game.carriedOut > 0 ? `${base} · ${game.carriedOut} carried out` : base;
 
-  if (game.carrying > 0) {
-    const config = round.games.find((g): g is SkinsConfig => g.id === game.id && g.kind === "skins");
-    if (config) return `${base} · carrying ${game.carrying} into ${skinsHolesDecided(round, config) + 1}`;
-  }
+  if (game.carrying > 0) return `${base} · carrying ${game.carrying} into ${game.holesDecided + 1}`;
   return base;
 };

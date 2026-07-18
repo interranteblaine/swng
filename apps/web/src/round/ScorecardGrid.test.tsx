@@ -173,7 +173,7 @@ describe("ScorecardGrid — dots", () => {
       cells: { [cellKey(ANN, si18Hole.number)]: scoreCell({ kind: "strokes", strokes: 5 }, ANN) },
       terminatedGameIds: new Set(),
     };
-    const activeGame: GameState = { kind: "skins", id: skins.id, lines: [], carrying: 0, carriedOut: 0, complete: false };
+    const activeGame: GameState = { kind: "skins", id: skins.id, lines: [], carrying: 0, carriedOut: 0, complete: false, holesDecided: 0 };
 
     // The domain allocates exactly one give-back (-1) on the SI-18 hole for a -1 course handicap.
     expect(gameDots(skins, state.participants, fixtureLinks18).get(ANN)!.get(si18Hole.number)).toBe(-1);

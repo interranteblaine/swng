@@ -127,8 +127,8 @@ describe("crewContribution — per-kind rules", () => {
           id: config.id,
           scoring: "gross",
           lines: [
-            { golferId: A, thru: 18, gross: { total: 72, pickups: 0 } },
-            { golferId: B, thru: 18, gross: { total: 80, pickups: 0 } },
+            { golferId: A, thru: 18, gross: { total: 72, pickups: 0 }, relativeToPar: 0 },
+            { golferId: B, thru: 18, gross: { total: 80, pickups: 0 }, relativeToPar: 8 },
           ],
         },
       ],

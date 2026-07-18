@@ -36,5 +36,9 @@ export const scoreStableford = (config: StablefordConfig, state: RoundState): Ga
 
   const complete = allPlayersComplete(state, config.players);
 
-  return { kind: "stableford", id: config.id, lines, complete };
+  // Leader(s) — highest points, ties included (see game.ts's `leaders` doc).
+  const highest = lines.length > 0 ? Math.max(...lines.map((line) => line.points)) : undefined;
+  const leaders = lines.filter((line) => line.points === highest).map((line) => line.golferId);
+
+  return { kind: "stableford", id: config.id, lines, complete, leaders };
 };

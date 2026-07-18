@@ -21,12 +21,15 @@ describe("stroke play — golden cards", () => {
       [A]: [4, 5, 3, 6, 4, 3, 5, 5, 4],
       [B]: [5, 4, 4, 5, 4, 4, 4, 6, 5],
     });
+    // fixtureLinks pars sum to 36 (4+4+3+5+4+3+4+5+4): Ann 39 → +3, Bo 41 → +5.
+    // Ann's lower total (39) leads outright.
     expect(state).toMatchObject({
       kind: "stroke-play", complete: true,
       lines: [
-        { golferId: A, thru: 9, gross: { total: 39, pickups: 0 } },
-        { golferId: B, thru: 9, gross: { total: 41, pickups: 0 } },
+        { golferId: A, thru: 9, gross: { total: 39, pickups: 0 }, relativeToPar: 3 },
+        { golferId: B, thru: 9, gross: { total: 41, pickups: 0 }, relativeToPar: 5 },
       ],
+      leaders: [A],
     });
   });
 
@@ -37,12 +40,16 @@ describe("stroke play — golden cards", () => {
       [A]: [5, 6, 3, "picked-up", 5, 4, 5, 6, 5],
       [B]: [4, 4, 3, 5, 5, 3, 4, 5, 4],
     });
+    // Net scoring: relativeToPar and the leader are both computed off NET totals (par 36).
+    // Ann nets 39 → +3, Bo nets 35 → -1: Bo's lower net total leads, even though Ann's
+    // gross (39) beats Bo's gross (37).
     expect(state).toMatchObject({
       kind: "stroke-play", complete: true,
       lines: [
-        { golferId: A, thru: 9, gross: { total: 39, pickups: 1 }, net: { total: 39, pickups: 0 } },
-        { golferId: B, thru: 9, gross: { total: 37, pickups: 0 }, net: { total: 35, pickups: 0 } },
+        { golferId: A, thru: 9, gross: { total: 39, pickups: 1 }, net: { total: 39, pickups: 0 }, relativeToPar: 3 },
+        { golferId: B, thru: 9, gross: { total: 37, pickups: 0 }, net: { total: 35, pickups: 0 }, relativeToPar: -1 },
       ],
+      leaders: [B],
     });
   });
 
@@ -52,9 +59,21 @@ describe("stroke play — golden cards", () => {
       [B]: [5, 4],
     });
     const lines = (state as GameState & { kind: "stroke-play" }).lines;
-    expect(lines[0]).toMatchObject({ thru: 3, gross: { total: 12, pickups: 0 } });
-    expect(lines[1]).toMatchObject({ thru: 2, gross: { total: 9, pickups: 0 } });
+    // Par thru holes counted so far: Ann thru 3 (4+4+3=11) → 12-11=+1; Bo thru 2 (4+4=8) → 9-8=+1.
+    // Bo's lower total (9 vs 12) leads even though both are +1 to par.
+    expect(lines[0]).toMatchObject({ thru: 3, gross: { total: 12, pickups: 0 }, relativeToPar: 1 });
+    expect(lines[1]).toMatchObject({ thru: 2, gross: { total: 9, pickups: 0 }, relativeToPar: 1 });
     expect((state as { complete: boolean }).complete).toBe(false);
+    expect((state as GameState & { kind: "stroke-play" }).leaders).toEqual([B]);
+  });
+
+  it("a tie for the lead lists every tied golferId", () => {
+    const tieGame = { kind: "stroke-play", id: gameId("g4"), scoring: "gross", players: [A, B] } as const;
+    const [state] = playGoldenRound(fixtureLinks, players, [tieGame], {
+      [A]: [4, 4, 3, 5, 4, 3, 4, 5, 4],
+      [B]: [4, 4, 3, 5, 4, 3, 4, 5, 4],
+    });
+    expect(state).toMatchObject({ kind: "stroke-play", complete: true, leaders: [A, B] });
   });
 });
 

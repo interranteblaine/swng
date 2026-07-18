@@ -25,8 +25,9 @@ describe("skins — golden cards", () => {
       [B]: [4, 5, 3, 6, 4, 4, 4, 5, 4],
       [C]: [6, 7, 4, 8, 6, 5, 6, 7, 6],
     });
+    // All 9 holes decided (every player had a cell every hole).
     expect(state).toMatchObject({
-      kind: "skins", complete: true, carrying: 0, carriedOut: 0,
+      kind: "skins", complete: true, carrying: 0, carriedOut: 0, holesDecided: 9,
       lines: [
         { golferId: A, skins: 6 },
         { golferId: B, skins: 3 },
@@ -44,8 +45,9 @@ describe("skins — golden cards", () => {
       [B]: [4, 5, 3],
       [C]: [6, 7, 5],
     });
+    // Only h1 and h2 have every player's cell — the carry rides into h3 (holesDecided + 1).
     expect(state).toMatchObject({
-      kind: "skins", complete: false, carrying: 1, carriedOut: 0,
+      kind: "skins", complete: false, carrying: 1, carriedOut: 0, holesDecided: 2,
       lines: [
         { golferId: A, skins: 1 },
         { golferId: B, skins: 0 },
@@ -61,8 +63,9 @@ describe("skins — golden cards", () => {
       [B]: ["picked-up", 5],
       [C]: ["picked-up", 6],
     });
+    // h1 and h2 are both decided (a pickup is still a recorded cell); h3 has no cells.
     expect(state).toMatchObject({
-      kind: "skins", complete: false, carrying: 0, carriedOut: 0,
+      kind: "skins", complete: false, carrying: 0, carriedOut: 0, holesDecided: 2,
       lines: [
         { golferId: A, skins: 2 },
         { golferId: B, skins: 0 },
@@ -79,8 +82,9 @@ describe("skins — golden cards", () => {
       [B]: [4, 5, 3, 6, 4, 4, 4, 5, 5],
       [C]: [6, 7, 4, 8, 6, 5, 6, 7, 6],
     });
+    // Complete: every hole (incl. the strand-out tie on h9) is decided.
     expect(state).toMatchObject({
-      kind: "skins", complete: true, carrying: 0, carriedOut: 2,
+      kind: "skins", complete: true, carrying: 0, carriedOut: 2, holesDecided: 9,
       lines: [
         { golferId: A, skins: 6 },
         { golferId: B, skins: 1 },

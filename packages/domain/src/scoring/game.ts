@@ -35,6 +35,10 @@ export interface StrokePlayLine {
   readonly thru: number;
   readonly gross: RunningTotal;
   readonly net?: RunningTotal;
+  // Scored total (net when the game is net-scored, else gross) minus par over the first
+  // `thru` holes of the player's own tee — golf's own vs-par notation. Computed here so
+  // describeGame (and any other view) never re-derives it from the course card.
+  readonly relativeToPar: number;
 }
 
 export interface StablefordLine {
@@ -56,7 +60,17 @@ export type MatchOutcome = { readonly winner: GolferId; readonly closing: string
 export type FourballOutcome = { readonly winner: "a" | "b"; readonly closing: string } | { readonly halved: true };
 
 export type GameState =
-  | { readonly kind: "stroke-play"; readonly id: GameId; readonly scoring: "gross" | "net"; readonly lines: readonly StrokePlayLine[]; readonly complete: boolean }
+  | {
+      readonly kind: "stroke-play";
+      readonly id: GameId;
+      readonly scoring: "gross" | "net";
+      readonly lines: readonly StrokePlayLine[];
+      readonly complete: boolean;
+      // The golferId(s) at the lowest total (net when net-scored, else gross), ties included —
+      // plural because medal play (unlike match play's single opponent) can tie for the lead.
+      // Named distinctly from match-play's singular `leader` so the two never collide.
+      readonly leaders: readonly GolferId[];
+    }
   | {
       readonly kind: "singles-match";
       readonly id: GameId;
@@ -67,7 +81,14 @@ export type GameState =
       readonly dormie: boolean;
       readonly outcome?: MatchOutcome;
     }
-  | { readonly kind: "stableford"; readonly id: GameId; readonly lines: readonly StablefordLine[]; readonly complete: boolean }
+  | {
+      readonly kind: "stableford";
+      readonly id: GameId;
+      readonly lines: readonly StablefordLine[];
+      readonly complete: boolean;
+      // The golferId(s) at the highest points, ties included — see stroke-play's `leaders` doc.
+      readonly leaders: readonly GolferId[];
+    }
   | {
       readonly kind: "fourball-match";
       readonly id: GameId;
@@ -85,6 +106,10 @@ export type GameState =
       readonly carrying: number; // pot riding into the next undecided hole
       readonly carriedOut: number; // pot stranded after the last hole (complete only)
       readonly complete: boolean;
+      // Count of holes decided so far (every player recorded a cell, in card order, stopping
+      // at the first gap) — the same walk carrying/carriedOut settle over. Lets a view name
+      // which hole a live carry is riding into (holesDecided + 1) without replaying the walk.
+      readonly holesDecided: number;
     };
 
 // Dispatch by kind, not a per-format if/else — each engine owns exactly one entry here.

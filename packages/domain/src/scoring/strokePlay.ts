@@ -50,10 +50,25 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
     // score), not a field we forgot to populate.
     const net: RunningTotal | undefined = config.scoring === "net" ? { total: netTotal, pickups: 0 } : undefined;
 
-    return { golferId, thru, gross, ...(net ? { net } : {}) };
+    // Par over the first `thru` holes of THIS player's own tee, in card order — not
+    // necessarily the specific holes that were scored (a mid-card gap is possible; see
+    // players.ts/state.ts), but the best available running baseline without exposing
+    // which holes are individually decided. Scored against whichever total this game
+    // scores by (net when net-scored, else gross) — the same selection `leaders` below uses.
+    const parThru = teeSet.holes.slice(0, thru).reduce((sum, hole) => sum + hole.par, 0);
+    const total = config.scoring === "net" ? netTotal : grossTotal;
+    const relativeToPar = total - parThru;
+
+    return { golferId, thru, gross, ...(net ? { net } : {}), relativeToPar };
   });
 
   const complete = allPlayersComplete(state, config.players);
 
-  return { kind: "stroke-play", id: config.id, scoring: config.scoring, lines, complete };
+  // Leader(s) by the same total selection relativeToPar used per line (net when
+  // net-scored, else gross) — lowest wins, ties included.
+  const totals = lines.map((line) => (config.scoring === "net" ? line.net!.total : line.gross.total));
+  const lowest = totals.length > 0 ? Math.min(...totals) : undefined;
+  const leaders = lines.filter((_, index) => totals[index] === lowest).map((line) => line.golferId);
+
+  return { kind: "stroke-play", id: config.id, scoring: config.scoring, lines, complete, leaders };
 };

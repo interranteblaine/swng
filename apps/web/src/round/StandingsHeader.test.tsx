@@ -26,8 +26,8 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
 });
 
 const gameStates: readonly GameState[] = [
-  { kind: "stroke-play", id: strokePlayConfig.id, scoring: "gross", lines: [], complete: false },
-  { kind: "stableford", id: stablefordConfig.id, lines: [], complete: false },
+  { kind: "stroke-play", id: strokePlayConfig.id, scoring: "gross", lines: [], complete: false, leaders: [] },
+  { kind: "stableford", id: stablefordConfig.id, lines: [], complete: false, leaders: [] },
 ];
 
 afterEach(() => cleanup());

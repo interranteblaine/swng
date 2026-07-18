@@ -1,22 +1,12 @@
-import { cellKey, resultOf } from "@swng/domain";
-import type { GameId, GameState, GolferId, RoundState } from "@swng/domain";
+import { unresolvedGames as domainUnresolvedGames } from "@swng/domain";
+import type { GameId, GameState, GolferId, RoundState, UnresolvedGameMissing } from "@swng/domain";
 import { describeGame } from "../games/describeGame";
-import { gamePlayers } from "./dots";
 
 export interface UnresolvedGame {
   readonly gameId: GameId;
   readonly title: string; // the game chip's OWN naming (describeGame's title) — never a hand-rolled label here
   readonly missing: string; // e.g. "holes 2–18 unscored for Pat"
 }
-
-// Same convention as ScorecardGrid.tsx's own canonicalHoles — the first tee set's hole
-// numbering, shared by every tee at a course (only yardage/rating/slope vary).
-const canonicalHoles = (state: RoundState) => state.card.teeSets[0]?.holes ?? [];
-
-const missingHolesFor = (state: RoundState, golfer: GolferId): readonly number[] =>
-  canonicalHoles(state)
-    .filter((hole) => !(cellKey(golfer, hole.number) in state.cells))
-    .map((hole) => hole.number);
 
 const nameOf = (state: RoundState, golfer: GolferId): string => state.participants.find((p) => p.golferId === golfer)?.name ?? golfer;
 
@@ -40,16 +30,15 @@ const formatHoleRanges = (holes: readonly number[]): string => {
 
 // One clause per DISTINCT missing-hole set among the game's own players — a crew that all
 // stopped at the same hole (the common case) reads as one clause naming everyone, not one
-// repetitive clause per golfer.
-const describeMissing = (state: RoundState, players: readonly GolferId[]): string => {
+// repetitive clause per golfer. Fed from the domain's own structured `missing[]` (already
+// filtered to golfers with at least one open hole) rather than re-deriving it locally.
+const describeMissing = (state: RoundState, missing: readonly UnresolvedGameMissing[]): string => {
   const groups = new Map<string, { readonly holes: readonly number[]; readonly names: string[] }>();
-  for (const golfer of players) {
-    const holes = missingHolesFor(state, golfer);
-    if (holes.length === 0) continue;
-    const key = holes.join(",");
+  for (const entry of missing) {
+    const key = entry.holes.join(",");
     const existing = groups.get(key);
-    if (existing) existing.names.push(nameOf(state, golfer));
-    else groups.set(key, { holes, names: [nameOf(state, golfer)] });
+    if (existing) existing.names.push(nameOf(state, entry.golferId));
+    else groups.set(key, { holes: entry.holes, names: [nameOf(state, entry.golferId)] });
   }
 
   if (groups.size === 0) return "not yet resolved"; // every hole scored, but the game hasn't concluded (defensive — resultOf already gated the caller)
@@ -59,19 +48,18 @@ const describeMissing = (state: RoundState, players: readonly GolferId[]): strin
     .join("; ");
 };
 
-// The finalize dialog's own readiness check, computed from the LOCAL fold (brief: "game config
-// × cells × terminatedGameIds") — a terminated game never appears here (settleRound's own
-// must-resolve set already excludes it; this mirrors that exclusion client-side) and a resolved
-// game (resultOf(gameState) !== undefined) doesn't either, so what's left is exactly what
-// finalize would 409 on right now.
+// The finalize dialog's own readiness check — presentation only now (task 3 of the "domain owns
+// the golf math" arc). WHICH games must resolve, and which holes are missing per player, is
+// @swng/domain's `unresolvedGames` (round/archive.ts): the identical must-resolve set
+// settleRound's own throw path enforces server-side, so what's left after this call is exactly
+// what finalize would 409 on right now. This function only turns that structured result into the
+// dialog's strings (title via describeGame, "holes X unscored for Y" via describeMissing above).
 export const unresolvedGames = (state: RoundState, games: readonly GameState[]): readonly UnresolvedGame[] => {
   const result: UnresolvedGame[] = [];
-  for (const config of state.games) {
-    if (state.terminatedGameIds.has(config.id)) continue;
-    const gameState = games.find((g) => g.id === config.id);
+  for (const game of domainUnresolvedGames(state)) {
+    const gameState = games.find((g) => g.id === game.gameId);
     if (!gameState) continue; // an unknown/future kind the session already filtered out of games() — nothing useful to report
-    if (resultOf(gameState) !== undefined) continue;
-    result.push({ gameId: config.id, title: describeGame(gameState, state).title, missing: describeMissing(state, gamePlayers(config)) });
+    result.push({ gameId: game.gameId, title: describeGame(gameState, state).title, missing: describeMissing(state, game.missing) });
   }
   return result;
 };

@@ -4,10 +4,12 @@ import { DomainError } from "../errors.js";
 import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
 import { adjustedGrossScore, scoreDifferential } from "../handicap/whs.js";
 import { playGoldenRoundLog } from "../scoring/golden/deck.js";
-import { fixtureLinks, fixtureWhite } from "../scoring/golden/fixtureCourse.js";
-import { settleRound } from "./archive.js";
+import { fixtureLinks, fixtureLinks18, fixtureWhite } from "../scoring/golden/fixtureCourse.js";
+import type { GameConfig } from "../scoring/game.js";
+import { settleRound, unresolvedGames } from "./archive.js";
 import { cellKey, reduceRound } from "./state.js";
 import type { RoundEvent } from "./events.js";
+import type { RoundState, ScoreCell } from "./state.js";
 
 // The milestone's headline concurrency deck (scoring/concurrent.test.ts): one log, two
 // games with different handicap allowances over the same cells, one correction that
@@ -436,5 +438,105 @@ describe("round is a sealed leaf — no crewId on state or archive", () => {
   it("a settled archive from a plain log has NO crewId key at all", () => {
     const archive = settleRound(finalLog);
     expect("crewId" in archive).toBe(false);
+  });
+});
+
+// unresolvedGames is the finalize dialog's live readiness view (task 3 of the "domain owns the
+// golf math" arc) — the SAME must-resolve set settleRound's own throw path enforces above,
+// walked without throwing. This deck was hand-picked to match apps/web's own former
+// finalizeReadiness.test.ts fixture exactly (Ann full 18, Pat stops at hole 1) so the web's
+// byte-identical-strings claim has something concrete to check against: this pins the
+// STRUCTURED domain shape the web now formats into that same "holes 2–18 unscored for Pat" line.
+describe("unresolvedGames — finalize readiness", () => {
+  const ANN = golferId("ann");
+  const PAT = golferId("pat");
+  const participants = [
+    { golferId: ANN, name: "Ann", tee: "white", courseHandicap: 8 },
+    { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 2 },
+  ];
+  let opCounter = 0;
+  const cell = (result: ScoreCell["result"], recordedBy: typeof ANN): ScoreCell => ({
+    result,
+    recordedBy,
+    hlc: { wallMs: 1, counter: 0, deviceId: deviceId("d") },
+    opId: opId(`op-unresolved-${(opCounter += 1)}`),
+  });
+  const stablefordConfig: GameConfig = { kind: "stableford", id: gameId("g-stableford"), players: [ANN, PAT] };
+  const skinsConfig: GameConfig = { kind: "skins", id: gameId("g-skins"), players: [ANN, PAT] };
+  const holes = fixtureLinks18.teeSets[0]!.holes;
+
+  // Ann's fully scored (holes 1-18); Pat only played hole 1 — holes 2-18 unscored for Pat.
+  const cellsWithPatStoppedAtHole1: RoundState["cells"] = {
+    ...Object.fromEntries(holes.map((h) => [cellKey(ANN, h.number), cell({ kind: "strokes", strokes: 4 }, ANN)])),
+    [cellKey(PAT, 1)]: cell({ kind: "strokes", strokes: 5 }, PAT),
+  };
+
+  const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
+    id: roundId("round-unresolved"),
+    status: "live",
+    card: fixtureLinks18,
+    participants,
+    games: [stablefordConfig],
+    cells: {},
+    terminatedGameIds: new Set(),
+    ...overrides,
+  });
+
+  it("is empty when every game has resolved", () => {
+    const cells = Object.fromEntries(
+      holes.flatMap((h) => [
+        [cellKey(ANN, h.number), cell({ kind: "strokes", strokes: 4 }, ANN)],
+        [cellKey(PAT, h.number), cell({ kind: "strokes", strokes: 4 }, PAT)],
+      ]),
+    );
+    expect(unresolvedGames(baseState({ cells }))).toEqual([]);
+  });
+
+  it("names an unresolved game by id, with the missing hole numbers per golfer", () => {
+    const state = baseState({ cells: cellsWithPatStoppedAtHole1 });
+
+    expect(unresolvedGames(state)).toEqual([{ gameId: stablefordConfig.id, missing: [{ golferId: PAT, holes: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18] }] }]);
+  });
+
+  it("excludes a terminated game even though its cells are still incomplete", () => {
+    const state = baseState({ cells: cellsWithPatStoppedAtHole1, terminatedGameIds: new Set([stablefordConfig.id]) });
+    expect(unresolvedGames(state)).toEqual([]);
+  });
+
+  it("lists multiple unresolved games independently, one per game — the SAME set settleRound would throw game-unresolved on", () => {
+    const state = baseState({ games: [stablefordConfig, skinsConfig], cells: cellsWithPatStoppedAtHole1 });
+
+    const result = unresolvedGames(state);
+    expect(result.map((r) => r.gameId)).toEqual([stablefordConfig.id, skinsConfig.id]);
+    expect(result.every((r) => r.missing.length === 1 && r.missing[0]!.golferId === PAT)).toBe(true);
+  });
+
+  it("names EXACTLY the game settleRound itself throws game-unresolved on — the reuse proof", () => {
+    const D = golferId("dee");
+    const E = golferId("eve");
+    const partialPlayers = [
+      { golferId: D, name: "Dee", tee: "white", courseHandicap: 5 },
+      { golferId: E, name: "Eve", tee: "white", courseHandicap: 10 },
+    ];
+    const partialGame = { kind: "stroke-play", id: gameId("sp1"), scoring: "gross", players: [D, E] } as const;
+    const partialLog = playGoldenRoundLog(
+      fixtureLinks,
+      partialPlayers,
+      [partialGame],
+      { [D]: [4, 5, 3, 6, 4], [E]: [5, 5, 4, 6, 5, 3, 4, 5, 4] },
+      [],
+      true,
+    );
+
+    const attempt = () => settleRound(partialLog);
+    expect(attempt).toThrowError(expect.objectContaining({ code: "game-unresolved" }));
+
+    const liveState = reduceRound(partialLog);
+    const unresolved = unresolvedGames(liveState);
+    expect(unresolved).toHaveLength(1);
+    expect(unresolved[0]!.gameId).toBe(partialGame.id);
+    // Dee has 5 of 9 holes; the missing set names exactly the 4 unscored ones, Eve absent
+    // entirely (she's fully scored — nothing to report for her).
+    expect(unresolved[0]!.missing).toEqual([{ golferId: D, holes: [6, 7, 8, 9] }]);
   });
 });

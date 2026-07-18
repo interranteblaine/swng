@@ -9,7 +9,7 @@ import type { GameResult } from "../scoring/result.js";
 import { resultOf } from "../scoring/result.js";
 import type { RosterEntry } from "./participant.js";
 import type { RoundEvent } from "./events.js";
-import type { ScoreCell } from "./state.js";
+import type { RoundState, ScoreCell } from "./state.js";
 import { byCanonicalOrder, cellKey, reduceRound, withoutSeq } from "./state.js";
 
 // The event log's write side is RoundState — a live projection that keeps re-folding as
@@ -62,6 +62,19 @@ const gameMembers = (config: GameConfig): readonly GolferId[] => {
   }
 };
 
+// The must-resolve set: every configured game except one explicitly terminated (a terminated
+// game is never waiting on a result that will never come — it stays in `state.games` for
+// audit, just excluded here). This is the ONE filter settleRound's own throw path below and
+// the live finalize-readiness view (unresolvedGames, bottom of file) both walk — factored out
+// so there is exactly one place in the domain that decides which games block finalize.
+const mustResolve = (state: RoundState): readonly GameConfig[] => state.games.filter((config) => !state.terminatedGameIds.has(config.id));
+
+// The ONE resolved/unresolved predicate mustResolve's members are tested against — scores the
+// config fresh against the current fold and asks resultOf whether it has settled. Shared by
+// settleRound (throws when this comes back undefined) and unresolvedGames (collects the
+// configs where it does), so "is this game done" is decided in exactly one place too.
+const resolvedResultOf = (config: GameConfig, state: RoundState): GameResult | undefined => resultOf(scoreGame(config, state));
+
 // Folds the log, then freezes it. Settlement only ever runs against a `final` round (the
 // one lifecycle state that means "no more events are coming" in practice — a reopened round
 // can still append), and every configured game must have resolved: a settled round with a
@@ -78,16 +91,11 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   if (state.status === "abandoned") throw new DomainError("round-abandoned", "settleRound: a scrapped round has no snapshot");
   if (state.status !== "final") throw new DomainError("round-not-final", "settleRound requires a final round");
 
-  // A terminated game never joins the must-resolve set — settlement isn't waiting on a
-  // result that will never come. It stays in `games` below (audit); it's simply absent
-  // from `results`.
-  const results = state.games
-    .filter((config) => !state.terminatedGameIds.has(config.id))
-    .map((config) => {
-      const result = resultOf(scoreGame(config, state));
-      if (!result) throw new DomainError("game-unresolved", `game "${config.id}" never resolved`);
-      return result;
-    });
+  const results = mustResolve(state).map((config) => {
+    const result = resolvedResultOf(config, state);
+    if (!result) throw new DomainError("game-unresolved", `game "${config.id}" never resolved`);
+    return result;
+  });
 
   const terminatedGameIds = [...state.terminatedGameIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
@@ -130,3 +138,37 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
     handicapping,
   };
 };
+
+// The per-golfer holes NOT yet scored, in card order. Same convention ScorecardGrid.tsx and
+// the (now-deleted) web finalizeReadiness.ts both used: the first tee set's hole numbering —
+// shared canonically by every tee at a course, since only yardage/rating/slope vary per tee.
+const missingHolesFor = (state: RoundState, golfer: GolferId): readonly number[] => {
+  const holes = state.card.teeSets[0]?.holes ?? [];
+  return holes.filter((hole) => !(cellKey(golfer, hole.number) in state.cells)).map((hole) => hole.number);
+};
+
+export interface UnresolvedGameMissing {
+  readonly golferId: GolferId;
+  readonly holes: readonly number[]; // never empty — a fully-scored golfer is omitted, not listed with []
+}
+
+export interface UnresolvedGame {
+  readonly gameId: GameId;
+  readonly missing: readonly UnresolvedGameMissing[]; // one entry per game-member golfer who still has holes open
+}
+
+// The finalize dialog's readiness view of the SAME must-resolve set settleRound's throw path
+// enforces above — a live, non-throwing read of "what's still blocking finalize right now"
+// instead of settleRound's all-or-nothing throw. Reused, not reimplemented: this walks
+// `mustResolve` and tests the identical `resolvedResultOf` predicate settleRound itself uses,
+// so there is exactly one place in the domain that decides which games must resolve before
+// finalize — a game a caller would 409 on right now, and only that game, comes back here.
+export const unresolvedGames = (state: RoundState): readonly UnresolvedGame[] =>
+  mustResolve(state)
+    .filter((config) => resolvedResultOf(config, state) === undefined)
+    .map((config) => ({
+      gameId: config.id,
+      missing: gameMembers(config)
+        .map((golferId) => ({ golferId, holes: missingHolesFor(state, golferId) }))
+        .filter((entry) => entry.holes.length > 0),
+    }));

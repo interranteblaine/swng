@@ -26,13 +26,14 @@ const toWireLine = (line: GolferRoundLine & { readonly finalizedAtMs: number }):
 });
 
 // No get-or-create here (unlike getMyGolfer/updateMyGolfer) — viewing an obviously-empty
-// record for a sub that's never even signed in far enough to have a golfer row needs no
-// item to exist; `{ metrics: {}, history: [] }` is already the honest answer.
+// record for a sub that's never even signed in far enough to have a golfer row needs no item to
+// exist; a zeroed distribution + empty trend (papercut 17's now-required members) alongside no
+// computed indexes is already the honest answer.
 export const getMyRecord =
   (deps: { golferStore: GolferStore; projectionStore: ProjectionStore; clock: Clock }) =>
   async (claims: AccountClaims): Promise<GetMyRecordResponse> => {
     const found = await deps.golferStore.getBySub(claims.sub);
-    if (!found) return { metrics: {}, history: [] };
+    if (!found) return { metrics: { distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, trend: [] }, history: [] };
 
     const lines = await deps.projectionStore.listLines(found.golfer.id);
     // listLines is UNORDERED (ports/projectionStore.ts) — sortLines (projections/
@@ -54,6 +55,8 @@ export const getMyRecord =
           ? { whsIndex: { value: metrics.whsIndex.value, computedAtMs: deps.clock.now(), differentialsUsed: metrics.whsIndex.differentialsUsed } }
           : {}),
         ...(metrics.swngIndex !== undefined ? { swngIndex: metrics.swngIndex } : {}),
+        distribution: metrics.distribution,
+        trend: metrics.trend,
       },
       history: sorted.reverse().map(toWireLine),
     };

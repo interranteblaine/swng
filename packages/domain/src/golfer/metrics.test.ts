@@ -69,8 +69,69 @@ describe("golferMetrics — the read projection (handicap-model legibility spec 
     expect(metrics.swngIndex).toEqual({ value: s.value, differentialsUsed: s.differentialsUsed });
   });
 
-  it("an empty history yields {} — no whsIndex, no swngIndex", () => {
-    expect(golferMetrics([])).toEqual({});
+  it("an empty history yields no whsIndex/swngIndex, plus zeroed distribution and an empty trend", () => {
+    expect(golferMetrics([])).toEqual({
+      distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+      trend: [],
+    });
+  });
+});
+
+// distribution + trend (papercut 17 — the metrics projection grows, the web stops computing
+// these itself): distribution is a CAREER total summed from every line's own `distribution`
+// field (record.ts's archiveGolferLine already computes it per line — this is a sum, not a
+// recomputation from cells), rated or unrated alike. trend is the posted (rated) differentials
+// only, oldest → newest (the order golferMetrics itself receives lines in, per getMyRecord's own
+// sortLines contract), capped at the newest 20.
+describe("golferMetrics — distribution (career totals, summed across ALL lines)", () => {
+  it("sums each bucket across every line, rated and unrated alike", () => {
+    const lines = [
+      line({ ags: 90, differential: 9.0, distribution: { eagles: 1, birdies: 2, pars: 10, bogeys: 4, doublePlus: 1 } }),
+      line({ ags: 100, distribution: { eagles: 0, birdies: 1, pars: 8, bogeys: 6, doublePlus: 3 } }), // unrated — still counts
+      line({ ags: 95, differential: 14.0, distribution: { eagles: 0, birdies: 0, pars: 6, bogeys: 8, doublePlus: 4 } }),
+    ];
+
+    expect(golferMetrics(lines).distribution).toEqual({ eagles: 1, birdies: 3, pars: 24, bogeys: 18, doublePlus: 8 });
+  });
+
+  it("an empty history sums to all zeros", () => {
+    expect(golferMetrics([]).distribution).toEqual({ eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 });
+  });
+});
+
+describe("golferMetrics — trend (posted differentials, oldest → newest, newest ≤20)", () => {
+  it("excludes lines without a posted differential (unrated)", () => {
+    const lines = [
+      line({ ags: 90, differential: 9.0 }),
+      line({ ags: 100 }), // unrated — no differential, excluded
+      line({ ags: 95, differential: 14.0 }),
+    ];
+
+    expect(golferMetrics(lines).trend).toEqual([9.0, 14.0]);
+  });
+
+  it("preserves the oldest → newest order it was given (the order getMyRecord's sortLines already produces)", () => {
+    const lines = [line({ differential: 9.0 }), line({ differential: 11.0 }), line({ differential: 14.0 })];
+
+    expect(golferMetrics(lines).trend).toEqual([9.0, 11.0, 14.0]);
+  });
+
+  it("an empty history yields an empty trend", () => {
+    expect(golferMetrics([]).trend).toEqual([]);
+  });
+
+  it("more than 20 posted differentials: keeps only the newest 20, still oldest → newest", () => {
+    const lines = Array.from({ length: 23 }, (_, i) => line({ differential: i + 1 }));
+
+    const trend = golferMetrics(lines).trend;
+    expect(trend).toHaveLength(20);
+    expect(trend).toEqual(Array.from({ length: 20 }, (_, i) => i + 4)); // newest 20 of 1..23 is 4..23
+  });
+
+  it("exactly 20 posted differentials: keeps all 20", () => {
+    const lines = Array.from({ length: 20 }, (_, i) => line({ differential: i + 1 }));
+
+    expect(golferMetrics(lines).trend).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
   });
 });
 

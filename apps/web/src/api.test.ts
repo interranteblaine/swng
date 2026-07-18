@@ -789,14 +789,14 @@ describe("getMyRecord", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { metrics: {}, history: [] });
+      return fakeResponse(200, { metrics: { distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, trend: [] }, history: [] });
     });
 
     const result = await getMyRecord("tok-me");
 
     expect(seenUrl).toBe(`${HTTP_URL}/me/record`);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
-    expect(result).toEqual({ metrics: {}, history: [] });
+    expect(result).toEqual({ metrics: { distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, trend: [] }, history: [] });
   });
 });
 

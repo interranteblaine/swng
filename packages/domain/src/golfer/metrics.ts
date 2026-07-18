@@ -8,18 +8,37 @@ export interface IndexMetric {
   readonly differentialsUsed: number;
 }
 
+// A career scoring profile: par-relative hole buckets, summed across every round line (papercut
+// 17 — the same shape GolferRoundLine.distribution already carries per round; this is a sum, not
+// a recomputation from cells).
+export interface ScoringDistribution {
+  readonly eagles: number;
+  readonly birdies: number;
+  readonly pars: number;
+  readonly bogeys: number;
+  readonly doublePlus: number;
+}
+
+const zeroDistribution: ScoringDistribution = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
+
 // The metrics projection (handicap-model legibility spec §2, §9; unrated-courses spec §6): a
 // read over the golfer's round lines producing every derived index in one place. `whsIndex` is
 // Rule 5.2a over RATED differentials only (the existing `differential !== undefined` filter —
 // unrated rounds carry none, so they cannot reach it); `swngIndex` is the WHS fold EXTENDED to
 // unrated rounds — real `differential` when rated, `ags − par` only when unrated — over every
-// ags-bearing round, so a rated-only golfer's swngIndex equals their whsIndex exactly. Grows to
-// N members (scoring-vs-par, distribution, trend) when a surface needs them — adding a metric is
-// adding a field here, not carving a new pathway. Read-time only, never stored: the fold is pure
-// (no clock); the application stamps time on the wire.
+// ags-bearing round, so a rated-only golfer's swngIndex equals their whsIndex exactly.
+// `distribution` and `trend` (papercut 17) are REQUIRED — always present, zeros/`[]` when there's
+// no data, unlike the optional index members above which stay absent below their own bootstrap.
+// `distribution` is a career total (every line, rated or unrated); `trend` is the posted
+// (rated) differentials, oldest → newest (the order `lines` itself arrives in — getMyRecord's own
+// sortLines contract), capped at the newest 20. Grows to N members when a surface needs them —
+// adding a metric is adding a field here, not carving a new pathway. Read-time only, never
+// stored: the fold is pure (no clock); the application stamps time on the wire.
 export interface GolferMetrics {
   readonly whsIndex?: IndexMetric;
   readonly swngIndex?: IndexMetric;
+  readonly distribution: ScoringDistribution;
+  readonly trend: readonly number[];
 }
 
 export const golferMetrics = (lines: readonly GolferRoundLine[]): GolferMetrics => {
@@ -28,9 +47,21 @@ export const golferMetrics = (lines: readonly GolferRoundLine[]): GolferMetrics 
     combineNineHoleDifferentials(rated.map((line) => ({ differential: line.differential!, holes: line.holes }))),
   );
   const swng = swngIndex(lines);
+  const distribution = lines.reduce<ScoringDistribution>(
+    (acc, l) => ({
+      eagles: acc.eagles + l.distribution.eagles,
+      birdies: acc.birdies + l.distribution.birdies,
+      pars: acc.pars + l.distribution.pars,
+      bogeys: acc.bogeys + l.distribution.bogeys,
+      doublePlus: acc.doublePlus + l.distribution.doublePlus,
+    }),
+    zeroDistribution,
+  );
   return {
     ...(whs !== undefined ? { whsIndex: { value: whs.value, differentialsUsed: whs.differentialsUsed } } : {}),
     ...(swng !== undefined ? { swngIndex: { value: swng.value, differentialsUsed: swng.differentialsUsed } } : {}),
+    distribution,
+    trend: rated.map((line) => line.differential!).slice(-20),
   };
 };
 

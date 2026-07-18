@@ -2,26 +2,18 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router";
 import type { GetMyRecordResponse, ListMyCrewsResponse } from "@swng/contracts";
-import type { CourseId, GolferRoundLine, IndexSource } from "@swng/domain";
+import type { CourseId, IndexSource } from "@swng/domain";
 import { formatHandicapIndex, resolveIndex } from "@swng/domain";
 import { getCourse, getMyRecord, listMyCrews, updateMe } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 
-// Last 20 differentials, oldest -> newest (left to right) — `history` itself arrives
-// newest-first (GetMyRecordResponse's own doc comment), so this takes the newest 20 then
-// reverses, rather than re-deriving an order the wire type already promises.
-const trendPoints = (history: readonly GolferRoundLine[]): readonly number[] =>
-  history
-    .map((line) => line.differential)
-    .filter((d): d is number => d !== undefined)
-    .slice(0, 20)
-    .reverse();
-
 // A dependency-free inline SVG (brief: "no chart lib") — a plain polyline is enough to show a
 // trend; nothing here is precise enough (or needs to be) to warrant an axis/tooltip library.
-function IndexTrend({ history }: { readonly history: readonly GolferRoundLine[] }) {
-  const points = trendPoints(history);
+// `points` is the served metrics projection's own `trend` (papercut 17, domain/golfer/
+// metrics.ts's golferMetrics) — already the newest ≤20 posted differentials, oldest → newest
+// (left to right); this component renders it, it no longer derives it from `history`.
+function IndexTrend({ points }: { readonly points: readonly number[] }) {
   if (points.length < 2) return null; // nothing to trend with 0-1 posted differentials
 
   const width = 280;
@@ -59,7 +51,7 @@ const INDEX_SOURCES: readonly { readonly kind: "swng" | "whs"; readonly label: s
   { kind: "whs", label: "WHS index", description: "rated rounds, official rules", useLabel: "Use WHS index", valueOf: (record) => record?.metrics?.whsIndex?.value },
 ];
 
-type DistributionKey = keyof GolferRoundLine["distribution"];
+type DistributionKey = keyof GetMyRecordResponse["metrics"]["distribution"];
 const DISTRIBUTION_ROWS: readonly { readonly key: DistributionKey; readonly label: string }[] = [
   { key: "eagles", label: "Eagle or better" },
   { key: "birdies", label: "Birdie" },
@@ -68,25 +60,20 @@ const DISTRIBUTION_ROWS: readonly { readonly key: DistributionKey; readonly labe
   { key: "doublePlus", label: "Double bogey+" },
 ];
 
-// Summed across the WHOLE history (not just the trend's last-20 window) — a career scoring
-// profile, not a recent-form snapshot.
-function DistributionBars({ history }: { readonly history: readonly GolferRoundLine[] }) {
-  const totals = history.reduce<Record<DistributionKey, number>>(
-    (acc, line) => {
-      for (const row of DISTRIBUTION_ROWS) acc[row.key] += line.distribution[row.key];
-      return acc;
-    },
-    { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
-  );
-  const max = Math.max(1, ...DISTRIBUTION_ROWS.map((row) => totals[row.key]));
+// The career scoring totals ARE the served metrics projection's own `distribution` (papercut 17,
+// domain/golfer/metrics.ts's golferMetrics — summed across every round line, rated or unrated
+// alike). This component only renders it; the `Math.max(1, …)` bar-width scaling is view-only and
+// stays here.
+function DistributionBars({ distribution }: { readonly distribution: GetMyRecordResponse["metrics"]["distribution"] }) {
+  const max = Math.max(1, ...DISTRIBUTION_ROWS.map((row) => distribution[row.key]));
 
   return (
     <ul aria-label="Scoring distribution" className="flex flex-col gap-1">
       {DISTRIBUTION_ROWS.map((row) => (
         <li key={row.key} className="flex items-center gap-2 text-sm text-slate-300">
           <span className="w-32 shrink-0 text-slate-400">{row.label}</span>
-          <span className="h-3 min-w-[2px] rounded bg-emerald-700" style={{ width: `${(totals[row.key] / max) * 100}%` }} />
-          <span>{totals[row.key]}</span>
+          <span className="h-3 min-w-[2px] rounded bg-emerald-700" style={{ width: `${(distribution[row.key] / max) * 100}%` }} />
+          <span>{distribution[row.key]}</span>
         </li>
       ))}
     </ul>
@@ -409,8 +396,8 @@ export function ProfilePage() {
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Your record</h2>
 
-        <IndexTrend history={history} />
-        <DistributionBars history={history} />
+        <IndexTrend points={record?.metrics.trend ?? []} />
+        <DistributionBars distribution={record?.metrics.distribution ?? { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }} />
 
         <div>
           <h3 className="text-base font-semibold">History</h3>

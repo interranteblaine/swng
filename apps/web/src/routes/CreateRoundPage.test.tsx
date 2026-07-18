@@ -45,6 +45,10 @@ const mockedSearchCourses = vi.mocked(searchCourses);
 const mockedGetMe = vi.mocked(getMe);
 const mockedGetMyRecord = vi.mocked(getMyRecord);
 
+// GetMyRecordResponse.metrics.distribution/trend are required (papercut 17) — these tests only
+// exercise the whsIndex/swngIndex suggestion, so every fixture here spreads a zeroed/empty pair.
+const zeroMetrics = { distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, trend: [] } as const;
+
 const courseView: CourseView = {
   courseId: courseId("course-18"),
   cardId: "card-18",
@@ -61,7 +65,7 @@ beforeEach(() => {
   mockedSearchCourses.mockReset();
   mockedGetMe.mockReset();
   mockedGetMyRecord.mockReset();
-  mockedGetMyRecord.mockResolvedValue({ metrics: {}, history: [] });
+  mockedGetMyRecord.mockResolvedValue({ metrics: { ...zeroMetrics }, history: [] });
 });
 
 afterEach(() => {
@@ -311,7 +315,7 @@ describe("CreateRoundPage — strokes you get here", () => {
   it("defaults the active index to GET /me/record's swngIndex when there's no declared override", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } }); // no declared
-    mockedGetMyRecord.mockResolvedValue({ metrics: { swngIndex: { value: 9.0, differentialsUsed: 5 } }, history: [] });
+    mockedGetMyRecord.mockResolvedValue({ metrics: { swngIndex: { value: 9.0, differentialsUsed: 5 }, ...zeroMetrics }, history: [] });
     mockedGetCourse.mockResolvedValue({ course: courseView });
 
     renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
@@ -358,7 +362,7 @@ describe("CreateRoundPage — strokes you get here", () => {
   it("a golfer on the WHS source seeds from the live whsIndex metric and names it in the derivation", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", indexSource: { kind: "whs" } } });
-    mockedGetMyRecord.mockResolvedValue({ metrics: { whsIndex: { value: 10, computedAtMs: 1_000, differentialsUsed: 6 } }, history: [] });
+    mockedGetMyRecord.mockResolvedValue({ metrics: { whsIndex: { value: 10, computedAtMs: 1_000, differentialsUsed: 6 }, ...zeroMetrics }, history: [] });
     const unrated9Card = { ...fixtureLinks18, teeSets: [{ name: "white", holes: fixtureWhite.holes }] };
     mockedGetCourse.mockResolvedValue({ course: { ...courseView, card: unrated9Card } });
 
@@ -388,7 +392,7 @@ describe("CreateRoundPage — strokes you get here", () => {
     fireEvent.change(screen.getByLabelText(/strokes you get here/i), { target: { value: "7" } });
 
     // The record resolves with a swngIndex that WOULD seed a very different value — the seed must not fire.
-    resolveRecord({ metrics: { swngIndex: { value: 20.0, differentialsUsed: 5 } }, history: [] });
+    resolveRecord({ metrics: { swngIndex: { value: 20.0, differentialsUsed: 5 }, ...zeroMetrics }, history: [] });
     await waitFor(() => expect(mockedGetMyRecord).toHaveBeenCalled());
 
     expect((screen.getByLabelText(/strokes you get here/i) as HTMLInputElement).value).toBe("7");

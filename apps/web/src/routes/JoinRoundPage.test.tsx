@@ -43,6 +43,10 @@ const mockedGetMe = vi.mocked(getMe);
 const mockedUpdateMe = vi.mocked(updateMe);
 const mockedGetMyRecord = vi.mocked(getMyRecord);
 
+// GetMyRecordResponse.metrics.distribution/trend are required (papercut 17) — these tests only
+// exercise the whsIndex/swngIndex suggestion, so every fixture here spreads a zeroed/empty pair.
+const zeroMetrics = { distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, trend: [] } as const;
+
 beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
   vi.stubGlobal("sessionStorage", createMemoryStorage());
@@ -52,7 +56,7 @@ beforeEach(() => {
   mockedGetMe.mockReset();
   mockedUpdateMe.mockReset();
   mockedGetMyRecord.mockReset();
-  mockedGetMyRecord.mockResolvedValue({ metrics: {}, history: [] });
+  mockedGetMyRecord.mockResolvedValue({ metrics: { ...zeroMetrics }, history: [] });
 });
 
 afterEach(() => {
@@ -336,7 +340,7 @@ describe("JoinRoundPage — strokes you get here", () => {
   it("a golfer on the WHS source seeds from the live whsIndex metric and names it in the derivation", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G", indexSource: { kind: "whs" } } });
-    mockedGetMyRecord.mockResolvedValue({ metrics: { whsIndex: { value: 10, computedAtMs: 1_000, differentialsUsed: 6 } }, history: [] });
+    mockedGetMyRecord.mockResolvedValue({ metrics: { whsIndex: { value: 10, computedAtMs: 1_000, differentialsUsed: 6 }, ...zeroMetrics }, history: [] });
     mockedPeekRound.mockResolvedValue({
       courseName: "Muni Front 9",
       teeSets: [{ name: "front", par: 36, holes: 9 }], // 9 holes, no rating/slope
@@ -379,7 +383,7 @@ describe("JoinRoundPage — strokes you get here", () => {
   it("defaults the active index to GET /me/record's swngIndex when there's no declared override", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });
-    mockedGetMyRecord.mockResolvedValue({ metrics: { swngIndex: { value: 9.0, differentialsUsed: 5 } }, history: [] });
+    mockedGetMyRecord.mockResolvedValue({ metrics: { swngIndex: { value: 9.0, differentialsUsed: 5 }, ...zeroMetrics }, history: [] });
     mockedPeekRound.mockResolvedValue({
       courseName: "Fixture Links 18",
       teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.6, slope: 128 }],

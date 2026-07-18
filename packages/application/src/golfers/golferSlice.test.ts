@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, fixtureLinks, golferId, opId, placeholderName, roundId, swngIndex } from "@swng/domain";
+import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, fixtureLinks, golferId, golferMetrics, opId, placeholderName, roundId, swngIndex } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import { createFrozenClock, createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
@@ -141,10 +141,10 @@ describe("updateMyGolfer", () => {
 });
 
 describe("getMyRecord", () => {
-  it("returns an empty record (empty metrics, empty history) for a sub with no golfer at all — no throw, no create", async () => {
+  it("returns an empty record (no computed indexes, zeroed distribution, empty trend, empty history) for a sub with no golfer at all — no throw, no create", async () => {
     const ctx = setup();
     const record = await ctx.record({ sub: "sub-1" });
-    expect(record).toEqual({ metrics: {}, history: [] });
+    expect(record).toEqual({ metrics: { distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, trend: [] }, history: [] });
   });
 
   it("bootstrap not met: history present, whsIndex absent below 3 differentials", async () => {
@@ -358,6 +358,64 @@ describe("getMyRecord", () => {
 
     const expected = computeIndexDetail(combineNineHoleDifferentials([3, 7, 11].map((differential) => ({ differential, holes: 18 }))))!;
     expect(response.metrics.whsIndex).toEqual({ value: expected.value, computedAtMs: FROZEN_NOW, differentialsUsed: expected.differentialsUsed });
+  });
+
+  // Papercut 17 — distribution + trend are the SAME golferMetrics fold as whsIndex/swngIndex
+  // above, just two more members: this proves the wire's distribution/trend agree byte-for-byte
+  // with calling golferMetrics directly over the same (sorted) lines, for a mixed
+  // rated/unrated/incomplete fixture (a rated round, an unrated ags-bearing round, and a
+  // no-ags-at-all incomplete round).
+  it("distribution + trend on the wire equal golferMetrics(sorted) for a mixed rated/unrated/incomplete history", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const stored = [
+      {
+        roundId: roundId("r1"),
+        courseName: "Casa Verde GC",
+        tee: "white",
+        holes: 18 as const,
+        par: 72,
+        courseHandicap: 8,
+        ags: 90,
+        differential: 9.0,
+        distribution: { eagles: 1, birdies: 2, pars: 10, bogeys: 4, doublePlus: 1 },
+        finalizedAtMs: 1_000,
+      },
+      {
+        roundId: roundId("r2"),
+        courseName: "Nine Pines (unrated)",
+        tee: "no-card",
+        holes: 18 as const,
+        par: 72,
+        courseHandicap: 20,
+        ags: 100, // unrated — no differential
+        distribution: { eagles: 0, birdies: 1, pars: 8, bogeys: 6, doublePlus: 3 },
+        finalizedAtMs: 2_000,
+      },
+      {
+        roundId: roundId("r3"),
+        courseName: "Casa Verde GC",
+        tee: "white",
+        holes: 18 as const,
+        par: 72,
+        courseHandicap: 8,
+        // no ags, no differential — an incomplete card
+        distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+        finalizedAtMs: 3_000,
+      },
+    ];
+    for (const line of stored) await ctx.projectionStore.putLine(golfer.golferId, line);
+
+    const record = await ctx.record({ sub: "sub-1" });
+
+    // The oracle: golferMetrics over the SAME lines, sorted oldest -> newest (getMyRecord's own
+    // sortLines contract), the identical fold getMyRecord itself runs.
+    const sortedOldestFirst = [...stored].sort((a, b) => a.finalizedAtMs - b.finalizedAtMs);
+    const expected = golferMetrics(sortedOldestFirst);
+    expect(record.metrics.distribution).toEqual(expected.distribution);
+    expect(record.metrics.trend).toEqual(expected.trend);
+    expect(record.metrics.distribution).toEqual({ eagles: 1, birdies: 3, pars: 18, bogeys: 10, doublePlus: 4 });
+    expect(record.metrics.trend).toEqual([9.0]);
   });
 });
 

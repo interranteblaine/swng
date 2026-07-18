@@ -10,6 +10,13 @@ import { ProfilePage } from "./ProfilePage";
 
 const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
 
+// GetMyRecordResponse.metrics.distribution/trend are REQUIRED on the wire now (papercut 17) —
+// api.ts's getMyRecord parses every /me/record response through the real zod schema, so a mock
+// missing either field throws at runtime and silently leaves `record` unset (the effect's own
+// `.catch(() => {})`). Every /me/record fixture below spreads this in; tests that care about a
+// SPECIFIC distribution/trend override it explicitly.
+const emptyMetricsExtras = { distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, trend: [] as readonly number[] };
+
 // ProfilePage's history lines are now react-router <Link>s (projection-realignment Task 6) —
 // every render needs a Router ancestor, same MemoryRouter-wrapping idiom WatchPage.test.tsx's
 // own renderWithAuth uses. A `/crews/:crewId` probe route is registered too since the crews
@@ -82,7 +89,7 @@ describe("ProfilePage — signed in", () => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: null });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras }, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -98,13 +105,21 @@ describe("ProfilePage — signed in", () => {
   it("renders the pre-filled form, computed index, trend SVG, distribution bars, and newest-first history", async () => {
     signIn();
     const history: GolferRoundLine[] = [lineWithDifferential("1", 9.2), lineWithDifferential("2", 11.8), lineWithDifferential("3", 14.5)]; // newest-first, per the wire contract
+    // The metrics projection's own distribution/trend (papercut 17) — trend is oldest -> newest
+    // (left to right), the mirror of the newest-first history above; distribution is the 3
+    // identical per-line buckets (lineWithDifferential) summed.
+    const metrics = {
+      whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 1 },
+      distribution: { eagles: 0, birdies: 3, pars: 30, bogeys: 18, doublePlus: 3 },
+      trend: [14.5, 11.8, 9.2],
+    };
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "declared", value: 15 } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { metrics: { whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 1 } }, history });
+        if (path === "/me/record") return fakeResponse(200, { metrics, history });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -141,7 +156,7 @@ describe("ProfilePage — signed in", () => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "declared", value: 15 } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras }, history });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -171,7 +186,7 @@ describe("ProfilePage — signed in", () => {
         }
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras }, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -209,7 +224,7 @@ describe("ProfilePage — signed in", () => {
         }
         if (path === "/me") return fakeResponse(200, { golfer: null });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras }, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -238,7 +253,7 @@ describe("ProfilePage — index sources", () => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { metrics, history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras, ...(metrics as object) }, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -295,7 +310,7 @@ describe("ProfilePage — index sources", () => {
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "declared", value: 20 } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") {
-          return fakeResponse(200, { metrics: { swngIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 } }, history: [] });
+          return fakeResponse(200, { metrics: { swngIndex: { value: 9.4, differentialsUsed: 3 }, whsIndex: { value: 7.2, computedAtMs: 1_000, differentialsUsed: 5 }, ...emptyMetricsExtras }, history: [] });
         }
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -319,7 +334,7 @@ describe("ProfilePage — Your index (the one active number)", () => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { metrics, history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras, ...(metrics as object) }, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -413,7 +428,7 @@ describe("ProfilePage — Your index (the one active number)", () => {
         }
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { metrics: { swngIndex: { value: 12.4, differentialsUsed: 8 }, whsIndex: { value: 11.2, computedAtMs: 1_000, differentialsUsed: 6 } }, history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { swngIndex: { value: 12.4, differentialsUsed: 8 }, whsIndex: { value: 11.2, computedAtMs: 1_000, differentialsUsed: 6 }, ...emptyMetricsExtras }, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -465,7 +480,7 @@ describe("ProfilePage — Your index (the one active number)", () => {
         }
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { metrics: { swngIndex: { value: 12.4, differentialsUsed: 8 } }, history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { swngIndex: { value: 12.4, differentialsUsed: 8 }, ...emptyMetricsExtras }, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -505,7 +520,7 @@ describe("ProfilePage — Your index (the one active number)", () => {
         }
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
-        if (path === "/me/record") return fakeResponse(200, { metrics: { swngIndex: { value: 12.4, differentialsUsed: 8 }, whsIndex: { value: 11.2, computedAtMs: 1_000, differentialsUsed: 6 } }, history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { swngIndex: { value: 12.4, differentialsUsed: 8 }, whsIndex: { value: 11.2, computedAtMs: 1_000, differentialsUsed: 6 }, ...emptyMetricsExtras }, history: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
@@ -580,7 +595,7 @@ describe("ProfilePage — crews", () => {
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
-        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras }, history: [] });
         if (path === "/me/crews") {
           return fakeResponse(200, {
             crews: [
@@ -607,7 +622,7 @@ describe("ProfilePage — crews", () => {
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: null });
-        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras }, history: [] });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -629,7 +644,7 @@ describe("ProfilePage — crews", () => {
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
         if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
-        if (path === "/me/record") return fakeResponse(200, { metrics: {}, history: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras }, history: [] });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),

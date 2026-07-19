@@ -6,6 +6,7 @@ import type { GolferId } from "@swng/domain";
 import type { CrewSeasonView, CrewView } from "@swng/contracts";
 import { ApiError, createSeason, getCrew, leaveCrew, listSeasons, mintCrewInvite, removeCrewMember, transferOrganizer } from "../api";
 import { useAuth } from "../auth/useAuth";
+import { badge, btnDanger, btnDangerSolid, btnPrimary, btnSecondary, cardBox, inputBox } from "../ui/classes";
 import { SeasonPanel } from "./SeasonPanel";
 
 // A crew load can fail two honest ways the wire names (errorMapping.ts) — both get human
@@ -143,18 +144,18 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
 
   if (!signedIn) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-slate-950 p-6 text-slate-100">
-        <h1 className="text-2xl font-bold">Crew</h1>
-        <p className="text-slate-400">Sign in to see your crew.</p>
+      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-cream p-6">
+        <h1 className="text-2xl font-bold text-forest">Crew</h1>
+        <p className="text-fairway">Sign in to see your crew.</p>
       </main>
     );
   }
 
   if (loadError) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-slate-950 p-6 text-slate-100">
-        <h1 className="text-2xl font-bold">Crew</h1>
-        <p role="alert" className="text-red-400">
+      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-cream p-6">
+        <h1 className="text-2xl font-bold text-forest">Crew</h1>
+        <p role="alert" className="text-oxblood">
           {loadError}
         </p>
       </main>
@@ -163,9 +164,9 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
 
   if (!crew) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-slate-950 p-6 text-slate-100">
-        <h1 className="text-2xl font-bold">Crew</h1>
-        <p>Loading…</p>
+      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-cream p-6">
+        <h1 className="text-2xl font-bold text-forest">Crew</h1>
+        <p className="text-forest">Loading…</p>
       </main>
     );
   }
@@ -256,43 +257,39 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
   const sortedSeasons = seasons ? [...seasons].sort((a, b) => b.createdAtMs - a.createdAtMs) : [];
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-bold">{crew.name}</h1>
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-cream p-6">
+      <h1 className="text-2xl font-bold text-forest">{crew.name}</h1>
 
       {/* Crew membership (invited in, accountable out — spec §2): the permanent join code is
           gone — ANY member mints a fresh 7-day invite link (mirrors ShareButton.tsx's own
-          mint/copy/visible-fallback idiom for the round-share link) as the one way in. */}
-      <div className="rounded-lg bg-slate-800 p-4">
-        <button
-          type="button"
-          onClick={() => void mintInvite()}
-          disabled={inviteBusy}
-          className="w-full rounded-lg bg-slate-900 px-4 py-3 text-center font-semibold text-emerald-400 disabled:opacity-50"
-        >
+          mint/copy/visible-fallback idiom for the round-share link) as the one way in. Invite
+          is this page's one primary action — the gold idiom. */}
+      <div className={`${cardBox} p-4`}>
+        <button type="button" onClick={() => void mintInvite()} disabled={inviteBusy} className={`${btnPrimary} w-full disabled:opacity-50`}>
           {inviteBusy ? "Getting link…" : "Invite"}
         </button>
         {inviteUrl && (
           <>
-            <p className="mt-2 text-xs text-slate-400">{inviteCopied ? "Link copied — good for 7 days." : "Copy this link — good for 7 days."}</p>
-            <p className="select-all text-xs text-slate-500">{inviteUrl}</p>
+            <p className="mt-2 text-xs text-fairway">{inviteCopied ? "Link copied — good for 7 days." : "Copy this link — good for 7 days."}</p>
+            <p className="mt-1 select-all font-mono text-xs text-fairway/70">{inviteUrl}</p>
           </>
         )}
         {inviteError && (
-          <p role="alert" className="mt-2 text-xs text-red-400">
+          <p role="alert" className="mt-2 text-xs text-oxblood">
             {inviteError}
           </p>
         )}
       </div>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Roster</h2>
+        <h2 className="text-lg font-semibold text-forest">Roster</h2>
         <ul aria-label="Roster" className="flex flex-col gap-2">
           {crew.members.map((member) => (
-            <li key={member.golferId} className="flex flex-col gap-2 rounded-lg bg-slate-900 p-3">
-              <div className="flex items-center gap-2">
+            <li key={member.golferId} className={`${cardBox} flex flex-col gap-2 p-3`}>
+              <div className="flex items-center gap-2 text-forest">
                 <span>{member.name}</span>
-                {member.claimed && <span className="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-emerald-400">account</span>}
-                {member.role === "organizer" && <span className="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-amber-400">organizer</span>}
+                {member.claimed && <span className={badge}>account</span>}
+                {member.role === "organizer" && <span className={badge}>organizer</span>}
               </div>
 
               {/* Crew membership (invited in, accountable out — spec §1): organizer-only, and
@@ -307,18 +304,13 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                       aria-label={memberAction.type === "remove" ? `Confirm remove ${member.name}` : `Confirm make ${member.name} organizer`}
                       className="flex flex-col gap-2"
                     >
-                      <span className="text-slate-300">
+                      <span className="text-fairway">
                         {memberAction.type === "remove"
                           ? `Remove ${member.name} from the crew? Their rounds stay counted; their standings return if they're invited back.`
                           : `Make ${member.name} organizer? They'll be the only one who can remove members or transfer the role — you won't be able to anymore.`}
                       </span>
                       <span className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void confirmMemberAction()}
-                          disabled={memberActionBusy}
-                          className="rounded-md bg-red-700 px-2 py-1 font-medium text-slate-100 disabled:opacity-50"
-                        >
+                        <button type="button" onClick={() => void confirmMemberAction()} disabled={memberActionBusy} className={`${btnDangerSolid} disabled:opacity-50`}>
                           Confirm
                         </button>
                         <button
@@ -330,13 +322,13 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                             setMemberActionError(undefined);
                           }}
                           disabled={memberActionBusy}
-                          className="rounded-md bg-slate-800 px-2 py-1 text-slate-300 disabled:opacity-50"
+                          className={`${btnSecondary} disabled:opacity-50`}
                         >
                           Cancel
                         </button>
                       </span>
                       {memberActionError && (
-                        <p role="alert" className="text-red-400">
+                        <p role="alert" className="text-oxblood">
                           {memberActionError}
                         </p>
                       )}
@@ -349,7 +341,7 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                           setMemberAction({ type: "remove", golferId: member.golferId, name: member.name });
                           setMemberActionError(undefined);
                         }}
-                        className="text-red-400 underline"
+                        className={btnDanger}
                       >
                         Remove…
                       </button>
@@ -359,7 +351,7 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                           setMemberAction({ type: "transfer", golferId: member.golferId, name: member.name });
                           setMemberActionError(undefined);
                         }}
-                        className="text-emerald-400 underline"
+                        className={btnSecondary}
                       >
                         Make organizer…
                       </button>
@@ -376,12 +368,12 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
           the old "Season records" ledger table entirely — a season list here, SeasonPanel does
           the standings/head-to-head/counted-rounds/count-a-round work once one is picked. */}
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Seasons</h2>
+        <h2 className="text-lg font-semibold text-forest">Seasons</h2>
 
         {seasonsError ? (
-          <p className="text-slate-400">Could not load seasons right now.</p>
+          <p className="text-fairway">Could not load seasons right now.</p>
         ) : seasons !== undefined && sortedSeasons.length === 0 ? (
-          <p className="text-slate-400">No seasons yet — start one below.</p>
+          <p className="text-fairway">No seasons yet — start one below.</p>
         ) : (
           <ul aria-label="Seasons" className="flex flex-col gap-2">
             {sortedSeasons.map((season) => (
@@ -389,12 +381,10 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                 <button
                   type="button"
                   onClick={() => setSelectedSeasonId(season.seasonId)}
-                  className={`w-full rounded-lg px-4 py-3 text-left ${
-                    selectedSeasonId === season.seasonId ? "bg-emerald-700" : "bg-slate-800"
-                  }`}
+                  className={`w-full px-4 py-3 text-left ${selectedSeasonId === season.seasonId ? "bg-forest text-cream" : cardBox}`}
                 >
                   {season.name}
-                  {season.status === "closed" && <span className="ml-2 text-xs text-slate-400">closed</span>}
+                  {season.status === "closed" && <span className={`ml-2 ${badge}`}>closed</span>}
                 </button>
               </li>
             ))}
@@ -402,21 +392,16 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
         )}
 
         <form onSubmit={(event) => void submitNewSeason(event)} className="flex flex-col gap-2">
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-forest">
             New season
-            <input
-              value={newSeasonName}
-              onChange={(event) => setNewSeasonName(event.target.value)}
-              maxLength={60}
-              className="rounded-lg bg-slate-800 p-3 text-lg"
-            />
+            <input value={newSeasonName} onChange={(event) => setNewSeasonName(event.target.value)} maxLength={60} className={`${inputBox} text-lg`} />
           </label>
           {createSeasonError && (
-            <p role="alert" className="text-red-400">
+            <p role="alert" className="text-oxblood">
               {createSeasonError}
             </p>
           )}
-          <button type="submit" disabled={creatingSeason} className="self-start rounded-lg bg-slate-800 px-4 py-3 font-semibold disabled:opacity-50">
+          <button type="submit" disabled={creatingSeason} className={`${btnSecondary} self-start disabled:opacity-50`}>
             Create season
           </button>
         </form>
@@ -434,34 +419,24 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
           them entirely rather than offering a button that's guaranteed to fail. */}
       <section className="flex flex-col gap-2">
         {isOrganizer ? (
-          <p className="text-sm text-slate-500">You're the organizer — make someone else the organizer to leave the crew.</p>
+          <p className="text-sm text-fairway/70">You're the organizer — make someone else the organizer to leave the crew.</p>
         ) : !confirmingLeave ? (
-          <button type="button" onClick={() => setConfirmingLeave(true)} className="self-start text-sm text-red-400 underline">
+          <button type="button" onClick={() => setConfirmingLeave(true)} className={`${btnDanger} self-start`}>
             Leave crew
           </button>
         ) : (
           <span role="dialog" aria-label="Confirm leave" className="flex items-center gap-2 text-sm">
-            <span className="text-slate-300">Leave {crew.name}?</span>
-            <button
-              type="button"
-              onClick={() => void confirmLeave()}
-              disabled={leaving}
-              className="rounded-md bg-red-700 px-2 py-1 font-medium text-slate-100 disabled:opacity-50"
-            >
+            <span className="text-fairway">Leave {crew.name}?</span>
+            <button type="button" onClick={() => void confirmLeave()} disabled={leaving} className={`${btnDangerSolid} disabled:opacity-50`}>
               Confirm
             </button>
-            <button
-              type="button"
-              onClick={() => setConfirmingLeave(false)}
-              disabled={leaving}
-              className="rounded-md bg-slate-800 px-2 py-1 text-slate-300 disabled:opacity-50"
-            >
+            <button type="button" onClick={() => setConfirmingLeave(false)} disabled={leaving} className={`${btnSecondary} disabled:opacity-50`}>
               Cancel
             </button>
           </span>
         )}
         {leaveError && (
-          <p role="alert" className="text-red-400">
+          <p role="alert" className="text-oxblood">
             {leaveError}
           </p>
         )}

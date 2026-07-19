@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import type { CourseView } from "@swng/contracts";
+import { cardBox, inputBox } from "../ui/classes";
 import { teeNumbers } from "./teeNumbers";
 
 export interface CourseSummaryCardProps {
@@ -25,26 +26,26 @@ export interface CourseSummaryCardProps {
 // entered it, never a self-typed verify count.
 export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCourse }: CourseSummaryCardProps) {
   return (
-    <div className="flex flex-col gap-3 rounded-lg bg-slate-900 p-4">
+    <div className={`${cardBox} flex flex-col gap-3 p-4`}>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-lg font-semibold">{course.card.courseName}</p>
+        <p className="text-lg font-semibold text-forest">{course.card.courseName}</p>
         <div className="flex items-center gap-3">
           {onChangeCourse && (
-            <button type="button" onClick={onChangeCourse} className="text-sm text-emerald-400 underline">
+            <button type="button" onClick={onChangeCourse} className="text-sm text-forest underline decoration-fairway">
               Change course
             </button>
           )}
           {/* The create-flow's own path to maintenance (Courses-surface T6): editing itself
               lives on CoursePage now, not here — this is just the door to it. */}
-          <Link to={`/courses/${course.courseId}`} className="text-sm text-emerald-400 underline">
+          <Link to={`/courses/${course.courseId}`} className="text-sm text-forest underline decoration-fairway">
             View course
           </Link>
         </div>
       </div>
 
-      <label className="flex flex-col gap-1">
+      <label className="flex flex-col gap-1 text-forest">
         Tee
-        <select value={selectedTee} onChange={(event) => onSelectTee(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg">
+        <select value={selectedTee} onChange={(event) => onSelectTee(event.target.value)} className={`${inputBox} text-lg`}>
           {course.card.teeSets.map((teeSet) => (
             <option key={teeSet.name} value={teeSet.name}>
               {teeSet.name} — {teeNumbers(teeSet)}
@@ -56,7 +57,7 @@ export function CourseSummaryCard({ course, selectedTee, onSelectTee, onChangeCo
       {/* Attribution only (course-cards spec §8): who entered this card and when — no per-tee
           verify badges, no edit affordance here directly (editing lives on CoursePage, reached
           via "View course" above). */}
-      <p className="text-sm text-slate-400">
+      <p className="font-mono text-sm text-fairway">
         entered by {course.enteredBy} · updated {new Date(course.updatedAtMs).toLocaleDateString()}
       </p>
     </div>

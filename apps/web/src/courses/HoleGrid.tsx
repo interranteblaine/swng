@@ -1,3 +1,5 @@
+import { cardBox, eyebrow } from "../ui/classes";
+
 // The hole-count toggle + hole grid, extracted out of AddCoursePage (M7 Task 7, papercut 2)
 // so EditCoursePage (I2) pre-fills and validates against the exact same code, not a second
 // hand-copy that could drift (engineering-conventions §0: second instance → extract). Both
@@ -82,7 +84,7 @@ export function HoleGrid({ holeCount, onChangeHoleCount, holes, onChangeHole, er
   return (
     <div className="flex flex-col gap-2">
       {!hideHoleCountToggle && (
-        <fieldset role="radiogroup" aria-label="Holes" className="flex gap-4">
+        <fieldset role="radiogroup" aria-label="Holes" className="flex gap-4 text-forest">
           {([9, 18] as const).map((count) => (
             <label key={count} className="flex items-center gap-2">
               <input type="radio" name="holeCount" checked={holeCount === count} onChange={() => onChangeHoleCount(count)} className="h-5 w-5" />
@@ -92,7 +94,7 @@ export function HoleGrid({ holeCount, onChangeHoleCount, holes, onChangeHole, er
         </fieldset>
       )}
 
-      <p aria-label="Stroke index remaining" className="text-xs text-slate-400">
+      <p aria-label="Stroke index remaining" className="text-xs text-fairway">
         SI remaining: {remainingStrokeIndexes.length > 0 ? remainingStrokeIndexes.join(", ") : "none"}
       </p>
       {/* Plain-language SI explainer (papercut 2): "SI" alone is jargon a golfer has to already
@@ -100,13 +102,10 @@ export function HoleGrid({ holeCount, onChangeHoleCount, holes, onChangeHole, er
           every game's dot allocation for the life of the course, so this line says both what
           it is and why exactness matters, rather than assuming the "SI remaining" hint above
           is self-explanatory. */}
-      <p className="text-xs text-slate-400">SI = the Handicap/HDCP row on your scorecard — 1 is the hardest hole. Type it exactly as printed.</p>
+      <p className="text-xs text-fairway">SI = the Handicap/HDCP row on your scorecard — 1 is the hardest hole. Type it exactly as printed.</p>
 
-      <div className="overflow-hidden rounded-lg border border-slate-800" data-testid="hole-grid-card">
-        <div
-          className={`grid ${gridCols} sticky top-0 z-10 gap-2 bg-slate-900 px-2 py-1 text-xs font-semibold text-slate-400`}
-          data-testid="hole-grid-header"
-        >
+      <div className={cardBox} data-testid="hole-grid-card">
+        <div className={`grid ${gridCols} sticky top-0 z-10 gap-2 border-b border-hairline bg-card px-2 py-1 ${eyebrow}`} data-testid="hole-grid-header">
           <span>Hole</span>
           <span>Par</span>
           <span>Yards</span>
@@ -117,27 +116,27 @@ export function HoleGrid({ holeCount, onChangeHoleCount, holes, onChangeHole, er
             const n = index + 1;
             return (
               <div key={n} className={`grid ${gridCols} items-center gap-2`} data-testid="hole-row">
-                <span className="text-sm text-slate-400">{n}</span>
+                <span className="font-mono text-sm text-fairway">{n}</span>
                 <input
                   aria-label={`Hole ${n} par`}
                   value={hole.par}
                   onChange={(event) => onChangeHole(index, { par: event.target.value })}
                   inputMode="numeric"
-                  className="w-full min-w-0 rounded-md bg-slate-800 p-2 text-center"
+                  className="w-full min-w-0 border border-hairline bg-card p-2 text-center text-forest"
                 />
                 <input
                   aria-label={`Hole ${n} yardage`}
                   value={hole.yardage}
                   onChange={(event) => onChangeHole(index, { yardage: event.target.value })}
                   inputMode="numeric"
-                  className="w-full min-w-0 rounded-md bg-slate-800 p-2 text-center"
+                  className="w-full min-w-0 border border-hairline bg-card p-2 text-center text-forest"
                 />
                 <input
                   aria-label={`Hole ${n} stroke index`}
                   value={hole.strokeIndex}
                   onChange={(event) => onChangeHole(index, { strokeIndex: event.target.value })}
                   inputMode="numeric"
-                  className="w-full min-w-0 rounded-md bg-slate-800 p-2 text-center"
+                  className="w-full min-w-0 border border-hairline bg-card p-2 text-center text-forest"
                 />
               </div>
             );
@@ -145,7 +144,7 @@ export function HoleGrid({ holeCount, onChangeHoleCount, holes, onChangeHole, er
         </div>
       </div>
       {error && (
-        <p role="alert" className="text-red-400">
+        <p role="alert" className="text-oxblood">
           {error}
         </p>
       )}

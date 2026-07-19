@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import { ApiError, createCourse } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
+import { btnPrimary, inputBox } from "../ui/classes";
 import { HoleGrid, defaultHoles, holesAreComplete, parseHoles } from "./HoleGrid";
 import type { HoleCount, HoleInput } from "./HoleGrid";
 
@@ -140,64 +141,64 @@ export function AddCoursePage() {
   // a sign-in funnel, not a form — the same SignInCta idiom CreateRoundPage uses.
   if (!auth.signedIn) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
-        <h1 className="text-2xl font-bold">Add a course</h1>
+      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-cream p-6">
+        <h1 className="text-2xl font-bold text-forest">Add a course</h1>
         <SignInCta message="Sign in to add a course." returnTo="/courses/new" />
       </main>
     );
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-bold">Add a course</h1>
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-cream p-6">
+      <h1 className="text-2xl font-bold text-forest">Add a course</h1>
       <form onSubmit={submit} className="flex flex-col gap-4">
         {/* The error span is a SIBLING of the <label>, not nested inside it — nesting it would
             fold the error text into the label's own accessible name (every getByLabelText
             lookup for this field would then have to match the error text too, not just the
             field's name). */}
         <div className="flex flex-col gap-1">
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-forest">
             Course name
-            <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+            <input value={name} onChange={(event) => setName(event.target.value)} className={`${inputBox} text-lg`} />
           </label>
           {errorFor("name") && (
-            <span role="alert" className="text-sm text-red-400">
+            <span role="alert" className="text-sm text-oxblood">
               {errorFor("name")}
             </span>
           )}
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-forest">
             Tee name
-            <input value={teeName} onChange={(event) => setTeeName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+            <input value={teeName} onChange={(event) => setTeeName(event.target.value)} className={`${inputBox} text-lg`} />
           </label>
           {errorFor("teeName") && (
-            <span role="alert" className="text-sm text-red-400">
+            <span role="alert" className="text-sm text-oxblood">
               {errorFor("teeName")}
             </span>
           )}
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-forest">
             Rating
-            <input value={rating} onChange={(event) => setRating(event.target.value)} inputMode="decimal" className="rounded-lg bg-slate-800 p-3 text-lg" />
+            <input value={rating} onChange={(event) => setRating(event.target.value)} inputMode="decimal" className={`${inputBox} text-lg`} />
           </label>
           {errorFor("rating") && (
-            <span role="alert" className="text-sm text-red-400">
+            <span role="alert" className="text-sm text-oxblood">
               {errorFor("rating")}
             </span>
           )}
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-forest">
             Slope
-            <input value={slope} onChange={(event) => setSlope(event.target.value)} inputMode="numeric" className="rounded-lg bg-slate-800 p-3 text-lg" />
+            <input value={slope} onChange={(event) => setSlope(event.target.value)} inputMode="numeric" className={`${inputBox} text-lg`} />
           </label>
           {errorFor("slope") && (
-            <span role="alert" className="text-sm text-red-400">
+            <span role="alert" className="text-sm text-oxblood">
               {errorFor("slope")}
             </span>
           )}
@@ -206,17 +207,17 @@ export function AddCoursePage() {
         {/* rating/slope are optional as a pair (unrated-courses arc): a card with no course
             rating is entered by leaving both blank, and still gets a scorecard, dots, and
             gross games — just no posted handicap differential. */}
-        <p className="text-sm text-slate-400">No course rating on the card? Leave these blank.</p>
+        <p className="text-sm text-fairway">No course rating on the card? Leave these blank.</p>
 
         <HoleGrid holeCount={holeCount} onChangeHoleCount={changeHoleCount} holes={holes} onChangeHole={updateHole} error={errorFor("holes")} />
 
         {generalError && (
-          <p role="alert" className="text-red-400">
+          <p role="alert" className="text-oxblood">
             {generalError}
           </p>
         )}
 
-        <button type="submit" disabled={!canSubmit || submitting} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+        <button type="submit" disabled={!canSubmit || submitting} className={`${btnPrimary} disabled:opacity-50`}>
           Add course
         </button>
       </form>

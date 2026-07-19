@@ -7,6 +7,7 @@ import type { CourseView, SupersedeCardRequest } from "@swng/contracts";
 import { ApiError, getCourse, supersedeCard } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
+import { btnPrimary, inputBox } from "../ui/classes";
 import { HoleGrid, defaultHoles, holesAreComplete, parseHoles } from "./HoleGrid";
 import type { HoleCount, HoleInput } from "./HoleGrid";
 import { teeNumbers } from "./teeNumbers";
@@ -230,9 +231,9 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
 
   if (loadError) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
-        <h1 className="text-2xl font-bold">{title}</h1>
-        <p role="alert" className="text-red-400">
+      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-cream p-6">
+        <h1 className="text-2xl font-bold text-forest">{title}</h1>
+        <p role="alert" className="text-oxblood">
           {loadError}
         </p>
       </main>
@@ -241,7 +242,7 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
 
   if (!view) {
     return (
-      <div role="status" aria-label="Loading course" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+      <div role="status" aria-label="Loading course" className="flex min-h-screen items-center justify-center bg-cream text-forest">
         Loading…
       </div>
     );
@@ -251,32 +252,32 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
   // loaded AFTER the card fetch (auth:none) so the message can name the specific course.
   if (!auth.signedIn) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
-        <h1 className="text-2xl font-bold">{title}</h1>
+      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-cream p-6">
+        <h1 className="text-2xl font-bold text-forest">{title}</h1>
         <SignInCta message={`Sign in to ${addTee ? "add a tee to" : "edit"} ${view.card.courseName}.`} returnTo={`/courses/${id}/edit`} />
       </main>
     );
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-bold">{title}</h1>
-      <p className="text-slate-400">{view.card.courseName}</p>
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-cream p-6">
+      <h1 className="text-2xl font-bold text-forest">{title}</h1>
+      <p className="text-fairway">{view.card.courseName}</p>
 
       {notice && (
-        <p role="status" className="text-amber-400">
+        <p role="status" className="border border-gold bg-goldwash p-3 text-sm text-forest">
           {notice}
         </p>
       )}
 
       <form onSubmit={submit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-forest">
             Course name
-            <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+            <input value={name} onChange={(event) => setName(event.target.value)} className={`${inputBox} text-lg`} />
           </label>
           {errorFor("name") && (
-            <span role="alert" className="text-sm text-red-400">
+            <span role="alert" className="text-sm text-oxblood">
               {errorFor("name")}
             </span>
           )}
@@ -286,9 +287,9 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
             Add-tee mode has no "which one" to pick — every existing tee already passes through
             untouched, and the tee name below always names the NEW one. */}
         {!addTee && (
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-forest">
             Tee to edit
-            <select value={selectedTeeName ?? ""} onChange={(event) => changeTeeToEdit(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg">
+            <select value={selectedTeeName ?? ""} onChange={(event) => changeTeeToEdit(event.target.value)} className={`${inputBox} text-lg`}>
               {view.card.teeSets.map((teeSet) => (
                 <option key={teeSet.name} value={teeSet.name}>
                   {teeSet.name} — {teeNumbers(teeSet)}
@@ -299,36 +300,36 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
         )}
 
         <div className="flex flex-col gap-1">
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-forest">
             Tee name
-            <input value={teeName} onChange={(event) => setTeeName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+            <input value={teeName} onChange={(event) => setTeeName(event.target.value)} className={`${inputBox} text-lg`} />
           </label>
           {errorFor("teeName") && (
-            <span role="alert" className="text-sm text-red-400">
+            <span role="alert" className="text-sm text-oxblood">
               {errorFor("teeName")}
             </span>
           )}
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-forest">
             Rating
-            <input value={rating} onChange={(event) => setRating(event.target.value)} inputMode="decimal" className="rounded-lg bg-slate-800 p-3 text-lg" />
+            <input value={rating} onChange={(event) => setRating(event.target.value)} inputMode="decimal" className={`${inputBox} text-lg`} />
           </label>
           {errorFor("rating") && (
-            <span role="alert" className="text-sm text-red-400">
+            <span role="alert" className="text-sm text-oxblood">
               {errorFor("rating")}
             </span>
           )}
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 text-forest">
             Slope
-            <input value={slope} onChange={(event) => setSlope(event.target.value)} inputMode="numeric" className="rounded-lg bg-slate-800 p-3 text-lg" />
+            <input value={slope} onChange={(event) => setSlope(event.target.value)} inputMode="numeric" className={`${inputBox} text-lg`} />
           </label>
           {errorFor("slope") && (
-            <span role="alert" className="text-sm text-red-400">
+            <span role="alert" className="text-sm text-oxblood">
               {errorFor("slope")}
             </span>
           )}
@@ -336,7 +337,7 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
 
         {/* rating/slope are optional as a pair (unrated-courses arc) — leaving both blank keeps
             (or makes) this tee unrated; the card's other tees are untouched either way. */}
-        <p className="text-sm text-slate-400">No course rating on the card? Leave these blank.</p>
+        <p className="text-sm text-fairway">No course rating on the card? Leave these blank.</p>
 
         {/* hideHoleCountToggle: this card's hole count is fixed by every OTHER tee on it
             (course.ts's validateCard) — there is no toggle here to pin the invariant with. */}
@@ -350,12 +351,12 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
         />
 
         {generalError && (
-          <p role="alert" className="text-red-400">
+          <p role="alert" className="text-oxblood">
             {generalError}
           </p>
         )}
 
-        <button type="submit" disabled={!canSubmit || submitting} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+        <button type="submit" disabled={!canSubmit || submitting} className={`${btnPrimary} disabled:opacity-50`}>
           Save changes
         </button>
       </form>

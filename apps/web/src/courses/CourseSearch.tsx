@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { CourseId } from "@swng/domain";
 import { ApiError, searchCourses } from "../api";
+import { cardBox, inputBox } from "../ui/classes";
 
 export interface CourseSearchProps {
   readonly onSelect: (courseId: CourseId, name: string) => void;
@@ -55,24 +56,15 @@ export function CourseSearch({ onSelect }: CourseSearchProps) {
     <div className="flex flex-col gap-2">
       <label className="flex flex-col gap-1">
         Course
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search courses…"
-          className="rounded-lg bg-slate-800 p-3 text-lg"
-        />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search courses…" className={`${inputBox} text-lg`} />
       </label>
 
       {results && results.length > 0 && (
         <ul className="flex flex-col gap-1">
           {results.map((course) => (
             <li key={course.courseId}>
-              <button
-                type="button"
-                onClick={() => onSelect(course.courseId, course.name)}
-                className="w-full rounded-lg bg-slate-800 p-3 text-left active:bg-slate-700"
-              >
-                {course.name} · {course.holeCount} holes
+              <button type="button" onClick={() => onSelect(course.courseId, course.name)} className={`${cardBox} w-full p-3 text-left`}>
+                {course.name} <span className="font-mono text-fairway">· {course.holeCount} holes</span>
               </button>
             </li>
           ))}
@@ -80,16 +72,16 @@ export function CourseSearch({ onSelect }: CourseSearchProps) {
       )}
 
       {searched && results && results.length === 0 && (
-        <p className="text-slate-400">
+        <p className="text-fairway">
           No courses found.{" "}
-          <Link to="/courses/new" className="text-emerald-400 underline">
+          <Link to="/courses/new" className="text-forest underline decoration-fairway">
             Add a course
           </Link>
         </p>
       )}
 
       {error && (
-        <p role="alert" className="text-red-400">
+        <p role="alert" className="text-oxblood">
           {error}
         </p>
       )}

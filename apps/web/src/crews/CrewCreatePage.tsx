@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { ApiError, createCrew } from "../api";
 import { useAuth } from "../auth/useAuth";
+import { btnPrimary, inputBox } from "../ui/classes";
 
 // name → POST /crews → the new crew's page (brief). Crews are golfer-gated end to end
 // (routes.ts's crew table), so unlike round creation there is no anonymous arm at all —
@@ -19,9 +20,9 @@ export function CrewCreatePage() {
 
   if (!auth.signedIn) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-slate-950 p-6 text-slate-100">
-        <h1 className="text-2xl font-bold">New crew</h1>
-        <p className="text-slate-400">Sign in to create a crew.</p>
+      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-cream p-6">
+        <h1 className="text-2xl font-bold text-forest">New crew</h1>
+        <p className="text-fairway">Sign in to create a crew.</p>
       </main>
     );
   }
@@ -52,30 +53,30 @@ export function CrewCreatePage() {
   };
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-bold">New crew</h1>
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-cream p-6">
+      <h1 className="text-2xl font-bold text-forest">New crew</h1>
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1 text-forest">
           Crew name
-          <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+          <input value={name} onChange={(event) => setName(event.target.value)} className={`${inputBox} text-lg`} />
         </label>
 
         {golferRequired && (
-          <p role="alert" className="text-red-400">
+          <p role="alert" className="text-oxblood">
             Set your name on your profile before creating a crew.{" "}
-            <Link to="/profile" className="underline">
+            <Link to="/profile" className="underline decoration-oxblood">
               Go to profile
             </Link>
           </p>
         )}
 
         {error && (
-          <p role="alert" className="text-red-400">
+          <p role="alert" className="text-oxblood">
             {error}
           </p>
         )}
 
-        <button type="submit" disabled={submitting} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+        <button type="submit" disabled={submitting} className={`${btnPrimary} disabled:opacity-50`}>
           Create crew
         </button>
       </form>

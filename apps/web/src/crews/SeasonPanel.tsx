@@ -4,6 +4,7 @@ import type { CrewId, GolferId, RoundId } from "@swng/domain";
 import type { GetMyRoundsResponse, SeasonStandingsResponse } from "@swng/contracts";
 import { appendCountedRound, ApiError, getMyRounds, getSeasonStandings, removeCountedRound } from "../api";
 import { useAuth } from "../auth/useAuth";
+import { badge, btnSecondary, cardBox } from "../ui/classes";
 
 export interface SeasonPanelProps {
   readonly crewId: CrewId;
@@ -107,10 +108,10 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
   };
 
   if (standingsError) {
-    return <p className="text-slate-400">Could not load this season — try again.</p>;
+    return <p className="text-fairway">Could not load this season — try again.</p>;
   }
   if (!standings) {
-    return <p>Loading…</p>;
+    return <p className="text-forest">Loading…</p>;
   }
 
   // A ledger line's `name` is already server-resolved (getSeasonStandings.ts) — head-to-head
@@ -129,14 +130,14 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
   const uncounted = (myRounds ?? []).filter((round) => !countedIds.has(round.roundId));
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg bg-slate-900 p-4">
-      <h3 className="text-lg font-semibold">
+    <div className={`${cardBox} flex flex-col gap-4 p-4`}>
+      <h3 className="text-lg font-semibold text-forest">
         {standings.name}
-        {standings.status === "closed" && <span className="ml-2 text-xs text-slate-500">closed</span>}
+        {standings.status === "closed" && <span className={`ml-2 ${badge}`}>closed</span>}
       </h3>
 
       {sortedLedger.length === 0 ? (
-        <p className="text-slate-400">
+        <p className="text-fairway">
           {standings.rounds.length === 0
             ? "Standings build as rounds are counted."
             : "No current members appear in this season's counted rounds."}
@@ -146,7 +147,7 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="text-slate-400">
+                <tr className="font-mono text-fairway">
                   <th className="py-1 pr-2 font-medium">Member</th>
                   <th className="py-1 pr-2 font-medium">Rounds</th>
                   <th className="py-1 pr-2 font-medium">Matches (W–L–H)</th>
@@ -156,25 +157,25 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
               </thead>
               <tbody>
                 {sortedLedger.map((line) => (
-                  <tr key={line.golferId} className="border-t border-slate-800">
+                  <tr key={line.golferId} className="border-t border-hairline text-forest">
                     <td className="py-2 pr-2">{line.name}</td>
-                    <td className="py-2 pr-2">{line.rounds}</td>
-                    <td className="py-2 pr-2">{`${line.wins}–${line.losses}–${line.halves}`}</td>
-                    <td className="py-2 pr-2">{line.points}</td>
-                    <td className="py-2">{line.skins}</td>
+                    <td className="py-2 pr-2 font-mono tabular-nums">{line.rounds}</td>
+                    <td className="py-2 pr-2 font-mono tabular-nums">{`${line.wins}–${line.losses}–${line.halves}`}</td>
+                    <td className="py-2 pr-2 font-mono tabular-nums">{line.points}</td>
+                    <td className="py-2 font-mono tabular-nums">{line.skins}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-slate-500">From this season&apos;s counted rounds — match results, Stableford points, and skins for current members.</p>
+          <p className="font-serif text-xs text-fairway">From this season&apos;s counted rounds — match results, Stableford points, and skins for current members.</p>
         </>
       )}
 
       {standings.headToHead.length > 0 && (
         <div>
-          <h4 className="text-base font-semibold">Head to head</h4>
-          <ul className="flex flex-col gap-1 text-sm text-slate-300">
+          <h4 className="text-base font-semibold text-forest">Head to head</h4>
+          <ul className="flex flex-col gap-1 text-sm text-fairway">
             {standings.headToHead.map((h2h) => (
               <li key={`${h2h.a}#${h2h.b}`}>{describeHeadToHead(h2h, nameOf)}</li>
             ))}
@@ -183,26 +184,21 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
       )}
 
       <div>
-        <h4 className="text-base font-semibold">Rounds counted</h4>
+        <h4 className="text-base font-semibold text-forest">Rounds counted</h4>
         {standings.rounds.length === 0 ? (
-          <p className="text-slate-400">No rounds counted yet.</p>
+          <p className="text-fairway">No rounds counted yet.</p>
         ) : (
           <ul aria-label="Counted rounds" className="flex flex-col gap-2">
             {standings.rounds.map((round) => (
-              <li key={round.roundId} className="flex items-center justify-between gap-2 rounded-lg bg-slate-800 p-3">
-                <Link to={`/rounds/${round.roundId}/archive`} className="underline decoration-slate-600 underline-offset-2 hover:decoration-slate-400">
+              <li key={round.roundId} className={`${cardBox} flex items-center justify-between gap-2 p-3`}>
+                <Link to={`/rounds/${round.roundId}/archive`} className="font-mono text-forest underline decoration-fairway">
                   {new Date(round.finalizedAt).toLocaleDateString()}
                 </Link>
                 {/* Remove affordance ONLY on rows the caller themselves appended (task-11-brief.md
                     binding resolution) — mirrors removeCountedRound.ts's own not-the-appender
                     403, shown here as an absent button rather than a doomed request. */}
                 {round.appendedBy === myGolferId && (
-                  <button
-                    type="button"
-                    onClick={() => void remove(round.roundId)}
-                    disabled={pendingRoundId === round.roundId}
-                    className="text-xs text-red-400 underline disabled:opacity-50"
-                  >
+                  <button type="button" onClick={() => void remove(round.roundId)} disabled={pendingRoundId === round.roundId} className="text-xs text-oxblood underline disabled:opacity-50">
                     Remove
                   </button>
                 )}
@@ -211,28 +207,28 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
           </ul>
         )}
         {removeError && (
-          <p role="alert" className="text-red-400">
+          <p role="alert" className="text-oxblood">
             {removeError}
           </p>
         )}
       </div>
 
       {!picking ? (
-        <button type="button" onClick={openPicker} className="self-start rounded-lg bg-slate-800 px-4 py-3 font-semibold">
+        <button type="button" onClick={openPicker} className={`${btnSecondary} self-start`}>
           Count a round…
         </button>
       ) : (
-        <div className="flex flex-col gap-2 rounded-lg bg-slate-800 p-3">
+        <div className={`${cardBox} flex flex-col gap-2 p-3`}>
           <div className="flex items-center justify-between">
-            <span className="font-medium">Pick a round</span>
-            <button type="button" onClick={() => setPicking(false)} className="text-sm text-emerald-400 underline">
+            <span className="font-medium text-forest">Pick a round</span>
+            <button type="button" onClick={() => setPicking(false)} className="text-sm text-forest underline decoration-fairway">
               Close
             </button>
           </div>
           {myRounds === undefined ? (
-            <p className="text-slate-400">Loading…</p>
+            <p className="text-fairway">Loading…</p>
           ) : uncounted.length === 0 ? (
-            <p className="text-slate-400">You have no uncounted finalized rounds.</p>
+            <p className="text-fairway">You have no uncounted finalized rounds.</p>
           ) : (
             <ul className="flex flex-col gap-2">
               {uncounted.map((round) => (
@@ -241,16 +237,16 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
                     type="button"
                     onClick={() => void count(round.roundId)}
                     disabled={pendingRoundId === round.roundId}
-                    className="w-full rounded-lg bg-slate-900 p-3 text-left disabled:opacity-50"
+                    className={`${cardBox} w-full p-3 text-left disabled:opacity-50`}
                   >
-                    {round.courseName} — {round.tee}
+                    <span className="text-forest">{round.courseName}</span> <span className="font-mono text-fairway">— {round.tee}</span>
                   </button>
                 </li>
               ))}
             </ul>
           )}
           {pickError && (
-            <p role="alert" className="text-red-400">
+            <p role="alert" className="text-oxblood">
               {pickError}
             </p>
           )}

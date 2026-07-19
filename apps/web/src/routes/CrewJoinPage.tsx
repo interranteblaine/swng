@@ -5,6 +5,7 @@ import type { PeekCrewInviteResponse } from "@swng/contracts";
 import { ApiError, joinCrewByInvite, peekCrewInvite, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
+import { btnPrimary, cardBox, inputBox } from "../ui/classes";
 
 // Crew membership (invited in, accountable out — spec §2/§5): the two failure codes a token
 // check can throw (peekCrewInvite AND joinCrewByInvite both make the SAME check — application/
@@ -27,9 +28,9 @@ const humanizeJoinError = (caught: unknown): string => mapInviteTokenError(caugh
 // dead token."
 function DeadInvite({ message }: { readonly message: string }) {
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 bg-slate-950 p-6 text-center text-slate-100">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 bg-cream p-6 text-center text-forest">
       <p role="status">{message}</p>
-      <Link to="/" className="text-emerald-400 underline">
+      <Link to="/" className="text-forest underline decoration-fairway">
         Back to swng
       </Link>
     </main>
@@ -66,18 +67,18 @@ function NamePrompt() {
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
-      <label className="flex flex-col gap-1">
+      <label className="flex flex-col gap-1 text-forest">
         What should the card call you?
-        <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+        <input value={name} onChange={(event) => setName(event.target.value)} className={`${inputBox} text-lg`} />
       </label>
 
       {error && (
-        <p role="alert" className="text-red-400">
+        <p role="alert" className="text-oxblood">
           {error}
         </p>
       )}
 
-      <button type="submit" disabled={saving || !name.trim()} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+      <button type="submit" disabled={saving || !name.trim()} className={`${btnPrimary} disabled:opacity-50`}>
         Continue
       </button>
     </form>
@@ -113,10 +114,12 @@ function ConsentCard({ peek, token }: { readonly peek: PeekCrewInviteResponse; r
   };
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
-      <div>
-        <h1 className="text-2xl font-bold">Join {peek.crewName}?</h1>
-        <p className="text-slate-400">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-cream p-6">
+      {/* The consent screen itself is a card (JoinRoundPage's own funnel idiom) — the crew
+          name/member count/inviter is the trust surface shown BEFORE sign-in (spec §2). */}
+      <div className={`${cardBox} flex flex-col gap-1 p-4`}>
+        <h1 className="text-2xl font-bold text-forest">Join {peek.crewName}?</h1>
+        <p className="text-fairway">
           {peek.memberCount} member{peek.memberCount === 1 ? "" : "s"} · invited by {peek.inviterName}
         </p>
       </div>
@@ -129,18 +132,18 @@ function ConsentCard({ peek, token }: { readonly peek: PeekCrewInviteResponse; r
         <SignInCta message="Sign in to join this crew — new players create their account on the way." returnTo={`/crews/join#${token}`} />
       ) : isIdentityLoading ? (
         <div role="status" aria-label="Loading your profile" className="flex flex-col gap-1">
-          <div className="rounded-lg bg-slate-800 p-3 text-lg text-slate-500">Loading your profile…</div>
+          <div className={`${cardBox} p-3 text-lg text-fairway/70`}>Loading your profile…</div>
         </div>
       ) : needsName ? (
         <NamePrompt />
       ) : (
         <div className="flex flex-col gap-4">
           {joinError && (
-            <p role="alert" className="text-red-400">
+            <p role="alert" className="text-oxblood">
               {joinError}
             </p>
           )}
-          <button type="button" onClick={() => void submitJoin()} disabled={joining} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+          <button type="button" onClick={() => void submitJoin()} disabled={joining} className={`${btnPrimary} disabled:opacity-50`}>
             {joining ? "Joining…" : "Join"}
           </button>
         </div>
@@ -183,7 +186,7 @@ export function CrewJoinPage() {
 
   if (!peek) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+      <main className="flex min-h-screen items-center justify-center bg-cream text-forest">
         <p role="status">Loading invite…</p>
       </main>
     );

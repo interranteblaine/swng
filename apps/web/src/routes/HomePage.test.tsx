@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GetMeResponse } from "@swng/contracts";
 import { golferId, roundId } from "@swng/domain";
@@ -68,6 +68,15 @@ const signIn = (): string => {
   return idToken;
 };
 
+// Renders the join-funnel destination as a probe reporting exactly what it was navigated to
+// (pathname + search), so the door's code-input tests can assert the ACTUAL navigation target
+// through the real router rather than a mocked navigate function — the harness this file
+// already uses for every other cross-page assertion (see "round page probe" below).
+function JoinProbe() {
+  const location = useLocation();
+  return <div>join page probe: {location.pathname}{location.search}</div>;
+}
+
 const renderHome = () =>
   render(
     <AuthProvider>
@@ -75,23 +84,16 @@ const renderHome = () =>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/round/:roundId" element={<div>round page probe</div>} />
+          <Route path="/join" element={<JoinProbe />} />
         </Routes>
       </MemoryRouter>
     </AuthProvider>,
   );
 
 describe("HomePage", () => {
-  // The wall (accounts-only identity spec §3): no anonymous "start a round" — signed out, that
-  // action is a sign-in CTA, and the whole page is sign-in / join-by-code / watch links only.
-  // Papercut 10 adds a SECOND sign-in CTA (the "Your rounds" section, replacing the device
-  // list) — both are asserted present rather than picking one with getByRole's single-match.
-  it("signed out: shows a sign-in CTA instead of an anonymous Start a round link", () => {
-    renderHome();
-
-    expect(screen.getAllByRole("button", { name: "Sign in" }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("link", { name: "Start a round" })).toBeNull();
-  });
-
+  // The wall (accounts-only identity spec §3): no anonymous "start a round" — signed in is the
+  // only state that renders the nav at all now (the signed-out door, tested in its own describe
+  // block below, replaces the old dual-sign-in-CTA structure this used to pin).
   it("signed in: shows the Start a round link to /create", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
@@ -102,24 +104,61 @@ describe("HomePage", () => {
     expect(link.getAttribute("href")).toBe("/create");
   });
 
-  it("links Join by code to /join", () => {
+  // Join by code is now a signed-in-only nav item (brand reskin spec §3) — signed out, the door
+  // (its own describe block below) shows a code INPUT + Join button instead, not this link.
+  it("signed in: links Join by code to /join", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
+
     renderHome();
 
-    const link = screen.getByRole("link", { name: "Join by code" });
+    const link = await screen.findByRole("link", { name: "Join by code" });
     expect(link.getAttribute("href")).toBe("/join");
   });
 
   // Papercut 10: post-wall, nothing writes new device credentials, so a saved credential can
-  // only ever be a pre-wall relic token — the device-list render arm is deleted outright in
-  // favor of the sign-in CTA, the funnel being the one way onto a card.
-  it("signed out, a device holding pre-wall relic credentials shows NO round list — only the sign-in CTA", () => {
+  // only ever be a pre-wall relic token. Signed out, the door (spec §3) never even reads
+  // credentialStore — this pins that a relic credential can't leak a round link onto the door.
+  it("signed out, a device holding pre-wall relic credentials shows NO round list — only the door", () => {
     credentialStore.save(roundId("round-1"), { token: "t1", golferId: golferId("ann"), name: "Walker", joinCode: "AAA111" });
     credentialStore.save(roundId("round-2"), { token: "t2", golferId: golferId("bo"), name: "Walker", joinCode: "BBB222" });
 
     renderHome();
 
     expect(screen.queryByRole("link", { name: /walker/i })).toBeNull();
-    expect(screen.getByText("Sign in to see your rounds.")).toBeTruthy();
+    expect(screen.getByText("swng is the app for the golf you actually play.")).toBeTruthy();
+  });
+});
+
+// Brand reskin spec §3: the signed-out door IS the landing page — no "Your rounds" section
+// (a heading whose only content is a locked-feature sign-in box), exactly one sign-in
+// affordance, and a round-code input that pre-fills the join funnel rather than gating a
+// second CTA behind it.
+describe("HomePage — signed-out door (brand reskin spec §3)", () => {
+  it("signed out: the door has exactly one sign-in button and no rounds section", () => {
+    renderHome();
+
+    expect(screen.getAllByRole("button", { name: "Sign in" })).toHaveLength(1);
+    expect(screen.getByText("swng is the app for the golf you actually play.")).toBeTruthy();
+    expect(screen.queryByText("Your rounds")).toBeNull();
+    expect(screen.queryByText("Sign in to see your rounds.")).toBeNull();
+  });
+
+  it("signed out: the door's code input routes into the join funnel with the code", () => {
+    renderHome();
+
+    fireEvent.change(screen.getByLabelText("Round code"), { target: { value: "  qk7m2a " } });
+    fireEvent.click(screen.getByRole("button", { name: "Join" }));
+
+    expect(screen.getByText("join page probe: /join?code=qk7m2a")).toBeTruthy();
+  });
+
+  it("signed out: an empty code input routes to the bare join page", () => {
+    renderHome();
+
+    fireEvent.click(screen.getByRole("button", { name: "Join" }));
+
+    expect(screen.getByText("join page probe: /join")).toBeTruthy();
   });
 });
 

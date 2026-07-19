@@ -8,10 +8,16 @@ import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { credentialStore } from "../identity";
 import { roundDayKey, roundLabel } from "../roundLabel";
+import { btnCreamOutline, btnPrimary, btnSecondary, cardBox, eyebrow, inputCode } from "../ui/classes";
 
 export function HomePage() {
-  const { withAuth, signedIn, golfer } = useAuth();
+  const { withAuth, signedIn, golfer, signIn } = useAuth();
   const navigate = useNavigate();
+  // The door's own code input (brand reskin spec §3) — the ONLY new state this task adds;
+  // useAuth gains no new surface. Lives above the early signed-out return so hook order stays
+  // fixed across the signed-in/signed-out branch (same reason every other piece of state here
+  // is declared before any conditional return).
+  const [doorCode, setDoorCode] = useState("");
 
   // A real account golfer (not undefined = signed out, not null = signed in but no golfer row
   // yet — useAuth.ts's own three-state doc comment) is the ONE condition for the identity-based
@@ -104,39 +110,81 @@ export function HomePage() {
     return key !== undefined && (dayKeyCounts.get(key) ?? 0) > 1;
   };
 
-  return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-3xl font-bold">swng</h1>
+  // Brand reskin spec §3: signed out, `/` IS the landing page — no app header (Layout suppresses
+  // it), no "Your rounds" section (a heading whose only content is a locked-feature sign-in box
+  // just enumerates a locked feature), exactly one sign-in affordance. `doorCode` pre-fills the
+  // join funnel, which keeps ALL of its own logic (sign-in gating, peek, tee picker) — the door
+  // just navigates there with the trimmed code.
+  if (!signedIn) {
+    return (
+      <main className="flex min-h-screen flex-col bg-cream">
+        <section className="flex flex-1 flex-col gap-4 p-7 pt-11">
+          <h1 className="text-3xl font-extrabold tracking-tight text-forest text-balance">
+            swng is the app for the golf you actually play.
+          </h1>
+          <p className="font-serif text-lg text-fairway">Fair matches, layered games, a record that lasts.</p>
+          <button type="button" onClick={() => signIn()} className={`${btnPrimary} mt-3`}>
+            Sign in
+          </button>
+          <p className="font-serif text-sm text-fairway">New here? Signing in creates your account.</p>
+        </section>
+        <section className="flex flex-col gap-2.5 bg-forest p-7">
+          <h2 className="text-xl font-bold text-cream">Playing today?</h2>
+          <p className="font-serif text-sm text-cream/70">Join a round with the code from your group.</p>
+          <form
+            className="mt-2 flex gap-2.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const trimmed = doorCode.trim();
+              navigate(trimmed ? `/join?code=${encodeURIComponent(trimmed)}` : "/join");
+            }}
+          >
+            <input
+              aria-label="Round code"
+              placeholder="ROUND CODE"
+              value={doorCode}
+              onChange={(event) => setDoorCode(event.target.value)}
+              className={`${inputCode} min-w-0 flex-1`}
+            />
+            <button type="submit" className={btnCreamOutline}>
+              Join
+            </button>
+          </form>
+          <p className="mt-4 font-mono text-[11px] text-cream/45">swng &copy; 2026</p>
+        </section>
+      </main>
+    );
+  }
 
-      {/* The wall (accounts-only identity spec §3): there is no anonymous "start a round" path.
-          Signed out, that action is a sign-in CTA; join-by-code still routes into the funnel
-          (which gates its own sign-in), and a shared watch link is the only other way in. */}
+  return (
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-cream p-6">
+      <h1 className="text-3xl font-extrabold tracking-tight text-forest">swng</h1>
+
+      {/* The wall (accounts-only identity spec §3): there is no anonymous "start a round" path
+          — the signed-out door (above) is the whole sign-in-first funnel now, so this branch
+          only ever renders signed in. */}
       <nav className="flex flex-col gap-3">
-        {signedIn ? (
-          <Link to="/create" className="rounded-lg bg-emerald-600 px-4 py-4 text-center text-lg font-semibold">
-            Start a round
-          </Link>
-        ) : (
-          <SignInCta message="Sign in to start a round." returnTo="/create" />
-        )}
-        <Link to="/join" className="rounded-lg bg-slate-800 px-4 py-4 text-center text-lg font-semibold">
+        <Link to="/create" className={btnPrimary}>
+          Start a round
+        </Link>
+        <Link to="/join" className={btnSecondary}>
           Join by code
         </Link>
       </nav>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-semibold text-slate-300">Your rounds</h2>
+        <h2 className={eyebrow}>Your rounds</h2>
         {isIdentityLoading ? (
           // A quiet placeholder — NEVER the device list and never "No rounds yet" (both are
           // claims about data this render doesn't have yet). Same role/label idiom as
           // CreateRoundPage/JoinRoundPage's own "Loading your profile" placeholder.
-          <div role="status" aria-label="Loading your rounds" className="rounded-lg bg-slate-800 p-3 text-slate-500">
+          <div role="status" aria-label="Loading your rounds" className={`${cardBox} p-3 text-fairway`}>
             Loading your rounds…
           </div>
         ) : hasGolferIdentity ? (
           <>
             {enterError && (
-              <div role="alert" className="text-red-400">
+              <div role="alert" className="text-oxblood">
                 <p>{enterError}</p>
                 {finishedRoundId && (
                   <p>
@@ -148,34 +196,45 @@ export function HomePage() {
               </div>
             )}
             {!liveRounds || liveRounds.length === 0 ? (
-              <p className="text-slate-400">No rounds yet</p>
+              <p className="text-fairway">No rounds yet</p>
             ) : (
               <ul className="flex flex-col gap-2">
-                {liveRounds.map((round) => (
-                  <li key={round.roundId}>
-                    {/* Task 14: a round found by identity may have no local device credential
-                        at all (started/joined from a different device or browser) —
-                        handleLiveRoundClick re-mints one before navigating whenever this
-                        device holds none; a device that already holds one navigates exactly
-                        as a plain Link would, no network call. */}
-                    <Link
-                      to={`/round/${round.roundId}`}
-                      onClick={handleLiveRoundClick(round.roundId)}
-                      aria-busy={enteringRoundId === round.roundId}
-                      className="block rounded-lg bg-slate-800 px-4 py-3"
-                    >
-                      {roundLabel({ courseName: round.courseName, createdAt: round.createdAt }, { withTime: collidesOnDay(round) })}
-                    </Link>
-                  </li>
-                ))}
+                {liveRounds.map((round) => {
+                  const label = roundLabel({ courseName: round.courseName, createdAt: round.createdAt }, { withTime: collidesOnDay(round) });
+                  // The date/time segment is the label MINUS the course-name prefix and its one
+                  // separating space, so the bullet stays on the date span — getByRole's own
+                  // accessible-name computation re-inserts exactly one space between block
+                  // siblings, reproducing roundLabel's own "Course · Date" string byte-for-byte
+                  // (verified: two block children "Course" + "· Date" name as "Course · Date").
+                  const dateLine = label.length > round.courseName.length ? label.slice(round.courseName.length + 1) : undefined;
+                  return (
+                    <li key={round.roundId}>
+                      {/* Task 14: a round found by identity may have no local device credential
+                          at all (started/joined from a different device or browser) —
+                          handleLiveRoundClick re-mints one before navigating whenever this
+                          device holds none; a device that already holds one navigates exactly
+                          as a plain Link would, no network call. */}
+                      <Link
+                        to={`/round/${round.roundId}`}
+                        onClick={handleLiveRoundClick(round.roundId)}
+                        aria-busy={enteringRoundId === round.roundId}
+                        className={`${cardBox} block border-l-[3px] border-l-fairway px-4 py-3`}
+                      >
+                        <span className="block font-serif text-forest">{round.courseName}</span>
+                        {dateLine && <span className="block font-mono text-sm text-fairway">{dateLine}</span>}
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </>
         ) : (
           // Papercut 10: post-wall (accounts-only identity), nothing writes new device
           // credentials, so the old device-list branch here could only ever surface pre-wall
-          // relic localStorage tokens. Signed out — or the dead golfer===null defensive case
-          // above `hasGolferIdentity` already excludes — the funnel is the one way onto a card.
+          // relic localStorage tokens. Signed in with no golfer row yet — the dead-loading
+          // window above already excludes the resolving case — the funnel is the one way onto
+          // a card.
           <SignInCta message="Sign in to see your rounds." returnTo="/" />
         )}
       </section>

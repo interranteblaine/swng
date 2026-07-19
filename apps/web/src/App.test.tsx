@@ -21,18 +21,27 @@ describe("App", () => {
   it("renders Home at the root route", () => {
     render(<App />);
 
-    // Home-specific and signed-out-stable: the anonymous "Start a round" link is gone
-    // (accounts-only), but "Join by code" still routes into the funnel.
-    expect(screen.getByRole("link", { name: "Join by code" })).toBeTruthy();
+    // Signed out at "/" is the landing door (brand reskin spec §3) — its hero heading is
+    // proof the router landed on Home, not any other route.
+    expect(screen.getByRole("heading", { name: "swng is the app for the golf you actually play." })).toBeTruthy();
   });
 
-  it("shows the Sign in header chrome when signed out", () => {
+  // Brand reskin spec §3: the signed-out home IS the landing page — no app header at all (the
+  // hero's first word is the wordmark). Every other route, including signed-out inner pages,
+  // keeps the header and its compact Sign in (e2e relies on it existing on /join).
+  it("signed out on /: renders no header banner — the door IS the page", () => {
     render(<App />);
 
-    // Scoped to the header banner: the Home body now also carries a sign-in CTA (its own
-    // "Sign in" button), so an unscoped query would match two.
+    expect(screen.queryByRole("banner")).toBeNull();
+  });
+
+  it("signed out on /join: keeps the header banner with its compact Sign in", () => {
+    window.history.pushState({}, "", "/join");
+    render(<App />);
+
     const header = screen.getByRole("banner");
     expect(within(header).getByRole("button", { name: "Sign in" })).toBeTruthy();
+    window.history.pushState({}, "", "/");
   });
 
   // Not a re-test of useAuth's own GET /me contract (useAuth.test.tsx covers that in full) —

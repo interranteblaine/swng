@@ -1,3 +1,4 @@
+import { btnPrimary, cardBox } from "../ui/classes";
 import { returnToStore } from "./tokenStore";
 import { useAuth } from "./useAuth";
 
@@ -30,9 +31,9 @@ export function SignInCta({ message, returnTo }: SignInCtaProps) {
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg bg-slate-800 p-4">
-      <p className="text-slate-300">{message}</p>
-      <button type="button" onClick={signIn} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold text-slate-50">
+    <div className={`${cardBox} flex flex-col gap-3 p-4`}>
+      <p className="font-serif text-fairway">{message}</p>
+      <button type="button" onClick={signIn} className={btnPrimary}>
         Sign in
       </button>
     </div>

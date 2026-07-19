@@ -1,4 +1,4 @@
-import { BrowserRouter, Link, Outlet, Route, Routes } from "react-router";
+import { BrowserRouter, Link, Outlet, Route, Routes, useLocation } from "react-router";
 import { SignInButton } from "./auth/SignInButton";
 import { AuthProvider, useAuth } from "./auth/useAuth";
 import { AddCoursePage } from "./courses/AddCoursePage";
@@ -27,11 +27,11 @@ function AuthChrome() {
 
   const displayName = auth.golfer?.name ?? auth.email?.split("@")[0] ?? "Signed in";
   return (
-    <div className="flex items-center gap-3 text-sm">
-      <Link to="/profile" className="font-medium text-emerald-400 underline">
+    <div className="flex items-center gap-3">
+      <Link to="/profile" className="font-mono text-xs text-fairway underline decoration-gold decoration-2 underline-offset-2">
         {displayName}
       </Link>
-      <button type="button" onClick={() => auth.signOut()} className="text-slate-400">
+      <button type="button" onClick={() => auth.signOut()} className="font-mono text-xs text-fairway">
         Sign out
       </button>
     </div>
@@ -42,10 +42,16 @@ function AuthChrome() {
 // second instance of "a page needs the identity chrome" is what earns this its own component
 // (engineering-conventions §0), rather than every page hand-rolling its own header row.
 function Layout() {
+  const { signedIn } = useAuth();
+  const { pathname } = useLocation();
+  // The signed-out home IS the landing page (brand reskin spec §3): no app header — the hero's
+  // first word is the wordmark. Every other route, signed out or in, keeps the chrome (e2e
+  // relies on the compact Sign in existing on signed-out inner pages like /join).
+  if (!signedIn && pathname === "/") return <Outlet />;
   return (
-    <div className="min-h-screen bg-slate-950">
-      <header className="flex items-center justify-between gap-4 border-b border-slate-800 px-4 py-3 text-slate-100">
-        <Link to="/" className="text-lg font-bold">
+    <div className="min-h-screen bg-cream">
+      <header className="flex items-center justify-between gap-4 border-b-[1.5px] border-forest px-4 py-3 text-forest">
+        <Link to="/" className="text-lg font-extrabold tracking-tight text-forest">
           swng
         </Link>
         <AuthChrome />

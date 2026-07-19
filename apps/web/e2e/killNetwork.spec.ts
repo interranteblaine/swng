@@ -132,9 +132,10 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     // pulled back by that SAME Sync-now HTTP fetch (push-then-pull, both inside one doSync()
     // pass — session.ts) — the client's confirmed-vs-outbox/opId reconciliation must fold the
     // pulled-back copy as the SAME event as the still-pending local one, not a second
-    // application. A concatenated/duplicated cell (e.g. "66" instead of "6") is exactly what a
-    // broken dedup would render here.
-    await expect(pageB.getByRole("button", { name: "Bo hole 2", exact: true })).toHaveText(/^\D*6$/);
+    // application. Exact full-text pin: the standard card renders Bo's cell as ● + gross 6 +
+    // net 5 (his CH 4 dots hole 2, SI ≤ 4 on the white nine — dots draw with no game now), and
+    // any concatenated/duplicated fold (e.g. "●665") corrupts this exact string.
+    await expect(pageB.getByRole("button", { name: "Bo hole 2", exact: true })).toHaveText("●65");
     await expect(pageB.getByRole("status", { name: /couldn.t be saved/i })).not.toBeVisible(); // no rejected-op toast either
 
     // A (never dropped) receives Bo's hole 2 purely over its own still-live WS — full

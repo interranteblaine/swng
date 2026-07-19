@@ -267,9 +267,14 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // 12 queued scores: holes 10-12 × 4 players, none of them pushed yet.
     await expect(pageB.getByText(/^12 scores syncing/)).toBeVisible();
 
-    // Offline is not an error: B's own fold still reads the stale (pre-correction) skins
-    // standing it last confirmed — it never received Ann's h9 correction while dark.
-    const staleSkins = describeSkinsAt(12, false);
+    // Offline is not an error — and B's stale state is the POST-CLEAR one: it saw the clear
+    // live (asserted above) but went dark before A's re-entry, so its fold still has Cal's h9
+    // as a gap. The skins chain stops at the first undecided hole (skins.ts — a cleared cell
+    // is a gap), so B's own queued holes 10-12 can't move the skins standing until the h9
+    // correction lands: the chip must still read exactly the post-clear line, not a walk of
+    // B's local holes. (A cleared-blind fold that counted h9's surviving cells WOULD move it —
+    // this assertion pins the accessor on the offline path too.)
+    const staleSkins = describeSkinsAt(8, false);
     await expect(chip(pageB, "Skins")).toContainText(staleSkins);
   });
 

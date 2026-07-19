@@ -18,6 +18,7 @@ export * from "./scoring/stableford.js";
 export * from "./scoring/fourballMatch.js";
 export * from "./scoring/skins.js";
 export * from "./scoring/result.js";
+export * from "./scoring/present.js";
 export * from "./scoring/golden/fixtureCourse.js";
 export * from "./scoring/golden/deck.js";
 export * from "./scoring/golden/fieldDeck18.js";

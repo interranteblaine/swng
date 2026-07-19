@@ -25,6 +25,17 @@ const humanizeAppendError = (caught: unknown): string => {
   return "Could not count that round — try again.";
 };
 
+// Head-to-head as a sentence, leader first — never the raw a/b row order.
+const describeHeadToHead = (h2h: SeasonStandingsResponse["headToHead"][number], nameOf: (id: GolferId) => string): string => {
+  const base =
+    h2h.aWins === h2h.bWins
+      ? `${nameOf(h2h.a)} and ${nameOf(h2h.b)} are tied ${h2h.aWins}–${h2h.bWins}`
+      : h2h.aWins > h2h.bWins
+        ? `${nameOf(h2h.a)} leads ${nameOf(h2h.b)} ${h2h.aWins}–${h2h.bWins}`
+        : `${nameOf(h2h.b)} leads ${nameOf(h2h.a)} ${h2h.bWins}–${h2h.aWins}`;
+  return h2h.halves > 0 ? `${base} · ${h2h.halves} halved` : base;
+};
+
 // GET /crews/{crewId}/seasons/{seasonId}/standings (architecture-realignment Task 9/11):
 // standings are computed on read — this is the ONE place the web renders them. CrewPage renders
 // this once a season is picked from its own list (`key={seasonId}` at that call site gives every
@@ -137,8 +148,8 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
               <tr className="text-slate-400">
                 <th className="py-1 pr-2 font-medium">Member</th>
                 <th className="py-1 pr-2 font-medium">Rounds</th>
-                <th className="py-1 pr-2 font-medium">W-L-H</th>
-                <th className="py-1 pr-2 font-medium">Points</th>
+                <th className="py-1 pr-2 font-medium">Matches (W–L–H)</th>
+                <th className="py-1 pr-2 font-medium">Stableford pts</th>
                 <th className="py-1 font-medium">Skins</th>
               </tr>
             </thead>
@@ -156,13 +167,14 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
           </table>
         </div>
       )}
+      <p className="text-xs text-slate-500">From this season&apos;s counted rounds — match results, Stableford points, and skins for current members.</p>
 
       {standings.headToHead.length > 0 && (
         <div>
           <h4 className="text-base font-semibold">Head to head</h4>
           <ul className="flex flex-col gap-1 text-sm text-slate-300">
             {standings.headToHead.map((h2h) => (
-              <li key={`${h2h.a}#${h2h.b}`}>{`${nameOf(h2h.a)} ${h2h.aWins}–${h2h.bWins}–${h2h.halves} vs ${nameOf(h2h.b)}`}</li>
+              <li key={`${h2h.a}#${h2h.b}`}>{describeHeadToHead(h2h, nameOf)}</li>
             ))}
           </ul>
         </div>

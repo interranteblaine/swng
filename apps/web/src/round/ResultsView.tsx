@@ -61,21 +61,17 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
       </div>
 
       <div>
-        <h2 className="text-lg font-semibold">Handicap differentials</h2>
+        <h2 className="text-lg font-semibold">Posted to handicaps</h2>
         <ul className="flex flex-col gap-1">
           {handicapping.map((row) => {
             const name = state.participants.find((p) => p.golferId === row.golferId)?.name ?? row.golferId;
             return (
               <li key={row.golferId} className="text-sm text-slate-300">
-                {name} —{" "}
                 {row.kind === "complete"
-                  ? `AGS ${row.ags}, differential ${row.differential.toFixed(1)}`
-                  : // unrated-courses arc: an unrated round still has an AGS, it just isn't posted to a
-                    // handicap (no rating/slope → no differential). Naming it "unrated (not posted)" keeps
-                    // it distinct from a genuinely undecided card, which stays "incomplete".
-                    row.kind === "unrated"
-                    ? `AGS ${row.ags} · unrated (not posted)`
-                    : "incomplete"}
+                  ? `${name} — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`
+                  : row.kind === "unrated"
+                    ? `${name} — adjusted score ${row.ags} · unrated course, not posted`
+                    : `${name} — card incomplete, nothing posted`}
               </li>
             );
           })}

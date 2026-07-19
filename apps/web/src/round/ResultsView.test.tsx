@@ -87,7 +87,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
     for (const row of response.handicapping) {
       if (row.kind !== "complete") continue;
       const name = state.participants.find((p) => p.golferId === row.golferId)!.name;
-      expect(screen.getByText(new RegExp(`${name} — AGS ${row.ags}, differential ${row.differential.toFixed(1)}`))).toBeTruthy();
+      expect(screen.getByText(`${name} — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`)).toBeTruthy();
     }
   });
 
@@ -155,9 +155,9 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     for (const row of archive.handicapping) {
       const name = state.participants.find((p) => p.golferId === row.golferId)!.name;
       if (row.kind === "complete") {
-        expect(screen.getByText(new RegExp(`${name} — AGS ${row.ags}, differential ${row.differential.toFixed(1)}`))).toBeTruthy();
+        expect(screen.getByText(`${name} — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`)).toBeTruthy();
       } else {
-        expect(screen.getByText(`${name} — incomplete`)).toBeTruthy();
+        expect(screen.getByText(`${name} — card incomplete, nothing posted`)).toBeTruthy();
       }
     }
   });
@@ -219,7 +219,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     };
 
     render(<ResultsView state={state} games={[]} response={undefined} />);
-    expect(screen.getByText("Ann — incomplete")).toBeTruthy();
+    expect(screen.getByText("Ann — card incomplete, nothing posted")).toBeTruthy();
   });
 });
 
@@ -260,16 +260,16 @@ describe("ResultsView — unrated handicapping row", () => {
     render(<ResultsView state={unratedState()} games={[]} response={undefined} />);
 
     // par-72 card, all pars, no net-double-bogey adjustment → AGS 72.
-    expect(screen.getByText(/Ann — AGS 72 · unrated \(not posted\)/)).toBeTruthy();
-    expect(screen.queryByText(/Ann — incomplete/)).toBeNull();
+    expect(screen.getByText("Ann — adjusted score 72 · unrated course, not posted")).toBeTruthy();
+    expect(screen.queryByText(/card incomplete/)).toBeNull();
   });
 
   it("renders a server response's own unrated row verbatim (the finalize-tab path)", () => {
     const response: FinalizeRoundResponse = { results: [], handicapping: [{ golferId: ann, kind: "unrated", ags: 84 }] };
     render(<ResultsView state={unratedState()} games={[]} response={response} />);
 
-    expect(screen.getByText(/Ann — AGS 84 · unrated \(not posted\)/)).toBeTruthy();
-    expect(screen.queryByText(/Ann — incomplete/)).toBeNull();
+    expect(screen.getByText("Ann — adjusted score 84 · unrated course, not posted")).toBeTruthy();
+    expect(screen.queryByText(/card incomplete/)).toBeNull();
   });
 });
 

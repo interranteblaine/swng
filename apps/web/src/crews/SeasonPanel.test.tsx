@@ -133,7 +133,7 @@ describe("SeasonPanel — standings", () => {
     expect(screen.queryByText(/guest/i)).toBeNull();
   });
 
-  it("renders head-to-head as 'Ann 5–5–2 vs Bo', names resolved from the ledger", async () => {
+  it("renders a tied head-to-head as a leader-first sentence — 'Ann and Bo are tied 5–5 · 2 halved'", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
@@ -150,12 +150,56 @@ describe("SeasonPanel — standings", () => {
 
     renderPanel();
 
-    expect(await screen.findByText("Ann 5–5–2 vs Bo")).toBeTruthy();
+    expect(await screen.findByText("Ann and Bo are tied 5–5 · 2 halved")).toBeTruthy();
+  });
+
+  // The helper reorders so the LEADER always comes first — even when the trailing party is `a`
+  // in the raw headToHead row (b has more wins here, but Ann is still `a` in the wire shape).
+  it("renders a leading head-to-head as a leader-first sentence, regardless of raw a/b order — 'Bo leads Ann 5–4'", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({
+      seasonId: "season-1",
+      name: "2026",
+      status: "open",
+      rounds: [],
+      ledger: [
+        { golferId: ANN, rounds: 9, wins: 4, losses: 5, halves: 0, points: 0, skins: 0, name: "Ann" },
+        { golferId: BO, rounds: 9, wins: 5, losses: 4, halves: 0, points: 0, skins: 0, name: "Bo" },
+      ],
+      headToHead: [{ a: ANN, b: BO, aWins: 4, bWins: 5, halves: 0 }],
+    });
+
+    renderPanel();
+
+    expect(await screen.findByText("Bo leads Ann 5–4")).toBeTruthy();
   });
 
   // Papercut 9: the empty-ledger copy distinguishes two different truths — no counted rounds
   // at all (standings genuinely haven't started building) vs. counted rounds exist but every
   // contributor is off the current roster (the ledger is empty for a DIFFERENT reason).
+  it("names the games in the column headers and footnote — no bare 'Points'/'W-L-H'", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({
+      seasonId: "season-1",
+      name: "2026",
+      status: "open",
+      rounds: [],
+      ledger: [{ golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann" }],
+      headToHead: [],
+    });
+
+    renderPanel();
+
+    const table = await screen.findByRole("table");
+    const headers = within(table).getAllByRole("columnheader").map((th) => th.textContent);
+    expect(headers).toEqual(["Member", "Rounds", "Matches (W–L–H)", "Stableford pts", "Skins"]);
+    expect(
+      screen.getByText("From this season's counted rounds — match results, Stableford points, and skins for current members."),
+    ).toBeTruthy();
+  });
+
   it("zero counted rounds: shows the build-up explainer, not an empty table", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });

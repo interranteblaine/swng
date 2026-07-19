@@ -42,7 +42,7 @@ const signIn = () => {
       .replace(/\//g, "_")
       .replace(/=+$/, "");
   const idToken = `${base64url({ alg: "none" })}.${base64url({ sub: "sub-ann", email: "ann@example.com" })}.sig`;
-  tokenStore.save({ idToken, refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+  tokenStore.save({ idToken, refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
 };
 
 beforeEach(() => {

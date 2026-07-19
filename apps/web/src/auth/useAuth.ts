@@ -82,25 +82,53 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     tokensRef.current = tokens;
   }, [tokens]);
 
-  // Papercut 6 (M9 hardening): clearing local tokens alone left the Hosted UI's OWN session
-  // cookie alive, so the next signIn() silently resumed the same account instead of prompting
-  // fresh credentials — this redirect through Cognito's /logout is what actually ends that
-  // session (mirrors signIn's own window.location.assign redirect below, same seam).
-  const signOut = useCallback(() => {
+  // The tokens+golfer half of signing out, with NO navigation — the primitive `withAuth` itself
+  // uses for a background/API failure (a stale-session load or a mid-session 401 that can't be
+  // recovered), which must degrade the app in place rather than yank the page through a redirect
+  // it never asked for. `signOut` below is this PLUS the explicit-only Hosted-UI redirect.
+  const clearLocalSession = useCallback(() => {
     tokenStore.clear();
     tokensRef.current = undefined;
     setTokens(undefined);
     setGolfer(undefined);
-    window.location.assign(buildLogoutUrl());
   }, []);
 
-  // The one 401-anywhere policy (brief): try the call; on a 401, refresh once and retry; if
-  // either the refresh or the retry still fails, sign out and rethrow — never a silent
-  // half-authenticated state.
+  // Papercut 6 (M9 hardening): clearing local tokens alone left the Hosted UI's OWN session
+  // cookie alive, so the next signIn() silently resumed the same account instead of prompting
+  // fresh credentials — this redirect through Cognito's /logout is what actually ends that
+  // session (mirrors signIn's own window.location.assign redirect below, same seam). Reserved
+  // for the explicit sign-out button: withAuth's own background failures use clearLocalSession
+  // above instead, never this redirect.
+  const signOut = useCallback(() => {
+    clearLocalSession();
+    window.location.assign(buildLogoutUrl());
+  }, [clearLocalSession]);
+
+  // The one 401-anywhere policy (brief), now fronted by a proactive check (Task 7): Cognito ID
+  // tokens live 60 minutes, and `expiresAt` used to be stored but never read — every stale-
+  // session load called `fn` with a token already known to be expired, ate a guaranteed 401, and
+  // only refreshed reactively afterward. Now, before the FIRST `fn` call, a token at or within
+  // 60s of expiry is refreshed proactively so the callee never sees it. A proactive refresh
+  // failure degrades in place (clearLocalSession, no redirect) and rethrows — never a silent
+  // half-authenticated state. The reactive 401 -> refresh -> retry net below stays intact
+  // underneath, for a token the client believed was still fine but the server didn't (clock
+  // skew, server-side revocation): still degrades in place on failure, same reasoning.
   const withAuth = useCallback(
     async <T,>(fn: (token: string) => Promise<T>): Promise<T> => {
-      const current = tokensRef.current;
+      let current = tokensRef.current;
       if (!current) throw new ApiError("not-signed-in", undefined, "not signed in");
+
+      if (current.expiresAt <= Date.now() + 60_000) {
+        const refreshed = await requestTokenRefresh(current.refreshToken);
+        if (!refreshed) {
+          clearLocalSession();
+          throw new ApiError("not-signed-in", undefined, "session refresh failed");
+        }
+        current = { idToken: refreshed.idToken, refreshToken: current.refreshToken, expiresAt: refreshed.expiresAt };
+        tokenStore.save(current);
+        tokensRef.current = current;
+        setTokens(current);
+      }
 
       try {
         return await fn(current.idToken);
@@ -109,7 +137,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
 
         const refreshed = await requestTokenRefresh(current.refreshToken);
         if (!refreshed) {
-          signOut();
+          clearLocalSession();
           throw caught;
         }
         const nextTokens: AuthTokens = { idToken: refreshed.idToken, refreshToken: current.refreshToken, expiresAt: refreshed.expiresAt };
@@ -120,12 +148,12 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
         try {
           return await fn(nextTokens.idToken);
         } catch (retryCaught) {
-          signOut();
+          clearLocalSession();
           throw retryCaught;
         }
       }
     },
-    [signOut],
+    [clearLocalSession],
   );
 
   const refetch = useCallback(async () => {

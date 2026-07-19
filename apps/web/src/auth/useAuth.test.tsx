@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { golferId } from "@swng/domain";
 import { getMyRecord } from "../api";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
+import { tokenEndpoint } from "./authConfig";
 import { tokenStore } from "./tokenStore";
 import { AuthProvider, useAuth } from "./useAuth";
 
@@ -20,6 +21,10 @@ const fakeIdToken = (claims: Record<string, unknown>): string => `${base64url({ 
 function Harness() {
   const auth = useAuth();
   const [callResult, setCallResult] = useState("");
+  // Records the exact token `withAuth` hands its callee — the only way to observe, from outside
+  // the provider, whether a stale/soon-to-expire stored token was ever actually passed through
+  // (proactive-refresh tests below) versus refreshed first.
+  const [tokenCalls, setTokenCalls] = useState<string[]>([]);
 
   return (
     <div>
@@ -50,6 +55,22 @@ function Harness() {
         Call record
       </button>
       <p data-testid="callResult">{callResult}</p>
+      <button
+        type="button"
+        onClick={() =>
+          void auth
+            .withAuth(async (token) => {
+              setTokenCalls((prev) => [...prev, token]);
+            })
+            .catch(() => {
+              // observed separately via callResult-style assertions where needed; a probe click
+              // against a signed-out provider rejecting is not itself under test here.
+            })
+        }
+      >
+        Call token probe
+      </button>
+      <p data-testid="tokenCalls">{tokenCalls.join(",")}</p>
     </div>
   );
 }
@@ -85,7 +106,7 @@ describe("AuthProvider / useAuth — signed out", () => {
 
 describe("AuthProvider / useAuth — signed in", () => {
   it("loads saved tokens, GETs /me once, and exposes the returned golfer", async () => {
-    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1", email: "ann@example.com" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1", email: "ann@example.com" }), refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
     const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } }));
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -105,7 +126,7 @@ describe("AuthProvider / useAuth — signed in", () => {
   // Controller amendment 1: GET /me never creates — a signed-in user with no golfer row gets
   // `golfer: null`, and the header/auto-fill fallback is the ID token's own email claim.
   it("golfer: null (no row yet) falls back to the ID token's email for display", async () => {
-    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-2", email: "fresh@example.com" }), refreshToken: "refresh-2", expiresAt: Date.now() + 60_000 });
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-2", email: "fresh@example.com" }), refreshToken: "refresh-2", expiresAt: Date.now() + 3_600_000 });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => fakeResponse(200, { golfer: null })),
@@ -122,7 +143,7 @@ describe("AuthProvider / useAuth — signed in", () => {
   });
 
   it("signOut() clears storage and reverts to signed-out", async () => {
-    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } })),
@@ -146,8 +167,11 @@ describe("AuthProvider / useAuth — signed in", () => {
   // session by redirecting through Cognito's /logout — otherwise the next signIn() silently
   // resumes the same account. Same window.location seam as the PKCE signIn redirect test
   // below (happy-dom actually updates window.location.href on assign, no extra mock needed).
+  // Task 7 (brand-reskin arc, §7): also the pin for the explicit-signOut half of the
+  // clearLocalSession/signOut split — the redirect stays reserved for THIS button, never for
+  // withAuth's own background failures (see the "proactive refresh before expiry" describe below).
   it("signOut() redirects to the Hosted UI's /logout URL, after clearing tokens", async () => {
-    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } })),
@@ -174,7 +198,7 @@ describe("AuthProvider / useAuth — signed in", () => {
   });
 
   it("refetch() re-runs GET /me on demand (e.g. after a claim/profile save elsewhere)", async () => {
-    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
     let call = 0;
     vi.stubGlobal(
       "fetch",
@@ -200,7 +224,7 @@ describe("AuthProvider / useAuth — signed in", () => {
   // applyGolfer replaces `golfer` in place from a view the caller already holds (a PUT /me
   // response) — the one-request counterpart to refetch: NO GET /me fires across the call.
   it("applyGolfer() sets the golfer in place with no GET /me refetch", async () => {
-    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
     const fetchSpy = vi.fn(async () => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } }));
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -250,7 +274,7 @@ describe("AuthProvider / useAuth — sign-in redirect (PKCE)", () => {
 
 describe("AuthProvider / useAuth — 401 anywhere: one silent refresh retry, then signed out", () => {
   it("a 401 from a golfer-tier call refreshes the token once and retries, succeeding", async () => {
-    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
     const calls: string[] = [];
     let refreshed = false;
     vi.stubGlobal(
@@ -288,7 +312,7 @@ describe("AuthProvider / useAuth — 401 anywhere: one silent refresh retry, the
   });
 
   it("a 401 with a failing refresh signs the golfer out (generalized via withAuth, not just getMe)", async () => {
-    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "bad-refresh", expiresAt: Date.now() + 60_000 });
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "bad-refresh", expiresAt: Date.now() + 3_600_000 });
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -312,5 +336,116 @@ describe("AuthProvider / useAuth — 401 anywhere: one silent refresh retry, the
     await waitFor(() => expect(screen.getByTestId("callResult").textContent).toBe("error:ApiError"));
     expect(screen.getByTestId("signedIn").textContent).toBe("false");
     expect(tokenStore.load()).toBeUndefined();
+  });
+});
+
+// Task 7 (brand-reskin arc, §7): a stale-session load used to fire GET /me with a KNOWN-expired
+// token, eat a guaranteed console 401, then refresh reactively. `withAuth` now checks
+// `expiresAt` proactively (a 60s skew) BEFORE ever calling its callee — the reactive 401->refresh
+// net above stays intact underneath for a token the client thought was fine but the server didn't.
+describe("AuthProvider / useAuth — proactive refresh before expiry", () => {
+  it("refreshes FIRST when the stored token is already past expiry — the callee never sees the stale token", async () => {
+    const staleToken = fakeIdToken({ sub: "sub-1" });
+    const freshToken = fakeIdToken({ sub: "sub-1", refreshed: true });
+    tokenStore.save({ idToken: staleToken, refreshToken: "refresh-1", expiresAt: Date.now() - 1000 });
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path === "/oauth2/token") return fakeResponse(200, { id_token: freshToken, expires_in: 3600 });
+      if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
+      throw new Error(`unexpected fetch ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AuthProvider>
+        <Harness />
+      </AuthProvider>,
+    );
+
+    // The mount's own GET /me (via refetch) succeeds on the FIRST attempt — no 401 round trip —
+    // because the proactive refresh already replaced the stale token before getMe ever ran.
+    await waitFor(() => expect(screen.getByTestId("golfer").textContent).toBe("Ann"));
+    expect(fetchMock).toHaveBeenCalledWith(tokenEndpoint(), expect.anything());
+    const mePaths = fetchMock.mock.calls.map(([url]) => new URL(url as string).pathname);
+    expect(mePaths.filter((path) => path === "/me")).toHaveLength(1);
+    expect(tokenStore.load()?.idToken).toBe(freshToken);
+
+    fireEvent.click(screen.getByRole("button", { name: "Call token probe" }));
+    await waitFor(() => expect(screen.getByTestId("tokenCalls").textContent).toBe(freshToken));
+  });
+
+  it("refreshes proactively when the stored token is inside the 60s skew window", async () => {
+    const freshToken = fakeIdToken({ sub: "sub-1", refreshed: true });
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 30_000 });
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path === "/oauth2/token") return fakeResponse(200, { id_token: freshToken, expires_in: 3600 });
+      if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
+      throw new Error(`unexpected fetch ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AuthProvider>
+        <Harness />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("golfer").textContent).toBe("Ann"));
+    expect(fetchMock).toHaveBeenCalledWith(tokenEndpoint(), expect.anything());
+    expect(tokenStore.load()?.idToken).toBe(freshToken);
+  });
+
+  it("does NOT refresh a comfortably-valid token — fn is called with the stored token, no token-endpoint fetch", async () => {
+    const storedToken = fakeIdToken({ sub: "sub-1" });
+    tokenStore.save({ idToken: storedToken, refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
+      throw new Error(`unexpected fetch ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AuthProvider>
+        <Harness />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("golfer").textContent).toBe("Ann"));
+    expect(fetchMock.mock.calls.some(([url]) => new URL(url as string).pathname === "/oauth2/token")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Call token probe" }));
+    await waitFor(() => expect(screen.getByTestId("tokenCalls").textContent).toBe(storedToken));
+  });
+
+  it("a failed background refresh degrades in place: session cleared, golfer undefined, no redirect", async () => {
+    tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "bad-refresh", expiresAt: Date.now() - 1000 });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/oauth2/token") return fakeResponse(400, { error: "invalid_grant" });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    render(
+      <AuthProvider>
+        <Harness />
+      </AuthProvider>,
+    );
+
+    // The mount's own withAuth call (via refetch) never reaches getMe at all — the proactive
+    // refresh fails first, clearing the session before the callee is ever invoked.
+    await waitFor(() => expect(screen.getByTestId("signedIn").textContent).toBe("false"));
+    expect(screen.getByTestId("golfer").textContent).toBe("undefined");
+    expect(tokenStore.load()).toBeUndefined();
+    // The defining behavior change: a background failure degrades in place, it never navigates.
+    expect(new URL(window.location.href).pathname).not.toBe("/logout");
+
+    // withAuth still rejects — callers can still tell the call didn't happen.
+    fireEvent.click(screen.getByRole("button", { name: "Call record" }));
+    await waitFor(() => expect(screen.getByTestId("callResult").textContent).toMatch(/^error:/));
   });
 });

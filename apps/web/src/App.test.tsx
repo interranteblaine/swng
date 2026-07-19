@@ -53,7 +53,7 @@ describe("App", () => {
         .replace(/\//g, "_")
         .replace(/=+$/, "");
     const idToken = `${base64url({ alg: "none" })}.${base64url({ sub: "sub-1" })}.sig`;
-    tokenStore.save({ idToken, refreshToken: "refresh-1", expiresAt: Date.now() + 60_000 });
+    tokenStore.save({ idToken, refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } }) }) as unknown as Response),
@@ -74,7 +74,7 @@ describe("App", () => {
         .replace(/\//g, "_")
         .replace(/=+$/, "");
     const idToken = `${base64url({ alg: "none" })}.${base64url({ sub: "sub-2", email: "fresh@example.com" })}.sig`;
-    tokenStore.save({ idToken, refreshToken: "refresh-2", expiresAt: Date.now() + 60_000 });
+    tokenStore.save({ idToken, refreshToken: "refresh-2", expiresAt: Date.now() + 3_600_000 });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ golfer: null }) }) as unknown as Response),

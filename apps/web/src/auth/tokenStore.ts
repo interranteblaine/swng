@@ -5,7 +5,7 @@
 export interface AuthTokens {
   readonly idToken: string;
   readonly refreshToken: string;
-  readonly expiresAt: number; // epoch ms — informational only; useAuth.ts's 401-triggered refresh is what actually gates re-use, not a client-side clock check
+  readonly expiresAt: number; // epoch ms — read proactively by withAuth (Task 7: a stored token at/within 60s of expiry is refreshed BEFORE its first use), with the 401-triggered reactive refresh still standing behind it for a token the client believed was fine but the server didn't
 }
 
 const AUTH_KEY = "swng:auth";

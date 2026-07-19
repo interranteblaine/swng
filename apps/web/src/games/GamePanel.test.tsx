@@ -298,6 +298,14 @@ describe("GamePanel — header (spec §2c)", () => {
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
   });
 
+  it("sets light text color on the panel region for readability on dark backgrounds", () => {
+    const { game, state } = singlesFixture();
+    render(<GamePanel game={game} state={state} />);
+
+    const region = screen.getByRole("region", { name: "Match play standings" });
+    expect(region.className).toContain("text-slate-100");
+  });
+
   it("orders title, treatment line, strokes line, then note — and drops the rules blurb entirely", () => {
     const { game, state } = singlesFixture();
     render(<GamePanel game={game} state={state} />);

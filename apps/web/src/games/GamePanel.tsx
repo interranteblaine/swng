@@ -62,7 +62,7 @@ export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanel
   const note = strokesNote(game.kind);
 
   return (
-    <section role="region" aria-label={`${title} standings`} className="flex flex-col gap-3 rounded-lg bg-slate-900 p-4">
+    <section role="region" aria-label={`${title} standings`} className="flex flex-col gap-3 rounded-lg bg-slate-900 p-4 text-slate-100">
       <div className="flex flex-col">
         <span className="text-lg font-semibold">
           {title}

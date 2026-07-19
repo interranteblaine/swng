@@ -61,6 +61,14 @@ export const allowancePhrase = (kind: GameKind, allowance?: number): string => {
   return `${name}${resolved === defaultAllowance(kind) ? " (standard)" : " (adjusted)"}`;
 };
 
+// The stroke-play treatment line, one tested copy — net prefixes the usual allowance phrase;
+// gross has NO allowance at all, by definition, so the allowance argument is ignored outright
+// rather than surfacing a meaningless percent. Every surface that states a stroke-play game's
+// handicap treatment (the live standings panel, the add-game preview) renders through this —
+// two independent literals of "Gross — raw scores, no strokes" is the exact bug this closes.
+export const strokePlayTreatment = (scoring: "gross" | "net", allowance?: number): string =>
+  scoring === "net" ? `Net — ${allowancePhrase("stroke-play", allowance)}` : "Gross — raw scores, no strokes";
+
 // A per-kind note on the strokes CONVENTION itself — distinct from allowancePhrase's
 // percent-of-handicap line — for the two kinds whose strokes are computed relative to another
 // player rather than each golfer's own handicap outright (singles-match: the difference between

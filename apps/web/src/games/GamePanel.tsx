@@ -1,4 +1,4 @@
-import { allowancePhrase, gameKindLabel, strokesNote } from "@swng/domain";
+import { allowancePhrase, gameKindLabel, strokePlayTreatment, strokesNote } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 import { strokesSummary } from "../round/dots";
 import { vsPar } from "./describeGame";
@@ -47,13 +47,10 @@ export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanel
 
   // spec 2026-07-19 §2c: the treatment line states the handicap convention in force, up front —
   // stroke-play splits gross (no strokes at all, by definition) from net (the usual allowance
-  // phrase); every other kind just reads its own allowancePhrase, as before.
-  const treatment =
-    game.kind === "stroke-play"
-      ? game.scoring === "net"
-        ? `Net — ${allowancePhrase("stroke-play", config?.allowance)}`
-        : "Gross — raw scores, no strokes"
-      : config && allowancePhrase(config.kind, config.allowance);
+  // phrase) via the one shared `strokePlayTreatment` (also used by AddGameForm's preview, closing
+  // the two-literal duplication a review caught); every other kind just reads its own
+  // allowancePhrase, as before.
+  const treatment = game.kind === "stroke-play" ? strokePlayTreatment(game.scoring, config?.allowance) : config && allowancePhrase(config.kind, config.allowance);
 
   // The strokes line for every kind except gross stroke play (which has none by definition —
   // gross never allocates a single dot, so there is nothing to summarize).

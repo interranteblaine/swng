@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowancePhrase, gameKindBlurb, gameKindFits, gameKindLabel, strokesNote } from "./present.js";
+import { allowancePhrase, gameKindBlurb, gameKindFits, gameKindLabel, strokePlayTreatment, strokesNote } from "./present.js";
 
 describe("gameKindLabel", () => {
   it("names every kind in golf's own plainest terms", () => {
@@ -44,6 +44,17 @@ describe("allowancePhrase", () => {
   it("a changed allowance reads adjusted — including full handicap where full isn't the default", () => {
     expect(allowancePhrase("stableford", 0.85)).toBe("85% handicap (adjusted)");
     expect(allowancePhrase("stroke-play", 1)).toBe("Full handicap (adjusted)");
+  });
+});
+
+describe("strokePlayTreatment", () => {
+  it("net reads the allowance phrase, prefixed", () => {
+    expect(strokePlayTreatment("net")).toBe("Net — 95% handicap (standard)");
+    expect(strokePlayTreatment("net", 0.85)).toBe("Net — 85% handicap (adjusted)");
+  });
+  it("gross has no allowance at all, by definition", () => {
+    expect(strokePlayTreatment("gross")).toBe("Gross — raw scores, no strokes");
+    expect(strokePlayTreatment("gross", 0.85)).toBe("Gross — raw scores, no strokes");
   });
 });
 

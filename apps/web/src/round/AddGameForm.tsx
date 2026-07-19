@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { defaultAllowance } from "@swng/client";
-import { allowancePhrase, gameId, gameKindBlurb, gameKindFits, gameKindLabel, golferId, strokesNote } from "@swng/domain";
+import { allowancePhrase, gameId, gameKindBlurb, gameKindFits, gameKindLabel, golferId, strokePlayTreatment, strokesNote } from "@swng/domain";
 import type { CourseCard, GameConfig, GolferId, Participant } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";
@@ -77,9 +77,9 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
   // GameConfigInput is GameConfig minus the server-assigned id — the placeholder restores it
   // purely so the preview can reuse the exact allocation the card's dots render.
   const preview = config ? strokesSummary({ ...config, id: PREVIEW_ID } as GameConfig, participants, card) : undefined;
-  // Live-walk finding (2026-07-19): gross stroke play has no allowance by definition — mirror
-  // GamePanel's own gross branch (apps/web/src/games/GamePanel.tsx) exactly, same literal, rather
-  // than showing a meaningless "95% handicap" phrase and an all-zero strokesSummary line.
+  // Live-walk finding (2026-07-19): gross stroke play has no allowance by definition — the
+  // shared `strokePlayTreatment` (also used by GamePanel's live standings) renders the gross line
+  // in place of a meaningless "95% handicap" phrase and an all-zero strokesSummary line.
   const isGrossStrokePlay = kind === "stroke-play" && scoring === "gross";
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -198,7 +198,7 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
             )}
           </span>
           {isGrossStrokePlay ? (
-            <span className="text-sm text-slate-400">Gross — raw scores, no strokes</span>
+            <span className="text-sm text-slate-400">{strokePlayTreatment("gross")}</span>
           ) : (
             <>
               <span className="text-sm text-slate-400">{allowancePhrase(kind, allowance)}</span>

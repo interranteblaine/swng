@@ -10,7 +10,7 @@ import { resultOf } from "../scoring/result.js";
 import type { RosterEntry } from "./participant.js";
 import type { RoundEvent } from "./events.js";
 import type { RoundState, ScoreCell } from "./state.js";
-import { byCanonicalOrder, cellKey, reduceRound, withoutSeq } from "./state.js";
+import { byCanonicalOrder, cellAt, reduceRound, withoutSeq } from "./state.js";
 
 // The event log's write side is RoundState — a live projection that keeps re-folding as
 // new events arrive. RoundArchive is its terminal read side: the frozen, content-addressed
@@ -92,7 +92,7 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   // unconditionally (this filter only ever removes a departed one).
   const hasScoredHole = (entry: RosterEntry): boolean => {
     const teeSet = findTeeSet(state.card, entry.tee);
-    return teeSet.holes.some((hole) => state.cells[cellKey(entry.golferId, hole.number)] !== undefined);
+    return teeSet.holes.some((hole) => cellAt(state.cells, entry.golferId, hole.number) !== undefined);
   };
   const inSomeGame = (golferId: GolferId): boolean => state.games.some((config) => gameMembers(config).includes(golferId));
   const settledParticipants = state.participants.filter((entry) => !entry.departed || hasScoredHole(entry) || inSomeGame(entry.golferId));
@@ -126,7 +126,7 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
 // shared canonically by every tee at a course, since only yardage/rating/slope vary per tee.
 const missingHolesFor = (state: RoundState, golfer: GolferId): readonly number[] => {
   const holes = state.card.teeSets[0]?.holes ?? [];
-  return holes.filter((hole) => !(cellKey(golfer, hole.number) in state.cells)).map((hole) => hole.number);
+  return holes.filter((hole) => cellAt(state.cells, golfer, hole.number) === undefined).map((hole) => hole.number);
 };
 
 export interface UnresolvedGameMissing {

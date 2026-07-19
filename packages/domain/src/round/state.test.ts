@@ -3,7 +3,7 @@ import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
 import type { CourseCard } from "../course/card.js";
 import type { Hlc } from "./hlc.js";
 import type { RoundEvent } from "./events.js";
-import { cellKey, reduceRound } from "./state.js";
+import { cellAt, cellKey, reduceRound } from "./state.js";
 
 const card: CourseCard = {
   courseName: "Fixture Links",
@@ -43,6 +43,22 @@ describe("reduceRound", () => {
     // The stale offline write ARRIVES LAST — the correction must still win.
     const state = reduceRound([genesis, joinA, started, correction, early]);
     expect(state.cells[cellKey(A, 1)]?.result).toEqual({ kind: "strokes", strokes: 5 });
+  });
+
+  it("a clear beats an older concurrent score in every arrival order", () => {
+    // Two concurrent writes for the same (golfer, hole) from different devices: a strokes
+    // write at t1, a clear strictly later at t2 — HLC-latest wins regardless of which
+    // arrives (or was pushed) first, exactly like any other same-cell conflict above.
+    const scored: RoundEvent = { ...base(10, "device-a"), kind: "score-recorded", golferId: A, hole: 1, result: { kind: "strokes", strokes: 5 } };
+    const cleared: RoundEvent = { ...base(20, "device-b"), kind: "score-recorded", golferId: A, hole: 1, result: { kind: "cleared" } };
+    const forward = reduceRound([genesis, joinA, started, scored, cleared]);
+    const backward = reduceRound([genesis, joinA, started, cleared, scored]);
+    // The fold RETAINS the cleared cell (no deletion — see state.ts's cellAt doc) ...
+    expect(forward.cells[cellKey(A, 1)]?.result.kind).toBe("cleared");
+    expect(backward.cells[cellKey(A, 1)]?.result.kind).toBe("cleared");
+    // ... but cellAt, the one sanctioned reader, hides it as unscored either way.
+    expect(cellAt(forward.cells, A, 1)).toBeUndefined();
+    expect(cellAt(backward.cells, A, 1)).toBeUndefined();
   });
 
   it("ignores a verbatim duplicate (same opId)", () => {

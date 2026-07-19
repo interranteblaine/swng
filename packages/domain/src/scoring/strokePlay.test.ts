@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
-import { gameId, golferId } from "../ids.js";
-import { playGoldenRound } from "./golden/deck.js";
+import { deviceId, gameId, golferId, opId } from "../ids.js";
+import type { RoundEvent } from "../round/events.js";
+import { reduceRound } from "../round/state.js";
+import { scoreGame } from "./game.js";
+import { playGoldenRound, playGoldenRoundLog } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
 import type { GameState } from "./game.js";
 
@@ -65,6 +68,23 @@ describe("stroke play — golden cards", () => {
     expect(lines[1]).toMatchObject({ thru: 2, gross: { total: 9, pickups: 0 }, relativeToPar: 1 });
     expect((state as { complete: boolean }).complete).toBe(false);
     expect((state as GameState & { kind: "stroke-play" }).leaders).toEqual([B]);
+  });
+
+  it("clearing a scored hole rewinds thru and totals", () => {
+    // Score holes 1-3, then clear hole 2 (a later hlc). Stroke play's walk `continue`s over
+    // absent cells — a gap is allowed anywhere, not just a dense unscored suffix — so thru
+    // counts SCORED holes: hole 3's cell still counts even though hole 2 is now a gap again,
+    // matching the walk's ordinary gap semantics rather than stopping at the first gap.
+    const log = playGoldenRoundLog(fixtureLinks, players, [grossGame], { [A]: [4, 5, 3] }, [], false);
+    const clearH2: RoundEvent = {
+      kind: "score-recorded", golferId: A, hole: 2, result: { kind: "cleared" },
+      opId: opId("clear-h2"), hlc: { wallMs: 9_999, counter: 0, deviceId: deviceId("clear-device") }, authorId: A,
+    };
+    const state = reduceRound([...log, clearH2]);
+    const [gameState] = state.games.map((config) => scoreGame(config, state));
+    const line = (gameState as GameState & { kind: "stroke-play" }).lines.find((l) => l.golferId === A)!;
+    // thru 2 (h1 + h3), total 7 (4 + 3) — h2's cleared 5 counted nowhere.
+    expect(line).toMatchObject({ thru: 2, gross: { total: 7, pickups: 0 } });
   });
 
   it("a tie for the lead lists every tied golferId", () => {

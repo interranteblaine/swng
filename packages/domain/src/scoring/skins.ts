@@ -1,5 +1,5 @@
 import type { RoundState } from "../round/state.js";
-import { cellKey } from "../round/state.js";
+import { cellAt } from "../round/state.js";
 import { defaultAllowance, playingHandicap } from "./allowances.js";
 import type { GameConfig, GameState, SkinsHole } from "./game.js";
 import { allPlayersComplete, playerTeeSet } from "./players.js";
@@ -25,7 +25,7 @@ export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState =>
   let holesDecided = 0;
 
   for (const hole of holes) {
-    const cells = players.map((player) => ({ player, cell: state.cells[cellKey(player.golferId, hole.number)] }));
+    const cells = players.map((player) => ({ player, cell: cellAt(state.cells, player.golferId, hole.number) }));
     // Skins settle sequentially — the pot riding out of this hole feeds the next
     // one, so the chain cannot skip an undecided hole (a hole is decided only
     // once EVERY player has a cell): stop at the first gap, like the match ladder.

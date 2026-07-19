@@ -57,6 +57,12 @@ const glyphFor = (result: HoleResult): string => {
       return "CN";
     case "strokes":
       return String(result.strokes);
+    case "cleared":
+      // Unreachable today — no web path writes a cleared result yet, and this component
+      // still reads raw cells (task-1-brief: the reader sweep to cellAt, plus a cleared
+      // cell's real rendering/clear affordance, is Task 4's). This arm exists only so the
+      // switch stays exhaustive over HoleResult's new additive kind.
+      return "";
   }
 };
 

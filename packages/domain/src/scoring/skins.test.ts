@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { gameId, golferId } from "../ids.js";
-import { playGoldenRound } from "./golden/deck.js";
+import { deviceId, gameId, golferId, opId } from "../ids.js";
+import type { RoundEvent } from "../round/events.js";
+import { reduceRound } from "../round/state.js";
+import { scoreGame } from "./game.js";
+import { playGoldenRound, playGoldenRoundLog } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
 
 const A = golferId("ann");
@@ -48,6 +51,34 @@ describe("skins — golden cards", () => {
     // Only h1 and h2 have every player's cell — the carry rides into h3 (holesDecided + 1).
     expect(state).toMatchObject({
       kind: "skins", complete: false, carrying: 1, carriedOut: 0, holesDecided: 2,
+      lines: [
+        { golferId: A, skins: 1 },
+        { golferId: B, skins: 0 },
+        { golferId: C, skins: 0 },
+      ],
+    });
+  });
+
+  it("a cleared cell re-opens the hole: settlement stops there like a gap", () => {
+    // Same mid-round fixture as above (h1 Ann takes 1, h2 tie(A,B) carries into h3), then
+    // Ann's h2 is cleared at a later hlc — the deck's own FixtureCorrection vocabulary has
+    // no "cleared" arm (it only rewrites to a strokes/picked-up/conceded score), so the
+    // clear is appended as a raw score-recorded event directly onto the deck's log.
+    const log = playGoldenRoundLog(
+      fixtureLinks, players3, [game],
+      { [A]: [4, 5], [B]: [4, 5, 3], [C]: [6, 7, 5] },
+      [], false,
+    );
+    const clearAnnH2: RoundEvent = {
+      kind: "score-recorded", golferId: A, hole: 2, result: { kind: "cleared" },
+      opId: opId("clear-ann-h2"), hlc: { wallMs: 9_999, counter: 0, deviceId: deviceId("clear-device") }, authorId: A,
+    };
+    const state = reduceRound([...log, clearAnnH2]);
+    const [skinsState] = state.games.map((config) => scoreGame(config, state));
+    // h2 is unscored again (Ann's cell reads as absent via cellAt) — only h1 (Ann's outright
+    // win, no carry) is decided; the chain stops there exactly like the original gap at h3.
+    expect(skinsState).toMatchObject({
+      kind: "skins", holesDecided: 1, carrying: 0, carriedOut: 0,
       lines: [
         { golferId: A, skins: 1 },
         { golferId: B, skins: 0 },

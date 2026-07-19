@@ -2,7 +2,7 @@ import { findTeeSet } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import type { CourseId, GolferId, RoundId } from "../ids.js";
 import type { RoundArchive } from "../round/archive.js";
-import { cellKey } from "../round/state.js";
+import { cellAt } from "../round/state.js";
 
 // What one archive contributes to one golfer's permanent record — the per-round line a
 // history view lists and the index projector folds over (architecture.md §2's "everything
@@ -39,7 +39,7 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
   // not a zero; both count nowhere, per the hand-pinned distribution this mirrors.
   const distribution = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
   for (const hole of teeSet.holes) {
-    const cell = archive.cells[cellKey(golferId, hole.number)];
+    const cell = cellAt(archive.cells, golferId, hole.number);
     if (!cell || cell.result.kind !== "strokes") continue;
     const relativeToPar = cell.result.strokes - hole.par;
     if (relativeToPar <= -2) distribution.eagles += 1;

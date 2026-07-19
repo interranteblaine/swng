@@ -1,6 +1,6 @@
 import type { GolferId } from "../ids.js";
 import type { RoundState } from "../round/state.js";
-import { cellKey } from "../round/state.js";
+import { cellAt } from "../round/state.js";
 import { defaultAllowance, playingHandicap } from "./allowances.js";
 import type { GameConfig, GameState } from "./game.js";
 import type { HoleWinner } from "./matchLadder.js";
@@ -29,7 +29,7 @@ export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundStat
   const holeCount = cardTeeSet.holes.length;
 
   const netFor = (golferId: GolferId, holeNumber: number): number | undefined => {
-    const cell = state.cells[cellKey(golferId, holeNumber)];
+    const cell = cellAt(state.cells, golferId, holeNumber);
     if (!cell || cell.result.kind !== "strokes") return undefined; // absent/picked-up/conceded: that player is out of the hole
     const dots = dotsByGolfer.get(golferId)?.get(holeNumber) ?? 0;
     return cell.result.strokes - dots;
@@ -45,7 +45,7 @@ export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundStat
   const winners: (HoleWinner | undefined)[] = cardTeeSet.holes.map((hole): HoleWinner | undefined => {
     // A hole is decided once all four players have a recorded cell — picked-up/conceded
     // still counts as recorded (it drops that player's ball, not the hole itself).
-    const allFourRecorded = golfers.every((golferId) => state.cells[cellKey(golferId, hole.number)] !== undefined);
+    const allFourRecorded = golfers.every((golferId) => cellAt(state.cells, golferId, hole.number) !== undefined);
     if (!allFourRecorded) return undefined;
 
     const bestA = sideBest(config.a, hole.number);

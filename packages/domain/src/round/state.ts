@@ -34,6 +34,15 @@ export interface RoundState {
 
 export const cellKey = (golfer: GolferId, hole: number): string => `${golfer}#${hole}`;
 
+// The ONE way to read a scored cell: absent and cleared are both "unscored". Every
+// engine/walk reads through this — a raw state.cells[...] read would silently treat a
+// cleared cell as a score. Takes the bare cells record so archive.cells readers
+// (golfer/record.ts) share it.
+export const cellAt = (cells: Readonly<Record<string, ScoreCell>>, golferId: GolferId, hole: number): ScoreCell | undefined => {
+  const cell = cells[cellKey(golferId, hole)];
+  return cell && cell.result.kind !== "cleared" ? cell : undefined;
+};
+
 const LIFECYCLE_STATUS: Record<"round-created" | "round-started" | "round-finalized" | "round-reopened" | "round-abandoned", RoundStatus> = {
   "round-created": "setup",
   "round-started": "live",

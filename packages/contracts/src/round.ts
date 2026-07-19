@@ -10,6 +10,8 @@ export const holeResultSchema: z.ZodType<HoleResult> = z.discriminatedUnion("kin
   z.object({ kind: z.literal("strokes"), strokes: z.number() }),
   z.object({ kind: z.literal("picked-up") }),
   z.object({ kind: z.literal("conceded") }),
+  // A mis-tap undone (task-1-brief): additive wire arm, mirroring domain's HoleResult.
+  z.object({ kind: z.literal("cleared") }),
 ]);
 
 // Exported (course-cards spec): courses.ts' tee-input payloads reuse the one hole shape rather

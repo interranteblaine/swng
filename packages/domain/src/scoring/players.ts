@@ -2,7 +2,7 @@ import { findTeeSet, type TeeSet } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import type { GolferId } from "../ids.js";
 import type { Participant } from "../round/participant.js";
-import { cellKey } from "../round/state.js";
+import { cellAt } from "../round/state.js";
 import type { RoundState } from "../round/state.js";
 
 export interface PlayerTeeSet {
@@ -26,5 +26,5 @@ export const allPlayersComplete = (state: RoundState, players: readonly GolferId
     const participant = state.participants.find((p) => p.golferId === golferId);
     if (!participant) return false;
     const teeSet = findTeeSet(state.card, participant.tee);
-    return teeSet.holes.every((hole) => state.cells[cellKey(golferId, hole.number)] !== undefined);
+    return teeSet.holes.every((hole) => cellAt(state.cells, golferId, hole.number) !== undefined);
   });

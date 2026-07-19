@@ -1,5 +1,5 @@
 import type { RoundState } from "../round/state.js";
-import { cellKey } from "../round/state.js";
+import { cellAt } from "../round/state.js";
 import { defaultAllowance, playingHandicap } from "./allowances.js";
 import type { GameConfig, GameState, RunningTotal } from "./game.js";
 import { allPlayersComplete, playerTeeSet } from "./players.js";
@@ -22,7 +22,7 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
     let thru = 0;
 
     for (const hole of teeSet.holes) {
-      const cell = state.cells[cellKey(golferId, hole.number)];
+      const cell = cellAt(state.cells, golferId, hole.number);
       if (!cell) continue;
       thru += 1;
 

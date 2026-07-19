@@ -1,5 +1,5 @@
 import type { RoundState, ScoreCell } from "../round/state.js";
-import { cellKey } from "../round/state.js";
+import { cellAt } from "../round/state.js";
 import { defaultAllowance, playingHandicap } from "./allowances.js";
 import type { GameConfig, GameState } from "./game.js";
 import type { HoleWinner } from "./matchLadder.js";
@@ -38,8 +38,8 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
   // Per-hole winner in the ladder's "a"/"b" vocabulary (config.a is always "a"
   // here) — undefined when either side hasn't posted a cell yet.
   const winners: (HoleWinner | undefined)[] = cardTeeSet.holes.map((hole): HoleWinner | undefined => {
-    const cellA = state.cells[cellKey(config.a, hole.number)];
-    const cellB = state.cells[cellKey(config.b, hole.number)];
+    const cellA = cellAt(state.cells, config.a, hole.number);
+    const cellB = cellAt(state.cells, config.b, hole.number);
     if (!cellA || !cellB) return undefined;
 
     const netA = netFor(higherIsA, cellA, hole.number);

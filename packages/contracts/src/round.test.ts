@@ -23,6 +23,12 @@ describe("roundEventSchema", () => {
     expect(roundTripped).toEqual(scoreRecordedEvent);
   });
 
+  it("parses a score-recorded event carrying a cleared result", () => {
+    const event: RoundEvent = { ...scoreRecordedEvent, hole: 3, result: { kind: "cleared" } };
+    const roundTripped = parse(roundEventSchema, JSON.parse(JSON.stringify(event)) as unknown);
+    expect(roundTripped).toEqual(event);
+  });
+
   it("rejects an event with an unknown kind", () => {
     expect(() => parse(roundEventSchema, { ...scoreRecordedEvent, kind: "score-deleted" })).toThrow(ContractError);
   });

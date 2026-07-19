@@ -6,7 +6,7 @@ import type { GolferId } from "../ids.js";
 import type { HoleResult } from "../round/holeResult.js";
 import type { Participant } from "../round/participant.js";
 import type { ScoreCell } from "../round/state.js";
-import { cellKey } from "../round/state.js";
+import { cellAt } from "../round/state.js";
 import { defaultAllowance, playingHandicap } from "./allowances.js";
 import type { GameConfig } from "./game.js";
 import { dotsByHole } from "./strokes.js";
@@ -93,7 +93,7 @@ export const handicappingFor = (
   const teeSet = findTeeSet(card, participant.tee);
   const holes = new Map<number, HoleResult>();
   for (const hole of teeSet.holes) {
-    const cell = cells[cellKey(participant.golferId, hole.number)];
+    const cell = cellAt(cells, participant.golferId, hole.number);
     if (cell) holes.set(hole.number, cell.result);
   }
   try {

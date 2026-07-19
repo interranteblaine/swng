@@ -69,6 +69,15 @@ export const gameStrokeAllocation = (
   }
 };
 
+// The STANDARD CARD's dots: each player's own course handicap allocated by stroke index —
+// no allowance, no game (spec 2026-07-19 §2a: the card never changes; games apply their
+// allowances internally and state them in words in their panels).
+export const courseHandicapAllocation = (
+  participants: readonly Participant[],
+  card: CourseCard,
+): ReadonlyMap<GolferId, ReadonlyMap<number, number>> =>
+  new Map(participants.map((p) => [p.golferId, dotsByHole(p.courseHandicap, findTeeSet(card, p.tee))]));
+
 // dotsByHole's allocation always sums exactly to its input strokes value (allocateStrokes' own
 // documented invariant, strokes.ts) — summing here is safe rather than re-deriving a parallel
 // "total dots" formula that could drift from the per-hole one above.

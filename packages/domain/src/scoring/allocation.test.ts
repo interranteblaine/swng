@@ -11,7 +11,7 @@ import { fieldDeck18 } from "./golden/fieldDeck18.js";
 import { fixtureLinks, fixtureLinks18, fixtureWhite } from "./golden/fixtureCourse.js";
 import { playGoldenRoundLog } from "./golden/deck.js";
 import type { FixtureScores } from "./golden/deck.js";
-import { gameStrokeAllocation, handicappingFor, totalDots } from "./allocation.js";
+import { courseHandicapAllocation, gameStrokeAllocation, handicappingFor, totalDots } from "./allocation.js";
 import type { GameConfig } from "./game.js";
 
 // The M5 field deck: fourball 90%-allowance playing handicaps 7/2/14/5 give relative
@@ -80,6 +80,47 @@ describe("gameStrokeAllocation", () => {
     };
     const allocation = gameStrokeAllocation(grossStrokePlay, players, fixtureLinks18);
     expect(allocation).toEqual(new Map());
+  });
+});
+
+describe("courseHandicapAllocation", () => {
+  // The standard card's own dots: each player's FULL course handicap allocated by stroke
+  // index — no allowance, no game. Unlike gameStrokeAllocation (relative/allowance-adjusted
+  // per game), this is just dotsByHole(participant.courseHandicap, theirTeeSet) per player.
+  it("a CH-8 player gets 8 dots on their tee's 8 hardest SI holes", () => {
+    const golfer = golferId("ch8");
+    const participants: readonly Participant[] = [{ golferId: golfer, name: "Eight", tee: "white", courseHandicap: 8 }];
+    const allocation = courseHandicapAllocation(participants, fixtureLinks18);
+    expect(allocation.get(golfer)).toEqual(dotsByHole(8, whiteTeeSet));
+    expect(totalDots(allocation.get(golfer)!)).toBe(8);
+  });
+
+  it("a CH-0 player gets a zero allocation on every hole (dotsByHole(0, ...)'s own shape)", () => {
+    const golfer = golferId("ch0");
+    const participants: readonly Participant[] = [{ golferId: golfer, name: "Zero", tee: "white", courseHandicap: 0 }];
+    const allocation = courseHandicapAllocation(participants, fixtureLinks18);
+    expect(allocation.get(golfer)).toEqual(dotsByHole(0, whiteTeeSet));
+    expect(totalDots(allocation.get(golfer)!)).toBe(0);
+  });
+
+  it("a plus player (CH -2) gives strokes back on the 2 easiest SI holes — negative dots, dotsByHole's own convention", () => {
+    const golfer = golferId("plus2");
+    const participants: readonly Participant[] = [{ golferId: golfer, name: "Plus", tee: "white", courseHandicap: -2 }];
+    const allocation = courseHandicapAllocation(participants, fixtureLinks18);
+    expect(allocation.get(golfer)).toEqual(dotsByHole(-2, whiteTeeSet));
+    expect(totalDots(allocation.get(golfer)!)).toBe(-2);
+  });
+
+  it("allocates independently per participant, each against their own tee and course handicap", () => {
+    const a = golferId("multi-a");
+    const b = golferId("multi-b");
+    const participants: readonly Participant[] = [
+      { golferId: a, name: "A", tee: "white", courseHandicap: 8 },
+      { golferId: b, name: "B", tee: "white", courseHandicap: -2 },
+    ];
+    const allocation = courseHandicapAllocation(participants, fixtureLinks18);
+    expect(allocation.get(a)).toEqual(dotsByHole(8, whiteTeeSet));
+    expect(allocation.get(b)).toEqual(dotsByHole(-2, whiteTeeSet));
   });
 });
 

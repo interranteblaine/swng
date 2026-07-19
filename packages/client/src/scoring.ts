@@ -48,6 +48,7 @@ export const foldAndScore = (events: readonly RoundEvent[]): { state: RoundState
 // are deliberately NOT re-exported — foldAndScore and RoundSession subsume every web use of them.
 export {
   gameStrokeAllocation,
+  courseHandicapAllocation,
   netStrokes,
   totalDots,
   unresolvedGames,

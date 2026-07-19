@@ -9,6 +9,8 @@ const BO = golferId("bo");
 const CY = golferId("cy");
 const PAT = golferId("pat");
 const ALEX = golferId("alex");
+const SAM = golferId("sam");
+const DANA = golferId("dana");
 
 const baseState = (games: readonly GameConfig[], participants: readonly Participant[], overrides: Partial<RoundState> = {}): RoundState => ({
   id: roundId("round-1"),
@@ -135,6 +137,40 @@ describe("GameSheet", () => {
     expect(within(rows[2]!).getAllByRole("cell").map((c) => c.textContent)).toEqual(["·", "", "●"]);
     expect(screen.getByRole("rowheader", { name: "Pat" })).toBeTruthy();
     expect(screen.getByRole("rowheader", { name: "Alex" })).toBeTruthy();
+  });
+
+  it("a decided fourball match wins in the plural — the sheet must match the chip", () => {
+    const participants: readonly Participant[] = [
+      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
+      { golferId: SAM, name: "Sam", tee: "white", courseHandicap: 4 },
+      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
+      { golferId: DANA, name: "Dana", tee: "white", courseHandicap: 10 },
+    ];
+    const config: GameConfig = { kind: "fourball-match", id: gameId("f1"), a: [PAT, SAM], b: [ALEX, DANA] };
+    const game: GameState = {
+      kind: "fourball-match",
+      id: config.id,
+      up: 2,
+      leader: "a",
+      thru: 17,
+      remaining: 0,
+      dormie: false,
+      holes: [
+        { hole: 1, winner: "a" },
+        { hole: 2, winner: "halved" },
+      ],
+      outcome: { winner: "a", closing: "2&1" },
+    };
+    const state = baseState([config], participants, { terminatedGameIds: new Set([config.id]) });
+
+    render(<GameSheet game={game} state={state} onClose={vi.fn()} />);
+
+    // describeGame's describeFourball already conjugates "win" for a pair — the sheet must match it.
+    expect(screen.getByText("Pat & Sam win 2&1")).toBeTruthy();
+    expect(screen.getByRole("rowheader", { name: "Pat & Sam" })).toBeTruthy();
+    expect(screen.getByRole("rowheader", { name: "Alex & Dana" })).toBeTruthy();
+    // The game is in state.terminatedGameIds — the "Ended" badge must render too.
+    expect(screen.getByText("Ended")).toBeTruthy();
   });
 
   it("the skins story collapses carry runs", () => {

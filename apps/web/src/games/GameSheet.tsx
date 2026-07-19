@@ -152,7 +152,7 @@ function MatchBody({ game, config, state }: { game: Extract<GameState, { kind: "
     if (game.outcome) {
       if ("halved" in game.outcome) return "Match halved";
       const winner = game.kind === "singles-match" ? nameOf(state.participants, (game.outcome as { winner: GolferId }).winner) : sideName((game.outcome as { winner: "a" | "b" }).winner);
-      return `${winner} wins ${game.outcome.closing}`;
+      return `${winner} ${game.kind === "fourball-match" ? "win" : "wins"} ${game.outcome.closing}`;
     }
     if (game.up === 0) return `All square thru ${game.thru}`;
     const leaderName = leaderSide ? sideName(leaderSide) : "";

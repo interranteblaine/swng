@@ -101,6 +101,29 @@ describe("strokes preview", () => {
     expect(screen.getByText("Match play uses the difference — only the higher handicap gets strokes.")).toBeTruthy();
   });
 
+  // Live-walk finding (2026-07-19): with Gross picked, the preview must match GamePanel's own
+  // gross treatment line (packages/scoring/present + the panel's inline literal) — no allowance
+  // phrase, no strokesSummary "everyone plays off 0" line, and no Adjust affordance, since an
+  // allowance is meaningless for gross. Switching back to net restores everything.
+  it("gross stroke play states its own treatment — no allowance phrase, no strokes line, no Adjust", async () => {
+    const user = userEvent.setup();
+    render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
+    await user.click(screen.getByRole("radio", { name: "Stroke play" }));
+    await user.click(screen.getByRole("checkbox", { name: "Pat" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "gross");
+
+    expect(screen.getByText("Gross — raw scores, no strokes")).toBeTruthy();
+    expect(screen.queryByText("95% handicap (standard)")).toBeNull();
+    expect(screen.queryByText("No strokes — everyone plays off 0.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Adjust" })).toBeNull();
+    expect(screen.queryByRole("spinbutton", { name: "Handicap %" })).toBeNull();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "net");
+    expect(screen.getByText("95% handicap (standard)")).toBeTruthy();
+    expect(screen.queryByText("Gross — raw scores, no strokes")).toBeNull();
+    expect(screen.getByRole("button", { name: "Adjust" })).toBeTruthy();
+  });
+
   // strokesNote (packages/domain/src/scoring/present.ts) is the one shared source for both
   // notes now — singles' string above is unchanged, but it comes from that shared function
   // rather than a literal hard-coded in this form; fourball gains its own note here too.

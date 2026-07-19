@@ -77,6 +77,10 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
   // GameConfigInput is GameConfig minus the server-assigned id — the placeholder restores it
   // purely so the preview can reuse the exact allocation the card's dots render.
   const preview = config ? strokesSummary({ ...config, id: PREVIEW_ID } as GameConfig, participants, card) : undefined;
+  // Live-walk finding (2026-07-19): gross stroke play has no allowance by definition — mirror
+  // GamePanel's own gross branch (apps/web/src/games/GamePanel.tsx) exactly, same literal, rather
+  // than showing a meaningless "95% handicap" phrase and an all-zero strokesSummary line.
+  const isGrossStrokePlay = kind === "stroke-play" && scoring === "gross";
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -187,14 +191,22 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
         <div className="flex flex-col gap-1 rounded-lg bg-slate-800 p-3">
           <span className="flex items-center justify-between">
             <span className="font-semibold">Strokes</span>
-            <button type="button" onClick={() => setAdjusting((current) => !current)} className="text-sm text-emerald-400 underline">
-              Adjust
-            </button>
+            {!isGrossStrokePlay && (
+              <button type="button" onClick={() => setAdjusting((current) => !current)} className="text-sm text-emerald-400 underline">
+                Adjust
+              </button>
+            )}
           </span>
-          <span className="text-sm text-slate-400">{allowancePhrase(kind, allowance)}</span>
-          {preview && <span className="text-sm">{preview}</span>}
-          {strokesNote(kind) && <span className="text-sm text-slate-400">{strokesNote(kind)}</span>}
-          {adjusting && (
+          {isGrossStrokePlay ? (
+            <span className="text-sm text-slate-400">Gross — raw scores, no strokes</span>
+          ) : (
+            <>
+              <span className="text-sm text-slate-400">{allowancePhrase(kind, allowance)}</span>
+              {preview && <span className="text-sm">{preview}</span>}
+              {strokesNote(kind) && <span className="text-sm text-slate-400">{strokesNote(kind)}</span>}
+            </>
+          )}
+          {!isGrossStrokePlay && adjusting && (
             <label className="flex flex-col gap-1 text-sm">
               Handicap %
               <input

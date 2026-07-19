@@ -230,6 +230,19 @@ describe("SeasonPanel — standings", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
+  // Review finding (task-6): the footnote glosses table columns, so it must not render under
+  // either empty-ledger state — it belongs beside the table, not the build-up explainer.
+  it("empty ledger: the table footnote does not render (nothing to gloss)", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
+
+    renderPanel();
+
+    await screen.findByText("Standings build as rounds are counted.");
+    expect(screen.queryByText("From this season's counted rounds — match results, Stableford points, and skins for current members.")).toBeNull();
+  });
+
   it("a standings load failure renders an honest quiet message, never a thrown render", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });

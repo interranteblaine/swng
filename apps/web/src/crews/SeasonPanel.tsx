@@ -142,32 +142,34 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
             : "No current members appear in this season's counted rounds."}
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="text-slate-400">
-                <th className="py-1 pr-2 font-medium">Member</th>
-                <th className="py-1 pr-2 font-medium">Rounds</th>
-                <th className="py-1 pr-2 font-medium">Matches (W–L–H)</th>
-                <th className="py-1 pr-2 font-medium">Stableford pts</th>
-                <th className="py-1 font-medium">Skins</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedLedger.map((line) => (
-                <tr key={line.golferId} className="border-t border-slate-800">
-                  <td className="py-2 pr-2">{line.name}</td>
-                  <td className="py-2 pr-2">{line.rounds}</td>
-                  <td className="py-2 pr-2">{`${line.wins}–${line.losses}–${line.halves}`}</td>
-                  <td className="py-2 pr-2">{line.points}</td>
-                  <td className="py-2">{line.skins}</td>
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="text-slate-400">
+                  <th className="py-1 pr-2 font-medium">Member</th>
+                  <th className="py-1 pr-2 font-medium">Rounds</th>
+                  <th className="py-1 pr-2 font-medium">Matches (W–L–H)</th>
+                  <th className="py-1 pr-2 font-medium">Stableford pts</th>
+                  <th className="py-1 font-medium">Skins</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {sortedLedger.map((line) => (
+                  <tr key={line.golferId} className="border-t border-slate-800">
+                    <td className="py-2 pr-2">{line.name}</td>
+                    <td className="py-2 pr-2">{line.rounds}</td>
+                    <td className="py-2 pr-2">{`${line.wins}–${line.losses}–${line.halves}`}</td>
+                    <td className="py-2 pr-2">{line.points}</td>
+                    <td className="py-2">{line.skins}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-slate-500">From this season&apos;s counted rounds — match results, Stableford points, and skins for current members.</p>
+        </>
       )}
-      <p className="text-xs text-slate-500">From this season&apos;s counted rounds — match results, Stableford points, and skins for current members.</p>
 
       {standings.headToHead.length > 0 && (
         <div>

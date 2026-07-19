@@ -73,17 +73,18 @@ ArchivedRoundPage lose the `activeGameId` state and props entirely.
 
 ### 2c. Every game states its handicap treatment, in words, up front
 
-Panel header, in order:
+Panel header, in order — deliberately WITHOUT the rules blurb (owner slop-check, 2026-07-19:
+teaching copy belongs where you *choose* a game — the picker — not repeated on every
+mid-round standings check; the panel leads with only what changes decisions):
 1. Title (chip title verbatim) + "Ended" badge when terminated.
 2. **The treatment line:** stroke-play net → `Net — {allowancePhrase}` (e.g. `Net — 95%
    handicap (standard)`); stroke-play gross → `Gross — raw scores, no strokes`; all other
    kinds → `allowancePhrase(kind, allowance)` as today.
-3. The blurb (`gameKindBlurb`).
-4. **The strokes line for every kind except gross stroke play** (which has none by
+3. **The strokes line for every kind except gross stroke play** (which has none by
    definition): the shared `strokesSummary` — with its all-zero copy changed to
    **`No strokes — everyone plays off 0.`** (the exact sentence that answers the CH-0
    gross-vs-net confusion; one copy, shared with the add-game preview).
-5. For match kinds, a per-kind note from a new `strokesNote(kind)` in
+4. For match kinds, a per-kind note from a new `strokesNote(kind)` in
    `scoring/present.ts`: singles → `Match play uses the difference — only the higher
    handicap gets strokes.` (moved from AddGameForm's literal — one copy, both sites);
    fourball → `Four-ball plays everyone off the lowest handicap.` (AddGameForm gains it
@@ -118,8 +119,9 @@ Panel header, in order:
 
 The chips' glance lines and `describeGame` (unchanged); the panel bodies from the previous
 arc (trails, story list, decoder ring, dormie gloss); `strokesSummary`/`allowancePhrase`/
-`gameKindBlurb`/`gameKindLabel` (one-copy formatters, now front and center); the add-game
-picker and strokes preview; two-tap score entry.
+`gameKindLabel` (one-copy formatters, now front and center); `gameKindBlurb` stays
+picker-only (the panel drops it — §2c); the add-game picker and strokes preview; two-tap
+score entry.
 
 ## 4. Out of scope
 

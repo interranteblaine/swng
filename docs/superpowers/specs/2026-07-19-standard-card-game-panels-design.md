@@ -134,7 +134,11 @@ New games; any change to scoring engines' math; the crew/season surfaces; junk/t
 2. **Cleared-cell semantics are commutative:** a clear beats an older concurrent write in
    every arrival order (HLC-pinned test); a cleared cell reads as unscored in every engine,
    in finalize-readiness, in settle, and in the AGS walk (one accessor, grep-gated: no raw
-   `\.cells\[` read survives outside the fold, `cellKey`/`cellAt` themselves, and tests).
+   `\.cells\[` read AND no `in cells`/`in state.cells` membership check survives outside the
+   fold, `cellKey`/`cellAt` themselves, and tests — the membership form was hardened into this
+   gate at final review, after a raw `cellKey(...) in cells` check in `ScorecardGrid`'s
+   `currentHoleNumber` slipped past the original `\.cells\[`-only pattern and stranded the
+   current-hole highlight past a hole whose mis-tapped cell had been cleared).
 3. **One copy of treatment copy:** `strokesSummary` (with the new off-0 line),
    `allowancePhrase`, `strokesNote` — shared by panels and the add-game form; no literal
    duplicates (review-gate grep).

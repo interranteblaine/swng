@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultAllowance, fixtureLinks, gameId, golferId, playingHandicap } from "@swng/domain";
 import type { GameConfig, Participant } from "@swng/domain";
-import { gameDots, gamePlayers, strokesSummary, totalDots } from "./dots";
+import { gameDots, strokesSummary, totalDots } from "./dots";
 
 // fixtureLinks (packages/domain/src/scoring/golden/fixtureCourse.ts) carries one 9-hole tee
 // set, "white" — every participant below plays it, so gameDots' per-hole allocation always
@@ -17,18 +17,6 @@ const CAL = golferId("cal");
 const DEE = golferId("dee");
 
 const participant = (id: ReturnType<typeof golferId>, name: string, courseHandicap: number): Participant => ({ golferId: id, name, tee: TEE, courseHandicap });
-
-describe("gamePlayers", () => {
-  it("reads players/sides per kind, in the config's own order", () => {
-    const strokePlay: GameConfig = { kind: "stroke-play", id: gameId("g"), scoring: "net", players: [ANN, BO] };
-    const singles: GameConfig = { kind: "singles-match", id: gameId("g"), a: ANN, b: BO };
-    const fourball: GameConfig = { kind: "fourball-match", id: gameId("g"), a: [ANN, BO], b: [CAL, DEE] };
-
-    expect(gamePlayers(strokePlay)).toEqual([ANN, BO]);
-    expect(gamePlayers(singles)).toEqual([ANN, BO]);
-    expect(gamePlayers(fourball)).toEqual([ANN, BO, CAL, DEE]);
-  });
-});
 
 describe("gameDots", () => {
   it("stableford: every player at playingHandicap(courseHandicap, allowance)", () => {

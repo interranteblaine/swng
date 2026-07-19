@@ -307,7 +307,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // separate confirm step. Every other entry in this spec goes through enterScore() (the
     // same two clicks), so this one entry stands in for all of them, per the brief.
     const cell = pageA.getByRole("button", { name: "Ann hole 13", exact: true });
-    await expect(cell).toContainText("–"); // idle placeholder (dots may already show — fourball allocates Ann a dot on hole 13's SI-4)
+    await expect(cell).toContainText("–"); // idle placeholder (dots may already show — the standard card's own course-handicap dots, not a game: Ann's CH 8 gets a dot on hole 13, SI 4)
     await cell.click(); // click 1 of 2
     const dialog = pageA.getByRole("dialog", { name: "Score for Ann, hole 13", exact: true });
     await expect(dialog).toBeVisible();

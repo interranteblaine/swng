@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { courseHandicapAllocation, netStrokes } from "@swng/client";
-import { cellAt, cellKey, findTeeSet, strokeGrant } from "@swng/domain";
+import { cellAt, findTeeSet, strokeGrant } from "@swng/domain";
 import type { CourseCard, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { ScorePad } from "./ScorePad";
 
@@ -25,10 +25,13 @@ interface Selection {
 const canonicalHoles = (card: CourseCard): readonly Hole[] => card.teeSets[0]?.holes ?? [];
 
 // First hole where not every participant has a cell — the on-course "where are we" pointer
-// (brief: "current hole = first hole where not every participant has a cell").
+// (brief: "current hole = first hole where not every participant has a cell"). Reads through
+// cellAt, never a raw membership check on `cells` — a cleared cell is RETAINED in state.cells
+// (the fold invariant), so an `in`/key-presence test would treat a cleared cell as recorded and
+// leave the highlight past a hole that actually needs re-entry.
 const currentHoleNumber = (holes: readonly Hole[], participants: readonly Participant[], cells: RoundState["cells"]): number | undefined => {
   for (const hole of holes) {
-    if (participants.some((p) => !(cellKey(p.golferId, hole.number) in cells))) return hole.number;
+    if (participants.some((p) => cellAt(cells, p.golferId, hole.number) === undefined)) return hole.number;
   }
   return undefined;
 };

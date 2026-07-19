@@ -279,6 +279,20 @@ describe("ScorecardGrid — Clear score", () => {
 
     expect(screen.queryByRole("button", { name: "Clear score" })).toBeNull();
   });
+
+  // A stored-cleared cell must read as unscored to the pad too, not just to the grid glyph:
+  // cellAt hides cleared cells from every reader, so ScorePad's `current` prop sees `undefined`
+  // and shows no Clear score button — pinned directly rather than by inference from the glyph.
+  it("tapping a cell whose stored result is cleared opens a pad with no Clear score button", () => {
+    const recordScore = vi.fn();
+    const state = twoPlayerState({ cells: { [cellKey(ANN, 1)]: scoreCell({ kind: "cleared" }, ANN) } });
+    render(<ScorecardGrid state={state} recordScore={recordScore} />);
+
+    fireEvent.click(cellButton("Ann", 1));
+
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Clear score" })).toBeNull();
+  });
 });
 
 describe("ScorecardGrid — current hole", () => {
@@ -289,6 +303,29 @@ describe("ScorecardGrid — current hole", () => {
         [cellKey(BO, 1)]: scoreCell({ kind: "strokes", strokes: 5 }, BO),
         [cellKey(ANN, 2)]: scoreCell({ kind: "strokes", strokes: 4 }, ANN),
         // Bo hole 2 missing — hole 2 is current.
+      },
+    });
+    render(<ScorecardGrid state={state} recordScore={vi.fn()} />);
+
+    const row1 = screen.getByRole("row", { name: /^Hole 1/ });
+    const row2 = screen.getByRole("row", { name: /^Hole 2/ });
+    expect(row1.getAttribute("aria-current")).not.toBe("true");
+    expect(row2.getAttribute("aria-current")).toBe("true");
+  });
+
+  // Regression: a cleared cell is RETAINED in state.cells (the fold invariant) — a mis-tap
+  // undone on the current hole must bring the highlight BACK to that hole, not leave it
+  // pointing past a hole that now needs re-entry. currentHoleNumber must read through cellAt
+  // (which hides cleared cells), never a raw key-presence check on `cells`.
+  it("clearing a cell on the current hole moves the highlight back to that hole", () => {
+    const state = twoPlayerState({
+      cells: {
+        [cellKey(ANN, 1)]: scoreCell({ kind: "strokes", strokes: 4 }, ANN),
+        [cellKey(BO, 1)]: scoreCell({ kind: "strokes", strokes: 5 }, BO),
+        // Both players scored hole 1, so hole 2 would be current if hole 1 stayed "done"...
+        [cellKey(ANN, 2)]: scoreCell({ kind: "cleared" }, ANN),
+        // ...but Ann's hole-2 cell was cleared (a mis-tap undone) — hole 2 must be current again.
+        [cellKey(BO, 2)]: scoreCell({ kind: "strokes", strokes: 4 }, BO),
       },
     });
     render(<ScorecardGrid state={state} recordScore={vi.fn()} />);

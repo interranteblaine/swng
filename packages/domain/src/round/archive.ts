@@ -113,6 +113,10 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
     card: state.card,
     participants: settledParticipants,
     games: state.games,
+    // Cells ride verbatim, including cleared ones — this is the fold's own state.cells, not
+    // filtered to settledParticipants. A departed golfer omitted above (zero scored holes, zero
+    // game membership) can still leave cell keys behind in principle; any consumer walking
+    // archive.cells must not assume every key resolves to a name in archive.participants.
     cells: state.cells,
     events: canonicalEvents,
     results,

@@ -881,44 +881,68 @@ export const waitForFinalOrRecover = async (page: Page, routeHandle: WsRouteHand
   await expectOrRecover(page, "Final results", () => expect(finalHeading).toBeVisible({ timeout: 45_000 }), routeHandle);
 };
 
-// <select>s only, never getByLabel — Playwright's getByLabel match text for a <label> wrapping
-// a <select> includes the currently-DISPLAYED option's own text (e.g. "CourseFixture Links",
-// the label's own text concatenated with the collapsed dropdown's visible value), not just the
-// label's literal text, so an exact match against just "Course" finds nothing and a substring
-// match over-matches (e.g. "Course" also substring-matches "Course name", another real label).
-// getByRole's
-// accessible-name computation for the CONTROL itself doesn't have this contamination — the
-// combobox's own name is cleanly "Course", excluding its own displayed option text.
-export const gameKindSelect = (page: Page) => page.getByRole("combobox", { name: "Kind", exact: true });
+// <select>s only, never getByLabel for the player pickers below — Playwright's getByLabel
+// match text for a <label> wrapping a <select> includes the currently-DISPLAYED option's own
+// text (e.g. a "Player 1" label reading "Player 1Ann" once Ann is picked), not just the
+// label's literal text, so a later exact match against just "Player 1" would find nothing.
+// getByRole's accessible-name computation for the CONTROL itself doesn't have this
+// contamination — the combobox's own name stays cleanly "Player 1", excluding its own
+// displayed option text.
 
+// Games legibility arc (Tasks 1-6): AddGameForm's old "Kind" <select> is gone, replaced by a
+// radio-card picker — each kind's radio carries its OWN accessible name via `aria-label`
+// (domain's gameKindLabel: "Stroke play"/"Match play"/"Stableford"/"Four-ball"/"Skins"), not
+// the surrounding label's visible text, so a plain role("radio", { name }).check() finds it
+// directly. Not exported — every caller below is one of this file's own add-game helpers.
+const pickGameKind = async (page: Page, label: string): Promise<void> => {
+  await page.getByRole("radio", { name: label, exact: true }).check();
+};
+
+// singles-match's group renamed "Who's playing?", its players "Player 1"/"Player 2" (was
+// "Player A"/"Player B") — no prior helper existed for singles (every spec drove it inline
+// against the old select-based form); this is the one place that flow now lives.
+export const addSinglesGame = async (page: Page, a: string, b: string): Promise<void> => {
+  await pickGameKind(page, "Match play");
+  await page.getByRole("combobox", { name: "Player 1", exact: true }).selectOption({ label: a });
+  await page.getByRole("combobox", { name: "Player 2", exact: true }).selectOption({ label: b });
+  await page.getByRole("button", { name: "Add game" }).click();
+};
+
+// Fourball's two sides are now "Team 1"/"Team 2" fieldsets (was "Side A"/"Side B" baked into
+// the select's own name), each with its own "First player"/"Second player" selects — the SAME
+// names in both groups, so each pair is scoped by its enclosing role("group", { name }) rather
+// than a side-qualified select name.
 export const addFourballGame = async (
   page: Page,
   sides: { readonly a1: string; readonly a2: string; readonly b1: string; readonly b2: string },
 ): Promise<void> => {
-  await gameKindSelect(page).selectOption({ value: "fourball-match" });
-  await page.getByRole("combobox", { name: "Side A – Player 1", exact: true }).selectOption({ label: sides.a1 });
-  await page.getByRole("combobox", { name: "Side A – Player 2", exact: true }).selectOption({ label: sides.a2 });
-  await page.getByRole("combobox", { name: "Side B – Player 1", exact: true }).selectOption({ label: sides.b1 });
-  await page.getByRole("combobox", { name: "Side B – Player 2", exact: true }).selectOption({ label: sides.b2 });
+  await pickGameKind(page, "Four-ball");
+  const team1 = page.getByRole("group", { name: "Team 1" });
+  await team1.getByRole("combobox", { name: "First player", exact: true }).selectOption({ label: sides.a1 });
+  await team1.getByRole("combobox", { name: "Second player", exact: true }).selectOption({ label: sides.a2 });
+  const team2 = page.getByRole("group", { name: "Team 2" });
+  await team2.getByRole("combobox", { name: "First player", exact: true }).selectOption({ label: sides.b1 });
+  await team2.getByRole("combobox", { name: "Second player", exact: true }).selectOption({ label: sides.b2 });
   await page.getByRole("button", { name: "Add game" }).click();
 };
 
+// The checkbox group these two share was renamed "Who's in?" (was "Players").
 export const addSkinsGame = async (page: Page, names: readonly string[]): Promise<void> => {
-  await gameKindSelect(page).selectOption({ value: "skins" });
-  const group = page.getByRole("group", { name: "Players" });
+  await pickGameKind(page, "Skins");
+  const group = page.getByRole("group", { name: "Who's in?" });
   for (const name of names) {
     await group.getByLabel(name, { exact: true }).check();
   }
   await page.getByRole("button", { name: "Add game" }).click();
 };
 
-// Same "Players" checkbox-group shape as addSkinsGame above, stableford's own kind selected
+// Same "Who's in?" checkbox-group shape as addSkinsGame above, stableford's own kind selected
 // instead — M7 Task 8's termination-coverage addendum (fieldTest.spec.ts) is the one caller
 // that needs a game requiring EVERY configured player's EVERY hole to resolve (unlike singles
 // match's early-closeout path), so a partial card leaves it deliberately unresolved.
 export const addStablefordGame = async (page: Page, names: readonly string[]): Promise<void> => {
-  await gameKindSelect(page).selectOption({ value: "stableford" });
-  const group = page.getByRole("group", { name: "Players" });
+  await pickGameKind(page, "Stableford");
+  const group = page.getByRole("group", { name: "Who's in?" });
   for (const name of names) {
     await group.getByLabel(name, { exact: true }).check();
   }

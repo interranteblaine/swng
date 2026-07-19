@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { chip, gameKindSelect, injectAuthTokens, joinRoundDirect, loadWebEnv, mintAccountGolfer, readJoinCode, waitForParticipant } from "./support.js";
+import { addSinglesGame, chip, injectAuthTokens, joinRoundDirect, loadWebEnv, mintAccountGolfer, readJoinCode, waitForParticipant } from "./support.js";
 import type { AccountGolfer } from "./support.js";
 
 // The M6 gate (docs/implementation-plan.md M6; docs/superpowers/plans/2026-07-09-m6-courses.md
@@ -218,14 +218,11 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
   });
 
   test("6: the singles match (Pat vs Quinn) is added via SetupPanel", async () => {
-    await gameKindSelect(page).selectOption({ value: "singles-match" });
-    await page.getByRole("combobox", { name: "Player A", exact: true }).selectOption({ label: "Pat" });
-    await page.getByRole("combobox", { name: "Player B", exact: true }).selectOption({ label: "Quinn" });
-    // Singles match defaults to 100% allowance (AddGameForm's changeKind re-anchor) — exactly
+    // Match play defaults to 100% allowance (AddGameForm's changeKind re-anchor) — exactly
     // the brief's own allowance, so nothing here overrides it.
-    await page.getByRole("button", { name: "Add game", exact: true }).click();
+    await addSinglesGame(page, "Pat", "Quinn");
 
-    await expect(chip(page, "Singles match")).toBeVisible();
+    await expect(chip(page, "Match play")).toBeVisible();
   });
 
   test("7: dots match the hand-verified expectations exactly — Pat ●● on hole 3 (SI 1), ● everywhere else, Quinn none", async () => {

@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import {
+  addSinglesGame,
   chip,
   createScoreOps,
   enterScore,
   finalizeRoundDirect,
-  gameKindSelect,
   getCourseDirect,
   getMyRecordDirect,
   injectAuthTokens,
@@ -245,11 +245,8 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
 
     // Add the singles match (Uma vs Vic) via SetupPanel — default 100% allowance, exactly the
     // pinned allocation above.
-    await gameKindSelect(page).selectOption({ value: "singles-match" });
-    await page.getByRole("combobox", { name: "Player A", exact: true }).selectOption({ label: "Uma" });
-    await page.getByRole("combobox", { name: "Player B", exact: true }).selectOption({ label: "Vic" });
-    await page.getByRole("button", { name: "Add game", exact: true }).click();
-    await expect(chip(page, "Singles match")).toBeVisible();
+    await addSinglesGame(page, "Uma", "Vic");
+    await expect(chip(page, "Match play")).toBeVisible();
 
     // Dots hole-by-hole against the hand-verified relative allocation — the CORE assertion: an
     // unrated tee allocates dots identically to a rated one (stroke index + course handicap only).

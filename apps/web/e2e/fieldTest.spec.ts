@@ -13,7 +13,6 @@ import {
   ensureCourse,
   enterScore,
   expectOrRecover,
-  gameKindSelect,
   injectAuthTokens,
   installWsProxy,
   joinRoundDirect,
@@ -192,16 +191,17 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
   test("3: A adds fourball (Ann+Bo vs Cal+Dee) and skins (all four) via SetupPanel; both contexts render both chips", async () => {
     await addFourballGame(pageA, { a1: "Ann", a2: "Bo", b1: "Cal", b2: "Dee" });
-    await expect(chip(pageA, "Fourball match")).toBeVisible();
+    await expect(chip(pageA, "Four-ball")).toBeVisible();
 
     // Same trailing form-reset race the M7 termination describe's own singles→stableford hop
     // guards against (see its note): AddGameForm.submit does `await onAddGame(config)` THEN
     // `changeKind(kind)`, but the chip above appears from the OPTIMISTIC fold, before that POST
     // resolves — so on a slow beta POST the fourball reset can fire mid-addSkinsGame, reverting
-    // Kind→fourball-match (the Players checkbox group vanishes) and hanging addSkinsGame's own
-    // `.check()`. "Side A – Player 1" returning to "Select…" (value "") is the form-local signal
-    // the reset has already fired; deterministic, no WS. Then the skins setup is race-free.
-    await expect(pageA.getByRole("combobox", { name: "Side A – Player 1", exact: true })).toHaveValue("", { timeout: 15_000 });
+    // Kind→fourball-match (the Who's in? checkbox group vanishes) and hanging addSkinsGame's own
+    // `.check()`. Team 1's "First player" returning to "Select…" (value "") is the form-local
+    // signal the reset has already fired; deterministic, no WS. Then the skins setup is race-free.
+    const team1First = pageA.getByRole("group", { name: "Team 1" }).getByRole("combobox", { name: "First player", exact: true });
+    await expect(team1First).toHaveValue("", { timeout: 15_000 });
 
     await addSkinsGame(pageA, PLAYER_NAMES);
     await expect(chip(pageA, "Skins")).toBeVisible();
@@ -317,9 +317,9 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     const expectedFourball = describeFourballAt(16, true);
     const expectedSkins = describeSkinsAt(16, true);
 
-    await expect(chip(pageA, "Fourball match")).toContainText(expectedFourball);
+    await expect(chip(pageA, "Four-ball")).toContainText(expectedFourball);
     await expect(chip(pageA, "Skins")).toContainText(expectedSkins);
-    await expectOrRecover(pageB, "B's Fourball thru 16 (step 7)", () => expect(chip(pageB, "Fourball match")).toContainText(expectedFourball), bRoute);
+    await expectOrRecover(pageB, "B's Fourball thru 16 (step 7)", () => expect(chip(pageB, "Four-ball")).toContainText(expectedFourball), bRoute);
     await expectOrRecover(pageB, "B's Skins thru 16 (step 7)", () => expect(chip(pageB, "Skins")).toContainText(expectedSkins), bRoute);
   });
 
@@ -337,14 +337,14 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
     // A scored holes 17-18 itself — same-page local state (its own optimistic fold), not
     // WS-dependent, so these stay bare.
-    await expect(chip(pageA, "Fourball match")).toContainText(expectedFourballFinal);
+    await expect(chip(pageA, "Four-ball")).toContainText(expectedFourballFinal);
     await expect(chip(pageA, "Skins")).toContainText(expectedSkinsFinal);
 
     // B only ever learns holes 17-18 via WS broadcast from A — cross-context, WS-dependent.
     // Skins (unlike fourball) only settles once hole 18 itself is decided — asserting it here
     // proves B actually received every one of hole 18's four scores, not just enough of them
     // for fourball's already-closed 2&1 to read correctly.
-    await expectOrRecover(pageB, "B's Fourball final (step 8)", () => expect(chip(pageB, "Fourball match")).toContainText(expectedFourballFinal), bRoute);
+    await expectOrRecover(pageB, "B's Fourball final (step 8)", () => expect(chip(pageB, "Four-ball")).toContainText(expectedFourballFinal), bRoute);
     await expectOrRecover(pageB, "B's Skins final (step 8)", () => expect(chip(pageB, "Skins")).toContainText(expectedSkinsFinal), bRoute);
   });
 
@@ -456,10 +456,10 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
   });
 
   test("2: a singles match (Pat vs Quinn) and a stableford (Pat, Quinn) are both added", async () => {
-    await gameKindSelect(page).selectOption({ value: "singles-match" });
-    await page.getByRole("combobox", { name: "Player A", exact: true }).selectOption({ label: "Pat" }); // Pat is this page's own optimistic participant — same-context, stays bare
+    await page.getByRole("radio", { name: "Match play", exact: true }).check();
+    await page.getByRole("combobox", { name: "Player 1", exact: true }).selectOption({ label: "Pat" }); // Pat is this page's own optimistic participant — same-context, stays bare
 
-    // Player B's <option>s render from the SAME state.participants Quinn's own roster/checkbox
+    // Player 2's <option>s render from the SAME state.participants Quinn's own roster/checkbox
     // text renders from (SetupPanel.tsx), so test 1's recovery-guarded wait above should already
     // guarantee this — but a bare selectOption({ label }) has NO configured timeout of its own
     // (playwright.config.ts sets no use.actionTimeout), so on any residual staleness it would
@@ -467,23 +467,23 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
     // hang, then 'Target page, context or browser has been closed'" symptom a real beta run hit
     // here. Guard the <option>'s actual presence with the SAME bounded, recoverable
     // expectOrRecover wait first, THEN do the (now cheap, already-satisfied) select.
-    const playerB = page.getByRole("combobox", { name: "Player B", exact: true });
-    const quinnOption = playerB.locator("option", { hasText: /^Quinn$/ });
-    await expectOrRecover(page, "Quinn appears in the Player B options (test 2)", () => expect(quinnOption).toHaveCount(1), route);
-    await playerB.selectOption({ label: "Quinn" });
+    const player2 = page.getByRole("combobox", { name: "Player 2", exact: true });
+    const quinnOption = player2.locator("option", { hasText: /^Quinn$/ });
+    await expectOrRecover(page, "Quinn appears in the Player 2 options (test 2)", () => expect(quinnOption).toHaveCount(1), route);
+    await player2.selectOption({ label: "Quinn" });
     await page.getByRole("button", { name: "Add game" }).click();
-    await expect(chip(page, "Singles match")).toBeVisible();
+    await expect(chip(page, "Match play")).toBeVisible();
 
-    // Settle the singles-match submit's OWN trailing form-reset before starting the stableford.
+    // Settle the match-play submit's OWN trailing form-reset before starting the stableford.
     // AddGameForm.submit does `await onAddGame(config)` (a network POST) THEN `changeKind(kind)`
-    // — but the "Singles match" chip above appears from the session's OPTIMISTIC fold, which can
+    // — but the "Match play" chip above appears from the session's OPTIMISTIC fold, which can
     // land well BEFORE that POST resolves. On a slow beta POST the reset therefore fires while
     // addStablefordGame is mid-setup, reverting Kind→singles-match and wiping the checked Pat/
     // Quinn, leaving "Add game" disabled forever (observed: run 5's 120s hang at this exact
-    // seam). Player A returning to "Select…" (value "") is the form-local signal that the reset
+    // seam). Player 1 returning to "Select…" (value "") is the form-local signal that the reset
     // has already fired — deterministic, no WS involved — so nothing can reset the form out from
     // under the stableford setup that follows.
-    await expect(page.getByRole("combobox", { name: "Player A", exact: true })).toHaveValue("", { timeout: 15_000 });
+    await expect(page.getByRole("combobox", { name: "Player 1", exact: true })).toHaveValue("", { timeout: 15_000 });
 
     await addStablefordGame(page, ["Pat", "Quinn"]);
     await expect(chip(page, "Stableford")).toBeVisible();
@@ -502,7 +502,7 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
     // match "10&8" (matchLadder.ts's own closeout rule). Hand-derived from the engine's own
     // documented rules for this fresh throwaway scenario (not fieldDeck18-sourced) — a
     // disagreement here is this test failing honestly, never something to relax.
-    await expect(chip(page, "Singles match")).toContainText("Pat wins 10&8");
+    await expect(chip(page, "Match play")).toContainText("Pat wins 10&8");
 
     // Stableford needs EVERY configured player's EVERY hole decided to resolve
     // (allPlayersComplete, scoring/stableford.ts) — holes 11-18 are untouched for both Pat and
@@ -536,7 +536,7 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
   });
 
   test("5: ResultsView shows the singles-match result and the stableford's Ended badge", async () => {
-    await expect(chip(page, "Singles match")).toContainText("Pat wins 10&8");
+    await expect(chip(page, "Match play")).toContainText("Pat wins 10&8");
     await expect(chip(page, "Stableford")).toContainText("Ended");
   });
 });

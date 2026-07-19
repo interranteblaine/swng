@@ -60,3 +60,21 @@ export const allowancePhrase = (kind: GameKind, allowance?: number): string => {
   const name = pct === 100 ? "Full handicap" : `${pct}% handicap`;
   return `${name}${resolved === defaultAllowance(kind) ? " (standard)" : " (adjusted)"}`;
 };
+
+// A per-kind note on the strokes CONVENTION itself — distinct from allowancePhrase's
+// percent-of-handicap line — for the two kinds whose strokes are computed relative to another
+// player rather than each golfer's own handicap outright (singles-match: the difference between
+// the two; fourball-match: everyone relative to the low playing handicap on the four). The other
+// three kinds need no extra explanation beyond the allowance phrase itself.
+export const strokesNote = (kind: GameKind): string | undefined => {
+  switch (kind) {
+    case "singles-match":
+      return "Match play uses the difference — only the higher handicap gets strokes.";
+    case "fourball-match":
+      return "Four-ball plays everyone off the lowest handicap.";
+    case "stroke-play":
+    case "stableford":
+    case "skins":
+      return undefined;
+  }
+};

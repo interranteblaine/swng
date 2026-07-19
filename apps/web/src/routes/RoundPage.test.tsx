@@ -192,8 +192,9 @@ describe("RoundPage", () => {
   });
 
   // The standard card (spec 2026-07-19 §2a: the card never changes) — StandingsHeader chips
-  // still switch which game's OWN panel is active, but the grid underneath is chip-independent:
-  // Ann's dots come from her own course handicap (8, on fixtureLinks' SI-5 hole 1) always.
+  // only ever expand/collapse a game's OWN panel now (Task 3's game-agnostic card change), so
+  // the grid underneath is chip-independent: Ann's dots come from her own course handicap (8,
+  // on fixtureLinks' SI-5 hole 1) always.
   it("tapping a standings chip does NOT change the grid's dots — the card is game-agnostic", async () => {
     const id = roundId("round-chip");
     const ann = golferId("ann");
@@ -224,28 +225,26 @@ describe("RoundPage", () => {
     const annHole1 = () => screen.getByRole("button", { name: "Ann hole 1" });
     await waitFor(() => expect(annHole1().textContent).toMatch("●"));
 
-    // Tapping the gross stroke-play chip switches StandingsHeader's own selection — the grid's
+    // Tapping the gross stroke-play chip only expands/collapses its own panel — the grid's
     // dot is unaffected (gross carries no allowance at all, but that's THAT game's own concern
     // now, never the card's).
-    fireEvent.click(screen.getByRole("tab", { name: /Stroke play \(gross\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Stroke play \(gross\)/ }));
     expect(annHole1().textContent).toMatch("●");
 
     // And back — still unaffected.
-    fireEvent.click(screen.getByRole("tab", { name: /Match play/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Match play/ }));
     expect(annHole1().textContent).toMatch("●");
   });
 
-  // M7 Task 6: terminated games drop out of the default active-game selection (brief) — the
-  // chip itself stays (with an "ended" badge, covered in StandingsHeader's own test suite),
-  // but the grid should never silently default onto a game that's stopped scoring.
-  it("the default active game skips a terminated one, falling through to the next live game", async () => {
+  // M7 Task 6 / spec 2026-07-19 §2b: a terminated game's chip stays (with an "Ended" badge) —
+  // there is no more "default active game" concept to skip it in (all chips start collapsed,
+  // spec §2b), but the chip itself must still render and stay tappable.
+  it("a terminated game's chip stays, with an Ended badge, alongside the live one", async () => {
     const id = roundId("round-term-default");
     const ann = golferId("ann");
     const bo = golferId("bo");
     credentialStore.save(id, { token: "tok-term-default", golferId: ann, name: "Ann", joinCode: "TERM01" });
 
-    // The singles-match is added first (buildTwoPlayerServerLog's own ordering) — the default
-    // WITHOUT this fix — but it's terminated here, so stroke-play should become the default.
     const terminated: RoundEvent = {
       kind: "game-terminated",
       gameId: gameId("single-1"),
@@ -272,10 +271,11 @@ describe("RoundPage", () => {
     );
     await waitFor(() => expect(screen.getByText("TERM01")).toBeTruthy());
 
-    const strokeTab = screen.getByRole("tab", { name: /Stroke play \(gross\)/ });
-    expect(strokeTab.getAttribute("aria-selected")).toBe("true");
-    const singlesTab = screen.getByRole("tab", { name: /Match play/ });
-    expect(singlesTab.getAttribute("aria-selected")).toBe("false");
+    const strokeChip = screen.getByRole("button", { name: /Stroke play \(gross\)/ });
+    const singlesChip = screen.getByRole("button", { name: /Match play/ });
+    expect(strokeChip.getAttribute("aria-expanded")).toBe("false");
+    expect(singlesChip.getAttribute("aria-expanded")).toBe("false");
+    expect(singlesChip.textContent).toMatch(/Ended/i);
   });
 
   // The between-holes digest is deleted (accounts-only identity spec §6) — the proof-of-negative:
@@ -569,9 +569,10 @@ describe("RoundPage", () => {
     expect(screen.queryByRole("button", { name: "Scrap this round" })).toBeNull();
   });
 
-  // M7 Task 6: the chip End-game flow, wired end to end — overflow → confirm → POST terminate
-  // → the game-terminated event folds back through the session → chip stays with an Ended badge.
-  it("chip End-game flow: overflow → confirm → POST terminate → chip stays with an Ended badge", async () => {
+  // M7 Task 6 / spec 2026-07-19 §2b: the End-game flow, wired end to end — expand the chip's
+  // panel → its own "End game…" trigger → confirm → POST terminate → the game-terminated event
+  // folds back through the session → chip stays with an Ended badge.
+  it("End-game flow: expand panel → End game… → confirm → POST terminate → chip stays with an Ended badge", async () => {
     const id = roundId("round-terminate-flow");
     const ann = golferId("ann");
     const bo = golferId("bo");
@@ -618,16 +619,17 @@ describe("RoundPage", () => {
     );
     await waitFor(() => expect(screen.getByText("TRM002")).toBeTruthy());
 
-    fireEvent.click(screen.getByRole("button", { name: "End Match play" }));
+    fireEvent.click(screen.getByRole("button", { name: /Match play/ }));
+    fireEvent.click(screen.getByRole("button", { name: "End game…" }));
     const dialog = screen.getByRole("dialog", { name: "End Match play" });
     expect(dialog.textContent).toMatch(/Match play/); // the confirm names the game
 
     fireEvent.click(screen.getByRole("button", { name: "End game" }));
 
-    await waitFor(() => expect(screen.getByRole("tab", { name: /Match play/ }).textContent).toMatch(/Ended/));
-    // The chip STAYS (an ended badge, not a removal), and its overflow control is gone.
-    expect(screen.getByRole("tab", { name: /Match play/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "End Match play" })).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Match play/ }).textContent).toMatch(/Ended/));
+    // The chip STAYS (an ended badge, not a removal), and its panel's own End trigger is gone.
+    expect(screen.getByRole("button", { name: /Match play/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "End game…" })).toBeNull();
   });
 
   // Papercut 4 (M9 hardening): onAddGame used to be the ONE mutation on this page with no
@@ -677,13 +679,13 @@ describe("RoundPage", () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(screen.getByText("GAME01")).toBeTruthy());
-    expect(screen.queryByRole("tab", { name: /Stableford/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Stableford/ })).toBeNull();
 
     // Default kind is already stableford — no kind select to drive anymore.
     fireEvent.click(within(screen.getByRole("group", { name: "Who's in?" })).getByLabelText("Ann"));
     fireEvent.click(screen.getByRole("button", { name: /add game/i }));
 
-    await waitFor(() => expect(screen.getByRole("tab", { name: /Stableford/ })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Stableford/ })).toBeTruthy());
   });
 
   // Papercut 1: the finalize dialog computes unresolved games from the LOCAL fold and offers

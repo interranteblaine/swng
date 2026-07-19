@@ -91,7 +91,7 @@ describe("gameDots", () => {
     expect(totalDots(dots.get(ANN)!)).toBe(playingHcps.ann - low);
     expect(totalDots(dots.get(BO)!)).toBe(playingHcps.bo - low);
     expect(totalDots(dots.get(CAL)!)).toBe(playingHcps.cal - low);
-    expect(totalDots(dots.get(DEE)!)).toBe(0); // Dee is the low playing handicap — plays scratch
+    expect(totalDots(dots.get(DEE)!)).toBe(0); // Dee is the low playing handicap — plays off 0, gets no strokes
   });
 
   it("honors an explicit allowance override instead of the per-kind default", () => {
@@ -118,10 +118,10 @@ describe("strokesSummary", () => {
     expect(strokesSummary(config, participants, CARD)).toBe("Ann gives 1 · Bo 3 dots");
   });
 
-  it("reads 'No strokes — everyone plays scratch.' when every member's total is zero", () => {
+  it("reads 'No strokes — everyone plays off 0.' when every member's total is zero", () => {
     const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 0)];
     const config: GameConfig = { kind: "skins", id: gameId("g"), players: [ANN, BO] };
 
-    expect(strokesSummary(config, participants, CARD)).toBe("No strokes — everyone plays scratch.");
+    expect(strokesSummary(config, participants, CARD)).toBe("No strokes — everyone plays off 0.");
   });
 });

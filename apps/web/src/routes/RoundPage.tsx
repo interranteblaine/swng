@@ -313,23 +313,15 @@ interface LiveRoundProps {
 }
 
 // Everything that's only ever rendered pre-finalize, as its OWN component (not an inline
-// branch of RoundPageContent) so its chip-selection state only ever runs while a live round is
-// actually mounted: it'd otherwise have to tolerate `state` swapping in and out across the
-// live/final boundary — this component simply unmounts once status flips to "final" and
-// RoundPageContent renders ResultsView instead.
+// branch of RoundPageContent) — spec 2026-07-19: the card is game-agnostic (Task 3) and
+// StandingsHeader no longer needs an active-game selection threaded down to it at all (its own
+// chips are pure disclosure toggles now), so this component's only remaining job is composing
+// the live-only chrome that unmounts once status flips to "final".
 function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave }: LiveRoundProps) {
-  const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
-  // Falls back to the first game until a chip is tapped (Task 5's fixed default-first-game
-  // decision) — also the correct fallback if a previously-active id ever stopped matching. A
-  // terminated game never wins the fallback (M7 Task 6 brief: "default active-game selection"
-  // is one of the downstream filters) — an explicit chip tap can still land on one (its chip
-  // stays, with an "ended" badge), just never the silent default.
-  const activeGame = games.find((g) => g.id === activeGameId) ?? games.find((g) => !state.terminatedGameIds.has(g.id));
-
   return (
     <>
       <ShareButton roundId={state.id} token={token} />
-      <StandingsHeader state={state} games={games} activeGameId={activeGame?.id} onSelect={setActiveGameId} onTerminate={onTerminate} />
+      <StandingsHeader state={state} games={games} onTerminate={onTerminate} />
       <ScorecardGrid state={state} recordScore={recordScore} />
       <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
       <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} />

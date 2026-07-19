@@ -35,5 +35,5 @@ export const strokesSummary = (config: GameConfig, participants: readonly Partic
     if (total === 0) return [];
     return [`${nameOf(id)} ${total} ${total === 1 ? "dot" : "dots"}`];
   });
-  return parts.length > 0 ? parts.join(" · ") : "No strokes — everyone plays scratch.";
+  return parts.length > 0 ? parts.join(" · ") : "No strokes — everyone plays off 0.";
 };

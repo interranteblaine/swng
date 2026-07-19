@@ -112,7 +112,7 @@ describe("WatchPage", () => {
     // (fixtureLinks' courseName + created-at 1_000ms), replacing the bare course name.
     expect(await screen.findByText(roundLabel({ courseName: "Fixture Links", createdAt: 1_000 }))).toBeTruthy();
     // The live grid + standings actually render (a real spectator sees the scorecard).
-    await waitFor(() => expect(screen.getByRole("tab", { name: /Stableford/ })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Stableford/ })).toBeTruthy());
     expect(screen.getByRole("columnheader", { name: "Ann" })).toBeTruthy();
     // Ann's hole-1 score (a "4") rendered as static text inside a disabled cell, not a live
     // number a spectator could imagine tapping to change.
@@ -120,14 +120,15 @@ describe("WatchPage", () => {
     expect(cell.hasAttribute("disabled")).toBe(true);
 
     // Structural proof of "no score buttons": every rendered button is either the disabled
-    // grid cells above or a StandingsHeader game-select TAB — never a ScorePad value button
-    // (1..12/"Picked up"/"Conceded"), never an "End game…" overflow (no onTerminate passed
+    // grid cells above or a StandingsHeader game-select CHIP (a disclosure toggle — the one
+    // other button kind here carries aria-expanded) — never a ScorePad value button
+    // (1..12/"Picked up"/"Conceded"), never an "End game…" trigger (no onTerminate passed
     // here at all), never "Finalize round"/"Add game"/"Add player" (SetupPanel/FinalizeControl
     // are never rendered by WatchPage in the first place).
     const buttons = screen.getAllByRole("button");
     for (const button of buttons) {
-      const isGameTab = button.getAttribute("role") === "tab";
-      expect(isGameTab || button.hasAttribute("disabled")).toBe(true);
+      const isGameChip = button.hasAttribute("aria-expanded");
+      expect(isGameChip || button.hasAttribute("disabled")).toBe(true);
     }
     expect(screen.queryByRole("dialog")).toBeNull(); // ScorePad/FinalizeControl/StandingsHeader's own confirm dialogs never open
     expect(screen.queryByRole("button", { name: /Finalize round/ })).toBeNull();
@@ -165,7 +166,7 @@ describe("WatchPage", () => {
     renderWatchPage(`/watch/${ROUND_ID}#spectator-tok-abandoned`, fixedUseWatchRound(view));
 
     await waitFor(() => expect(screen.getByText(/was scrapped/)).toBeTruthy());
-    expect(screen.queryByRole("tab", { name: /Stableford/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Stableford/ })).toBeNull();
     expect(screen.queryByText("Final results")).toBeNull();
   });
 });

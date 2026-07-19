@@ -1,6 +1,5 @@
-import { useState } from "react";
 import { handicappingFor } from "@swng/client";
-import type { GameId, GameState, RoundState } from "@swng/domain";
+import type { GameState, RoundState } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
 import { ScorecardGrid } from "./ScorecardGrid";
 import { ShareButton } from "./ShareButton";
@@ -35,13 +34,6 @@ const deriveHandicapping = (state: RoundState): readonly HandicappingRow[] =>
 
 export function ResultsView({ state, games, response, shareToken }: ResultsViewProps) {
   const handicapping = response?.handicapping ?? deriveHandicapping(state);
-  // Task 5: the archive gets the same chip-selected active game as a live round (RoundPage's
-  // LiveRound) instead of a fixed games[0] — StandingsHeader IS the per-game standings display
-  // here too (title+line per describeGame), so there's no separate static list beside it. M7
-  // Task 6: same terminated-game exclusion from the default as LiveRound's own fallback — a
-  // terminated game (kept in the archive for audit) never wins the silent default here either.
-  const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
-  const activeGame = games.find((g) => g.id === activeGameId) ?? games.find((g) => !state.terminatedGameIds.has(g.id));
 
   return (
     <section className="flex flex-col gap-6 p-4 text-slate-100">
@@ -80,7 +72,10 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
 
       <div>
         <h2 className="text-lg font-semibold">Final card</h2>
-        <StandingsHeader state={state} games={games} activeGameId={activeGame?.id} onSelect={setActiveGameId} />
+        {/* No onTerminate: an archived round is never live, so StandingsHeader's own panels
+            render with no End affordance — same reuse contract as before, minus the
+            activeGameId/onSelect wiring the game-agnostic card (Task 3) made unnecessary. */}
+        <StandingsHeader state={state} games={games} />
         {/* recordScore is never called — readOnly disables every cell's tap natively (no pad
             ever opens), matching the brief's "the archived card... entry locked". */}
         <ScorecardGrid state={state} recordScore={() => {}} readOnly />

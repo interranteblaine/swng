@@ -113,10 +113,10 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
     const beforeTap = cell.querySelector('span[aria-hidden]')?.textContent;
     expect(beforeTap).toBe("●".repeat(chDots.get(hole!)!));
 
-    fireEvent.click(screen.getByRole("tab", { name: /skins/i }));
+    fireEvent.click(screen.getByRole("button", { name: /skins/i }));
 
-    // The chip tap changes StandingsHeader's own selection (its own test suite covers that) —
-    // the grid's dots are unaffected either way.
+    // The chip tap only expands/collapses that game's own panel (StandingsHeader's own test
+    // suite covers that) — the grid's dots are unaffected either way.
     expect(cell.querySelector('span[aria-hidden]')?.textContent).toBe(beforeTap);
   });
 });
@@ -175,10 +175,10 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     expect(cell.hasAttribute("disabled")).toBe(true);
   });
 
-  // M7 Task 6: terminated games drop out of the default active-game selection here too — the
-  // exact same rule as RoundPage's LiveRound (the archive gets the same chip-selected default
-  // a live round does, per this file's own M6 Task 5 precedent).
-  it("the default active game skips a terminated one, falling through to the next game", () => {
+  // spec 2026-07-19 §2b: there is no more "default active game" — chips are pure disclosure
+  // toggles that all start collapsed. A terminated game's chip still renders (with its own
+  // Ended badge) right alongside a live one, and both are equally tappable to view.
+  it("a terminated game's chip renders alongside a resolved one — both collapsed, no default selection", () => {
     const ann = golferId("ann");
     const bo = golferId("bo");
     const terminatedConfig: GameConfig = { kind: "singles-match", id: gameId("terminated-1"), a: ann, b: bo };
@@ -191,7 +191,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
         { golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 },
         { golferId: bo, name: "Bo", tee: "white", courseHandicap: 2 },
       ],
-      games: [terminatedConfig, resolvedConfig], // terminated one FIRST — the erroneous default without the fix
+      games: [terminatedConfig, resolvedConfig],
       cells: {},
       terminatedGameIds: new Set([terminatedConfig.id]),
     };
@@ -199,8 +199,12 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
 
     render(<ResultsView state={state} games={games} response={undefined} />);
 
-    expect(screen.getByRole("tab", { name: /Stableford/ }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("tab", { name: /Match play/ }).getAttribute("aria-selected")).toBe("false");
+    const stablefordChip = screen.getByRole("button", { name: /Stableford/ });
+    const matchChip = screen.getByRole("button", { name: /Match play/ });
+    expect(stablefordChip.getAttribute("aria-expanded")).toBe("false");
+    expect(matchChip.getAttribute("aria-expanded")).toBe("false");
+    expect(matchChip.textContent).toMatch(/Ended/i);
+    expect(screen.queryByRole("region")).toBeNull(); // nothing expanded by default
   });
 
   it("a golfer with an undecided card (a pickup mid-round, no finalize response) shows 'incomplete', not a crash", () => {

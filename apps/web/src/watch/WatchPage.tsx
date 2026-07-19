@@ -1,7 +1,6 @@
-import { useState } from "react";
 import { useLocation, useParams } from "react-router";
 import { roundId as makeRoundId } from "@swng/domain";
-import type { GameId, RoundId } from "@swng/domain";
+import type { RoundId } from "@swng/domain";
 import { roundLabel } from "../roundLabel";
 import { ResultsView } from "../round/ResultsView";
 import { ScorecardGrid } from "../round/ScorecardGrid";
@@ -23,13 +22,11 @@ type UseWatchRound = (roundId: RoundId, token: string) => WatchRoundView;
 // score entry UI structurally never appears; ResultsView's own archived-card precedent for
 // this exact readOnly reuse).
 function LiveWatch({ view }: { view: WatchRoundView }) {
-  const [activeGameId, setActiveGameId] = useState<GameId | undefined>(undefined);
   const state = view.state!; // caller's own contract: only rendered once view.state is defined
-  const activeGame = view.games.find((g) => g.id === activeGameId) ?? view.games.find((g) => !state.terminatedGameIds.has(g.id));
 
   return (
     <>
-      <StandingsHeader state={state} games={view.games} activeGameId={activeGame?.id} onSelect={setActiveGameId} />
+      <StandingsHeader state={state} games={view.games} />
       <ScorecardGrid state={state} recordScore={() => {}} readOnly />
     </>
   );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowancePhrase, gameKindBlurb, gameKindFits, gameKindLabel } from "./present.js";
+import { allowancePhrase, gameKindBlurb, gameKindFits, gameKindLabel, strokesNote } from "./present.js";
 
 describe("gameKindLabel", () => {
   it("names every kind in golf's own plainest terms", () => {
@@ -44,5 +44,17 @@ describe("allowancePhrase", () => {
   it("a changed allowance reads adjusted — including full handicap where full isn't the default", () => {
     expect(allowancePhrase("stableford", 0.85)).toBe("85% handicap (adjusted)");
     expect(allowancePhrase("stroke-play", 1)).toBe("Full handicap (adjusted)");
+  });
+});
+
+describe("strokesNote", () => {
+  it("explains the two kinds whose strokes are relative to another player, not just your own handicap", () => {
+    expect(strokesNote("singles-match")).toBe("Match play uses the difference — only the higher handicap gets strokes.");
+    expect(strokesNote("fourball-match")).toBe("Four-ball plays everyone off the lowest handicap.");
+  });
+  it("stays undefined for the three kinds whose strokes need no extra explanation", () => {
+    expect(strokesNote("stroke-play")).toBeUndefined();
+    expect(strokesNote("stableford")).toBeUndefined();
+    expect(strokesNote("skins")).toBeUndefined();
   });
 });

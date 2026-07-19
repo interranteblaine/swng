@@ -100,6 +100,22 @@ describe("strokes preview", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Player 2" }), "Alex");
     expect(screen.getByText("Match play uses the difference — only the higher handicap gets strokes.")).toBeTruthy();
   });
+
+  // strokesNote (packages/domain/src/scoring/present.ts) is the one shared source for both
+  // notes now — singles' string above is unchanged, but it comes from that shared function
+  // rather than a literal hard-coded in this form; fourball gains its own note here too.
+  it("fourball explains its lowest-handicap convention", async () => {
+    const user = userEvent.setup();
+    render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
+    await user.click(screen.getByRole("radio", { name: "Four-ball" }));
+    const team1 = screen.getByRole("group", { name: "Team 1" });
+    const team2 = screen.getByRole("group", { name: "Team 2" });
+    await user.selectOptions(within(team1).getByRole("combobox", { name: "First player" }), "Pat");
+    await user.selectOptions(within(team1).getByRole("combobox", { name: "Second player" }), "Alex");
+    await user.selectOptions(within(team2).getByRole("combobox", { name: "First player" }), "Sam");
+    await user.selectOptions(within(team2).getByRole("combobox", { name: "Second player" }), "Dana");
+    expect(screen.getByText("Four-ball plays everyone off the lowest handicap.")).toBeTruthy();
+  });
 });
 
 // Moved from SetupPanel.test.tsx (the old in-file AddGameForm's own behavior tests) and adapted

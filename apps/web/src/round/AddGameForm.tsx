@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { defaultAllowance } from "@swng/client";
-import { allowancePhrase, gameId, gameKindBlurb, gameKindFits, gameKindLabel, golferId } from "@swng/domain";
+import { allowancePhrase, gameId, gameKindBlurb, gameKindFits, gameKindLabel, golferId, strokesNote } from "@swng/domain";
 import type { CourseCard, GameConfig, GolferId, Participant } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";
@@ -193,7 +193,7 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
           </span>
           <span className="text-sm text-slate-400">{allowancePhrase(kind, allowance)}</span>
           {preview && <span className="text-sm">{preview}</span>}
-          {kind === "singles-match" && <span className="text-sm text-slate-400">Match play uses the difference — only the higher handicap gets strokes.</span>}
+          {strokesNote(kind) && <span className="text-sm text-slate-400">{strokesNote(kind)}</span>}
           {adjusting && (
             <label className="flex flex-col gap-1 text-sm">
               Handicap %

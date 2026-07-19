@@ -1,12 +1,17 @@
-import { allowancePhrase, gameKindBlurb, gameKindLabel } from "@swng/domain";
+import { allowancePhrase, gameKindLabel, strokesNote } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 import { strokesSummary } from "../round/dots";
 import { vsPar } from "./describeGame";
 
-export interface GameSheetProps {
+export interface GamePanelProps {
   readonly game: GameState;
   readonly state: RoundState;
-  readonly onClose: () => void;
+  // Opens the destructive confirm sheet for THIS game — owned and rendered by StandingsHeader
+  // (kept, unmoved from before this arc); the panel only ever TRIGGERS it via this callback,
+  // never renders a dialog itself. Omitted entirely by every read-only reuse (results/watch/
+  // archived), which is what hides the "End game…" affordance there with no second "is this
+  // live" prop — StandingsHeader's own doc comment, carried forward from the old GameSheet.
+  readonly onTerminate?: () => void;
 }
 
 const nameOf = (participants: readonly Participant[], id: GolferId): string => participants.find((p) => p.golferId === id)?.name ?? id;
@@ -35,43 +40,61 @@ const skinsStory = (holes: readonly { hole: number; winner?: GolferId; pot: numb
   return items;
 };
 
-export function GameSheet({ game, state, onClose }: GameSheetProps) {
+export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanelProps) {
   const config = state.games.find((g): g is GameConfig => g.id === game.id);
   const title = game.kind === "stroke-play" ? `${gameKindLabel(game.kind)} (${game.scoring})` : gameKindLabel(game.kind);
   const terminated = state.terminatedGameIds.has(game.id);
 
-  return (
-    <div
-      role="dialog"
-      aria-label={`${title} standings`}
-      className="fixed inset-x-0 bottom-0 z-50 flex max-h-[80vh] flex-col gap-3 overflow-y-auto rounded-t-2xl bg-slate-900 p-4 text-slate-100 shadow-2xl"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex flex-col">
-          <span className="text-lg font-semibold">
-            {title}
-            {terminated && <span className="ml-2 rounded bg-slate-600 px-1.5 py-0.5 text-xs font-medium">Ended</span>}
-          </span>
-          {config && <span className="text-sm text-slate-400">{allowancePhrase(config.kind, config.allowance)}</span>}
-        </div>
-        <button type="button" aria-label="Close" onClick={onClose} className="min-h-10 rounded-lg bg-slate-800 px-3 text-lg text-slate-300">
-          ✕
-        </button>
-      </div>
+  // spec 2026-07-19 §2c: the treatment line states the handicap convention in force, up front —
+  // stroke-play splits gross (no strokes at all, by definition) from net (the usual allowance
+  // phrase); every other kind just reads its own allowancePhrase, as before.
+  const treatment =
+    game.kind === "stroke-play"
+      ? game.scoring === "net"
+        ? `Net — ${allowancePhrase("stroke-play", config?.allowance)}`
+        : "Gross — raw scores, no strokes"
+      : config && allowancePhrase(config.kind, config.allowance);
 
-      <p className="text-sm text-slate-400">{gameKindBlurb(game.kind)}</p>
+  // The strokes line for every kind except gross stroke play (which has none by definition —
+  // gross never allocates a single dot, so there is nothing to summarize).
+  const strokes = game.kind === "stroke-play" && game.scoring === "gross" ? undefined : config && strokesSummary(config, state.participants, state.card);
+
+  const note = strokesNote(game.kind);
+
+  return (
+    <section role="region" aria-label={`${title} standings`} className="flex flex-col gap-3 rounded-lg bg-slate-900 p-4">
+      <div className="flex flex-col">
+        <span className="text-lg font-semibold">
+          {title}
+          {terminated && <span className="ml-2 rounded bg-slate-600 px-1.5 py-0.5 text-xs font-medium">Ended</span>}
+        </span>
+        {treatment && <span className="text-sm text-slate-400">{treatment}</span>}
+        {strokes && <span className="text-sm text-slate-300">{strokes}</span>}
+        {note && <span className="text-sm text-slate-400">{note}</span>}
+      </div>
 
       {game.kind === "stroke-play" && <StrokePlayBody game={game} state={state} />}
       {game.kind === "stableford" && <StablefordBody game={game} state={state} />}
       {(game.kind === "singles-match" || game.kind === "fourball-match") && config && <MatchBody game={game} config={config} state={state} />}
       {game.kind === "skins" && <SkinsBody game={game} state={state} />}
-    </div>
+
+      {onOpenConfirm && state.status === "live" && !terminated && (
+        <button type="button" onClick={onOpenConfirm} className="self-start rounded-lg bg-slate-800 px-4 py-3 text-sm font-medium text-red-400">
+          End game…
+        </button>
+      )}
+    </section>
   );
 }
 
 function StrokePlayBody({ game, state }: { game: Extract<GameState, { kind: "stroke-play" }>; state: RoundState }) {
   const total = (line: (typeof game.lines)[number]) => (game.scoring === "net" ? line.net!.total : line.gross.total);
-  const sorted = [...game.lines].sort((a, b) => total(a) - total(b));
+  // Owner ruling (spec 2026-07-19 §2b, closing the queued sort ruling): vs-par ascending, then
+  // holes-played descending — NOT raw total. A thru-0 line's raw total is always the lowest
+  // possible number regardless of how the real field is playing; sorting by vs-par instead is
+  // fair across different thru counts, and the thru tie-break means a golfer who's actually
+  // played the round outranks one who's only nominally tied because they haven't started.
+  const sorted = [...game.lines].sort((a, b) => a.relativeToPar - b.relativeToPar || b.thru - a.thru);
   if (sorted.length === 0) return <p className="text-sm text-slate-400">No scores yet</p>;
   return (
     <div className="overflow-x-auto">
@@ -194,7 +217,6 @@ function MatchBody({ game, config, state }: { game: Extract<GameState, { kind: "
           </table>
         </div>
       )}
-      <p className="text-sm text-slate-400">{strokesSummary(config, state.participants, state.card)}</p>
     </>
   );
 }

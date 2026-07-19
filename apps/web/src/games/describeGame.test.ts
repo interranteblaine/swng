@@ -113,7 +113,7 @@ describe("describeGame — singles-match", () => {
 
   it("in-progress with a leader and dormie: the chip line names the leader plainly, no ' · dormie' suffix", () => {
     // singlesMatch.test.ts's golden dormie card: Ann 2 up thru 7, dormie. The dormie GLOSS
-    // ("Pat is 2 UP with 2 to play — dormie: ...") lives in GameSheet now, not the chip line.
+    // ("Pat is 2 UP with 2 to play — dormie: ...") lives in GamePanel now, not the chip line.
     const { round, states } = playRound(fixtureLinks, twoPlayers, [match], {
       [A]: [5, 5, 3, 6, 4, 4, 5],
       [B]: [4, 5, 4, 5, 5, 3, 4],

@@ -40,7 +40,7 @@ export const describeGame = (game: GameState, round: RoundState): GameDescriptio
 const nameOf = (participants: readonly Participant[], golfer: GolferId): string => participants.find((p) => p.golferId === golfer)?.name ?? golfer;
 
 // "(E)" for even par, "(+N)"/"(-N)" otherwise — golf's own vs-par notation, defined once here
-// and reused by GameSheet's stroke-play body (its own "vs par" column) — the one definition site.
+// and reused by GamePanel's stroke-play body (its own "vs par" column) — the one definition site.
 export const vsPar = (relative: number): string => (relative === 0 ? "(E)" : relative > 0 ? `(+${relative})` : `(${relative})`);
 
 type StrokePlay = Extract<GameState, { kind: "stroke-play" }>;

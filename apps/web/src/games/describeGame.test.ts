@@ -108,16 +108,17 @@ describe("describeGame — singles-match", () => {
   it("all square, in-progress: no leader named", () => {
     // h1 halves under singlesMatch.test.ts's golden dots (Ann net 4, Bo net 4).
     const { round, states } = playRound(fixtureLinks, twoPlayers, [match], { [A]: [5], [B]: [4] });
-    expect(describeGame(states[0]!, round)).toEqual({ title: "Singles match", line: "All square thru 1" });
+    expect(describeGame(states[0]!, round)).toEqual({ title: "Match play", line: "All square thru 1" });
   });
 
-  it("in-progress with a leader and dormie, matches the brief's target format", () => {
-    // singlesMatch.test.ts's golden dormie card: Ann 2 up thru 7, dormie.
+  it("in-progress with a leader and dormie: the chip line names the leader plainly, no ' · dormie' suffix", () => {
+    // singlesMatch.test.ts's golden dormie card: Ann 2 up thru 7, dormie. The dormie GLOSS
+    // ("Pat is 2 UP with 2 to play — dormie: ...") lives in GameSheet now, not the chip line.
     const { round, states } = playRound(fixtureLinks, twoPlayers, [match], {
       [A]: [5, 5, 3, 6, 4, 4, 5],
       [B]: [4, 5, 4, 5, 5, 3, 4],
     });
-    expect(describeGame(states[0]!, round)).toEqual({ title: "Singles match", line: "Ann 2 UP thru 7 · dormie" });
+    expect(describeGame(states[0]!, round)).toEqual({ title: "Match play", line: "Ann 2 UP thru 7" });
   });
 
   it("decided by a wide margin renders 'wins N&M', matching the brief's exact target string", () => {
@@ -126,7 +127,7 @@ describe("describeGame — singles-match", () => {
       [A]: [5, 5, 3, 6, 4, 4, 5],
       [B]: [4, 5, 4, 5, 5, 3, 5],
     });
-    expect(describeGame(states[0]!, round)).toEqual({ title: "Singles match", line: "Ann wins 3&2" });
+    expect(describeGame(states[0]!, round)).toEqual({ title: "Match play", line: "Ann wins 3&2" });
   });
 
   it("a match that ends all square renders 'Match halved'", () => {
@@ -134,27 +135,27 @@ describe("describeGame — singles-match", () => {
       [A]: [5, 5, 4, 6, 4, 4, 5, 6, "conceded"],
       [B]: [4, 6, 3, 6, 4, 4, 4, 5, 5],
     });
-    expect(describeGame(states[0]!, round)).toEqual({ title: "Singles match", line: "Match halved" });
+    expect(describeGame(states[0]!, round)).toEqual({ title: "Match play", line: "Match halved" });
   });
 });
 
 describe("describeGame — fourball-match", () => {
   const { players, fourball } = fieldDeck18;
 
-  it("in-progress with dormie, matches the brief's exact target string", () => {
+  it("in-progress with dormie: the chip line names the leader plainly, no ' · dormie' suffix", () => {
     // Truncate to thru 16 the same way fieldDeck18.test.ts's own `thru` helper does.
     const thru16 = Object.fromEntries(Object.entries(fieldDeck18.scores).map(([g, holes]) => [g, holes.slice(0, 16)]));
     const events16 = playGoldenRoundLog(fixtureLinks18, players, [fourball], thru16, fieldDeck18.corrections, false);
     const round = reduceRound(events16);
     const state = scoreGame(fourball, round);
-    expect(describeGame(state, round)).toEqual({ title: "Fourball match", line: "Ann & Bo 2 UP thru 16 · dormie" });
+    expect(describeGame(state, round)).toEqual({ title: "Four-ball", line: "Ann & Bo 2 UP thru 16" });
   });
 
   it("decided, matches the brief's exact target string", () => {
     const events = playGoldenRoundLog(fixtureLinks18, players, [fourball], fieldDeck18.scores, fieldDeck18.corrections, false);
     const round = reduceRound(events);
     const state = scoreGame(fourball, round);
-    expect(describeGame(state, round)).toEqual({ title: "Fourball match", line: "Ann & Bo win 2&1" });
+    expect(describeGame(state, round)).toEqual({ title: "Four-ball", line: "Ann & Bo win 2&1" });
   });
 });
 

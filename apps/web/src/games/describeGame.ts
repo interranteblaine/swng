@@ -1,4 +1,4 @@
-import { DomainError } from "@swng/domain";
+import { DomainError, gameKindLabel } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 
 export interface GameDescription {
@@ -21,15 +21,15 @@ export interface GameDescription {
 export const describeGame = (game: GameState, round: RoundState): GameDescription => {
   switch (game.kind) {
     case "stroke-play":
-      return { title: `Stroke play (${game.scoring})`, line: describeStrokePlay(game, round) };
+      return { title: `${gameKindLabel("stroke-play")} (${game.scoring})`, line: describeStrokePlay(game, round) };
     case "stableford":
-      return { title: "Stableford", line: describeStableford(game, round) };
+      return { title: gameKindLabel("stableford"), line: describeStableford(game, round) };
     case "singles-match":
-      return { title: "Singles match", line: describeSingles(game, round) };
+      return { title: gameKindLabel("singles-match"), line: describeSingles(game, round) };
     case "fourball-match":
-      return { title: "Fourball match", line: describeFourball(game, round) };
+      return { title: gameKindLabel("fourball-match"), line: describeFourball(game, round) };
     case "skins":
-      return { title: "Skins", line: describeSkins(game, round) };
+      return { title: gameKindLabel("skins"), line: describeSkins(game, round) };
     default:
       // Exhaustive at compile time (GameState is a discriminated union); guards a runtime
       // value that bypassed it — same defensive shape as domain's own scoreGame/resultOf.
@@ -39,9 +39,9 @@ export const describeGame = (game: GameState, round: RoundState): GameDescriptio
 
 const nameOf = (participants: readonly Participant[], golfer: GolferId): string => participants.find((p) => p.golferId === golfer)?.name ?? golfer;
 
-// "(E)" for even par, "(+N)"/"(-N)" otherwise — golf's own vs-par notation, used nowhere else
-// in the codebase yet (checked) so this is the one place it's defined.
-const vsPar = (relative: number): string => (relative === 0 ? "(E)" : relative > 0 ? `(+${relative})` : `(${relative})`);
+// "(E)" for even par, "(+N)"/"(-N)" otherwise — golf's own vs-par notation, defined once here
+// and reused by GameSheet's stroke-play body (its own "vs par" column) — the one definition site.
+export const vsPar = (relative: number): string => (relative === 0 ? "(E)" : relative > 0 ? `(+${relative})` : `(${relative})`);
 
 type StrokePlay = Extract<GameState, { kind: "stroke-play" }>;
 
@@ -76,7 +76,7 @@ const describeSingles = (game: SinglesMatch, round: RoundState): string => {
     return `${nameOf(round.participants, game.outcome.winner)} wins ${game.outcome.closing}`;
   }
   if (game.up === 0) return `All square thru ${game.thru}`;
-  return `${nameOf(round.participants, game.leader!)} ${game.up} UP thru ${game.thru}${game.dormie ? " · dormie" : ""}`;
+  return `${nameOf(round.participants, game.leader!)} ${game.up} UP thru ${game.thru}`;
 };
 
 type FourballMatch = Extract<GameState, { kind: "fourball-match" }>;
@@ -87,13 +87,13 @@ const sideNames = (round: RoundState, config: FourballConfig, side: "a" | "b"): 
 
 const describeFourball = (game: FourballMatch, round: RoundState): string => {
   const config = round.games.find((g): g is FourballConfig => g.id === game.id && g.kind === "fourball-match");
-  if (!config) return "Fourball match"; // degraded render: config vanished from state.games — shouldn't happen, never crash over it
+  if (!config) return gameKindLabel("fourball-match"); // degraded render: config vanished from state.games — shouldn't happen, never crash over it
   if (game.outcome) {
     if ("halved" in game.outcome) return "Match halved";
     return `${sideNames(round, config, game.outcome.winner)} win ${game.outcome.closing}`;
   }
   if (game.up === 0) return `All square thru ${game.thru}`;
-  return `${sideNames(round, config, game.leader!)} ${game.up} UP thru ${game.thru}${game.dormie ? " · dormie" : ""}`;
+  return `${sideNames(round, config, game.leader!)} ${game.up} UP thru ${game.thru}`;
 };
 
 type Skins = Extract<GameState, { kind: "skins" }>;

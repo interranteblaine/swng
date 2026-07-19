@@ -74,6 +74,35 @@ describe("StandingsHeader", () => {
     expect(stablefordTab.className).toMatch(/border border-transparent/);
     expect(stablefordTab.className).not.toMatch(/font-semibold/);
   });
+
+  it("tapping the active chip opens that game's sheet; tapping an inactive chip only selects", async () => {
+    const onSelect = vi.fn();
+    render(<StandingsHeader state={baseState()} games={gameStates} activeGameId={strokePlayConfig.id} onSelect={onSelect} />);
+
+    // The inactive (stableford) chip still just selects — no dialog.
+    fireEvent.click(screen.getByRole("tab", { name: /Stableford/ }));
+    expect(onSelect).toHaveBeenCalledWith(stablefordConfig.id);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    // The active (stroke-play) chip opens its sheet instead of re-selecting.
+    onSelect.mockClear();
+    fireEvent.click(screen.getByRole("tab", { name: /Stroke play/ }));
+    expect(onSelect).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Stroke play (gross) standings" });
+    expect(dialog).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("the active chip shows the › open cue", () => {
+    render(<StandingsHeader state={baseState()} games={gameStates} activeGameId={strokePlayConfig.id} onSelect={vi.fn()} />);
+
+    const strokeTab = screen.getByRole("tab", { name: /Stroke play/ });
+    const stablefordTab = screen.getByRole("tab", { name: /Stableford/ });
+    expect(strokeTab.textContent).toContain("›");
+    expect(stablefordTab.textContent).not.toContain("›");
+  });
 });
 
 // M7 Task 6: game termination affordance — an overflow "End game…" per chip (live rounds

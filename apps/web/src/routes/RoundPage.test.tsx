@@ -227,7 +227,7 @@ describe("RoundPage", () => {
     expect(annHole1().textContent).not.toMatch("●");
 
     // And back — the singles-match chip is still there and still switches correctly.
-    fireEvent.click(screen.getByRole("tab", { name: /Singles match/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /Match play/ }));
     expect(annHole1().textContent).toMatch("●");
   });
 
@@ -270,7 +270,7 @@ describe("RoundPage", () => {
 
     const strokeTab = screen.getByRole("tab", { name: /Stroke play \(gross\)/ });
     expect(strokeTab.getAttribute("aria-selected")).toBe("true");
-    const singlesTab = screen.getByRole("tab", { name: /Singles match/ });
+    const singlesTab = screen.getByRole("tab", { name: /Match play/ });
     expect(singlesTab.getAttribute("aria-selected")).toBe("false");
   });
 
@@ -614,16 +614,16 @@ describe("RoundPage", () => {
     );
     await waitFor(() => expect(screen.getByText("TRM002")).toBeTruthy());
 
-    fireEvent.click(screen.getByRole("button", { name: "End Singles match" }));
-    const dialog = screen.getByRole("dialog", { name: "End Singles match" });
-    expect(dialog.textContent).toMatch(/Singles match/); // the confirm names the game
+    fireEvent.click(screen.getByRole("button", { name: "End Match play" }));
+    const dialog = screen.getByRole("dialog", { name: "End Match play" });
+    expect(dialog.textContent).toMatch(/Match play/); // the confirm names the game
 
     fireEvent.click(screen.getByRole("button", { name: "End game" }));
 
-    await waitFor(() => expect(screen.getByRole("tab", { name: /Singles match/ }).textContent).toMatch(/Ended/));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Match play/ }).textContent).toMatch(/Ended/));
     // The chip STAYS (an ended badge, not a removal), and its overflow control is gone.
-    expect(screen.getByRole("tab", { name: /Singles match/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "End Singles match" })).toBeNull();
+    expect(screen.getByRole("tab", { name: /Match play/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "End Match play" })).toBeNull();
   });
 
   // Papercut 4 (M9 hardening): onAddGame used to be the ONE mutation on this page with no
@@ -748,7 +748,7 @@ describe("RoundPage", () => {
     // The dialog lists each unresolved game in the game chip's own naming, with what's missing
     // — computed from the local fold, not a server response.
     const dialog = screen.getByRole("dialog", { name: "Confirm finalize" });
-    expect(dialog.textContent).toMatch(/Singles match — holes 1–9 unscored for Ann, Bo/);
+    expect(dialog.textContent).toMatch(/Match play — holes 1–9 unscored for Ann, Bo/);
     expect(dialog.textContent).toMatch(/Stroke play \(gross\) — holes 1–9 unscored for Ann, Bo/);
     // The plain Finalize action is not offered while games are unresolved.
     expect(screen.queryByRole("button", { name: "Finalize" })).toBeNull();

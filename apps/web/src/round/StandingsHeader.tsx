@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { GameId, GameState, RoundState } from "@swng/domain";
 import { describeGame } from "../games/describeGame";
+import { GameSheet } from "../games/GameSheet";
 
 export interface StandingsHeaderProps {
   readonly state: RoundState;
@@ -25,11 +26,13 @@ export function StandingsHeader({ state, games, activeGameId, onSelect, onTermin
   const [confirmingId, setConfirmingId] = useState<GameId | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [sheetGameId, setSheetGameId] = useState<GameId | undefined>(undefined);
 
   if (games.length === 0) return null; // nothing to stand for yet — SetupPanel covers pre-game state
 
   const confirmingGame = games.find((g) => g.id === confirmingId);
   const confirmingTitle = confirmingGame ? describeGame(confirmingGame, state).title : undefined;
+  const sheetGame = games.find((g) => g.id === sheetGameId);
 
   const openConfirm = (gameId: GameId) => {
     setError(undefined);
@@ -69,7 +72,7 @@ export function StandingsHeader({ state, games, activeGameId, onSelect, onTermin
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => onSelect(game.id)}
+                onClick={() => (active ? setSheetGameId(game.id) : onSelect(game.id))}
                 className={`flex min-h-14 flex-col items-start justify-center gap-0.5 rounded-lg px-3 py-1 text-left whitespace-nowrap ${
                   // Color alone can't carry "which chip is active" (color-blind / grayscale
                   // readability) — the border + weight are the non-color cue; border-transparent
@@ -80,6 +83,11 @@ export function StandingsHeader({ state, games, activeGameId, onSelect, onTermin
                 <span className="text-[10px] font-semibold uppercase tracking-wide opacity-80">
                   {title}
                   {terminated && <span className="ml-1 rounded bg-slate-600 px-1 py-0.5 text-slate-200 normal-case">Ended</span>}
+                  {active && (
+                    <span aria-hidden="true" className="ml-1">
+                      ›
+                    </span>
+                  )}
                 </span>
                 <span className="text-sm font-medium">{line}</span>
               </button>
@@ -124,6 +132,8 @@ export function StandingsHeader({ state, games, activeGameId, onSelect, onTermin
           )}
         </div>
       )}
+
+      {sheetGame && <GameSheet game={sheetGame} state={state} onClose={() => setSheetGameId(undefined)} />}
     </>
   );
 }

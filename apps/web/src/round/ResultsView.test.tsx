@@ -200,7 +200,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     render(<ResultsView state={state} games={games} response={undefined} />);
 
     expect(screen.getByRole("tab", { name: /Stableford/ }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("tab", { name: /Singles match/ }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByRole("tab", { name: /Match play/ }).getAttribute("aria-selected")).toBe("false");
   });
 
   it("a golfer with an undecided card (a pickup mid-round, no finalize response) shows 'incomplete', not a crash", () => {

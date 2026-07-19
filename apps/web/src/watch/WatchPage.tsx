@@ -30,7 +30,7 @@ function LiveWatch({ view }: { view: WatchRoundView }) {
   return (
     <>
       <StandingsHeader state={state} games={view.games} activeGameId={activeGame?.id} onSelect={setActiveGameId} />
-      <ScorecardGrid state={state} activeGame={activeGame} recordScore={() => {}} readOnly />
+      <ScorecardGrid state={state} recordScore={() => {}} readOnly />
     </>
   );
 }

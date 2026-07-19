@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defaultAllowance, fixtureLinks, gameId, golferId, playingHandicap, roundId } from "@swng/domain";
-import type { GameConfig, GameState, Participant, RoundState } from "@swng/domain";
+import { fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
+import type { GameConfig, Participant, RoundState } from "@swng/domain";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
@@ -68,12 +68,15 @@ describe("SetupPanel", () => {
     expect(screen.getByText("ABC123")).toBeTruthy();
   });
 
-  it("shows the plain roster (name, tee, courseHandicap) when no games exist yet", () => {
+  // The standard card (spec 2026-07-19 §2a: the card never changes) — a roster row reads
+  // `name — tee — CH X`, full stop, whether or not any game exists.
+  it("shows the roster row as `name — tee — CH X`, with no game badges", () => {
     renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
-    expect(screen.getByText("Ann")).toBeTruthy();
-    expect(screen.getByText(/CH 8/)).toBeTruthy();
-    expect(screen.queryByText(/^Games/)).toBeNull(); // no games section before any game exists
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    expect(annRow).toBeTruthy();
+    expect(annRow!.textContent).toMatch(/Ann — white — CH 8/);
+    expect(screen.queryByText(/^Games/)).toBeNull();
   });
 
   // accounts-only identity spec §4: a departed participant is NOT removed from the roster — they
@@ -94,42 +97,28 @@ describe("SetupPanel", () => {
     expect(within(annRow!).queryByText(/^left$/i)).toBeNull();
   });
 
-  it("shows per-game dots once a game exists, on the same roster row as name/tee/CH", () => {
-    const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
-    const state = baseState({ games: [stableford] });
-    const games: GameState[] = [{ kind: "stableford", id: gameId("game-1"), lines: [], complete: false, leaders: [] }];
-
-    renderPanel({ state, games, joinCode: "ABC123", onAddGame: noopAddGame });
-
-    const expectedDots = playingHandicap(8, defaultAllowance("stableford"));
-    const annRow = screen.getAllByRole("listitem").find((li) => /CH 8/.test(li.textContent ?? ""));
-    expect(annRow).toBeTruthy();
-    // Same row carries both the identity (name/tee/CH) and the game's dots — one roster, not
-    // a second list keyed off dots alone.
-    expect(within(annRow!).getByText(new RegExp(`Stableford: ${expectedDots} dots`))).toBeTruthy();
-  });
-
-  // M7 Task 6: terminated games drop out of roster dot-badges (brief) — a terminated game has
-  // stopped consuming scores, so it shouldn't still claim a dots badge on the roster.
-  it("drops a terminated game's badge from the roster, even though the game config is still in state.games", () => {
+  // The standard card is game-agnostic (spec 2026-07-19 §2a): a game existing in state.games —
+  // terminated or not — never adds a badge, never changes the roster row, and the deleted
+  // "Not yet in a game" copy is gone for good.
+  it("a game in state.games changes nothing about the roster — no badges, no 'Not yet in a game', even terminated", () => {
     const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
     const state = baseState({ games: [stableford], terminatedGameIds: new Set([stableford.id]) });
-    const games: GameState[] = [{ kind: "stableford", id: gameId("game-1"), lines: [], complete: false, leaders: [] }];
 
-    renderPanel({ state, games, joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /CH 8/.test(li.textContent ?? ""));
     expect(annRow).toBeTruthy();
-    expect(within(annRow!).queryByText(/Stableford/)).toBeNull();
-    expect(within(annRow!).getByText("Not yet in a game")).toBeTruthy();
+    // Scoped to the roster row itself — the Add Game form below also renders a "Stableford"
+    // radio-card label, which is a different surface entirely, not a roster badge.
+    expect(annRow!.textContent).toBe("Ann — white — CH 8");
+    expect(screen.queryByText(/Not yet in a game/)).toBeNull();
   });
 
   it("renders each participant's identity row exactly once even once games exist — no second, dots-only roster", () => {
     const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
     const state = baseState({ games: [stableford] });
-    const games: GameState[] = [{ kind: "stableford", id: gameId("game-1"), lines: [], complete: false, leaders: [] }];
 
-    renderPanel({ state, games, joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
     // Scope to <li> rows specifically (not the Add Game form's player checkboxes, which are
     // <label> elements, not list items) — Ann must appear as exactly one roster row.
@@ -140,38 +129,10 @@ describe("SetupPanel", () => {
     expect(annRows[0]?.textContent).toMatch(/white/);
     expect(annRows[0]?.textContent).toMatch(/CH 8/);
 
-    // Bo has no game yet — still gets an identity row (just no dots badge).
+    // Bo has no game either — still gets an identity row, byte-identical shape.
     const boRows = screen.getAllByRole("listitem").filter((li) => /Bo/.test(li.textContent ?? ""));
     expect(boRows).toHaveLength(1);
     expect(boRows[0]?.textContent).toMatch(/CH 4/);
-  });
-
-  // The fourball-config-shape, hand-edited-allowance, and failed-add-game-error tests moved to
-  // AddGameForm.test.tsx (Task 4) — they exercise the form's OWN behavior, now a separate
-  // component, adapted to the new radio-card / Who's-in / Team 1 & 2 / Adjust-percent UI. This
-  // test stays here: its assertion target is SetupPanel's own roster (that it renders purely
-  // from props, never optimistically from a click), driven through the still-embedded
-  // AddGameForm as the realistic way to fire onAddGame.
-  it("never renders the submitted game optimistically — it only appears once state.games reflects it", async () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
-
-    // Default kind is already stableford — just check Ann in and submit.
-    fireEvent.click(within(screen.getByRole("group", { name: "Who's in?" })).getByLabelText("Ann"));
-    fireEvent.click(screen.getByRole("button", { name: /add game/i }));
-
-    expect(noopAddGame).toHaveBeenCalled();
-    // Props are unchanged (still zero games) — the new game must not appear from the click
-    // alone. Confirms the why-comment in SetupPanel: game-added arrives back through the
-    // session, not from a local optimistic write.
-    expect(screen.queryByText(/^Games/)).toBeNull();
-
-    // Only once the parent re-renders with the new game (as the real session would, after the
-    // game-added event round-trips) does it show up.
-    const stableford: GameConfig = { kind: "stableford", id: gameId("game-9"), players: [ANN] };
-    cleanup();
-    renderPanel({ state: baseState({ games: [stableford] }), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
-    const expectedDots = playingHandicap(8, defaultAllowance("stableford"));
-    expect(screen.getByText(new RegExp(`Stableford: ${expectedDots} dots`))).toBeTruthy();
   });
 });
 
@@ -251,23 +212,5 @@ describe("SetupPanel — a plus handicap renders through the domain (CH +N, give
     const normRow = screen.getAllByRole("listitem").find((li) => /Norm/.test(li.textContent ?? ""));
     expect(normRow!.textContent).toMatch(/CH 13\b/);
     expect(normRow!.textContent).not.toMatch(/\+/);
-  });
-
-  it("renders a plus player's give-back dot total as 'gives N', never a bare '-N dots'; a normal total is unchanged", () => {
-    // Skins is full-handicap (allowance 1): a plus player (CH -1) gives one stroke, so the dot
-    // total is -1 — the exact bare-negative the arc closes everywhere else.
-    const skins: GameConfig = { kind: "skins", id: gameId("game-1"), players: [PLUS, NORMAL] };
-    const state = baseState({ participants: [participant(PLUS, "Plus", "white", -1), participant(NORMAL, "Norm", "white", 5)], games: [skins] });
-    const games: GameState[] = [{ kind: "skins", id: gameId("game-1"), lines: [], carrying: 0, carriedOut: 0, complete: false, holesDecided: 0, holes: [] }];
-    renderPanel({ state, games, joinCode: "ABC123", onAddGame: noopAddGame });
-
-    const plusRow = screen.getAllByRole("listitem").find((li) => /Plus/.test(li.textContent ?? ""));
-    expect(plusRow).toBeTruthy();
-    expect(within(plusRow!).getByText("Skins: gives 1")).toBeTruthy();
-    expect(plusRow!.textContent).not.toMatch(/-1 dots/);
-
-    // A normal (receives) dot total is byte-identical to before: "{label}: N dots".
-    const normRow = screen.getAllByRole("listitem").find((li) => /Norm/.test(li.textContent ?? ""));
-    expect(within(normRow!).getByText("Skins: 5 dots")).toBeTruthy();
   });
 });

@@ -330,7 +330,7 @@ function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFi
     <>
       <ShareButton roundId={state.id} token={token} />
       <StandingsHeader state={state} games={games} activeGameId={activeGame?.id} onSelect={setActiveGameId} onTerminate={onTerminate} />
-      <ScorecardGrid state={state} activeGame={activeGame} recordScore={recordScore} />
+      <ScorecardGrid state={state} recordScore={recordScore} />
       <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
       <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} />
       <ScrapControl onAbandon={onAbandon} />

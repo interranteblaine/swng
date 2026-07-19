@@ -83,7 +83,7 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
         <StandingsHeader state={state} games={games} activeGameId={activeGame?.id} onSelect={setActiveGameId} />
         {/* recordScore is never called — readOnly disables every cell's tap natively (no pad
             ever opens), matching the brief's "the archived card... entry locked". */}
-        <ScorecardGrid state={state} activeGame={activeGame} recordScore={() => {}} readOnly />
+        <ScorecardGrid state={state} recordScore={() => {}} readOnly />
       </div>
     </section>
   );

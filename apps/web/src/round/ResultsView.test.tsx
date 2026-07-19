@@ -3,12 +3,12 @@ import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cellKey,
+  courseHandicapAllocation,
   deviceId,
   fieldDeck18,
   fixtureLinks18,
   fixtureWhite18,
   gameId,
-  gameStrokeAllocation,
   golferId,
   opId,
   playGoldenRoundLog,
@@ -97,27 +97,27 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
     expect(cell.hasAttribute("disabled")).toBe(true);
   });
 
-  it("StandingsHeader chips switch the archived grid's active game — the games[0]-only limitation is gone", () => {
-    // An independent oracle (domain's own gameStrokeAllocation, not the component under test)
-    // for Ann's per-hole dots under each config — fourball's relative playingHandicap is 7
-    // (fieldDeck18's own pinned expectation), skins' is 8, so the SI-8 hole is Ann's cleanest
-    // possible fixture: exactly zero dots under fourball, exactly one under skins.
+  // The standard card (spec 2026-07-19 §2a: the card never changes) — StandingsHeader's chips
+  // still switch which game's OWN standings/strokes panel is active, but the grid underneath
+  // is chip-independent: its dots are always the golfer's own course handicap, never a game's.
+  it("StandingsHeader chips do NOT change the grid — dots are course-handicap, chip-independent", () => {
     const annId = players[0]!.golferId;
-    const fourballDots = gameStrokeAllocation(fourball, state.participants, state.card).get(annId)!;
-    const skinsDots = gameStrokeAllocation(skins, state.participants, state.card).get(annId)!;
-    const hole = [...fourballDots.keys()].find((h) => (fourballDots.get(h) ?? 0) === 0 && (skinsDots.get(h) ?? 0) > 0);
+    // An independent oracle (domain's own courseHandicapAllocation, not the component under
+    // test) for Ann's per-hole standard-card dots.
+    const chDots = courseHandicapAllocation(state.participants, state.card).get(annId)!;
+    const hole = [...chDots.keys()].find((h) => (chDots.get(h) ?? 0) > 0);
     expect(hole).toBeDefined();
 
     render(<ResultsView state={state} games={localGames} response={response} />);
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole ${hole}` });
-
-    // fourball is games[0] (fieldDeck18's own [fourball, skins] order) — the default active
-    // game before any chip tap, same convention as RoundPage's LiveRound.
-    expect(cell.querySelector('span[aria-hidden]')).toBeNull(); // 0 dots renders no glyph at all (Cell's own contract)
+    const beforeTap = cell.querySelector('span[aria-hidden]')?.textContent;
+    expect(beforeTap).toBe("●".repeat(chDots.get(hole!)!));
 
     fireEvent.click(screen.getByRole("tab", { name: /skins/i }));
 
-    expect(cell.querySelector('span[aria-hidden]')?.textContent).toBe("●".repeat(skinsDots.get(hole!)!));
+    // The chip tap changes StandingsHeader's own selection (its own test suite covers that) —
+    // the grid's dots are unaffected either way.
+    expect(cell.querySelector('span[aria-hidden]')?.textContent).toBe(beforeTap);
   });
 });
 

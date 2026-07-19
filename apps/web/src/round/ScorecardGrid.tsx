@@ -1,18 +1,11 @@
 import { useState } from "react";
-import { netStrokes } from "@swng/client";
-import { cellKey, findTeeSet, strokeGrant } from "@swng/domain";
-import type { CourseCard, GameState, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
-import { gameDots } from "./dots";
+import { courseHandicapAllocation, netStrokes } from "@swng/client";
+import { cellAt, cellKey, findTeeSet, strokeGrant } from "@swng/domain";
+import type { CourseCard, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { ScorePad } from "./ScorePad";
 
 export interface ScorecardGridProps {
   readonly state: RoundState;
-  // The Task 6 seam (chip selection): concurrent games mean concurrent dot sets, so the grid
-  // renders dots/nets for exactly ONE game — this is it. `undefined` (no games yet, or none
-  // selected) means plain gross, no dots, no nets. Only `.id`/`.kind` are read here — the
-  // full GameConfig (players, allowance, ...) needed to compute dots is looked up from
-  // `state.games` below, since GameState alone doesn't carry it.
-  readonly activeGame: GameState | undefined;
   readonly recordScore: (golferId: GolferId, hole: number, result: HoleResult) => void;
   // Task 6's archived-card reuse: a `final` round's ScorecardGrid is the same component, just
   // with every cell's tap made inert (native `disabled`, not merely "recordScore is a no-op")
@@ -58,10 +51,9 @@ const glyphFor = (result: HoleResult): string => {
     case "strokes":
       return String(result.strokes);
     case "cleared":
-      // Unreachable today — no web path writes a cleared result yet, and this component
-      // still reads raw cells (task-1-brief: the reader sweep to cellAt, plus a cleared
-      // cell's real rendering/clear affordance, is Task 4's). This arm exists only so the
-      // switch stays exhaustive over HoleResult's new additive kind.
+      // Dead in practice: the grid reads every cell through cellAt (round/state.ts), which
+      // hides cleared cells from readers entirely (`cell` is undefined below, so this switch
+      // never runs on one) — kept only so the switch stays exhaustive over HoleResult's kind.
       return "";
   }
 };
@@ -111,24 +103,21 @@ function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
 
 // The scorecard: hole rows × player columns, two-tap score-for-anyone entry (product.md §9).
 // Any cell — yours or anyone else's — opens the same ScorePad; tapping a value there posts
-// and closes with no confirm step. Rendering is purely a function of `state` (+ `activeGame`
-// for dots) — recordScore's optimistic fold (the session layer) is what makes the tapped
-// value show up here on the very next render; this component adds no local echo of its own.
-export function ScorecardGrid({ state, activeGame, recordScore, readOnly = false }: ScorecardGridProps) {
+// and closes with no confirm step. Rendering is purely a function of `state` — no game
+// context at all (spec 2026-07-19 §2a: the card never changes). recordScore's optimistic
+// fold (the session layer) is what makes the tapped value show up here on the very next
+// render; this component adds no local echo of its own.
+export function ScorecardGrid({ state, recordScore, readOnly = false }: ScorecardGridProps) {
   const [selection, setSelection] = useState<Selection | undefined>(undefined);
 
   const holes = canonicalHoles(state.card);
   const current = currentHoleNumber(holes, state.participants, state.cells);
 
-  // activeGame (GameState) only identifies WHICH game is active by id — the dots math needs
-  // the frozen GameConfig, which lives in state.games; dots.ts's gameDots is the one place
-  // that formula is allowed to live (reused verbatim, not re-derived — SetupPanel's own
-  // precedent). A terminated game never contributes dots (M7 Task 6 brief) — StandingsHeader
-  // still lets its chip be selected (an "ended" badge, not a removal), but that chip's grid
-  // reads exactly like "no game selected" here: a terminated game has stopped consuming
-  // scores, so showing dots for it would misrepresent what's actually being allocated.
-  const activeConfig = activeGame && !state.terminatedGameIds.has(activeGame.id) ? state.games.find((g) => g.id === activeGame.id) : undefined;
-  const dotsByGolfer = activeConfig ? gameDots(activeConfig, state.participants, state.card) : undefined;
+  // The STANDARD CARD's dots: each player's own course handicap, allocated by stroke index —
+  // no allowance, no game, computed once per render (spec 2026-07-19 §2a). Any concurrent
+  // game's own strokes (a different allowance, a relative allocation) live in that game's own
+  // panel — this grid never re-derives them.
+  const dotsByGolfer = courseHandicapAllocation(state.participants, state.card);
 
   const selectedParticipant = selection && state.participants.find((p) => p.golferId === selection.golferId);
   const selectedHole = selection && holes.find((h) => h.number === selection.hole);
@@ -169,8 +158,8 @@ export function ScorecardGrid({ state, activeGame, recordScore, readOnly = false
                       <Cell
                         participant={p}
                         hole={hole}
-                        cell={state.cells[cellKey(p.golferId, hole.number)]}
-                        dots={dotsByGolfer?.get(p.golferId)?.get(hole.number) ?? 0}
+                        cell={cellAt(state.cells, p.golferId, hole.number)}
+                        dots={dotsByGolfer.get(p.golferId)?.get(hole.number) ?? 0}
                         onTap={() => setSelection({ golferId: p.golferId, hole: hole.number })}
                         readOnly={readOnly}
                       />

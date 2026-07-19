@@ -191,7 +191,10 @@ describe("RoundPage", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Ann hole 1" }).textContent).toContain("5"));
   });
 
-  it("tapping a standings chip changes which game drives the grid's dots (Task 5's fixed seam)", async () => {
+  // The standard card (spec 2026-07-19 §2a: the card never changes) — StandingsHeader chips
+  // still switch which game's OWN panel is active, but the grid underneath is chip-independent:
+  // Ann's dots come from her own course handicap (8, on fixtureLinks' SI-5 hole 1) always.
+  it("tapping a standings chip does NOT change the grid's dots — the card is game-agnostic", async () => {
     const id = roundId("round-chip");
     const ann = golferId("ann");
     const bo = golferId("bo");
@@ -216,17 +219,18 @@ describe("RoundPage", () => {
     );
     await waitFor(() => expect(screen.getByText("CHIP01")).toBeTruthy());
 
-    // Default active game is the singles-match (added first) — Ann (ch8) vs Bo (ch2) gives
-    // Ann a dot on hole 1 (fixtureLinks SI 5, within her 6-dot allocation).
+    // Ann's own course handicap (8) allocates a dot on hole 1 (fixtureLinks SI 5) regardless
+    // of which game (if any) is chip-selected.
     const annHole1 = () => screen.getByRole("button", { name: "Ann hole 1" });
     await waitFor(() => expect(annHole1().textContent).toMatch("●"));
 
-    // Tapping the gross stroke-play chip switches the active game — gross carries no
-    // allowance at all (dots.ts's own rule), so Ann's dot disappears.
+    // Tapping the gross stroke-play chip switches StandingsHeader's own selection — the grid's
+    // dot is unaffected (gross carries no allowance at all, but that's THAT game's own concern
+    // now, never the card's).
     fireEvent.click(screen.getByRole("tab", { name: /Stroke play \(gross\)/ }));
-    expect(annHole1().textContent).not.toMatch("●");
+    expect(annHole1().textContent).toMatch("●");
 
-    // And back — the singles-match chip is still there and still switches correctly.
+    // And back — still unaffected.
     fireEvent.click(screen.getByRole("tab", { name: /Match play/ }));
     expect(annHole1().textContent).toMatch("●");
   });

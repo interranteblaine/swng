@@ -10,6 +10,7 @@ import { useAuth } from "../auth/useAuth";
 import { teeNumbers } from "../courses/teeNumbers";
 import { credentialStore } from "../identity";
 import { roundLabel } from "../roundLabel";
+import { btnPrimary, cardBox, inputBox, inputCode } from "../ui/classes";
 
 // >=250ms, same debounce window as CourseSearch's own — long enough that a fast typist never
 // fires one request per keystroke.
@@ -175,20 +176,20 @@ export function JoinRoundPage() {
   };
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-bold">Join by code</h1>
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-cream p-6">
+      <h1 className="text-2xl font-extrabold tracking-tight text-forest">Join by code</h1>
 
-      <label className="flex flex-col gap-1">
+      <label className="flex flex-col gap-1 text-forest">
         Code
         <input
           value={code}
           onChange={(event) => setCode(event.target.value)}
           maxLength={6}
-          className="rounded-lg bg-slate-800 p-3 text-lg uppercase tracking-widest"
+          className={`${inputCode} uppercase`}
         />
       </label>
 
-      {courseName && <p className="text-sm text-slate-400">Joining {roundLabel({ courseName, createdAt })}</p>}
+      {courseName && <p className="text-sm text-fairway">Joining {roundLabel({ courseName, createdAt })}</p>}
 
       {!auth.signedIn ? (
         // The join link IS the sign-up funnel (spec §3): signing in through the stock Hosted UI
@@ -202,26 +203,26 @@ export function JoinRoundPage() {
         // A quiet placeholder, not a form — a submit during this window is exactly the M8 defect
         // (a silent rename of a profile that hadn't loaded yet). Nothing here can be submitted.
         <div role="status" aria-label="Loading your profile" className="flex flex-col gap-1">
-          <div className="rounded-lg bg-slate-800 p-3 text-lg text-slate-500">Loading your profile…</div>
+          <div className={`${cardBox} p-3 text-lg text-fairway/70`}>Loading your profile…</div>
         </div>
       ) : needsName ? (
         <NamePrompt />
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
-            <span className="text-sm text-slate-400">Playing as</span>
-            <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-800 p-3 text-lg">
+            <span className="text-sm text-fairway">Playing as</span>
+            <div className={`${cardBox} flex items-center justify-between gap-2 p-3 text-lg text-forest`}>
               <span>{auth.golfer!.name}</span>
-              <Link to="/profile" className="text-sm text-emerald-400 underline">
+              <Link to="/profile" className="text-sm text-forest underline decoration-gold decoration-2">
                 Change
               </Link>
             </div>
           </div>
 
           {peekTees ? (
-            <label className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1 text-forest">
               Tee
-              <select value={tee} onChange={(event) => setTee(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg">
+              <select value={tee} onChange={(event) => setTee(event.target.value)} className={`${inputBox} text-lg`}>
                 {peekTees.map((peekTee) => (
                   <option key={peekTee.name} value={peekTee.name}>
                     {peekTee.name} — {teeNumbers(peekTee)}
@@ -231,13 +232,13 @@ export function JoinRoundPage() {
             </label>
           ) : (
             <div className="flex flex-col gap-1">
-              <label className="flex flex-col gap-1">
+              <label className="flex flex-col gap-1 text-forest">
                 Tee
-                <input value={tee} onChange={(event) => setTee(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+                <input value={tee} onChange={(event) => setTee(event.target.value)} className={`${inputBox} text-lg`} />
               </label>
               {/* Sibling of the <label>, not nested inside it — nesting would fold this note into
                   the label's own accessible name. */}
-              {peekFailed && <span className="text-xs text-slate-500">Could not look up this course's tees — type yours from the card.</span>}
+              {peekFailed && <span className="text-xs text-fairway/70">Could not look up this course's tees — type yours from the card.</span>}
             </div>
           )}
 
@@ -246,7 +247,7 @@ export function JoinRoundPage() {
               the visible derivation is the legibility rule (spec §4/§7): the index turned into
               today's strokes, never a bare number and never a separate declaration. */}
           <div className="flex flex-col gap-1">
-            <label className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1 text-forest">
               Strokes you get here
               <input
                 type="number"
@@ -256,19 +257,19 @@ export function JoinRoundPage() {
                   setTouched(true); // a typed value wins over the seed from here on
                   setCourseHandicap(event.target.value);
                 }}
-                className="rounded-lg bg-slate-800 p-3 text-lg"
+                className={`${inputBox} text-lg`}
               />
             </label>
-            {suggestion && <span className="text-xs text-slate-500">{suggestion.note}</span>}
+            {suggestion && <span className="text-xs text-fairway/70">{suggestion.note}</span>}
           </div>
 
           {error && (
-            <p role="alert" className="text-red-400">
+            <p role="alert" className="text-oxblood">
               {error}
             </p>
           )}
 
-          <button type="submit" disabled={submitting} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+          <button type="submit" disabled={submitting} className={`${btnPrimary} disabled:opacity-50`}>
             Join round
           </button>
         </form>
@@ -307,18 +308,18 @@ function NamePrompt() {
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
-      <label className="flex flex-col gap-1">
+      <label className="flex flex-col gap-1 text-forest">
         What should the card call you?
-        <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+        <input value={name} onChange={(event) => setName(event.target.value)} className={`${inputBox} text-lg`} />
       </label>
 
       {error && (
-        <p role="alert" className="text-red-400">
+        <p role="alert" className="text-oxblood">
           {error}
         </p>
       )}
 
-      <button type="submit" disabled={saving || !name.trim()} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+      <button type="submit" disabled={saving || !name.trim()} className={`${btnPrimary} disabled:opacity-50`}>
         Continue
       </button>
     </form>

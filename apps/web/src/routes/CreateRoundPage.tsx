@@ -11,6 +11,7 @@ import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 import { CourseSummaryCard } from "../courses/CourseSummaryCard";
 import { credentialStore } from "../identity";
+import { btnPrimary, cardBox, inputBox } from "../ui/classes";
 
 interface LocationState {
   // AddCoursePage's own success navigation (M6 Task 5's "Add a course" hand-off) — a course
@@ -185,8 +186,8 @@ export function CreateRoundPage() {
   };
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-slate-950 p-6 text-slate-100">
-      <h1 className="text-2xl font-bold">Start a round</h1>
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-6 bg-cream p-6">
+      <h1 className="text-2xl font-extrabold tracking-tight text-forest">Start a round</h1>
 
       {!auth.signedIn ? (
         <SignInCta message="Sign in to start a round." returnTo="/create" />
@@ -204,17 +205,17 @@ export function CreateRoundPage() {
             <CourseSearch onSelect={(courseId) => selectCourse(courseId)} />
           )}
           {courseError && (
-            <p role="alert" className="text-red-400">
+            <p role="alert" className="text-oxblood">
               {courseError}
             </p>
           )}
 
           {golfer ? (
             <div className="flex flex-col gap-1">
-              <span className="text-sm text-slate-400">Playing as</span>
-              <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-800 p-3 text-lg">
+              <span className="text-sm text-fairway">Playing as</span>
+              <div className={`${cardBox} flex items-center justify-between gap-2 p-3 text-lg text-forest`}>
                 <span>{golfer.name}</span>
-                <Link to="/profile" className="text-sm text-emerald-400 underline">
+                <Link to="/profile" className="text-sm text-forest underline decoration-gold decoration-2">
                   Change
                 </Link>
               </div>
@@ -223,7 +224,7 @@ export function CreateRoundPage() {
             // A quiet placeholder while identity resolves — submit stays disabled, so no round
             // is ever created before we know whose it is.
             <div role="status" aria-label="Loading your profile" className="flex flex-col gap-1">
-              <div className="rounded-lg bg-slate-800 p-3 text-lg text-slate-500">Loading your profile…</div>
+              <div className={`${cardBox} p-3 text-lg text-fairway/70`}>Loading your profile…</div>
             </div>
           )}
 
@@ -233,7 +234,7 @@ export function CreateRoundPage() {
               the visible derivation is the legibility rule (spec §4/§7): the field is the index
               turned into today's strokes, never a bare number and never a separate declaration. */}
           <div className="flex flex-col gap-1">
-            <label className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1 text-forest">
               Strokes you get here
               <input
                 type="number"
@@ -243,14 +244,14 @@ export function CreateRoundPage() {
                   setTouched(true); // a typed value wins over the seed from here on
                   setCourseHandicap(event.target.value);
                 }}
-                className="rounded-lg bg-slate-800 p-3 text-lg"
+                className={`${inputBox} text-lg`}
               />
             </label>
-            {suggestion && <span className="text-xs text-slate-500">{suggestion.note}</span>}
+            {suggestion && <span className="text-xs text-fairway/70">{suggestion.note}</span>}
           </div>
 
           {error && (
-            <p role="alert" className="text-red-400">
+            <p role="alert" className="text-oxblood">
               {error}
             </p>
           )}
@@ -258,7 +259,7 @@ export function CreateRoundPage() {
           <button
             type="submit"
             disabled={submitting || !courseView || !golfer}
-            className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50"
+            className={`${btnPrimary} disabled:opacity-50`}
           >
             Create round
           </button>

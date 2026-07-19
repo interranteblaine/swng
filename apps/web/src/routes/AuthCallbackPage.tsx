@@ -59,18 +59,18 @@ export function AuthCallbackPage() {
   }, [auth, navigate, searchParams]);
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-100">
+    <main className="flex min-h-screen items-center justify-center bg-cream p-6">
       {error ? (
         <div className="flex flex-col items-center gap-3 text-center">
-          <p role="alert" className="text-red-400">
+          <p role="alert" className="text-oxblood">
             {error}
           </p>
-          <a href="/" className="text-emerald-400 underline">
+          <a href="/" className="text-forest underline decoration-gold decoration-2">
             Back to swng
           </a>
         </div>
       ) : (
-        <p role="status">Signing you in…</p>
+        <p role="status" className="font-serif text-forest">Signing you in…</p>
       )}
     </main>
   );

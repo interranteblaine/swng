@@ -51,13 +51,13 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
       // role="alert").
       if (view.error) {
         return (
-          <div role="status" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+          <div role="status" className="flex min-h-screen items-center justify-center bg-cream">
             This share link isn&apos;t valid — ask for a fresh one.
           </div>
         );
       }
       return (
-        <div role="status" aria-label="Loading round" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+        <div role="status" aria-label="Loading round" className="flex min-h-screen items-center justify-center bg-cream">
           Loading round…
         </div>
       );
@@ -72,8 +72,8 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
     // rule, so a spectator whose round is scrapped mid-watch simply lands here on the next poll).
     if (isAbandoned) {
       return (
-        <main className="min-h-screen bg-slate-950">
-          <div role="status" className="flex min-h-screen items-center justify-center p-6 text-center text-slate-100">
+        <main className="min-h-screen bg-cream">
+          <div role="status" className="flex min-h-screen items-center justify-center p-6 text-center">
             This round was scrapped — there&apos;s nothing to show.
           </div>
         </main>
@@ -81,12 +81,12 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
     }
 
     return (
-      <main className="min-h-screen bg-slate-950">
+      <main className="min-h-screen bg-cream">
         {/* The canonical designation (accounts-only identity spec §5): the spectator sees WHICH
             round this is — course + date, rendered the one way the home list and archive render
             it, replacing the bare course name. */}
-        <div className="p-4 text-slate-100">
-          <p className="text-sm text-slate-400">{roundLabel({ courseName: view.state.card.courseName, createdAt: view.createdAt })}</p>
+        <div className="p-4">
+          <p className="font-serif text-sm text-fairway">{roundLabel({ courseName: view.state.card.courseName, createdAt: view.createdAt })}</p>
         </div>
         {/* No shareToken: a spectator holds no participant token to mint a NEW share link with —
             ResultsView.tsx's own doc comment explains why shareToken is optional and omitted
@@ -105,7 +105,7 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
 
     if (!param || !token) {
       return (
-        <div role="status" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+        <div role="status" className="flex min-h-screen items-center justify-center bg-cream">
           This share link looks incomplete — ask for a fresh one.
         </div>
       );

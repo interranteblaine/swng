@@ -58,7 +58,7 @@ export function ArchivedRoundPage() {
 
   if (!param) {
     return (
-      <div role="status" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+      <div role="status" className="flex min-h-screen items-center justify-center bg-cream">
         This link looks incomplete.
       </div>
     );
@@ -66,7 +66,7 @@ export function ArchivedRoundPage() {
 
   if (error) {
     return (
-      <div role="status" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+      <div role="status" className="flex min-h-screen items-center justify-center bg-cream">
         {error}
       </div>
     );
@@ -74,18 +74,18 @@ export function ArchivedRoundPage() {
 
   if (!view) {
     return (
-      <div role="status" aria-label="Loading round" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+      <div role="status" aria-label="Loading round" className="flex min-h-screen items-center justify-center bg-cream">
         Loading round…
       </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-950">
-      <div className="p-4 text-slate-100">
+    <main className="min-h-screen bg-cream">
+      <div className="p-4">
         {/* The canonical designation (spec §5): course + date, rendered the one way it is on the
             home list and the join link. */}
-        <p className="text-sm text-slate-400">{roundLabel({ courseName: view.state.card.courseName, createdAt: view.createdAtMs })}</p>
+        <p className="font-serif text-sm text-fairway">{roundLabel({ courseName: view.state.card.courseName, createdAt: view.createdAtMs })}</p>
       </div>
       {/* No shareToken: this page's viewer holds only their own golfer Bearer — never a
           round-scoped participant token to mint a NEW share link with (same reasoning as

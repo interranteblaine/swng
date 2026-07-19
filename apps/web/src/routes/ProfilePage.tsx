@@ -7,6 +7,7 @@ import { formatHandicapIndex, resolveIndex } from "@swng/domain";
 import { getCourse, getMyRecord, listMyCrews, updateMe } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
+import { btnPrimary, cardBox, inputBox } from "../ui/classes";
 
 // "Your index over time" (metrics-projection-grows spec, papercut 17's follow-on) — a
 // dependency-free inline SVG (no chart lib needed: two plain polylines are enough to show
@@ -30,7 +31,7 @@ function IndexOverTime({
     return (
       <div className="flex flex-col gap-1">
         <h3 className="text-base font-semibold">Your index over time</h3>
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-fairway">
           {`Your index history shows up at ${INDEX_HISTORY_MIN_ROUNDS} rounds — you've played ${roundsPlayed}. Keep going.`}
         </p>
       </div>
@@ -67,11 +68,11 @@ function IndexOverTime({
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">
         <h3 className="text-base font-semibold">Your index over time</h3>
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-fairway/70">
           your last {n} round{n === 1 ? "" : "s"}
         </span>
       </div>
-      <div className="flex items-center gap-3 text-xs text-slate-400">
+      <div className="flex items-center gap-3 text-xs text-fairway">
         <span>● swng</span>
         <span>○ WHS</span>
       </div>
@@ -82,10 +83,10 @@ function IndexOverTime({
         viewBox={`0 0 ${width} ${height}`}
         width={width}
         height={height}
-        className="rounded-lg bg-slate-900"
+        className={cardBox}
       >
         {swngLine && (
-          <polyline data-testid="index-line-swng" aria-label="swng index" points={swngLine} fill="none" stroke="currentColor" strokeWidth={2} className="text-emerald-400" />
+          <polyline data-testid="index-line-swng" aria-label="swng index" points={swngLine} fill="none" stroke="currentColor" strokeWidth={2} className="text-forest" />
         )}
         {whsLine && (
           <polyline
@@ -96,19 +97,19 @@ function IndexOverTime({
             stroke="currentColor"
             strokeWidth={2}
             strokeDasharray="3 3"
-            className="text-slate-400"
+            className="text-fairway"
           />
         )}
         {/* Per-round markers (● swng filled, ○ WHS hollow) so a single-vertex series stays visible:
             a lone point — e.g. one rated round among unrated play — draws no line, but its dot shows. */}
         {swngPts.map((p, i) => (
-          <circle key={`s${i}`} data-testid="index-dot-swng" cx={p.x} cy={p.y} r={2.5} fill="currentColor" className="text-emerald-400" />
+          <circle key={`s${i}`} data-testid="index-dot-swng" cx={p.x} cy={p.y} r={2.5} fill="currentColor" className="text-forest" />
         ))}
         {whsPts.map((p, i) => (
-          <circle key={`w${i}`} data-testid="index-dot-whs" cx={p.x} cy={p.y} r={2.5} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-slate-400" />
+          <circle key={`w${i}`} data-testid="index-dot-whs" cx={p.x} cy={p.y} r={2.5} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-fairway" />
         ))}
       </svg>
-      <p className="text-sm text-slate-300">
+      <p className="text-sm text-fairway">
         swng {latestSwng !== undefined ? formatHandicapIndex(latestSwng) : "—"} · WHS {latestWhs !== undefined ? formatHandicapIndex(latestWhs) : "—"}
       </p>
     </div>
@@ -279,9 +280,9 @@ export function ProfilePage() {
 
   if (!auth.signedIn) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-slate-950 p-6 text-slate-100">
+      <main className="mx-auto flex min-h-screen max-w-md flex-col gap-4 bg-cream p-6">
         <h1 className="text-2xl font-bold">Profile</h1>
-        <p className="text-slate-400">Sign in to see your profile and swng index.</p>
+        <p className="text-fairway">Sign in to see your profile and swng index.</p>
       </main>
     );
   }
@@ -294,21 +295,21 @@ export function ProfilePage() {
   const history = record?.history ?? [];
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-slate-950 p-6 text-slate-100">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-cream p-6">
       <h1 className="text-2xl font-bold">Profile</h1>
 
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
         <label className="flex flex-col gap-1">
           Name
-          <input value={name} onChange={(event) => setName(event.target.value)} className="rounded-lg bg-slate-800 p-3 text-lg" />
+          <input value={name} onChange={(event) => setName(event.target.value)} className={`${inputBox} text-lg`} />
         </label>
 
         <div className="flex flex-col gap-1">
           <span>Home course</span>
           {!pickingCourse && homeCourse ? (
-            <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-800 p-3">
+            <div className={`${cardBox} flex items-center justify-between gap-2 p-3`}>
               <span>{homeCourse.name}</span>
-              <button type="button" onClick={() => setPickingCourse(true)} className="text-sm text-emerald-400 underline">
+              <button type="button" onClick={() => setPickingCourse(true)} className="text-sm text-forest underline decoration-fairway">
                 Change
               </button>
             </div>
@@ -339,14 +340,14 @@ export function ProfilePage() {
               <span className="text-3xl font-bold">{formatHandicapIndex(resolved.value)}</span>
               {/* The source phrasing IS the legibility — the golfer always sees WHICH number they're
                   on: "your own" (declared), "your WHS index" (whs), or "from all your rounds" (swng). */}
-              <span className="text-sm text-slate-400">
+              <span className="text-sm text-fairway">
                 {resolved.kind === "declared" ? "your own" : resolved.kind === "whs" ? "your WHS index" : "from all your rounds"}
               </span>
             </p>
           ) : (
             // A computed source with no data yet resolves to undefined (first-class, not 0) — the
             // reason names the source the golfer is on so the "—" is legible, never a bare blank.
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-fairway">
               {resolved.kind === "whs"
                 ? "No WHS index yet — play a few rated rounds, or pick another source below."
                 : "No index yet — play a few rounds and swng will compute one, or set your own below."}
@@ -362,12 +363,12 @@ export function ProfilePage() {
               const active = activeSource.kind === source.kind;
               return (
                 <div key={source.label} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="text-slate-300">
+                  <span className="text-fairway">
                     {source.label} · {value !== undefined ? formatHandicapIndex(value) : "—"}
-                    <span className="block text-xs text-slate-500">{source.description}</span>
+                    <span className="block text-xs text-fairway/70">{source.description}</span>
                   </span>
                   {active ? (
-                    <span className="shrink-0 text-xs text-emerald-400">in use</span>
+                    <span className="shrink-0 text-xs text-forest">in use</span>
                   ) : (
                     value !== undefined && (
                       <button
@@ -375,7 +376,7 @@ export function ProfilePage() {
                         aria-label={source.useLabel}
                         disabled={committing}
                         onClick={() => void commit({ kind: source.kind })}
-                        className="shrink-0 text-emerald-400 underline disabled:opacity-50"
+                        className="shrink-0 text-forest underline decoration-fairway disabled:opacity-50"
                       >
                         Use this
                       </button>
@@ -390,7 +391,7 @@ export function ProfilePage() {
               number" is its own commit tap, consistent with the rows above. */}
           <label className="flex flex-col gap-1">
             Your own number
-            <input value={declaredDraft} onChange={(event) => setDeclaredDraft(event.target.value)} inputMode="decimal" className="rounded-lg bg-slate-800 p-3 text-lg" />
+            <input value={declaredDraft} onChange={(event) => setDeclaredDraft(event.target.value)} inputMode="decimal" className={`${inputBox} text-lg`} />
           </label>
           {(() => {
             const parsed = declaredDraft.trim() === "" ? undefined : Number.parseFloat(declaredDraft.trim());
@@ -398,13 +399,13 @@ export function ProfilePage() {
             const declaredActive = activeSource.kind === "declared";
             return (
               <div className="flex items-center justify-between gap-2 text-sm">
-                {declaredActive && <span className="text-xs text-emerald-400">your own number — in use</span>}
+                {declaredActive && <span className="text-xs text-forest">your own number — in use</span>}
                 {valid && (
                   <button
                     type="button"
                     disabled={committing}
                     onClick={() => void commit({ kind: "declared", value: parsed })}
-                    className="ml-auto shrink-0 text-emerald-400 underline disabled:opacity-50"
+                    className="ml-auto shrink-0 text-forest underline decoration-fairway disabled:opacity-50"
                   >
                     Use this number
                   </button>
@@ -413,24 +414,24 @@ export function ProfilePage() {
             );
           })()}
           {commitError && (
-            <p role="alert" className="text-sm text-red-400">
+            <p role="alert" className="text-sm text-oxblood">
               {commitError}
             </p>
           )}
         </section>
 
         {error && (
-          <p role="alert" className="text-red-400">
+          <p role="alert" className="text-oxblood">
             {error}
           </p>
         )}
         {saved && !error && (
-          <p role="status" className="text-emerald-400">
+          <p role="status" className="text-forest">
             Saved.
           </p>
         )}
 
-        <button type="submit" disabled={saving} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+        <button type="submit" disabled={saving} className={`${btnPrimary} disabled:opacity-50`}>
           {saving ? "Saving…" : "Save"}
         </button>
       </form>
@@ -441,14 +442,14 @@ export function ProfilePage() {
           of crews already joined is the whole section now; joining an existing crew is an
           invite-link funnel (CrewJoinPage, `/crews/join`), never typed here. */}
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold text-slate-300">Your crews</h2>
+        <h2 className="text-lg font-semibold text-fairway">Your crews</h2>
         {crews && crews.length > 0 && (
           <ul className="flex flex-col gap-2">
             {crews.map((crew) => (
               <li key={crew.crewId}>
-                <Link to={`/crews/${crew.crewId}`} className="flex items-center justify-between rounded-lg bg-slate-800 px-4 py-3">
+                <Link to={`/crews/${crew.crewId}`} className={`${cardBox} flex items-center justify-between px-4 py-3`}>
                   <span>{crew.name}</span>
-                  <span className="text-sm text-slate-400">
+                  <span className="text-sm text-fairway">
                     {crew.memberCount} member{crew.memberCount === 1 ? "" : "s"}
                   </span>
                 </Link>
@@ -457,7 +458,7 @@ export function ProfilePage() {
           </ul>
         )}
 
-        <Link to="/crews/new" className="self-start text-emerald-400 underline">
+        <Link to="/crews/new" className="self-start text-forest underline decoration-fairway">
           New crew
         </Link>
       </section>
@@ -467,21 +468,21 @@ export function ProfilePage() {
 
         <IndexOverTime points={record?.metrics.indexHistory ?? []} roundsPlayed={record?.history.length ?? 0} />
 
-        <p className="text-sm text-slate-300">{describeTypicalEighteen(record?.metrics.typicalEighteen ?? ZERO_TYPICAL_EIGHTEEN)}</p>
+        <p className="text-sm text-fairway tabular-nums">{describeTypicalEighteen(record?.metrics.typicalEighteen ?? ZERO_TYPICAL_EIGHTEEN)}</p>
 
         <div>
           <h3 className="text-base font-semibold">History</h3>
           {history.length > 0 ? (
             <ul className="flex flex-col gap-1">
               {history.map((line) => (
-                <li key={line.roundId} className="text-sm text-slate-300">
+                <li key={line.roundId}>
                   {/* Projection-realignment Task 6: every history line opens its own
                       ArchivedRoundPage — the "open one finalized round" half of this task,
                       reached from the "list my rounds" half already rendered here. Score-first
                       (metrics-projection-grows spec): the score leads, course/tee follow — a
                       golfer scans results, not metadata. `vsPar`/differential are presentation
                       only, no domain compute import. */}
-                  <Link to={`/rounds/${line.roundId}/archive`} className="underline decoration-slate-600 underline-offset-2 hover:decoration-slate-400">
+                  <Link to={`/rounds/${line.roundId}/archive`} className={`${cardBox} block px-3 py-2 text-sm text-fairway underline decoration-fairway tabular-nums`}>
                     {line.courseName} · {line.tee}
                     {line.ags !== undefined && ` · ${line.ags} (${vsPar(line.ags, line.par)})`}
                     {line.holes === 9 && " · 9 holes"}
@@ -491,7 +492,7 @@ export function ProfilePage() {
               ))}
             </ul>
           ) : (
-            <p className="text-slate-400">No rounds yet.</p>
+            <p className="text-fairway">No rounds yet.</p>
           )}
         </div>
       </section>

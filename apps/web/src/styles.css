@@ -1,1 +1,23 @@
 @import "tailwindcss";
+
+/* The brand tokens — the ONE place hex values live (spec §2). Light-only by owner call;
+   a dark variant later is a token flip, not a redesign. */
+@theme {
+  --color-forest: #1c2b22;
+  --color-fairway: #3d5a45;
+  --color-cream: #f7f5ef;
+  --color-card: #fffdf8;
+  --color-hairline: #ddd8c9;
+  --color-gold: #c9a356;
+  --color-goldwash: #f3e9d2;
+  --color-oxblood: #8b3a3a;
+  --font-serif: Georgia, "Iowan Old Style", serif;
+  --font-mono: "Courier New", Courier, monospace;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-cream);
+    color: var(--color-forest);
+  }
+}

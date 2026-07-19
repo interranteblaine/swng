@@ -711,6 +711,60 @@ stroke-play sheet sorts by raw running total (spec §6) which can rank a thru-0 
 the real leader mid-round; recommendation: sort by vs-par** (`relativeToPar` is already on
 the line). On local `main`, never pushed.
 
+The card never changes, games open in one tap, and a mis-tap is clearable (post-games-
+legibility, 2026-07-19, spec `docs/superpowers/specs/2026-07-19-standard-card-game-panels-
+design.md`, plan `2026-07-19-standard-card-game-panels.md`, 6 SDD tasks + review fixes,
+commits `fdefdea..2c0f3bb`, base `a8fbcdd`): the owner's field critique of the shipped
+games-legibility arc — gross and net looked the same, no handicap treatment stated anywhere,
+no score clearing down to the wire, the per-game card mutation (M5-era) worse than a standard
+card, the double-tap modal hidden — closed by four corrections. **One standard card, always:**
+the grid renders gross + each player's own FULL course-handicap dots (`courseHandicapAllocation`
+— new domain compute, fence-banned, `@swng/client`-re-exported) with net-vs-those-dots under;
+chip taps never touch the grid (`ScorecardGridProps` has no game-typed prop — stable by
+construction); SetupPanel roster is `name — tee — CH X`. **Scores clear:** `HoleResult` gains
+an additive `{kind:"cleared"}` arm — the fold RETAINS cleared cells under HLC-latest (deletion
+would let a late-arriving older write resurrect a score) and ONE accessor `cellAt`
+(absent-or-cleared → undefined) replaces every raw cell read across all five engines,
+finalize-readiness, settle, AGS, and the web; the ScorePad shows `Clear score` only when the
+cell holds a result; the settled wire changes ONLY by this arm (deploy lambda-first — an old
+bundle receiving a cleared event parse-fails until refresh, accepted beta window). **One tap,
+inline:** chips are disclosure buttons (`aria-expanded`, ▾/▴); a tap expands that game's
+`GamePanel` (the de-modaled GameSheet, `role="region"` `{title} standings`) inline below the
+chip row — switch, or tap-again to close; "End game…" moved into the panel footer; the
+`⋯`/`›`/tablist/second-tap machinery is deleted. **Treatment in words, up front:** every panel
+leads title → treatment line → strokes line → note, with NO rules blurb (picker-only, the
+owner slop-check); `strokePlayTreatment(scoring, allowance?)` (`Net — 95% handicap (standard)`
+/ `Gross — raw scores, no strokes`) and `strokesNote(kind)` join the one-copy formatters in
+`scoring/present.ts`; `strokesSummary`'s all-zero copy is now `No strokes — everyone plays off
+0.` — the exact CH-0 gross-vs-net answer; the stroke-play panel sorts vs-par-then-thru
+(closing the queued owner ruling; the plan's illustrative "+2 above E" fixture was corrected
+mid-arc — E outranks +2 on any vs-par board). The whole-branch review (fable) caught the ONE
+cross-task leak no scoped review owned: `currentHoleNumber` checked cells via the `in`
+operator — a membership form the arc's `\.cells\[` grep structurally couldn't see — so a clear
+on the current hole didn't pull the highlight back; fixed with a pre-fix-failing test and the
+spec's grep gate HARDENED to the membership form. E2E reconciliation held one more lesson: the
+first live field run failed on two STALE ORACLES with the product CORRECT both times
+(fieldTest's offline-B skins expectation predated B-goes-dark-with-h9-cleared — the chain
+stops at the cleared gap, re-derived to `describeSkinsAt(8)`; killNetwork's `/^\D*6$/`
+end-anchor broke on the standard card's net suffix — re-derived to an exact `"●65"` pin that
+is STRONGER for its no-dupes purpose). Close-out (controller-run): `deploy:beta` lambda-first
+(UPDATE_COMPLETE) → `publish:web:beta` → `e2e:beta` 16/16 ×2 → `e2e:field` 59 passed / 1
+documented-skip → the **adversarial USE pass** on DEPLOYED beta.swng.golf (the memory's
+lesson, now practiced): CH 9 vs CH 0 accounts, gross AND net stroke play added via the real
+picker — the panels showed 11 (+3) vs 9 (+1) LIVE with treatment stated; a mis-tap cleared and
+re-entered through the real pad; the review fix proven live (clear on a done hole → the
+current-hole highlight RETURNED); the card's dots byte-identical through everything; both-CH-0
+round rendered the off-0 sentence; console clean but for the two pre-existing papercut-18
+transients — and the pass DID ITS JOB, finding the gross add-game preview still showing
+net-shaped copy (`95% handicap (standard)` + off-0) — fixed same-day (`835a6ac`), the fix's
+own literal-duplication caught and hoisted into `strokePlayTreatment` (`2c0f3bb`, one-copy
+invariant restored), republished (bundle `index-Daj5vQLZ.js`), and re-verified live on the
+deployed surface; final reviewer verdict YES at HEAD. NO data wipe (additive wire only).
+Riding as notes: symmetric re-score-after-clear untested (fold provably kind-agnostic);
+orphan cleared cells of omitted departed golfers ride in `archive.cells` (commented);
+`openGamePanel` e2e helper leaves its panel open; killNetwork's A-side keeps a loose anchor
+(the dedup pin lives in B's exact one). On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

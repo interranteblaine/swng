@@ -1,7 +1,7 @@
 import type { RoundState } from "../round/state.js";
 import { cellKey } from "../round/state.js";
 import { defaultAllowance, playingHandicap } from "./allowances.js";
-import type { GameConfig, GameState } from "./game.js";
+import type { GameConfig, GameState, SkinsHole } from "./game.js";
 import { allPlayersComplete, playerTeeSet } from "./players.js";
 import { dotsByHole } from "./strokes.js";
 
@@ -20,6 +20,7 @@ export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState =>
   const holes = players[0]?.teeSet.holes ?? [];
 
   const skinsWon = new Map(config.players.map((golferId) => [golferId, 0]));
+  const trail: SkinsHole[] = [];
   let carrying = 0;
   let holesDecided = 0;
 
@@ -42,9 +43,11 @@ export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState =>
     if (winners.length === 1) {
       const winner = winners[0]!.golferId;
       skinsWon.set(winner, skinsWon.get(winner)! + pot);
+      trail.push({ hole: hole.number, winner, pot });
       carrying = 0;
     } else {
       // A tie carries the whole pot; so does a hole where everyone picked up.
+      trail.push({ hole: hole.number, pot });
       carrying = pot;
     }
   }
@@ -61,5 +64,6 @@ export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState =>
     carriedOut: complete ? carrying : 0,
     complete,
     holesDecided,
+    holes: trail,
   };
 };

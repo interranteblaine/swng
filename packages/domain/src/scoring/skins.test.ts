@@ -74,6 +74,33 @@ describe("skins — golden cards", () => {
     });
   });
 
+  it("exposes the hole-by-hole story: pots, winners, carries", () => {
+    // Same card as the golden test: carries on 1–3 build the pot to 4, Ann takes it on 4;
+    // fresh skin carries on 5, Ann takes 2 on 6; Bo takes 1 on 7; carry on 8, Bo takes 2 on 9.
+    const [state] = playGoldenRound(fixtureLinks, players3, [game], {
+      [A]: [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"],
+      [B]: [4, 5, 3, 6, 4, 4, 4, 5, 4],
+      [C]: [6, 7, 4, 8, 6, 5, 6, 7, 6],
+    });
+    expect(state).toMatchObject({
+      holes: [
+        { hole: 1, pot: 1 },
+        { hole: 2, pot: 2 },
+        { hole: 3, pot: 3 },
+        { hole: 4, winner: A, pot: 4 },
+        { hole: 5, pot: 1 },
+        { hole: 6, winner: A, pot: 2 },
+        { hole: 7, winner: B, pot: 1 },
+        { hole: 8, pot: 1 },
+        { hole: 9, winner: B, pot: 2 },
+      ],
+    });
+    // Carried entries have no winner at all (absent key, not undefined-valued).
+    const trail = (state as Extract<typeof state, { kind: "skins" }>).holes;
+    expect(Object.keys(trail[0]!)).not.toContain("winner");
+    expect(trail).toHaveLength(9);
+  });
+
   it("a tie on the last hole strands the pot as carriedOut", () => {
     // Same card as the golden test except Bo's h9 gross is 5: h9 is tie(B,C at
     // net 5) with Ann picked up, so the h8 carry plus h9's own skin strands.

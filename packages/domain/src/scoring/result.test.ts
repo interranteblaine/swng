@@ -180,4 +180,14 @@ describe("resultOf", () => {
     };
     expect(resultOf(fourball)).not.toHaveProperty("holes");
   });
+
+  it("a settled skins result carries no live hole trail", () => {
+    const skins: GameState = {
+      kind: "skins", id: gameId("k-lean"),
+      lines: [{ golferId: golferId("a1"), skins: 1 }],
+      carrying: 0, carriedOut: 0, complete: true, holesDecided: 9,
+      holes: [{ hole: 1, winner: golferId("a1"), pot: 1 }],
+    };
+    expect(resultOf(skins)).not.toHaveProperty("holes");
+  });
 });

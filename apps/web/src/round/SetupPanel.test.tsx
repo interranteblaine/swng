@@ -301,7 +301,7 @@ describe("SetupPanel — a plus handicap renders through the domain (CH +N, give
     // total is -1 — the exact bare-negative the arc closes everywhere else.
     const skins: GameConfig = { kind: "skins", id: gameId("game-1"), players: [PLUS, NORMAL] };
     const state = baseState({ participants: [participant(PLUS, "Plus", "white", -1), participant(NORMAL, "Norm", "white", 5)], games: [skins] });
-    const games: GameState[] = [{ kind: "skins", id: gameId("game-1"), lines: [], carrying: 0, carriedOut: 0, complete: false, holesDecided: 0 }];
+    const games: GameState[] = [{ kind: "skins", id: gameId("game-1"), lines: [], carrying: 0, carriedOut: 0, complete: false, holesDecided: 0, holes: [] }];
     renderPanel({ state, games, joinCode: "ABC123", onAddGame: noopAddGame });
 
     const plusRow = screen.getAllByRole("listitem").find((li) => /Plus/.test(li.textContent ?? ""));

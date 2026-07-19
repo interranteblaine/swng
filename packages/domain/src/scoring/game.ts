@@ -75,6 +75,15 @@ export interface MatchHole {
   readonly winner: "a" | "b" | "halved";
 }
 
+// One decided hole in a skins trail. pot = what the hole was worth (1 + the carry riding
+// in); winner present iff a single lowest net took it (and took `pot` skins) — absent
+// means the pot carried. Live-GameState only, like MatchHole.
+export interface SkinsHole {
+  readonly hole: number;
+  readonly winner?: GolferId;
+  readonly pot: number;
+}
+
 export type GameState =
   | {
       readonly kind: "stroke-play";
@@ -128,6 +137,10 @@ export type GameState =
       // at the first gap) — the same walk carrying/carriedOut settle over. Lets a view name
       // which hole a live carry is riding into (holesDecided + 1) without replaying the walk.
       readonly holesDecided: number;
+      // One entry per decided hole, in card order (holes.length === holesDecided) — the
+      // pot-by-pot story the same walk already computes. Live-GameState only, like
+      // singles/fourball's own `holes` trail; resultOf never reaches this.
+      readonly holes: readonly SkinsHole[];
     };
 
 // Every golferId a game config references — the union across all five kinds' player fields

@@ -675,8 +675,8 @@ describe("RoundPage", () => {
     await waitFor(() => expect(screen.getByText("GAME01")).toBeTruthy());
     expect(screen.queryByRole("tab", { name: /Stableford/ })).toBeNull();
 
-    fireEvent.change(screen.getByLabelText(/^kind$/i), { target: { value: "stableford" } });
-    fireEvent.click(within(screen.getByRole("group", { name: /players/i })).getByLabelText("Ann"));
+    // Default kind is already stableford — no kind select to drive anymore.
+    fireEvent.click(within(screen.getByRole("group", { name: "Who's in?" })).getByLabelText("Ann"));
     fireEvent.click(screen.getByRole("button", { name: /add game/i }));
 
     await waitFor(() => expect(screen.getByRole("tab", { name: /Stableford/ })).toBeTruthy());

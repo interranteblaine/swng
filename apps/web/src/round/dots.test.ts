@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { defaultAllowance, fixtureLinks, gameId, golferId, playingHandicap } from "@swng/domain";
 import type { GameConfig, Participant } from "@swng/domain";
-import { gameDots, gamePlayers, totalDots } from "./dots";
+import { gameDots, gamePlayers, strokesSummary, totalDots } from "./dots";
 
 // fixtureLinks (packages/domain/src/scoring/golden/fixtureCourse.ts) carries one 9-hole tee
 // set, "white" — every participant below plays it, so gameDots' per-hole allocation always
@@ -102,5 +102,26 @@ describe("gameDots", () => {
 
     expect(totalDots(dots.get(ANN)!)).toBe(playingHandicap(20, 0.5));
     expect(totalDots(dots.get(ANN)!)).not.toBe(playingHandicap(20, defaultAllowance("stableford")));
+  });
+});
+
+// AddGameForm.test.tsx's "strokes preview" describe block covers the ordinary receives/omit
+// case (through a render); these two edge cases — a plus-handicap "gives" and the all-scratch
+// empty line — have no live UI trigger yet (no give-back fixture is wired into the form's own
+// participants), so they're pinned directly against the same fixture card here instead.
+describe("strokesSummary", () => {
+  it("reads a plus handicap as 'gives N', a normal handicap as 'N dots', in gameMembers order", () => {
+    // Skins is full-handicap (allowance 1): Ann's course handicap -1 gives one stroke back.
+    const participants = [participant(ANN, "Ann", -1), participant(BO, "Bo", 3)];
+    const config: GameConfig = { kind: "skins", id: gameId("g"), players: [ANN, BO] };
+
+    expect(strokesSummary(config, participants, CARD)).toBe("Ann gives 1 · Bo 3 dots");
+  });
+
+  it("reads 'No strokes — everyone plays scratch.' when every member's total is zero", () => {
+    const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 0)];
+    const config: GameConfig = { kind: "skins", id: gameId("g"), players: [ANN, BO] };
+
+    expect(strokesSummary(config, participants, CARD)).toBe("No strokes — everyone plays scratch.");
   });
 });

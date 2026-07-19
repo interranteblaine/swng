@@ -146,28 +146,17 @@ describe("SetupPanel", () => {
     expect(boRows[0]?.textContent).toMatch(/CH 4/);
   });
 
-  it("adds a fourball-match game with the exact {kind, a, b} shape (ids from participants) and no id field", async () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
-    noopAddGame.mockClear();
-
-    fireEvent.change(screen.getByLabelText(/^kind$/i), { target: { value: "fourball-match" } });
-    fireEvent.change(screen.getByLabelText(/side a.*player 1/i), { target: { value: ANN } });
-    fireEvent.change(screen.getByLabelText(/side a.*player 2/i), { target: { value: BO } });
-    fireEvent.change(screen.getByLabelText(/side b.*player 1/i), { target: { value: CAL } });
-    fireEvent.change(screen.getByLabelText(/side b.*player 2/i), { target: { value: DEE } });
-    fireEvent.click(screen.getByRole("button", { name: /add game/i }));
-
-    expect(noopAddGame).toHaveBeenCalledTimes(1);
-    const sent = noopAddGame.mock.calls[0]![0];
-    expect(sent).toMatchObject({ kind: "fourball-match", a: [ANN, BO], b: [CAL, DEE] });
-    expect(sent).not.toHaveProperty("id");
-  });
-
+  // The fourball-config-shape, hand-edited-allowance, and failed-add-game-error tests moved to
+  // AddGameForm.test.tsx (Task 4) — they exercise the form's OWN behavior, now a separate
+  // component, adapted to the new radio-card / Who's-in / Team 1 & 2 / Adjust-percent UI. This
+  // test stays here: its assertion target is SetupPanel's own roster (that it renders purely
+  // from props, never optimistically from a click), driven through the still-embedded
+  // AddGameForm as the realistic way to fire onAddGame.
   it("never renders the submitted game optimistically — it only appears once state.games reflects it", async () => {
     renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
 
-    fireEvent.change(screen.getByLabelText(/^kind$/i), { target: { value: "stableford" } });
-    fireEvent.click(within(screen.getByRole("group", { name: /players/i })).getByLabelText("Ann"));
+    // Default kind is already stableford — just check Ann in and submit.
+    fireEvent.click(within(screen.getByRole("group", { name: "Who's in?" })).getByLabelText("Ann"));
     fireEvent.click(screen.getByRole("button", { name: /add game/i }));
 
     expect(noopAddGame).toHaveBeenCalled();
@@ -183,38 +172,6 @@ describe("SetupPanel", () => {
     renderPanel({ state: baseState({ games: [stableford] }), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
     const expectedDots = playingHandicap(8, defaultAllowance("stableford"));
     expect(screen.getByText(new RegExp(`Stableford: ${expectedDots} dots`))).toBeTruthy();
-  });
-
-  it("sends a hand-edited allowance value (not the per-kind default) in onAddGame's config", async () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
-    noopAddGame.mockClear();
-
-    fireEvent.change(screen.getByLabelText(/^kind$/i), { target: { value: "stableford" } });
-    fireEvent.click(within(screen.getByRole("group", { name: /players/i })).getByLabelText("Ann"));
-    // 0.5 isn't stableford's default allowance (0.95, per defaultAllowance) — picking a value
-    // that differs from the default is the point: this guards the step="any" fix (a stricter
-    // step would have silently blocked this exact submit).
-    fireEvent.change(screen.getByLabelText(/allowance/i), { target: { value: "0.5" } });
-    fireEvent.click(screen.getByRole("button", { name: /add game/i }));
-
-    expect(noopAddGame).toHaveBeenCalledTimes(1);
-    const sent = noopAddGame.mock.calls[0]![0];
-    expect(sent).toMatchObject({ kind: "stableford", players: [ANN], allowance: 0.5 });
-  });
-
-  // Papercut 12 (M9 hardening, the never-raw-caught.message sweep): a failed Add game must never
-  // surface a raw generic Error's message — only an honest fallback.
-  it("never renders a raw generic Error's message from a failed Add game — only an honest fallback (papercut 12)", async () => {
-    const rejecting = vi.fn().mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'bar')"));
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: rejecting });
-
-    fireEvent.change(screen.getByLabelText(/^kind$/i), { target: { value: "stableford" } });
-    fireEvent.click(within(screen.getByRole("group", { name: /players/i })).getByLabelText("Ann"));
-    fireEvent.click(screen.getByRole("button", { name: /add game/i }));
-
-    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
-    expect(screen.getByRole("alert").textContent).toBe("Could not add the game — try again.");
-    expect(document.body.textContent).not.toMatch(/Cannot read properties/);
   });
 });
 

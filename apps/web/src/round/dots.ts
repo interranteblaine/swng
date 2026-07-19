@@ -1,5 +1,5 @@
 import { gameStrokeAllocation, totalDots } from "@swng/client";
-import { gameMembers } from "@swng/domain";
+import { gameMembers, strokeGrant } from "@swng/domain";
 import type { CourseCard, GameConfig, GolferId, Participant } from "@swng/domain";
 
 // The golfer ids a GameConfig covers, in the config's own order — used both to render a
@@ -20,3 +20,20 @@ export const gameDots = (config: GameConfig, participants: readonly Participant[
 // reached through @swng/client (same on-device compute seam as gameDots above) — Task 4 deleted
 // this file's own reduce, which was byte-identical to the domain version.
 export { totalDots };
+
+// "Pat 5 dots · Alex 1 dot · Sam gives 1" — a game's strokes as one plain line, from the
+// same allocation the card's dots render. Members with no strokes are omitted; a game
+// where nobody gets any reads as scratch golf outright.
+export const strokesSummary = (config: GameConfig, participants: readonly Participant[], card: CourseCard): string => {
+  const dots = gameDots(config, participants, card);
+  const nameOf = (id: GolferId): string => participants.find((p) => p.golferId === id)?.name ?? id;
+  const parts = gameMembers(config).flatMap((id) => {
+    const perHole = dots.get(id);
+    const total = perHole ? totalDots(perHole) : 0;
+    const grant = strokeGrant(total);
+    if (grant.kind === "gives") return [`${nameOf(id)} gives ${grant.count}`];
+    if (total === 0) return [];
+    return [`${nameOf(id)} ${total} ${total === 1 ? "dot" : "dots"}`];
+  });
+  return parts.length > 0 ? parts.join(" · ") : "No strokes — everyone plays scratch.";
+};

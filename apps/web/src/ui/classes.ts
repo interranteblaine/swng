@@ -13,6 +13,9 @@ export const btnDangerSolid =
   "bg-oxblood px-4 py-3 text-center text-sm font-semibold tracking-widest text-cream uppercase";
 export const cardBox = "border border-hairline bg-card";
 export const eyebrow = "font-mono text-[11px] tracking-[2px] text-fairway uppercase";
+// A filled status badge — SetupPanel's departed "left" marker and GamePanel/StandingsHeader's
+// "Ended" marker are the same idiom, one copy.
+export const badge = "bg-fairway px-1.5 py-0.5 font-mono text-[10px] tracking-wide text-cream uppercase";
 export const inputBox =
   "border border-hairline bg-card px-3 py-3 text-forest placeholder:text-oxblood";
 export const inputCode =

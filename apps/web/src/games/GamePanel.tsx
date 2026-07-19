@@ -1,6 +1,7 @@
 import { allowancePhrase, gameKindLabel, strokePlayTreatment, strokesNote } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 import { strokesSummary } from "../round/dots";
+import { badge, btnDanger, cardBox } from "../ui/classes";
 import { vsPar } from "./describeGame";
 
 export interface GamePanelProps {
@@ -59,15 +60,15 @@ export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanel
   const note = strokesNote(game.kind);
 
   return (
-    <section role="region" aria-label={`${title} standings`} className="flex flex-col gap-3 rounded-lg bg-slate-900 p-4 text-slate-100">
+    <section role="region" aria-label={`${title} standings`} className={`${cardBox} flex flex-col gap-3 p-4 text-forest`}>
       <div className="flex flex-col">
-        <span className="text-lg font-semibold">
+        <span className="text-lg font-semibold text-forest">
           {title}
-          {terminated && <span className="ml-2 rounded bg-slate-600 px-1.5 py-0.5 text-xs font-medium">Ended</span>}
+          {terminated && <span className={`ml-2 ${badge}`}>Ended</span>}
         </span>
-        {treatment && <span className="text-sm text-slate-400">{treatment}</span>}
-        {strokes && <span className="text-sm text-slate-300">{strokes}</span>}
-        {note && <span className="text-sm text-slate-400">{note}</span>}
+        {treatment && <span className="text-sm text-fairway">{treatment}</span>}
+        {strokes && <span className="text-sm text-fairway">{strokes}</span>}
+        {note && <span className="text-sm text-fairway">{note}</span>}
       </div>
 
       {game.kind === "stroke-play" && <StrokePlayBody game={game} state={state} />}
@@ -76,7 +77,7 @@ export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanel
       {game.kind === "skins" && <SkinsBody game={game} state={state} />}
 
       {onOpenConfirm && state.status === "live" && !terminated && (
-        <button type="button" onClick={onOpenConfirm} className="self-start rounded-lg bg-slate-800 px-4 py-3 text-sm font-medium text-red-400">
+        <button type="button" onClick={onOpenConfirm} className={`${btnDanger} self-start`}>
           End game…
         </button>
       )}
@@ -92,12 +93,12 @@ function StrokePlayBody({ game, state }: { game: Extract<GameState, { kind: "str
   // fair across different thru counts, and the thru tie-break means a golfer who's actually
   // played the round outranks one who's only nominally tied because they haven't started.
   const sorted = [...game.lines].sort((a, b) => a.relativeToPar - b.relativeToPar || b.thru - a.thru);
-  if (sorted.length === 0) return <p className="text-sm text-slate-400">No scores yet</p>;
+  if (sorted.length === 0) return <p className="text-sm text-fairway">No scores yet</p>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead>
-          <tr className="text-slate-400">
+          <tr className="text-fairway">
             <th className="py-1 pr-2 font-medium">Player</th>
             <th className="py-1 pr-2 font-medium">Total</th>
             <th className="py-1 pr-2 font-medium">Thru</th>
@@ -106,7 +107,7 @@ function StrokePlayBody({ game, state }: { game: Extract<GameState, { kind: "str
         </thead>
         <tbody>
           {sorted.map((line) => (
-            <tr key={line.golferId} className="border-t border-slate-800">
+            <tr key={line.golferId} className="border-t border-hairline">
               <td className="py-2 pr-2">{nameOf(state.participants, line.golferId)}</td>
               <td className="py-2 pr-2">{total(line)}</td>
               <td className="py-2 pr-2">{line.thru}</td>
@@ -123,14 +124,14 @@ function StablefordBody({ game, state }: { game: Extract<GameState, { kind: "sta
   const sorted = [...game.lines].sort((a, b) => b.points - a.points);
   return (
     <>
-      <p className="text-sm text-slate-400">Eagle 4 · Birdie 3 · Par 2 · Bogey 1 · worse 0</p>
+      <p className="text-sm text-fairway">Eagle 4 · Birdie 3 · Par 2 · Bogey 1 · worse 0</p>
       {sorted.length === 0 ? (
-        <p className="text-sm text-slate-400">No scores yet</p>
+        <p className="text-sm text-fairway">No scores yet</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="text-slate-400">
+              <tr className="text-fairway">
                 <th className="py-1 pr-2 font-medium">Player</th>
                 <th className="py-1 pr-2 font-medium">Points</th>
                 <th className="py-1 font-medium">Thru</th>
@@ -138,7 +139,7 @@ function StablefordBody({ game, state }: { game: Extract<GameState, { kind: "sta
             </thead>
             <tbody>
               {sorted.map((line) => (
-                <tr key={line.golferId} className="border-t border-slate-800">
+                <tr key={line.golferId} className="border-t border-hairline">
                   <td className="py-2 pr-2">{nameOf(state.participants, line.golferId)}</td>
                   <td className="py-2 pr-2">{line.points}</td>
                   <td className="py-2">{line.thru}</td>
@@ -188,7 +189,7 @@ function MatchBody({ game, config, state }: { game: Extract<GameState, { kind: "
         <div className="overflow-x-auto">
           <table className="text-xs">
             <thead>
-              <tr className="text-slate-400">
+              <tr className="text-fairway">
                 <th className="py-1 pr-2 text-left font-medium">Hole</th>
                 {game.holes.map((h) => (
                   <th key={h.hole} className="px-1 py-1 text-center font-medium">
@@ -199,7 +200,7 @@ function MatchBody({ game, config, state }: { game: Extract<GameState, { kind: "
             </thead>
             <tbody>
               {(["a", "b"] as const).map((side) => (
-                <tr key={side} className="border-t border-slate-800">
+                <tr key={side} className="border-t border-hairline">
                   <th scope="row" className="py-1 pr-2 text-left font-medium whitespace-nowrap">
                     {sideName(side)}
                   </th>
@@ -232,7 +233,7 @@ function SkinsBody({ game, state }: { game: Extract<GameState, { kind: "skins" }
       {status && <p className="text-sm font-medium">{status}</p>}
       <p className="text-sm">{totals.map((l) => `${nameOf(state.participants, l.golferId)} ${l.skins}`).join(" · ")}</p>
       {game.holes.length > 0 && (
-        <ul className="flex flex-col gap-1 text-sm text-slate-300">
+        <ul className="flex flex-col gap-1 text-sm text-fairway">
           {skinsStory(game.holes, state.participants).map((item) => (
             <li key={item}>{item}</li>
           ))}

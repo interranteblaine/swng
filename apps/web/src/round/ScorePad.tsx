@@ -1,5 +1,6 @@
 import type { Hole } from "@swng/domain";
 import type { HoleResult, Participant } from "@swng/domain";
+import { btnDanger, btnSecondary, cardBox } from "../ui/classes";
 
 // "Par-first" so the values a golfer is most likely to have shot are the closest tap targets
 // — distance-from-par ascending, ties (equidistant above/below) broken toward the lower value.
@@ -31,32 +32,35 @@ export interface ScorePadProps {
 export function ScorePad({ golfer, hole, current, onSubmit, onCancel }: ScorePadProps) {
   const values = orderedStrokeValues(hole.par);
 
-  const buttonClass = "min-h-14 min-w-14 rounded-lg bg-slate-700 px-3 text-lg font-semibold text-slate-100 active:bg-emerald-600";
+  const valueButtonClass = `${cardBox} flex min-h-14 min-w-14 items-center justify-center px-3 text-lg font-semibold text-forest`;
+  // Picked up / Conceded: same cardBox square, oxblood ink — a distinct action from a plain
+  // numeric score, never the numeral color.
+  const specialButtonClass = `${cardBox} flex min-h-14 min-w-20 items-center justify-center px-3 text-base font-semibold text-oxblood`;
 
   return (
-    <div role="dialog" aria-label={`Score for ${golfer.name}, hole ${hole.number}`} className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 rounded-t-2xl bg-slate-900 p-4 shadow-2xl">
-      <p className="text-center text-sm text-slate-400">
+    <div role="dialog" aria-label={`Score for ${golfer.name}, hole ${hole.number}`} className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 border-t-2 border-forest bg-card p-4 shadow-2xl">
+      <p className="text-center text-sm text-fairway">
         {golfer.name} — hole {hole.number} · par {hole.par}
       </p>
       <div className="flex flex-wrap justify-center gap-2">
         {values.map((value) => (
-          <button key={value} type="button" className={buttonClass} onClick={() => onSubmit({ kind: "strokes", strokes: value })}>
+          <button key={value} type="button" className={valueButtonClass} onClick={() => onSubmit({ kind: "strokes", strokes: value })}>
             {value}
           </button>
         ))}
-        <button type="button" className={`${buttonClass} min-w-20 text-base`} onClick={() => onSubmit({ kind: "picked-up" })}>
+        <button type="button" className={specialButtonClass} onClick={() => onSubmit({ kind: "picked-up" })}>
           Picked up
         </button>
-        <button type="button" className={`${buttonClass} min-w-20 text-base`} onClick={() => onSubmit({ kind: "conceded" })}>
+        <button type="button" className={specialButtonClass} onClick={() => onSubmit({ kind: "conceded" })}>
           Conceded
         </button>
         {current !== undefined && (
-          <button type="button" className={`${buttonClass} min-w-20 text-base`} onClick={() => onSubmit({ kind: "cleared" })}>
+          <button type="button" className={`${btnDanger} min-h-14 min-w-20`} onClick={() => onSubmit({ kind: "cleared" })}>
             Clear score
           </button>
         )}
       </div>
-      <button type="button" className="min-h-14 rounded-lg bg-slate-800 px-3 text-base font-medium text-slate-300" onClick={onCancel}>
+      <button type="button" className={`${btnSecondary} min-h-14`} onClick={onCancel}>
         Clear selection
       </button>
     </div>

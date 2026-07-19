@@ -86,3 +86,8 @@ export const strokesNote = (kind: GameKind): string | undefined => {
       return undefined;
   }
 };
+
+// Golf's own "red numbers" convention — strictly below par, never at or above it. A pure
+// presentation predicate (no golf RESULT computed here), so the web renders through it
+// directly wherever a gross or net score sits beside its hole's par.
+export const underPar = (score: number, par: number): boolean => score < par;

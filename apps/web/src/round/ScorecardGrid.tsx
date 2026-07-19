@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { courseHandicapAllocation, netStrokes } from "@swng/client";
-import { cellAt, findTeeSet, strokeGrant } from "@swng/domain";
+import { cellAt, findTeeSet, strokeGrant, underPar } from "@swng/domain";
 import type { CourseCard, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
+import { cardBox } from "../ui/classes";
 import { ScorePad } from "./ScorePad";
 
 export interface ScorecardGridProps {
@@ -73,7 +74,8 @@ interface CellProps {
 // A tappable scorecard cell — dots above, gross (large) + net (small, only where dots apply)
 // below. This IS the "tap 1" of the two-tap contract; ScorePad below is "tap 2".
 function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
-  const net = cell?.result.kind === "strokes" && dots !== 0 ? netStrokes(cell.result.strokes, dots) : undefined;
+  const gross = cell?.result.kind === "strokes" ? cell.result.strokes : undefined;
+  const net = gross !== undefined && dots !== 0 ? netStrokes(gross, dots) : undefined;
 
   return (
     <button
@@ -81,7 +83,7 @@ function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
       aria-label={`${participant.name} hole ${hole.number}`}
       onClick={onTap}
       disabled={readOnly}
-      className="flex min-h-14 min-w-14 flex-col items-center justify-center gap-0.5 rounded-md bg-slate-800 px-1 py-1 active:bg-slate-700 disabled:active:bg-slate-800"
+      className={`${cardBox} flex min-h-14 min-w-14 flex-col items-center justify-center gap-0.5 px-1 py-1`}
     >
       {(() => {
         const grant = strokeGrant(dots);
@@ -89,17 +91,25 @@ function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
         // received strokes are filled ●; GIVEN strokes (a plus handicap) are hollow ○ — on the
         // screen now, not silently dropped. net = gross − dots already reads gross + 1 for a give.
         return (
-          <span aria-hidden className="text-[10px] leading-none text-amber-400">
+          <span aria-hidden className="text-[10px] leading-none text-forest">
             {(grant.kind === "receives" ? "●" : "○").repeat(grant.count)}
           </span>
         );
       })()}
       {cell ? (
-        <span className={cell.result.kind === "strokes" ? "text-lg font-semibold text-slate-100" : "text-sm font-semibold text-amber-300"}>{glyphFor(cell.result)}</span>
+        <span
+          className={
+            gross !== undefined
+              ? `text-lg font-semibold tabular-nums ${underPar(gross, hole.par) ? "text-oxblood" : "text-forest"}`
+              : "text-sm font-semibold text-oxblood"
+          }
+        >
+          {glyphFor(cell.result)}
+        </span>
       ) : (
-        <span className="text-slate-600">–</span>
+        <span className="text-fairway/50">–</span>
       )}
-      {net !== undefined && <span className="text-[10px] leading-none text-slate-400">{net}</span>}
+      {net !== undefined && <span className={`text-[10px] leading-none ${underPar(net, hole.par) ? "text-oxblood" : "text-fairway"}`}>{net}</span>}
     </button>
   );
 }
@@ -130,18 +140,18 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
   const selectedCell = selection && cellAt(state.cells, selection.golferId, selection.hole);
 
   return (
-    <section className="flex flex-col gap-2 p-2 text-slate-100">
+    <section className={`${cardBox} flex flex-col gap-2 p-2 text-forest`}>
       <div className="overflow-x-auto">
         <table className="w-full border-separate border-spacing-1">
           <thead>
             {/* Sticky player header (brief) — column identity stays visible while scrolling
                 a long 18-hole card. */}
-            <tr className="sticky top-0 z-10 bg-slate-950">
-              <th scope="col" className="sticky left-0 z-20 bg-slate-950 px-2 text-left text-xs font-medium text-slate-400">
+            <tr className="sticky top-0 z-10 bg-forest">
+              <th scope="col" className="sticky left-0 z-20 bg-forest px-2 text-left font-mono text-[10px] tracking-wide text-cream uppercase">
                 Hole
               </th>
               {state.participants.map((p) => (
-                <th key={p.golferId} scope="col" className="min-w-14 px-1 text-xs font-medium text-slate-300">
+                <th key={p.golferId} scope="col" className="min-w-14 px-1 text-sm font-bold text-cream">
                   {p.name}
                 </th>
               ))}
@@ -152,9 +162,9 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
               const isCurrent = hole.number === current;
               const yardage = yardageLabel(state.card, state.participants, hole.number);
               return (
-                <tr key={hole.number} aria-label={`Hole ${hole.number}`} aria-current={isCurrent ? "true" : undefined} className={isCurrent ? "bg-emerald-950" : undefined}>
-                  <th scope="row" className="sticky left-0 z-10 bg-inherit px-2 text-left text-xs text-slate-400">
-                    <div className="font-semibold text-slate-200">{hole.number}</div>
+                <tr key={hole.number} aria-label={`Hole ${hole.number}`} aria-current={isCurrent ? "true" : undefined} className={isCurrent ? "bg-goldwash" : undefined}>
+                  <th scope="row" className="sticky left-0 z-10 bg-inherit px-2 text-left font-mono text-xs text-fairway">
+                    <div className="font-semibold">{hole.number}</div>
                     <div>
                       Par {hole.par} · SI {hole.strokeIndex}
                       {yardage && ` · ${yardage}y`}

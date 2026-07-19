@@ -5,6 +5,7 @@ import { allowancePhrase, gameId, gameKindBlurb, gameKindFits, gameKindLabel, go
 import type { CourseCard, GameConfig, GolferId, Participant } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";
+import { btnPrimary, cardBox, inputBox } from "../ui/classes";
 import { strokesSummary } from "./dots";
 
 type Kind = GameConfig["kind"];
@@ -108,11 +109,7 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
   const selectPlayer = (label: string, value: GolferId | undefined, onChange: (id: GolferId | undefined) => void) => (
     <label className="flex flex-col gap-1">
       {label}
-      <select
-        value={value ?? ""}
-        onChange={(event) => onChange(event.target.value ? golferId(event.target.value) : undefined)}
-        className="rounded-lg bg-slate-700 p-2"
-      >
+      <select value={value ?? ""} onChange={(event) => onChange(event.target.value ? golferId(event.target.value) : undefined)} className={inputBox}>
         <option value="">Select…</option>
         {participants.map(playerOption)}
       </select>
@@ -120,24 +117,21 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
   );
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4 rounded-lg bg-slate-900 p-4">
-      <h2 className="text-lg font-semibold">Add game</h2>
+    <form onSubmit={submit} className={`${cardBox} flex flex-col gap-4 p-4`}>
+      <h2 className="text-lg font-semibold text-forest">Add game</h2>
 
       <fieldset className="flex flex-col gap-2">
         <legend className="sr-only">Game</legend>
         {KINDS.map((k) => (
-          <label
-            key={k}
-            className={`flex cursor-pointer flex-col gap-1 rounded-lg border p-3 ${kind === k ? "border-emerald-500 bg-emerald-950" : "border-transparent bg-slate-800"}`}
-          >
+          <label key={k} className={`${cardBox} flex cursor-pointer flex-col gap-1 p-3 ${kind === k ? "ring-2 ring-forest" : ""}`}>
             <span className="flex items-baseline justify-between gap-2">
               <span className="flex items-center gap-2 font-semibold">
                 <input type="radio" name="game-kind" aria-label={gameKindLabel(k)} checked={kind === k} onChange={() => changeKind(k)} className="h-4 w-4" />
                 {gameKindLabel(k)}
               </span>
-              <span className="text-xs text-slate-400">{gameKindFits(k)}</span>
+              <span className="text-xs text-fairway">{gameKindFits(k)}</span>
             </span>
-            <span className="text-sm text-slate-400">{gameKindBlurb(k)}</span>
+            <span className="text-sm text-fairway">{gameKindBlurb(k)}</span>
           </label>
         ))}
       </fieldset>
@@ -145,7 +139,7 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
       {kind === "stroke-play" && (
         <label className="flex flex-col gap-1">
           Scoring
-          <select value={scoring} onChange={(event) => setScoring(event.target.value as "gross" | "net")} className="rounded-lg bg-slate-700 p-2">
+          <select value={scoring} onChange={(event) => setScoring(event.target.value as "gross" | "net")} className={inputBox}>
             <option value="net">Net — with handicap strokes</option>
             <option value="gross">Gross — raw scores</option>
           </select>
@@ -188,26 +182,26 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
       )}
 
       {config && (
-        <div className="flex flex-col gap-1 rounded-lg bg-slate-800 p-3">
+        <div className={`${cardBox} flex flex-col gap-1 p-3`}>
           <span className="flex items-center justify-between">
-            <span className="font-semibold">Strokes</span>
+            <span className="font-semibold text-forest">Strokes</span>
             {!isGrossStrokePlay && (
-              <button type="button" onClick={() => setAdjusting((current) => !current)} className="text-sm text-emerald-400 underline">
+              <button type="button" onClick={() => setAdjusting((current) => !current)} className="text-sm text-forest underline decoration-gold decoration-2">
                 Adjust
               </button>
             )}
           </span>
           {isGrossStrokePlay ? (
-            <span className="text-sm text-slate-400">{strokePlayTreatment("gross")}</span>
+            <span className="text-sm text-fairway">{strokePlayTreatment("gross")}</span>
           ) : (
             <>
-              <span className="text-sm text-slate-400">{allowancePhrase(kind, allowance)}</span>
-              {preview && <span className="text-sm">{preview}</span>}
-              {strokesNote(kind) && <span className="text-sm text-slate-400">{strokesNote(kind)}</span>}
+              <span className="text-sm text-fairway">{allowancePhrase(kind, allowance)}</span>
+              {preview && <span className="text-sm text-forest">{preview}</span>}
+              {strokesNote(kind) && <span className="text-sm text-fairway">{strokesNote(kind)}</span>}
             </>
           )}
           {!isGrossStrokePlay && adjusting && (
-            <label className="flex flex-col gap-1 text-sm">
+            <label className="flex flex-col gap-1 text-sm text-forest">
               Handicap %
               <input
                 type="number"
@@ -216,7 +210,7 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
                 step="any"
                 value={Math.round(allowance * 1000) / 10}
                 onChange={(event) => setAllowance(Number(event.target.value) / 100)}
-                className="rounded-lg bg-slate-700 p-2"
+                className={inputBox}
               />
             </label>
           )}
@@ -224,12 +218,12 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
       )}
 
       {error && (
-        <p role="alert" className="text-red-400">
+        <p role="alert" className="text-oxblood">
           {error}
         </p>
       )}
 
-      <button type="submit" disabled={!config || submitting} className="rounded-lg bg-emerald-600 px-4 py-4 text-lg font-semibold disabled:opacity-50">
+      <button type="submit" disabled={!config || submitting} className={`${btnPrimary} disabled:opacity-50`}>
         Add game
       </button>
     </form>

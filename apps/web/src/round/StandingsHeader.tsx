@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { GameId, GameState, RoundState } from "@swng/domain";
 import { describeGame } from "../games/describeGame";
 import { GamePanel } from "../games/GamePanel";
+import { badge, btnDangerSolid, btnSecondary } from "../ui/classes";
 
 export interface StandingsHeaderProps {
   readonly state: RoundState;
@@ -67,16 +68,13 @@ export function StandingsHeader({ state, games, onTerminate }: StandingsHeaderPr
               type="button"
               aria-expanded={expanded}
               onClick={() => setExpandedGameId(expanded ? undefined : game.id)}
-              className={`flex min-h-14 shrink-0 flex-col items-start justify-center gap-0.5 rounded-lg px-3 py-1 text-left whitespace-nowrap ${
-                // Color alone can't carry "which chip is open" (color-blind / grayscale
-                // readability) — the border + weight are the non-color cue; border-transparent
-                // (not border-0) keeps the collapsed chip's box the same size as the open one.
-                expanded ? "border-2 border-current bg-emerald-700 font-semibold text-slate-50" : "border border-transparent bg-slate-800 text-slate-300"
+              className={`flex min-h-14 shrink-0 flex-col items-start justify-center gap-0.5 border border-forest px-3 py-1 text-left whitespace-nowrap ${
+                expanded ? "bg-forest font-semibold text-cream" : "bg-transparent text-forest"
               }`}
             >
               <span className="text-[10px] font-semibold uppercase tracking-wide opacity-80">
                 {title}
-                {terminated && <span className="ml-1 rounded bg-slate-600 px-1 py-0.5 text-slate-200 normal-case">Ended</span>}
+                {terminated && <span className={`ml-1 ${badge}`}>Ended</span>}
               </span>
               <span className="flex items-center gap-1 text-sm font-medium">
                 {line}
@@ -94,26 +92,16 @@ export function StandingsHeader({ state, games, onTerminate }: StandingsHeaderPr
       )}
 
       {confirmingId && confirmingTitle && (
-        <div role="dialog" aria-label={`End ${confirmingTitle}`} className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 rounded-t-2xl bg-slate-900 p-4 shadow-2xl">
-          <p className="text-sm text-slate-300">End {confirmingTitle}? It stops scoring for this game — it won&apos;t be included in the final results.</p>
-          <button
-            type="button"
-            onClick={() => void confirmTerminate()}
-            disabled={busy}
-            className="min-h-14 rounded-lg bg-red-800 px-4 text-base font-semibold text-slate-100 disabled:opacity-50"
-          >
+        <div role="dialog" aria-label={`End ${confirmingTitle}`} className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 border-t-2 border-forest bg-card p-4 shadow-2xl">
+          <p className="text-sm text-fairway">End {confirmingTitle}? It stops scoring for this game — it won&apos;t be included in the final results.</p>
+          <button type="button" onClick={() => void confirmTerminate()} disabled={busy} className={`${btnDangerSolid} min-h-14 disabled:opacity-50`}>
             {busy ? "Ending…" : "End game"}
           </button>
-          <button
-            type="button"
-            onClick={() => setConfirmingId(undefined)}
-            disabled={busy}
-            className="min-h-14 rounded-lg bg-slate-800 px-4 text-base font-medium text-slate-300 disabled:opacity-50"
-          >
+          <button type="button" onClick={() => setConfirmingId(undefined)} disabled={busy} className={`${btnSecondary} min-h-14 disabled:opacity-50`}>
             Cancel
           </button>
           {error && (
-            <p role="alert" className="text-red-400">
+            <p role="alert" className="text-oxblood">
               {error}
             </p>
           )}

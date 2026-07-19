@@ -113,8 +113,12 @@ describe("RoundPage", () => {
     await waitFor(() => expect(screen.getByText("ABC123")).toBeTruthy()); // SetupPanel's join code banner
     expect(screen.queryByRole("status")).toBeNull();
     // "Ann" alone is ambiguous (also a checkbox label in the Add Game form's players list) —
-    // the roster line's fuller text disambiguates.
-    expect(screen.getByText(/Ann.*white.*CH 8/)).toBeTruthy();
+    // the roster line's fuller text disambiguates. The roster row nests "tee — CH X" in its own
+    // mono span (brand reskin), so getByText's direct-text-only matching can no longer see the
+    // full string on one element — locate the <li> and assert its whole textContent instead,
+    // the same parent-level oracle SetupPanel.test.tsx already uses directly.
+    const rosterRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    expect(rosterRow?.textContent).toMatch(/Ann.*white.*CH 8/);
     // M9 Task 3 (share): the live view carries its own "Share round" affordance, wired to
     // THIS device's own participant token (credentialStore.save above).
     expect(screen.getByRole("button", { name: "Share round" })).toBeTruthy();

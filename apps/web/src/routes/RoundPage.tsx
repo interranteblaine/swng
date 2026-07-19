@@ -15,6 +15,7 @@ import { StandingsHeader } from "../round/StandingsHeader";
 import { StatusChrome } from "../round/StatusChrome";
 import { useRoundSession as defaultUseRoundSession } from "../session/useRoundSession";
 import type { RoundSessionView } from "../session/useRoundSession";
+import { btnDanger, btnDangerSolid, btnPrimary, btnSecondary } from "../ui/classes";
 
 type UseRoundSession = (roundId: RoundId) => RoundSessionView;
 
@@ -84,56 +85,41 @@ function FinalizeControl({ state, games, onFinalize, onTerminate }: FinalizeCont
           setError(undefined);
           setConfirming(true);
         }}
-        className="min-h-14 w-full rounded-lg bg-red-900 px-4 text-base font-semibold text-slate-100 active:bg-red-800"
+        className={`${btnDanger} min-h-14 w-full`}
       >
         Finalize round
       </button>
 
       {confirming && (
-        <div role="dialog" aria-label="Confirm finalize" className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 rounded-t-2xl bg-slate-900 p-4 shadow-2xl">
+        <div role="dialog" aria-label="Confirm finalize" className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 border-t-2 border-forest bg-card p-4 shadow-2xl">
           {unresolved.length === 0 ? (
             <>
-              <p className="text-sm text-slate-300">Finalize the round? This locks in every score — no more edits.</p>
-              <button
-                type="button"
-                onClick={() => void finalizeNow()}
-                disabled={busy}
-                className="min-h-14 rounded-lg bg-red-800 px-4 text-base font-semibold text-slate-100 disabled:opacity-50"
-              >
+              <p className="text-sm text-fairway">Finalize the round? This locks in every score — no more edits.</p>
+              <button type="button" onClick={() => void finalizeNow()} disabled={busy} className={`${btnPrimary} min-h-14 disabled:opacity-50`}>
                 {busy ? "Finalizing…" : "Finalize"}
               </button>
             </>
           ) : (
             <>
-              <p className="text-sm text-slate-300">Some games aren&apos;t finished:</p>
-              <ul className="flex flex-col gap-1 text-sm text-slate-200">
+              <p className="text-sm text-fairway">Some games aren&apos;t finished:</p>
+              <ul className="flex flex-col gap-1 text-sm text-forest">
                 {unresolved.map((game) => (
                   <li key={game.gameId}>
                     {game.title} — {game.missing}
                   </li>
                 ))}
               </ul>
-              <p className="text-sm text-slate-400">Ending them stops their scoring — they won&apos;t appear in the final results.</p>
-              <button
-                type="button"
-                onClick={() => void endUnfinishedAndFinalize()}
-                disabled={busy}
-                className="min-h-14 rounded-lg bg-red-800 px-4 text-base font-semibold text-slate-100 disabled:opacity-50"
-              >
+              <p className="text-sm text-fairway">Ending them stops their scoring — they won&apos;t appear in the final results.</p>
+              <button type="button" onClick={() => void endUnfinishedAndFinalize()} disabled={busy} className={`${btnDangerSolid} min-h-14 disabled:opacity-50`}>
                 {busy ? "Finalizing…" : "End unfinished games & finalize"}
               </button>
             </>
           )}
-          <button
-            type="button"
-            onClick={() => setConfirming(false)}
-            disabled={busy}
-            className="min-h-14 rounded-lg bg-slate-800 px-4 text-base font-medium text-slate-300 disabled:opacity-50"
-          >
+          <button type="button" onClick={() => setConfirming(false)} disabled={busy} className={`${btnSecondary} min-h-14 disabled:opacity-50`}>
             Cancel
           </button>
           {error && (
-            <p role="alert" className="text-red-400">
+            <p role="alert" className="text-oxblood">
               {error}
             </p>
           )}
@@ -176,34 +162,22 @@ function ScrapControl({ onAbandon }: { readonly onAbandon: () => Promise<void> }
           setError(undefined);
           setConfirming(true);
         }}
-        className="min-h-12 w-full rounded-lg bg-slate-900 px-4 text-sm font-medium text-slate-500 active:bg-slate-800"
+        className="min-h-12 w-full px-4 text-sm font-medium text-fairway/70"
       >
         Scrap this round
       </button>
 
       {confirming && (
-        <div role="dialog" aria-label="Confirm scrap" className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 rounded-t-2xl bg-slate-900 p-4 shadow-2xl">
-          <p className="text-sm text-slate-300">
-            Scrap this round? It counts nowhere — no results, no handicap posting — and this can&apos;t be undone.
-          </p>
-          <button
-            type="button"
-            onClick={() => void scrapNow()}
-            disabled={busy}
-            className="min-h-14 rounded-lg bg-red-800 px-4 text-base font-semibold text-slate-100 disabled:opacity-50"
-          >
+        <div role="dialog" aria-label="Confirm scrap" className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 border-t-2 border-forest bg-card p-4 shadow-2xl">
+          <p className="text-sm text-fairway">Scrap this round? It counts nowhere — no results, no handicap posting — and this can&apos;t be undone.</p>
+          <button type="button" onClick={() => void scrapNow()} disabled={busy} className={`${btnDanger} min-h-14 disabled:opacity-50`}>
             {busy ? "Scrapping…" : "Scrap round"}
           </button>
-          <button
-            type="button"
-            onClick={() => setConfirming(false)}
-            disabled={busy}
-            className="min-h-14 rounded-lg bg-slate-800 px-4 text-base font-medium text-slate-300 disabled:opacity-50"
-          >
+          <button type="button" onClick={() => setConfirming(false)} disabled={busy} className={`${btnSecondary} min-h-14 disabled:opacity-50`}>
             Cancel
           </button>
           {error && (
-            <p role="alert" className="text-red-400">
+            <p role="alert" className="text-oxblood">
               {error}
             </p>
           )}
@@ -247,34 +221,24 @@ function LeaveControl({ onLeave }: { readonly onLeave: () => Promise<void> }) {
           setError(undefined);
           setConfirming(true);
         }}
-        className="min-h-12 w-full rounded-lg bg-slate-900 px-4 text-sm font-medium text-slate-500 active:bg-slate-800"
+        className="min-h-12 w-full px-4 text-sm font-medium text-fairway/70"
       >
         Leave round
       </button>
 
       {confirming && (
-        <div role="dialog" aria-label="Confirm leave" className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 rounded-t-2xl bg-slate-900 p-4 shadow-2xl">
-          <p className="text-sm text-slate-300">
+        <div role="dialog" aria-label="Confirm leave" className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 border-t-2 border-forest bg-card p-4 shadow-2xl">
+          <p className="text-sm text-fairway">
             Leave this round? Your scored holes stay in the game — you just stop scoring. You can rejoin anytime with the round code.
           </p>
-          <button
-            type="button"
-            onClick={() => void leaveNow()}
-            disabled={busy}
-            className="min-h-14 rounded-lg bg-slate-700 px-4 text-base font-semibold text-slate-100 disabled:opacity-50"
-          >
+          <button type="button" onClick={() => void leaveNow()} disabled={busy} className="min-h-14 bg-fairway px-4 text-base font-semibold text-cream disabled:opacity-50">
             {busy ? "Leaving…" : "Leave"}
           </button>
-          <button
-            type="button"
-            onClick={() => setConfirming(false)}
-            disabled={busy}
-            className="min-h-14 rounded-lg bg-slate-800 px-4 text-base font-medium text-slate-300 disabled:opacity-50"
-          >
+          <button type="button" onClick={() => setConfirming(false)} disabled={busy} className={`${btnSecondary} min-h-14 disabled:opacity-50`}>
             Cancel
           </button>
           {error && (
-            <p role="alert" className="text-red-400">
+            <p role="alert" className="text-oxblood">
               {error}
             </p>
           )}
@@ -290,9 +254,9 @@ function LeaveControl({ onLeave }: { readonly onLeave: () => Promise<void> }) {
 // WS/pull (same "status comes from the folded log, not local memory" contract as the final path).
 function ScrappedRound() {
   return (
-    <div role="status" className="flex min-h-screen flex-col items-center justify-center gap-2 p-6 text-center text-slate-100">
-      <p className="text-lg font-semibold">This round was scrapped.</p>
-      <p className="max-w-sm text-sm text-slate-400">It counts nowhere — no results, no handicap posting. Start a new round to play again.</p>
+    <div role="status" className="flex min-h-screen flex-col items-center justify-center gap-2 p-6 text-center">
+      <p className="text-lg font-semibold text-forest">This round was scrapped.</p>
+      <p className="max-w-sm text-sm text-fairway">It counts nowhere — no results, no handicap posting. Start a new round to play again.</p>
     </div>
   );
 }
@@ -418,7 +382,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     // `session.state` to RoundState, not RoundState | undefined, below.
     if (!session.hydrated || !session.state) {
       return (
-        <div role="status" aria-label="Loading round" className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
+        <div role="status" aria-label="Loading round" className="flex min-h-screen items-center justify-center bg-cream">
           Loading round…
         </div>
       );
@@ -434,14 +398,14 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     // badge would be meaningless noise over a round that counts nowhere).
     if (isAbandoned) {
       return (
-        <main className="min-h-screen bg-slate-950">
+        <main className="min-h-screen bg-cream">
           <ScrappedRound />
         </main>
       );
     }
 
     return (
-      <main className="min-h-screen bg-slate-950">
+      <main className="min-h-screen bg-cream">
         <StatusChrome
           connected={session.connected}
           pending={session.pending}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowancePhrase, gameKindBlurb, gameKindFits, gameKindLabel, strokePlayTreatment, strokesNote } from "./present.js";
+import { allowancePhrase, gameKindBlurb, gameKindFits, gameKindLabel, strokePlayTreatment, strokesNote, underPar } from "./present.js";
 
 describe("gameKindLabel", () => {
   it("names every kind in golf's own plainest terms", () => {
@@ -67,5 +67,13 @@ describe("strokesNote", () => {
     expect(strokesNote("stroke-play")).toBeUndefined();
     expect(strokesNote("stableford")).toBeUndefined();
     expect(strokesNote("skins")).toBeUndefined();
+  });
+});
+
+describe("underPar", () => {
+  it("underPar is golf's red-numbers convention: strictly below par", () => {
+    expect(underPar(3, 4)).toBe(true);
+    expect(underPar(4, 4)).toBe(false);
+    expect(underPar(5, 4)).toBe(false);
   });
 });

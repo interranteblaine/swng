@@ -45,28 +45,28 @@ export function StatusChrome({ connected, pending, rejected, participants, onRec
   }, [rejected.length]);
 
   return (
-    <div className="flex flex-col gap-2 p-3 text-slate-100">
+    <div className="flex flex-col gap-2 p-3">
       {!connected && (
-        <div role="status" className="flex items-center justify-between gap-2 rounded-md bg-amber-950 px-3 py-2 text-sm text-amber-200">
+        <div role="status" className="flex items-center justify-between gap-2 border border-gold bg-goldwash px-3 py-2 text-sm text-forest">
           <p>Offline — scores queue and sync when signal returns.</p>
-          <button type="button" onClick={onReconnect} className="min-h-8 shrink-0 rounded-md bg-amber-900 px-2 text-xs font-medium">
+          <button type="button" onClick={onReconnect} className="min-h-8 shrink-0 border border-forest px-2 text-xs font-medium text-forest">
             Sync now
           </button>
         </div>
       )}
 
       {pending > 0 && (
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-fairway">
           {pending} score{pending === 1 ? "" : "s"} syncing…
         </p>
       )}
 
       {rejected.length > 0 && !toastDismissed && (
-        <div role="alert" className="flex items-center justify-between gap-2 rounded-md bg-red-950 px-3 py-2 text-sm text-red-200">
+        <div role="alert" className="flex items-center justify-between gap-2 border border-oxblood bg-card px-3 py-2 text-sm text-oxblood">
           <span>
             {rejected.length} score{rejected.length === 1 ? "" : "s"} couldn&apos;t be saved.
           </span>
-          <button type="button" onClick={() => setToastDismissed(true)} className="min-h-8 rounded-md bg-red-900 px-2 text-xs font-medium">
+          <button type="button" onClick={() => setToastDismissed(true)} className="min-h-8 border border-oxblood px-2 text-xs font-medium text-oxblood">
             Dismiss
           </button>
         </div>
@@ -75,7 +75,7 @@ export function StatusChrome({ connected, pending, rejected, participants, onRec
       {rejected.length > 0 && (
         <ul className="flex flex-col gap-1">
           {rejected.map((r) => (
-            <li key={r.event.opId} className="text-xs text-red-300">
+            <li key={r.event.opId} className="text-xs text-oxblood">
               {describeRejection(participants, r)} — {r.code}
             </li>
           ))}

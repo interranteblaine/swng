@@ -36,16 +36,16 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
   const handicapping = response?.handicapping ?? deriveHandicapping(state);
 
   return (
-    <section className="flex flex-col gap-6 p-4 text-slate-100">
-      <h1 className="text-xl font-bold">Final results</h1>
+    <section className="flex flex-col gap-6 p-4">
+      <h1 className="text-xl font-bold text-forest">Final results</h1>
 
       {shareToken && <ShareButton roundId={state.id} token={shareToken} />}
 
       <div>
-        <h2 className="text-lg font-semibold">Roster</h2>
+        <h2 className="text-lg font-semibold text-forest">Roster</h2>
         <ul className="flex flex-col gap-2">
           {state.participants.map((p) => (
-            <li key={p.golferId} className="flex items-center gap-2">
+            <li key={p.golferId} className="flex items-center gap-2 text-forest">
               <span>{p.name}</span>
             </li>
           ))}
@@ -53,12 +53,12 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
       </div>
 
       <div>
-        <h2 className="text-lg font-semibold">Posted to handicaps</h2>
+        <h2 className="text-lg font-semibold text-forest">Posted to handicaps</h2>
         <ul className="flex flex-col gap-1">
           {handicapping.map((row) => {
             const name = state.participants.find((p) => p.golferId === row.golferId)?.name ?? row.golferId;
             return (
-              <li key={row.golferId} className="text-sm text-slate-300">
+              <li key={row.golferId} className="text-sm text-fairway">
                 {row.kind === "complete"
                   ? `${name} — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`
                   : row.kind === "unrated"
@@ -71,7 +71,7 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
       </div>
 
       <div>
-        <h2 className="text-lg font-semibold">Final card</h2>
+        <h2 className="text-lg font-semibold text-forest">Final card</h2>
         {/* No onTerminate: an archived round is never live, so StandingsHeader's own panels
             render with no End affordance — same reuse contract as before, minus the
             activeGameId/onSelect wiring the game-agnostic card (Task 3) made unnecessary. */}

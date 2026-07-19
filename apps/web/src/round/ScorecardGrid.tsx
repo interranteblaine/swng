@@ -121,6 +121,10 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
 
   const selectedParticipant = selection && state.participants.find((p) => p.golferId === selection.golferId);
   const selectedHole = selection && holes.find((h) => h.number === selection.hole);
+  // The tapped cell's current result (if any) — read the same way every other cell is (cellAt,
+  // never a raw state.cells[...] index), so ScorePad can show `Clear score` only when there's
+  // actually something to clear.
+  const selectedCell = selection && cellAt(state.cells, selection.golferId, selection.hole);
 
   return (
     <section className="flex flex-col gap-2 p-2 text-slate-100">
@@ -176,6 +180,7 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
         <ScorePad
           golfer={selectedParticipant}
           hole={selectedHole}
+          current={selectedCell?.result}
           onSubmit={(result) => {
             recordScore(selection.golferId, selection.hole, result);
             setSelection(undefined); // closes on post — no confirm step (the two-tap contract)

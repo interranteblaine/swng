@@ -255,6 +255,32 @@ describe("ScorecardGrid — cleared cells", () => {
   });
 });
 
+// Wiring proof for the pad's `current` prop (ScorePad.test.tsx pins the button's own
+// presence/behavior in isolation) — this is the ONE call site that reads the tapped cell's
+// result via cellAt and threads it through, so the button shows up live off real grid state.
+describe("ScorecardGrid — Clear score", () => {
+  it("tapping an already-scored cell opens a pad with Clear score; posting it fires recordScore with { kind: 'cleared' }", () => {
+    const recordScore = vi.fn<(golferId: GolferId, hole: number, result: HoleResult) => void>();
+    const state = twoPlayerState({ cells: { [cellKey(ANN, 1)]: scoreCell({ kind: "strokes", strokes: 6 }, ANN) } });
+    render(<ScorecardGrid state={state} recordScore={recordScore} />);
+
+    fireEvent.click(cellButton("Ann", 1));
+    fireEvent.click(screen.getByRole("button", { name: "Clear score" }));
+
+    expect(recordScore).toHaveBeenCalledWith(ANN, 1, { kind: "cleared" });
+    expect(screen.queryByRole("dialog")).toBeNull(); // closes on post, same as any other tap
+  });
+
+  it("tapping an unscored cell opens a pad with no Clear score button", () => {
+    const recordScore = vi.fn();
+    render(<ScorecardGrid state={twoPlayerState()} recordScore={recordScore} />);
+
+    fireEvent.click(cellButton("Bo", 1));
+
+    expect(screen.queryByRole("button", { name: "Clear score" })).toBeNull();
+  });
+});
+
 describe("ScorecardGrid — current hole", () => {
   it("highlights the first hole where not every participant has a cell", () => {
     const state = twoPlayerState({

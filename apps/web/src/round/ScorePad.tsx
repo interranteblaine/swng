@@ -17,6 +17,10 @@ export const orderedStrokeValues = (par: number): readonly number[] => {
 export interface ScorePadProps {
   readonly golfer: Participant;
   readonly hole: Hole;
+  // The tapped cell's current result, if any (round/state.ts's cellAt — never a raw
+  // state.cells[...] read at the call site). Gates the `Clear score` button below: undefined
+  // (an unscored cell) means there's nothing to clear, so the button doesn't render at all.
+  readonly current?: HoleResult;
   readonly onSubmit: (result: HoleResult) => void;
   readonly onCancel: () => void;
 }
@@ -24,7 +28,7 @@ export interface ScorePadProps {
 // The two-tap bottom sheet (product.md §9): every button here posts and closes in one tap —
 // there is no separate confirm step. `Clear selection` is the only button that does NOT call
 // onSubmit — it exists purely to back out without posting anything.
-export function ScorePad({ golfer, hole, onSubmit, onCancel }: ScorePadProps) {
+export function ScorePad({ golfer, hole, current, onSubmit, onCancel }: ScorePadProps) {
   const values = orderedStrokeValues(hole.par);
 
   const buttonClass = "min-h-14 min-w-14 rounded-lg bg-slate-700 px-3 text-lg font-semibold text-slate-100 active:bg-emerald-600";
@@ -46,6 +50,11 @@ export function ScorePad({ golfer, hole, onSubmit, onCancel }: ScorePadProps) {
         <button type="button" className={`${buttonClass} min-w-20 text-base`} onClick={() => onSubmit({ kind: "conceded" })}>
           Conceded
         </button>
+        {current !== undefined && (
+          <button type="button" className={`${buttonClass} min-w-20 text-base`} onClick={() => onSubmit({ kind: "cleared" })}>
+            Clear score
+          </button>
+        )}
       </div>
       <button type="button" className="min-h-14 rounded-lg bg-slate-800 px-3 text-base font-medium text-slate-300" onClick={onCancel}>
         Clear selection

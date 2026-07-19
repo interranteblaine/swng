@@ -95,3 +95,33 @@ describe("ScorePad", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 });
+
+// A mis-tap is removable: `Clear score` posts { kind: "cleared" } — a real event through the
+// same onSubmit path as any other tap, folded/rendered as unscored everywhere (round/state.ts's
+// cellAt). Distinct from `Clear selection` above, which backs out of the pad without posting
+// anything at all.
+describe("ScorePad — Clear score", () => {
+  it("shows a Clear score button when the cell currently holds a result", () => {
+    const current: HoleResult = { kind: "strokes", strokes: 5 };
+    render(<ScorePad golfer={ANN} hole={HOLE_PAR4} current={current} onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Clear score" })).toBeTruthy();
+  });
+
+  it("an unscored cell's pad (no current result) has no Clear score button", () => {
+    render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "Clear score" })).toBeNull();
+  });
+
+  it("tapping Clear score posts { kind: 'cleared' }", () => {
+    const onSubmit = vi.fn<(result: HoleResult) => void>();
+    const current: HoleResult = { kind: "picked-up" };
+    render(<ScorePad golfer={ANN} hole={HOLE_PAR4} current={current} onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear score" }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith({ kind: "cleared" });
+  });
+});

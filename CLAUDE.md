@@ -661,6 +661,56 @@ and lone-WHS-marker tests) → this docs sweep. Minor visual note: the shipped c
 sparkline without y-axis tick labels (the ASCII mockup had them) — the trend direction + current
 values read clearly, accepted. On local `main`, never pushed.
 
+Games are legible — the model teaches, the UI shows (post-record-redesign, 2026-07-19, spec
+`docs/superpowers/specs/2026-07-18-games-legibility-design.md`, plan
+`2026-07-18-games-legibility.md`, 7 SDD tasks + 2 review fixes, commits `e8bbad8..8b06dab`):
+the owner's problem — games were jargony, unviewable, and opaque to new players, in rounds and
+crews — closed by ONE principle: **each game's human meaning (name, one-line rules, fits,
+handicap convention) is domain truth in one tested module, and every surface renders through
+it** (`scoring/present.ts`: `gameKindLabel`/`gameKindBlurb`/`gameKindFits`/`allowancePhrase` —
+the `handicap/present.ts` precedent; renames presentation-only, wire kinds unchanged: "Match
+play", "Four-ball"). The engines expose the per-hole trails their walks already computed, on
+**live GameState ONLY** (`MatchHole` in `"a"/"b"` side vocabulary for both match kinds;
+`SkinsHole {hole, winner?, pot}` with absent-winner = carried) — `resultOf` builds settled
+results from named fields so **the settled wire is byte-unchanged** (lean-wire tests pin it;
+zero contracts edits; old snapshots parse and settle exactly as before). The add-game form
+teaches: a radio-card picker (label + fits + blurb), plain who's-in ("Who's playing?", "Team
+1/2" — Player A/Side-A schema-speak deleted), and a **strokes preview replacing the raw
+allowance decimal** ("Full handicap (standard)" + "Pat 5 dots · Sam gives 1" via one shared
+`strokesSummary`; "Adjust" reveals a percent input; match play gets "uses the difference —
+only the higher handicap gets strokes"; skins gains a client-side 2-player floor). Viewing:
+**tapping the ACTIVE chip opens that game's sheet** (visible `›` cue; chips stay the glance
+layer) — full standings for EVERY player (not just leaders), Stableford's decoder ring, dormie
+glossed in plain words ("Alex must win every remaining hole to tie"), the match trail as a
+●/·-per-side match-card grid, the skins trail as a story list with carry runs collapsed
+("Holes 2–3 — carried · Hole 4 — Alex takes 3") — and because the sheet lives inside
+`StandingsHeader`, live/results/archived/watch all got it through one integration point,
+trails free on archived views via the local fold. ResultsView posts in plain words ("Posted to
+handicaps — Pat — adjusted score 82 · posts 12.3"); the season ledger names its games
+(`Matches (W–L–H) · Stableford pts · Skins`, a table-scoped footnote, leader-first
+head-to-head sentences "Al leads Bo 5–4 · 2 halved"). **"Are these the right games?" —
+owner-ruled via the spec: yes, the five stay; Nassau is the recorded next game arc (a
+structure over a match with presses, per product.md), Wolf/Vegas/junk v2.** Task reviews
+caught and fixed in-arc: the ledger footnote leaking into empty states (`fe77aa4`), and the
+whole-branch review's fourball "wins"-vs-"win" grammar drift between sheet and chip
+(`8b06dab` — plus the missing fourball sheet test that let it slip). E2E reconciliation was a
+deliberate task (the string-breakage lesson): helpers drive the picker by accessible name,
+verified locator-by-locator against the JSX. Gated: `pnpm validate` green at every commit;
+each task independently reviewed; whole-branch review (0 Critical, the 1 Important fixed);
+close-out controller-run — `deploy:beta` lambda-first (UPDATE_COMPLETE 53.41s; engines
+changed, wire didn't, lockstep) → `publish:web:beta` (bundle `index-CEzbWTSZ.js`, CF
+invalidation) → `e2e:beta` 16/16 ×2 → `e2e:field` **57 passed / 1 documented-skip on the
+FIRST run** (every reconciled locator resolved live) → a controller browser walk on DEPLOYED
+beta.swng.golf via a seeded 4-account live round (chips renamed live; the fourball sheet's
+plural "win" + ●-trail + strokes line; the skins sheet's story summing 4+3+6=13 with
+"Carrying 4 into hole 18"; the picker's five teaching cards; the match-play difference
+preview computed live; console clean, zero CSP violations; round scrapped after). NO data
+wipe (nothing stored changed). Riding as notes: GameSheet duplicates describeGame's
+title-suffix expression; the percent input snaps empty→0; **one owner ruling queued — the
+stroke-play sheet sorts by raw running total (spec §6) which can rank a thru-0 player above
+the real leader mid-round; recommendation: sort by vs-par** (`relativeToPar` is already on
+the line). On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

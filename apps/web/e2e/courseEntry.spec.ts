@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { addSinglesGame, chip, injectAuthTokens, joinRoundDirect, loadWebEnv, mintAccountGolfer, readJoinCode, waitForParticipant } from "./support.js";
+import { addSinglesGame, chip, injectAuthTokens, joinRoundDirect, loadWebEnv, mintAccountGolfer, openGamePanel, readJoinCode, waitForParticipant } from "./support.js";
 import type { AccountGolfer } from "./support.js";
 
 // The M6 gate (docs/implementation-plan.md M6; docs/superpowers/plans/2026-07-09-m6-courses.md
@@ -225,28 +225,50 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     await expect(chip(page, "Match play")).toBeVisible();
   });
 
-  test("7: dots match the hand-verified expectations exactly — Pat ●● on hole 3 (SI 1), ● everywhere else, Quinn none", async () => {
-    // gameStrokeAllocation (packages/domain/src/scoring/allocation.ts): singles-match dots are
-    // relative — chA=21, chB=2, allowance 1 (100%) -> diff = playingHandicap(19, 1) = 19; the
-    // higher-handicap player (Pat) gets dotsByHole(19, whiteTee), the lower (Quinn) gets zero
-    // everywhere. allocateStrokes(19, 18 holes): base = floor(19/18) = 1, extra = 19 % 18 = 1,
-    // so every hole gets 1 and stroke-index 1 (hole 3) gets the 19th, for 2. If this ever
-    // disagrees with what the grid actually renders, that's the plan's own BLOCKED condition —
-    // not something this test may quietly re-derive or relax.
+  test("7: the STANDARD CARD's dots match the hand-verified expectations exactly — each player's own course handicap (Pat 21, Quinn 2), no allowance, no game", async () => {
+    // spec 2026-07-19 §2a: the card never changes — ScorecardGrid always renders
+    // courseHandicapAllocation (packages/domain/src/scoring/allocation.ts), each player's OWN
+    // course handicap allocated by stroke index, no allowance, no game (chip taps no longer
+    // touch the grid). allocateStrokes(21, 18 holes): base = floor(21/18) = 1, extra = 21 % 18 =
+    // 3, so every hole gets 1 dot and the THREE hardest holes (stroke index 1, 2, 3 — holes 3,
+    // 10, 2 respectively on this card) get a 2nd, for 2. allocateStrokes(2, 18 holes): base =
+    // floor(2/18) = 0, extra = 2, so only stroke index 1 and 2 (holes 3 and 10) get a single
+    // dot; every other hole gets 0. If this ever disagrees with what the grid actually renders,
+    // that's the plan's own BLOCKED condition — not something this test may quietly re-derive or
+    // relax.
     const dotsOn = async (golfer: string, hole: number): Promise<number> => {
       const cell = page.getByRole("button", { name: `${golfer} hole ${hole}`, exact: true });
       const text = await cell.innerText();
       return (text.match(new RegExp(DOT, "g")) ?? []).length;
     };
 
+    const PAT_TWO_DOT_HOLES = new Set([2, 3, 10]); // stroke index 3, 1, 2 — CH 21's "extra" holes
+    const QUINN_ONE_DOT_HOLES = new Set([3, 10]); // stroke index 1, 2 — CH 2's "extra" holes
+
     for (let hole = 1; hole <= 18; hole += 1) {
-      const expectedPatDots = hole === 3 ? 2 : 1;
+      const expectedPatDots = PAT_TWO_DOT_HOLES.has(hole) ? 2 : 1;
+      const expectedQuinnDots = QUINN_ONE_DOT_HOLES.has(hole) ? 1 : 0;
       expect(await dotsOn("Pat", hole), `Pat hole ${hole}`).toBe(expectedPatDots);
-      expect(await dotsOn("Quinn", hole), `Quinn hole ${hole}`).toBe(0);
+      expect(await dotsOn("Quinn", hole), `Quinn hole ${hole}`).toBe(expectedQuinnDots);
     }
   });
 
-  test("8: scoring hole 1 two-tap renders net = gross - dots (Pat 5 on a 1-dot hole nets 4)", async () => {
+  test("8: the Match play PANEL states the singles-difference strokes — relative, not each player's own CH — opened with ONE chip tap", async () => {
+    // gameStrokeAllocation (packages/domain/src/scoring/allocation.ts): singles-match strokes
+    // are RELATIVE, not each player's own course handicap — only the higher-handicap player
+    // receives any, the lower plays scratch. chA (Pat) = 21, chB (Quinn) = 2, allowance 1 (100%,
+    // AddGameForm's own singles-match default) -> diff = playingHandicap(19, 1) = 19. That 19 is
+    // exactly what the panel's own strokes line states (strokesSummary, apps/web/src/round/
+    // dots.ts) — Quinn is omitted entirely (his relative allocation is 0, strokeGrant "none").
+    // This is the arithmetic test 7's own grid dots used to carry when a single active game
+    // drove the whole card; the panel is its new home now, not the grid (spec 2026-07-19
+    // §2a/§2b) — relocated, not deleted. If this ever disagrees with what the panel actually
+    // renders, that's the plan's own BLOCKED condition too.
+    const panel = await openGamePanel(page, "Match play");
+    await expect(panel).toContainText("Pat 19 dots");
+  });
+
+  test("9: scoring hole 1 two-tap renders net = gross - dots (Pat 5 on a 1-dot hole nets 4)", async () => {
     const cell = page.getByRole("button", { name: "Pat hole 1", exact: true });
     await cell.click(); // tap 1
     const dialog = page.getByRole("dialog", { name: "Score for Pat, hole 1", exact: true });

@@ -7,12 +7,14 @@ import {
   addSkinsGame,
   addStablefordGame,
   chip,
+  clearScore,
   correctedScore,
   describeFourballAt,
   describeSkinsAt,
   ensureCourse,
   enterScore,
   expectOrRecover,
+  gameChips,
   injectAuthTokens,
   installWsProxy,
   joinRoundDirect,
@@ -206,13 +208,15 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await addSkinsGame(pageA, PLAYER_NAMES);
     await expect(chip(pageA, "Skins")).toBeVisible();
 
-    // pageA's own tab count is same-context (A added both games itself — its own optimistic
+    // pageA's own chip count is same-context (A added both games itself — its own optimistic
     // fold), so it stays bare. pageB only learns of A's game-adds via WS broadcast —
     // cross-context, WS-dependent, the exact seam expectOrRecover exists for (see support.ts's
     // own doc comment) — so it gets the announced force-close + Sync-now recovery instead of a
     // bare wait that can hang to the suite's 120s test timeout on a silently-lost push.
-    await expect(pageA.getByRole("tab")).toHaveCount(2);
-    await expectOrRecover(pageB, "B sees both game chips (test 3)", () => expect(pageB.getByRole("tab")).toHaveCount(2), bRoute);
+    // gameChips (not a bare getByRole("button")) — chips are plain buttons now (Task 3: no more
+    // tablist), so a bare button role would also match Add game/Sync now/Finalize round etc.
+    await expect(gameChips(pageA)).toHaveCount(2);
+    await expectOrRecover(pageB, "B sees both game chips (test 3)", () => expect(gameChips(pageB)).toHaveCount(2), bRoute);
   });
 
   test("4: A scores holes 1-9 for all four (Cal h9 = 4 as entered); B sees the pre-correction skins snapshot live over WS", async () => {
@@ -231,8 +235,23 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await expectOrRecover(pageB, "B's pre-correction Skins snapshot (step 4)", () => expect(chip(pageB, "Skins")).toContainText(expectedThru9), bRoute);
   });
 
-  test("5: B goes offline; A corrects Cal's h9 to 5; B scores holes 10-12 for all four while dark", async () => {
+  test("5: A clears Cal's mis-tapped h9 (both browsers see the refold), re-enters it correctly; B goes offline; B scores holes 10-12 for all four while dark", async () => {
     test.setTimeout(120_000);
+
+    // The clear-score beat, live: Cal's h9 was mis-tapped as 4 (test 4's "as entered" value) —
+    // A clears it via the pad's own "Clear score" button (ScorePad.tsx: rendered only when the
+    // tapped cell already holds a result), and BOTH contexts refold the skins chip back to the
+    // pre-score line (skins.ts's own "stop at the first gap": with Cal's h9 cell gone, hole 9 is
+    // undecided again, so the standing reads exactly as it did after hole 8 — describeSkinsAt(8,
+    // …) — regardless of what Ann/Bo/Dee's own already-scored h9 cells hold, since the chain
+    // never even looks past the first undecided hole). This must happen BEFORE B goes offline
+    // below — the whole point is that B observes the refold live, over the same WS broadcast a
+    // real golfer would.
+    await clearScore(pageA, "Cal", 9);
+    const preScoreSkins = describeSkinsAt(8, false); // hole 9 no longer decided for anyone — carries from hole 8
+    await expect(chip(pageA, "Skins")).toContainText(preScoreSkins); // A's own optimistic fold, same-page, stays bare
+    await expectOrRecover(pageB, "B sees the cleared-cell skins refold (step 5)", () => expect(chip(pageB, "Skins")).toContainText(preScoreSkins), bRoute);
+
     await contextB.setOffline(true); // blocks B's future push/pull fetches
     await bRoute.current?.close().catch(() => {}); // actually severs B's socket — see beforeAll's own note
     await expect(pageB.getByRole("status").filter({ hasText: "Offline" })).toBeVisible();
@@ -364,28 +383,25 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     const expectedFourballFinal = describeFourballAt(18, true); // "Ann & Bo win 2&1"
     const expectedSkinsFinal = describeSkinsAt(18, true); // "Bo 7 · Dee 8 · 3 carried out"
 
-    // M6 field-test upkeep finding: ResultsView.tsx (M6 Task 5, commit 8d8d1ba) replaced its
-    // own standalone per-game <ul> (the direct sibling of the "Final results" <h1>) with the
-    // SAME StandingsHeader tablist a live round renders — "the archive gets the same
-    // chip-selected active game as a live round" per that commit's own message. There is no
-    // longer any <ul> sibling of the heading at all (only the "Handicap differentials" one,
-    // nested inside a <div>), so the xpath this used to use can never match again — a stale
-    // locator from before that restructuring, not a product bug (the ARIA snapshot of a
-    // failed run showed the tablist rendering the exact right text). Fixed here to read the
-    // SAME tablist `chip()` already reads on a LIVE round (support.ts) — the expected VALUES
-    // below are untouched, still derived from the deck via describeFourballAt/describeSkinsAt.
-    const finalGames = (page: Page) => page.getByRole("tablist", { name: "Games" });
-
+    // ResultsView.tsx renders the archived card through the SAME StandingsHeader a live round
+    // uses ("the archive gets the same card as a live round"). spec 2026-07-19 §2a/§2b dropped
+    // tablist semantics from StandingsHeader entirely — chips are plain disclosure buttons now,
+    // no wrapping "Games" tablist landmark exists to query — so this reads the SAME `chip()`
+    // helper every earlier step in this file already reads on the live round (support.ts). The
+    // expected VALUES are untouched, still derived from the deck via
+    // describeFourballAt/describeSkinsAt.
     for (const page of [pageA, pageB]) {
-      await expect(finalGames(page)).toContainText(expectedFourballFinal);
-      await expect(finalGames(page)).toContainText(expectedSkinsFinal);
+      await expect(chip(page, "Four-ball")).toContainText(expectedFourballFinal);
+      await expect(chip(page, "Skins")).toContainText(expectedSkinsFinal);
     }
 
     // Deep match: B's ResultsView (rendered from a WS-pushed finalize, per Task 6's own
-    // contract) reads byte-identical to A's (rendered from its own finalize response) on the
-    // game-results text.
-    const [textA, textB] = await Promise.all([finalGames(pageA).innerText(), finalGames(pageB).innerText()]);
-    expect(textB).toBe(textA);
+    // contract) reads byte-identical to A's (rendered from its own finalize response) on each
+    // game's own chip text.
+    const [fourballTextA, fourballTextB] = await Promise.all([chip(pageA, "Four-ball").innerText(), chip(pageB, "Four-ball").innerText()]);
+    expect(fourballTextB).toBe(fourballTextA);
+    const [skinsTextA, skinsTextB] = await Promise.all([chip(pageA, "Skins").innerText(), chip(pageB, "Skins").innerText()]);
+    expect(skinsTextB).toBe(skinsTextA);
 
     // The archived card: entry locked, no pad ever opens.
     await expect(pageA.getByRole("button", { name: "Ann hole 1", exact: true })).toBeDisabled();

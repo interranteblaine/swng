@@ -10,7 +10,7 @@ import { CloudFormationClient, ListStackResourcesCommand } from "@aws-sdk/client
 import { AdminCreateUserCommand, AdminSetUserPasswordCommand, CognitoIdentityProviderClient, InitiateAuthCommand } from "@aws-sdk/client-cognito-identity-provider";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { expect, test } from "@playwright/test";
-import type { BrowserContext, Page, WebSocketRoute } from "@playwright/test";
+import type { BrowserContext, Locator, Page, WebSocketRoute } from "@playwright/test";
 import {
   addGameRequestSchema,
   addGameResponseSchema,
@@ -746,6 +746,22 @@ export const enterScore = async (page: Page, golferName: string, hole: number, s
   else await expect(cell).toHaveText(new RegExp(`^\\D*${score}`));
 };
 
+// Clears an already-scored cell via the pad's own "Clear score" button (ScorePad.tsx: rendered
+// ONLY when the tapped cell already holds a result) — the same two-tap shape as enterScore
+// above, backing a score OUT instead of posting one. Afterward the cell reads unscored
+// everywhere (cellAt hides a `cleared` result from every reader, round/state.ts), so the caller
+// asserts whatever "unscored" means for its own surface (an idle cell, a refolded game line).
+export const clearScore = async (page: Page, golferName: string, hole: number): Promise<void> => {
+  const cell = page.getByRole("button", { name: `${golferName} hole ${hole}`, exact: true });
+  await cell.click(); // tap 1
+
+  const dialog = page.getByRole("dialog", { name: `Score for ${golferName}, hole ${hole}`, exact: true });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Clear score", exact: true }).click(); // tap 2
+
+  await expect(dialog).toBeHidden(); // no confirm step, same as a posting tap
+};
+
 // --- Setup: reading the join code, waiting on cross-context participant/game propagation ----
 
 // SetupPanel's own layout: "Join code" label, then the code itself, as adjacent <p>s — no ARIA
@@ -949,8 +965,30 @@ export const addStablefordGame = async (page: Page, names: readonly string[]): P
   await page.getByRole("button", { name: "Add game" }).click();
 };
 
-// StandingsHeader's chip text is the CONCATENATION of two adjacent <span>s (title, line) with
-// no separating whitespace in the DOM — using the computed accessible NAME (which may insert
-// its own separator depending on the browser's accname algorithm) would be a fragile way to
-// assert on it. `.filter({ hasText })` + raw textContent-based matchers sidestep that.
-export const chip = (page: Page, titlePrefix: string) => page.getByRole("tab").filter({ hasText: titlePrefix });
+// spec 2026-07-19 §2a/§2b: StandingsHeader's chips are plain disclosure buttons now (a tap
+// toggles that game's own inline panel; no single chip is ever "the" active one), not tabs — so
+// this reads role="button", not "tab". The chip text is still the CONCATENATION of two adjacent
+// <span>s (title, line) with no separating whitespace in the DOM — using the computed
+// accessible NAME (which may insert its own separator depending on the browser's accname
+// algorithm) would be a fragile way to assert on it. `.filter({ hasText })` + raw
+// textContent-based matchers sidestep that.
+export const chip = (page: Page, titlePrefix: string) => page.getByRole("button").filter({ hasText: titlePrefix });
+
+// Every game chip (StandingsHeader.tsx) carries `aria-expanded` — the ONE attribute that
+// distinguishes it from every other button on a round page (Add game/Sync now/Finalize
+// round/etc. carry none), the same discriminator apps/web/src/watch/WatchPage.test.tsx's own
+// component test already uses (`button.hasAttribute("aria-expanded")`) to tell "a game chip"
+// apart from any other button structurally. Used where a spec needs to count chips rather than
+// name one — a bare `getByRole("button")` would also match every other button on the page.
+export const gameChips = (page: Page): Locator => page.locator("button[aria-expanded]");
+
+// Opens a game's own inline panel via ONE chip tap (StandingsHeader: a tap toggles the panel —
+// no dialog, no tabs, no second tap) and returns its region locator (GamePanel.tsx:
+// role="region", aria-label={`${title} standings`}). The one-tap-panel access pattern every
+// reconciled strokes-line assertion goes through.
+export const openGamePanel = async (page: Page, titlePrefix: string): Promise<Locator> => {
+  await chip(page, titlePrefix).click();
+  const panel = page.getByRole("region", { name: /standings$/ }).filter({ hasText: titlePrefix });
+  await expect(panel).toBeVisible();
+  return panel;
+};

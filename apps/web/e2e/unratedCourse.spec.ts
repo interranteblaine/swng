@@ -12,6 +12,7 @@ import {
   joinRoundDirect,
   loadWebEnv,
   mintAccountGolfer,
+  openGamePanel,
   pollUntil,
   readJoinCode,
   recordScoreDirect,
@@ -68,16 +69,28 @@ const PAR_TOTAL = 36; // = sum of HOLES[*].par — the frozen tee's par, carried
 
 const DOT = "●"; // ScorecardGrid.tsx's own dot glyph (Cell's aria-hidden "●".repeat(dots) span)
 
-// The live round's singles-match dots (Uma ch 13 vs Vic ch 2). gameStrokeAllocation
-// (packages/domain/src/scoring/allocation.ts): singles-match is RELATIVE — the higher-handicap
-// player (Uma) gets dotsByHole(diff), the lower (Vic) plays scratch. diff = playingHandicap(
-// |13 − 2| = 11, allowance 1.0 = 100%) = 11. allocateStrokes(11, 9 holes): base = floor(11/9) =
-// 1, extra = 11 % 9 = 2 → every hole gets 1, and the two hardest holes (stroke index 1 and 2 —
-// holes 2 and 6 in this card) get a 2nd. The missing rating changes NONE of this: dots are pure
-// stroke-index + course-handicap arithmetic. Cross-checked against dotsByHole(11, tee) directly.
 const UMA_CH = 13;
 const VIC_CH = 2;
-const EXPECTED_UMA_DOTS = [1, 2, 1, 1, 1, 2, 1, 1, 1] as const; // holes 1..9
+
+// The STANDARD CARD's dots (spec 2026-07-19 §2a: the card never changes) — ScorecardGrid always
+// renders courseHandicapAllocation (packages/domain/src/scoring/allocation.ts), EACH PLAYER'S
+// OWN course handicap allocated by stroke index, no allowance, no game. allocateStrokes(13, 9
+// holes): base = floor(13/9) = 1, extra = 13 % 9 = 4 → every hole gets 1, and the four hardest
+// holes (stroke index 1-4 — holes 2, 6, 4, 8 in this card) get a 2nd. allocateStrokes(2, 9
+// holes): base = 0, extra = 2 → only stroke index 1 and 2 (holes 2 and 6) get a single dot,
+// everywhere else 0. The missing rating changes NONE of this: dots are pure stroke-index +
+// course-handicap arithmetic. Cross-checked against courseHandicapAllocation(participants,
+// card) directly.
+const EXPECTED_UMA_DOTS = [1, 2, 1, 2, 1, 2, 1, 2, 1] as const; // holes 1..9
+const EXPECTED_VIC_DOTS = [0, 1, 0, 0, 0, 1, 0, 0, 0] as const; // holes 1..9
+
+// The Match play PANEL'S own strokes line (relative, not each player's own CH) — moved here from
+// the grid, which now renders the standard card's dots above instead. gameStrokeAllocation:
+// singles-match is RELATIVE — only the higher-handicap player (Uma) receives any, the lower
+// (Vic) plays scratch. diff = playingHandicap(|13 − 2| = 11, allowance 1.0 = 100%) = 11 — exactly
+// what strokesSummary (apps/web/src/round/dots.ts) states in the panel; Vic is omitted (his
+// relative allocation is 0, strokeGrant "none").
+const EXPECTED_MATCH_STROKES_LINE = "Uma 11 dots";
 
 // The six record-building rounds' hole-by-hole gross scores, oldest-first. Every score is at or
 // below bogey (par + 1) and the AGS course handicap (8) puts every net-double-bogey cap (par + 2
@@ -225,7 +238,7 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     course = await getCourseDirect(httpUrl, courseIdParam);
   });
 
-  test("2: a live round on the unrated tee — its singles-match dots come straight from stroke index + course handicap, and two-tap scoring nets against them", async () => {
+  test("2: a live round on the unrated tee — the standard card's dots come straight from stroke index + course handicap, the Match play panel states the relative strokes, and two-tap scoring nets against the card", async () => {
     // "Start a round here" preselects the course; Uma creates on the unrated white tee (ch 13).
     await page.getByRole("link", { name: "Start a round here", exact: true }).click();
     await expect(page).toHaveURL(/\/create/);
@@ -248,9 +261,11 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     await addSinglesGame(page, "Uma", "Vic");
     await expect(chip(page, "Match play")).toBeVisible();
 
-    // Dots hole-by-hole against the hand-verified relative allocation — the CORE assertion: an
-    // unrated tee allocates dots identically to a rated one (stroke index + course handicap only).
-    // If the grid ever disagrees with EXPECTED_UMA_DOTS, that's the BLOCKED condition, not a
+    // The STANDARD CARD's dots, hole-by-hole against the hand-verified CH allocation — the CORE
+    // assertion: an unrated tee allocates dots identically to a rated one (stroke index + course
+    // handicap only), and the grid renders each player's OWN course handicap now, never the
+    // game's relative one (spec 2026-07-19 §2a — chip taps don't touch the grid). If this ever
+    // disagrees with EXPECTED_UMA_DOTS/EXPECTED_VIC_DOTS, that's the BLOCKED condition, not a
     // pin this test may quietly re-derive.
     const dotsOn = async (golfer: string, hole: number): Promise<number> => {
       const cell = page.getByRole("button", { name: `${golfer} hole ${hole}`, exact: true });
@@ -259,8 +274,14 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     };
     for (let hole = 1; hole <= 9; hole += 1) {
       expect(await dotsOn("Uma", hole), `Uma hole ${hole}`).toBe(EXPECTED_UMA_DOTS[hole - 1]);
-      expect(await dotsOn("Vic", hole), `Vic hole ${hole}`).toBe(0); // the lower handicap plays scratch
+      expect(await dotsOn("Vic", hole), `Vic hole ${hole}`).toBe(EXPECTED_VIC_DOTS[hole - 1]);
     }
+
+    // The "singles-match dots" claim, re-anchored: the RELATIVE allocation (the arithmetic the
+    // grid used to carry) now lives in the Match play panel's own strokes line, opened with ONE
+    // chip tap — not the grid, which just proved it renders the standard card's dots above.
+    const panel = await openGamePanel(page, "Match play");
+    await expect(panel).toContainText(EXPECTED_MATCH_STROKES_LINE);
 
     // Two-tap scoring renders net = gross − dots, exactly as on a rated course. Hole 1 (1 dot):
     // gross 5 → net 4 → "●54". Hole 6 (2 dots): gross 6 → net 4 → "●●64". enterScore itself pins

@@ -54,6 +54,10 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
   const ladder = matchLadder(winners, holeCount);
   const golferFor = (side: "a" | "b") => (side === "a" ? config.a : config.b);
 
+  // The trail is exactly the prefix the ladder consumed (thru): every entry inside it is
+  // defined (the ladder stops at the first undefined), hence the non-null assertion.
+  const holes = cardTeeSet.holes.slice(0, ladder.thru).map((hole, i) => ({ hole: hole.number, winner: winners[i]! }));
+
   return {
     kind: "singles-match",
     id: config.id,
@@ -62,6 +66,7 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
     thru: ladder.thru,
     remaining: ladder.remaining,
     dormie: ladder.dormie,
+    holes,
     ...(ladder.outcome
       ? { outcome: "halved" in ladder.outcome ? ladder.outcome : { winner: golferFor(ladder.outcome.winner), closing: ladder.outcome.closing } }
       : {}),

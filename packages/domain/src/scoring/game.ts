@@ -66,6 +66,15 @@ export type MatchOutcome = { readonly winner: GolferId; readonly closing: string
 // singles-match's MatchOutcome does.
 export type FourballOutcome = { readonly winner: "a" | "b"; readonly closing: string } | { readonly halved: true };
 
+// One decided hole in a match's trail — the "a"/"b" side vocabulary for BOTH match kinds
+// (singles resolves sides to golfers in leader/outcome, but the trail stays sides: views
+// map to names via the frozen config, the describeFourball precedent). Live-GameState
+// only — resultOf builds settled results from named fields, so this never reaches the wire.
+export interface MatchHole {
+  readonly hole: number;
+  readonly winner: "a" | "b" | "halved";
+}
+
 export type GameState =
   | {
       readonly kind: "stroke-play";
@@ -86,6 +95,7 @@ export type GameState =
       readonly thru: number;
       readonly remaining: number;
       readonly dormie: boolean;
+      readonly holes: readonly MatchHole[];
       readonly outcome?: MatchOutcome;
     }
   | {
@@ -104,6 +114,7 @@ export type GameState =
       readonly thru: number;
       readonly remaining: number;
       readonly dormie: boolean;
+      readonly holes: readonly MatchHole[];
       readonly outcome?: FourballOutcome;
     }
   | {

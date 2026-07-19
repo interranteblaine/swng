@@ -53,4 +53,23 @@ describe("singles match — golden cards", () => {
     });
     expect(state).toMatchObject({ outcome: { winner: A, closing: "1 up" } });
   });
+
+  it("exposes the decided hole trail the ladder consumed — and nothing past the closeout", () => {
+    // Same card as the 3&2 test: h1 halve, h2 A, h3 A, h4 halve, h5 A, h6 B, h7 A → closed 3&2.
+    const [state] = playGoldenRound(fixtureLinks, players, [match], {
+      [A]: [5, 5, 3, 6, 4, 4, 5],
+      [B]: [4, 5, 4, 5, 5, 3, 5],
+    });
+    expect(state).toMatchObject({
+      holes: [
+        { hole: 1, winner: "halved" },
+        { hole: 2, winner: "a" },
+        { hole: 3, winner: "a" },
+        { hole: 4, winner: "halved" },
+        { hole: 5, winner: "a" },
+        { hole: 6, winner: "b" },
+        { hole: 7, winner: "a" },
+      ],
+    });
+  });
 });

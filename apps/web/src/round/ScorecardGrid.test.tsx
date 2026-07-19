@@ -114,7 +114,7 @@ describe("ScorecardGrid — dots", () => {
       cells: {},
       terminatedGameIds: new Set(),
     };
-    const activeGame: GameState = { kind: "fourball-match", id: fourball.id, up: 0, thru: 0, remaining: 18, dormie: false };
+    const activeGame: GameState = { kind: "fourball-match", id: fourball.id, up: 0, thru: 0, remaining: 18, dormie: false, holes: [] };
 
     render(<ScorecardGrid state={state} activeGame={activeGame} recordScore={vi.fn()} />);
 
@@ -146,7 +146,7 @@ describe("ScorecardGrid — dots", () => {
       cells: { [cellKey(players[0]!.golferId, 2)]: scoreCell({ kind: "strokes", strokes: 5 }, players[0]!.golferId) },
       terminatedGameIds: new Set(),
     };
-    const activeGame: GameState = { kind: "fourball-match", id: fourball.id, up: 0, thru: 0, remaining: 18, dormie: false };
+    const activeGame: GameState = { kind: "fourball-match", id: fourball.id, up: 0, thru: 0, remaining: 18, dormie: false, holes: [] };
 
     render(<ScorecardGrid state={state} activeGame={activeGame} recordScore={vi.fn()} />);
 
@@ -204,7 +204,7 @@ describe("ScorecardGrid — dots", () => {
       cells: {},
       terminatedGameIds: new Set(),
     };
-    const activeGame: GameState = { kind: "singles-match", id: singles.id, up: 0, thru: 0, remaining: 18, dormie: false };
+    const activeGame: GameState = { kind: "singles-match", id: singles.id, up: 0, thru: 0, remaining: 18, dormie: false, holes: [] };
 
     render(<ScorecardGrid state={state} activeGame={activeGame} recordScore={vi.fn()} />);
 
@@ -233,7 +233,7 @@ describe("ScorecardGrid — dots", () => {
       cells: {},
       terminatedGameIds: new Set([fourball.id]),
     };
-    const activeGame: GameState = { kind: "fourball-match", id: fourball.id, up: 0, thru: 0, remaining: 18, dormie: false };
+    const activeGame: GameState = { kind: "fourball-match", id: fourball.id, up: 0, thru: 0, remaining: 18, dormie: false, holes: [] };
 
     render(<ScorecardGrid state={state} activeGame={activeGame} recordScore={vi.fn()} />);
 

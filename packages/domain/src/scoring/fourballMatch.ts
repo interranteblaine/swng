@@ -59,6 +59,10 @@ export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundStat
 
   const ladder = matchLadder(winners, holeCount);
 
+  // The trail is exactly the prefix the ladder consumed (thru): every entry inside it is
+  // defined (the ladder stops at the first undefined), hence the non-null assertion.
+  const holes = cardTeeSet.holes.slice(0, ladder.thru).map((hole, i) => ({ hole: hole.number, winner: winners[i]! }));
+
   return {
     kind: "fourball-match",
     id: config.id,
@@ -67,6 +71,7 @@ export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundStat
     thru: ladder.thru,
     remaining: ladder.remaining,
     dormie: ladder.dormie,
+    holes,
     ...(ladder.outcome ? { outcome: ladder.outcome } : {}),
   };
 };

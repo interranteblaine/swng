@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { gameId, golferId } from "../ids.js";
+import type { GameState } from "./game.js";
 import { resultOf } from "./result.js";
 import { playGoldenRound } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
@@ -160,5 +161,23 @@ describe("resultOf", () => {
       [D]: [5, 5],
     });
     expect(resultOf(state!)).toBeUndefined();
+  });
+
+  it("settled match results carry no live hole trail — the wire stays lean", () => {
+    const singles: GameState = {
+      kind: "singles-match", id: gameId("m-lean"), up: 1, leader: golferId("a1"),
+      thru: 9, remaining: 0, dormie: false,
+      outcome: { winner: golferId("a1"), closing: "1 up" },
+      holes: [{ hole: 1, winner: "a" }],
+    };
+    expect(resultOf(singles)).not.toHaveProperty("holes");
+
+    const fourball: GameState = {
+      kind: "fourball-match", id: gameId("f-lean"), up: 2, leader: "a",
+      thru: 9, remaining: 0, dormie: false,
+      outcome: { winner: "a", closing: "2 up" },
+      holes: [{ hole: 1, winner: "a" }],
+    };
+    expect(resultOf(fourball)).not.toHaveProperty("holes");
   });
 });

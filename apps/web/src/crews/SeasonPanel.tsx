@@ -191,7 +191,7 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
           <ul aria-label="Counted rounds" className="flex flex-col gap-2">
             {standings.rounds.map((round) => (
               <li key={round.roundId} className={`${cardBox} flex items-center justify-between gap-2 p-3`}>
-                <Link to={`/rounds/${round.roundId}/archive`} className="font-mono text-forest underline decoration-fairway">
+                <Link to={`/rounds/${round.roundId}`} className="font-mono text-forest underline decoration-fairway">
                   {new Date(round.finalizedAt).toLocaleDateString()}
                 </Link>
                 {/* Remove affordance ONLY on rows the caller themselves appended (task-11-brief.md

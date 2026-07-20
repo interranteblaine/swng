@@ -147,10 +147,11 @@ describe("ProfilePage — signed in", () => {
   });
 
   // Projection-realignment Task 6 / navigation spec §6c.3 (Step 1's own structural pin): every
-  // history line's score/remainder is a real link to its own ArchivedRoundPage, keyed by the wire
-  // response's own roundId — never plain unlinked text. (The course-name link is pinned
-  // separately below, in the two-sibling-links test — this fixture carries no courseId.)
-  it("renders each history line's score/remainder as a link to its own /rounds/:roundId/archive", async () => {
+  // history line's score/remainder is a real link to the round's own permanent address
+  // (navigation Task 5's RoundRecordPage), keyed by the wire response's own roundId — never
+  // plain unlinked text. (The course-name link is pinned separately below, in the
+  // two-sibling-links test — this fixture carries no courseId.)
+  it("renders each history line's score/remainder as a link to its own /rounds/:roundId", async () => {
     signIn();
     const history: GolferRoundLine[] = [lineWithDifferential("1", 9.2), lineWithDifferential("2", 11.8)];
     vi.stubGlobal(
@@ -169,10 +170,10 @@ describe("ProfilePage — signed in", () => {
     // Both lines share the same course/tee/ags/par (Pebble Beach · white · 82 (+10)) and differ
     // only by their differential, so each link's accessible name anchors on that trailing detail.
     const firstLink = await waitFor(() => screen.getByRole("link", { name: /white · 82 \(\+10\) · 9\.2/ }));
-    expect(firstLink.getAttribute("href")).toBe(`/rounds/${history[0]!.roundId}/archive`);
+    expect(firstLink.getAttribute("href")).toBe(`/rounds/${history[0]!.roundId}`);
 
     const secondLink = screen.getByRole("link", { name: /white · 82 \(\+10\) · 11\.8/ });
-    expect(secondLink.getAttribute("href")).toBe(`/rounds/${history[1]!.roundId}/archive`);
+    expect(secondLink.getAttribute("href")).toBe(`/rounds/${history[1]!.roundId}`);
   });
 
   // The two-sibling-links restructure itself (navigation spec §4b/§6c.3): a courseId-bearing line
@@ -201,14 +202,14 @@ describe("ProfilePage — signed in", () => {
     expect(courseLink.querySelector("a")).toBeNull(); // never nested inside another anchor
 
     const scoreLink = screen.getByRole("link", { name: /white · 82 \(\+10\) · 9\.2/ });
-    expect(scoreLink.getAttribute("href")).toBe(`/rounds/${withCourse.roundId}/archive`);
+    expect(scoreLink.getAttribute("href")).toBe(`/rounds/${withCourse.roundId}`);
 
     // The courseId-less row: exactly one "Pebble Beach" is a link (the first row's); the second
     // is plain text.
     expect(screen.getAllByText("Pebble Beach")).toHaveLength(2);
     const plainCourseName = screen.getAllByText("Pebble Beach").find((el) => el.tagName !== "A");
     expect(plainCourseName).toBeTruthy();
-    expect(screen.getByRole("link", { name: /white · 82 \(\+10\) · 11\.8/ }).getAttribute("href")).toBe(`/rounds/${withoutCourse.roundId}/archive`);
+    expect(screen.getByRole("link", { name: /white · 82 \(\+10\) · 11\.8/ }).getAttribute("href")).toBe(`/rounds/${withoutCourse.roundId}`);
   });
 
   // The chart gate (metrics-projection-grows spec): a golfer's index chart is HELD BACK below

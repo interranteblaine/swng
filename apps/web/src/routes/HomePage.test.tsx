@@ -11,11 +11,13 @@ import { createMemoryStorage } from "../testSupport/memoryStorage";
 // for the AuthProvider. Realignment Task 13 adds getMyLiveRounds for the signed-in-with-a-golfer
 // "Your rounds" section (presence, not the pre-wall device-credential round list). Task 14 adds
 // mintParticipantToken — the tap-to-enter re-mint for a live round this device holds no local
-// credential for. Crews are a grouping/competition only (spec §11a, owner ruling) and moved off
-// this page entirely — HomePage never calls a crew endpoint at all anymore.
+// credential for. Navigation Task 5 adds getMyRounds for the "Recent rounds" switchboard
+// section. Crews are a grouping/competition only (spec §11a, owner ruling) and moved off this
+// page entirely — HomePage never calls a crew endpoint at all anymore.
 vi.mock("../api", () => ({
   getMe: vi.fn(),
   getMyLiveRounds: vi.fn(),
+  getMyRounds: vi.fn(),
   mintParticipantToken: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
@@ -29,13 +31,14 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, getMe, getMyLiveRounds, mintParticipantToken } from "../api";
+import { ApiError, getMe, getMyLiveRounds, getMyRounds, mintParticipantToken } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { HomePage } from "./HomePage";
 
 const mockedGetMe = vi.mocked(getMe);
 const mockedGetMyLiveRounds = vi.mocked(getMyLiveRounds);
+const mockedGetMyRounds = vi.mocked(getMyRounds);
 const mockedMintParticipantToken = vi.mocked(mintParticipantToken);
 
 // vitest.config.ts doesn't set test.globals, so @testing-library/react's own auto-cleanup
@@ -47,8 +50,10 @@ beforeEach(() => {
   vi.stubGlobal("sessionStorage", createMemoryStorage());
   mockedGetMe.mockReset();
   mockedGetMyLiveRounds.mockReset();
+  mockedGetMyRounds.mockReset();
   mockedMintParticipantToken.mockReset();
   mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
+  mockedGetMyRounds.mockResolvedValue({ rounds: [] });
 });
 
 afterEach(() => {
@@ -243,7 +248,10 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
 
     renderHome();
 
-    expect(await screen.findByText(/no rounds yet/i)).toBeTruthy();
+    // Exact string, not the substring-matching /no rounds yet/i regex: the Recent rounds
+    // section below (Task 5) has its OWN "No rounds yet." (with a period) which would otherwise
+    // multi-match the same query.
+    expect(await screen.findByText("No rounds yet")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Device Round" })).toBeNull();
   });
 
@@ -332,9 +340,10 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toMatch(/this round has finished/i);
     expect(screen.queryByText(/is finalized/i)).toBeNull();
-    // Archive link is present with the correct href
+    // Archive link is present with the correct href — the round's own permanent address
+    // (navigation Task 5), not the old /archive suffix.
     const archiveLink = screen.getByRole("link", { name: /view archived round/i });
-    expect(archiveLink.getAttribute("href")).toBe(`/rounds/live-1/archive`);
+    expect(archiveLink.getAttribute("href")).toBe(`/rounds/live-1`);
     // Row removed from live list
     expect(screen.queryByRole("link", { name: /casa verde gc/i })).toBeNull();
   });
@@ -445,8 +454,73 @@ describe("HomePage — no crews section, in any auth state (spec §11a)", () => 
     mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
 
     renderHome();
-    await screen.findByText(/no rounds yet/i); // let the signed-in render settle
+    await screen.findByText("No rounds yet"); // let the signed-in render settle (exact — the
+    // Recent rounds section below has its own "No rounds yet." with a period)
 
     expect(queryAnyCrewText()).toBe(false);
+  });
+});
+
+// Navigation Task 5 (spec §4b): home becomes the switchboard — a "Recent rounds" section reusing
+// the SAME history-row component ProfilePage/GolferPage use (RecordSections' extracted
+// HistoryList — no second vs-par/score composition here), capped to 3, plus a quiet pointer to
+// the full record; the redundant body h1 "swng" is gone.
+describe("HomePage — the switchboard (Task 5)", () => {
+  const historyLine = (suffix: string, finalizedAt: number) => ({
+    roundId: roundId(`recent-${suffix}`),
+    courseName: "Pebble Beach",
+    tee: "white",
+    holes: 18 as const,
+    par: 72,
+    courseHandicap: 8,
+    ags: 82,
+    differential: 9.2,
+    distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
+    finalizedAt,
+  });
+
+  it("recent rounds render via the SAME history row, capped to 3 and linking the round's permanent address (never /archive), plus a pointer to your profile", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
+    mockedGetMyRounds.mockResolvedValue({
+      rounds: [historyLine("1", 4_000), historyLine("2", 3_000), historyLine("3", 2_000), historyLine("4", 1_000)],
+    });
+
+    renderHome();
+
+    const rows = await screen.findAllByRole("link", { name: /white/ });
+    expect(rows).toHaveLength(3); // capped to the first 3, newest-first per the wire contract
+    const hrefs = rows.map((row) => row.getAttribute("href"));
+    expect(hrefs).toEqual(["/rounds/recent-1", "/rounds/recent-2", "/rounds/recent-3"]);
+    expect(hrefs.some((href) => href?.includes("/archive"))).toBe(false);
+    expect(hrefs).not.toContain("/rounds/recent-4"); // the 4th (oldest) round is truncated
+
+    const pointer = screen.getByRole("link", { name: /all rounds.*your profile/i });
+    expect(pointer.getAttribute("href")).toBe("/profile");
+  });
+
+  it("no finalized rounds yet: the Recent rounds section still renders 'No rounds yet.' via the shared row component", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
+    mockedGetMyRounds.mockResolvedValue({ rounds: [] });
+
+    renderHome();
+
+    await screen.findByText("Recent rounds");
+    expect(screen.getByText("No rounds yet.")).toBeTruthy();
+  });
+
+  it("removes the redundant body h1 'swng' under the header wordmark (recorded papercut)", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [] });
+    mockedGetMyRounds.mockResolvedValue({ rounds: [] });
+
+    renderHome();
+
+    await screen.findByText("No rounds yet"); // let the signed-in render settle (exact)
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
   });
 });

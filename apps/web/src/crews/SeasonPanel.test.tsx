@@ -79,7 +79,7 @@ const renderPanel = (myGolferId = ANN) =>
       <MemoryRouter initialEntries={["/crews/crew-1"]}>
         <Routes>
           <Route path="/crews/:crewId" element={<SeasonPanel crewId={CREW} seasonId="season-1" myGolferId={myGolferId} />} />
-          <Route path="/rounds/:roundId/archive" element={<div data-testid="archive-probe">archive</div>} />
+          <Route path="/rounds/:roundId" element={<div data-testid="archive-probe">archive</div>} />
         </Routes>
       </MemoryRouter>
     </AuthProvider>,
@@ -256,7 +256,7 @@ describe("SeasonPanel — standings", () => {
 });
 
 describe("SeasonPanel — counted rounds", () => {
-  it("counted-round rows link to /rounds/<id>/archive; remove shows ONLY on the caller's own appended rows", async () => {
+  it("counted-round rows link to /rounds/<id>; remove shows ONLY on the caller's own appended rows", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
@@ -277,8 +277,8 @@ describe("SeasonPanel — counted rounds", () => {
     const items = within(list).getAllByRole("listitem");
     expect(items).toHaveLength(2);
 
-    const mine = items.find((li) => within(li).getByRole("link").getAttribute("href") === "/rounds/round-1/archive")!;
-    const theirs = items.find((li) => within(li).getByRole("link").getAttribute("href") === "/rounds/round-2/archive")!;
+    const mine = items.find((li) => within(li).getByRole("link").getAttribute("href") === "/rounds/round-1")!;
+    const theirs = items.find((li) => within(li).getByRole("link").getAttribute("href") === "/rounds/round-2")!;
     expect(within(mine).getByRole("button", { name: /remove/i })).toBeTruthy();
     expect(within(theirs).queryByRole("button", { name: /remove/i })).toBeNull();
 

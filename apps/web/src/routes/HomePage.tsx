@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import type { MouseEvent } from "react";
 import { Link, useNavigate } from "react-router";
-import type { GetMyLiveRoundsResponse } from "@swng/contracts";
+import type { GetMyLiveRoundsResponse, GetMyRoundsResponse } from "@swng/contracts";
 import type { RoundId } from "@swng/domain";
-import { ApiError, getMyLiveRounds, mintParticipantToken } from "../api";
+import { ApiError, getMyLiveRounds, getMyRounds } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
+import { HistoryList } from "../golfers/RecordSections";
 import { credentialStore } from "../identity";
 import { roundDayKey, roundLabel } from "../roundLabel";
+import { openLiveRound } from "../session/openLiveRound";
 import { btnCreamOutline, btnPrimary, btnSecondary, cardBox, eyebrow, inputCode } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
 
@@ -49,6 +51,21 @@ export function HomePage() {
       .catch(() => {}); // degrade silently — a transient failure just leaves the list empty
   }, [hasGolferIdentity, withAuth]);
 
+  // Navigation Task 5 (spec §4b): home becomes the switchboard — "Recent rounds" is the latest 3
+  // of GET /me/rounds, rendered by the SAME history-row component ProfilePage/GolferPage use
+  // (RecordSections' extracted `HistoryList`), never a second vs-par/score composition here.
+  const [recentRounds, setRecentRounds] = useState<GetMyRoundsResponse["rounds"] | undefined>(undefined);
+
+  useEffect(() => {
+    if (!hasGolferIdentity) {
+      setRecentRounds(undefined);
+      return;
+    }
+    void withAuth((token) => getMyRounds(token))
+      .then((response) => setRecentRounds(response.rounds))
+      .catch(() => {}); // degrade silently — same precedent as liveRounds above
+  }, [hasGolferIdentity, withAuth]);
+
   // Task 14: a round found by identity may have no local device credential at all — started
   // or joined from a different device/browser. `enteringRoundId` gates a double-tap while the
   // re-mint is in flight; `enterError` is the ONE alert this section shows (never raw server
@@ -60,20 +77,17 @@ export function HomePage() {
 
   // Scoring capability derives from PARTICIPATION, not the device that joined (this task's own
   // headline): mint a fresh participant token for THIS device and store it exactly as a join
-  // would (credentialStore.save, the SAME shape JoinRoundPage's own submit uses), then enter.
-  // `joinCode: ""` — the mint response carries no join code (JoinRoundResponse's own shape),
-  // same "no code known" precedent WatchPage/ArchivedRoundPage already established for a
-  // credential minted outside the join flow (nothing downstream needs the code here — this
-  // device is entering a round its own account golfer already sits in).
+  // would, then enter — navigation Task 5 extracted the mint+store+navigate body to the shared
+  // `openLiveRound` (RoundRecordPage's own live-check branch, spec §7 step 2, is the second
+  // caller). The catch below (ApiError branching into human copy) stays here — it's this
+  // section's own UI, not part of the re-mint itself.
   const enterLiveRound = async (id: RoundId) => {
     if (enteringRoundId) return; // a re-mint is already in flight — no double-tap
     setEnterError(undefined);
     setFinishedRoundId(undefined);
     setEnteringRoundId(id);
     try {
-      const response = await withAuth((token) => mintParticipantToken(token, id));
-      credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer!.name, joinCode: "" });
-      navigate(`/round/${response.roundId}`);
+      await openLiveRound(id, { withAuth, golferName: golfer!.name, navigate });
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "round-final") {
         setEnterError("This round has finished.");
@@ -160,8 +174,6 @@ export function HomePage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-cream p-6">
-      <h1 className="text-3xl font-extrabold tracking-tight text-forest">swng</h1>
-
       {/* The wall (accounts-only identity spec §3): there is no anonymous "start a round" path
           — the signed-out door (above) is the whole sign-in-first funnel now, so this branch
           only ever renders signed in. */}
@@ -190,7 +202,7 @@ export function HomePage() {
                 <p>{enterError}</p>
                 {finishedRoundId && (
                   <p>
-                    <Link to={`/rounds/${finishedRoundId}/archive`} className="underline">
+                    <Link to={`/rounds/${finishedRoundId}`} className="underline">
                       View archived round
                     </Link>
                   </p>
@@ -240,6 +252,21 @@ export function HomePage() {
           <SignInCta message="Sign in to see your rounds." returnTo="/" />
         )}
       </section>
+
+      {/* Navigation Task 5: the switchboard's second section — the latest 3 finalized rounds, via
+          the SAME row rendering ProfilePage/GolferPage use (RecordSections' extracted
+          HistoryList), plus a quiet pointer to the full record. Only shown once a real account
+          golfer exists — the loading/no-identity states above already gate "Your rounds"; there's
+          nothing distinct to add here for those windows. */}
+      {hasGolferIdentity && (
+        <section className="flex flex-col gap-2">
+          <h2 className={eyebrow}>Recent rounds</h2>
+          <HistoryList history={recentRounds ?? []} historyLimit={3} />
+          <Link to="/profile" className="font-mono text-xs text-fairway underline decoration-fairway">
+            all rounds → your profile
+          </Link>
+        </section>
+      )}
     </main>
   );
 }

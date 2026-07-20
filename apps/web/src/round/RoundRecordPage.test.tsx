@@ -3,11 +3,13 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deviceId, fixtureLinks, golferId, opId, roundId } from "@swng/domain";
 import type { OpId, RoundEvent } from "@swng/domain";
+import { ArchiveRedirect } from "../App";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
+import { credentialStore } from "../identity";
 import { roundLabel } from "../roundLabel";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
-import { ArchivedRoundPage } from "./ArchivedRoundPage";
+import { RoundRecordPage } from "./RoundRecordPage";
 
 const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
 
@@ -35,7 +37,7 @@ const buildFinalLog = (): RoundEvent[] => {
 
 // Same bare, unverified-signature idiom as ProfilePage.test.tsx's own signIn — the point here
 // is only to give useAuth's withAuth a token to attach, never real Cognito verification.
-const signIn = () => {
+const signIn = (): string => {
   const base64url = (obj: unknown) =>
     btoa(JSON.stringify(obj))
       .replace(/\+/g, "-")
@@ -43,6 +45,7 @@ const signIn = () => {
       .replace(/=+$/, "");
   const idToken = `${base64url({ alg: "none" })}.${base64url({ sub: "sub-ann", email: "ann@example.com" })}.sig`;
   tokenStore.save({ idToken, refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
+  return idToken;
 };
 
 beforeEach(() => {
@@ -55,18 +58,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const renderArchivedRoundPage = (path: string) =>
+const renderRoundRecordPage = (path: string) =>
   render(
     <MemoryRouter initialEntries={[path]}>
       <AuthProvider>
         <Routes>
-          <Route path="/rounds/:roundId/archive" element={<ArchivedRoundPage />} />
+          <Route path="/rounds/:roundId" element={<RoundRecordPage />} />
+          <Route path="/round/:roundId" element={<div>round page probe</div>} />
+          <Route path="/join" element={<div>join page probe</div>} />
         </Routes>
       </AuthProvider>
     </MemoryRouter>,
   );
 
-describe("ArchivedRoundPage", () => {
+describe("RoundRecordPage — archived (the old ArchivedRoundPage content, absorbed)", () => {
   it("loads via the golfer Bearer, folds the archive's events (the domain reduceRound, mirroring WatchPage's own composition), and renders ResultsView with the canonical course + date header", async () => {
     signIn();
     vi.stubGlobal(
@@ -84,7 +89,7 @@ describe("ArchivedRoundPage", () => {
       }),
     );
 
-    renderArchivedRoundPage(`/rounds/${ROUND_ID}/archive`);
+    renderRoundRecordPage(`/rounds/${ROUND_ID}`);
 
     expect(screen.getByRole("status", { name: "Loading round" })).toBeTruthy();
 
@@ -119,7 +124,7 @@ describe("ArchivedRoundPage", () => {
       }),
     );
 
-    renderArchivedRoundPage(`/rounds/${ROUND_ID}/archive`);
+    renderRoundRecordPage(`/rounds/${ROUND_ID}`);
     await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
 
     const buttons = screen.getAllByRole("button");
@@ -132,8 +137,40 @@ describe("ArchivedRoundPage", () => {
     expect(screen.queryByRole("button", { name: /^Add /i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^End /i })).toBeNull();
   });
+});
 
-  it("shows an honest message (never a raw server error) when the round can't be opened — e.g. a stranger's 403 or an unknown round's 404", async () => {
+// Navigation spec §7: the address resolves by state — an archive read failure is never the end
+// of the story on its own, since the round might simply still be live.
+describe("RoundRecordPage — resolution when the archive read fails (navigation spec §7)", () => {
+  it("non-200 archive fetch + the round IS in the caller's live rounds: re-mints via openLiveRound and navigates to /round/{id}", async () => {
+    const idToken = signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        const method = init?.method ?? "GET";
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === `/rounds/${ROUND_ID}/archive`) {
+          return { ok: false, status: 404, json: async () => ({ code: "round-not-found", message: "no snapshot for round archived-round-1" }) } as unknown as Response;
+        }
+        if (path === "/me/rounds/live") return fakeResponse(200, { rounds: [{ roundId: ROUND_ID, courseName: "Fixture Links", joinedAt: 1_000 }] });
+        if (path === `/rounds/${ROUND_ID}/token` && method === "POST") {
+          expect((init?.headers as Record<string, string>).authorization).toBe(`Bearer ${idToken}`);
+          return fakeResponse(200, { roundId: ROUND_ID, token: "fresh-token", golferId: ANN_ID });
+        }
+        throw new Error(`unexpected fetch ${path} ${method}`);
+      }),
+    );
+
+    renderRoundRecordPage(`/rounds/${ROUND_ID}`);
+
+    await waitFor(() => expect(screen.getByText("round page probe")).toBeTruthy());
+    // The SAME credential shape a real join/re-mint stores (openLiveRound.ts) — name from the
+    // caller's own account golfer, joinCode "" (no code known outside the join flow).
+    expect(credentialStore.load(ROUND_ID)).toEqual({ token: "fresh-token", golferId: ANN_ID, name: "Ann", joinCode: "" });
+  });
+
+  it("non-200 archive fetch + NOT in the caller's live rounds: the honest fallback, with a join-here link to /join", async () => {
     signIn();
     vi.stubGlobal(
       "fetch",
@@ -143,14 +180,59 @@ describe("ArchivedRoundPage", () => {
         if (path === `/rounds/${ROUND_ID}/archive`) {
           return { ok: false, status: 404, json: async () => ({ code: "round-not-found", message: "no snapshot for round archived-round-1" }) } as unknown as Response;
         }
+        if (path === "/me/rounds/live") return fakeResponse(200, { rounds: [] });
         throw new Error(`unexpected fetch ${path}`);
       }),
     );
 
-    renderArchivedRoundPage(`/rounds/${ROUND_ID}/archive`);
+    renderRoundRecordPage(`/rounds/${ROUND_ID}`);
 
-    await waitFor(() => expect(screen.getByText(/couldn.t be found/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/this round isn.t available/i)).toBeTruthy());
+    // Never the raw server text (the old ArchivedRoundPage's own discipline, carried forward).
     expect(document.body.textContent).not.toMatch(/no snapshot for round/);
     expect(screen.queryByText("Final results")).toBeNull();
+    const joinLink = screen.getByRole("link", { name: /join here/i });
+    expect(joinLink.getAttribute("href")).toBe("/join");
+  });
+
+  it("signed out: shows the SignInCta funnel, returnTo the current round address", () => {
+    renderRoundRecordPage(`/rounds/${ROUND_ID}`);
+
+    expect(screen.getByText(/sign in to see this round/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+    // No fetch at all while signed out — the effect only runs once `signedIn` is true (spec §7).
+  });
+});
+
+describe("RoundRecordPage — the old /rounds/:roundId/archive address redirects (navigation spec §7)", () => {
+  it("rendering the app at /rounds/x/archive lands on /rounds/x", async () => {
+    signIn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: null });
+        if (path === "/rounds/x/archive") return { ok: false, status: 404, json: async () => ({ code: "round-not-found", message: "no snapshot" }) } as unknown as Response;
+        if (path === "/me/rounds/live") return fakeResponse(200, { rounds: [] });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/rounds/x/archive"]}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/rounds/:roundId" element={<RoundRecordPage />} />
+            <Route path="/rounds/:roundId/archive" element={<ArchiveRedirect />} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    // Proof the redirect actually landed on /rounds/x (not merely that the archive route's own
+    // element never renders): RoundRecordPage's effect ran for id "x" — the honest-fallback copy
+    // only appears once its GET /rounds/x/archive + GET /me/rounds/live round trip (stubbed
+    // above, keyed to "x") completes.
+    await waitFor(() => expect(screen.getByText(/this round isn.t available/i)).toBeTruthy());
   });
 });

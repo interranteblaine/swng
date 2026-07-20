@@ -51,7 +51,7 @@ describe("RecordSections", () => {
     expect(screen.getByTestId("index-line-whs")).toBeTruthy();
   });
 
-  it("a history row with a courseId is two sibling (non-nested) links: the course name to /courses/:courseId, the score/remainder to /rounds/:roundId/archive", () => {
+  it("a history row with a courseId is two sibling (non-nested) links: the course name to /courses/:courseId, the score/remainder to /rounds/:roundId", () => {
     const withCourse = line("1", { courseId: courseId("course-1") });
     renderSections(ZERO_METRICS, [withCourse]);
 
@@ -60,7 +60,7 @@ describe("RecordSections", () => {
     expect(courseLink.querySelector("a")).toBeNull(); // no anchor nested inside an anchor
 
     const scoreLink = screen.getByRole("link", { name: /white · 82 \(\+10\) · 9\.2/ });
-    expect(scoreLink.getAttribute("href")).toBe(`/rounds/${withCourse.roundId}/archive`);
+    expect(scoreLink.getAttribute("href")).toBe(`/rounds/${withCourse.roundId}`);
     expect(scoreLink.querySelector("a")).toBeNull();
   });
 
@@ -71,7 +71,7 @@ describe("RecordSections", () => {
     expect(screen.queryByRole("link", { name: "Pebble Beach" })).toBeNull();
     expect(screen.getByText("Pebble Beach").tagName).not.toBe("A");
     const scoreLink = screen.getByRole("link", { name: /white · 82 \(\+10\) · 9\.2/ });
-    expect(scoreLink.getAttribute("href")).toBe(`/rounds/${withoutCourse.roundId}/archive`);
+    expect(scoreLink.getAttribute("href")).toBe(`/rounds/${withoutCourse.roundId}`);
   });
 
   it("a 9-hole, undifferentiated line renders the 9-hole marker and no differential", () => {

@@ -1,4 +1,4 @@
-import { BrowserRouter, Link, Outlet, Route, Routes, useLocation } from "react-router";
+import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router";
 import { SignInButton } from "./auth/SignInButton";
 import { AuthProvider, useAuth } from "./auth/useAuth";
 import { AddCoursePage } from "./courses/AddCoursePage";
@@ -8,7 +8,7 @@ import { EditCoursePage } from "./courses/EditCoursePage";
 import { CrewCreatePage } from "./crews/CrewCreatePage";
 import { CrewPage } from "./crews/CrewPage";
 import { GolferPage } from "./golfers/GolferPage";
-import { ArchivedRoundPage } from "./round/ArchivedRoundPage";
+import { RoundRecordPage } from "./round/RoundRecordPage";
 import { AuthCallbackPage } from "./routes/AuthCallbackPage";
 import { CreateRoundPage } from "./routes/CreateRoundPage";
 import { CrewJoinPage } from "./routes/CrewJoinPage";
@@ -74,6 +74,16 @@ function Layout() {
   );
 }
 
+// Navigation Task 5 (spec §7): the round's OLD address — a stored link, a text someone sent, a
+// bookmark — must keep working forever, so it's a REDIRECT to the permanent address, never a
+// second route. `replace` so the archive URL doesn't linger in browser history under the new
+// one. Exported so RoundRecordPage.test.tsx can pin the redirect directly (MemoryRouter,
+// navigation spec §7's own test (d)) without re-deriving a second copy of this component.
+export function ArchiveRedirect() {
+  const { roundId } = useParams();
+  return <Navigate to={`/rounds/${roundId}`} replace />;
+}
+
 export function App() {
   return (
     <AuthProvider>
@@ -107,11 +117,17 @@ export function App() {
             <Route path="/crews/:crewId" element={<CrewPage />} />
             <Route path="/join" element={<JoinRoundPage />} />
             <Route path="/round/:roundId" element={<RoundPage />} />
-            {/* Projection-realignment Task 6: INSIDE Layout, unlike /watch/:roundId below —
-                this route needs the golfer Bearer (useAuth's withAuth), which only exists
-                signed in, and the header chrome is exactly what a signed-in golfer expects
-                browsing from their own Profile. */}
-            <Route path="/rounds/:roundId/archive" element={<ArchivedRoundPage />} />
+            {/* Navigation Task 5 (spec §7): the round's ONE permanent address — INSIDE Layout,
+                unlike /watch/:roundId below — this route needs the golfer Bearer (useAuth's
+                withAuth), which only exists signed in, and the header chrome is exactly what a
+                signed-in golfer expects browsing from their own Profile. Resolves by state
+                (archived → live → honest fallback); RoundRecordPage absorbs the old
+                ArchivedRoundPage's rendering. The old `/archive` address (below) redirects here —
+                react-router ranks its extra static segment MORE specific than this dynamic route
+                regardless of declaration order, so a stored `/rounds/{id}/archive` link still
+                lands on the redirect, never here directly. */}
+            <Route path="/rounds/:roundId" element={<RoundRecordPage />} />
+            <Route path="/rounds/:roundId/archive" element={<ArchiveRedirect />} />
             <Route path="/profile" element={<ProfilePage />} />
             {/* A real 404 — LAST inside the Layout route group, so it only catches paths none of
                 the routes above matched. Keeps the header/chrome (Layout), unlike the two bare

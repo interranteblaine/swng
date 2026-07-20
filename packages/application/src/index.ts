@@ -52,6 +52,8 @@ export { updateMyGolfer } from "./golfers/updateMyGolfer.js";
 export { getMyRecord } from "./golfers/getMyRecord.js";
 export { getMyRounds } from "./golfers/getMyRounds.js";
 export { getMyLiveRounds } from "./golfers/getMyLiveRounds.js";
+// Navigation spec §6a: GET /golfers/{golferId} — any signed-in golfer, not self-scoped.
+export { getGolfer } from "./golfers/getGolfer.js";
 
 export { createCrew } from "./crews/createCrew.js";
 export { getCrew } from "./crews/getCrew.js";

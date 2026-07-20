@@ -24,6 +24,7 @@ import {
   finalizeRound,
   getCourse,
   getCrew,
+  getGolfer,
   getMyGolfer,
   getMyLiveRounds,
   getMyRecord,
@@ -285,12 +286,13 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
-    // snapshots/golferStore/crewStore (projection-realignment Task 6): the SAME instances the
-    // finalize/crew use cases above already share.
-    getRoundArchive: getRoundArchive({ snapshots, golferStore, crewStore }),
+    // snapshots (projection-realignment Task 6; navigation spec §6b dropped the golferStore/
+    // crewStore authorization deps — any signed-in golfer may read now, so only "does a
+    // snapshot exist" is left to check): the SAME instance finalize/crew use cases above share.
+    getRoundArchive: getRoundArchive({ snapshots }),
     // journal/golferStore/tokens (architecture-realignment Task 14): the SAME journal/tokens
     // instances startRound/joinRound above already share, plus the SAME golferStore
-    // getRoundArchive above shares.
+    // startRound/joinRound above share.
     mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
     // Course-cards spec §4: createCourse/supersedeCard derive enteredBy from the account
     // (golferStore's own get-or-create), so they take the SAME golferStore startRound/joinRound
@@ -313,6 +315,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // journal (accounts-only identity spec §5): the live list derives each round's created-at from
     // its genesis at read time — the SAME journal every round use case above shares.
     getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
+    // Navigation spec §6a: golferStore/projectionStore — the SAME instances getMyRecord above
+    // shares (getGolfer runs the identical recordOf fold, just for a golferId off the path
+    // instead of the caller's own sub).
+    getGolfer: getGolfer({ golferStore, projectionStore }),
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),

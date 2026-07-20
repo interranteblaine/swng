@@ -23,6 +23,7 @@ import {
   finalizeRound,
   getCourse,
   getCrew,
+  getGolfer,
   getMyGolfer,
   getMyLiveRounds,
   getMyRecord,
@@ -62,6 +63,7 @@ import {
   finalizeRoundResponseSchema,
   getCourseResponseSchema,
   getCrewResponseSchema,
+  getGolferResponseSchema,
   getMeResponseSchema,
   getMyLiveRoundsResponseSchema,
   getMyRecordResponseSchema,
@@ -175,7 +177,7 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
-    getRoundArchive: getRoundArchive({ snapshots, golferStore, crewStore }),
+    getRoundArchive: getRoundArchive({ snapshots }),
     mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
     createCourse: createCourse({ cardStore, golferStore, idGenerator: ids, clock, logger }),
     supersedeCard: supersedeCard({ cardStore, golferStore, idGenerator: ids, clock, logger }),
@@ -187,6 +189,7 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     getMyRecord: getMyRecord({ golferStore, projectionStore, clock }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
     getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
+    getGolfer: getGolfer({ golferStore, projectionStore }),
     createCrew: createCrew({ crewStore, golferStore, ids }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
@@ -1683,15 +1686,17 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       expect(events.some((event) => event.kind === "round-finalized")).toBe(true);
     });
 
-    // The stranger-403 pin (task-6-brief.md's binding resolution — Task 9's crew-membership
-    // arm is explicitly deferred): a signed-in golfer who simply never played this round.
-    it("403s not-a-viewer for a signed-in golfer who never played this round — a stranger", async () => {
+    // Navigation spec §6b (binding): the archive read relaxed to any signed-in golfer — the
+    // former stranger-403 pin (task-6-brief.md) is superseded; a signed-in golfer who simply
+    // never played this round still gets the event log.
+    it("returns the archive's own event log for a signed-in golfer who never played this round — any signed-in golfer may view it now (spec §6b)", async () => {
       const { dispatcher } = await setupArchive();
       const started = await seedAnnsFinalizedRound(dispatcher);
 
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(bo) })));
-      expect(resp.statusCode).toBe(403);
-      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-a-viewer" });
+      expect(resp.statusCode).toBe(200);
+      const { events } = getRoundArchiveResponseSchema.parse(JSON.parse(resp.body!));
+      expect(events.some((event) => event.kind === "round-finalized")).toBe(true);
     });
 
     it("401s with no bearer token at all — golfer-tier auth, never the round-scoped participant/spectator tier", async () => {
@@ -1761,6 +1766,40 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
     it("401s with no bearer token at all", async () => {
       const { dispatcher } = await setupArchive();
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds/live" })));
+      expect(resp.statusCode).toBe(401);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+    });
+  });
+
+  // Navigation spec §6a: the golfer page's read — "golfer"-gated (any signed-in caller), but
+  // NOT self-scoped (unlike GET /me/record just above): the target golferId rides the PATH.
+  describe("GET /golfers/{golferId}", () => {
+    it("returns another golfer's name/indexSource/metrics/history for any signed-in caller", async () => {
+      const { dispatcher } = await setupArchive();
+      const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
+      const { golfer } = golferResponseSchema.parse(JSON.parse(putResp.body!));
+
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/golfers/${golfer.golferId}`, token: golferBearer(bo) })));
+      expect(resp.statusCode).toBe(200);
+      const parsed = getGolferResponseSchema.parse(JSON.parse(resp.body!));
+      expect(parsed).toEqual({
+        name: "Ann",
+        indexSource: { kind: "swng" },
+        metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] },
+        history: [],
+      });
+    });
+
+    it("404s golfer-not-found for an unknown golferId", async () => {
+      const { dispatcher } = await setupArchive();
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/golfers/no-such-golfer", token: golferBearer(bo) })));
+      expect(resp.statusCode).toBe(404);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "golfer-not-found" });
+    });
+
+    it("401s with no bearer token at all", async () => {
+      const { dispatcher } = await setupArchive();
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/golfers/anything" })));
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });

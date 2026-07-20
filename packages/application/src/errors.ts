@@ -46,6 +46,11 @@ export type ApplicationErrorCode =
   // a silent auto-create; the web PUTs /me first (the same T5 pattern GET /me's plan
   // amendment established).
   | "golfer-required"
+  // Navigation spec §6a: GET /golfers/{golferId} names a golferId with no row at all
+  // (GolferStore.getMany's own miss shape) — an unresolvable path-embedded resource id, the
+  // same "identified resource not found" 404 shape as round-not-found/course-not-found/
+  // unknown-crew above.
+  | "golfer-not-found"
   // M9 hardening: GolferStore.put refuses a REPLACE that would clear a currently-bound sub
   // (golferStore.ts's port doc). Every real call site re-passes its own found.sub on every
   // replace, so this only ever fires on a programmer error — deliberately mapped to a 500 in

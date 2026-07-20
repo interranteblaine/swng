@@ -596,7 +596,7 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "$disconnect" });
     });
 
-    it("wires all thirty-six HTTP routes (37 − add-tee/verify + PUT /courses/{courseId} from the course-cards wire switch)", () => {
+    it("wires all thirty-seven HTTP routes (36 + GET /golfers/{golferId} from the navigation spec's golfer page)", () => {
       const expectedRouteKeys = [
         "POST /rounds",
         "POST /rounds/join",
@@ -630,6 +630,8 @@ describe("SwngStack", () => {
         "GET /me/rounds",
         // Projection-realignment Task 13: "your rounds, right now" — presence.
         "GET /me/rounds/live",
+        // Navigation spec §6a: the golfer page's read — any signed-in golfer, not self-scoped.
+        "GET /golfers/{golferId}",
         // M8 Task 4: crews (POST /rounds, POST /rounds/join above are unchanged route keys —
         // accounts-only identity spec §3 only moved their auth tier). Crew membership
         // (invited in, accountable out): POST /crews/{crewId}/members (add-by-id) is gone;
@@ -660,11 +662,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (36 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (37 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 38 routes total (36 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 38);
+    it("has exactly 39 routes total (37 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 39);
     });
 
     // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route

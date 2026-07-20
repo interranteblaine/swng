@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CourseId, GolferId, GolferRoundLine, IndexSource, RoundId } from "@swng/domain";
+import type { CourseId, GolferId, GolferMetrics, GolferRoundLine, IndexSource, RoundId } from "@swng/domain";
 import { courseIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
 
 // The index a golfer is ON is a SOURCE they choose (index-source model spec §3): swng/whs are
@@ -111,6 +111,30 @@ const golferRoundLineSchema: z.ZodType<GolferRoundLine> = z.object(golferRoundLi
 // index over time" — one point per round, oldest → newest, each recomputed from every line up to
 // and including it; the headline whsIndex/swngIndex above is exactly indexHistory's own last
 // point) are REQUIRED — both always present, zeros/`[]` rather than absent.
+// Shared metrics sub-schemas — the domain `GolferMetrics` fold's own shape (domain/golfer/
+// metrics.ts), reused verbatim below by BOTH getMyRecordResponseSchema (which layers a
+// read-time `computedAtMs` stamp onto its own whsIndex — a Clock reading the pure fold never
+// carries) and getGolferResponseSchema (which serves the bare fold as-is) — never redeclared.
+const indexMetricSchema = z.object({ value: z.number(), differentialsUsed: z.number().int() });
+const scoringShapeSchema = z.object({
+  eagles: z.number().int(),
+  birdies: z.number().int(),
+  pars: z.number().int(),
+  bogeys: z.number().int(),
+  doublePlus: z.number().int(),
+});
+const indexHistorySchema = z.array(z.object({ roundId: roundIdSchema, swngIndex: z.number().optional(), whsIndex: z.number().optional() })).readonly();
+
+// The bare domain GolferMetrics shape, straight off golferMetrics() — no computedAtMs (that's
+// getMyRecordResponseSchema's own read-time addition below); getGolferResponseSchema serves
+// this as-is.
+const golferMetricsSchema: z.ZodType<GolferMetrics> = z.object({
+  whsIndex: indexMetricSchema.optional(),
+  swngIndex: indexMetricSchema.optional(),
+  typicalEighteen: scoringShapeSchema,
+  indexHistory: indexHistorySchema,
+});
+
 export interface GetMyRecordResponse {
   readonly metrics: {
     readonly whsIndex?: { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number };
@@ -123,17 +147,32 @@ export interface GetMyRecordResponse {
 
 export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.object({
   metrics: z.object({
-    whsIndex: z.object({ value: z.number(), computedAtMs: z.number().int(), differentialsUsed: z.number().int() }).optional(),
-    swngIndex: z.object({ value: z.number(), differentialsUsed: z.number().int() }).optional(),
-    typicalEighteen: z.object({
-      eagles: z.number().int(),
-      birdies: z.number().int(),
-      pars: z.number().int(),
-      bogeys: z.number().int(),
-      doublePlus: z.number().int(),
-    }),
-    indexHistory: z.array(z.object({ roundId: roundIdSchema, swngIndex: z.number().optional(), whsIndex: z.number().optional() })).readonly(),
+    whsIndex: indexMetricSchema.extend({ computedAtMs: z.number().int() }).optional(),
+    swngIndex: indexMetricSchema.optional(),
+    typicalEighteen: scoringShapeSchema,
+    indexHistory: indexHistorySchema,
   }),
+  history: z.array(golferRoundLineSchema).readonly(),
+});
+
+// GET /golfers/{golferId} (navigation spec §6a): the golfer page's read. Any signed-in golfer
+// may view any golfer — golf handicaps are posted in every clubhouse; the record is scores,
+// not messages (spec §6a's own visibility decision). Deliberately narrower than GolferView +
+// GetMyRecordResponse combined: no homeCourseId/namePlaceholder (the page never renders them —
+// serve only what renders), and `metrics` is the bare domain GolferMetrics, not the richer
+// wire shape above — application/src/golfers/getGolfer.ts runs the SAME lines-to-
+// `{metrics, history}` fold getMyRecord.ts runs (recordOf.ts), never a second implementation.
+export interface GetGolferResponse {
+  readonly name: string;
+  readonly indexSource: IndexSource;
+  readonly metrics: GolferMetrics;
+  readonly history: readonly GolferRoundLine[];
+}
+
+export const getGolferResponseSchema: z.ZodType<GetGolferResponse> = z.object({
+  name: z.string(),
+  indexSource: indexSourceSchema,
+  metrics: golferMetricsSchema,
   history: z.array(golferRoundLineSchema).readonly(),
 });
 

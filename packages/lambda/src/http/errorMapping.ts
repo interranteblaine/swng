@@ -48,6 +48,9 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "unknown-crew": 404,
   "not-a-member": 403,
   "golfer-required": 400,
+  // Navigation spec §6a: GET /golfers/{golferId}'s own unresolvable-id 404, same bucket as
+  // round-not-found/course-not-found/unknown-crew above.
+  "golfer-not-found": 404,
   // M9 hardening (application/src/errors.ts): deliberately mapped to a genuine-bug 500, not a
   // client-shaped 4xx — the real call site (GolferStore.put) always re-passes its own
   // found.sub, so this should never actually throw; a client can't "fix" the request that

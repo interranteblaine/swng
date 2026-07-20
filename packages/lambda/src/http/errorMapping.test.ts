@@ -126,6 +126,15 @@ describe("toHttpError — M7 golfer/terminate ApplicationErrors", () => {
     expect(result.statusCode).toBe(409);
     expect(JSON.parse(result.body)).toEqual({ code: "golfer-conflict", message: "golfer g-1 revision mismatch (expected 2)" });
   });
+
+  // Navigation spec §6a: GET /golfers/{golferId}'s own getGolfer.ts throw — a path-embedded
+  // golferId with no row at all, same "identified resource not found" 404 shape as
+  // round-not-found/course-not-found/unknown-crew above.
+  it("maps golfer-not-found to 404", () => {
+    const result = toHttpError(new ApplicationError("golfer-not-found"), logger);
+    expect(result.statusCode).toBe(404);
+    expect(JSON.parse(result.body)).toEqual({ code: "golfer-not-found", message: "golfer-not-found" });
+  });
 });
 
 // accounts-only identity: joinRound rejects a re-tap from a golfer already seated in THIS round —

@@ -18,6 +18,7 @@ import type {
   FinalizeRoundResponse,
   GetCourseResponse,
   GetCrewResponse,
+  GetGolferResponse,
   GetMeResponse,
   GetMyLiveRoundsResponse,
   GetMyRecordResponse,
@@ -93,7 +94,8 @@ export interface UseCases {
   getShareLink: (claims: ParticipantClaims) => Promise<ShareLinkResponse>;
   // Projection-realignment Task 6: the snapshot's own event log, "golfer"-gated (a signed-in
   // account, never a round-scoped participant token — the archive outlives any one device's
-  // credential) — getRoundArchive.ts's own doc comment covers the participant/stranger split.
+  // credential). Navigation spec §6b relaxed this to any signed-in golfer, not just a
+  // participant/counting-crew-member — getRoundArchive.ts's own doc comment covers why.
   getRoundArchive: (claims: AccountClaims, id: RoundId) => Promise<GetRoundArchiveResponse>;
   // Architecture-realignment Task 14: the participant-token re-mint — "golfer"-gated (the SAME
   // signed-in account tier getRoundArchive above uses, not a round-scoped participant token,
@@ -120,6 +122,11 @@ export interface UseCases {
   // Projection-realignment Task 13: "your rounds, right now" — presence pointers, not
   // finalized history (getMyRounds just above). Same golfer-tier auth.
   getMyLiveRounds: (claims: AccountClaims) => Promise<GetMyLiveRoundsResponse>;
+  // Navigation spec §6a: GET /golfers/{golferId} — the golfer page's read. "golfer"-gated
+  // (any signed-in caller), but NOT self-scoped like getMyRecord/getMyRounds/getMyLiveRounds
+  // above — the target golferId rides the request, resolved from the path (routes.ts's own
+  // path-param extraction below), so this takes no claims at all.
+  getGolfer: (request: { golferId: GolferId }) => Promise<GetGolferResponse>;
   // M8 Task 4: crews — every route below is "golfer"-gated (routes.ts's table), EXCEPT
   // peekCrewInvite ("none" — the consent-screen preview a would-be joiner sees before signing
   // in). Crew membership (invited in, accountable out — spec §2/§3): mintCrewInvite/
@@ -439,6 +446,18 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 200,
     handler: async (ctx) => useCases.getMyLiveRounds(ctx.account!),
+  },
+  // Navigation spec §6a: the golfer page's read. "golfer"-gated (any signed-in caller may
+  // view any golfer — spec §6a's own visibility decision) but NOT self-scoped: the target
+  // golferId rides the path, same extraction shape as GET /courses/{courseId}. Deliberately
+  // NOT in ANON_THROTTLED_ROUTES (apps/infra-cdk/lib/swngStack.ts) — unlike the "none"-auth
+  // course reads, this route always requires a signed-in caller.
+  {
+    method: "GET",
+    path: "/golfers/{golferId}",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getGolfer({ golferId: golferId(ctx.pathParams.golferId!) }),
   },
   // M8 Task 4: crews — every route below is "golfer"-gated (a signed-in Cognito identity,
   // same tier as the /me* surface above), EXCEPT POST /crews/peek ("none" — see its own entry

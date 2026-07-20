@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { crewId, fixtureLinks, golferId, roundId } from "@swng/domain";
-import type { Crew, RoundArchive } from "@swng/domain";
-import { createInMemoryCrewStore, createInMemoryGolferStore, createInMemorySnapshotStore, putAndBindGolfer } from "../testing/fakes.js";
+import { fixtureLinks, golferId, roundId } from "@swng/domain";
+import type { RoundArchive } from "@swng/domain";
+import { createInMemorySnapshotStore } from "../testing/fakes.js";
 import { getRoundArchive } from "./getRoundArchive.js";
 
 const ROUND_ID = roundId("round-1");
 const ANN_ID = golferId("ann");
-const BO_ID = golferId("bo");
-const CREW_ID = crewId("crew-1");
 
 // A minimal-but-real RoundArchive — the exact `events` array is never inspected by
 // getRoundArchive beyond passing it straight through, so a placeholder log (never validated
@@ -28,9 +26,7 @@ const buildArchive = (overrides?: Partial<RoundArchive>): RoundArchive => ({
 
 const setup = () => {
   const snapshots = createInMemorySnapshotStore();
-  const golferStore = createInMemoryGolferStore();
-  const crewStore = createInMemoryCrewStore();
-  return { snapshots, golferStore, crewStore, archive: getRoundArchive({ snapshots, golferStore, crewStore }) };
+  return { snapshots, archive: getRoundArchive({ snapshots }) };
 };
 
 describe("getRoundArchive", () => {
@@ -43,44 +39,19 @@ describe("getRoundArchive", () => {
     const ctx = setup();
     const events = buildArchive().events; // the placeholder log this archive was built with
     ctx.snapshots.record(buildArchive({ events }));
-    await putAndBindGolfer(ctx.golferStore, ANN_ID, "sub-ann", "Ann");
 
     const result = await ctx.archive({ sub: "sub-ann" }, ROUND_ID);
     expect(result).toEqual({ events });
   });
 
-  // The stranger-403 pin (task-9 crew arm): a non-participant who shares NO counting crew with
-  // this round is still rejected — a signed-in golfer who was never in it and whose crews (none
-  // here) count nothing.
-  it("403s not-a-viewer for a signed-in golfer who is NOT a participant and shares no counting crew — a stranger", async () => {
-    const ctx = setup();
-    ctx.snapshots.record(buildArchive());
-    await putAndBindGolfer(ctx.golferStore, BO_ID, "sub-bo", "Bo");
-
-    await expect(ctx.archive({ sub: "sub-bo" }, ROUND_ID)).rejects.toMatchObject({ code: "not-a-viewer" });
-  });
-
-  it("403s not-a-viewer for a signed-in caller who has no account golfer row at all", async () => {
-    const ctx = setup();
-    ctx.snapshots.record(buildArchive());
-
-    await expect(ctx.archive({ sub: "sub-never-seen" }, ROUND_ID)).rejects.toMatchObject({ code: "not-a-viewer" });
-  });
-
-  // The crew-view arm (task-9): a non-participant who belongs to a crew that COUNTS this round
-  // may view it — authority flows from the crew's counted set (countsRound), reached via the
-  // caller's crews (listByGolfer), never from a back-reference on the round.
-  it("returns the event log for a non-participant who is a member of a crew that counts this round", async () => {
+  // Navigation spec §6b (binding): the archive read relaxes to any signed-in golfer — a
+  // stranger who never played this round and shares no counting crew still gets the event
+  // log. The old participant-or-crew-counts authorization (and its golferStore/crewStore
+  // deps) is gone; only "does a snapshot exist" gates this read now.
+  it("any signed-in golfer reads any finalized archive — a stranger who never played it", async () => {
     const ctx = setup();
     const events = buildArchive().events;
     ctx.snapshots.record(buildArchive({ events }));
-    await putAndBindGolfer(ctx.golferStore, BO_ID, "sub-bo", "Bo");
-    // Bo isn't in the round (Ann is the only participant) but is a crew member, and the crew
-    // counts this round into a season.
-    const crew: Crew = { id: CREW_ID, name: "Sunday Skins", members: [{ golferId: BO_ID, name: "Bo", role: "organizer" }] };
-    await ctx.crewStore.put(crew, undefined);
-    await ctx.crewStore.putSeason(CREW_ID, { seasonId: "s1", name: "2026", status: "open", createdAtMs: 1_000 });
-    await ctx.crewStore.addCountedRound(CREW_ID, "s1", { roundId: ROUND_ID, finalizedAtMs: 2_000, appendedBy: BO_ID, appendedAtMs: 3_000 });
 
     await expect(ctx.archive({ sub: "sub-bo" }, ROUND_ID)).resolves.toEqual({ events });
   });

@@ -411,6 +411,23 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // The archived card: entry locked, no pad ever opens.
     await expect(pageA.getByRole("button", { name: "Ann hole 1", exact: true })).toBeDisabled();
   });
+
+  test("10: B opens Ann's golfer page from the results Roster; her record renders under her own name", async () => {
+    // GolferLink (navigation spec §4a): ResultsView's Roster list (aria-label="Roster", distinct
+    // from the "Posted to handicaps" list below it, which links the SAME four names a second
+    // time) links every name to /golfers/{golferId}. B is signed in as Bo — any signed-in
+    // golfer's Bearer is enough for GET /golfers/{golferId} (auth tier "golfer").
+    await pageB.getByRole("list", { name: "Roster" }).getByRole("link", { name: "Ann", exact: true }).click();
+
+    await expect(pageB).toHaveURL(/\/golfers\/[^/]+$/);
+    await expect(pageB.getByRole("heading", { name: "Ann", exact: true })).toBeVisible();
+
+    // RecordSections (GolferPage.tsx) — the SAME extraction ProfilePage renders for yourself,
+    // third-person, no controls. Both section headings render regardless of how much history Ann
+    // has accrued (the chart's own <8-rounds gate changes its body text, never its heading).
+    await expect(pageB.getByRole("heading", { name: "Your index over time" })).toBeVisible();
+    await expect(pageB.getByRole("heading", { name: "History" })).toBeVisible();
+  });
 });
 
 // M7 Task 8 (docs/superpowers/plans/2026-07-10-m7-identity.md Task 8; docs/papercuts.md's

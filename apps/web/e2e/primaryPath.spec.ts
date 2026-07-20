@@ -131,4 +131,28 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
 
     await page.screenshot({ path: screenshotPath("primary-path-profile-history.png"), fullPage: true });
   });
+
+  test("6: the history row's round link opens the round record; its course-name link opens the course page", async () => {
+    // Two sibling links per row (RecordSections.tsx's HistoryList, navigation spec §4b) — never
+    // a full-card link. The round half's href starts with /rounds/ (distinct from the course
+    // half's /courses/), which is what makes it clickable without depending on the exact
+    // score/tee text the row renders.
+    const historyList = page.locator("xpath=//h3[normalize-space(text())='History']/following-sibling::ul[1]");
+    await historyList.locator('a[href^="/rounds/"]').first().click();
+
+    // The round's ONE permanent address (navigation spec §7) — RoundRecordPage renders the same
+    // ResultsView test 4's own finalize already proved out.
+    await expect(page).toHaveURL(/\/rounds\/[^/]+$/);
+    await expect(page.getByRole("heading", { name: "Final results" })).toBeVisible();
+
+    // RoundRecordPage's own heading (spec §7/link sweep): the course name is linked (the frozen
+    // card carries a courseId — ensureCourse seeded a real course above), the date stays plain
+    // text right after it — click the course half.
+    await page.getByRole("link", { name: courseName, exact: true }).click();
+
+    await expect(page).toHaveURL(/\/courses\/[^/]+$/);
+    await expect(page.getByRole("heading", { name: courseName, exact: true })).toBeVisible();
+
+    await page.screenshot({ path: screenshotPath("primary-path-round-to-course.png"), fullPage: true });
+  });
 });

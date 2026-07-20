@@ -765,6 +765,58 @@ orphan cleared cells of omitted departed golfers ride in `archive.cells` (commen
 `openGamePanel` e2e helper leaves its panel open; killNetwork's A-side keeps a loose anchor
 (the dedup pin lives in B's exact one). On local `main`, never pushed.
 
+The app wears the brand — the reskin, the door, and the death of the 401 (post-standard-card,
+2026-07-19, spec `docs/superpowers/specs/2026-07-19-brand-reskin-design.md`, plan
+`2026-07-19-brand-reskin.md`, 8 SDD tasks + a review-directed fix, commits `1363921..51b51fb`,
+base `a474240`): an owner field report — the signed-out home showed THREE identical "Sign in"
+buttons and a console 401 on every stale-session load — grew, by owner call ("we might as well
+plan the reskin"), into `apps/web` adopting the marketing site's identity
+(https://swng.webflow.io/, values extracted live) end to end. The design was owner-approved via
+RENDERED MOCKUPS iterated across four rounds (artifact `ff994673`, kept current): cream
+`#f7f5ef` paper / forest `#1c2b22` ink / gold `#c9a356` as the pencil (ONCE per screen — the
+primary action or the current-hole wash, never data ink) / **oxblood `#8b3a3a` as the second
+ink** (extracted from the marketing site's own input placeholder; jobs: under-par scores,
+picked-up/conceded glyphs, placeholders, careful actions, errors — nothing else), Georgia
+sentences, mono machine-facts, square corners everywhere, and — after the owner rejected
+Oswald ("hard to read") and Archivo ("doesn't have a good feeling") — **the system font**,
+so the whole identity ships ZERO font files. Tokens live in ONE Tailwind `@theme` block;
+idioms (btnPrimary/btnSecondary/btnDanger/btnDangerSolid/cardBox/eyebrow/badge/inputBox/
+inputCode) in ONE `ui/classes.ts`; the binding sweep invariant — **recolor, retype, re-shape,
+never re-behave** — held across ~40 files with exactly two sanctioned exceptions. One: the
+signed-out `/` is now the LANDING PAGE (no app header — Layout renders a bare Outlet iff
+signed-out-on-`/`; marketing hero copy verbatim; ONE gold Sign in; "New here? Signing in
+creates your account."; a forest band whose mono ROUND-CODE input routes straight into
+`/join?code=` — the funnel keeps all its own logic), closing the field report at the root.
+Two: `useAuth` reads the `expiresAt` it always stored — `withAuth` refreshes PROACTIVELY
+(60s skew) before calling, and a failed background refresh degrades in place via a new private
+`clearLocalSession` (NO Cognito /logout redirect mid-load; the explicit Sign out button keeps
+it), killing papercut 18's 401 arm structurally. One domain addition: `underPar(score, par)`
+in `scoring/present.ts` (fence-allowed presentation truth) inks gross AND net red on the card.
+Whole-tree grep gates (no legacy palette incl. red-*, no `rounded*`, no font files, no stray
+hex) caught a straggler no task's file list owned (`ShareButton.tsx`); e2e reconciliation
+moved 18 `exact:true` locators to anchored case-insensitive regexes because **CSS `uppercase`
+changes Chromium accnames but not happy-dom textContent** (~90 others triaged immune). The
+whole-branch review (READY TO DEPLOY — YES, 0 Critical/0 Important, invariants verified by
+execution) caught the ONE cross-task composition no scoped review owned — signed-out inner
+pages rendered TWO golds (compact header Sign in + body CTA), the origin report's exact shape
+— fixed same-day (`51b51fb`: the header compact goes btnSecondary). Close-out
+(controller-run, web-only — NO `deploy:beta`, no wipe): `publish:web:beta` (bundle
+`index-OfMGbMX_.js`) → `e2e:beta` 16/16 ×2 → `e2e:field` **58 passed / 1 documented-skip on
+the FIRST run** (59 declared tests reconcile exactly; every reconciled locator held live) →
+an adversarial USE pass on DEPLOYED beta.swng.golf (phone viewport, real PKCE, "Golfer 6465"):
+the door live with ZERO API calls and ZERO console errors signed out, the code input
+pre-filling the funnel, a real Casa Verde round — dots on exactly SI≤9, a birdie 3 wearing
+oxblood gross AND net, a mis-tapped 8 cleared through the real pad (the Stableford chip
+honestly "5 pts thru 2"), the inline panel with treatment lines — and **the 401 kill proven
+on the wire**: `expiresAt` forced past → reload → `POST oauth2/token` 200 FIRST, then `/me`
+200, zero 401s, zero console errors, no redirect. Riding as notes: Leave-round's confirm
+deliberately wears fairway not oxblood (component-commented spec deviation); HoleGrid retypes
+cardBox inline ×3 + the goldwash warning banner is hand-carried in 2 files (hoist candidates);
+finalize-modal-over-AddGameForm can transiently show two golds (no scrim — out of charter);
+`text-fairway/70` small-text sits below AA-small; the signed-in home's body `h1 "swng"` under
+the header wordmark is pre-existing structure (papercut candidate). The marketing site
+eventually adopting the system font is recorded, not scheduled. On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

@@ -89,7 +89,31 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
             <li key={p.golferId} className="flex flex-col gap-1 text-forest">
               <span className="flex flex-wrap items-center gap-2">
                 <span>
-                  <GolferLink golferId={p.golferId} name={p.name} /> — <span className="font-mono text-fairway">{p.tee} — CH {formatCourseHandicap(p.courseHandicap)}</span>
+                  <GolferLink golferId={p.golferId} name={p.name} /> — <span className="font-mono text-fairway">{p.tee}</span>
+                  {/* The formatted CH span and the editor are mutually exclusive (review finding:
+                      showing "CH +2" statically while the editor below holds the raw "-2" put two
+                      sign-opposite representations of the same number on screen at once). While
+                      editing, the editor renders IN PLACE of the "— CH ..." text entirely. */}
+                  {editing === p.golferId ? (
+                    <span className="ml-2 inline-flex items-center gap-2">
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        aria-label={`Course handicap for ${p.name}`}
+                        className={`${inputBox} w-16`}
+                        value={value}
+                        onChange={(event) => setValue(event.target.value)}
+                      />
+                      <button type="button" className={btnPrimary} disabled={saving || !isValidInt(value)} onClick={() => void save(p.golferId)}>
+                        Save
+                      </button>
+                      <button type="button" className={btnSecondary} onClick={cancelEdit}>
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="font-mono text-fairway"> — CH {formatCourseHandicap(p.courseHandicap)}</span>
+                  )}
                 </span>
                 {/* A departed participant (accounts-only identity spec §4) stays on the roster
                     WITH their seat data — their played holes are facts — plus this "left"
@@ -111,22 +135,6 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
 
               {editing === p.golferId && (
                 <span className="flex flex-col gap-2">
-                  <span className="inline-flex items-center gap-2">
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      aria-label={`Course handicap for ${p.name}`}
-                      className={`${inputBox} w-16`}
-                      value={value}
-                      onChange={(event) => setValue(event.target.value)}
-                    />
-                    <button type="button" className={btnPrimary} disabled={saving || !isValidInt(value)} onClick={() => void save(p.golferId)}>
-                      Save
-                    </button>
-                    <button type="button" className={btnSecondary} onClick={cancelEdit}>
-                      Cancel
-                    </button>
-                  </span>
                   <span className="text-sm text-fairway">Strokes apply to the whole round — dots and games update everywhere.</span>
                   {error && (
                     <p role="alert" className="text-oxblood">

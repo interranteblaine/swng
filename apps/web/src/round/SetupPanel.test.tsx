@@ -117,8 +117,9 @@ describe("SetupPanel", () => {
     // Scoped to the roster row itself — the Add Game form below also renders a "Stableford"
     // radio-card label, which is a different surface entirely, not a roster badge. The identity
     // line itself is byte-identical; the row also carries an Edit affordance now (mid-round
-    // handicap correction spec 2026-07-20), so the match is anchored, not exact.
-    expect(annRow!.textContent).toMatch(/^Ann — white — CH 8/);
+    // handicap correction spec 2026-07-20), so the match is anchored (with a trailing word
+    // boundary, so a regression rendering "CH 85" would fail this), not exact.
+    expect(annRow!.textContent).toMatch(/^Ann — white — CH 8\b/);
     expect(screen.queryByText(/Not yet in a game/)).toBeNull();
   });
 
@@ -132,8 +133,10 @@ describe("SetupPanel", () => {
     expect(annLink.getAttribute("href")).toBe(`/golfers/${ANN}`);
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     // Anchored, not exact (mid-round handicap correction spec 2026-07-20 adds an Edit
-    // affordance after the identity line) — the tee/CH suffix itself is still plain text.
-    expect(annRow!.textContent).toMatch(/^Ann — white — CH 8/);
+    // affordance after the identity line) — the tee/CH suffix itself is still plain text. The
+    // trailing word boundary catches a regression rendering "CH 85" that a bare start-anchor
+    // would miss.
+    expect(annRow!.textContent).toMatch(/^Ann — white — CH 8\b/);
   });
 
   it("renders each participant's identity row exactly once even once games exist — no second, dots-only roster", () => {
@@ -262,6 +265,11 @@ describe("SetupPanel — mid-round handicap correction (spec 2026-07-20)", () =>
     expect((input as HTMLInputElement).value).toBe("-2");
     expect(screen.getByText("Strokes apply to the whole round — dots and games update everywhere.")).toBeTruthy();
 
+    // The swap (review finding): the static formatted "CH +2" must NOT still be on screen while
+    // the editor holds the raw "-2" underneath it — a plus handicap is exactly where two
+    // sign-opposite representations of the same number would otherwise appear at once.
+    expect(plusRow!.textContent).not.toMatch(/CH \+2/);
+
     // Ann's row is untouched — only Plus's row entered edit mode.
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     expect(within(annRow!).queryByRole("spinbutton")).toBeNull();
@@ -292,22 +300,27 @@ describe("SetupPanel — mid-round handicap correction (spec 2026-07-20)", () =>
     expect(screen.queryByText("Strokes apply to the whole round — dots and games update everywhere.")).toBeNull();
   });
 
-  it("Cancel restores the static row without calling onSetHandicap", async () => {
+  it("Cancel restores the static row (the swap back) without calling onSetHandicap", async () => {
     const user = userEvent.setup();
-    const state = baseState({ participants: [participant(ANN, "Ann", "white", 8), participant(BO, "Bo", "white", 4)] });
+    // The plus-handicap fixture is where the swap actually bites: static "CH +2" vs. the raw
+    // "-2" the editor holds — Cancel must bring the sign-formatted static text back, not leave
+    // the row showing nothing or the raw value.
+    const state = baseState({ participants: [participant(PLUS, "Plus", "white", -2), participant(ANN, "Ann", "white", 8)] });
     renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
-    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
-    await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
+    const plusRow = screen.getAllByRole("listitem").find((li) => /Plus/.test(li.textContent ?? ""));
+    await user.click(within(plusRow!).getByRole("button", { name: "Edit" }));
 
-    const input = within(annRow!).getByRole("spinbutton", { name: "Course handicap for Ann" });
+    const input = within(plusRow!).getByRole("spinbutton", { name: "Course handicap for Plus" });
+    expect(plusRow!.textContent).not.toMatch(/CH \+2/); // swapped out while editing
     await user.clear(input);
     await user.type(input, "99");
-    await user.click(within(annRow!).getByRole("button", { name: "Cancel" }));
+    await user.click(within(plusRow!).getByRole("button", { name: "Cancel" }));
 
     expect(noopSetHandicap).not.toHaveBeenCalled();
-    expect(within(annRow!).queryByRole("spinbutton")).toBeNull();
-    expect(annRow!.textContent).toMatch(/^Ann — white — CH 8/);
+    expect(within(plusRow!).queryByRole("spinbutton")).toBeNull();
+    // Swapped back: the static "CH +2" text is on screen again, anchored with a word boundary.
+    expect(plusRow!.textContent).toMatch(/^Plus — white — CH \+2\b/);
   });
 
   it("a failed save surfaces the error text and keeps the editor open", async () => {

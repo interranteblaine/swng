@@ -65,7 +65,7 @@ export function AuthCallbackPage() {
           <p role="alert" className="text-oxblood">
             {error}
           </p>
-          <a href="/" className="text-forest underline decoration-gold decoration-2">
+          <a href="/" className="text-forest underline decoration-fairway decoration-2">
             Back to swng
           </a>
         </div>

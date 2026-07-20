@@ -83,7 +83,7 @@ function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
       aria-label={`${participant.name} hole ${hole.number}`}
       onClick={onTap}
       disabled={readOnly}
-      className={`${cardBox} flex min-h-14 min-w-14 flex-col items-center justify-center gap-0.5 px-1 py-1`}
+      className={`${cardBox} flex min-h-14 min-w-14 flex-col items-center justify-center gap-0.5 px-1 py-1 active:bg-goldwash`}
     >
       {(() => {
         const grant = strokeGrant(dots);

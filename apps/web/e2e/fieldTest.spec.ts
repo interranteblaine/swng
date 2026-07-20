@@ -140,7 +140,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // identity spec §3): the code rides the URL, and the page offers exactly one way forward —
     // the sign-in CTA (scoped to <main>; the header chrome carries its own compact Sign in).
     await pageB.goto(`/join?code=${joinCode}`);
-    await expect(pageB.getByRole("main").getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+    await expect(pageB.getByRole("main").getByRole("button", { name: /^sign in$/i })).toBeVisible();
 
     // The Hosted-UI round trip itself is Cognito's stock form — the controller's live
     // spot-walk covers it, not this automated gate — so the harness injects Bo's minted
@@ -153,7 +153,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // golfer, so the funnel asks its one required question before any join form renders —
     // this is where "Bo" gets typed, the only name entry in his whole story.
     await pageB.getByLabel("What should the card call you?").fill("Bo");
-    await pageB.getByRole("button", { name: "Continue", exact: true }).click();
+    await pageB.getByRole("button", { name: /^continue$/i }).click();
 
     // The prompt resolves into the join form on the same visit — "Playing as Bo" from the
     // record, the code preserved through the whole trip.
@@ -375,7 +375,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
   test("9: A finalizes; both contexts render matching ResultsView with the deck-correct final numbers", async () => {
     test.setTimeout(60_000);
     await pageA.getByRole("button", { name: "Finalize round" }).click();
-    await pageA.getByRole("dialog", { name: "Confirm finalize" }).getByRole("button", { name: "Finalize", exact: true }).click();
+    await pageA.getByRole("dialog", { name: "Confirm finalize" }).getByRole("button", { name: /^finalize$/i }).click();
 
     await expect(pageA.getByRole("heading", { name: "Final results" })).toBeVisible();
     // finalize's WS broadcast fires after settleRound + the archive write (finalizeRound.ts) —
@@ -542,7 +542,7 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
     await page.screenshot({ path: screenshotPath("finalize-dialog-unresolved.png"), fullPage: true });
 
     const finalizeResponsePromise = page.waitForResponse((r) => r.url().includes("/finalize") && r.request().method() === "POST");
-    await dialog.getByRole("button", { name: "End unfinished games & finalize", exact: true }).click();
+    await dialog.getByRole("button", { name: /^end unfinished games & finalize$/i }).click();
     const finalizeResponse = await finalizeResponsePromise;
     const body = parse(finalizeRoundResponseSchema, await finalizeResponse.json());
 

@@ -32,10 +32,10 @@ export interface ScorePadProps {
 export function ScorePad({ golfer, hole, current, onSubmit, onCancel }: ScorePadProps) {
   const values = orderedStrokeValues(hole.par);
 
-  const valueButtonClass = `${cardBox} flex min-h-14 min-w-14 items-center justify-center px-3 text-lg font-semibold text-forest`;
+  const valueButtonClass = `${cardBox} flex min-h-14 min-w-14 items-center justify-center px-3 text-lg font-semibold text-forest active:bg-goldwash`;
   // Picked up / Conceded: same cardBox square, oxblood ink — a distinct action from a plain
   // numeric score, never the numeral color.
-  const specialButtonClass = `${cardBox} flex min-h-14 min-w-20 items-center justify-center px-3 text-base font-semibold text-oxblood`;
+  const specialButtonClass = `${cardBox} flex min-h-14 min-w-20 items-center justify-center px-3 text-base font-semibold text-oxblood active:bg-goldwash`;
 
   return (
     <div role="dialog" aria-label={`Score for ${golfer.name}, hole ${hole.number}`} className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 border-t-2 border-forest bg-card p-4 shadow-2xl">

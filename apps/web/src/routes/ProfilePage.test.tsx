@@ -316,7 +316,7 @@ describe("ProfilePage — signed in", () => {
 
   // History rows lead with the score, not just the course — the redesign's whole point (a golfer
   // scans scores first, details second). A 9-hole round gets a marker; a rated round's already-
-  // rounded (0.1) differential renders as a short secondary detail, never a long float.
+  // posted (0.1) differential renders as a short secondary detail, never a long float.
   it("history rows lead with the score: AGS (vs par), a 9-hole marker, and a short differential", async () => {
     signIn();
     const eighteen: GolferRoundLine = {

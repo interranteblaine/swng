@@ -215,7 +215,7 @@ export function CreateRoundPage() {
               <span className="text-sm text-fairway">Playing as</span>
               <div className={`${cardBox} flex items-center justify-between gap-2 p-3 text-lg text-forest`}>
                 <span>{golfer.name}</span>
-                <Link to="/profile" className="text-sm text-forest underline decoration-gold decoration-2">
+                <Link to="/profile" className="text-sm text-forest underline decoration-fairway decoration-2">
                   Change
                 </Link>
               </div>

@@ -137,7 +137,7 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     await expect(page.getByLabel("Hole 18 yardage", { exact: true })).toHaveValue("377");
     await expect(page.getByText("SI remaining: none")).toBeVisible(); // all 18 indexes placed, a real permutation
 
-    await page.getByRole("button", { name: "Add course", exact: true }).click();
+    await page.getByRole("button", { name: /^add course$/i }).click();
 
     // Success lands on the course's own hub now (course-cards spec §7), not back on /create.
     // The (?!new$) lookahead is load-bearing: the PRE-click URL is /courses/new, which a bare
@@ -178,7 +178,7 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     await fillHoleGridKeyboardOnly(page);
     await expect(page.getByText("SI remaining: none")).toBeVisible();
 
-    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await page.getByRole("button", { name: /^save changes$/i }).click();
 
     await expect(page).toHaveURL(/\/courses\/[^/]+$/);
     expect(page.url()).toContain(`/courses/${courseId}`);
@@ -192,7 +192,7 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
   });
 
   test("5: 'Start a round here' preselects the course; Pat creates the round on white (ch 21); Quinn joins as himself over a direct HTTP fetch (ch 2)", async () => {
-    await page.getByRole("link", { name: "Start a round here", exact: true }).click();
+    await page.getByRole("link", { name: /^start a round here$/i }).click();
     await expect(page).toHaveURL(/\/create/);
 
     // The preselect (CoursePage's own router-state hand-off) lands with the card's FIRST tee
@@ -204,7 +204,7 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     // own record — the create form has no name field to fill anymore.
     await expect(page.getByText("Playing as", { exact: true })).toBeVisible();
     await page.getByLabel("Strokes you get here", { exact: true }).fill("21");
-    await page.getByRole("button", { name: "Create round", exact: true }).click();
+    await page.getByRole("button", { name: /^create round$/i }).click();
 
     await expect(page).toHaveURL(/\/round\//);
     joinCode = await readJoinCode(page);

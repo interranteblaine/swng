@@ -213,7 +213,7 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
   test("3: a finalize ATTEMPT while still offline fails with the honest fallback line — never a raw network error, dialog stays open, the queue survives", async () => {
     await page.getByRole("button", { name: "Finalize round" }).click();
     await expect(page.getByRole("dialog", { name: "Confirm finalize" })).toBeVisible();
-    await page.getByRole("button", { name: "Finalize", exact: true }).click();
+    await page.getByRole("button", { name: /^finalize$/i }).click();
 
     // Same honest, never-raw-text fallback RoundPage.test.tsx's own component-level pin already
     // asserts for a REJECTED finalize — this is the same code path hit by a REAL failed fetch
@@ -238,7 +238,7 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
 
     await page.getByRole("button", { name: "Finalize round" }).click();
     await expect(page.getByRole("dialog", { name: "Confirm finalize" })).toBeVisible();
-    await page.getByRole("button", { name: "Finalize", exact: true }).click();
+    await page.getByRole("button", { name: /^finalize$/i }).click();
 
     await expect(page.getByRole("heading", { name: "Final results" })).toBeVisible({ timeout: 45_000 });
   });

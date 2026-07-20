@@ -214,7 +214,7 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     await expect(page.getByLabel("Hole 9 yardage", { exact: true })).toHaveValue("356");
     await expect(page.getByText("SI remaining: none")).toBeVisible(); // all 9 indexes placed, a real permutation
 
-    await page.getByRole("button", { name: "Add course", exact: true }).click();
+    await page.getByRole("button", { name: /^add course$/i }).click();
 
     // Success lands on the course's own hub. The (?!new$) lookahead is load-bearing: the pre-click
     // URL is /courses/new, which a bare /courses/[^/]+$ already matches, so without it this wait
@@ -240,12 +240,12 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
 
   test("2: a live round on the unrated tee — the standard card's dots come straight from stroke index + course handicap, the Match play panel states the relative strokes, and two-tap scoring nets against the card", async () => {
     // "Start a round here" preselects the course; Uma creates on the unrated white tee (ch 13).
-    await page.getByRole("link", { name: "Start a round here", exact: true }).click();
+    await page.getByRole("link", { name: /^start a round here$/i }).click();
     await expect(page).toHaveURL(/\/create/);
     await expect(page.getByText(courseName, { exact: true })).toBeVisible();
     await expect(page.getByText("Playing as", { exact: true })).toBeVisible(); // no name field — the account's own record
     await page.getByLabel("Strokes you get here", { exact: true }).fill(String(UMA_CH));
-    await page.getByRole("button", { name: "Create round", exact: true }).click();
+    await page.getByRole("button", { name: /^create round$/i }).click();
 
     await expect(page).toHaveURL(/\/round\//);
     const joinCode = await readJoinCode(page);

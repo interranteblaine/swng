@@ -66,7 +66,7 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
     // required question before any join form. Answering it is the ONE name entry in this file.
     await page.goto("/join");
     await page.getByLabel("What should the card call you?").fill(GOLFER_NAME);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("button", { name: /^continue$/i }).click();
 
     // The prompt resolves into the join form on the same visit (no navigation hop) — proof the
     // PUT landed and the account now renders by its real name, straight from the record.
@@ -78,7 +78,7 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
 
   test("2: signed-in home -> Start a round shows 'Playing as' — no name field anywhere", async () => {
     await page.goto("/");
-    await page.getByRole("link", { name: "Start a round", exact: true }).click();
+    await page.getByRole("link", { name: /^start a round$/i }).click();
     await expect(page).toHaveURL(/\/create/);
 
     await page.getByLabel("Course", { exact: true }).fill(courseName);
@@ -96,7 +96,7 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
 
     await page.screenshot({ path: screenshotPath("primary-path-playing-as.png"), fullPage: true });
 
-    await page.getByRole("button", { name: "Create round", exact: true }).click();
+    await page.getByRole("button", { name: /^create round$/i }).click();
     await expect(page).toHaveURL(/\/round\//);
   });
 
@@ -108,7 +108,7 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
 
   test("4: finalize through the real confirm dialog", async () => {
     await page.getByRole("button", { name: "Finalize round" }).click();
-    await page.getByRole("dialog", { name: "Confirm finalize" }).getByRole("button", { name: "Finalize", exact: true }).click();
+    await page.getByRole("dialog", { name: "Confirm finalize" }).getByRole("button", { name: /^finalize$/i }).click();
     await expect(page.getByRole("heading", { name: "Final results" })).toBeVisible();
   });
 

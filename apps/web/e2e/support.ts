@@ -757,7 +757,7 @@ export const clearScore = async (page: Page, golferName: string, hole: number): 
 
   const dialog = page.getByRole("dialog", { name: `Score for ${golferName}, hole ${hole}`, exact: true });
   await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "Clear score", exact: true }).click(); // tap 2
+  await dialog.getByRole("button", { name: /^clear score$/i }).click(); // tap 2
 
   await expect(dialog).toBeHidden(); // no confirm step, same as a posting tap
 };

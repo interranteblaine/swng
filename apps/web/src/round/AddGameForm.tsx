@@ -186,7 +186,7 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
           <span className="flex items-center justify-between">
             <span className="font-semibold text-forest">Strokes</span>
             {!isGrossStrokePlay && (
-              <button type="button" onClick={() => setAdjusting((current) => !current)} className="text-sm text-forest underline decoration-gold decoration-2">
+              <button type="button" onClick={() => setAdjusting((current) => !current)} className="text-sm text-forest underline decoration-fairway decoration-2">
                 Adjust
               </button>
             )}

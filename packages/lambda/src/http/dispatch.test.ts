@@ -47,6 +47,7 @@ import {
   removeCrewMember,
   searchCourses,
   seedCard,
+  setHandicap,
   startRound,
   supersedeCard,
   terminateGame,
@@ -60,6 +61,7 @@ import {
   createCrewResponseSchema,
   createSeasonResponseSchema,
   errorResponseSchema,
+  eventsResponseSchema,
   finalizeRoundResponseSchema,
   getCourseResponseSchema,
   getCrewResponseSchema,
@@ -82,6 +84,7 @@ import {
   removeCountedRoundResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
+  setHandicapResponseSchema,
   shareLinkResponseSchema,
   startRoundResponseSchema,
   supersedeCardResponseSchema,
@@ -174,6 +177,7 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
     abandonRound: abandonRound({ journal, broadcast, clock, ids, projectionStore, logger }),
     leaveRound: leaveRound({ journal, broadcast, clock, ids }),
+    setHandicap: setHandicap({ journal, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
@@ -336,6 +340,54 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
         ],
       }),
     ]);
+  });
+
+  // spec 2026-07-20: mid-round course handicap correction — any participant corrects any
+  // participant (score-for-anyone), so the FIRST participant's own token authors a correction
+  // whose SUBJECT is the SECOND participant.
+  it("POST /rounds/{roundId}/handicap: participant auth, 200, appends the correction", async () => {
+    const { dispatcher } = await setup();
+
+    const started = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(
+            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } } }),
+          ),
+        ).body!,
+      ),
+    );
+    const joined = joinRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(
+            makeEvent({ method: "POST", path: "/rounds/join", token: "sub-bo", body: { code: started.joinCode, tee: "white", courseHandicap: 2 } }),
+          ),
+        ).body!,
+      ),
+    );
+
+    const resp = asStructured(
+      await dispatcher(
+        makeEvent({
+          method: "POST",
+          path: `/rounds/${started.roundId}/handicap`,
+          token: started.token,
+          body: { golferId: joined.golferId, courseHandicap: 13 },
+        }),
+      ),
+    );
+    expect(resp.statusCode).toBe(200);
+    const parsed = setHandicapResponseSchema.parse(JSON.parse(resp.body!));
+    expect(parsed.events).toHaveLength(1);
+    expect(parsed.events[0]).toMatchObject({ kind: "participant-handicap-set", golferId: joined.golferId, courseHandicap: 13 });
+
+    const eventsResp = asStructured(
+      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
+    );
+    expect(eventsResp.statusCode).toBe(200);
+    const events = eventsResponseSchema.parse(JSON.parse(eventsResp.body!));
+    expect(events.events.some((event) => event.kind === "participant-handicap-set")).toBe(true);
   });
 
   it("rejects a request with no bearer token on a participant route — 401", async () => {
@@ -1509,6 +1561,23 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(
         await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/games/some-game/terminate`, token: spectatorToken })),
+      );
+      expect(resp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
+    });
+
+    it("POST /rounds/{roundId}/handicap", async () => {
+      const { dispatcher } = await setup();
+      const { started, spectatorToken } = await startAndShare(dispatcher);
+      const resp = asStructured(
+        await dispatcher(
+          makeEvent({
+            method: "POST",
+            path: `/rounds/${started.roundId}/handicap`,
+            token: spectatorToken,
+            body: { golferId: started.golferId, courseHandicap: 13 },
+          }),
+        ),
       );
       expect(resp.statusCode).toBe(403);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });

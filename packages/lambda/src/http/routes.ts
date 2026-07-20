@@ -42,6 +42,8 @@ import type {
   RemoveCountedRoundResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
+  SetHandicapRequest,
+  SetHandicapResponse,
   ShareLinkResponse,
   StartRoundRequest,
   StartRoundResponse,
@@ -62,6 +64,7 @@ import {
   joinRoundRequestSchema,
   peekCrewInviteRequestSchema,
   recordScoreRequestSchema,
+  setHandicapRequestSchema,
   startRoundRequestSchema,
   supersedeCardRequestSchema,
   transferOrganizerRequestSchema,
@@ -87,6 +90,10 @@ export interface UseCases {
   // accounts-only identity spec §4: a participant walks off — appends participant-left for the
   // token's OWN golferId (self-only, no body). "participant"-gated, same tier as the acts above.
   leaveRound: (claims: ParticipantClaims) => Promise<LeaveRoundResponse>;
+  // spec 2026-07-20: mid-round course handicap correction — any participant corrects any
+  // participant (score-for-anyone), the SUBJECT golferId rides the body. "participant"-gated,
+  // same tier as the acts above.
+  setHandicap: (claims: ParticipantClaims, request: SetHandicapRequest) => Promise<SetHandicapResponse>;
   readEvents: (id: RoundId, sinceSeq: number) => Promise<EventsResponse>;
   peekRound: (code: string) => Promise<PeekRoundResponse>;
   // M9 Task 3 (share): mints (deterministically) this round's own spectator link — participant-
@@ -306,6 +313,14 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "participant", // accounts-only identity spec §4: the leaver is the token's own golferId — self-only by construction.
     successStatus: 200, // an act on an existing round (appends participant-left), not a mint — same 200 spirit as finalize/abandon.
     handler: async (ctx) => useCases.leaveRound(ctx.claims!),
+  },
+  {
+    method: "POST",
+    path: "/rounds/{roundId}/handicap",
+    schema: setHandicapRequestSchema,
+    auth: "participant", // spec 2026-07-20: any participant corrects any participant (score-for-anyone).
+    successStatus: 200, // an act on an existing round (appends participant-handicap-set), not a mint — same 200 spirit as leave/finalize.
+    handler: async (ctx, body) => useCases.setHandicap(ctx.claims!, body as SetHandicapRequest),
   },
   // GET /rounds/peek must be matched BEFORE any /rounds/{roundId}/... template below it —
   // the dispatcher (http/dispatch.ts) walks this array in order and returns the first match,

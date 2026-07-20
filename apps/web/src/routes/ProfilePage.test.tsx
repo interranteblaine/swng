@@ -136,10 +136,9 @@ describe("ProfilePage — signed in", () => {
     // 3 rounds is under the 8-round chart gate — no chart yet.
     expect(screen.queryByTestId("index-chart")).toBeNull();
 
-    // History renders newest-first, exactly as the wire response ordered it (no re-sort). The
-    // course name (no courseId on this fixture) renders as PLAIN TEXT, not a link (RecordSections
-    // extraction, navigation spec §6c.3: two sibling links, never nested) — so each row's ROUND
-    // link is queried directly, anchored on its own "white" tee text.
+    // History renders newest-first, exactly as the wire response ordered it (no re-sort). Each row
+    // is ONE whole-row link to its own round (RecordSections extraction, owner-ruled 2026-07-20 —
+    // a history row IS the round) — queried directly, anchored on its own "white" tee text.
     const historyLinks = screen.getAllByRole("link", { name: /white/ });
     expect(historyLinks[0]?.textContent).toContain("9.2");
     expect(historyLinks[1]?.textContent).toContain("11.8");
@@ -181,12 +180,11 @@ describe("ProfilePage — signed in", () => {
     expect(screen.getByRole("button", { name: "Change" })).toBeTruthy();
   });
 
-  // Projection-realignment Task 6 / navigation spec §6c.3 (Step 1's own structural pin): every
-  // history line's score/remainder is a real link to the round's own permanent address
-  // (navigation Task 5's RoundRecordPage), keyed by the wire response's own roundId — never
-  // plain unlinked text. (The course-name link is pinned separately below, in the
-  // two-sibling-links test — this fixture carries no courseId.)
-  it("renders each history line's score/remainder as a link to its own /rounds/:roundId", async () => {
+  // Projection-realignment Task 6 / navigation spec §6c.3 (Step 1's own structural pin), corrected
+  // 2026-07-20 (a history row IS the round): every history line is ONE whole-row link to the
+  // round's own permanent address (navigation Task 5's RoundRecordPage), keyed by the wire
+  // response's own roundId — never plain unlinked text.
+  it("renders each history line as a whole-row link to its own /rounds/:roundId", async () => {
     signIn();
     const history: GolferRoundLine[] = [lineWithDifferential("1", 9.2), lineWithDifferential("2", 11.8)];
     vi.stubGlobal(
@@ -211,10 +209,10 @@ describe("ProfilePage — signed in", () => {
     expect(secondLink.getAttribute("href")).toBe(`/rounds/${history[1]!.roundId}`);
   });
 
-  // The two-sibling-links restructure itself (navigation spec §4b/§6c.3): a courseId-bearing line
-  // splits into two NON-NESTED links (course name → its course; score/remainder → its round); a
-  // courseId-less line (the common case pre-course-cards) renders the course name as plain text.
-  it("splits a history row into two sibling links — course name to its course, score to its round — and a courseId-less row renders the course name as plain text", async () => {
+  // Owner ruling 2026-07-20: a history row is ONE link, whole row, regardless of whether the line
+  // carries a courseId — a courseId no longer produces a second, separately-addressable anchor
+  // inside the row (the course stays reachable from the round page's own heading link instead).
+  it("a history row is one whole-row link whether or not the line carries a courseId — the course name is never its own anchor inside the row", async () => {
     signIn();
     const withCourse: GolferRoundLine = { ...lineWithDifferential("1", 9.2), courseId: courseId("course-pebble") };
     const withoutCourse: GolferRoundLine = lineWithDifferential("2", 11.8);
@@ -232,19 +230,17 @@ describe("ProfilePage — signed in", () => {
 
     renderProfilePage();
 
-    const courseLink = await waitFor(() => screen.getByRole("link", { name: "Pebble Beach" }));
-    expect(courseLink.getAttribute("href")).toBe(`/courses/${withCourse.courseId}`);
-    expect(courseLink.querySelector("a")).toBeNull(); // never nested inside another anchor
+    const firstRowLink = await waitFor(() => screen.getByRole("link", { name: /Pebble Beach · white · 82 \(\+10\) · 9\.2/ }));
+    expect(firstRowLink.getAttribute("href")).toBe(`/rounds/${withCourse.roundId}`);
+    expect(firstRowLink.querySelectorAll("a")).toHaveLength(0); // no nested anchor, courseId or not
 
-    const scoreLink = screen.getByRole("link", { name: /white · 82 \(\+10\) · 9\.2/ });
-    expect(scoreLink.getAttribute("href")).toBe(`/rounds/${withCourse.roundId}`);
+    const secondRowLink = screen.getByRole("link", { name: /Pebble Beach · white · 82 \(\+10\) · 11\.8/ });
+    expect(secondRowLink.getAttribute("href")).toBe(`/rounds/${withoutCourse.roundId}`);
+    expect(secondRowLink.querySelectorAll("a")).toHaveLength(0);
 
-    // The courseId-less row: exactly one "Pebble Beach" is a link (the first row's); the second
-    // is plain text.
-    expect(screen.getAllByText("Pebble Beach")).toHaveLength(2);
-    const plainCourseName = screen.getAllByText("Pebble Beach").find((el) => el.tagName !== "A");
-    expect(plainCourseName).toBeTruthy();
-    expect(screen.getByRole("link", { name: /white · 82 \(\+10\) · 11\.8/ }).getAttribute("href")).toBe(`/rounds/${withoutCourse.roundId}`);
+    // Exactly two anchors carry "Pebble Beach" in their accessible name — the two row links
+    // themselves — never a third, separately-addressable course-name anchor for either row.
+    expect(screen.getAllByRole("link", { name: /Pebble Beach/ })).toHaveLength(2);
   });
 
   // The chart gate (metrics-projection-grows spec): a golfer's index chart is HELD BACK below
@@ -430,18 +426,18 @@ describe("ProfilePage — signed in", () => {
 
     renderProfilePage();
 
-    // Course names (no courseId on these fixtures) render as plain text, not links (RecordSections
-    // extraction, navigation spec §6c.3) — the score/remainder link is queried directly.
+    // Each row is one whole-row link (RecordSections extraction, owner-ruled 2026-07-20) — the
+    // course name is text inside that same link, queried via the link's own textContent.
     const eighteenLink = await waitFor(() => screen.getByRole("link", { name: /81 \(\+9\)/ }));
     expect(eighteenLink.textContent).toContain("81 (+9)");
     expect(eighteenLink.textContent).toContain("8.7");
     expect(eighteenLink.textContent).not.toMatch(/8\.7\d/); // never a long float — pinned to one decimal
-    expect(screen.getByText("Casa Verde GC")).toBeTruthy();
+    expect(eighteenLink.textContent).toContain("Casa Verde GC");
 
     const nineLink = screen.getByRole("link", { name: /47 \(\+11\)/ });
     expect(nineLink.textContent).toContain("47 (+11)");
     expect(nineLink.textContent).toContain("9 holes");
-    expect(screen.getByText("Sandy Hollow Nine")).toBeTruthy();
+    expect(nineLink.textContent).toContain("Sandy Hollow Nine");
   });
 
   // The name/home Save (index-source one-tap spec §2): the index source commits on its own tap now,

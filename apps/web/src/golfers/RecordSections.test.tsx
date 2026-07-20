@@ -58,27 +58,27 @@ describe("RecordSections", () => {
     expect(screen.getByTestId("index-line-whs")).toBeTruthy();
   });
 
-  it("a history row with a courseId is two sibling (non-nested) links: the course name to /courses/:courseId, the score/remainder to /rounds/:roundId", () => {
+  it("a history row is ONE whole-row link to /rounds/:roundId — the course name renders as plain text inside it, never its own anchor", () => {
     const withCourse = line("1", { courseId: courseId("course-1") });
     renderSections(ZERO_METRICS, [withCourse]);
 
-    const courseLink = screen.getByRole("link", { name: "Pebble Beach" });
-    expect(courseLink.getAttribute("href")).toBe(`/courses/${withCourse.courseId}`);
-    expect(courseLink.querySelector("a")).toBeNull(); // no anchor nested inside an anchor
+    // Exactly one anchor for the row, named by its full rendered text (course name included).
+    const rowLink = screen.getByRole("link", { name: /Pebble Beach · white · 82 \(\+10\) · 9\.2/ });
+    expect(rowLink.getAttribute("href")).toBe(`/rounds/${withCourse.roundId}`);
+    expect(rowLink.querySelectorAll("a")).toHaveLength(0); // no nested anchor
 
-    const scoreLink = screen.getByRole("link", { name: /white · 82 \(\+10\) · 9\.2/ });
-    expect(scoreLink.getAttribute("href")).toBe(`/rounds/${withCourse.roundId}`);
-    expect(scoreLink.querySelector("a")).toBeNull();
+    // The course name is text INSIDE the row link, not a link of its own — a courseId on the line
+    // no longer produces a second, separately-addressable anchor.
+    expect(screen.getAllByRole("link")).toHaveLength(1);
   });
 
-  it("a history row without a courseId renders the course name as plain text, never a link", () => {
+  it("a history row without a courseId renders identically to one with a courseId — the row link is the whole card either way", () => {
     const withoutCourse = line("1");
     renderSections(ZERO_METRICS, [withoutCourse]);
 
-    expect(screen.queryByRole("link", { name: "Pebble Beach" })).toBeNull();
-    expect(screen.getByText("Pebble Beach").tagName).not.toBe("A");
-    const scoreLink = screen.getByRole("link", { name: /white · 82 \(\+10\) · 9\.2/ });
-    expect(scoreLink.getAttribute("href")).toBe(`/rounds/${withoutCourse.roundId}`);
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    const rowLink = screen.getByRole("link", { name: /Pebble Beach · white · 82 \(\+10\) · 9\.2/ });
+    expect(rowLink.getAttribute("href")).toBe(`/rounds/${withoutCourse.roundId}`);
   });
 
   it("a 9-hole, undifferentiated line renders the 9-hole marker and no differential", () => {

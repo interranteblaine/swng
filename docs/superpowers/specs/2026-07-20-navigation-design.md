@@ -88,7 +88,7 @@ count grows. Revisit when Events (v2) lands.
 | Surface | Change |
 |---|---|
 | HomePage (signed-in) | NEW "Recent rounds" section: latest 3 from `GET /me/rounds`, each row → `/rounds/:roundId`, rendered by the SAME history-row component §6c.3 extracts from ProfilePage (one rendering, no second vs-par/score composition web-side — the compute fence); a quiet "all rounds → your profile" pointer. Live-rounds list unchanged (already links). The redundant body `h1 "swng"` under the header wordmark is removed (recorded papercut). |
-| ProfilePage history rows | Row splits into two links, NO nested anchors: course name → `/courses/:courseId` (when courseId present); the score/date remainder → `/rounds/:roundId`. |
+| ProfilePage history rows | **(Amended by owner ruling, 2026-07-20 — supersedes the original two-link split.)** A history row REPRESENTS a finalized round: the whole row is ONE link to `/rounds/:roundId` (full-card tap target); the course name inside is plain text. The course is one tap away on the round page's own heading link. The original spec split the row (course name → course page) — shipped, then owner-caught as misleading and corrected. |
 | ProfilePage home course | Course name → course link (the "Change" button stays). |
 | SetupPanel roster | Names → `GolferLink`. |
 | GamePanel (standings tables, skins story, match trail labels) | Names → `GolferLink` via the existing `nameOf` sites. |
@@ -112,7 +112,12 @@ count grows. Revisit when Events (v2) lands.
    only ("golferId stays server-side", `contracts/courses.ts`) — course reads are `auth: none`
    and golferIds don't belong on an anonymous wire. (Deviation from mockup frame 3, accepted.)
 4. **StatusChrome stays plain.** It is connection telemetry, not a roster surface.
-5. **Recorded post-build (whole-branch review + live walk, 2026-07-20) — correctly-plain
+5. **A row that represents a round is ONE link — to the round** (owner ruling, 2026-07-20).
+   In any list whose rows stand for rounds (profile/golfer history, home's Recent rounds),
+   the name-is-a-link rule yields: the whole row links to `/rounds/:roundId` and entity
+   names inside it stay plain. Two destinations inside one row-shaped affordance is
+   misleading, and the row's dominant text would hijack most taps.
+6. **Recorded post-build (whole-branch review + live walk, 2026-07-20) — correctly-plain
    surfaces the enumeration above didn't name, now part of the carve-out record so future
    sweeps inherit the ruling:** AddGameForm's who's-in labels and player pickers (names
    inside form controls — anchors don't belong in checkboxes/selects); StandingsHeader
@@ -200,7 +205,8 @@ path). Renders:
    the index-model spec.
 3. The record sections ProfilePage already renders — index-over-time chart, typical 18,
    history rows — extracted into shared components (`apps/web/src/golfers/RecordSections.tsx`)
-   consumed by BOTH pages. History rows link to rounds and courses exactly as on Profile (§4b).
+   consumed by BOTH pages. History rows are whole-row round links exactly as on Profile (§4b,
+   as amended).
 4. If the viewed golfer is you: a quiet `This is you · your profile` link. ProfilePage keeps
    the controls (name/home Save, index-source picker) — controls never render on `/golfers/:id`.
 5. 404 from the API → the honest empty state ("This golfer isn't available") with a link home.

@@ -145,12 +145,13 @@ export interface HistoryListProps {
   readonly historyLimit?: number;
 }
 
-// The ONE history-row rendering (navigation spec §4b): ProfilePage/GolferPage use it via
-// RecordSections below; HomePage's own "Recent rounds" switchboard section (Task 5) renders it
-// directly, capped to 3, WITHOUT dragging in the chart/typical-18 sections below — those only
-// belong on a golfer's full record. Rows are TWO SIBLING links, never nested: the course name
-// (when `courseId` is present — absent renders plain text, never a dead link) opens the course
-// page; the score/remainder opens the round's own permanent address.
+// The ONE history-row rendering (navigation spec §4b, corrected 2026-07-20 — a history row IS a
+// finalized round): ProfilePage/GolferPage use it via RecordSections below; HomePage's own
+// "Recent rounds" switchboard section (Task 5) renders it directly, capped to 3, WITHOUT dragging
+// in the chart/typical-18 sections below — those only belong on a golfer's full record. Each row
+// is ONE whole-row link to the round's own permanent address — tapping anywhere on the row (course
+// name included) opens the round; the course stays reachable from the round page's own heading
+// link instead (RoundRecordPage), never a second link inside the row.
 export function HistoryList({ history, historyLimit }: HistoryListProps) {
   const rows = historyLimit !== undefined ? history.slice(0, historyLimit) : history;
 
@@ -160,26 +161,19 @@ export function HistoryList({ history, historyLimit }: HistoryListProps) {
     <ul className="flex flex-col gap-1">
       {rows.map((line) => (
         <li key={line.roundId}>
-          {/* Two sibling links, never nested — the course name (when courseId is known) opens
-              the course page; the score/remainder opens the round. Score-first
-              (metrics-projection-grows spec): the score leads, course/tee follow — a golfer
-              scans results, not metadata. `vsPar`/differential are presentation only, no
-              domain compute import. */}
-          <div className={`${cardBox} block px-3 py-2 text-sm text-fairway tabular-nums`}>
-            {line.courseId ? (
-              <Link to={`/courses/${line.courseId}`} className="underline decoration-fairway">
-                {line.courseName}
-              </Link>
-            ) : (
-              <span>{line.courseName}</span>
-            )}{" "}
-            <Link to={`/rounds/${line.roundId}`} className="underline decoration-fairway">
-              · {line.tee}
-              {line.ags !== undefined && ` · ${line.ags} (${vsPar(line.ags, line.par)})`}
-              {line.holes === 9 && " · 9 holes"}
-              {line.differential !== undefined && ` · ${line.differential.toFixed(1)}`}
-            </Link>
-          </div>
+          {/* One row, one link, the whole card — a history row represents a finalized round, so
+              tapping anywhere on it goes there, full stop. Score-first (metrics-projection-grows
+              spec): the score leads, course/tee follow — a golfer scans results, not metadata.
+              `vsPar`/differential are presentation only, no domain compute import. */}
+          <Link
+            to={`/rounds/${line.roundId}`}
+            className={`${cardBox} block px-3 py-2 text-sm text-fairway underline decoration-fairway tabular-nums`}
+          >
+            {line.courseName} · {line.tee}
+            {line.ags !== undefined && ` · ${line.ags} (${vsPar(line.ags, line.par)})`}
+            {line.holes === 9 && " · 9 holes"}
+            {line.differential !== undefined && ` · ${line.differential.toFixed(1)}`}
+          </Link>
         </li>
       ))}
     </ul>

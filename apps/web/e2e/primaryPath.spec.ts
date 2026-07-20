@@ -132,11 +132,10 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
     await page.screenshot({ path: screenshotPath("primary-path-profile-history.png"), fullPage: true });
   });
 
-  test("6: the history row's round link opens the round record; its course-name link opens the course page", async () => {
-    // Two sibling links per row (RecordSections.tsx's HistoryList, navigation spec §4b) — never
-    // a full-card link. The round half's href starts with /rounds/ (distinct from the course
-    // half's /courses/), which is what makes it clickable without depending on the exact
-    // score/tee text the row renders.
+  test("6: the history row opens the round record; the round page's own heading course link opens the course page", async () => {
+    // A history row is ONE whole-row link (RecordSections.tsx's HistoryList, owner-ruled
+    // 2026-07-20 — a history row IS the round) — its href starts with /rounds/, which is what
+    // makes it clickable without depending on the exact score/tee text the row renders.
     const historyList = page.locator("xpath=//h3[normalize-space(text())='History']/following-sibling::ul[1]");
     await historyList.locator('a[href^="/rounds/"]').first().click();
 

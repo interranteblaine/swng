@@ -859,16 +859,25 @@ USE pass on DEPLOYED beta.swng.golf (two live accounts): the funnel preserved a 
 through PKCE; the hub's search NAVIGATED; Bo tapped Ann's name in a live match panel and
 read "Walk Ann · plays off — · from all their rounds · Their index over time · they've
 played 0" — the person fix live; finalize → results/roster/posted names all linked; home's
-recent-rounds two-link row; `/archive` URL redirected live; a signed-out round link funneled
+recent-rounds row; `/archive` URL redirected live; a signed-out round link funneled
 through sign-in BACK to the round; consoles clean (the only entry: the walk tool's own eval
 tripping the CSP — the CSP working); walk users deleted. Riding as notes: adjacent
 "No rounds yet" empty states on home (live + recent, no loading state); a transport failure
 reads as the "round isn't available" copy (no retry split); heading course links wear
-decoration-fairway (sentence-context precedent) vs `linkEntity`; history-row tap-target
-shrank to the two text links (no-nested-anchors cost); GolferPage says "their" even on your
-own page (the "This is you · your profile" link is the escape hatch — papercut candidate);
-typical-18 extrapolates small samples (pre-existing); the heading-split expression is
-hand-carried in 2 files. On local `main`, never pushed.
+decoration-fairway (sentence-context precedent) vs `linkEntity`; GolferPage says "their" even
+on your own page (the "This is you · your profile" link is the escape hatch — papercut
+candidate); typical-18 extrapolates small samples (pre-existing); the heading-split
+expression is hand-carried in 2 files. **Post-close owner correction (same day, `b060e23`):
+a history row IS the round** — the shipped two-link row split (course name → course page,
+remainder → round) was the SPEC's own error, owner-caught on the live surface ("when you
+click into a player's history, which represents a finalized round, and it brings you to the
+course page, that's misleading"); rows in round-representing lists (profile/golfer history,
+home Recent rounds — one shared `HistoryList`) are now ONE whole-row link to `/rounds/:id`
+(the full-card tap target restored, retiring that riding note), entity names inside them
+plain, the course one tap away on the round page's heading; spec §4b amended + §4c.5
+carve-out recorded; zero e2e locator changes (the round-href click was already the target);
+republished (bundle `index-9a79YajF.js`, served live), `e2e:field` 60/1-skip again, 71/71
+row pins. On local `main`, never pushed.
 
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.

@@ -344,4 +344,43 @@ describe("SetupPanel — mid-round handicap correction (spec 2026-07-20)", () =>
     expect(document.body.textContent).not.toMatch(/network exploded/);
     expect(within(annRow!).getByRole("spinbutton", { name: "Course handicap for Ann" })).toBeTruthy();
   });
+
+  // Review finding (Minor): a slow save in flight must not be interruptible by switching rows —
+  // otherwise save()'s own setEditing(undefined)/setError lands on whichever row is open when the
+  // request settles, not necessarily the row that started it. A deferred promise (held open until
+  // resolved by hand) exposes the mid-flight window — same fixture shape as HomePage.test.tsx's/
+  // CreateRoundPage.test.tsx's own deferred-GET-/me tests, applied here to onSetHandicap.
+  it("disables Edit on OTHER rows and Cancel on the editing row while a save is in flight, re-enabling once it settles", async () => {
+    const user = userEvent.setup();
+    let resolveSetHandicap: (() => void) | undefined;
+    const pendingSetHandicap = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSetHandicap = resolve;
+        }),
+    );
+    const state = baseState({ participants: [participant(ANN, "Ann", "white", 8), participant(BO, "Bo", "white", 4)] });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: pendingSetHandicap });
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    const boRow = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
+    await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
+
+    const input = within(annRow!).getByRole("spinbutton", { name: "Course handicap for Ann" });
+    await user.clear(input);
+    await user.type(input, "9");
+    await user.click(within(annRow!).getByRole("button", { name: "Save" }));
+
+    // Mid-flight, before resolveSetHandicap fires: Ann's own Cancel is disabled, and Bo's Edit —
+    // a DIFFERENT row — is disabled too, so it can't be tapped to open a second editor while
+    // Ann's save is still in the air.
+    expect((within(annRow!).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(boRow!).getByRole("button", { name: "Edit" }) as HTMLButtonElement).disabled).toBe(true);
+
+    resolveSetHandicap?.();
+    await waitFor(() => expect(within(annRow!).queryByRole("spinbutton")).toBeNull());
+
+    // Settled: Bo's Edit is enabled again.
+    expect((within(boRow!).getByRole("button", { name: "Edit" }) as HTMLButtonElement).disabled).toBe(false);
+  });
 });

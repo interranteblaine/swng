@@ -3,7 +3,7 @@ import { formatCourseHandicap } from "@swng/domain";
 import type { GameState, GolferId, Participant, RoundState } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { GolferLink } from "../ui/GolferLink";
-import { badge, btnPrimary, btnSecondary, cardBox, eyebrow, inputBox } from "../ui/classes";
+import { badge, btnSecondary, cardBox, eyebrow, inputBox } from "../ui/classes";
 import { AddGameForm } from "./AddGameForm";
 
 // Mid-round handicap correction (spec 2026-07-20): "-2" and "13" both parse fine via
@@ -28,9 +28,15 @@ export interface SetupPanelProps {
 }
 
 export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupPanelProps) {
-  // Only one row edits at a time — opening a second row's editor is unreachable through the UI
-  // (every other row's own Edit button is hidden while another row is mid-edit), so a single
-  // `editing` id is enough state, no per-row map.
+  // A single `editing` id (not a per-row map) holds at most one open editor. Every OTHER row's
+  // own Edit button stays visible and clickable the whole time — only the row currently being
+  // edited hides its own Edit button, swapping in the Save/Cancel pair in its place. Tapping a
+  // different row's Edit calls startEdit again, which just overwrites `editing`/`value` — an
+  // IMPLICIT cancel of whichever row was open before, not a blocked action. Edit and Cancel are
+  // both disabled while `saving` is true so a slow save in flight can't be interrupted by
+  // switching rows mid-request — `save`'s own `setEditing(undefined)`/`setError` would otherwise
+  // land on whatever row happens to be open when the request settles, not necessarily the row
+  // that started it.
   const [editing, setEditing] = useState<GolferId | undefined>(undefined);
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
@@ -104,10 +110,18 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
                         value={value}
                         onChange={(event) => setValue(event.target.value)}
                       />
-                      <button type="button" className={btnPrimary} disabled={saving || !isValidInt(value)} onClick={() => void save(p.golferId)}>
+                      {/* btnSecondary, not btnPrimary (review finding — two golds while editing):
+                          AddGameForm's "Add game" submit below is this SAME panel's one gold
+                          action (the reskin rule, spec 2026-07-19 — gold once per screen). The
+                          established idiom for a secondary commit action composed alongside an
+                          existing gold one is ProfilePage's own index-source "Use this"/"Use this
+                          number" buttons — non-gold even though ProfilePage's name/home Save is
+                          gold — so Save here mirrors Cancel's own family instead of introducing a
+                          second fill. */}
+                      <button type="button" className={btnSecondary} disabled={saving || !isValidInt(value)} onClick={() => void save(p.golferId)}>
                         Save
                       </button>
-                      <button type="button" className={btnSecondary} onClick={cancelEdit}>
+                      <button type="button" className={btnSecondary} disabled={saving} onClick={cancelEdit}>
                         Cancel
                       </button>
                     </span>
@@ -126,7 +140,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
                 {editing !== p.golferId && (
                   <>
                     {" "}
-                    <button type="button" className={btnSecondary} onClick={() => startEdit(p)}>
+                    <button type="button" className={btnSecondary} disabled={saving} onClick={() => startEdit(p)}>
                       Edit
                     </button>
                   </>

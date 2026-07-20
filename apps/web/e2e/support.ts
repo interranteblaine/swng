@@ -770,6 +770,10 @@ export const clearScore = async (page: Page, golferName: string, hole: number): 
 // established inline version of this same xpath (untouched, per this milestone's field-test-
 // upkeep scope) — this export exists for courseEntry.spec.ts's own single-context flow, so any
 // NEW caller has one place to get it from rather than a third copy.
+// Only works on rounds entered through a real create/join flow — a round opened via the
+// /rounds/:roundId re-mint path (openLiveRound.ts) saves `joinCode: ""` (a re-mint's own
+// POST /rounds/{roundId}/token response carries no join code), so the panel's "Join code" <p>
+// renders BLANK there and this helper's own `/^[A-Z0-9]{6}$/` match times out.
 export const readJoinCode = async (page: Page): Promise<string> => {
   const joinCodeCell = page.locator("xpath=//p[normalize-space(text())='Join code']/following-sibling::p[1]");
   await expect(joinCodeCell).toBeVisible();

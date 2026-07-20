@@ -125,10 +125,12 @@ Route `/courses` (static segment ahead of `/courses/:courseId`). Public (course 
    CourseSearch already exists.
 3. Signed in, when `auth.golfer.homeCourseId` is set: a "Your home course" card — name
    fetched via the public `GET /courses/{courseId}` — linking to the course page.
-4. Signed in: "Courses you've played" — derived client-side from `GET /me/rounds`: group
-   lines by `courseId` (skip lines without one), order by most-recent round, render
-   `name · N round(s)`, each → the course page. Course name comes from the lines'
-   `courseName` (no extra fetches).
+4. Signed in: "Courses you've played" — a new pure domain accessor
+   **`coursesPlayed(lines)`** (`domain/golfer`, the `gameMembers` precedent: derivations
+   over round lines are domain truth, never inline view logic) folds the `GET /me/rounds`
+   lines: group by `courseId` (skip lines without one), most-recent first, returning
+   `{ courseId, name, rounds }[]`; the hub renders `name · N round(s)`, each → the course
+   page. Course name comes from the lines' `courseName` (no extra fetches).
 5. An "Add a course" secondary action → `/courses/new`.
 
 Signed out, the hub shows heading + search + Add a course (the add flow's own funnel
@@ -183,8 +185,11 @@ path). Renders:
 2. The index line with its source named: `plays off 12.4 · computed from their rounds` —
    resolved exactly as ProfilePage does (`resolveIndex(indexSource, metrics)` +
    `formatHandicapIndex`), with the source phrases extracted to ONE shared helper
-   parameterized by person (`your`/`their` — ProfilePage's copy strings move there; one
-   copy, two persons). `—` when unresolved, per the index-model spec.
+   **`indexSourcePhrase(kind, person)` in `@swng/domain` `handicap/present.ts`** — the
+   model owns the convention's words (`formatHandicapIndex`/`strokesNote` precedent;
+   ProfilePage's copy strings move there verbatim as the `your` arm; the `their` arm:
+   `from all their rounds` / `their WHS index` / `their own`). `—` when unresolved, per
+   the index-model spec.
 3. The record sections ProfilePage already renders — index-over-time chart, typical 18,
    history rows — extracted into shared components (`apps/web/src/golfers/RecordSections.tsx`)
    consumed by BOTH pages. History rows link to rounds and courses exactly as on Profile (§4b).

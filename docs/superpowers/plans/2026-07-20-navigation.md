@@ -152,6 +152,7 @@ Mount it as the first child of `<BrowserRouter>` in App.tsx.
 ### Task 3: `/courses` hub + the header's Courses destination
 
 **Files:**
+- Create: `packages/domain/src/golfer/coursesPlayed.ts`, `coursesPlayed.test.ts` (export from the domain barrel like its `golfer/` siblings)
 - Create: `apps/web/src/courses/CoursesHubPage.tsx`, `CoursesHubPage.test.tsx`
 - Modify: `apps/web/src/App.tsx` (route `/courses` ahead of `/courses/:courseId`; header gains the Courses link)
 - Modify: `apps/web/src/api.ts` ONLY IF `getMyRounds` (GET /me/rounds, parsing `getMyRoundsResponseSchema`) is not already there — grep first, add in the file's existing fetch idiom if missing
@@ -159,11 +160,13 @@ Mount it as the first child of `<BrowserRouter>` in App.tsx.
 
 **Interfaces:**
 - Consumes: `CourseSearch` UNCHANGED (its existing `onSelect(courseId, name)` callback — the hub navigates; form-filling callers keep their behavior); public `getCourse` from api.ts; `useAuth` (`golfer.homeCourseId`); `withAuth` + `getMyRounds`.
-- Produces: route `/courses`; header nav link.
+- Produces: `coursesPlayed(lines: readonly { courseId?: string; courseName: string }[]): readonly { courseId: string; name: string; rounds: number }[]` (a pure domain fold — structural param typing so wire lines pass straight in; input order is the lines' own newest-first, output preserves first-seen order = most-recent first); route `/courses`; header nav link.
 
-- [ ] **Step 1: Hub page, test-first.** Tests: (a) renders the `Courses` heading + `CourseSearch`; (b) selecting a search result navigates to `/courses/{id}` (MemoryRouter + a stubbed search selection); (c) signed in with `homeCourseId`: a "Your home course" card shows the fetched course name linking to its page; (d) signed in with rounds lines: "Courses you've played" groups by `courseId` (lines WITHOUT courseId skipped), most-recent first, `name · N round(s)` each linking to the course page — pin one fixture with two courses and one courseId-less line; (e) signed out: heading + search + "Add a course" only. Implementation per spec §5: `usePageTitle("Courses")`; sections in spec order; "Add a course" wears the secondary idiom (`btnSecondary`-class link) — NO gold on this page; names/course rows wear `linkEntity`.
+- [ ] **Step 1: `coursesPlayed`, test-first in the domain.** Tests: two courses interleaved newest-first → grouped with correct counts in first-seen order; lines without `courseId` skipped; empty input → empty. Implement as a small pure fold in `domain/golfer/coursesPlayed.ts` (the `gameMembers` precedent — derivations over round lines are domain truth, never inline view logic), barrel-exported.
 
-- [ ] **Step 2: Routes + header.** `<Route path="/courses" element={<CoursesHubPage />} />` above `/courses/new` (react-router ranks exact over dynamic; keep declaration order readable as the file's comments already do). Header (Layout): between the wordmark and `AuthChrome`, on the right cluster:
+- [ ] **Step 2: Hub page, test-first.** Tests: (a) renders the `Courses` heading + `CourseSearch`; (b) selecting a search result navigates to `/courses/{id}` (MemoryRouter + a stubbed search selection); (c) signed in with `homeCourseId`: a "Your home course" card shows the fetched course name linking to its page; (d) signed in with rounds lines: "Courses you've played" renders `coursesPlayed`'s output as `name · N round(s)` rows each linking to the course page — pin one fixture with two courses and one courseId-less line; (e) signed out: heading + search + "Add a course" only. Implementation per spec §5: `usePageTitle("Courses")`; sections in spec order; the page maps lines through `coursesPlayed` and renders — no inline grouping; "Add a course" wears the secondary idiom (`btnSecondary`-class link) — NO gold on this page; names/course rows wear `linkEntity`.
+
+- [ ] **Step 3: Routes + header.** `<Route path="/courses" element={<CoursesHubPage />} />` above `/courses/new` (react-router ranks exact over dynamic; keep declaration order readable as the file's comments already do). Header (Layout): between the wordmark and `AuthChrome`, on the right cluster:
 
 ```tsx
 <nav className="flex items-center gap-3">
@@ -176,7 +179,7 @@ Mount it as the first child of `<BrowserRouter>` in App.tsx.
 
 Shown signed in AND signed out (course reads are public). The signed-out `/` landing keeps suppressing the whole header — untouched. Update App.test.tsx: header shows `Courses` in both auth states; landing page still has no header.
 
-- [ ] **Step 3: Validate & commit**: `feat(web): /courses hub — search that navigates, your courses, one header destination`.
+- [ ] **Step 4: Validate & commit**: `feat(domain,web): /courses hub — coursesPlayed in the domain, search that navigates, one header destination`.
 
 ---
 
@@ -184,7 +187,7 @@ Shown signed in AND signed out (course reads are public). The signed-out `/` lan
 
 **Files:**
 - Create: `apps/web/src/golfers/RecordSections.tsx`, `RecordSections.test.tsx` (extracted from ProfilePage: the index-over-time chart, typical-18, history list)
-- Create: `apps/web/src/golfers/sourcePhrase.ts`, `sourcePhrase.test.ts`
+- Modify: `packages/domain/src/handicap/present.ts` + its test file (add `indexSourcePhrase` — the model owns the convention's words, the `formatHandicapIndex`/`strokesNote` precedent)
 - Create: `apps/web/src/golfers/GolferPage.tsx`, `GolferPage.test.tsx`
 - Modify: `apps/web/src/routes/ProfilePage.tsx` (consume both; render-identical)
 - Modify: `apps/web/src/api.ts` (`getGolfer(token, golferId)` parsing `getGolferResponseSchema`)
@@ -192,15 +195,15 @@ Shown signed in AND signed out (course reads are public). The signed-out `/` lan
 
 **Interfaces:**
 - Consumes: Task 1's wire (`GetGolferResponse`); Task 2's `GolferLink`/`usePageTitle`; the SignInCta funnel (`returnTo` = current path — the JoinRoundPage idiom); ProfilePage's existing `resolveIndex`/`formatHandicapIndex` imports.
-- Produces: `RecordSections({ metrics, history, historyLimit? })` — renders chart + typical-18 + history rows; each history row is TWO SIBLING LINKS (no nesting): course name → `/courses/{courseId}` when present (plain text when absent), the score/remainder text → the round (this task: the existing `/rounds/{roundId}/archive` path; Task 5 retargets). `sourcePhrase(kind: IndexSource["kind"], person: "your" | "their"): string` — the EXACT current ProfilePage strings for `your`, third-person variants `from all their rounds` / `their WHS index` / `their own`.
+- Produces: `RecordSections({ metrics, history, historyLimit? })` — renders chart + typical-18 + history rows; each history row is TWO SIBLING LINKS (no nesting): course name → `/courses/{courseId}` when present (plain text when absent), the score/remainder text → the round (this task: the existing `/rounds/{roundId}/archive` path; Task 5 retargets). `indexSourcePhrase(kind: IndexSource["kind"], person: "your" | "their"): string` in `@swng/domain` `handicap/present.ts` — the EXACT current ProfilePage strings for `your` (copy from the JSX, never retype), third-person variants `from all their rounds` / `their WHS index` / `their own`.
 
 - [ ] **Step 1: Extract RecordSections (ProfilePage tests are the pin).** Move the chart/typical-18/history JSX out of ProfilePage byte-identically except: (a) props instead of closure state; (b) the history row's course-name span becomes its own `<Link>` when `line.courseId` is present (sibling of the row's round link — restructure the row so the anchors never nest, keeping the rendered text identical). Run the full ProfilePage test file — every existing assertion passes; add one new row assertion: course name has `href="/courses/{id}"`, the score half has the round href, and a courseId-less line renders the name as plain text.
 
-- [ ] **Step 2: sourcePhrase, test-first.** Extract ProfilePage's three source-copy strings VERBATIM as the `"your"` arm (do not retype them — copy from the JSX); `"their"` arm per Global Constraints. ProfilePage switches to `sourcePhrase(kind, "your")`; its tests still pass unchanged (string-identical).
+- [ ] **Step 2: `indexSourcePhrase`, test-first in the domain.** In `handicap/present.ts` (alongside `formatHandicapIndex` — one-copy presentation truth): extract ProfilePage's three source-copy strings VERBATIM as the `"your"` arm (do not retype them — copy from the JSX); `"their"` arm per Global Constraints. Domain tests pin all six strings. ProfilePage switches to `indexSourcePhrase(kind, "your")`; its tests still pass unchanged (string-identical).
 
-- [ ] **Step 3: api + page, test-first.** `GolferPage` tests: (a) signed out → SignInCta with `returnTo` the current `/golfers/{id}` path; (b) loaded: name `h1`, `plays off {formatted} · {sourcePhrase(kind, "their")}` (an unresolvable index renders the `—` treatment exactly as ProfilePage does), RecordSections rendered with the response's metrics/history; (c) API 404 → `This golfer isn't available` + a link home, no crash; (d) viewing yourself (golferId === auth.golfer.golferId) shows `This is you · your profile` linking `/profile`; (e) `usePageTitle` lands the golfer's name. Implement: fetch via `withAuth((t) => getGolfer(t, golferId))`; resolve/format through the SAME imports ProfilePage uses; no controls of any kind on this page.
+- [ ] **Step 3: api + page, test-first.** `GolferPage` tests: (a) signed out → SignInCta with `returnTo` the current `/golfers/{id}` path; (b) loaded: name `h1`, `plays off {formatted} · {indexSourcePhrase(kind, "their")}` (an unresolvable index renders the `—` treatment exactly as ProfilePage does), RecordSections rendered with the response's metrics/history; (c) API 404 → `This golfer isn't available` + a link home, no crash; (d) viewing yourself (golferId === auth.golfer.golferId) shows `This is you · your profile` linking `/profile`; (e) `usePageTitle` lands the golfer's name. Implement: fetch via `withAuth((t) => getGolfer(t, golferId))`; resolve/format through the SAME imports ProfilePage uses; no controls of any kind on this page.
 
-- [ ] **Step 4: Route** `/golfers/:golferId` inside Layout. Validate & commit: `feat(web): the Golfer page — any player's record, one extraction, one copy of the source phrases`.
+- [ ] **Step 4: Route** `/golfers/:golferId` inside Layout. Validate & commit: `feat(domain,web): the Golfer page — any player's record, one extraction, the source phrases in the model`.
 
 ---
 

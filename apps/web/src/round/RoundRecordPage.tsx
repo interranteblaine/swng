@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { foldAndScore } from "@swng/client";
 import { roundId as makeRoundId } from "@swng/domain";
@@ -44,6 +44,13 @@ export function RoundRecordPage() {
   const navigate = useNavigate();
   const [view, setView] = useState<ArchiveView | undefined>(undefined);
   const [unavailable, setUnavailable] = useState(false);
+  // `golfer` resolves asynchronously (AuthProvider's own once-per-session GET /me — undefined
+  // until it settles) and is read ONLY inside the effect's re-mint branch below, never to decide
+  // whether to fetch — the tokensRef precedent (useAuth.ts:78). A ref, not a dependency: the
+  // effect below must not re-fire just because identity resolved after the archive already
+  // loaded (the reviewed duplicate-fetch/loading-flash finding).
+  const golferRef = useRef(golfer);
+  golferRef.current = golfer;
   // Re-runs once the archive loads (usePageTitle's own title-prop-change contract) — "swng"
   // while loading/resolving, then the same course + date designation the page's own header
   // renders below.
@@ -52,11 +59,16 @@ export function RoundRecordPage() {
   useEffect(() => {
     if (!param || !signedIn) return;
     const id: RoundId = makeRoundId(param);
+    // Stale-run guard: a second effect run (a real param/signedIn change) or an unmount
+    // (navigate() below, or the caller navigating away) must not let THIS run's callbacks
+    // setState afterward — every set* and the openLiveRound/navigate call below checks it first.
+    let ignore = false;
     setView(undefined);
     setUnavailable(false);
 
     void withAuth((token) => getRoundArchive(token, id))
       .then(({ events }) => {
+        if (ignore) return;
         const { state, games } = foldAndScore(events);
         setView({ state, games, createdAtMs: createdAtMsOf(events) });
       })
@@ -69,17 +81,23 @@ export function RoundRecordPage() {
         void (async () => {
           try {
             const { rounds } = await withAuth((token) => getMyLiveRounds(token));
+            if (ignore) return;
             if (rounds.some((round) => round.roundId === id)) {
-              await openLiveRound(id, { withAuth, golferName: golfer?.name ?? "", navigate });
+              await openLiveRound(id, { withAuth, golferName: golferRef.current?.name ?? "", navigate });
               return;
             }
           } catch {
             // falls through to the fallback below
           }
+          if (ignore) return;
           setUnavailable(true);
         })();
       });
-  }, [param, signedIn, withAuth, golfer, navigate]);
+
+    return () => {
+      ignore = true;
+    };
+  }, [param, signedIn, withAuth, navigate]);
 
   if (!param) {
     return (

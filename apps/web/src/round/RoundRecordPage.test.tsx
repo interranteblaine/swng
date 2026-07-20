@@ -109,6 +109,53 @@ describe("RoundRecordPage — archived (the old ArchivedRoundPage content, absor
     expect(cell.hasAttribute("disabled")).toBe(true);
   });
 
+  // Task review finding: `golfer` starts undefined in AuthProvider and resolves asynchronously
+  // via its own once-per-session GET /me — on every fresh signed-in load (this page's primary
+  // use case, a bookmarked/texted link) that resolution used to land AFTER the archive fetch's
+  // effect had already fired once, and `golfer` sitting in the effect's dependency array made it
+  // fire AGAIN: a duplicate GET /rounds/{roundId}/archive and a visible flash back to "Loading
+  // round…" after results had already rendered. This pins the fix: identity resolving late must
+  // not re-fire the fetch or revert the view.
+  it("golfer identity resolves AFTER the archive already rendered: the archive fetch fires exactly once and the view never flashes back to Loading (review finding)", async () => {
+    signIn();
+    let resolveMe!: (response: Response) => void;
+    const mePromise = new Promise<Response>((resolve) => {
+      resolveMe = resolve;
+    });
+    let archiveFetchCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        // AuthProvider's own once-per-session GET /me — deliberately held open so the archive
+        // fetch below resolves and renders FIRST, then `golfer` resolves well afterward.
+        if (path === "/me") return mePromise;
+        if (path === `/rounds/${ROUND_ID}/archive`) {
+          archiveFetchCount += 1;
+          return fakeResponse(200, { events: buildFinalLog() });
+        }
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderRoundRecordPage(`/rounds/${ROUND_ID}`);
+
+    // The archive resolves and renders while `golfer` is still unresolved (GET /me pending).
+    await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
+    expect(archiveFetchCount).toBe(1);
+
+    // Now identity resolves — the exact review scenario: `golfer` transitions from undefined to
+    // a real GolferView well after the archive already loaded and rendered.
+    resolveMe(fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } }));
+    // Let the resolution's re-render(s) settle.
+    await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
+
+    // No duplicate archive fetch, and the results never reverted to the loading state in between.
+    expect(archiveFetchCount).toBe(1);
+    expect(screen.queryByRole("status", { name: "Loading round" })).toBeNull();
+    expect(screen.getByText("Final results")).toBeTruthy();
+  });
+
   // Read-only, no session/outbox/edit affordances (the brief's own contract) — structurally,
   // the same "every button is either disabled or a game-select tab" proof WatchPage.test.tsx's
   // own live-log case uses for its archived-card reuse.
@@ -153,7 +200,15 @@ describe("RoundRecordPage — resolution when the archive read fails (navigation
         if (path === `/rounds/${ROUND_ID}/archive`) {
           return { ok: false, status: 404, json: async () => ({ code: "round-not-found", message: "no snapshot for round archived-round-1" }) } as unknown as Response;
         }
-        if (path === "/me/rounds/live") return fakeResponse(200, { rounds: [{ roundId: ROUND_ID, courseName: "Fixture Links", joinedAt: 1_000 }] });
+        if (path === "/me/rounds/live") {
+          // golfer now resolves via a ref (the reviewed fix — see RoundRecordPage.tsx), read at
+          // the moment openLiveRound is called rather than re-running the whole effect once
+          // identity settles. A real live-rounds round trip is never faster than the identity
+          // fetch's own render commit; a macrotask tick here reproduces that ordering so this
+          // mock (everything else resolves same-tick) doesn't race React's own re-render.
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          return fakeResponse(200, { rounds: [{ roundId: ROUND_ID, courseName: "Fixture Links", joinedAt: 1_000 }] });
+        }
         if (path === `/rounds/${ROUND_ID}/token` && method === "POST") {
           expect((init?.headers as Record<string, string>).authorization).toBe(`Bearer ${idToken}`);
           return fakeResponse(200, { roundId: ROUND_ID, token: "fresh-token", golferId: ANN_ID });

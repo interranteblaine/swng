@@ -12,6 +12,7 @@ import {
   loadWebEnv,
   mintAccountGolfer,
   openGamePanel,
+  readJoinCode,
   startRoundDirect,
   waitForParticipant,
 } from "./support.js";
@@ -38,16 +39,20 @@ import type { AccountGolfer } from "./support.js";
 // dialog, which is what's actually under test.
 //
 // Round creation goes through the API (startRoundDirect), not CreateRoundPage — so Gil's own
-// browser page has no naturally-populated credentialStore entry the way every other browser-
-// driven spec's host does. RoundPage.tsx's own guard (RoundPageForId) reads ONLY
-// `credentialStore.load(roundId)` (apps/web/src/identity.ts: `localStorage["swng:credential:
-// <roundId>"]`, a plain `{token, golferId, name, joinCode}` JSON blob — no validation beyond
-// JSON.parse) — so an addInitScript write of that exact shape, keyed by the roundId
-// startRoundDirect returns, is both sufficient and the ONLY way to view an API-created round
-// live without either driving CreateRoundPage's course-search UI (irrelevant to what's under
-// test here) or inventing a UI-driven "resume as host" flow the product doesn't have. Same
-// mechanism as this file's own injectAuthTokens (a second, pre-existing localStorage key), just
-// round-scoped instead of account-scoped.
+// browser page has no naturally-populated scoring credential for this round the way every other
+// browser-driven spec's host does. That is exactly the supported product scenario
+// RoundRecordPage.tsx (the round's own permanent noun address, /rounds/:roundId, navigation spec
+// §7) exists for: a signed-in golfer who already holds no local credential opens the round by
+// id, the archive fetch 404s (still live), `GET /me/rounds/live` finds Gil's own presence
+// (`writePresence` — packages/application/src/rounds/presence.ts — written synchronously inside
+// `startRound` right after the journal append, so it is already committed by the time this
+// browser ever opens, no eventual-consistency wait needed), and `openLiveRound`
+// (apps/web/src/session/openLiveRound.ts) mints a device credential via `POST
+// /rounds/{roundId}/token`, saves it via `credentialStore.save` — the exact shape a real
+// join/CreateRoundPage would write — then client-navigates to /round/:roundId, the live scoring
+// session's own address. Gil's browser therefore only needs the pre-existing account-token
+// injection (`injectAuthTokens`) to authorize that re-mint; the round-scoped credential itself is
+// acquired through the real re-mint path, never hand-written into storage.
 
 const DOT = "●"; // ScorecardGrid.tsx's own dot glyph (Cell's aria-hidden "●".repeat(dots) span)
 
@@ -88,15 +93,18 @@ test.describe.serial("mid-round handicap correction — a wrong course handicap 
     const context = await browser.newContext();
     page = await context.newPage();
     await injectAuthTokens(page, gil.tokens);
-    // See this file's own header comment: RoundPage's credentialStore guard needs exactly this
-    // shape, keyed by the roundId startRoundDirect minted — mirrors CreateRoundPage.tsx's own
-    // `credentialStore.save(response.roundId, { token, golferId, name: golfer.name, joinCode })`.
-    await page.addInitScript(
-      (arg) => localStorage.setItem(`swng:credential:${arg.roundId}`, JSON.stringify(arg.credential)),
-      { roundId: started.roundId, credential: { token: started.token, golferId: started.golferId, name: gil.golfer.name, joinCode: started.joinCode } },
-    );
 
-    await page.goto(`/round/${started.roundId}`);
+    // See this file's own header comment: the round's own permanent address resolves — archive
+    // 404 (still live) → GET /me/rounds/live hit (Gil's presence, already committed by
+    // startRoundDirect above) → openLiveRound's re-mint → client navigation to /round/:roundId —
+    // entirely through the real product path, no storage injection of the round credential.
+    await page.goto(`/rounds/${started.roundId}`);
+    // readJoinCode's own visibility assertion is the "landed on the live SetupPanel" proof — a
+    // stable element of the resolved page, not the URL (which never changes visibly here, since
+    // RoundRecordPage's navigate() to /round/:roundId is a client-side route change) and not an
+    // arbitrary timeout; Playwright's auto-retrying expect() carries this through the archive
+    // fetch + live-rounds check + token re-mint + navigate chain above.
+    await readJoinCode(page);
     await waitForParticipant(page, "Rae");
     await expect(chip(page, "Stroke play (net)")).toBeVisible();
   });

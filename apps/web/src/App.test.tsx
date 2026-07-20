@@ -44,6 +44,18 @@ describe("App", () => {
     window.history.pushState({}, "", "/");
   });
 
+  // Nav infrastructure Task 3: the header's Courses destination — public (course reads need no
+  // sign-in), so it shows on every signed-out inner page too, not just once signed in.
+  it("signed out on /join: the header also shows the Courses link", () => {
+    window.history.pushState({}, "", "/join");
+    render(<App />);
+
+    const header = screen.getByRole("banner");
+    const link = within(header).getByRole("link", { name: "Courses" });
+    expect(link.getAttribute("href")).toBe("/courses");
+    window.history.pushState({}, "", "/");
+  });
+
   // Not a re-test of useAuth's own GET /me contract (useAuth.test.tsx covers that in full) —
   // just that App.tsx's header actually wires the golfer's name through to a /profile link.
   it("shows the golfer's name linking to /profile when signed in", async () => {
@@ -63,6 +75,10 @@ describe("App", () => {
 
     const link = await screen.findByRole("link", { name: "Ann" });
     expect(link.getAttribute("href")).toBe("/profile");
+
+    // Nav infrastructure Task 3: the Courses link shows signed in too.
+    const coursesLink = screen.getByRole("link", { name: "Courses" });
+    expect(coursesLink.getAttribute("href")).toBe("/courses");
   });
 
   // Controller amendment 1: GET /me never creates — a signed-in user with no golfer row yet

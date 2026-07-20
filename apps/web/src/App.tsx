@@ -3,6 +3,7 @@ import { SignInButton } from "./auth/SignInButton";
 import { AuthProvider, useAuth } from "./auth/useAuth";
 import { AddCoursePage } from "./courses/AddCoursePage";
 import { CoursePage } from "./courses/CoursePage";
+import { CoursesHubPage } from "./courses/CoursesHubPage";
 import { EditCoursePage } from "./courses/EditCoursePage";
 import { CrewCreatePage } from "./crews/CrewCreatePage";
 import { CrewPage } from "./crews/CrewPage";
@@ -15,6 +16,7 @@ import { JoinRoundPage } from "./routes/JoinRoundPage";
 import { NotFoundPage } from "./routes/NotFoundPage";
 import { ProfilePage } from "./routes/ProfilePage";
 import { RoundPage } from "./routes/RoundPage";
+import { linkEntity } from "./ui/classes";
 import { ScrollToTop } from "./ui/ScrollToTop";
 import { WatchPage } from "./watch/WatchPage";
 
@@ -30,7 +32,7 @@ function AuthChrome() {
   const displayName = auth.golfer?.name ?? auth.email?.split("@")[0] ?? "Signed in";
   return (
     <div className="flex items-center gap-3">
-      <Link to="/profile" className="font-mono text-xs text-fairway underline decoration-gold decoration-2 underline-offset-2">
+      <Link to="/profile" className={`font-mono text-xs text-fairway ${linkEntity}`}>
         {displayName}
       </Link>
       <button type="button" onClick={() => auth.signOut()} className="font-mono text-xs text-fairway">
@@ -56,7 +58,15 @@ function Layout() {
         <Link to="/" className="text-lg font-extrabold tracking-tight text-forest">
           swng
         </Link>
-        <AuthChrome />
+        {/* Navigation Task 3: the header's one new destination — shown signed in AND signed out
+            (course reads are public). Small uppercase forest text, not gold (the brand rule:
+            gold stays the one primary action per screen). */}
+        <nav className="flex items-center gap-3">
+          <Link to="/courses" className="text-xs font-semibold tracking-widest text-forest uppercase">
+            Courses
+          </Link>
+          <AuthChrome />
+        </nav>
       </header>
       <Outlet />
     </div>
@@ -72,6 +82,11 @@ export function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/create" element={<CreateRoundPage />} />
+            {/* Navigation Task 3: /courses is the hub — a static segment, ranked ahead of the
+                dynamic /courses/:courseId below by react-router itself regardless of declaration
+                order, but placed here too for the same readability reason /courses/new (right
+                below) and /crews/new already are. */}
+            <Route path="/courses" element={<CoursesHubPage />} />
             {/* /courses/new is a static segment, ranked ahead of the dynamic /courses/:courseId
                 below by react-router itself regardless of declaration order — kept here too for
                 the same readability reason /crews/new sits ahead of /crews/:crewId. */}

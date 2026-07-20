@@ -879,6 +879,52 @@ carve-out recorded; zero e2e locator changes (the round-href click was already t
 republished (bundle `index-9a79YajF.js`, served live), `e2e:field` 60/1-skip again, 71/71
 row pins. On local `main`, never pushed.
 
+The course handicap is correctable mid-round — the log records what happened (post-navigation,
+2026-07-20, spec `docs/superpowers/specs/2026-07-20-mid-round-handicap-correction-design.md`,
+plan `2026-07-20-mid-round-handicap-correction.md`, 6 SDD tasks + 2 in-arc Important fixes + a
+whole-branch fix wave, commits `6265327..a2e36c5`): the owner's field report — "course handicap
+cannot be updated mid round" (his wife's complaint) — closed by ONE narrow event. **Semantics:
+retroactive, whole round** (a wrong CH was always wrong; dots move on already-played holes, every
+standing recomputes, the archive records the corrected number) — free by construction, since
+nothing ever snapshots strokes (dots/engines/AGS/settle all read the folded roster live).
+**The mechanism survived an owner probe:** the first design reused `participant-joined` (the fold's
+LWW seat map absorbs a second join); the owner asked "why is it a participant-joined event?" and the
+re-derivation replaced it — a join is a PRESENCE fact (it clears `departed`), and needing a
+no-corrections-for-departed guard to suppress half an event's meaning was the tell. The shipped
+event is `participant-handicap-set { golferId, courseHandicap }` (subject/author split like
+`score-recorded`): the log records corrections as corrections, presence stays orthogonal (a
+departed player — whose holes still count — is correctable and never re-seated), and the event
+structurally cannot carry a name/tee (name-freeze by construction). Fold rule, one sentence: a set
+applies iff HLC-later than that golfer's latest join, so a genuine rejoin's freshly-typed CH always
+supersedes an older correction. Wire: `POST /rounds/{roundId}/handicap` (participant auth, 37→38
+HTTP/40 total, NOT anon-throttled, existing error codes only — any participant corrects any
+participant, the score-for-anyone trust model), server-minted envelope, `leaveRound` shape; the
+client transport's score-recorded-only push guard untouched (roster mutations are REST, scoring
+stays the only offline-first write). Web: the roster row is the editor — EDIT swaps the static
+`CH N` span for a raw-signed input (mutual exclusion pinned with a plus-handicap fixture after the
+task review caught `CH +2` and `-2` on screen at once), one teaching line ("Strokes apply to the
+whole round — dots and games update everywhere."), Save `btnSecondary` (one gold per screen —
+ProfilePage's demoted-commit precedent), api-then-`sync()`, no optimistic write. Review culture
+earned its keep twice more: a task review replaced the browser spec's hand-written
+`swng:credential` storage injection with the REAL `/rounds/:id` re-mint path (making it the first
+spec to drive `RoundRecordPage`'s live-round resolution end-to-end), and the whole-branch review
+(fable, 0 Critical) caught that path's own stale oracle — `readJoinCode` waits on a join-code panel
+the re-mint entry renders EMPTY (`openLiveRound` saves `joinCode: ""`) — fixed to a Roster-heading
+wait before the gate ever ran. Gated: `pnpm validate` green at every commit; close-out
+controller-run — `deploy:beta` LAMBDA-FIRST (route live, 38 HTTP confirmed on `swng-http-beta`) →
+`publish:web:beta` (bundle `index-CbwK4GFB.js`) → `e2e:beta` **17/17 ×2** (the new wire case green
+first try) → `e2e:field` **64 passed / 1 documented-skip on the FIRST run** (incl.
+`handicapCorrection.spec.ts` 4/4 live) → an adversarial USE pass on DEPLOYED beta.swng.golf
+replaying the exact field complaint (two accounts, Wren seated at a wrong CH 9, match play added
+off the wrong number, five holes scored two-tap, then EDIT → 13 → Save: the chip moved
+**"2 UP thru 5" → "1 UP thru 5"** and the already-scored hole-5 cell re-struck `5` → `●54` live;
+exactly ONE `POST .../handicap` on the wire then one pull; console zero errors/warnings; finalize
+via the ended-game dialog; the sealed log read back join-with-9 → one set-to-13 — the story, on the
+wire; walk users deleted). NO wipe (additive event + route only). Recorded, not scheduled:
+**papercut 19 — any round entered via the re-mint path shows an empty join-code panel** (pre-existing
+since the navigation arc; honest fix is server-side, the re-mint response carrying the code).
+On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

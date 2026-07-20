@@ -112,6 +112,14 @@ count grows. Revisit when Events (v2) lands.
    only ("golferId stays server-side", `contracts/courses.ts`) — course reads are `auth: none`
    and golferIds don't belong on an anonymous wire. (Deviation from mockup frame 3, accepted.)
 4. **StatusChrome stays plain.** It is connection telemetry, not a roster surface.
+5. **Recorded post-build (whole-branch review + live walk, 2026-07-20) — correctly-plain
+   surfaces the enumeration above didn't name, now part of the carve-out record so future
+   sweeps inherit the ruling:** AddGameForm's who's-in labels and player pickers (names
+   inside form controls — anchors don't belong in checkboxes/selects); StandingsHeader
+   chips and `describeGame` compound strings (names inside `<button>`s — the linked
+   equivalents are one tap away in the open panel); Home's live-rounds rows (the whole row
+   already links to the round); CourseSummaryCard's course name (its "View course" link
+   carries the same address three lines down).
 
 ## 5. `/courses` — the hub (new page)
 

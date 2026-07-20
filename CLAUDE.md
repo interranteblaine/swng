@@ -817,6 +817,59 @@ finalize-modal-over-AddGameForm can transiently show two golds (no scrim — out
 the header wordmark is pre-existing structure (papercut candidate). The marketing site
 eventually adopting the system font is recorded, not scheduled. On local `main`, never pushed.
 
+Navigation is the nouns — every noun has an address, every name is a link (post-reskin,
+2026-07-20, spec `docs/superpowers/specs/2026-07-20-navigation-design.md` + its post-build
+§4c.5 carve-out record, plan `2026-07-20-navigation.md`, 7 SDD tasks + 2 review fixes + a
+whole-branch fix, commits `f32dcc3..54e12ad` + cleanup `46cc802`, base `fcf7ce6`): the owner's
+field report — no way to reach a course outside the start-round flow, no way to see another
+player — closed by ONE principle: **the product is four nouns; navigation is the nouns**
+(`/rounds/:id`, `/courses/:id`, `/golfers/:id`, `/crews/:id` + the `/courses` hub and a real
+404; every rendered noun-name links to its address, subject to spec-enumerated carve-outs).
+Backend adds exactly ONE route — `GET /golfers/{golferId}` (auth `golfer`, 37 HTTP/39 total,
+NOT anon-throttled) serving `{name, indexSource, metrics, history}` through a shared
+`recordOf` fold extracted from `getMyRecord` (one lines→record implementation) — and ONE
+policy relaxation: `GET /rounds/{roundId}/archive` reads for any signed-in golfer (spec §6b
+decision: a finalized scorecard is the same class of fact every participant's record already
+shows; capability tokens still gate live reads and all writes; the orphaned `not-a-viewer`
+vocabulary deleted). Web: `GolferLink`+`PlainNamesContext` (watch turns the whole tree's
+golfer links off at the root), `usePageTitle` on every page, `ScrollToTop` (PUSH/REPLACE
+only), a `path="*"` 404; the `/courses` hub (search NAVIGATES there — form-fill callers
+unchanged; home course; "Courses you've played" via a new pure domain `coursesPlayed` fold —
+the `gameMembers` precedent, owner-audit-driven like `indexSourcePhrase(kind, person)`
+joining `handicap/present.ts`); the Golfer page rendering the SAME extracted `RecordSections`
+ProfilePage uses (byte-identical relocation pinned by unchanged ProfilePage tests) with a
+`person` prop — the whole-branch review's ONE Important, caught composing "Your index over
+time" onto someone else's page, fixed to "Their … they've played N" (exhortation dropped;
+`54e12ad`); **one address per round** — `/rounds/:roundId` resolves archive → your-live
+(re-mint via the extracted `openLiveRound`) → honest fallback, `/archive` redirects forever,
+every internal link retargeted; the link sweep across SetupPanel/GamePanel/ResultsView/
+CrewPage/SeasonPanel/ProfilePage + the heading course-link split, with the scoring surface
+(ScorecardGrid/ScorePad/StatusChrome) pinned linkless by a `?raw` structural test (web lint
+bans node:fs) and deep links surviving sign-in via the shared `returnTo` funnel on every
+gated page. Task reviews caught and fixed in-arc: a raw-`golfer` effect dep double-fetching
+every fresh round-link load (ref + ignore-flag + fetch-count-1 regression pin, `1162d8c`)
+and the structural pin missing StatusChrome (`e668014`). Gated: `pnpm validate` green at
+every commit; each task independently reviewed; whole-branch review (fable) READY TO DEPLOY
+with the one fix, verified RESOLVED. Close-out (controller-run): `deploy:beta` LAMBDA-FIRST
+(new route CREATE_COMPLETE, 53.8s; old-bundle window verified zero-breakage by review) →
+`publish:web:beta` (bundle `index-BCD8uLcw.js`) → `e2e:beta` 16/16 ×2 → `e2e:field` **60
+passed / 1 documented-skip on the FIRST run** (61 declared incl. the two new beats: profile
+row → round record → course page, and browser B opening A's golfer page) → an adversarial
+USE pass on DEPLOYED beta.swng.golf (two live accounts): the funnel preserved a join code
+through PKCE; the hub's search NAVIGATED; Bo tapped Ann's name in a live match panel and
+read "Walk Ann · plays off — · from all their rounds · Their index over time · they've
+played 0" — the person fix live; finalize → results/roster/posted names all linked; home's
+recent-rounds two-link row; `/archive` URL redirected live; a signed-out round link funneled
+through sign-in BACK to the round; consoles clean (the only entry: the walk tool's own eval
+tripping the CSP — the CSP working); walk users deleted. Riding as notes: adjacent
+"No rounds yet" empty states on home (live + recent, no loading state); a transport failure
+reads as the "round isn't available" copy (no retry split); heading course links wear
+decoration-fairway (sentence-context precedent) vs `linkEntity`; history-row tap-target
+shrank to the two text links (no-nested-anchors cost); GolferPage says "their" even on your
+own page (the "This is you · your profile" link is the escape hatch — papercut candidate);
+typical-18 extrapolates small samples (pre-existing); the heading-split expression is
+hand-carried in 2 files. On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

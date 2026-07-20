@@ -6,6 +6,7 @@ import { ApiError, joinCrewByInvite, peekCrewInvite, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { btnPrimary, cardBox, inputBox } from "../ui/classes";
+import { usePageTitle } from "../ui/usePageTitle";
 
 // Crew membership (invited in, accountable out — spec §2/§5): the two failure codes a token
 // check can throw (peekCrewInvite AND joinCrewByInvite both make the SAME check — application/
@@ -165,6 +166,9 @@ export function CrewJoinPage() {
 
   const [peek, setPeek] = useState<PeekCrewInviteResponse | undefined>(undefined);
   const [peekError, setPeekError] = useState<string | undefined>(undefined);
+  // Re-runs once the peek resolves (usePageTitle's own title-prop-change contract) — "Join a
+  // crew" until the crew's own name is known.
+  usePageTitle(peek?.crewName ?? "Join a crew");
 
   useEffect(() => {
     if (!token) return;

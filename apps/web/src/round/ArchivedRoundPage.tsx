@@ -6,6 +6,7 @@ import type { GameState, RoundEvent, RoundId, RoundState } from "@swng/domain";
 import { ApiError, getRoundArchive } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { roundLabel } from "../roundLabel";
+import { usePageTitle } from "../ui/usePageTitle";
 import { ResultsView } from "./ResultsView";
 
 // The genesis event's own wallMs, searched from the raw log — the round's created-at, which the
@@ -35,6 +36,9 @@ export function ArchivedRoundPage() {
   const { withAuth } = useAuth();
   const [view, setView] = useState<ArchiveView | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
+  // Re-runs once the archive loads (usePageTitle's own title-prop-change contract) — "swng"
+  // while loading, then the same course + date designation the page's own header renders below.
+  usePageTitle(view ? roundLabel({ courseName: view.state.card.courseName, createdAt: view.createdAtMs }) : undefined);
 
   useEffect(() => {
     if (!param) return;

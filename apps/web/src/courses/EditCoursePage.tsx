@@ -8,6 +8,7 @@ import { ApiError, getCourse, supersedeCard } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { btnPrimary, inputBox } from "../ui/classes";
+import { usePageTitle } from "../ui/usePageTitle";
 import { HoleGrid, defaultHoles, holesAreComplete, parseHoles } from "./HoleGrid";
 import type { HoleCount, HoleInput } from "./HoleGrid";
 import { teeNumbers } from "./teeNumbers";
@@ -71,6 +72,9 @@ function EditCoursePageForId({ courseIdParam }: { readonly courseIdParam: string
   const [view, setView] = useState<CourseView | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
+  // Re-runs once the card loads (usePageTitle's own title-prop-change contract) — "swng" while
+  // loading, then the course name.
+  usePageTitle(view?.card.courseName);
 
   const [name, setName] = useState("");
   // The ORIGINAL tee being edited, identified by its ORIGINAL name — captured once at

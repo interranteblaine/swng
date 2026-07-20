@@ -8,6 +8,7 @@ import { getCourse, getMyRecord, listMyCrews, updateMe } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 import { btnPrimary, cardBox, inputBox } from "../ui/classes";
+import { usePageTitle } from "../ui/usePageTitle";
 
 // "Your index over time" (metrics-projection-grows spec, papercut 17's follow-on) — a
 // dependency-free inline SVG (no chart lib needed: two plain polylines are enough to show
@@ -158,6 +159,7 @@ const INDEX_SOURCES: readonly { readonly kind: "swng" | "whs"; readonly label: s
 // GET /me get-or-creates the caller's golfer on first touch (ensureGolfer), this page always edits
 // an EXISTING golfer — updateMe is an update, never the create path.
 export function ProfilePage() {
+  usePageTitle("Your profile");
   const auth = useAuth();
   // Destructured so the record-fetch effect below lists a stable function reference as its
   // dep (withAuth's own useCallback identity, useAuth.ts) rather than the whole `auth` object,

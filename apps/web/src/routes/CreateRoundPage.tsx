@@ -12,6 +12,7 @@ import { CourseSearch } from "../courses/CourseSearch";
 import { CourseSummaryCard } from "../courses/CourseSummaryCard";
 import { credentialStore } from "../identity";
 import { btnPrimary, cardBox, inputBox } from "../ui/classes";
+import { usePageTitle } from "../ui/usePageTitle";
 
 interface LocationState {
   // AddCoursePage's own success navigation (M6 Task 5's "Add a course" hand-off) — a course
@@ -27,6 +28,7 @@ interface LocationState {
 }
 
 export function CreateRoundPage() {
+  usePageTitle("Start a round");
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuth();

@@ -12,8 +12,10 @@ import { CreateRoundPage } from "./routes/CreateRoundPage";
 import { CrewJoinPage } from "./routes/CrewJoinPage";
 import { HomePage } from "./routes/HomePage";
 import { JoinRoundPage } from "./routes/JoinRoundPage";
+import { NotFoundPage } from "./routes/NotFoundPage";
 import { ProfilePage } from "./routes/ProfilePage";
 import { RoundPage } from "./routes/RoundPage";
+import { ScrollToTop } from "./ui/ScrollToTop";
 import { WatchPage } from "./watch/WatchPage";
 
 // The signed-in half of the header's identity chrome (brief: "Signed-in chrome: name in the
@@ -65,6 +67,7 @@ export function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <ScrollToTop />
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<HomePage />} />
@@ -90,6 +93,11 @@ export function App() {
                 browsing from their own Profile. */}
             <Route path="/rounds/:roundId/archive" element={<ArchivedRoundPage />} />
             <Route path="/profile" element={<ProfilePage />} />
+            {/* A real 404 — LAST inside the Layout route group, so it only catches paths none of
+                the routes above matched. Keeps the header/chrome (Layout), unlike the two bare
+                transitional routes below it (AuthCallbackPage/WatchPage), which are outside
+                Layout for their own reasons. */}
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
           {/* Outside Layout on purpose: mid-redirect from the Hosted UI is a bare transitional
               screen (a centered "Signing you in..."/error state), not a page that needs the

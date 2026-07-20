@@ -9,8 +9,10 @@ import { useAuth } from "../auth/useAuth";
 import { credentialStore } from "../identity";
 import { roundDayKey, roundLabel } from "../roundLabel";
 import { btnCreamOutline, btnPrimary, btnSecondary, cardBox, eyebrow, inputCode } from "../ui/classes";
+import { usePageTitle } from "../ui/usePageTitle";
 
 export function HomePage() {
+  usePageTitle();
   const { withAuth, signedIn, golfer, signIn } = useAuth();
   const navigate = useNavigate();
   // The door's own code input (brand reskin spec §3) — the ONLY new state this task adds;

@@ -146,6 +146,8 @@ describe("CrewJoinPage — the consent card", () => {
 
     expect(await screen.findByRole("heading", { name: "Join The Saturday Boys?" })).toBeTruthy();
     expect(screen.getByText("8 members · invited by Al")).toBeTruthy();
+    // Nav infrastructure Task 2: usePageTitle re-runs once the peek resolves — the crew's name.
+    expect(document.title).toBe("The Saturday Boys · swng");
   });
 
   // The solo-founder crew is the commonest consent card there is (a brand-new crew's first

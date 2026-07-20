@@ -93,6 +93,9 @@ describe("ArchivedRoundPage", () => {
     // own wallMs (1_000ms since epoch — the round's created-at, not the finalize time), rendered
     // the one way roundLabel renders it everywhere.
     expect(screen.getByText(roundLabel({ courseName: "Fixture Links", createdAt: 1_000 }))).toBeTruthy();
+    // Nav infrastructure Task 2: usePageTitle re-runs once the archive loads — the same
+    // canonical designation the page's own header renders.
+    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", createdAt: 1_000 })} · swng`);
 
     // Ann's roster row and hole-1 score render from the real fold (a genuine ResultsView, not
     // a stub) — same disabled-cell assertion WatchPage.test.tsx's own archived-card case pins.

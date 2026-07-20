@@ -4,6 +4,7 @@ import { courseId as makeCourseId } from "@swng/domain";
 import type { CourseView } from "@swng/contracts";
 import { ApiError, getCourse } from "../api";
 import { btnPrimary, inputBox } from "../ui/classes";
+import { usePageTitle } from "../ui/usePageTitle";
 import { teeNumbers } from "./teeNumbers";
 
 // Course-cards spec §7: the course hub — a read-only summary of a lineage's CURRENT card
@@ -24,6 +25,9 @@ function CoursePageForId({ courseIdParam }: { readonly courseIdParam: string }) 
   const [view, setView] = useState<CourseView | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const [selectedTee, setSelectedTee] = useState<string | undefined>(undefined);
+  // Re-runs once the card loads (usePageTitle's own title-prop-change contract) — "swng" while
+  // loading, then the course name.
+  usePageTitle(view?.card.courseName);
 
   useEffect(() => {
     getCourse(id)

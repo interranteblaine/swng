@@ -112,6 +112,9 @@ describe("RoundPage", () => {
 
     await waitFor(() => expect(screen.getByText("ABC123")).toBeTruthy()); // SetupPanel's join code banner
     expect(screen.queryByRole("status")).toBeNull();
+    // Nav infrastructure Task 2: usePageTitle re-runs once the session hydrates — fixtureLinks'
+    // own courseName ("Fixture Links"), no created-at on RoundState so no date segment.
+    expect(document.title).toBe("Fixture Links · swng");
     // "Ann" alone is ambiguous (also a checkbox label in the Add Game form's players list) —
     // the roster line's fuller text disambiguates. The roster row nests "tee — CH X" in its own
     // mono span (brand reskin), so getByText's direct-text-only matching can no longer see the

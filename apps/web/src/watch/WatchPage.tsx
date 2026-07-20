@@ -5,6 +5,7 @@ import { roundLabel } from "../roundLabel";
 import { ResultsView } from "../round/ResultsView";
 import { ScorecardGrid } from "../round/ScorecardGrid";
 import { StandingsHeader } from "../round/StandingsHeader";
+import { usePageTitle } from "../ui/usePageTitle";
 import { useWatchRound as defaultUseWatchRound } from "./useWatchRound";
 import type { WatchRoundView } from "./useWatchRound";
 
@@ -41,6 +42,9 @@ function LiveWatch({ view }: { view: WatchRoundView }) {
 export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRound) => {
   function WatchPageContent({ roundId, token }: { roundId: RoundId; token: string }) {
     const view = useWatchRound(roundId, token);
+    // Re-runs once the round hydrates (usePageTitle's own title-prop-change contract) — "swng"
+    // while loading, then the same course + date designation the page's own header renders below.
+    usePageTitle(view.state ? roundLabel({ courseName: view.state.card.courseName, createdAt: view.createdAt }) : undefined);
 
     if (!view.hydrated || !view.state) {
       // Papercut 14 (M9 hardening): a mistyped/dead link's every pull fails identically to a

@@ -20,3 +20,9 @@ export const inputBox =
   "border border-hairline bg-card px-3 py-3 text-forest placeholder:text-oxblood";
 export const inputCode =
   "border border-hairline bg-card px-3 py-3 font-mono tracking-[2px] text-forest placeholder:text-oxblood";
+// A link to a golfer's own record (GolferLink.tsx) — gold as a DECORATION, not a button fill,
+// same treatment App.tsx's own header identity link already wears. The brand rule (gold once per
+// screen as the primary action) governs FILLED gold; an underline decoration marking "this text
+// names an entity you can open" is a different, lighter register — no color/size of its own, so
+// it composes under whatever ambient text color/size its caller already set.
+export const linkEntity = "underline decoration-gold decoration-2 underline-offset-2";

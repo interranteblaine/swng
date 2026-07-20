@@ -137,6 +137,8 @@ describe("CrewPage", () => {
 
     await waitForLoaded();
     expect(screen.getByText("Sunday crew")).toBeTruthy();
+    // Nav infrastructure Task 2: usePageTitle re-runs once the crew loads — the crew's own name.
+    expect(document.title).toBe("Sunday crew · swng");
     // The permanent join code is gone outright — no six-character code renders anywhere.
     expect(screen.queryByText(/crew code/i)).toBeNull();
 

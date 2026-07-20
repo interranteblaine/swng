@@ -4,11 +4,13 @@ import { Link, useNavigate } from "react-router";
 import { ApiError, createCrew } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { btnPrimary, inputBox } from "../ui/classes";
+import { usePageTitle } from "../ui/usePageTitle";
 
 // name → POST /crews → the new crew's page (brief). Crews are golfer-gated end to end
 // (routes.ts's crew table), so unlike round creation there is no anonymous arm at all —
 // signed out gets a prompt, not a form that would 401 at submit.
 export function CrewCreatePage() {
+  usePageTitle("New crew");
   const navigate = useNavigate();
   const auth = useAuth();
   const [name, setName] = useState("");

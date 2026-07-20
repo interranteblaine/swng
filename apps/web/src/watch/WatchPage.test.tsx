@@ -111,6 +111,9 @@ describe("WatchPage", () => {
     // The canonical course + date header identifies WHICH round the spectator is watching
     // (fixtureLinks' courseName + created-at 1_000ms), replacing the bare course name.
     expect(await screen.findByText(roundLabel({ courseName: "Fixture Links", createdAt: 1_000 }))).toBeTruthy();
+    // Nav infrastructure Task 2: usePageTitle re-runs once the round hydrates — the same
+    // canonical designation the page's own header renders.
+    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", createdAt: 1_000 })} · swng`);
     // The live grid + standings actually render (a real spectator sees the scorecard).
     await waitFor(() => expect(screen.getByRole("button", { name: /Stableford/ })).toBeTruthy());
     expect(screen.getByRole("columnheader", { name: "Ann" })).toBeTruthy();

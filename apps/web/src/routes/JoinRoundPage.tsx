@@ -11,6 +11,7 @@ import { teeNumbers } from "../courses/teeNumbers";
 import { credentialStore } from "../identity";
 import { roundLabel } from "../roundLabel";
 import { btnPrimary, cardBox, inputBox, inputCode } from "../ui/classes";
+import { usePageTitle } from "../ui/usePageTitle";
 
 // >=250ms, same debounce window as CourseSearch's own — long enough that a fast typist never
 // fires one request per keystroke.
@@ -23,6 +24,7 @@ const DEBOUNCE_MS = 250;
 type PeekTee = PeekRoundResponse["teeSets"][number];
 
 export function JoinRoundPage() {
+  usePageTitle("Join a round");
   const navigate = useNavigate();
   const auth = useAuth();
   // Destructured for a stable effect dep (withAuth is a useCallback — useAuth.ts).

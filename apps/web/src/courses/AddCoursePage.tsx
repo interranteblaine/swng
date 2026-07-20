@@ -5,6 +5,7 @@ import { ApiError, createCourse } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { btnPrimary, inputBox } from "../ui/classes";
+import { usePageTitle } from "../ui/usePageTitle";
 import { HoleGrid, defaultHoles, holesAreComplete, parseHoles } from "./HoleGrid";
 import type { HoleCount, HoleInput } from "./HoleGrid";
 
@@ -39,6 +40,7 @@ const FIELD_FOR_CODE: Readonly<Record<string, Field>> = {
 // course is "golfer"-gated now (enteredBy derives from the account, never a self-typed name — the
 // "Your name" field is gone), so the page is a sign-in funnel when signed out.
 export function AddCoursePage() {
+  usePageTitle("Add a course");
   const navigate = useNavigate();
   const auth = useAuth();
 

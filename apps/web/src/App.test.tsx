@@ -104,4 +104,16 @@ describe("App", () => {
     expect(screen.getByText(/sign in to see your crew/i)).toBeTruthy();
     window.history.pushState({}, "", "/");
   });
+
+  // Nav infrastructure Task 2: the `path="*"` catch-all inside Layout — a real 404 for any
+  // path none of the routes above match, instead of a blank Outlet.
+  it("routes an unknown path to a real 404, inside the header chrome", () => {
+    window.history.pushState({}, "", "/this/path/does/not/exist");
+    render(<App />);
+
+    expect(screen.getByText("This page doesn't exist.")).toBeTruthy();
+    // Still inside Layout (unlike /auth/callback and /watch/:roundId) — the header banner renders.
+    expect(screen.getByRole("banner")).toBeTruthy();
+    window.history.pushState({}, "", "/");
+  });
 });

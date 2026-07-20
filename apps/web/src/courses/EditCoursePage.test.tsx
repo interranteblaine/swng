@@ -138,6 +138,8 @@ describe("EditCoursePage", () => {
     await awaitForm();
 
     expect((screen.getByLabelText(/^course name$/i) as HTMLInputElement).value).toBe("Fixture Links");
+    // Nav infrastructure Task 2: usePageTitle re-runs once the card loads — the course name.
+    expect(document.title).toBe("Fixture Links · swng");
     expect((screen.getByLabelText(/^tee name$/i) as HTMLInputElement).value).toBe("white");
     expect((screen.getByLabelText(/^rating$/i) as HTMLInputElement).value).toBe(String(fixtureWhite.rating));
     expect((screen.getByLabelText(/^slope$/i) as HTMLInputElement).value).toBe(String(fixtureWhite.slope));

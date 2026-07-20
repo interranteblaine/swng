@@ -7,6 +7,7 @@ import type { CrewSeasonView, CrewView } from "@swng/contracts";
 import { ApiError, createSeason, getCrew, leaveCrew, listSeasons, mintCrewInvite, removeCrewMember, transferOrganizer } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { badge, btnDanger, btnDangerSolid, btnPrimary, btnSecondary, cardBox, inputBox } from "../ui/classes";
+import { usePageTitle } from "../ui/usePageTitle";
 import { SeasonPanel } from "./SeasonPanel";
 
 // A crew load can fail two honest ways the wire names (errorMapping.ts) — both get human
@@ -94,6 +95,9 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
 
   const [crew, setCrew] = useState<CrewView | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
+  // Re-runs once the crew loads (usePageTitle's own title-prop-change contract) — "swng" while
+  // loading, then the crew's own name.
+  usePageTitle(crew?.name);
 
   // Architecture-realignment Task 11: seasons + counted rounds + standings-on-read replace the
   // old crew projection layer's "Season records" section entirely (Task 9's backend, this

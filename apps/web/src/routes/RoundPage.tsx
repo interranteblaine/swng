@@ -13,9 +13,11 @@ import { ShareButton } from "../round/ShareButton";
 import { SetupPanel } from "../round/SetupPanel";
 import { StandingsHeader } from "../round/StandingsHeader";
 import { StatusChrome } from "../round/StatusChrome";
+import { roundLabel } from "../roundLabel";
 import { useRoundSession as defaultUseRoundSession } from "../session/useRoundSession";
 import type { RoundSessionView } from "../session/useRoundSession";
 import { btnDanger, btnDangerSolid, btnPrimary, btnSecondary } from "../ui/classes";
+import { usePageTitle } from "../ui/usePageTitle";
 
 type UseRoundSession = (roundId: RoundId) => RoundSessionView;
 
@@ -376,6 +378,13 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
       connect();
       void sync();
     }, [connect, sync]);
+
+    // Re-runs once the session hydrates (usePageTitle's own title-prop-change contract) — "swng"
+    // while loading, then the round's own course name. RoundState carries no created-at (that's
+    // only ever derived from the round-created event's own wallMs, ArchivedRoundPage/WatchPage's
+    // own doc comments), so this is the bare course name — still enough to tell rounds apart in
+    // a browser's tab strip/history.
+    usePageTitle(session.state ? roundLabel({ courseName: session.state.card.courseName }) : undefined);
 
     // session.state is only guaranteed once hydrated() is true (RoundSessionView's own
     // contract, mirroring @swng/client's render guard) — checked together so TS narrows

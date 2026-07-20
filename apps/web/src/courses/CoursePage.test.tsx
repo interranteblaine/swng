@@ -100,6 +100,8 @@ describe("CoursePage", () => {
     expect(await screen.findByRole("heading", { name: "Pebble Beach" })).toBeTruthy();
     expect(screen.getByText(/entered by Ann/i)).toBeTruthy();
     expect(screen.getByText(/entered by Ann/i).textContent).toMatch(new Date(view.updatedAtMs).toLocaleDateString());
+    // Nav infrastructure Task 2: usePageTitle re-runs once the card loads — the course name.
+    expect(document.title).toBe("Pebble Beach · swng");
 
     const select = screen.getByLabelText(/^tee$/i) as HTMLSelectElement;
     expect([...select.options].map((o) => o.value)).toEqual(["white", "blue"]);

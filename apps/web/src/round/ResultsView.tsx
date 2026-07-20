@@ -1,6 +1,7 @@
 import { handicappingFor } from "@swng/client";
 import type { GameState, RoundState } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
+import { GolferLink } from "../ui/GolferLink";
 import { ScorecardGrid } from "./ScorecardGrid";
 import { ShareButton } from "./ShareButton";
 import { StandingsHeader } from "./StandingsHeader";
@@ -43,10 +44,10 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
 
       <div>
         <h2 className="text-lg font-semibold text-forest">Roster</h2>
-        <ul className="flex flex-col gap-2">
+        <ul aria-label="Roster" className="flex flex-col gap-2">
           {state.participants.map((p) => (
             <li key={p.golferId} className="flex items-center gap-2 text-forest">
-              <span>{p.name}</span>
+              <GolferLink golferId={p.golferId} name={p.name} />
             </li>
           ))}
         </ul>
@@ -54,16 +55,17 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
 
       <div>
         <h2 className="text-lg font-semibold text-forest">Posted to handicaps</h2>
-        <ul className="flex flex-col gap-1">
+        <ul aria-label="Posted to handicaps" className="flex flex-col gap-1">
           {handicapping.map((row) => {
             const name = state.participants.find((p) => p.golferId === row.golferId)?.name ?? row.golferId;
             return (
               <li key={row.golferId} className="text-sm text-fairway">
+                <GolferLink golferId={row.golferId} name={name} />
                 {row.kind === "complete"
-                  ? `${name} — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`
+                  ? ` — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`
                   : row.kind === "unrated"
-                    ? `${name} — adjusted score ${row.ags} · unrated course, not posted`
-                    : `${name} — card incomplete, nothing posted`}
+                    ? ` — adjusted score ${row.ags} · unrated course, not posted`
+                    : ` — card incomplete, nothing posted`}
               </li>
             );
           })}

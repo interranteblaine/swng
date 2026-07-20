@@ -1,6 +1,7 @@
 import { formatCourseHandicap } from "@swng/domain";
 import type { GameState, RoundState } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
+import { GolferLink } from "../ui/GolferLink";
 import { badge, cardBox, eyebrow } from "../ui/classes";
 import { AddGameForm } from "./AddGameForm";
 
@@ -37,7 +38,7 @@ export function SetupPanel({ state, joinCode, onAddGame }: SetupPanelProps) {
           {state.participants.map((p) => (
             <li key={p.golferId} className="flex items-center gap-2 text-forest">
               <span>
-                {p.name} — <span className="font-mono text-fairway">{p.tee} — CH {formatCourseHandicap(p.courseHandicap)}</span>
+                <GolferLink golferId={p.golferId} name={p.name} /> — <span className="font-mono text-fairway">{p.tee} — CH {formatCourseHandicap(p.courseHandicap)}</span>
               </span>
               {/* A departed participant (accounts-only identity spec §4) stays on the roster
                   WITH their seat data — their played holes are facts — plus this "left"

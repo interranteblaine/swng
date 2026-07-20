@@ -6,6 +6,7 @@ import type { GolferId } from "@swng/domain";
 import type { CrewSeasonView, CrewView } from "@swng/contracts";
 import { ApiError, createSeason, getCrew, leaveCrew, listSeasons, mintCrewInvite, removeCrewMember, transferOrganizer } from "../api";
 import { useAuth } from "../auth/useAuth";
+import { GolferLink } from "../ui/GolferLink";
 import { badge, btnDanger, btnDangerSolid, btnPrimary, btnSecondary, cardBox, inputBox } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
 import { SeasonPanel } from "./SeasonPanel";
@@ -291,7 +292,7 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
           {crew.members.map((member) => (
             <li key={member.golferId} className={`${cardBox} flex flex-col gap-2 p-3`}>
               <div className="flex items-center gap-2 text-forest">
-                <span>{member.name}</span>
+                <GolferLink golferId={member.golferId} name={member.name} />
                 {member.claimed && <span className={badge}>account</span>}
                 {member.role === "organizer" && <span className={badge}>organizer</span>}
               </div>

@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
 import type { GameConfig, Participant, RoundState } from "@swng/domain";
@@ -33,9 +34,11 @@ const noopAddGame = vi.fn().mockResolvedValue(undefined);
 // claim button, nothing does — and that SetupPanel fires no fetch of its own.
 const renderPanel = (props: SetupPanelProps) =>
   render(
-    <AuthProvider>
-      <SetupPanel {...props} />
-    </AuthProvider>,
+    <MemoryRouter>
+      <AuthProvider>
+        <SetupPanel {...props} />
+      </AuthProvider>
+    </MemoryRouter>,
   );
 
 const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
@@ -112,6 +115,18 @@ describe("SetupPanel", () => {
     // radio-card label, which is a different surface entirely, not a roster badge.
     expect(annRow!.textContent).toBe("Ann — white — CH 8");
     expect(screen.queryByText(/Not yet in a game/)).toBeNull();
+  });
+
+  // The link sweep (navigation spec, task 6): every rendered noun's name is its address — the
+  // roster's own identity row links each golfer's name to /golfers/:golferId, the tee/CH suffix
+  // staying plain text.
+  it("links each roster name to /golfers/:golferId, leaving the tee/CH suffix as plain text", () => {
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+
+    const annLink = screen.getByRole("link", { name: "Ann" });
+    expect(annLink.getAttribute("href")).toBe(`/golfers/${ANN}`);
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    expect(annRow!.textContent).toBe("Ann — white — CH 8");
   });
 
   it("renders each participant's identity row exactly once even once games exist — no second, dots-only roster", () => {

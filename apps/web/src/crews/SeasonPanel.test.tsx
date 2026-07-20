@@ -108,6 +108,27 @@ describe("SeasonPanel — standings", () => {
     expect(rows.map((row) => within(row).getAllByRole("cell")[0]!.textContent)).toEqual([expect.stringContaining("Bo"), expect.stringContaining("Ann")]);
   });
 
+  // The link sweep (navigation spec, task 6): every rendered noun's name is its address — the
+  // ledger's own Member column links to /golfers/:golferId.
+  it("links each ledger row's name to /golfers/:golferId", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({
+      seasonId: "season-1",
+      name: "2026",
+      status: "open",
+      rounds: [],
+      ledger: [{ golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann" }],
+      headToHead: [],
+    });
+
+    renderPanel();
+
+    const table = await screen.findByRole("table");
+    const annLink = within(table).getByRole("link", { name: "Ann" });
+    expect(annLink.getAttribute("href")).toBe(`/golfers/${ANN}`);
+  });
+
   // Crews became accounts-only rosters (architecture-realignment Phase 3): the guest label is
   // dead regardless of a ledger line's `member` flag — this pins the negative for BOTH values
   // (the wire field itself only dies in a later task; the point here is the web never renders
@@ -150,7 +171,14 @@ describe("SeasonPanel — standings", () => {
 
     renderPanel();
 
-    expect(await screen.findByText("Ann and Bo are tied 5–5 · 2 halved")).toBeTruthy();
+    // Names are GolferLinks now (the link sweep, task 6) — RTL's getByText can't bridge a
+    // nested <a>, so the sentence is read via the <li>'s own native textContent (this file's own
+    // counted-round-link precedent already reads a <li> the same way).
+    const list = await screen.findByRole("list", { name: "Head to head" });
+    const item = within(list).getByRole("listitem");
+    expect(item.textContent).toBe("Ann and Bo are tied 5–5 · 2 halved");
+    expect(within(item).getByRole("link", { name: "Ann" }).getAttribute("href")).toBe(`/golfers/${ANN}`);
+    expect(within(item).getByRole("link", { name: "Bo" }).getAttribute("href")).toBe(`/golfers/${BO}`);
   });
 
   // The helper reorders so the LEADER always comes first — even when the trailing party is `a`
@@ -172,7 +200,11 @@ describe("SeasonPanel — standings", () => {
 
     renderPanel();
 
-    expect(await screen.findByText("Bo leads Ann 5–4")).toBeTruthy();
+    const list = await screen.findByRole("list", { name: "Head to head" });
+    const item = within(list).getByRole("listitem");
+    expect(item.textContent).toBe("Bo leads Ann 5–4");
+    expect(within(item).getByRole("link", { name: "Bo" }).getAttribute("href")).toBe(`/golfers/${BO}`);
+    expect(within(item).getByRole("link", { name: "Ann" }).getAttribute("href")).toBe(`/golfers/${ANN}`);
   });
 
   // Papercut 9: the empty-ledger copy distinguishes two different truths — no counted rounds

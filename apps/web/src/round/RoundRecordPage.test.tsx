@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { deviceId, fixtureLinks, golferId, opId, roundId } from "@swng/domain";
+import { cardId, courseId, deviceId, fixtureLinks, golferId, opId, roundId } from "@swng/domain";
 import type { OpId, RoundEvent } from "@swng/domain";
 import { ArchiveRedirect } from "../App";
 import { AuthProvider } from "../auth/useAuth";
@@ -101,12 +101,46 @@ describe("RoundRecordPage — archived (the old ArchivedRoundPage content, absor
     // Nav infrastructure Task 2: usePageTitle re-runs once the archive loads — the same
     // canonical designation the page's own header renders.
     expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", createdAt: 1_000 })} · swng`);
+    // The link sweep (navigation spec, task 6): fixtureLinks carries no `source` — the course
+    // name renders as PLAIN TEXT, never a dead link.
+    expect(screen.queryByRole("link", { name: "Fixture Links" })).toBeNull();
 
     // Ann's roster row and hole-1 score render from the real fold (a genuine ResultsView, not
     // a stub) — same disabled-cell assertion WatchPage.test.tsx's own archived-card case pins.
     expect(screen.getAllByText("Ann").length).toBeGreaterThan(0); // roster row + scorecard column header
     const cell = screen.getByRole("button", { name: "Ann hole 1" });
     expect(cell.hasAttribute("disabled")).toBe(true);
+  });
+
+  // The link sweep (navigation spec, task 6): the heading's course-name half links to the course
+  // when the archive's frozen card carries a source (write-time provenance — course-cards spec
+  // §2) — the date half stays plain either way.
+  it("links the heading's course-name half to /courses/:courseId when the frozen card carries a source", async () => {
+    signIn();
+    const COURSE_ID = courseId("course-record-1");
+    const withSource = (): RoundEvent[] => {
+      const log = buildFinalLog();
+      const created = log[0] as Extract<RoundEvent, { kind: "round-created" }>;
+      return [{ ...created, card: { ...created.card, source: { courseId: COURSE_ID, cardId: cardId("card-1") } } }, ...log.slice(1)];
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: null });
+        if (path === `/rounds/${ROUND_ID}/archive`) return fakeResponse(200, { events: withSource() });
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderRoundRecordPage(`/rounds/${ROUND_ID}`);
+    await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
+
+    const courseLink = screen.getByRole("link", { name: "Fixture Links" });
+    expect(courseLink.getAttribute("href")).toBe(`/courses/${COURSE_ID}`);
+    // The title (usePageTitle) and the date half are unaffected by the split — the SAME
+    // roundLabel string, just with its course-name half now wearing an anchor.
+    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", createdAt: 1_000 })} · swng`);
   });
 
   // Task review finding: `golfer` starts undefined in AuthProvider and resolves asynchronously

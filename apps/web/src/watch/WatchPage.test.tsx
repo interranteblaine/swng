@@ -1,7 +1,7 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
-import { deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/domain";
+import { cardId, courseId, deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { GameConfig, OpId, RoundEvent, RoundId } from "@swng/domain";
 import { AuthProvider } from "../auth/useAuth";
 import { roundLabel } from "../roundLabel";
@@ -46,6 +46,17 @@ const buildLiveLog = (): RoundEvent[] => {
 };
 
 const buildFinalLog = (): RoundEvent[] => [...buildLiveLog(), { kind: "round-finalized", authorId: ANN_ID, opId: opId("op-finalize"), hlc: { wallMs: 9_000, counter: 0, deviceId: SERVER_DEVICE } }];
+
+// The link sweep's own course-carrying variant (navigation spec, task 6) — the SAME logs above,
+// with the genesis event's frozen card carrying a `source` (write-time provenance, course-cards
+// spec §2), so the heading's course-name half has a courseId to link.
+const WATCH_COURSE_ID = courseId("course-watch-1");
+const withCourseSource = (log: readonly RoundEvent[]): RoundEvent[] => {
+  const created = log[0] as Extract<RoundEvent, { kind: "round-created" }>;
+  return [{ ...created, card: { ...created.card, source: { courseId: WATCH_COURSE_ID, cardId: cardId("card-1") } } }, ...log.slice(1)];
+};
+const buildLiveLogWithCourse = (): RoundEvent[] => withCourseSource(buildLiveLog());
+const buildFinalLogWithCourse = (): RoundEvent[] => withCourseSource(buildFinalLog());
 
 const buildAbandonedLog = (): RoundEvent[] => [...buildLiveLog(), { kind: "round-abandoned", authorId: ANN_ID, opId: opId("op-abandon"), hlc: { wallMs: 9_000, counter: 0, deviceId: SERVER_DEVICE } }];
 
@@ -171,5 +182,51 @@ describe("WatchPage", () => {
     await waitFor(() => expect(screen.getByText(/was scrapped/)).toBeTruthy());
     expect(screen.queryByRole("button", { name: /Stableford/ })).toBeNull();
     expect(screen.queryByText("Final results")).toBeNull();
+  });
+
+  // The link sweep's own watch pin (navigation spec, task 6, brief Step 2): the heading's
+  // course-name half links to the course (public — allowed on a spectator view) while every
+  // GOLFER name renders plain, no anchor — PlainNamesContext reaches the whole tree, live AND
+  // archived.
+  it("the plain-names pin (live): the course-name heading links to the course while participant names render with NO anchor", async () => {
+    const { reduceRound, scoreGame } = await import("@swng/domain");
+    const events = buildLiveLogWithCourse();
+    const state = reduceRound(events);
+    const games = state.games.map((g) => scoreGame(g, state));
+    const view: WatchRoundView = { hydrated: true, error: false, state, games, createdAt: 1_000 };
+
+    renderWatchPage(`/watch/${ROUND_ID}#tok-plain-live`, fixedUseWatchRound(view));
+
+    const courseLink = await screen.findByRole("link", { name: "Fixture Links" });
+    expect(courseLink.getAttribute("href")).toBe(`/courses/${WATCH_COURSE_ID}`);
+
+    // Expand the Stableford chip to reach GamePanel's own participant-name render sites — the
+    // one place a spectator's live view would otherwise show a GolferLink.
+    fireEvent.click(screen.getByRole("button", { name: /Stableford/ }));
+    await waitFor(() => expect(screen.getByRole("region")).toBeTruthy());
+
+    expect(screen.getAllByText("Ann").length).toBeGreaterThan(0); // renders — just never as a link
+    expect(screen.queryByRole("link", { name: "Ann" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Bo" })).toBeNull();
+  });
+
+  it("the plain-names pin (archived/final): the course-name heading links to the course while ResultsView's names render with NO anchor", async () => {
+    const { reduceRound, scoreGame } = await import("@swng/domain");
+    const events = buildFinalLogWithCourse();
+    const state = reduceRound(events);
+    const games = state.games.map((g) => scoreGame(g, state));
+    const view: WatchRoundView = { hydrated: true, error: false, state, games, createdAt: 1_000 };
+
+    renderWatchPage(`/watch/${ROUND_ID}#tok-plain-final`, fixedUseWatchRound(view));
+
+    await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
+
+    const courseLink = screen.getByRole("link", { name: "Fixture Links" });
+    expect(courseLink.getAttribute("href")).toBe(`/courses/${WATCH_COURSE_ID}`);
+
+    // ResultsView's roster + handicapping rows both name Ann — neither renders as a link here.
+    expect(screen.getAllByText("Ann").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "Ann" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Bo" })).toBeNull();
   });
 });

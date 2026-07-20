@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
-import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cellKey,
@@ -28,8 +29,20 @@ import { ResultsView } from "./ResultsView";
 // ResultsView renders a plain-names roster (the claim affordance it once hosted is deleted with
 // the whole ghost/claim flow, accounts-only identity spec §3). The AuthProvider wrapper stays so
 // the signed-in proof-of-negative at the foot of this file can prove no claim button renders even
-// in the state that used to show one.
-const render = (ui: ReactElement) => rtlRender(<AuthProvider>{ui}</AuthProvider>);
+// in the state that used to show one. Names are GolferLinks now (the link sweep, task 6) — every
+// render needs a Router ancestor too.
+const render = (ui: ReactElement) =>
+  rtlRender(
+    <MemoryRouter>
+      <AuthProvider>{ui}</AuthProvider>
+    </MemoryRouter>,
+  );
+
+// The handicapping list's own rows, as plain text (GolferLink + literal suffix concatenated) —
+// scoped by the list's own aria-label since RTL's getByText can't bridge a nested <a> boundary,
+// but a located element's native .textContent always can (this codebase's own established idiom
+// for asserting rendered text that spans a link, e.g. SetupPanel's roster-row assertions).
+const handicappingTexts = (): readonly (string | null)[] => within(screen.getByRole("list", { name: "Posted to handicaps" })).getAllByRole("listitem").map((li) => li.textContent);
 
 afterEach(() => cleanup());
 
@@ -84,11 +97,27 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
 
   it("handicapping rows render the server's response verbatim — no local recomputation when a response exists", () => {
     render(<ResultsView state={state} games={localGames} response={response} />);
+    const texts = handicappingTexts();
     for (const row of response.handicapping) {
       if (row.kind !== "complete") continue;
       const name = state.participants.find((p) => p.golferId === row.golferId)!.name;
-      expect(screen.getByText(`${name} — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`)).toBeTruthy();
+      expect(texts).toContain(`${name} — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`);
     }
+  });
+
+  // The link sweep (navigation spec, task 6): every rendered noun's name is its address — both
+  // the roster and the handicapping list's own names link to /golfers/:golferId.
+  it("the link sweep: roster and handicapping-row names link to /golfers/:golferId", () => {
+    render(<ResultsView state={state} games={localGames} response={response} />);
+
+    const ann = players[0]!;
+    const rosterList = screen.getByRole("list", { name: "Roster" });
+    const rosterLink = within(rosterList).getByRole("link", { name: ann.name });
+    expect(rosterLink.getAttribute("href")).toBe(`/golfers/${ann.golferId}`);
+
+    const handicapList = screen.getByRole("list", { name: "Posted to handicaps" });
+    const handicapLink = within(handicapList).getByRole("link", { name: ann.name });
+    expect(handicapLink.getAttribute("href")).toBe(`/golfers/${ann.golferId}`);
   });
 
   it("the archived card reuses ScorecardGrid, read-only — a cell tap is inert", () => {
@@ -152,12 +181,13 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
 
     render(<ResultsView state={state} games={localGames} response={undefined} />);
 
+    const texts = handicappingTexts();
     for (const row of archive.handicapping) {
       const name = state.participants.find((p) => p.golferId === row.golferId)!.name;
       if (row.kind === "complete") {
-        expect(screen.getByText(`${name} — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`)).toBeTruthy();
+        expect(texts).toContain(`${name} — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`);
       } else {
-        expect(screen.getByText(`${name} — card incomplete, nothing posted`)).toBeTruthy();
+        expect(texts).toContain(`${name} — card incomplete, nothing posted`);
       }
     }
   });
@@ -223,7 +253,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     };
 
     render(<ResultsView state={state} games={[]} response={undefined} />);
-    expect(screen.getByText("Ann — card incomplete, nothing posted")).toBeTruthy();
+    expect(handicappingTexts()).toContain("Ann — card incomplete, nothing posted");
   });
 });
 
@@ -264,7 +294,7 @@ describe("ResultsView — unrated handicapping row", () => {
     render(<ResultsView state={unratedState()} games={[]} response={undefined} />);
 
     // par-72 card, all pars, no net-double-bogey adjustment → AGS 72.
-    expect(screen.getByText("Ann — adjusted score 72 · unrated course, not posted")).toBeTruthy();
+    expect(handicappingTexts()).toContain("Ann — adjusted score 72 · unrated course, not posted");
     expect(screen.queryByText(/card incomplete/)).toBeNull();
   });
 
@@ -272,7 +302,7 @@ describe("ResultsView — unrated handicapping row", () => {
     const response: FinalizeRoundResponse = { results: [], handicapping: [{ golferId: ann, kind: "unrated", ags: 84 }] };
     render(<ResultsView state={unratedState()} games={[]} response={response} />);
 
-    expect(screen.getByText("Ann — adjusted score 84 · unrated course, not posted")).toBeTruthy();
+    expect(handicappingTexts()).toContain("Ann — adjusted score 84 · unrated course, not posted");
     expect(screen.queryByText(/card incomplete/)).toBeNull();
   });
 });

@@ -136,12 +136,34 @@ export function RoundRecordPage() {
     );
   }
 
+  // The link sweep (navigation spec, task 6): the heading splits into two halves — the course
+  // name (linked to /courses/:courseId when the frozen card carries a source, plain text when
+  // absent) and the date, which stays plain either way. `dateSuffix` is sliced off `label`
+  // (never re-derived) so the exact date FORMATTING logic stays the one copy in roundLabel.ts —
+  // `label` always starts with `courseName` verbatim by construction, so the slice is exact. The
+  // plain branch renders `courseName` as a bare string (no wrapping element) so the existing
+  // "the whole heading is one string" assertions keep working unchanged when there's no link to
+  // split around.
+  const courseName = view.state.card.courseName;
+  const label = roundLabel({ courseName, createdAt: view.createdAtMs });
+  const dateSuffix = label.slice(courseName.length);
+  const courseLinkId = view.state.card.source?.courseId;
+
   return (
     <main className="min-h-screen bg-cream">
       <div className="p-4">
         {/* The canonical designation (spec §5): course + date, rendered the one way it is on the
             home list and the join link. */}
-        <p className="font-serif text-sm text-fairway">{roundLabel({ courseName: view.state.card.courseName, createdAt: view.createdAtMs })}</p>
+        <p className="font-serif text-sm text-fairway">
+          {courseLinkId ? (
+            <Link to={`/courses/${courseLinkId}`} className="underline decoration-fairway">
+              {courseName}
+            </Link>
+          ) : (
+            courseName
+          )}
+          {dateSuffix}
+        </p>
       </div>
       {/* No shareToken: this page's viewer holds only their own golfer Bearer — never a
           round-scoped participant token to mint a NEW share link with (same reasoning as

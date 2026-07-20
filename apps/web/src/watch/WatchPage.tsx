@@ -1,10 +1,11 @@
-import { useLocation, useParams } from "react-router";
+import { Link, useLocation, useParams } from "react-router";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { RoundId } from "@swng/domain";
 import { roundLabel } from "../roundLabel";
 import { ResultsView } from "../round/ResultsView";
 import { ScorecardGrid } from "../round/ScorecardGrid";
 import { StandingsHeader } from "../round/StandingsHeader";
+import { PlainNamesContext } from "../ui/GolferLink";
 import { usePageTitle } from "../ui/usePageTitle";
 import { useWatchRound as defaultUseWatchRound } from "./useWatchRound";
 import type { WatchRoundView } from "./useWatchRound";
@@ -84,19 +85,41 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
       );
     }
 
+    // The link sweep (navigation spec, task 6): the heading's course-name half links to
+    // /courses/:courseId when the frozen card carries a source (plain text when absent — the
+    // SAME split RoundRecordPage.tsx uses, `dateSuffix` sliced off `label` rather than
+    // re-derived); every GOLFER name below it (live standings/trail/story AND the final
+    // ResultsView roster/handicapping) renders plain — a spectator's tree turns golfer links off
+    // at the root via PlainNamesContext, spec §4c.2. Course links stay on: they're public.
+    const courseName = view.state.card.courseName;
+    const label = roundLabel({ courseName, createdAt: view.createdAt });
+    const dateSuffix = label.slice(courseName.length);
+    const courseLinkId = view.state.card.source?.courseId;
+
     return (
-      <main className="min-h-screen bg-cream">
-        {/* The canonical designation (accounts-only identity spec §5): the spectator sees WHICH
-            round this is — course + date, rendered the one way the home list and archive render
-            it, replacing the bare course name. */}
-        <div className="p-4">
-          <p className="font-serif text-sm text-fairway">{roundLabel({ courseName: view.state.card.courseName, createdAt: view.createdAt })}</p>
-        </div>
-        {/* No shareToken: a spectator holds no participant token to mint a NEW share link with —
-            ResultsView.tsx's own doc comment explains why shareToken is optional and omitted
-            here. */}
-        {isFinal ? <ResultsView state={view.state} games={view.games} response={undefined} /> : <LiveWatch view={view} />}
-      </main>
+      <PlainNamesContext.Provider value={true}>
+        <main className="min-h-screen bg-cream">
+          {/* The canonical designation (accounts-only identity spec §5): the spectator sees WHICH
+              round this is — course + date, rendered the one way the home list and archive render
+              it, replacing the bare course name. */}
+          <div className="p-4">
+            <p className="font-serif text-sm text-fairway">
+              {courseLinkId ? (
+                <Link to={`/courses/${courseLinkId}`} className="underline decoration-fairway">
+                  {courseName}
+                </Link>
+              ) : (
+                courseName
+              )}
+              {dateSuffix}
+            </p>
+          </div>
+          {/* No shareToken: a spectator holds no participant token to mint a NEW share link with —
+              ResultsView.tsx's own doc comment explains why shareToken is optional and omitted
+              here. */}
+          {isFinal ? <ResultsView state={view.state} games={view.games} response={undefined} /> : <LiveWatch view={view} />}
+        </main>
+      </PlainNamesContext.Provider>
     );
   }
 

@@ -157,6 +157,22 @@ describe("CrewPage", () => {
     expect(within(items[2]!).queryByText(/^organizer$/i)).toBeNull();
   });
 
+  // The link sweep (navigation spec, task 6): every rendered noun's name is its address — the
+  // roster's own member names link to /golfers/:golferId.
+  it("links each roster member's name to /golfers/:golferId", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetCrew.mockResolvedValue({ crew });
+    mockedListSeasons.mockResolvedValue(emptySeasons);
+
+    renderPage();
+    await waitForLoaded();
+
+    const roster = screen.getByRole("list", { name: /roster/i });
+    const annLink = within(roster).getByRole("link", { name: "Ann" });
+    expect(annLink.getAttribute("href")).toBe(`/golfers/${golferId("ann-g")}`);
+  });
+
   // De-ghost (architecture-realignment Task 9) removed the free-text ghost-mint form; Task 11
   // removes the golferId-based "Add member" form from the UI entirely too, and crew membership
   // (invited in, accountable out — spec §3) removes add-by-id outright — an invite link is the

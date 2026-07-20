@@ -8,7 +8,7 @@ import { getCourse, getMyRecord, listMyCrews, updateMe } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 import { RecordSections } from "../golfers/RecordSections";
-import { btnPrimary, cardBox, inputBox } from "../ui/classes";
+import { btnPrimary, cardBox, inputBox, linkEntity } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
 
 // The record section below (RecordSections, navigation spec §6c.3) renders unconditionally, even
@@ -191,7 +191,9 @@ export function ProfilePage() {
           <span>Home course</span>
           {!pickingCourse && homeCourse ? (
             <div className={`${cardBox} flex items-center justify-between gap-2 p-3`}>
-              <span>{homeCourse.name}</span>
+              <Link to={`/courses/${homeCourse.id}`} className={`text-forest ${linkEntity}`}>
+                {homeCourse.name}
+              </Link>
               <button type="button" onClick={() => setPickingCourse(true)} className="text-sm text-forest underline decoration-fairway">
                 Change
               </button>

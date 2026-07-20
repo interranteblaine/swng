@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { CrewId, GolferId, RoundId } from "@swng/domain";
 import type { GetMyRoundsResponse, SeasonStandingsResponse } from "@swng/contracts";
 import { appendCountedRound, ApiError, getMyRounds, getSeasonStandings, removeCountedRound } from "../api";
 import { useAuth } from "../auth/useAuth";
+import { GolferLink } from "../ui/GolferLink";
 import { badge, btnSecondary, cardBox } from "../ui/classes";
 
 export interface SeasonPanelProps {
@@ -26,15 +28,25 @@ const humanizeAppendError = (caught: unknown): string => {
   return "Could not count that round — try again.";
 };
 
-// Head-to-head as a sentence, leader first — never the raw a/b row order.
-const describeHeadToHead = (h2h: SeasonStandingsResponse["headToHead"][number], nameOf: (id: GolferId) => string): string => {
-  const base =
-    h2h.aWins === h2h.bWins
-      ? `${nameOf(h2h.a)} and ${nameOf(h2h.b)} are tied ${h2h.aWins}–${h2h.bWins}`
-      : h2h.aWins > h2h.bWins
-        ? `${nameOf(h2h.a)} leads ${nameOf(h2h.b)} ${h2h.aWins}–${h2h.bWins}`
-        : `${nameOf(h2h.b)} leads ${nameOf(h2h.a)} ${h2h.bWins}–${h2h.aWins}`;
-  return h2h.halves > 0 ? `${base} · ${h2h.halves} halved` : base;
+// Head-to-head as a sentence, leader first — never the raw a/b row order. Names are GolferLinks
+// (the link sweep, task 6); the connective words/score/halves suffix stay plain text — joined so
+// the rendered TEXT is byte-identical to the old plain-string sentence.
+const headToHeadLine = (h2h: SeasonStandingsResponse["headToHead"][number], nameOf: (id: GolferId) => string): ReactNode => {
+  const tied = h2h.aWins === h2h.bWins;
+  const aLeads = h2h.aWins > h2h.bWins;
+  const firstId = tied || aLeads ? h2h.a : h2h.b;
+  const secondId = tied || aLeads ? h2h.b : h2h.a;
+  const score = tied || aLeads ? `${h2h.aWins}–${h2h.bWins}` : `${h2h.bWins}–${h2h.aWins}`;
+  return (
+    <>
+      <GolferLink golferId={firstId} name={nameOf(firstId)} />
+      {tied ? " and " : " leads "}
+      <GolferLink golferId={secondId} name={nameOf(secondId)} />
+      {tied ? " are tied " : " "}
+      {score}
+      {h2h.halves > 0 && ` · ${h2h.halves} halved`}
+    </>
+  );
 };
 
 // GET /crews/{crewId}/seasons/{seasonId}/standings (architecture-realignment Task 9/11):
@@ -158,7 +170,9 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
               <tbody>
                 {sortedLedger.map((line) => (
                   <tr key={line.golferId} className="border-t border-hairline text-forest">
-                    <td className="py-2 pr-2">{line.name}</td>
+                    <td className="py-2 pr-2">
+                      <GolferLink golferId={line.golferId} name={line.name} />
+                    </td>
                     <td className="py-2 pr-2 font-mono tabular-nums">{line.rounds}</td>
                     <td className="py-2 pr-2 font-mono tabular-nums">{`${line.wins}–${line.losses}–${line.halves}`}</td>
                     <td className="py-2 pr-2 font-mono tabular-nums">{line.points}</td>
@@ -175,9 +189,9 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
       {standings.headToHead.length > 0 && (
         <div>
           <h4 className="text-base font-semibold text-forest">Head to head</h4>
-          <ul className="flex flex-col gap-1 text-sm text-fairway">
+          <ul aria-label="Head to head" className="flex flex-col gap-1 text-sm text-fairway">
             {standings.headToHead.map((h2h) => (
-              <li key={`${h2h.a}#${h2h.b}`}>{describeHeadToHead(h2h, nameOf)}</li>
+              <li key={`${h2h.a}#${h2h.b}`}>{headToHeadLine(h2h, nameOf)}</li>
             ))}
           </ul>
         </div>

@@ -1,8 +1,15 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { cleanup, fireEvent, render as rtlRender, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixtureLinks, gameId, gameKindBlurb, golferId, roundId } from "@swng/domain";
 import type { GameConfig, GameState, Participant, RoundState } from "@swng/domain";
 import { GamePanel } from "./GamePanel";
+
+// GamePanel now renders GolferLinks (the link sweep, navigation spec task 6) — every render
+// needs a Router ancestor, the same MemoryRouter-wrapping idiom the other player-name surfaces'
+// own test files use.
+const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 const ANN = golferId("ann");
 const BO = golferId("bo");
@@ -268,8 +275,113 @@ describe("GamePanel", () => {
     render(<GamePanel game={game} state={state} />);
 
     expect(screen.getByText("Holes 1–2 — carried")).toBeTruthy();
-    expect(screen.getByText("Hole 3 — Pat takes 3")).toBeTruthy();
+    // The winner's name is now a GolferLink (the link sweep, task 6) — the "carried" items stay
+    // one plain text node each (getByText still finds them directly), but the winner item spans
+    // a nested <a>, so it's read via the <li>'s own native textContent instead.
+    const storyItems = screen.getAllByRole("listitem");
+    expect(storyItems.map((li) => li.textContent)).toEqual(["Holes 1–2 — carried", "Hole 3 — Pat takes 3", "Hole 4 — carried"]);
+    expect(within(storyItems[1]!).getByRole("link", { name: "Pat" }).getAttribute("href")).toBe(`/golfers/${PAT}`);
     expect(screen.getByText("Hole 4 — carried")).toBeTruthy();
+  });
+});
+
+// The link sweep (navigation spec, task 6): every visible standings-table/trail-label/story-line
+// name in GamePanel becomes a GolferLink to /golfers/:golferId, the same resolved name text
+// nameOf already produced — rendered TEXT is unchanged, only the wrapping element.
+describe("GamePanel — the link sweep (every visible name links to /golfers/:golferId)", () => {
+  it("stroke play + stableford: each row's Player cell links to the golfer", () => {
+    const participants: readonly Participant[] = [
+      { golferId: ANN, name: "Ann", tee: "white", courseHandicap: 8 },
+      { golferId: BO, name: "Bo", tee: "white", courseHandicap: 2 },
+    ];
+    const spConfig: GameConfig = { kind: "stroke-play", id: gameId("g-link-sp"), scoring: "gross", players: [ANN, BO] };
+    const spGame: GameState = {
+      kind: "stroke-play",
+      id: spConfig.id,
+      scoring: "gross",
+      complete: true,
+      leaders: [ANN],
+      lines: [
+        { golferId: ANN, thru: 18, gross: { total: 70, pickups: 0 }, relativeToPar: -2 },
+        { golferId: BO, thru: 18, gross: { total: 75, pickups: 0 }, relativeToPar: 3 },
+      ],
+    };
+    const { unmount } = render(<GamePanel game={spGame} state={baseState([spConfig], participants)} />);
+    const annLink = screen.getByRole("link", { name: "Ann" });
+    expect(annLink.getAttribute("href")).toBe(`/golfers/${ANN}`);
+    unmount();
+
+    const sfConfig: GameConfig = { kind: "stableford", id: gameId("g-link-sf"), players: [ANN] };
+    const sfGame: GameState = { kind: "stableford", id: sfConfig.id, complete: true, leaders: [ANN], lines: [{ golferId: ANN, thru: 18, points: 30 }] };
+    render(<GamePanel game={sfGame} state={baseState([sfConfig], [participants[0]!])} />);
+    expect(screen.getByRole("link", { name: "Ann" }).getAttribute("href")).toBe(`/golfers/${ANN}`);
+  });
+
+  it("singles match: the rowheader name links to the golfer — the status sentence stays plain prose", () => {
+    const participants: readonly Participant[] = [
+      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
+      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
+    ];
+    const config: GameConfig = { kind: "singles-match", id: gameId("m-link"), a: PAT, b: ALEX };
+    const game: GameState = { kind: "singles-match", id: config.id, up: 1, leader: PAT, thru: 3, remaining: 15, dormie: false, holes: [{ hole: 1, winner: "a" }] };
+    render(<GamePanel game={game} state={baseState([config], participants)} />);
+
+    const patLink = screen.getByRole("link", { name: "Pat" });
+    expect(patLink.getAttribute("href")).toBe(`/golfers/${PAT}`);
+    // The status sentence above the trail table names Pat in plain prose — a compound sentence,
+    // not a linked standings/trail row (brief's own carve-out) — so it must NOT be inside a link.
+    const status = screen.getByText(/Pat is 1 UP/);
+    expect(status.querySelector("a")).toBeNull();
+    expect(status.closest("a")).toBeNull();
+  });
+
+  it("fourball match: the rowheader renders TWO GolferLinks joined by ' & ' — same text as the (unlinked) status sentence", () => {
+    const participants: readonly Participant[] = [
+      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
+      { golferId: SAM, name: "Sam", tee: "white", courseHandicap: 4 },
+      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
+      { golferId: DANA, name: "Dana", tee: "white", courseHandicap: 10 },
+    ];
+    const config: GameConfig = { kind: "fourball-match", id: gameId("f-link"), a: [PAT, SAM], b: [ALEX, DANA] };
+    const game: GameState = { kind: "fourball-match", id: config.id, up: 1, leader: "a", thru: 3, remaining: 15, dormie: false, holes: [{ hole: 1, winner: "a" }] };
+    render(<GamePanel game={game} state={baseState([config], participants)} />);
+
+    const rowheader = screen.getByRole("rowheader", { name: "Pat & Sam" });
+    expect(rowheader.textContent).toBe("Pat & Sam"); // rendered text unchanged
+    expect(within(rowheader).getByRole("link", { name: "Pat" }).getAttribute("href")).toBe(`/golfers/${PAT}`);
+    expect(within(rowheader).getByRole("link", { name: "Sam" }).getAttribute("href")).toBe(`/golfers/${SAM}`);
+  });
+
+  it("skins: both the totals line and the story's winner name link to the golfer", () => {
+    const participants: readonly Participant[] = [
+      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
+      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
+    ];
+    const config: GameConfig = { kind: "skins", id: gameId("s-link"), players: [PAT, ALEX] };
+    const game: GameState = {
+      kind: "skins",
+      id: config.id,
+      lines: [
+        { golferId: PAT, skins: 3 },
+        { golferId: ALEX, skins: 0 },
+      ],
+      carrying: 0,
+      carriedOut: 0,
+      complete: false,
+      holesDecided: 1,
+      holes: [{ hole: 1, winner: PAT, pot: 3 }],
+    };
+    render(<GamePanel game={game} state={baseState([config], participants)} />);
+
+    // Two "Pat" links exist — the totals line and the story line — both resolve to the golfer.
+    const patLinks = screen.getAllByRole("link", { name: "Pat" });
+    expect(patLinks.length).toBe(2);
+    for (const link of patLinks) expect(link.getAttribute("href")).toBe(`/golfers/${PAT}`);
+    // Rendered TEXT is unchanged — checked via the region's own native textContent (which, unlike
+    // RTL's getByText, recurses through the nested <a> the same way a browser reads the page).
+    const region = screen.getByRole("region", { name: "Skins standings" });
+    expect(region.textContent).toContain("Pat 3 · Alex 0");
+    expect(region.textContent).toContain("Hole 1 — Pat takes 3");
   });
 });
 

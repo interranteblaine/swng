@@ -146,6 +146,41 @@ describe("ProfilePage — signed in", () => {
     expect(historyLinks[2]?.textContent).toContain("14.5");
   });
 
+  // The link sweep (navigation spec, task 6): every rendered noun's name is its address — the
+  // home course line links to /courses/:courseId, in the same linkEntity idiom CoursesHubPage
+  // uses; the "Change" button stays a plain button beside it, unchanged.
+  it("links the home course name to /courses/:courseId — 'Change' stays a plain button", async () => {
+    signIn();
+    const homeCourseId = courseId("course-home-1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", homeCourseId, indexSource: { kind: "swng" } } });
+        if (path === "/me/crews") return fakeResponse(200, { crews: [] });
+        if (path === "/me/record") return fakeResponse(200, { metrics: { ...emptyMetricsExtras }, history: [] });
+        if (path === `/courses/${homeCourseId}`) {
+          return fakeResponse(200, {
+            course: {
+              courseId: homeCourseId,
+              cardId: "card-1",
+              card: { courseName: "Pebble Beach", teeSets: [{ name: "white", holes: [{ number: 1, par: 4, yardage: 380, strokeIndex: 1 }] }] },
+              enteredBy: "Ann",
+              updatedAtMs: 1_000,
+            },
+          });
+        }
+        throw new Error(`unexpected fetch ${path}`);
+      }),
+    );
+
+    renderProfilePage();
+
+    const courseLink = await screen.findByRole("link", { name: "Pebble Beach" });
+    expect(courseLink.getAttribute("href")).toBe(`/courses/${homeCourseId}`);
+    expect(screen.getByRole("button", { name: "Change" })).toBeTruthy();
+  });
+
   // Projection-realignment Task 6 / navigation spec §6c.3 (Step 1's own structural pin): every
   // history line's score/remainder is a real link to the round's own permanent address
   // (navigation Task 5's RoundRecordPage), keyed by the wire response's own roundId — never

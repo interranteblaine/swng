@@ -121,6 +121,19 @@ describe("App", () => {
     window.history.pushState({}, "", "/");
   });
 
+  // Navigation Task 4: same router-wiring smoke as the crew routes above — GolferPage carries its
+  // own full behavior-contract suite in src/golfers/.
+  it("routes /golfers/:golferId to GolferPage", () => {
+    window.history.pushState({}, "", "/golfers/golfer-1");
+    render(<App />);
+
+    // Signed out (no token saved) — GolferPage's own SignInCta framing message is proof the
+    // route landed (the header ALSO carries a compact "Sign in" on this inner page, so anchor on
+    // the CTA's own text rather than the ambiguous button name).
+    expect(screen.getByText(/sign in to see this golfer's record/i)).toBeTruthy();
+    window.history.pushState({}, "", "/");
+  });
+
   // Nav infrastructure Task 2: the `path="*"` catch-all inside Layout — a real 404 for any
   // path none of the routes above match, instead of a blank Outlet.
   it("routes an unknown path to a real 404, inside the header chrome", () => {

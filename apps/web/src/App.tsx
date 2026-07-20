@@ -7,6 +7,7 @@ import { CoursesHubPage } from "./courses/CoursesHubPage";
 import { EditCoursePage } from "./courses/EditCoursePage";
 import { CrewCreatePage } from "./crews/CrewCreatePage";
 import { CrewPage } from "./crews/CrewPage";
+import { GolferPage } from "./golfers/GolferPage";
 import { ArchivedRoundPage } from "./round/ArchivedRoundPage";
 import { AuthCallbackPage } from "./routes/AuthCallbackPage";
 import { CreateRoundPage } from "./routes/CreateRoundPage";
@@ -93,6 +94,10 @@ export function App() {
             <Route path="/courses/new" element={<AddCoursePage />} />
             <Route path="/courses/:courseId" element={<CoursePage />} />
             <Route path="/courses/:courseId/edit" element={<EditCoursePage />} />
+            {/* Navigation Task 4: any player's record, read-only — inside Layout (the golfer
+                Bearer, via useAuth's withAuth, only exists signed in; the header chrome is exactly
+                what a signed-in golfer expects browsing from a link off a scorecard/crew page). */}
+            <Route path="/golfers/:golferId" element={<GolferPage />} />
             <Route path="/crews/new" element={<CrewCreatePage />} />
             {/* Crew membership (invited in, accountable out — spec §2): the invite funnel — a
                 static segment, ranked ahead of the dynamic /crews/:crewId below by react-router

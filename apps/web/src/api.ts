@@ -9,6 +9,7 @@ import {
   finalizeRoundResponseSchema,
   getCourseResponseSchema,
   getCrewResponseSchema,
+  getGolferResponseSchema,
   getMeResponseSchema,
   getMyLiveRoundsResponseSchema,
   getMyRecordResponseSchema,
@@ -48,6 +49,7 @@ import type {
   FinalizeRoundResponse,
   GetCourseResponse,
   GetCrewResponse,
+  GetGolferResponse,
   GetMeResponse,
   GetMyLiveRoundsResponse,
   GetMyRecordResponse,
@@ -241,6 +243,15 @@ export const updateMe = async (token: string, input: UpdateMeRequest): Promise<G
 export const getMyRecord = async (token: string): Promise<GetMyRecordResponse> => {
   const json = await requestJson("/me/record", { token });
   return parse(getMyRecordResponseSchema, json);
+};
+
+// Navigation spec §6a: GET /golfers/{golferId} — any signed-in golfer may view any golfer's
+// record (handicaps are posted in every clubhouse, not private). Same requestJson + per-endpoint
+// idiom as getMyRecord above, "golfer"-gated the same way — the target golferId rides the path,
+// never a claims-derived self scope.
+export const getGolfer = async (token: string, id: GolferId): Promise<GetGolferResponse> => {
+  const json = await requestJson(`/golfers/${id}`, { token });
+  return parse(getGolferResponseSchema, json);
 };
 
 // Projection-realignment Task 6: "list my rounds" — same requestJson + per-endpoint idiom as

@@ -2,139 +2,20 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router";
 import type { GetMyRecordResponse, ListMyCrewsResponse } from "@swng/contracts";
-import type { CourseId, IndexSource } from "@swng/domain";
-import { formatHandicapIndex, resolveIndex } from "@swng/domain";
+import type { CourseId, GolferMetrics, IndexSource } from "@swng/domain";
+import { formatHandicapIndex, indexSourcePhrase, resolveIndex } from "@swng/domain";
 import { getCourse, getMyRecord, listMyCrews, updateMe } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
+import { RecordSections } from "../golfers/RecordSections";
 import { btnPrimary, cardBox, inputBox } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
 
-// "Your index over time" (metrics-projection-grows spec, papercut 17's follow-on) — a
-// dependency-free inline SVG (no chart lib needed: two plain polylines are enough to show
-// swng drifting under/over WHS). `points` is the served metrics projection's own `indexHistory`
-// (domain/golfer/metrics.ts's golferMetrics) — one point per round, oldest → newest, each
-// carrying the golfer's swng/WHS index AS OF that round; this component only renders it, it
-// never derives index math (SVG coordinate placement is presentation, not golf compute). Below
-// INDEX_HISTORY_MIN_ROUNDS rounds the chart is GATED, not drawn — a 1-3 point sparkline is noise,
-// not a trend (the exact defect this redesign replaces: the OLD page plotted an unlabeled
-// score-differential line from round one).
-const INDEX_HISTORY_MIN_ROUNDS = 8;
-
-function IndexOverTime({
-  points,
-  roundsPlayed,
-}: {
-  readonly points: GetMyRecordResponse["metrics"]["indexHistory"];
-  readonly roundsPlayed: number;
-}) {
-  if (roundsPlayed < INDEX_HISTORY_MIN_ROUNDS) {
-    return (
-      <div className="flex flex-col gap-1">
-        <h3 className="text-base font-semibold">Your index over time</h3>
-        <p className="text-sm text-fairway">
-          {`Your index history shows up at ${INDEX_HISTORY_MIN_ROUNDS} rounds — you've played ${roundsPlayed}. Keep going.`}
-        </p>
-      </div>
-    );
-  }
-
-  const width = 280;
-  const height = 96;
-  const n = points.length;
-  const values = points.flatMap((point) => [point.swngIndex, point.whsIndex].filter((value): value is number => value !== undefined));
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-
-  // The SAME point index maps to the same x whichever series it belongs to, so the two lines
-  // stay comparable; a LOWER index sits LOWER on screen (improving play trends the line down).
-  const pointsFor = (key: "swngIndex" | "whsIndex"): readonly { readonly x: number; readonly y: number }[] =>
-    points
-      .map((point, i) => ({ i, value: point[key] }))
-      .filter((entry): entry is { i: number; value: number } => entry.value !== undefined)
-      .map(({ i, value }) => ({
-        x: n <= 1 ? 0 : (i / (n - 1)) * width,
-        y: max === min ? height / 2 : height - ((value - min) / (max - min)) * height,
-      }));
-  const asLine = (pts: readonly { readonly x: number; readonly y: number }[]) => pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-
-  const swngPts = pointsFor("swngIndex");
-  const whsPts = pointsFor("whsIndex");
-  const swngLine = asLine(swngPts);
-  const whsLine = asLine(whsPts);
-  const latestSwng = [...points].reverse().find((point) => point.swngIndex !== undefined)?.swngIndex;
-  const latestWhs = [...points].reverse().find((point) => point.whsIndex !== undefined)?.whsIndex;
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-baseline justify-between">
-        <h3 className="text-base font-semibold">Your index over time</h3>
-        <span className="text-xs text-fairway/70">
-          your last {n} round{n === 1 ? "" : "s"}
-        </span>
-      </div>
-      <div className="flex items-center gap-3 text-xs text-fairway">
-        <span>● swng</span>
-        <span>○ WHS</span>
-      </div>
-      <svg
-        data-testid="index-chart"
-        role="img"
-        aria-label="Your index over time"
-        viewBox={`0 0 ${width} ${height}`}
-        width={width}
-        height={height}
-        className={cardBox}
-      >
-        {swngLine && (
-          <polyline data-testid="index-line-swng" aria-label="swng index" points={swngLine} fill="none" stroke="currentColor" strokeWidth={2} className="text-forest" />
-        )}
-        {whsLine && (
-          <polyline
-            data-testid="index-line-whs"
-            aria-label="WHS index"
-            points={whsLine}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeDasharray="3 3"
-            className="text-fairway"
-          />
-        )}
-        {/* Per-round markers (● swng filled, ○ WHS hollow) so a single-vertex series stays visible:
-            a lone point — e.g. one rated round among unrated play — draws no line, but its dot shows. */}
-        {swngPts.map((p, i) => (
-          <circle key={`s${i}`} data-testid="index-dot-swng" cx={p.x} cy={p.y} r={2.5} fill="currentColor" className="text-forest" />
-        ))}
-        {whsPts.map((p, i) => (
-          <circle key={`w${i}`} data-testid="index-dot-whs" cx={p.x} cy={p.y} r={2.5} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-fairway" />
-        ))}
-      </svg>
-      <p className="text-sm text-fairway">
-        swng {latestSwng !== undefined ? formatHandicapIndex(latestSwng) : "—"} · WHS {latestWhs !== undefined ? formatHandicapIndex(latestWhs) : "—"}
-      </p>
-    </div>
-  );
-}
-
-// Local presentation-only helpers for the record section below — arithmetic view logic over
-// numbers the wire already computed (ags − par; a literal join of already-summed typicalEighteen
-// buckets), never golf rules, so no `@swng/domain` compute import is warranted (the ESLint
-// compute fence stays clean).
-const vsPar = (ags: number, par: number): string => {
-  const d = ags - par;
-  return d === 0 ? "E" : d > 0 ? `+${d}` : `${d}`;
-};
-
-const ZERO_TYPICAL_EIGHTEEN: GetMyRecordResponse["metrics"]["typicalEighteen"] = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
-
-// "Your typical 18" (metrics.typicalEighteen — always present, zeroed rather than absent below
-// any bootstrap): the career scoring shape normalized to one 18-hole round, so a golfer who
-// mostly plays 9s isn't shown a deflated total.
-const describeTypicalEighteen = (typical: GetMyRecordResponse["metrics"]["typicalEighteen"]): string => {
-  const eaglePrefix = typical.eagles > 0 ? `${typical.eagles} eagle+ · ` : "";
-  return `In a typical 18: ${eaglePrefix}${typical.birdies} birdies · ${typical.pars} pars · ${typical.bogeys} bogeys · ${typical.doublePlus} double+`;
-};
+// The record section below (RecordSections, navigation spec §6c.3) renders unconditionally, even
+// before GET /me/record resolves — its `metrics` prop is REQUIRED (a shared component takes a
+// real default, never an implicit fallback baked into itself), so this is that default: zeroed
+// rather than absent, matching the wire's own zeroed-not-absent contract for typicalEighteen.
+const ZERO_METRICS: GolferMetrics = { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] };
 
 // The two adoptable computed sources shown beneath "Your index" (index-source model spec §6) —
 // each a labeled data point read straight off GET /me/record's metrics, with a one-tap "Use this"
@@ -341,10 +222,10 @@ export function ProfilePage() {
             <p className="flex items-baseline gap-2">
               <span className="text-3xl font-bold">{formatHandicapIndex(resolved.value)}</span>
               {/* The source phrasing IS the legibility — the golfer always sees WHICH number they're
-                  on: "your own" (declared), "your WHS index" (whs), or "from all your rounds" (swng). */}
-              <span className="text-sm text-fairway">
-                {resolved.kind === "declared" ? "your own" : resolved.kind === "whs" ? "your WHS index" : "from all your rounds"}
-              </span>
+                  on: "your own" (declared), "your WHS index" (whs), or "from all your rounds" (swng).
+                  indexSourcePhrase (@swng/domain, navigation spec §6c) owns these words — the SAME
+                  helper GolferPage uses for the "their" arm, viewing someone else's record. */}
+              <span className="text-sm text-fairway">{indexSourcePhrase(resolved.kind, "your")}</span>
             </p>
           ) : (
             // A computed source with no data yet resolves to undefined (first-class, not 0) — the
@@ -468,35 +349,9 @@ export function ProfilePage() {
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Your record</h2>
 
-        <IndexOverTime points={record?.metrics.indexHistory ?? []} roundsPlayed={record?.history.length ?? 0} />
-
-        <p className="text-sm text-fairway tabular-nums">{describeTypicalEighteen(record?.metrics.typicalEighteen ?? ZERO_TYPICAL_EIGHTEEN)}</p>
-
-        <div>
-          <h3 className="text-base font-semibold">History</h3>
-          {history.length > 0 ? (
-            <ul className="flex flex-col gap-1">
-              {history.map((line) => (
-                <li key={line.roundId}>
-                  {/* Projection-realignment Task 6: every history line opens its own
-                      ArchivedRoundPage — the "open one finalized round" half of this task,
-                      reached from the "list my rounds" half already rendered here. Score-first
-                      (metrics-projection-grows spec): the score leads, course/tee follow — a
-                      golfer scans results, not metadata. `vsPar`/differential are presentation
-                      only, no domain compute import. */}
-                  <Link to={`/rounds/${line.roundId}/archive`} className={`${cardBox} block px-3 py-2 text-sm text-fairway underline decoration-fairway tabular-nums`}>
-                    {line.courseName} · {line.tee}
-                    {line.ags !== undefined && ` · ${line.ags} (${vsPar(line.ags, line.par)})`}
-                    {line.holes === 9 && " · 9 holes"}
-                    {line.differential !== undefined && ` · ${line.differential.toFixed(1)}`}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-fairway">No rounds yet.</p>
-          )}
-        </div>
+        {/* The chart/typical-18/history JSX (navigation spec §6c.3) — extracted so GolferPage
+            renders the SAME thing about someone else, never a second copy. */}
+        <RecordSections metrics={record?.metrics ?? ZERO_METRICS} history={history} />
       </section>
     </main>
   );

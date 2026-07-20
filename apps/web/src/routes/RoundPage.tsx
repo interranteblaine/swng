@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useParams } from "react-router";
 import type { FinalizeRoundResponse, GameConfigInput } from "@swng/contracts";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { GameId, GameState, GolferId, HoleResult, RoundId, RoundState } from "@swng/domain";
-import { abandonRound, addGame, finalizeRound, leaveRound, terminateGame } from "../api";
+import { abandonRound, addGame, finalizeRound, leaveRound, setHandicap, terminateGame } from "../api";
 import { credentialStore } from "../identity";
 import type { RoundCredential } from "../identity";
 import { unresolvedGames } from "../round/finalizeReadiness";
@@ -276,6 +276,7 @@ interface LiveRoundProps {
   readonly onTerminate: (gameId: GameId) => Promise<void>;
   readonly onAbandon: () => Promise<void>;
   readonly onLeave: () => Promise<void>;
+  readonly onSetHandicap: (golferId: GolferId, courseHandicap: number) => Promise<void>;
 }
 
 // Everything that's only ever rendered pre-finalize, as its OWN component (not an inline
@@ -283,14 +284,14 @@ interface LiveRoundProps {
 // StandingsHeader no longer needs an active-game selection threaded down to it at all (its own
 // chips are pure disclosure toggles now), so this component's only remaining job is composing
 // the live-only chrome that unmounts once status flips to "final".
-function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave }: LiveRoundProps) {
+function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave, onSetHandicap }: LiveRoundProps) {
   return (
     <>
       <ShareButton roundId={state.id} token={token} />
       <StandingsHeader state={state} games={games} onTerminate={onTerminate} />
       <ScorecardGrid state={state} recordScore={recordScore} />
       <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
-      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} />
+      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} onSetHandicap={onSetHandicap} />
       <ScrapControl onAbandon={onAbandon} />
       <LeaveControl onLeave={onLeave} />
     </>
@@ -324,6 +325,16 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
         // sees its own new game once the NEXT unrelated sync happens to fire (there is no
         // periodic poll timer; @swng/client's session only pulls on an explicit sync() or a WS
         // push), which could be a long, confusing wait for the host who just added the game.
+        await sync();
+      },
+      [roundId, credential.token, sync],
+    );
+
+    const onSetHandicap = useCallback(
+      async (golferId: GolferId, courseHandicap: number) => {
+        // Server-authored append, then sync() — the corrected CH re-strikes dots/standings when the
+        // fold re-renders, matching every other mutation's sync()-then-let-the-fold-swap pattern.
+        await setHandicap(roundId, credential.token, { golferId, courseHandicap });
         await sync();
       },
       [roundId, credential.token, sync],
@@ -436,6 +447,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
             onTerminate={onTerminate}
             onAbandon={onAbandon}
             onLeave={onLeave}
+            onSetHandicap={onSetHandicap}
           />
         )}
       </main>

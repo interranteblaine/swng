@@ -29,6 +29,7 @@ import {
   removeCountedRoundResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
+  setHandicapResponseSchema,
   shareLinkResponseSchema,
   startRoundResponseSchema,
   supersedeCardResponseSchema,
@@ -71,6 +72,8 @@ import type {
   RemoveCountedRoundResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
+  SetHandicapRequest,
+  SetHandicapResponse,
   ShareLinkResponse,
   StartRoundRequest,
   StartRoundResponse,
@@ -178,6 +181,15 @@ export const abandonRound = async (roundId: RoundId, token: string): Promise<Aba
 export const leaveRound = async (roundId: RoundId, token: string): Promise<LeaveRoundResponse> => {
   const json = await requestJson(`/rounds/${roundId}/leave`, { method: "POST", token });
   return parse(leaveRoundResponseSchema, json);
+};
+
+// POST /rounds/{roundId}/handicap (spec 2026-07-20): any participant corrects any participant's
+// course handicap mid-round; the correction is retroactive by construction (dots, standings,
+// and the eventual archive all read the folded roster). Append idiom — the response carries the
+// one participant-handicap-set this call appended; the caller sync()s and lets the fold render.
+export const setHandicap = async (roundId: RoundId, token: string, request: SetHandicapRequest): Promise<SetHandicapResponse> => {
+  const json = await requestJson(`/rounds/${roundId}/handicap`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request), token });
+  return parse(setHandicapResponseSchema, json);
 };
 
 // M9 Task 3 (share): mints this round's own immortal spectator link. `url` is a path+fragment

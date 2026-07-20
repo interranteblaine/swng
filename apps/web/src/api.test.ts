@@ -42,6 +42,7 @@ import {
   removeCountedRound,
   removeCrewMember,
   searchCourses,
+  setHandicap,
   shareRound,
   supersedeCard,
   terminateGame,
@@ -890,6 +891,31 @@ describe("leaveRound", () => {
     expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/leave`);
     expect(seenInit?.method).toBe("POST");
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-leave");
+    expect(seenInit).not.toHaveProperty("token");
+    expect(result).toEqual({ events: [] });
+  });
+});
+
+// Mid-round handicap correction (spec 2026-07-20): same POST + bearer-token (participant) idiom
+// as leaveRound/terminateGame — the request body carries the SUBJECT golferId (any participant
+// corrects any participant), and the appended participant-handicap-set event comes back for the
+// caller to fold.
+describe("setHandicap", () => {
+  it("POSTs { golferId, courseHandicap } to /rounds/{roundId}/handicap with the bearer token and parses a SetHandicapResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { events: [] });
+    });
+
+    const result = await setHandicap(roundId("round-1"), "tok-handicap", { golferId: golferId("bo"), courseHandicap: -2 });
+
+    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/handicap`);
+    expect(seenInit?.method).toBe("POST");
+    expect(JSON.parse(String(seenInit?.body))).toEqual({ golferId: "bo", courseHandicap: -2 });
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-handicap");
     expect(seenInit).not.toHaveProperty("token");
     expect(result).toEqual({ events: [] });
   });

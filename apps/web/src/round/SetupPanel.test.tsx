@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
@@ -28,6 +29,7 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
 });
 
 const noopAddGame = vi.fn().mockResolvedValue(undefined);
+const noopSetHandicap = vi.fn().mockResolvedValue(undefined);
 
 // SetupPanel no longer touches auth (the claim affordance is gone), but the AuthProvider wrapper
 // stays: it lets the signed-in pins below prove that even in the state that USED to render the
@@ -56,6 +58,7 @@ const signIn = () => {
 
 beforeEach(() => {
   noopAddGame.mockClear();
+  noopSetHandicap.mockClear();
   vi.stubGlobal("localStorage", createMemoryStorage());
   vi.stubGlobal("sessionStorage", createMemoryStorage());
 });
@@ -66,7 +69,7 @@ afterEach(() => {
 
 describe("SetupPanel", () => {
   it("shows the join code prominently", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
     expect(screen.getByText("ABC123")).toBeTruthy();
   });
@@ -74,7 +77,7 @@ describe("SetupPanel", () => {
   // The standard card (spec 2026-07-19 §2a: the card never changes) — a roster row reads
   // `name — tee — CH X`, full stop, whether or not any game exists.
   it("shows the roster row as `name — tee — CH X`, with no game badges", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     expect(annRow).toBeTruthy();
@@ -89,7 +92,7 @@ describe("SetupPanel", () => {
     const state = baseState({
       participants: [participant(ANN, "Ann", "white", 8), { ...participant(BO, "Bo", "white", 4), departed: true }],
     });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
     const boRow = screen.getAllByRole("listitem").find((li) => /Bo — white — CH 4/.test(li.textContent ?? ""));
     expect(boRow).toBeTruthy(); // still on the roster, seat data intact
@@ -107,13 +110,15 @@ describe("SetupPanel", () => {
     const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
     const state = baseState({ games: [stableford], terminatedGameIds: new Set([stableford.id]) });
 
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /CH 8/.test(li.textContent ?? ""));
     expect(annRow).toBeTruthy();
     // Scoped to the roster row itself — the Add Game form below also renders a "Stableford"
-    // radio-card label, which is a different surface entirely, not a roster badge.
-    expect(annRow!.textContent).toBe("Ann — white — CH 8");
+    // radio-card label, which is a different surface entirely, not a roster badge. The identity
+    // line itself is byte-identical; the row also carries an Edit affordance now (mid-round
+    // handicap correction spec 2026-07-20), so the match is anchored, not exact.
+    expect(annRow!.textContent).toMatch(/^Ann — white — CH 8/);
     expect(screen.queryByText(/Not yet in a game/)).toBeNull();
   });
 
@@ -121,19 +126,21 @@ describe("SetupPanel", () => {
   // roster's own identity row links each golfer's name to /golfers/:golferId, the tee/CH suffix
   // staying plain text.
   it("links each roster name to /golfers/:golferId, leaving the tee/CH suffix as plain text", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
     const annLink = screen.getByRole("link", { name: "Ann" });
     expect(annLink.getAttribute("href")).toBe(`/golfers/${ANN}`);
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
-    expect(annRow!.textContent).toBe("Ann — white — CH 8");
+    // Anchored, not exact (mid-round handicap correction spec 2026-07-20 adds an Edit
+    // affordance after the identity line) — the tee/CH suffix itself is still plain text.
+    expect(annRow!.textContent).toMatch(/^Ann — white — CH 8/);
   });
 
   it("renders each participant's identity row exactly once even once games exist — no second, dots-only roster", () => {
     const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
     const state = baseState({ games: [stableford] });
 
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
     // Scope to <li> rows specifically (not the Add Game form's player checkboxes, which are
     // <label> elements, not list items) — Ann must appear as exactly one roster row.
@@ -155,13 +162,13 @@ describe("SetupPanel", () => {
 // ghost form is deleted; the join code — already rendered above — is framed as the one way in.
 describe("SetupPanel — share the code, not add a player", () => {
   it("frames the join code as the one way in — new players sign up on the way", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
     expect(screen.getByText(/players join with this code — new players create their account on the way/i)).toBeTruthy();
   });
 
   it("has no 'Add player' ghost form at all — no name field, no Add player button", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
     expect(screen.queryByRole("button", { name: /^add player$/i })).toBeNull();
     expect(screen.queryByLabelText(/^name$/i)).toBeNull();
@@ -178,7 +185,7 @@ describe("SetupPanel — share the code, not add a player", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
     // Let the AuthProvider's own GET /me settle so a claim button, if any, would have rendered.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/me"), expect.anything()));
@@ -197,7 +204,7 @@ describe("SetupPanel — share the code, not add a player", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/me"), expect.anything()));
     // Every fetch the whole tree ever made was the AuthProvider's GET /me — SetupPanel itself
@@ -216,7 +223,7 @@ describe("SetupPanel — a plus handicap renders through the domain (CH +N, give
 
   it("renders a plus course handicap as 'CH +1', never a bare 'CH -1' — a normal handicap stays plain 'CH 13'", () => {
     const state = baseState({ participants: [participant(PLUS, "Plus", "white", -1), participant(NORMAL, "Norm", "white", 13)] });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
 
     const plusRow = screen.getAllByRole("listitem").find((li) => /Plus/.test(li.textContent ?? ""));
     expect(plusRow).toBeTruthy();
@@ -227,5 +234,101 @@ describe("SetupPanel — a plus handicap renders through the domain (CH +N, give
     const normRow = screen.getAllByRole("listitem").find((li) => /Norm/.test(li.textContent ?? ""));
     expect(normRow!.textContent).toMatch(/CH 13\b/);
     expect(normRow!.textContent).not.toMatch(/\+/);
+  });
+});
+
+// Mid-round handicap correction (spec 2026-07-20): the roster row IS the editor — any participant
+// corrects any participant's course handicap, retroactively, with no optimistic local write (the
+// corrected CH arrives via the fold once the caller sync()s). These tests drive the row's controls
+// by accessible name, the e2e-reconciliation lesson.
+describe("SetupPanel — mid-round handicap correction (spec 2026-07-20)", () => {
+  const PLUS = golferId("plus");
+
+  it("Edit opens an inline editor holding the raw signed CH, with the whole-round teaching line", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ participants: [participant(PLUS, "Plus", "white", -2), participant(ANN, "Ann", "white", 8)] });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
+
+    const plusRow = screen.getAllByRole("listitem").find((li) => /Plus/.test(li.textContent ?? ""));
+    expect(plusRow).toBeTruthy();
+    // A plus handicap renders "CH +2" in the static row (the domain's own sign convention) — but
+    // the editable input underneath must hold the RAW signed value the engine consumes: "-2", the
+    // editable-input carve-out from the plus-handicap render gate.
+    expect(plusRow!.textContent).toMatch(/CH \+2\b/);
+
+    await user.click(within(plusRow!).getByRole("button", { name: "Edit" }));
+
+    const input = within(plusRow!).getByRole("spinbutton", { name: "Course handicap for Plus" });
+    expect((input as HTMLInputElement).value).toBe("-2");
+    expect(screen.getByText("Strokes apply to the whole round — dots and games update everywhere.")).toBeTruthy();
+
+    // Ann's row is untouched — only Plus's row entered edit mode.
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    expect(within(annRow!).queryByRole("spinbutton")).toBeNull();
+    expect(within(annRow!).getByRole("button", { name: "Edit" })).toBeTruthy();
+  });
+
+  it("Save submits the parsed signed integer for THAT golfer and closes the editor", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ participants: [participant(ANN, "Ann", "white", 8), participant(BO, "Bo", "white", 4)] });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
+
+    const input = within(annRow!).getByRole("spinbutton", { name: "Course handicap for Ann" });
+    await user.clear(input);
+    await user.type(input, "13");
+    await user.click(within(annRow!).getByRole("button", { name: "Save" }));
+
+    expect(noopSetHandicap).toHaveBeenCalledTimes(1);
+    expect(noopSetHandicap).toHaveBeenCalledWith(ANN, 13);
+
+    // No optimistic local write (the corrected CH arrives via the fold, not local state): the
+    // editor closes and the static row reappears showing the UNCHANGED prop value — asserting the
+    // spy's args, never the row text, is the point of this test.
+    await waitFor(() => expect(within(annRow!).queryByRole("spinbutton")).toBeNull());
+    expect(within(annRow!).getByRole("button", { name: "Edit" })).toBeTruthy();
+    expect(screen.queryByText("Strokes apply to the whole round — dots and games update everywhere.")).toBeNull();
+  });
+
+  it("Cancel restores the static row without calling onSetHandicap", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ participants: [participant(ANN, "Ann", "white", 8), participant(BO, "Bo", "white", 4)] });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
+
+    const input = within(annRow!).getByRole("spinbutton", { name: "Course handicap for Ann" });
+    await user.clear(input);
+    await user.type(input, "99");
+    await user.click(within(annRow!).getByRole("button", { name: "Cancel" }));
+
+    expect(noopSetHandicap).not.toHaveBeenCalled();
+    expect(within(annRow!).queryByRole("spinbutton")).toBeNull();
+    expect(annRow!.textContent).toMatch(/^Ann — white — CH 8/);
+  });
+
+  it("a failed save surfaces the error text and keeps the editor open", async () => {
+    const user = userEvent.setup();
+    const failingSetHandicap = vi.fn().mockRejectedValue(new Error("network exploded"));
+    const state = baseState({ participants: [participant(ANN, "Ann", "white", 8), participant(BO, "Bo", "white", 4)] });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: failingSetHandicap });
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
+
+    const input = within(annRow!).getByRole("spinbutton", { name: "Course handicap for Ann" });
+    await user.clear(input);
+    await user.type(input, "9");
+    await user.click(within(annRow!).getByRole("button", { name: "Save" }));
+
+    // Never a raw generic Error's message (papercut 12's own precedent) — an honest fallback,
+    // and the editor stays open (retry one tap away).
+    expect(await within(annRow!).findByRole("alert")).toBeTruthy();
+    expect(within(annRow!).getByRole("alert").textContent).toBe("Could not update the course handicap — try again.");
+    expect(document.body.textContent).not.toMatch(/network exploded/);
+    expect(within(annRow!).getByRole("spinbutton", { name: "Course handicap for Ann" })).toBeTruthy();
   });
 });

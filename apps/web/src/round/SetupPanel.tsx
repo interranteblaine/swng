@@ -3,7 +3,7 @@ import { formatCourseHandicap } from "@swng/domain";
 import type { GameState, GolferId, Participant, RoundState } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { GolferLink } from "../ui/GolferLink";
-import { badge, btnSecondary, cardBox, eyebrow, inputBox } from "../ui/classes";
+import { badge, btnQuiet, cardBox, eyebrow, inputBox } from "../ui/classes";
 import { AddGameForm } from "./AddGameForm";
 
 // Mid-round handicap correction (spec 2026-07-20): "-2" and "13" both parse fine via
@@ -110,18 +110,15 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
                         value={value}
                         onChange={(event) => setValue(event.target.value)}
                       />
-                      {/* btnSecondary, not btnPrimary (review finding — two golds while editing):
+                      {/* btnQuiet, never a boxed button (owner call, 2026-07-20 — the boxed idioms
+                          are visually oversized inside a text row) and never gold (review finding —
                           AddGameForm's "Add game" submit below is this SAME panel's one gold
-                          action (the reskin rule, spec 2026-07-19 — gold once per screen). The
-                          established idiom for a secondary commit action composed alongside an
-                          existing gold one is ProfilePage's own index-source "Use this"/"Use this
-                          number" buttons — non-gold even though ProfilePage's name/home Save is
-                          gold — so Save here mirrors Cancel's own family instead of introducing a
-                          second fill. */}
-                      <button type="button" className={btnSecondary} disabled={saving || !isValidInt(value)} onClick={() => void save(p.golferId)}>
+                          action; the reskin rule, spec 2026-07-19). Same register as ProfilePage's
+                          own index-source "Use this" buttons. */}
+                      <button type="button" className={btnQuiet} disabled={saving || !isValidInt(value)} onClick={() => void save(p.golferId)}>
                         Save
                       </button>
-                      <button type="button" className={btnSecondary} disabled={saving} onClick={cancelEdit}>
+                      <button type="button" className={btnQuiet} disabled={saving} onClick={cancelEdit}>
                         Cancel
                       </button>
                     </span>
@@ -140,7 +137,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
                 {editing !== p.golferId && (
                   <>
                     {" "}
-                    <button type="button" className={btnSecondary} disabled={saving} onClick={() => startEdit(p)}>
+                    <button type="button" className={`${btnQuiet} text-sm`} disabled={saving} onClick={() => startEdit(p)}>
                       Edit
                     </button>
                   </>

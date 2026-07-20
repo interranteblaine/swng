@@ -20,6 +20,12 @@ export const inputBox =
   "border border-hairline bg-card px-3 py-3 text-forest placeholder:text-oxblood";
 export const inputCode =
   "border border-hairline bg-card px-3 py-3 font-mono tracking-[2px] text-forest placeholder:text-oxblood";
+// The text-register action — for row-scale affordances living INSIDE a line of text (a roster
+// row's Edit/Save/Cancel, ProfilePage's index-source "Use this"), where any boxed button idiom
+// is visually oversized. Plain underlined text at the ambient size, disabled = faded. Distinct
+// from linkEntity (gold decoration = "opens an entity"); this is fairway decoration = "does a
+// small thing right here."
+export const btnQuiet = "text-forest underline decoration-fairway disabled:opacity-50";
 // A link to a golfer's own record (GolferLink.tsx) — gold as a DECORATION, not a button fill,
 // same treatment App.tsx's own header identity link already wears. The brand rule (gold once per
 // screen as the primary action) governs FILLED gold; an underline decoration marking "this text

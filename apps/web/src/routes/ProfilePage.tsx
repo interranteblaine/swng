@@ -8,7 +8,7 @@ import { getCourse, getMyRecord, listMyCrews, updateMe } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 import { RecordSections } from "../golfers/RecordSections";
-import { btnPrimary, cardBox, inputBox, linkEntity } from "../ui/classes";
+import { btnPrimary, btnQuiet, cardBox, inputBox, linkEntity } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
 
 // The record section below (RecordSections, navigation spec §6c.3) renders unconditionally, even
@@ -194,7 +194,7 @@ export function ProfilePage() {
               <Link to={`/courses/${homeCourse.id}`} className={`text-forest ${linkEntity}`}>
                 {homeCourse.name}
               </Link>
-              <button type="button" onClick={() => setPickingCourse(true)} className="text-sm text-forest underline decoration-fairway">
+              <button type="button" onClick={() => setPickingCourse(true)} className={`text-sm ${btnQuiet}`}>
                 Change
               </button>
             </div>
@@ -261,7 +261,7 @@ export function ProfilePage() {
                         aria-label={source.useLabel}
                         disabled={committing}
                         onClick={() => void commit({ kind: source.kind })}
-                        className="shrink-0 text-forest underline decoration-fairway disabled:opacity-50"
+                        className={`shrink-0 ${btnQuiet}`}
                       >
                         Use this
                       </button>
@@ -290,7 +290,7 @@ export function ProfilePage() {
                     type="button"
                     disabled={committing}
                     onClick={() => void commit({ kind: "declared", value: parsed })}
-                    className="ml-auto shrink-0 text-forest underline decoration-fairway disabled:opacity-50"
+                    className={`ml-auto shrink-0 ${btnQuiet}`}
                   >
                     Use this number
                   </button>
@@ -343,7 +343,7 @@ export function ProfilePage() {
           </ul>
         )}
 
-        <Link to="/crews/new" className="self-start text-forest underline decoration-fairway">
+        <Link to="/crews/new" className={`self-start ${btnQuiet}`}>
           New crew
         </Link>
       </section>

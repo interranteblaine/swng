@@ -163,8 +163,17 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
   //    in leavesByGolfer for a join that may or may not arrive, which is what keeps the fold
   //    commutative over a leave that lands before its join. `departed` is set only when true
   //    (absent ≡ present, the default), so a departure-free round is byte-identical to before.
+  //
+  //    Handicap corrections layer the same way: `participant-handicap-set` overrides the
+  //    seat's courseHandicap iff strictly later than the latest join, touching neither
+  //    presence nor any other seat field.
   const seatByGolfer = new Map<GolferId, { participant: Participant; latestJoinHlc: Hlc; firstHlc: Hlc }>();
   const leavesByGolfer = new Map<GolferId, Hlc>();
+  // Handicap corrections (spec 2026-07-20): latest set per golfer by the same HLC total order.
+  // Applied below iff strictly later than that golfer's latest join — a rejoin's fresh CH
+  // supersedes an older correction. A set with no folded join waits here harmlessly (no seat
+  // to apply to), exactly like a leave-before-join: what keeps the fold commutative.
+  const handicapSetsByGolfer = new Map<GolferId, { courseHandicap: number; hlc: Hlc }>();
   for (const event of deduped) {
     if (event.kind === "participant-joined") {
       const existing = seatByGolfer.get(event.participant.golferId);
@@ -172,14 +181,22 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
     } else if (event.kind === "participant-left") {
       const existing = leavesByGolfer.get(event.golferId);
       if (!existing || compareHlc(event.hlc, existing) > 0) leavesByGolfer.set(event.golferId, event.hlc);
+    } else if (event.kind === "participant-handicap-set") {
+      const existing = handicapSetsByGolfer.get(event.golferId);
+      if (!existing || compareHlc(event.hlc, existing.hlc) > 0) handicapSetsByGolfer.set(event.golferId, { courseHandicap: event.courseHandicap, hlc: event.hlc });
     }
   }
   const participants: RosterEntry[] = [...seatByGolfer.values()]
     .sort((a, b) => compareHlc(a.firstHlc, b.firstHlc) || (a.participant.golferId < b.participant.golferId ? -1 : a.participant.golferId > b.participant.golferId ? 1 : 0))
     .map(({ participant, latestJoinHlc }) => {
+      const set = handicapSetsByGolfer.get(participant.golferId);
+      // Seat data stays the join's own payload; ONLY courseHandicap is correctable, and only by
+      // a set strictly later than the latest join (presence and CH are separate concerns — a
+      // set never clears `departed`, and a rejoin always re-asserts its own typed CH).
+      const seat = set !== undefined && compareHlc(set.hlc, latestJoinHlc) > 0 ? { ...participant, courseHandicap: set.courseHandicap } : participant;
       const leaveHlc = leavesByGolfer.get(participant.golferId);
       const departed = leaveHlc !== undefined && compareHlc(leaveHlc, latestJoinHlc) > 0;
-      return departed ? { ...participant, departed: true } : participant;
+      return departed ? { ...seat, departed: true } : seat;
     });
 
   // 5. games: same LWW-map treatment keyed by config.id, with the same

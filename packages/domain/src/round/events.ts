@@ -47,4 +47,13 @@ export type RoundEvent = RoundEventBase &
     // latest of {participant-joined, participant-left} wins. Additive/append-only, like every
     // event kind before it — an old client that never sends it is unaffected.
     | { readonly kind: "participant-left"; readonly golferId: GolferId }
+    // Mid-round course handicap correction (spec 2026-07-20): a NARROW, dedicated event —
+    // deliberately NOT a second participant-joined, which is a presence fact (a later join
+    // clears `departed`; that's what makes rejoin work) and carries the whole seat. This arm
+    // carries ONLY the number, so a correction structurally cannot rewrite a card name or tee
+    // and never touches presence. `golferId` is the SUBJECT (whose handicap); `authorId` (the
+    // envelope) is who recorded it — the score-recorded split; any participant may correct any
+    // participant (the score-for-anyone trust model), enforced at the API layer, not here.
+    // Additive/append-only, like every arm before it.
+    | { readonly kind: "participant-handicap-set"; readonly golferId: GolferId; readonly courseHandicap: number }
   );

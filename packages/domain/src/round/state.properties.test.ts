@@ -89,12 +89,32 @@ const gameTerminatedEvent = fc
     opId: opId(`terminate-${op}`), hlc: { wallMs, counter, deviceId: deviceId(device) }, authorId: golfers[0]!,
   }));
 
-// The shuffled pool every convergence property draws from — mixing all four
-// event kinds means a shuffle also reorders roster joins, game adds, and
-// terminations relative to scores, exercising firstHlc ordering (state.ts #4/#5)
-// and the terminated-set union alongside the cell LWW logic scoreEvent alone
-// already covered.
-const anyEvent = fc.oneof(scoreEvent, participantJoinedEvent, gameAddedEvent, gameTerminatedEvent);
+// A handicap correction (spec 2026-07-20): drawn from the same golfer pool as
+// participantJoinedEvent, seated or not — a set for a golfer this particular shuffle never
+// joins is exactly the "no folded join" case state.ts's fold must tolerate harmlessly. Small
+// ints including negatives cover a plus handicap (state.ts applies it verbatim, no clamping).
+const participantHandicapSetEvent = fc
+  .record({
+    golfer: fc.constantFrom(...golfers),
+    courseHandicap: fc.integer({ min: -5, max: 36 }),
+    wallMs: fc.integer({ min: 1, max: 1_000 }),
+    counter: fc.integer({ min: 0, max: 3 }),
+    device: fc.constantFrom("d1", "d2", "d3"),
+    op: fc.integer({ min: 0, max: 500 }),
+  })
+  .map(({ golfer, courseHandicap, wallMs, counter, device, op }): RoundEvent => ({
+    kind: "participant-handicap-set",
+    golferId: golfer,
+    courseHandicap,
+    opId: opId(`set-${op}`), hlc: { wallMs, counter, deviceId: deviceId(device) }, authorId: golfer,
+  }));
+
+// The shuffled pool every convergence property draws from — mixing all five
+// event kinds means a shuffle also reorders roster joins, game adds,
+// terminations, and handicap corrections relative to scores, exercising
+// firstHlc ordering (state.ts #4/#5) and the terminated-set union alongside
+// the cell LWW logic scoreEvent alone already covered.
+const anyEvent = fc.oneof(scoreEvent, participantJoinedEvent, gameAddedEvent, gameTerminatedEvent, participantHandicapSetEvent);
 
 describe("reduceRound convergence", () => {
   it("is order-independent: any shuffle of the same events folds to the same state", () => {

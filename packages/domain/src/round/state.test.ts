@@ -315,3 +315,58 @@ describe("reduceRound — participant leaving (presence by HLC)", () => {
     expect(reduceRound([genesis, joinA, started, abandoned, leaveAt(20)]).status).toBe("abandoned");
   });
 });
+
+describe("participant-handicap-set", () => {
+  const setA = (wallMs: number, courseHandicap: number): RoundEvent => ({ ...base(wallMs), kind: "participant-handicap-set", golferId: A, courseHandicap });
+
+  it("a set later than the join overrides the seat's courseHandicap in place", () => {
+    const state = reduceRound([genesis, joinA, started, setA(10, 13)]);
+    const seat = state.participants.find((p) => p.golferId === A);
+    expect(seat?.courseHandicap).toBe(13);
+    // Everything else about the seat is the join's own data, untouched.
+    expect(seat?.name).toBe("Ann");
+    expect(seat?.tee).toBe("white");
+  });
+
+  it("is order-independent: the set folds identically wherever it lands in arrival order", () => {
+    const events = [genesis, joinA, started, setA(10, 13)];
+    const shuffled = [events[3], events[0], events[2], events[1]] as RoundEvent[];
+    expect(reduceRound(shuffled)).toEqual(reduceRound(events));
+  });
+
+  it("latest set wins among multiple sets, including a plus-handicap value", () => {
+    const state = reduceRound([genesis, joinA, started, setA(10, 13), setA(11, -2)]);
+    expect(state.participants.find((p) => p.golferId === A)?.courseHandicap).toBe(-2);
+  });
+
+  it("a REJOIN later than a set wins — the fresh join's CH applies", () => {
+    const leave: RoundEvent = { ...base(11), kind: "participant-left", golferId: A };
+    const rejoin: RoundEvent = { ...base(12), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", courseHandicap: 20 } };
+    const state = reduceRound([genesis, joinA, started, setA(10, 13), leave, rejoin]);
+    const seat = state.participants.find((p) => p.golferId === A);
+    expect(seat?.courseHandicap).toBe(20);
+    expect(seat?.departed).toBeUndefined();
+  });
+
+  it("a set earlier than the latest join loses to that join", () => {
+    const leave: RoundEvent = { ...base(11), kind: "participant-left", golferId: A };
+    const rejoin: RoundEvent = { ...base(13), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", courseHandicap: 20 } };
+    // Set minted between the leave and the rejoin — the rejoin's later hlc supersedes it.
+    const state = reduceRound([genesis, joinA, started, leave, setA(12, 13), rejoin]);
+    expect(state.participants.find((p) => p.golferId === A)?.courseHandicap).toBe(20);
+  });
+
+  it("corrects a DEPARTED golfer's CH without re-seating them", () => {
+    const leave: RoundEvent = { ...base(11), kind: "participant-left", golferId: A };
+    const state = reduceRound([genesis, joinA, started, leave, setA(12, 13)]);
+    const seat = state.participants.find((p) => p.golferId === A);
+    expect(seat?.courseHandicap).toBe(13);
+    expect(seat?.departed).toBe(true); // presence untouched — the set is not a join
+  });
+
+  it("a set for a golfer with no folded join contributes nothing and never throws", () => {
+    const setB: RoundEvent = { ...base(10), kind: "participant-handicap-set", golferId: B, courseHandicap: 5 };
+    const state = reduceRound([genesis, joinA, started, setB]);
+    expect(state.participants.map((p) => p.golferId)).toEqual([A]);
+  });
+});

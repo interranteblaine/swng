@@ -125,6 +125,55 @@ describe("settleRound — concurrency deck", () => {
   });
 });
 
+// A mid-round handicap correction (spec 2026-07-20) is a plain seat overwrite in the fold
+// (state.ts), so settleRound needs no new logic — participants and handicappingFor both
+// already read courseHandicap off the folded seat. This pins that passthrough: the corrected
+// CH, not the join's original one, is what reaches both the roster AND the AGS calculation.
+describe("settleRound — mid-round handicap correction", () => {
+  it("settles the CORRECTED courseHandicap into archive.participants and handicapping", () => {
+    const player = { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 };
+    // Hole 3 (par 3, SI 9) is blown up to 7 strokes, deliberately: at CH 8 it gets 0 dots
+    // (net-double-bogey cap 5), at the corrected CH 15 it gets 1 dot (cap 6) — a real AGS
+    // difference, not just a passthrough field, so this proves handicappingFor read the
+    // CORRECTED seat rather than the join's original 8.
+    const annScores = [4, 4, 7, 5, 4, 3, 4, 5, 4];
+    const preFinalize = playGoldenRoundLog(fixtureLinks, [player], [], { [A]: annScores }, [], false);
+    const lastWallMs = Math.max(...preFinalize.map((event) => event.hlc.wallMs));
+    const set: RoundEvent = {
+      kind: "participant-handicap-set",
+      golferId: A,
+      courseHandicap: 15,
+      opId: opId("set-ch-settle"),
+      hlc: { wallMs: lastWallMs + 1, counter: 0, deviceId: deviceId("test") },
+      authorId: A,
+    };
+    const finalize: RoundEvent = {
+      kind: "round-finalized",
+      opId: opId("finalize-correction"),
+      hlc: { wallMs: lastWallMs + 2, counter: 0, deviceId: deviceId("test") },
+      authorId: A,
+    };
+    const archive = settleRound([...preFinalize, set, finalize]);
+
+    // The seat's courseHandicap is the corrected value, not the join's original 8.
+    expect(archive.participants.find((p) => p.golferId === A)?.courseHandicap).toBe(15);
+
+    const holesMap = new Map(annScores.map((strokes, index) => [index + 1, { kind: "strokes" as const, strokes }]));
+    const correctedAgs = adjustedGrossScore(fixtureWhite, 15, holesMap);
+    expect(correctedAgs).toBe(39);
+    // Sanity: the UNCORRECTED CH (8) caps hole 3 tighter — confirms the number above genuinely
+    // tracks which CH won the fold, not an incidental match.
+    expect(adjustedGrossScore(fixtureWhite, 8, holesMap)).toBe(38);
+
+    expect(archive.handicapping).toHaveLength(1);
+    const [entry] = archive.handicapping;
+    expect(entry).toMatchObject({ golferId: A, kind: "complete", ags: correctedAgs });
+    if (entry?.kind === "complete") {
+      expect(entry.differential).toBeCloseTo(scoreDifferential(fixtureWhite, correctedAgs), 9);
+    }
+  });
+});
+
 describe("settleRound — game termination", () => {
   const D = golferId("dee");
   const E = golferId("eve");

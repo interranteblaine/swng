@@ -86,6 +86,13 @@ describe("GolferPage", () => {
     expect(screen.getByText("plays off 12.4 · from all their rounds")).toBeTruthy();
     // RecordSections rendered with the response's (empty) history.
     expect(screen.getByText("No rounds yet.")).toBeTruthy();
+    // person="their" (whole-branch-review finding): GolferPage renders someone ELSE's record, so
+    // RecordSections' own copy must read third-person too — no second-person "Your"/"Keep going."
+    // text anywhere on the page.
+    expect(screen.getByRole("heading", { name: "Their index over time" })).toBeTruthy();
+    expect(screen.getByText("Their index history shows up at 8 rounds — they've played 0.")).toBeTruthy();
+    expect(screen.queryByText(/Your index over time/)).toBeNull();
+    expect(screen.queryByText(/Keep going\./)).toBeNull();
   });
 
   // An unresolvable index (no computed data for the golfer's chosen source) renders the "—"

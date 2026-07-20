@@ -423,9 +423,11 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await expect(pageB.getByRole("heading", { name: "Ann", exact: true })).toBeVisible();
 
     // RecordSections (GolferPage.tsx) — the SAME extraction ProfilePage renders for yourself,
-    // third-person, no controls. Both section headings render regardless of how much history Ann
-    // has accrued (the chart's own <8-rounds gate changes its body text, never its heading).
-    await expect(pageB.getByRole("heading", { name: "Your index over time" })).toBeVisible();
+    // rendered here with person="their" (whole-branch-review finding: the copy itself must read
+    // third-person, not just the index line above it), no controls. Both section headings render
+    // regardless of how much history Ann has accrued (the chart's own <8-rounds gate changes its
+    // body text, never its heading).
+    await expect(pageB.getByRole("heading", { name: "Their index over time" })).toBeVisible();
     await expect(pageB.getByRole("heading", { name: "History" })).toBeVisible();
   });
 });

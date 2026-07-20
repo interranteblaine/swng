@@ -14,13 +14,30 @@ import { cardBox } from "../ui/classes";
 // score-differential line from round one).
 const INDEX_HISTORY_MIN_ROUNDS = 8;
 
-function IndexOverTime({ points, roundsPlayed }: { readonly points: readonly IndexPoint[]; readonly roundsPlayed: number }) {
+function IndexOverTime({
+  points,
+  roundsPlayed,
+  person,
+}: {
+  readonly points: readonly IndexPoint[];
+  readonly roundsPlayed: number;
+  readonly person: "your" | "their";
+}) {
+  // Person-aware copy (navigation arc review finding: RecordSections rendered second-person text
+  // verbatim on GolferPage, addressed to a viewer about someone else's rounds). Mirrors
+  // indexSourcePhrase's own "your"/"their" convention (@swng/domain handicap/present.ts). The
+  // "their" arm drops the exhortation below the gate ("Keep going.") — a nudge belongs on your
+  // own page, not a spectator's.
+  const heading = person === "your" ? "Your index over time" : "Their index over time";
+
   if (roundsPlayed < INDEX_HISTORY_MIN_ROUNDS) {
     return (
       <div className="flex flex-col gap-1">
-        <h3 className="text-base font-semibold">Your index over time</h3>
+        <h3 className="text-base font-semibold">{heading}</h3>
         <p className="text-sm text-fairway">
-          {`Your index history shows up at ${INDEX_HISTORY_MIN_ROUNDS} rounds — you've played ${roundsPlayed}. Keep going.`}
+          {person === "your"
+            ? `Your index history shows up at ${INDEX_HISTORY_MIN_ROUNDS} rounds — you've played ${roundsPlayed}. Keep going.`
+            : `Their index history shows up at ${INDEX_HISTORY_MIN_ROUNDS} rounds — they've played ${roundsPlayed}.`}
         </p>
       </div>
     );
@@ -55,9 +72,9 @@ function IndexOverTime({ points, roundsPlayed }: { readonly points: readonly Ind
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">
-        <h3 className="text-base font-semibold">Your index over time</h3>
+        <h3 className="text-base font-semibold">{heading}</h3>
         <span className="text-xs text-fairway/70">
-          your last {n} round{n === 1 ? "" : "s"}
+          {person} last {n} round{n === 1 ? "" : "s"}
         </span>
       </div>
       <div className="flex items-center gap-3 text-xs text-fairway">
@@ -67,7 +84,7 @@ function IndexOverTime({ points, roundsPlayed }: { readonly points: readonly Ind
       <svg
         data-testid="index-chart"
         role="img"
-        aria-label="Your index over time"
+        aria-label={heading}
         viewBox={`0 0 ${width} ${height}`}
         width={width}
         height={height}
@@ -177,15 +194,21 @@ export interface RecordSectionsProps {
   // is `history.length`, not the capped count) — a limit is a display truncation of the list, not a
   // smaller career. Omitted renders every row (ProfilePage's own contract).
   readonly historyLimit?: number;
+  // Who the copy is addressed to — "your" (default, ProfilePage: your own record) or "their"
+  // (GolferPage: a signed-in golfer reading someone ELSE's record). Defaults to "your" so
+  // ProfilePage's existing render/tests stay byte-identical. Mirrors indexSourcePhrase's own
+  // "your"/"their" convention (@swng/domain handicap/present.ts) — the finding this closes: this
+  // component previously rendered second-person copy verbatim on GolferPage.
+  readonly person?: "your" | "their";
 }
 
 // The record sections ProfilePage renders for yourself and GolferPage renders for anyone
 // (navigation spec §6c.3) — index-over-time chart, typical 18, history rows — ONE extraction, so
 // neither page re-derives a second copy of this presentation.
-export function RecordSections({ metrics, history, historyLimit }: RecordSectionsProps) {
+export function RecordSections({ metrics, history, historyLimit, person = "your" }: RecordSectionsProps) {
   return (
     <>
-      <IndexOverTime points={metrics.indexHistory} roundsPlayed={history.length} />
+      <IndexOverTime points={metrics.indexHistory} roundsPlayed={history.length} person={person} />
 
       <p className="text-sm text-fairway tabular-nums">{describeTypicalEighteen(metrics.typicalEighteen)}</p>
 

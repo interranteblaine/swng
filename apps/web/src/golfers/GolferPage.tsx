@@ -94,9 +94,11 @@ export function GolferPage() {
       )}
 
       {/* The chart/typical-18/history JSX (navigation spec §6c.3) — the SAME extracted component
-          ProfilePage renders for yourself, no second copy. No controls of any kind here. */}
+          ProfilePage renders for yourself, no second copy. No controls of any kind here.
+          person="their" (whole-branch-review finding): this is ANOTHER golfer's record, so the
+          chart's own copy must read third-person too, not just the index line above it. */}
       <section className="flex flex-col gap-4">
-        <RecordSections metrics={golfer.metrics} history={golfer.history} />
+        <RecordSections metrics={golfer.metrics} history={golfer.history} person="their" />
       </section>
     </main>
   );

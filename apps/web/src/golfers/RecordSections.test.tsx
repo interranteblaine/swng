@@ -29,6 +29,13 @@ const renderSections = (metrics: GolferMetrics, history: readonly GolferRoundLin
     </MemoryRouter>,
   );
 
+const renderSectionsAs = (person: "your" | "their", metrics: GolferMetrics, history: readonly GolferRoundLine[]) =>
+  render(
+    <MemoryRouter>
+      <RecordSections metrics={metrics} history={history} person={person} />
+    </MemoryRouter>,
+  );
+
 describe("RecordSections", () => {
   it("no rounds: the chart is gated with a 'keep going' message, typical-18 renders zeroed, history reads 'No rounds yet.'", () => {
     renderSections(ZERO_METRICS, []);
@@ -91,5 +98,27 @@ describe("RecordSections", () => {
     // Below the 8-round gate regardless (3 total rounds) — the gate message names the FULL count,
     // not the capped 2 rows actually rendered.
     expect(screen.getByText(/you've played 3\./)).toBeTruthy();
+  });
+
+  it('person="their" (GolferPage viewing someone else): the gate heading/body mirror pronouns and drop the exhortation, with no "Your"/"Keep going." copy anywhere', () => {
+    renderSectionsAs("their", ZERO_METRICS, []);
+
+    expect(screen.getByText("Their index over time")).toBeTruthy();
+    expect(screen.getByText("Their index history shows up at 8 rounds — they've played 0.")).toBeTruthy();
+    expect(screen.queryByText(/Keep going\./)).toBeNull();
+    expect(screen.queryByText(/^Your /)).toBeNull();
+    expect(screen.queryByText(/you've/)).toBeNull();
+  });
+
+  it('person="their", 8+ rounds: the chart heading, aria-label, and "last N rounds" caption all mirror pronouns', () => {
+    const history = Array.from({ length: 8 }, (_, i) => line(String(i + 1)));
+    const indexHistory = history.map((entry, i) => ({ roundId: entry.roundId, swngIndex: 12 - i * 0.2, whsIndex: 12.5 - i * 0.15 }));
+    renderSectionsAs("their", { ...ZERO_METRICS, indexHistory }, history);
+
+    expect(screen.getByRole("heading", { name: "Their index over time" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Their index over time" })).toBeTruthy();
+    expect(screen.getByText("their last 8 rounds")).toBeTruthy();
+    expect(screen.queryByText(/^Your index over time$/)).toBeNull();
+    expect(screen.queryByText(/your last/)).toBeNull();
   });
 });

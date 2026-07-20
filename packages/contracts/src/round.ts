@@ -163,6 +163,12 @@ export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
   // accounts-only identity spec §4: a participant walks off. Additive/append-only, like every
   // arm above. `golferId` is the SUBJECT (who left); `authorId` (envelope) is who recorded it.
   z.object({ ...envelope, kind: z.literal("participant-left"), golferId: golferIdSchema }),
+  // Mid-round handicap correction (spec 2026-07-20): additive/append-only, like every arm
+  // above. Carries ONLY the number — structurally cannot rewrite a name or tee. `golferId` is
+  // the SUBJECT; `authorId` (envelope) is who recorded it. An OLD deployed bundle that pulls a
+  // log containing this kind fails the union parse until refresh — the accepted stale-bundle
+  // window (cleared-score precedent), open only once someone in the round used the new editor.
+  z.object({ ...envelope, kind: z.literal("participant-handicap-set"), golferId: golferIdSchema, courseHandicap: z.number().int() }),
 ]);
 export const roundEventSchema: z.ZodType<RoundEvent> = roundEventSchemaImpl;
 
@@ -224,6 +230,16 @@ export interface LeaveRoundResponse {
 }
 
 export const leaveRoundResponseSchema: z.ZodType<LeaveRoundResponse> = z.object({
+  events: z.array(roundEventSchema).readonly(),
+});
+
+// POST /rounds/{roundId}/handicap: response mirrors leaveRound's append idiom — `events`
+// carries exactly what THIS call appended (the one participant-handicap-set), seq-stamped.
+export interface SetHandicapResponse {
+  readonly events: readonly RoundEvent[];
+}
+
+export const setHandicapResponseSchema: z.ZodType<SetHandicapResponse> = z.object({
   events: z.array(roundEventSchema).readonly(),
 });
 

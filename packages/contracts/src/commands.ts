@@ -71,6 +71,16 @@ export const recordScoreRequestSchema = z.object({
 });
 export type RecordScoreRequest = z.infer<typeof recordScoreRequestSchema>;
 
+// POST /rounds/{roundId}/handicap (spec 2026-07-20): any participant corrects any participant —
+// the score-for-anyone trust model, so the SUBJECT rides the body while the author is the
+// token's own golferId. The server minds the envelope (server-minted, like join/leave); the
+// value may be negative (plus handicap), and the correction is retroactive by construction.
+export const setHandicapRequestSchema = z.object({
+  golferId: golferIdSchema,
+  courseHandicap: z.number().int(),
+});
+export type SetHandicapRequest = z.infer<typeof setHandicapRequestSchema>;
+
 export interface StartRoundResponse {
   readonly roundId: RoundId;
   readonly joinCode: string;

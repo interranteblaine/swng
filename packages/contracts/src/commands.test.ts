@@ -7,6 +7,7 @@ import {
   gameConfigInputSchema,
   joinRoundRequestSchema,
   recordScoreRequestSchema,
+  setHandicapRequestSchema,
   startRoundRequestSchema,
 } from "./commands.js";
 
@@ -112,6 +113,13 @@ describe("recordScoreRequestSchema", () => {
   it("rejects hole 0", () => {
     const request = { ...base, hole: 0 };
     expect(() => parse(recordScoreRequestSchema, request)).toThrow(ContractError);
+  });
+});
+
+describe("setHandicapRequestSchema", () => {
+  it("setHandicapRequestSchema: accepts a negative (plus) value, rejects a non-integer", () => {
+    expect(setHandicapRequestSchema.parse({ golferId: "g1", courseHandicap: -2 })).toEqual({ golferId: "g1", courseHandicap: -2 });
+    expect(() => setHandicapRequestSchema.parse({ golferId: "g1", courseHandicap: 12.4 })).toThrow();
   });
 });
 

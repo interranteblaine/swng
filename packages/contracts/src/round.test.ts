@@ -63,6 +63,14 @@ describe("roundEventSchema", () => {
     expect(roundTripped).toEqual(event);
   });
 
+  it("parses participant-handicap-set (incl. a plus-handicap negative value)", () => {
+    const event = {
+      opId: "op-1", hlc: { wallMs: 5, counter: 0, deviceId: "d1" }, authorId: "g-author",
+      kind: "participant-handicap-set", golferId: "g-subject", courseHandicap: -2,
+    };
+    expect(roundEventSchema.parse(event)).toEqual(event);
+  });
+
   const card: CourseCard = {
     courseName: "Test Links",
     teeSets: [

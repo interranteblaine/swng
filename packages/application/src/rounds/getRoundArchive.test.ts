@@ -35,7 +35,7 @@ describe("getRoundArchive", () => {
     await expect(ctx.archive({ sub: "sub-ann" }, ROUND_ID)).rejects.toMatchObject({ code: "round-not-found" });
   });
 
-  it("returns the archive's own event log, verbatim, for a caller whose account golfer is a participant", async () => {
+  it("returns the archive's own event log, verbatim, for a signed-in caller", async () => {
     const ctx = setup();
     const events = buildArchive().events; // the placeholder log this archive was built with
     ctx.snapshots.record(buildArchive({ events }));

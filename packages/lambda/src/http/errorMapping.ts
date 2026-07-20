@@ -71,9 +71,6 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // route accepts — a "forbidden actor" 403, same bucket as not-a-participant above, never a 401
   // (401 means "no usable identity at all", which a spectator token isn't).
   "read-only-token": 403,
-  // Projection-realignment Task 6: getRoundArchive's own forbidden-actor code — same 403
-  // bucket as not-a-participant/not-a-member above.
-  "not-a-viewer": 403,
   // Architecture-realignment Task 8 (application/src/errors.ts): CrewStore.addCountedRound's
   // collision signal, forward-provisioned ahead of any real route that calls it (same
   // "exhaustive Record" precedent as crew-conflict above) — a failed
@@ -85,7 +82,7 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // invalid-season-name is a bad-body 400 (like invalid-crew-name); season-not-found is an
   // unresolvable id 404 (like unknown-crew); season-closed is a failed lifecycle precondition
   // 409 (like round-already-counted); did-not-play and not-the-appender are forbidden actors
-  // 403 (like not-a-member/not-a-viewer).
+  // 403 (like not-a-member).
   "invalid-season-name": 400,
   "season-not-found": 404,
   "season-closed": 409,

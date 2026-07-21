@@ -3,10 +3,10 @@ import { Link } from "react-router";
 import type { CrewId, GolferId, RoundId } from "@swng/domain";
 import { formatHandicapIndex } from "@swng/domain";
 import type { GetMyRoundsResponse, SeasonStandingsResponse } from "@swng/contracts";
-import { appendCountedRound, ApiError, getMyRounds, getSeasonStandings, removeCountedRound } from "../api";
+import { appendCountedRound, ApiError, closeSeason, getMyRounds, getSeasonStandings, removeCountedRound, reopenSeason } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { GolferLink } from "../ui/GolferLink";
-import { badge, btnSecondary, cardBox } from "../ui/classes";
+import { badge, btnDangerSolid, btnQuiet, btnSecondary, cardBox } from "../ui/classes";
 import { headToHeadLine } from "./headToHeadLine";
 
 export interface SeasonPanelProps {
@@ -17,6 +17,11 @@ export interface SeasonPanelProps {
   // account golfer yet. With no golferId, no counted-round row can ever show a remove
   // affordance (the appendedBy match below can never be true), which is the honest outcome.
   readonly myGolferId: GolferId | undefined;
+  // close-season spec 2026-07-21 §2: the organizer-only Close/Reopen verbs render off the SAME
+  // caller-role fact CrewPage already computes for the roster's Remove…/Make organizer…
+  // affordances (crew.members.some(role === "organizer")) — threaded through rather than
+  // recomputed here, since SeasonPanel has no roster of its own to derive it from.
+  readonly isOrganizer: boolean;
 }
 
 // appendCountedRound's own documented failure codes it can throw beyond the shared member-gate
@@ -34,7 +39,7 @@ const humanizeAppendError = (caught: unknown): string => {
 // this once a season is picked from its own list (`key={seasonId}` at that call site gives every
 // season selection a fresh mount — the simplest correct reset, no seasonId-changed effect dance
 // needed here).
-export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) {
+export function SeasonPanel({ crewId, seasonId, myGolferId, isOrganizer }: SeasonPanelProps) {
   const { withAuth } = useAuth();
 
   const [standings, setStandings] = useState<SeasonStandingsResponse | undefined>(undefined);
@@ -99,6 +104,45 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
     }
   };
 
+  // close-season spec 2026-07-21 §2: the organizer's own verbs. Close gets a click-to-reveal
+  // confirm (CrewPage's own Leave crew/Remove member/Make organizer idiom — role="dialog", a
+  // btnDangerSolid Confirm + btnSecondary Cancel) carrying the EXACT teaching line the spec
+  // pins; Reopen is one tap, no confirm (spec §1.3: "first-class, not an apology" — reopening
+  // loses nothing, titles are a read fold that simply stop/resume appearing). Both are
+  // api-then-refetch through the SAME `load()` the count/remove actions already use above — no
+  // optimistic write, and the honest fallback line covers both verbs alike (no per-code text,
+  // since the UI never offers a door the server would 409 in the normal case).
+  const [confirmingClose, setConfirmingClose] = useState(false);
+  const [closeReopenBusy, setCloseReopenBusy] = useState(false);
+  const [closeReopenError, setCloseReopenError] = useState<string | undefined>(undefined);
+
+  const confirmClose = async () => {
+    setCloseReopenBusy(true);
+    setCloseReopenError(undefined);
+    try {
+      await withAuth((token) => closeSeason(token, crewId, seasonId));
+      await load();
+      setConfirmingClose(false);
+    } catch {
+      setCloseReopenError("Could not update the season — try again.");
+    } finally {
+      setCloseReopenBusy(false);
+    }
+  };
+
+  const reopen = async () => {
+    setCloseReopenBusy(true);
+    setCloseReopenError(undefined);
+    try {
+      await withAuth((token) => reopenSeason(token, crewId, seasonId));
+      await load();
+    } catch {
+      setCloseReopenError("Could not update the season — try again.");
+    } finally {
+      setCloseReopenBusy(false);
+    }
+  };
+
   if (standingsError) {
     return <p className="text-fairway">Could not load this season — try again.</p>;
   }
@@ -123,10 +167,52 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
 
   return (
     <div className={`${cardBox} flex flex-col gap-4 p-4`}>
-      <h3 className="text-lg font-semibold text-forest">
-        {standings.name}
-        {standings.status === "closed" && <span className={`ml-2 ${badge}`}>closed</span>}
-      </h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-lg font-semibold text-forest">
+          {standings.name}
+          {standings.status === "closed" && <span className={`ml-2 ${badge}`}>closed</span>}
+        </h3>
+        {/* close-season spec 2026-07-21 §2: organizer-only, never gold (btnQuiet — the panel's
+            existing primary actions keep the screen's one gold). A non-organizer sees the badge
+            above with no verb at all. */}
+        {isOrganizer && standings.status === "open" && !confirmingClose && (
+          <button type="button" onClick={() => setConfirmingClose(true)} className={btnQuiet}>
+            Close season
+          </button>
+        )}
+        {isOrganizer && standings.status === "closed" && (
+          <button type="button" onClick={() => void reopen()} disabled={closeReopenBusy} className={btnQuiet}>
+            {closeReopenBusy ? "Reopening…" : "Reopen"}
+          </button>
+        )}
+      </div>
+
+      {confirmingClose && (
+        <span role="dialog" aria-label="Confirm close season" className="flex flex-col gap-2 text-sm">
+          <span className="text-fairway">Closing locks this season&apos;s counted rounds and awards its titles — you can reopen it later.</span>
+          <span className="flex items-center gap-2">
+            <button type="button" onClick={() => void confirmClose()} disabled={closeReopenBusy} className={`${btnDangerSolid} disabled:opacity-50`}>
+              {closeReopenBusy ? "Closing…" : "Confirm"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setConfirmingClose(false);
+                setCloseReopenError(undefined);
+              }}
+              disabled={closeReopenBusy}
+              className={`${btnSecondary} disabled:opacity-50`}
+            >
+              Cancel
+            </button>
+          </span>
+        </span>
+      )}
+      {closeReopenError && (
+        <p role="alert" className="text-oxblood">
+          {closeReopenError}
+        </p>
+      )}
 
       {standings.ledger.length === 0 ? (
         <p className="text-fairway">
@@ -255,44 +341,52 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
         )}
       </div>
 
-      {!picking ? (
-        <button type="button" onClick={openPicker} className={`${btnSecondary} self-start`}>
-          Count a round…
-        </button>
-      ) : (
-        <div className={`${cardBox} flex flex-col gap-2 p-3`}>
-          <div className="flex items-center justify-between">
-            <span className="font-medium text-forest">Pick a round</span>
-            <button type="button" onClick={() => setPicking(false)} className="text-sm text-forest underline decoration-fairway">
-              Close
+      {/* close-season spec 2026-07-21 §2: "the server already 409s; the UI simply doesn't show a
+          door the server has closed" — the count-a-round affordance (and its picker) render only
+          on an OPEN season, for every member (not organizer-scoped — anyone could count a round
+          before closure, so the door closes for everyone alike). */}
+      {standings.status === "open" && (
+        <>
+          {!picking ? (
+            <button type="button" onClick={openPicker} className={`${btnSecondary} self-start`}>
+              Count a round…
             </button>
-          </div>
-          {myRounds === undefined ? (
-            <p className="text-fairway">Loading…</p>
-          ) : uncounted.length === 0 ? (
-            <p className="text-fairway">You have no uncounted finalized rounds.</p>
           ) : (
-            <ul className="flex flex-col gap-2">
-              {uncounted.map((round) => (
-                <li key={round.roundId}>
-                  <button
-                    type="button"
-                    onClick={() => void count(round.roundId)}
-                    disabled={pendingRoundId === round.roundId}
-                    className={`${cardBox} w-full p-3 text-left disabled:opacity-50`}
-                  >
-                    <span className="text-forest">{round.courseName}</span> <span className="font-mono text-fairway">— {round.tee}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <div className={`${cardBox} flex flex-col gap-2 p-3`}>
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-forest">Pick a round</span>
+                <button type="button" onClick={() => setPicking(false)} className="text-sm text-forest underline decoration-fairway">
+                  Close
+                </button>
+              </div>
+              {myRounds === undefined ? (
+                <p className="text-fairway">Loading…</p>
+              ) : uncounted.length === 0 ? (
+                <p className="text-fairway">You have no uncounted finalized rounds.</p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {uncounted.map((round) => (
+                    <li key={round.roundId}>
+                      <button
+                        type="button"
+                        onClick={() => void count(round.roundId)}
+                        disabled={pendingRoundId === round.roundId}
+                        className={`${cardBox} w-full p-3 text-left disabled:opacity-50`}
+                      >
+                        <span className="text-forest">{round.courseName}</span> <span className="font-mono text-fairway">— {round.tee}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {pickError && (
+                <p role="alert" className="text-oxblood">
+                  {pickError}
+                </p>
+              )}
+            </div>
           )}
-          {pickError && (
-            <p role="alert" className="text-oxblood">
-              {pickError}
-            </p>
-          )}
-        </div>
+        </>
       )}
     </div>
   );

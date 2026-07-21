@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { crewId, golferId, roundId } from "@swng/domain";
-import type { GetMyRoundsResponse } from "@swng/contracts";
+import type { GetMyRoundsResponse, SeasonStandingsResponse } from "@swng/contracts";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
 // Faking the api.ts module boundary (established idiom) — SeasonPanel owns its own fetching
@@ -12,6 +12,8 @@ vi.mock("../api", () => ({
   getMyRounds: vi.fn(),
   appendCountedRound: vi.fn(),
   removeCountedRound: vi.fn(),
+  closeSeason: vi.fn(),
+  reopenSeason: vi.fn(),
   getMe: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
@@ -25,7 +27,7 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { appendCountedRound, ApiError, getMe, getMyRounds, getSeasonStandings, removeCountedRound } from "../api";
+import { appendCountedRound, ApiError, closeSeason, getMe, getMyRounds, getSeasonStandings, removeCountedRound, reopenSeason } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { SeasonPanel } from "./SeasonPanel";
@@ -34,6 +36,8 @@ const mockedGetSeasonStandings = vi.mocked(getSeasonStandings);
 const mockedGetMyRounds = vi.mocked(getMyRounds);
 const mockedAppendCountedRound = vi.mocked(appendCountedRound);
 const mockedRemoveCountedRound = vi.mocked(removeCountedRound);
+const mockedCloseSeason = vi.mocked(closeSeason);
+const mockedReopenSeason = vi.mocked(reopenSeason);
 const mockedGetMe = vi.mocked(getMe);
 
 beforeEach(() => {
@@ -43,6 +47,8 @@ beforeEach(() => {
   mockedGetMyRounds.mockReset();
   mockedAppendCountedRound.mockReset();
   mockedRemoveCountedRound.mockReset();
+  mockedCloseSeason.mockReset();
+  mockedReopenSeason.mockReset();
   mockedGetMe.mockReset();
 });
 
@@ -70,15 +76,17 @@ const CREW = crewId("crew-1");
 const distribution = { eagles: 0, birdies: 2, pars: 8, bogeys: 6, doublePlus: 2 };
 
 // Renders SeasonPanel directly (not through CrewPage) — CrewPage.test.tsx only pins that
-// selecting a season wires the right crewId/seasonId/myGolferId through; SeasonPanel's own full
-// behavior (standings, head-to-head, counted rounds, the count-a-round picker, remove) is pinned
-// here in isolation.
-const renderPanel = (myGolferId = ANN) =>
+// selecting a season wires the right crewId/seasonId/myGolferId/isOrganizer through;
+// SeasonPanel's own full behavior (standings, head-to-head, counted rounds, the count-a-round
+// picker, remove, close/reopen) is pinned here in isolation. `isOrganizer` defaults false — the
+// conservative default for a permissions flag — so every PRE-EXISTING test above (none of which
+// exercise the organizer-only verbs) keeps behaving exactly as it did before this prop existed.
+const renderPanel = (myGolferId = ANN, isOrganizer = false) =>
   render(
     <AuthProvider>
       <MemoryRouter initialEntries={["/crews/crew-1"]}>
         <Routes>
-          <Route path="/crews/:crewId" element={<SeasonPanel crewId={CREW} seasonId="season-1" myGolferId={myGolferId} />} />
+          <Route path="/crews/:crewId" element={<SeasonPanel crewId={CREW} seasonId="season-1" myGolferId={myGolferId} isOrganizer={isOrganizer} />} />
           <Route path="/rounds/:roundId" element={<div data-testid="archive-probe">archive</div>} />
         </Routes>
       </MemoryRouter>
@@ -560,5 +568,144 @@ describe("SeasonPanel — count a round", () => {
     const heading = await screen.findByRole("heading", { level: 3 });
     expect(heading.textContent).toContain("2026");
     expect(within(heading).getByText(/closed/i)).toBeTruthy();
+  });
+});
+
+// close-season spec 2026-07-21 §2: the organizer's verb, the badge, and the closed door — an
+// open season gives the organizer Close (behind a confirm carrying the EXACT teaching line the
+// spec pins), a closed season shows the badge + Reopen (no confirm — spec §1.3, "first-class,
+// not an apology") and hides the count-a-round affordance, and a non-organizer sees the badge
+// alone either way.
+describe("SeasonPanel — close/reopen season", () => {
+  const openSeason: SeasonStandingsResponse = {
+    seasonId: "season-1",
+    name: "2026",
+    status: "open",
+    rounds: [],
+    ledger: [],
+    headToHead: [],
+    partners: [],
+    superlatives: {},
+  };
+  const closedSeason: SeasonStandingsResponse = { ...openSeason, status: "closed" };
+
+  it("organizer + open season: Close season renders (no badge); confirming shows the EXACT teaching line", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue(openSeason);
+
+    renderPanel(ANN, true);
+
+    const heading = await screen.findByRole("heading", { level: 3 });
+    expect(within(heading).queryByText(/closed/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close season" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Confirm close season" });
+    expect(within(dialog).getByText("Closing locks this season's counted rounds and awards its titles — you can reopen it later.")).toBeTruthy();
+  });
+
+  it("confirming Close POSTs close and refreshes standings through the existing reload path (api-then-refetch)", async () => {
+    const idToken = signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValueOnce(openSeason).mockResolvedValueOnce(closedSeason);
+    mockedCloseSeason.mockResolvedValue({ season: { seasonId: "season-1", name: "2026", status: "closed", createdAtMs: 1 } });
+
+    renderPanel(ANN, true);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Close season" }));
+    const dialog = await screen.findByRole("dialog", { name: "Confirm close season" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(mockedCloseSeason).toHaveBeenCalledWith(idToken, CREW, "season-1"));
+    await waitFor(() => expect(mockedGetSeasonStandings).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("button", { name: "Reopen" })).toBeTruthy();
+  });
+
+  it("organizer + closed season: badge + Reopen render; the count-a-round affordance is NOT offered", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue(closedSeason);
+
+    renderPanel(ANN, true);
+
+    const heading = await screen.findByRole("heading", { level: 3 });
+    expect(within(heading).getByText(/closed/i)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Reopen" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Close season" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /count a round/i })).toBeNull();
+  });
+
+  it("tapping Reopen POSTs reopen with no confirm step, and refreshes standings", async () => {
+    const idToken = signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValueOnce(closedSeason).mockResolvedValueOnce(openSeason);
+    mockedReopenSeason.mockResolvedValue({ season: { seasonId: "season-1", name: "2026", status: "open", createdAtMs: 1 } });
+
+    renderPanel(ANN, true);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reopen" }));
+
+    await waitFor(() => expect(mockedReopenSeason).toHaveBeenCalledWith(idToken, CREW, "season-1"));
+    await waitFor(() => expect(mockedGetSeasonStandings).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("button", { name: "Close season" })).toBeTruthy();
+  });
+
+  it("non-organizer + closed season: badge only, no Close/Reopen verb anywhere", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue(closedSeason);
+
+    renderPanel(ANN, false);
+
+    const heading = await screen.findByRole("heading", { level: 3 });
+    expect(within(heading).getByText(/closed/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reopen" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close season" })).toBeNull();
+  });
+
+  it("non-organizer + open season: no Close verb, no badge", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue(openSeason);
+
+    renderPanel(ANN, false);
+
+    const heading = await screen.findByRole("heading", { level: 3 });
+    expect(within(heading).queryByText(/closed/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close season" })).toBeNull();
+  });
+
+  it("a close failure renders the honest fallback line, never raw error text", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue(openSeason);
+    mockedCloseSeason.mockRejectedValue(new ApiError("season-already-closed", 409, "season season-1 of crew crew-1 is already closed"));
+
+    renderPanel(ANN, true);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Close season" }));
+    const dialog = await screen.findByRole("dialog", { name: "Confirm close season" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Could not update the season — try again.");
+    expect(document.body.textContent).not.toMatch(/season season-1 of crew crew-1/);
+  });
+
+  it("a reopen failure renders the honest fallback line, never raw error text", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue(closedSeason);
+    mockedReopenSeason.mockRejectedValue(new ApiError("season-not-closed", 409, "season season-1 of crew crew-1 is not closed"));
+
+    renderPanel(ANN, true);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reopen" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Could not update the season — try again.");
+    expect(document.body.textContent).not.toMatch(/season season-1 of crew crew-1/);
   });
 });

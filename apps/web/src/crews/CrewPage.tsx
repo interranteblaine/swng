@@ -414,7 +414,7 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
 
         {/* key={selectedSeasonId}: a fresh mount per season selection is the simplest correct
             reset — no seasonId-changed effect dance needed inside SeasonPanel itself. */}
-        {selectedSeasonId && <SeasonPanel key={selectedSeasonId} crewId={id} seasonId={selectedSeasonId} myGolferId={auth.golfer?.golferId} />}
+        {selectedSeasonId && <SeasonPanel key={selectedSeasonId} crewId={id} seasonId={selectedSeasonId} myGolferId={auth.golfer?.golferId} isOrganizer={isOrganizer} />}
       </section>
 
       {/* Analytics read-folds spec 2026-07-21 §5: "All-time" — every season's counted rounds

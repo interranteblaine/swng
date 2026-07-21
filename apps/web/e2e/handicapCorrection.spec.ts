@@ -12,6 +12,7 @@ import {
   loadWebEnv,
   mintAccountGolfer,
   openGamePanel,
+  readJoinCode,
   startRoundDirect,
   waitForParticipant,
 } from "./support.js";
@@ -98,18 +99,16 @@ test.describe.serial("mid-round handicap correction — a wrong course handicap 
     // startRoundDirect above) → openLiveRound's re-mint → client navigation to /round/:roundId —
     // entirely through the real product path, no storage injection of the round credential.
     await page.goto(`/rounds/${started.roundId}`);
-    // The landing proof, joinCode-FREE: openLiveRound (apps/web/src/session/openLiveRound.ts)
-    // saves `joinCode: ""` for a re-mint credential — the POST /rounds/{roundId}/token response
-    // carries no join code, since this device is entering a round its own account golfer
-    // already sits in, not joining fresh. SetupPanel's "Join code" <p> therefore renders EMPTY
-    // on this entry path, so readJoinCode's `/^[A-Z0-9]{6}$/` match would time out here — this
-    // spec instead waits on the "Roster" <h2> (apps/web/src/round/SetupPanel.tsx), a stable
-    // element of the resolved live SetupPanel that renders regardless of how the round was
-    // entered. Not the URL (which never changes visibly here, since RoundRecordPage's
+    // The landing proof: waits on the "Roster" <h2> (apps/web/src/round/SetupPanel.tsx), a
+    // stable element of the resolved live SetupPanel that renders regardless of how the round
+    // was entered. Not the URL (which never changes visibly here, since RoundRecordPage's
     // navigate() to /round/:roundId is a client-side route change) and not an arbitrary
     // timeout; Playwright's auto-retrying expect() carries this through the archive fetch +
     // live-rounds check + token re-mint + navigate chain above.
     await expect(page.getByRole("heading", { name: "Roster" })).toBeVisible();
+    // The re-mint response now carries the code (spec 2026-07-20) — the panel renders it on
+    // this entry path too, the live proof the former papercut-19 blank panel is dead.
+    expect(await readJoinCode(page)).toBe(started.joinCode);
     await waitForParticipant(page, "Rae");
     await expect(chip(page, "Stroke play (net)")).toBeVisible();
   });

@@ -161,6 +161,9 @@ export default [
                 "milestonesOf",
                 "fullyHoledOut",
                 "grossOf",
+                // course record — the per-course fold (its present.ts phrase formatters are
+                // fence-ALLOWED, the handicap/present.ts precedent, so they're deliberately absent here)
+                "courseRecord",
                 // crew season aggregation
                 "crewContribution",
                 "aggregateSeason",

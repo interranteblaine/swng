@@ -36,6 +36,13 @@ export * from "./golfer/coursesPlayed.js";
 // golferMetrics is the one sanctioned way to reach a bests/milestones value.
 export type { BestRound, GolferBests, MilestoneKind, Milestone } from "./golfer/analytics.js";
 export { fullyHoledOut, grossOf } from "./golfer/analytics.js";
+// courseRecord.ts (analytics spec 2026-07-21 §4): "Your record here" — the per-course fold plus
+// its CourseHoleInsight member shape. `courseRecord` itself is compute (bans onto the web-side
+// fence below); the phrase formatters in present.ts are fence-ALLOWED, the handicap/present.ts
+// precedent — the web renders through them, never rebuilding the sentences inline.
+export type { CourseHoleInsight, CourseRecord } from "./golfer/courseRecord.js";
+export { courseRecord } from "./golfer/courseRecord.js";
+export * from "./golfer/present.js";
 export * from "./crew/crew.js";
 export * from "./crew/ledger.js";
 // GameConfig is already re-exported via ./round/events.js (game.ts owns the

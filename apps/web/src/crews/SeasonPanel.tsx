@@ -132,7 +132,12 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
         <p className="text-fairway">
           {standings.rounds.length === 0
             ? "Standings build as rounds are counted."
-            : "No current members appear in this season's counted rounds."}
+            : // Two truths, one honest sentence (papercut 9's distinction, widened): counted rounds
+              // exist but the roster-filtered ledger is empty either because the contributors have
+              // since left the roster, OR because the counted rounds carried no games between
+              // current members at all (e.g. a solo gameless round) — both read as "no standings
+              // yet," never a false claim that members are missing.
+              "No standings from these rounds yet — standings build from games between current members."}
         </p>
       ) : (
         <>

@@ -248,7 +248,7 @@ describe("SeasonPanel — standings", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("counted rounds exist but an empty ledger (every contributor off the roster): tells the truth instead of the build-up copy", async () => {
+  it("counted rounds exist but an empty ledger (departed members, or no games at all): tells the truth instead of the build-up copy", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
@@ -262,7 +262,7 @@ describe("SeasonPanel — standings", () => {
 
     renderPanel();
 
-    expect(await screen.findByText("No current members appear in this season's counted rounds.")).toBeTruthy();
+    expect(await screen.findByText("No standings from these rounds yet — standings build from games between current members.")).toBeTruthy();
     expect(screen.queryByText("Standings build as rounds are counted.")).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();
   });

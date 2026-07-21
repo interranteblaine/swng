@@ -59,9 +59,11 @@ export function CrewRecordsSection({ crewId }: { readonly crewId: CrewId }) {
       <h3 className="text-lg font-semibold text-forest">All-time</h3>
 
       {records.ledger.length === 0 ? (
-        // Same two-truths distinction SeasonPanel's own empty-ledger copy draws (papercut 9):
-        // never counted vs. counted-but-nobody-on-the-current-roster read differently.
-        <p className="text-fairway">{records.rounds === 0 ? "No rounds counted yet." : "No current members appear in these counted rounds."}</p>
+        // Same two-truths distinction SeasonPanel's own empty-ledger copy draws (papercut 9),
+        // widened to cover BOTH real causes of an empty roster-filtered ledger — contributors who
+        // have since left the roster, or counted rounds that carried no games between current
+        // members at all: never counted vs. counted-but-no-standings-yet read differently.
+        <p className="text-fairway">{records.rounds === 0 ? "No rounds counted yet." : "No standings from these rounds yet — standings build from games between current members."}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">

@@ -136,14 +136,14 @@ describe("CrewRecordsSection", () => {
     expect(screen.queryByText(/Stableford titles/)).toBeNull();
   });
 
-  it("rounds counted exist but the ledger is empty (no current members): distinct copy from 'never counted'", async () => {
+  it("rounds counted exist but the ledger is empty (departed members, or no games at all): distinct copy from 'never counted'", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetCrewRecords.mockResolvedValue({ rounds: 4, ledger: [], headToHead: [], partners: [], titles: [] });
 
     renderSection();
 
-    expect(await screen.findByText("No current members appear in these counted rounds.")).toBeTruthy();
+    expect(await screen.findByText("No standings from these rounds yet — standings build from games between current members.")).toBeTruthy();
     expect(screen.queryByText("No rounds counted yet.")).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();
   });

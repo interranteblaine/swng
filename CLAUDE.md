@@ -925,6 +925,51 @@ wire; walk users deleted). NO wipe (additive event + route only). Recorded, not 
 since the navigation arc; honest fix is server-side, the re-mint response carrying the code).
 On local `main`, never pushed.
 
+The join code arrives with the credential, and the round page's actions read in use-order
+(post-handicap-correction, 2026-07-20, spec
+`docs/superpowers/specs/2026-07-20-round-page-papercuts-join-code-design.md`, plan
+`2026-07-20-round-page-papercuts-join-code.md`, 4 SDD tasks + 2 review-directed comment fixes,
+commits `7224ed3..6966888`): five owner field reports, one arc. Four are UI corrections —
+ScorePad's "Clear selection" renamed **"Cancel"** (it never cleared; it backs out — the M5-era
+name read as a data action beside the real `Clear score`); scorecard cells gain `w-full` so a
+long name's widened column no longer leaves 56px cells hugging its left edge (cells center
+under centered names at any width); and the live page reorders to use-order —
+chips → card → setup → **Finalize** → Leave → Scrap → **Share dead last** (owner: least-used
+goes last; same move at ResultsView's bottom). The fifth was **a modeling error surfaced by a
+feature ask** ("shouldn't the join code be a link or at least copy?"): the code was stored
+server-side but never SERVED — clients knew it only by happenstance of entry path (create
+response, or the typed join form) and stored it as device state, so the third door
+(open-from-home re-mint) rendered a blank Join code panel (papercut 19). The correction, twice
+re-derived under owner probing: the join code is **participant-scoped round metadata delivered
+with the credential** — a REQUIRED `joinCode` on `JoinRoundResponse` at all three doors
+(`joinRound` echoes the just-matched canonical code; `POST /rounds/{roundId}/token` reads it
+via new `RoundStore.getJoinCode`, a ConsistentRead GetItem on the meta item, AFTER every auth
+check so strangers still learn nothing). The invariant — **holding a participant token means
+holding the code** — makes the blank panel unrepresentable going forward; it must NEVER ride
+the event log or any `round-read` response (spectators fold the same log — a watch link must
+not leak the power to join). On top: SetupPanel's **"Copy invite link"** (`btnQuiet`, ShareButton's
+visible-fallback clipboard discipline) copies `${origin}/join?code=X` into the existing
+`?code=`+returnTo funnel. One legacy tolerance: pre-fix re-mint credentials hold `""` and keep
+the blank panel until the next entry (guard commented as such); no new routes, no error codes,
+no event-log change, no migration. Whole-branch review (fable): READY TO DEPLOY — YES, 0
+Critical / 0 Important; two comment Minors fixed in-arc (the mint check-order list gained its
+step 5; the echo comment states the real mechanism); riding notes: the two-copy clipboard
+fallback line (hoist on a third copy), no order-pinning test for the existence-leak property.
+Close-out (controller-run): `deploy:beta` LAMBDA-FIRST (required response field; old bundle
+strips unknown keys — verified non-strict) → `publish:web:beta` (bundle `index-8yJKQ5-A.js`) →
+`e2e:beta` **17/17 ×2** (every join parses the required field live) → `e2e:field` **64 passed /
+1 documented-skip FIRST RUN** (incl. the new re-mint-renders-the-code assertion) → an
+adversarial USE pass on DEPLOYED beta.swng.golf with screenshots read as design artifacts (the
+eyes-on-pixels rule): the reordered page top-to-bottom with one gold; Cancel beside Clear score
+on a scored cell (the 5 survived Cancel); "Link copied — https://beta.swng.golf/join?code=UUSERB"
+after one tap; **the re-mint door live** (credential wiped → `/rounds/:id` → panel shows UUSERB,
+papercut 19 dead on the wire); **the copied link's full round trip** (second account through
+the funnel — code preserved across PKCE, "What should the card call you?", joined; its
+credential held the ECHOED code); the two-player card at phone width with "Bartholomew Walker"'s
+wide column cells centered under the name; ResultsView's Share at the very bottom; console
+clean but for Cognito's own favicon 404 and the by-design archive-404 probe. Walk users
+deleted; NO wipe (additive wire only).
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

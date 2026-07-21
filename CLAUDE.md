@@ -970,6 +970,57 @@ wide column cells centered under the name; ResultsView's Share at the very botto
 clean but for Cognito's own favicon 404 and the by-design archive-404 probe. Walk users
 deleted; NO wipe (additive wire only).
 
+Analytics are read folds over sealed rounds (2026-07-21, spec
+`docs/superpowers/specs/2026-07-21-analytics-read-folds-design.md`, plan
+`2026-07-21-analytics-read-folds.md`, 8 SDD tasks + 2 fix waves, commits `422cd01..4fb65ad`,
+base `955a4a1`): the owner's problem — rich analytics without footguns or slop — closed by a
+6-point binding model the design session converged (a Codex-authored fact-table/projector/
+manifest design was REJECTED for re-building machinery this repo deleted twice): **the
+snapshot is the only truth; every scope stores only a list of its rounds; exactly ONE
+performance cache (the golfer's own row); the crew folds snapshots at read; the crew is the
+only leaderboard (owner ruling); the web renders served numbers.** The ONE storage change:
+`GolferRoundLine.holeResults?` (`{hole, par, result: DecidedHoleResult}[]`, decided cells via
+`cellAt`, par frozen at play time) — built in `archiveGolferLine`'s SAME walk as
+`distribution`, backfilled by ONE paged `rebuildProjections` run (436 snapshots), never on
+the wire (`toWireLine` maps explicitly). On it: `golfer/analytics.ts` (`fullyHoledOut` — the
+one implementation everywhere — `bestsOf` strict-<-earlier-tie, `milestonesOf` fixed kind
+order: first-birdie/first-eagle/broke-100/90/80 on fully-holed-out 18s; both REQUIRED
+`GolferMetrics` members riding the existing record routes), `golfer/courseRecord.ts` (domain
+owns every gate: insights ≥5 rounds, per-hole ≥3 strokes-plays, neverBirdied shown at 1–3
+remaining) + `golfer/present.ts` phrases (fence-allowed), `crew/analytics.ts`
+(`partnerRecords` fourball both-member pairs, `netAverages` ≥3-round floor +
+more-qualifying-hole-count rule, `mostImproved` drops-only over application-computed
+boundary indexes, `stablefordTitle`). Wire: 2 routes (38→40 HTTP/42 total, golfer-auth,
+not anon-throttled) — `GET /me/courses/{courseId}/record`, `GET /crews/{crewId}/records`
+(all-time = deduped counted rounds, ONE `getMany`, titles from CLOSED seasons oldest-first);
+standings response grows REQUIRED `partners` + `superlatives` ({lowestNet ties-share,
+mostImproved absent-not-empty}). Web: RecordSections Bests/Milestones (roundId→history
+join, empty renders NOTHING), CourseRecordSection ("builds at 5 rounds" gate line),
+SeasonPanel partners/superlatives, CrewRecordsSection (all-time + titles; year suffix ONLY
+when the season name IS a 4-digit year — review-caught: names are free text). Reviews earned
+their keep: the whole-branch review (fable, READY TO DEPLOY — YES, all invariants verified
+by execution) caught spec §8's missing rebuild-parity assertion for holeResults-DERIVED
+metrics (a rebuild dropping the field would have passed every gate — fixed `4fb65ad`), and a
+task review caught the `'{yy}` slice rendering garbage on free-text season names. Gates:
+`pnpm validate` green at every commit; e2e:beta 17/17 ×2; **e2e:field 66 passed / 1
+documented-skip FIRST RUN** (every hand-derived oracle held: identityRecord bests 82/+10 +
+broke-100/90, crewSeason frozen-deck nets 866/12→72.2 with existing assertions
+byte-identical, the course-record beat); adversarial USE pass on DEPLOYED beta.swng.golf
+(fresh "Golfer 5088", empty profile renders no sections, one seeded 88-gross birdie round →
+"Best 18: 88 (+16)" linked + First birdie/Broke 100/Broke 90 live, course "Your record
+here" + gate line, crew All-time both empty truths through the real route; console zero app
+errors). Deploy #(lambda-first) + publishWeb (`index-D_awqjG5.js`) + the one rebuild; NO
+wipe. RECORDED FOR OWNER, not scheduled: (1) a plan contradiction — SeasonPanel/
+CrewRecordsSection client-side ledger ranking sort (pre-existing idiom) violates "web
+computes no golf result," but the server-side fix changes wire order the frozen crewSeason
+deck pins; proposed fix on approval: total domain comparator in `aggregateSeason` +
+values-identical deck reorder + both client sorts deleted, one commit; (2) **no API path
+closes a season** — `status:"closed"` exists and titles consume it, but nothing sets it, so
+Stableford titles are inert until a close path lands (owner-ruled design needed); (3)
+milestone labels wear plain ink vs the mockup's oxblood (the stricter brand reading —
+oxblood is for under-par scores); (4) a gameless counted round shows "No current members
+appear…" (pre-existing two-truths copy, slightly imprecise for played-but-no-games).
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

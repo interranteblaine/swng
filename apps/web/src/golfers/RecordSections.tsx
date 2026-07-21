@@ -160,7 +160,7 @@ function IndexOverTime({
           {ticks.map((t) => (
             <g key={`tick-${t}`}>
               <line data-testid="index-gridline" x1={ML} x2={width - MR} y1={y(t)} y2={y(t)} stroke="currentColor" strokeWidth={1} className="text-hairline" />
-              <text data-testid="index-tick-label" x={ML - 7} y={y(t)} dominantBaseline="middle" textAnchor="end" fill="currentColor" className="font-mono text-[10px] text-fairway">
+              <text data-testid="index-tick-label" x={ML - 7} y={y(t)} dominantBaseline="middle" textAnchor="end" fill="currentColor" className="font-mono text-[11px] text-fairway">
                 {formatCourseHandicap(t)}
               </text>
             </g>

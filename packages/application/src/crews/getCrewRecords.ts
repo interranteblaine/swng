@@ -48,9 +48,15 @@ export const getCrewRecords =
 
     // Titles: each CLOSED season's Stableford points leader(s) under the CURRENT roster filter —
     // an open season, or a closed one whose roster-filtered ledger is empty/scoreless, contributes
-    // no entry (stablefordTitle's own [] rule).
+    // no entry (stablefordTitle's own [] rule). A title list reads as a timeline, not a feed —
+    // built oldest-first (spec §5's own example order: "Bo '24 · Al '25"), the REVERSE of
+    // `countedBySeason`'s newest-first order above (which stays newest-first for its other use,
+    // deduping roundIds — whole-branch review, 2026-07-21, Finding 3).
+    const chronological = [...countedBySeason].sort(
+      (a, b) => a.season.createdAtMs - b.season.createdAtMs || (a.season.name < b.season.name ? -1 : a.season.name > b.season.name ? 1 : 0),
+    );
     const titles: CrewRecordsResponse["titles"][number][] = [];
-    for (const { season, counted } of countedBySeason) {
+    for (const { season, counted } of chronological) {
       if (season.status !== "closed") continue;
       const seasonArchives = counted
         .map((entry) => archiveByRoundId.get(entry.roundId))

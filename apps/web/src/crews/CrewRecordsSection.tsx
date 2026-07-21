@@ -8,10 +8,11 @@ import { cardBox } from "../ui/classes";
 import { headToHeadLine } from "./headToHeadLine";
 
 // Season names are FREE TEXT (docs/architecture.md's own examples include "Summer Cup"; the
-// crewSeason e2e fixture season is "The Golden Dozen") — the "'{yy}" form is a CONVENTION for
-// year-named seasons only, never a schema guarantee. Applies iff the name ends in two digits;
-// otherwise the season's own name renders verbatim beside the golfer name.
-const seasonTitleSuffix = (seasonName: string): string => (/\d{2}$/.test(seasonName) ? ` '${seasonName.slice(-2)}` : ` — ${seasonName}`);
+// crewSeason e2e fixture season is "The Golden Dozen") — the "'{yy}" form is a CONVENTION that
+// applies only when the name IS a year, never merely ends in two digits ("Summer Cup 2025" is
+// not "2025" — whole-branch review, 2026-07-21, Finding 2). Applies iff the whole name is a
+// 4-digit year; otherwise the season's own name renders verbatim beside the golfer name.
+const seasonTitleSuffix = (seasonName: string): string => (/^\d{4}$/.test(seasonName) ? ` '${seasonName.slice(-2)}` : ` — ${seasonName}`);
 
 // GET /crews/{crewId}/records (analytics read-folds spec 2026-07-21 §5): "All-time" — every
 // counted round across every season, deduped by roundId, folded once. CrewPage renders this

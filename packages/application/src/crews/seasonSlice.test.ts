@@ -663,6 +663,38 @@ describe("getCrewRecords", () => {
     expect(records.titles).toEqual([{ seasonId: closedSeason.season.seasonId, name: "2025", golfers: [{ golferId: ann, name: "Ann" }] }]);
   });
 
+  it("titles read oldest-first — a timeline, not newest-first (spec §5's own example order: 'Bo '24 · Al '25', whole-branch review 2026-07-21 Finding 3)", async () => {
+    const ctx = setup();
+    const ann = await seedGolfer(ctx, "ann", "Ann");
+    const bo = await seedGolfer(ctx, "bo", "Bo");
+    const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
+    const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
+    await ctx.join(asClaims("bo"), { token: invite.token });
+
+    // Created in chronological order — the fixed clock (createFixedClock) advances 1ms per
+    // call, so season2024's createdAtMs < season2025's; getCrewRecords' own season listing
+    // sorts newest-first for other purposes, so this pins that `titles` is built separately.
+    const season2024 = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2024" });
+    const season2025 = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2025" });
+
+    ctx.snapshots.record(stablefordArchive("r1", 5_000, [ann, bo], { [ann]: 40, [bo]: 30 })); // Ann wins 2024
+    await ctx.append(asClaims("ann"), created.crew.crewId, season2024.season.seasonId, { roundId: roundId("r1") });
+    ctx.snapshots.record(stablefordArchive("r2", 6_000, [ann, bo], { [ann]: 20, [bo]: 35 })); // Bo wins 2025
+    await ctx.append(asClaims("bo"), created.crew.crewId, season2025.season.seasonId, { roundId: roundId("r2") });
+
+    const closed2024 = await ctx.crewStore.getSeason(created.crew.crewId, season2024.season.seasonId);
+    await ctx.crewStore.putSeason(created.crew.crewId, { ...closed2024!, status: "closed" });
+    const closed2025 = await ctx.crewStore.getSeason(created.crew.crewId, season2025.season.seasonId);
+    await ctx.crewStore.putSeason(created.crew.crewId, { ...closed2025!, status: "closed" });
+
+    const records = await ctx.records(asClaims("ann"), created.crew.crewId);
+
+    expect(records.titles).toEqual([
+      { seasonId: season2024.season.seasonId, name: "2024", golfers: [{ golferId: ann, name: "Ann" }] },
+      { seasonId: season2025.season.seasonId, name: "2025", golfers: [{ golferId: bo, name: "Bo" }] },
+    ]);
+  });
+
   it("a non-member is rejected — not-a-member", async () => {
     const ctx = setup();
     const { crewId } = await crewWithSeason(ctx);

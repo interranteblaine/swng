@@ -254,6 +254,11 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     expect(postRebuildRecord.metrics.whsIndex?.value).toBe(preRebuildRecord.metrics.whsIndex?.value);
     expect(postRebuildRecord.metrics.whsIndex?.differentialsUsed).toBe(preRebuildRecord.metrics.whsIndex?.differentialsUsed);
 
+    // Rebuild parity must cover the holeResults-DERIVED metrics too — history/whsIndex equality
+    // alone would pass a rebuild that dropped holeResults (whole-branch review, 2026-07-21).
+    expect(postRebuildRecord.metrics.bests).toEqual(preRebuildRecord.metrics.bests);
+    expect(postRebuildRecord.metrics.milestones).toEqual(preRebuildRecord.metrics.milestones);
+
     // computedAtMs is deliberately EXCLUDED from the equality above — since pre-prod
     // hardening D4a it's getMyRecord's read-time stamp (`deps.clock.now()` at each GET), so
     // two reads at different instants ALWAYS differ; it proves nothing about the rebuild. The

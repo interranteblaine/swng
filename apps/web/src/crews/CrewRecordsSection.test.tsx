@@ -95,6 +95,10 @@ describe("CrewRecordsSection", () => {
         // Cup"; the crewSeason e2e fixture season is "The Golden Dozen") — pinning both the
         // year-name shape and a free-text shape from the SAME fixture proves the fallback.
         { seasonId: "s-dozen", name: "The Golden Dozen", golfers: [{ golferId: ANN, name: "Ann" }] },
+        // The collision case a looser "ends in two digits" regex gets wrong: the name is NOT a
+        // year, it merely ends in one — the '{yy} form must not fire (whole-branch review,
+        // 2026-07-21, Finding 2).
+        { seasonId: "s-summer-2025", name: "Summer Cup 2025", golfers: [{ golferId: BO, name: "Bo" }] },
       ],
     };
     mockedGetCrewRecords.mockResolvedValue(records);
@@ -112,9 +116,10 @@ describe("CrewRecordsSection", () => {
 
     expect(screen.getByText("Ann & Bo — 9–2")).toBeTruthy();
 
-    // "2024" ends in two digits -> the "'{yy}" convention; "The Golden Dozen" does not -> the
-    // season's own name renders verbatim beside the golfer name.
-    expect(screen.getByText("Stableford titles — Bo '24 · Ann — The Golden Dozen")).toBeTruthy();
+    // "2024" IS a year -> the "'{yy}" convention; "The Golden Dozen" isn't a year at all -> the
+    // season's own name renders verbatim; "Summer Cup 2025" merely ENDS in a year (not IS one)
+    // -> verbatim too, the collision case a looser "ends in two digits" regex would get wrong.
+    expect(screen.getByText("Stableford titles — Bo '24 · Ann — The Golden Dozen · Bo — Summer Cup 2025")).toBeTruthy();
   });
 
   it("no rounds counted ever: the table shows the honest empty state, not a blank table", async () => {

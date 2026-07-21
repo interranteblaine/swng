@@ -364,6 +364,12 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(post.history).toEqual(pre.history);
     expect(post.metrics.whsIndex?.value).toBe(pre.metrics.whsIndex?.value);
     expect(post.metrics.whsIndex?.differentialsUsed).toBe(pre.metrics.whsIndex?.differentialsUsed);
+
+    // Rebuild parity must cover the holeResults-DERIVED metrics too — history/whsIndex equality
+    // alone would pass a rebuild that dropped holeResults (whole-branch review, 2026-07-21).
+    expect(post.metrics.bests).toEqual(pre.metrics.bests);
+    expect(post.metrics.milestones).toEqual(pre.metrics.milestones);
+
     expect(post.metrics.whsIndex?.computedAtMs).not.toBe(pre.metrics.whsIndex?.computedAtMs);
 
     // Standings are computed on read from the counted rounds' own snapshots — there is no

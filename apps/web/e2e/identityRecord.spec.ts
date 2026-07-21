@@ -178,6 +178,35 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     expect(record.metrics.whsIndex?.value).toBe(PINNED_INDEX);
     expect(record.metrics.whsIndex?.differentialsUsed).toBe(PINNED_DIFFERENTIALS_USED);
 
+    // Bests + milestones (analytics read-folds spec 2026-07-21 §3, packages/domain/src/golfer/
+    // analytics.ts) — hand-derived BEFORE any live run from this deck's own pinned scores, never
+    // read back off the system (BLOCKED-don't-fudge). All three rounds are fully holed out
+    // (every hole a strokes cell) 18-hole cards on the par-72 all-par-4 course, so:
+    //
+    //   round 1 (10 bogeys): gross 82, toPar 82 - 72 = 10   <- LOWEST gross
+    //   round 2 (13 bogeys): gross 85, toPar 13
+    //   round 3 (16 bogeys): gross 88, toPar 16
+    //
+    // BESTS: lowest gross per hole count, tie -> earlier round (bestsOf's strict `<`). Round 1's
+    // 82 is the outright lowest 18-hole gross, so best18 = { round 1, 82, +10 }. There is no
+    // 9-hole round at all, so best9 is ABSENT (the honest empty answer, not zeroed). roundIds[0]
+    // is round 1 (test 1 pushes r1/r2/r3 in play order; roundIds[2] is round 3, the newest).
+    expect(record.metrics.bests.best18).toEqual({ roundId: roundIds[0], gross: 82, toPar: 10 });
+    expect(record.metrics.bests.best9).toBeUndefined();
+    //
+    // MILESTONES: achieved-only, emitted in the FIXED kind order (first-birdie, first-eagle,
+    // broke-100, broke-90, broke-80 — milestonesOf), each the earliest qualifying round.
+    //   - first-birdie / first-eagle: this deck NEVER scores below par (every hole is a 4 or a
+    //     bogey 5 on a par-4 card), so no under-par hole exists -> BOTH absent.
+    //   - broke-100: first fully holed-out 18 under 100 -> round 1 (82 < 100).
+    //   - broke-90:  first under 90 -> round 1 (82 < 90).
+    //   - broke-80:  none under 80 (82/85/88 all >= 80) -> absent.
+    // So exactly [broke-100 @ r1, broke-90 @ r1], in that fixed order.
+    expect(record.metrics.milestones).toEqual([
+      { kind: "broke-100", roundId: roundIds[0] },
+      { kind: "broke-90", roundId: roundIds[0] },
+    ]);
+
     preRebuildRecord = record;
   });
 

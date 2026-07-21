@@ -53,6 +53,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
   let pageA: Page;
   let pageB: Page;
   let joinCode = "";
+  let seededCourseId = ""; // the fixtureLinks18 lineage id, captured at seed time for the course-record beat (test 11)
   // Both contexts' WebSocket traffic is routed through support.ts's installWsProxy (see its own
   // doc comment for the full mechanism: CDP's offline emulation doesn't tear down an already-open
   // socket, so routeWebSocket + a force-close is what makes context.setOffline produce the
@@ -82,7 +83,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // before pageA's first navigation (CreateRoundPage is sign-in-gated); Bo's are injected
     // mid-step-2, AFTER his signed-out funnel landing has been asserted.
     const annAccount = await mintAccountGolfer("field-ann", "Ann");
-    await ensureCourse(fixtureLinks18.courseName, fixtureLinks18, annAccount);
+    seededCourseId = (await ensureCourse(fixtureLinks18.courseName, fixtureLinks18, annAccount)).courseId;
     boTokens = await mintThrowawayUser("field-bo");
     calAccount = await mintAccountGolfer("field-cal", "Cal");
     deeAccount = await mintAccountGolfer("field-dee", "Dee");
@@ -429,6 +430,28 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // body text, never its heading).
     await expect(pageB.getByRole("heading", { name: "Their index over time" })).toBeVisible();
     await expect(pageB.getByRole("heading", { name: "History" })).toBeVisible();
+  });
+
+  test("11: Ann's course page shows 'Your record here' with the just-finalized round counted", async () => {
+    test.setTimeout(120_000);
+    // CourseRecordSection (analytics read-folds spec 2026-07-21 §4; apps/web/src/courses/
+    // CourseRecordSection.tsx) fetches GET /me/courses/{courseId}/record ONCE on mount and renders
+    // NOTHING until the caller has ≥1 round at the course (returns null at rounds === 0). The
+    // projector is async relative to finalize, and the section does not re-fetch on its own — so
+    // reload the course page until Ann's freshly-finalized fourball round lands in her own rows.
+    // Ann is a fresh account each run (mintAccountGolfer), and she plays exactly this one round on
+    // fixtureLinks18 in the whole suite, so her OWN record here is precisely "Rounds played — 1"
+    // (rounds counts lines at the course in ANY state — courseRecord.ts — so her hole-17 pickup
+    // still counts). pageA is signed in as Ann, so the section is her own record.
+    const recordHeading = pageA.getByRole("heading", { name: "Your record here", exact: true });
+    await expect(async () => {
+      await pageA.goto(`/courses/${seededCourseId}`);
+      await expect(recordHeading).toBeVisible({ timeout: 5_000 });
+    }).toPass({ timeout: 90_000 });
+
+    // The "Rounds played — N" list item is the first <li> under the heading (CourseRecordSection's
+    // own JSX) — exactly 1 for Ann's fresh account.
+    await expect(pageA.getByText("Rounds played — 1", { exact: true })).toBeVisible();
   });
 });
 

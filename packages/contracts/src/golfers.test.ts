@@ -3,7 +3,15 @@ import type { z } from "zod";
 import { courseId, golferId, roundId } from "@swng/domain";
 import type { GolferRoundLine } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
-import { getMeResponseSchema, getMyLiveRoundsResponseSchema, getMyRecordResponseSchema, getMyRoundsResponseSchema, golferViewSchema, updateMeRequestSchema } from "./golfers.js";
+import {
+  getMeResponseSchema,
+  getMyCourseRecordResponseSchema,
+  getMyLiveRoundsResponseSchema,
+  getMyRecordResponseSchema,
+  getMyRoundsResponseSchema,
+  golferViewSchema,
+  updateMeRequestSchema,
+} from "./golfers.js";
 
 // parse(JSON.parse(JSON.stringify(x))) === x — the wire round-trip every schema here has to
 // survive unchanged, same pattern as courses.test.ts / round.test.ts.
@@ -189,6 +197,42 @@ describe("getMyRecordResponseSchema", () => {
     expect(() =>
       parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], bests: {} }, history: [] }),
     ).toThrow(ContractError);
+  });
+});
+
+// GET /me/courses/{courseId}/record (analytics spec 2026-07-21 §4).
+describe("getMyCourseRecordResponseSchema", () => {
+  it("round-trips a bare record — rounds only, no best/scoringAverage/insights yet", () => {
+    roundTrips(getMyCourseRecordResponseSchema, { courseId: courseId("course-1"), rounds: 2 });
+  });
+
+  it("round-trips a record with best + scoringAverage, gated insights still absent below 5 rounds", () => {
+    roundTrips(getMyCourseRecordResponseSchema, {
+      courseId: courseId("course-1"),
+      rounds: 3,
+      best: { roundId: roundId("r1"), gross: 82, toPar: 10 },
+      scoringAverage: 88.3,
+    });
+  });
+
+  it("round-trips a fully-populated record: best, scoringAverage, and every insights member", () => {
+    roundTrips(getMyCourseRecordResponseSchema, {
+      courseId: courseId("course-1"),
+      rounds: 5,
+      best: { roundId: roundId("r1"), gross: 79, toPar: 7 },
+      scoringAverage: 86.4,
+      insights: {
+        worstHole: { hole: 7, par: 4, plays: 5, avgOverPar: 1.4, doublePlus: 2 },
+        scoringHole: { hole: 2, par: 5, plays: 5, parOrBetter: 4 },
+        neverBirdied: [3, 7, 12],
+      },
+    });
+  });
+
+  // insights can be present (rounds >= 5) yet carry none of its own three members, when no hole
+  // clears any threshold — an empty object, not an absent one.
+  it("round-trips insights present but empty", () => {
+    roundTrips(getMyCourseRecordResponseSchema, { courseId: courseId("course-1"), rounds: 5, insights: {} });
   });
 });
 

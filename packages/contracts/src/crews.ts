@@ -199,8 +199,64 @@ const seasonStandingLineSchema: z.ZodType<SeasonStandingLine> = z.object({
   name: z.string(),
 });
 
+// Partner records (analytics spec 2026-07-21 §5): four-ball pairs, both current roster members —
+// `nameA`/`nameB` resolved from the roster the SAME way SeasonStandingLine.name is
+// (getSeasonStandings.ts's own nameByGolfer), never the snapshot's own participant name. Shared
+// by SeasonStandingsResponse (season-scoped) and CrewRecordsResponse (all-time) below — one
+// shape, never redeclared.
+export interface PartnerStandingRecord {
+  readonly a: GolferId;
+  readonly b: GolferId;
+  readonly nameA: string;
+  readonly nameB: string;
+  readonly wins: number;
+  readonly losses: number;
+  readonly halves: number;
+}
+const partnerStandingRecordSchema: z.ZodType<PartnerStandingRecord> = z.object({
+  a: golferIdSchema,
+  b: golferIdSchema,
+  nameA: z.string(),
+  nameB: z.string(),
+  wins: z.number().int(),
+  losses: z.number().int(),
+  halves: z.number().int(),
+});
+
+// Season superlatives (analytics spec 2026-07-21 §5): computed on read over the season's counted
+// snapshots, nothing stored. `lowestNet` is the single lowest per-member net average (ties share
+// the entry, `golfers` naming all of them) — ABSENT, not zeroed, when nobody has ≥3 qualifying
+// rounds. `mostImproved` is domain's own `mostImproved()` fold verbatim (every member whose swng
+// index dropped between the season's first and last counted round, ranked biggest-drop-first),
+// each entry given a roster name — ABSENT (never `[]`) when nobody qualifies, e.g. an empty
+// season or a season where no member has an index at both ends.
+export interface SeasonSuperlatives {
+  readonly lowestNet?: {
+    readonly holes: 9 | 18;
+    readonly average: number;
+    readonly rounds: number;
+    readonly golfers: readonly { readonly golferId: GolferId; readonly name: string }[];
+  };
+  readonly mostImproved?: readonly { readonly golferId: GolferId; readonly name: string; readonly from: number; readonly to: number }[];
+}
+const seasonSuperlativesSchema: z.ZodType<SeasonSuperlatives> = z.object({
+  lowestNet: z
+    .object({
+      holes: z.union([z.literal(9), z.literal(18)]),
+      average: z.number(),
+      rounds: z.number().int(),
+      golfers: z.array(z.object({ golferId: golferIdSchema, name: z.string() })).readonly(),
+    })
+    .optional(),
+  mostImproved: z
+    .array(z.object({ golferId: golferIdSchema, name: z.string(), from: z.number(), to: z.number() }))
+    .readonly()
+    .optional(),
+});
+
 // Standings are computed on read (spec §4): the counted snapshots folded through the SAME
-// domain crewContribution/aggregateSeason the M8 projector used — no stored ledger.
+// domain crewContribution/aggregateSeason the M8 projector used — no stored ledger. `partners`/
+// `superlatives` (analytics spec §5) grow the same read, over the SAME archives/memberIds.
 export interface SeasonStandingsResponse {
   readonly seasonId: string;
   readonly name: string;
@@ -208,6 +264,8 @@ export interface SeasonStandingsResponse {
   readonly rounds: readonly CountedRoundView[]; // newest-first by finalizedAt
   readonly ledger: readonly SeasonStandingLine[];
   readonly headToHead: readonly HeadToHeadRecord[];
+  readonly partners: readonly PartnerStandingRecord[];
+  readonly superlatives: SeasonSuperlatives;
 }
 export const seasonStandingsResponseSchema: z.ZodType<SeasonStandingsResponse> = z.object({
   seasonId: z.string(),
@@ -216,6 +274,29 @@ export const seasonStandingsResponseSchema: z.ZodType<SeasonStandingsResponse> =
   rounds: z.array(countedRoundViewSchema).readonly(),
   ledger: z.array(seasonStandingLineSchema).readonly(),
   headToHead: z.array(headToHeadRecordSchema).readonly(),
+  partners: z.array(partnerStandingRecordSchema).readonly(),
+  superlatives: seasonSuperlativesSchema,
+});
+
+// GET /crews/{crewId}/records (analytics spec 2026-07-21 §5): all-time — every counted round
+// across every season, deduped by roundId (the SAME round counted twice contributes once),
+// folded through the SAME roster-filter + aggregateSeason composition as standings above, plus
+// `titles` (each CLOSED season's Stableford points leader(s) under the current-roster filter —
+// included only when non-empty; an open season, or a closed one with a scoreless/tied-at-zero
+// ledger, contributes no entry).
+export interface CrewRecordsResponse {
+  readonly rounds: number; // distinct counted rounds all-time
+  readonly ledger: readonly SeasonStandingLine[];
+  readonly headToHead: readonly HeadToHeadRecord[];
+  readonly partners: readonly PartnerStandingRecord[];
+  readonly titles: readonly { readonly seasonId: string; readonly name: string; readonly golfers: readonly { readonly golferId: GolferId; readonly name: string }[] }[];
+}
+export const crewRecordsResponseSchema: z.ZodType<CrewRecordsResponse> = z.object({
+  rounds: z.number().int(),
+  ledger: z.array(seasonStandingLineSchema).readonly(),
+  headToHead: z.array(headToHeadRecordSchema).readonly(),
+  partners: z.array(partnerStandingRecordSchema).readonly(),
+  titles: z.array(z.object({ seasonId: z.string(), name: z.string(), golfers: z.array(z.object({ golferId: golferIdSchema, name: z.string() })).readonly() })).readonly(),
 });
 
 export interface LeaveCrewResponse {

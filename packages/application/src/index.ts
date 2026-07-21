@@ -53,6 +53,8 @@ export { ensureGolfer } from "./golfers/ensureGolfer.js";
 export { getMyGolfer } from "./golfers/getMyGolfer.js";
 export { updateMyGolfer } from "./golfers/updateMyGolfer.js";
 export { getMyRecord } from "./golfers/getMyRecord.js";
+// Analytics spec 2026-07-21 §4: GET /me/courses/{courseId}/record — "Your record here."
+export { getMyCourseRecord } from "./golfers/getMyCourseRecord.js";
 export { getMyRounds } from "./golfers/getMyRounds.js";
 export { getMyLiveRounds } from "./golfers/getMyLiveRounds.js";
 // Navigation spec §6a: GET /golfers/{golferId} — any signed-in golfer, not self-scoped.
@@ -78,6 +80,11 @@ export { listSeasons } from "./crews/listSeasons.js";
 export { appendCountedRound } from "./crews/appendCountedRound.js";
 export { removeCountedRound } from "./crews/removeCountedRound.js";
 export { getSeasonStandings } from "./crews/getSeasonStandings.js";
+// Analytics spec 2026-07-21 §5: GET /crews/{crewId}/records — all-time ledger/head-to-head/
+// partners + per-closed-season Stableford titles. rosterFilteredContribution (the shared
+// roster-filter this consumes) stays an internal getSeasonStandings.ts export — a same-package
+// relative import, like sortLines — never routed through this barrel.
+export { getCrewRecords } from "./crews/getCrewRecords.js";
 
 export { projectArchive, finalizedAtMsOf } from "./projections/projectArchive.js";
 export { rebuildProjections } from "./projections/rebuildProjections.js";

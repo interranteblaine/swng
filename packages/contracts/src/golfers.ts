@@ -174,6 +174,38 @@ export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.objec
   history: z.array(golferRoundLineSchema).readonly(),
 });
 
+// GET /me/courses/{courseId}/record (analytics spec 2026-07-21 §4): "Your record here" — the
+// caller's OWN rows at one course, folded through domain's `courseRecord` (application/src/
+// golfers/getMyCourseRecord.ts runs the getMyRecord idiom exactly: get-or-nothing, no
+// ensureGolfer). Mirrors domain's CourseRecord shape field-for-field, wrapped with the courseId
+// the caller asked about. Non-strict, house style — `insights` shows only from ≥5 rounds at the
+// course (the domain's own gate, never re-derived here).
+export interface GetMyCourseRecordResponse {
+  readonly courseId: CourseId;
+  readonly rounds: number;
+  readonly best?: { readonly roundId: RoundId; readonly gross: number; readonly toPar: number };
+  readonly scoringAverage?: number;
+  readonly insights?: {
+    readonly worstHole?: { readonly hole: number; readonly par: number; readonly plays: number; readonly avgOverPar: number; readonly doublePlus: number };
+    readonly scoringHole?: { readonly hole: number; readonly par: number; readonly plays: number; readonly parOrBetter: number };
+    readonly neverBirdied?: readonly number[];
+  };
+}
+
+export const getMyCourseRecordResponseSchema: z.ZodType<GetMyCourseRecordResponse> = z.object({
+  courseId: courseIdSchema,
+  rounds: z.number().int(),
+  best: bestRoundSchema.optional(),
+  scoringAverage: z.number().optional(),
+  insights: z
+    .object({
+      worstHole: z.object({ hole: z.number().int(), par: z.number().int(), plays: z.number().int(), avgOverPar: z.number(), doublePlus: z.number().int() }).optional(),
+      scoringHole: z.object({ hole: z.number().int(), par: z.number().int(), plays: z.number().int(), parOrBetter: z.number().int() }).optional(),
+      neverBirdied: z.array(z.number().int()).readonly().optional(),
+    })
+    .optional(),
+});
+
 // GET /golfers/{golferId} (navigation spec §6a): the golfer page's read. Any signed-in golfer
 // may view any golfer — golf handicaps are posted in every clubhouse; the record is scores,
 // not messages (spec §6a's own visibility decision). Deliberately narrower than GolferView +

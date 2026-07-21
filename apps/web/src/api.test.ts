@@ -517,7 +517,7 @@ describe("getSeasonStandings", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
+      return fakeResponse(200, { seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [], partners: [], superlatives: {} });
     });
 
     const result = await getSeasonStandings("tok-crew", crewId("crew-1"), "season-1");

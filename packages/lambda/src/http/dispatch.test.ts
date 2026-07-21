@@ -204,7 +204,7 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     listSeasons: listSeasons({ crewStore, golferStore }),
     appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
     removeCountedRound: removeCountedRound({ crewStore, golferStore }),
-    getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots }),
+    getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
     leaveCrew: leaveCrew({ crewStore, golferStore }),
     removeCrewMember: removeCrewMember({ crewStore, golferStore }),
     transferOrganizer: transferOrganizer({ crewStore, golferStore }),

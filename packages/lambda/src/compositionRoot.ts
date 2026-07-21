@@ -345,7 +345,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     listSeasons: listSeasons({ crewStore, golferStore }),
     appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
     removeCountedRound: removeCountedRound({ crewStore, golferStore }),
-    getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots }),
+    // projectionStore (analytics spec 2026-07-21 §5): most-improved's bounded cross-read — one
+    // listLines query per roster member — the SAME projectionStore instance getMyRecord above
+    // shares.
+    getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
     leaveCrew: leaveCrew({ crewStore, golferStore }),
     // Crew membership (invited in, accountable out — spec §1): the organizer's authority — the
     // SAME crewStore/golferStore instances leaveCrew above shares.

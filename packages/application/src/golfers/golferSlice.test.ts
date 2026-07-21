@@ -3,6 +3,7 @@ import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, f
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import { createFrozenClock, createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
+import { getMyCourseRecord } from "./getMyCourseRecord.js";
 import { getMyGolfer } from "./getMyGolfer.js";
 import { getMyLiveRounds } from "./getMyLiveRounds.js";
 import { getMyRecord } from "./getMyRecord.js";
@@ -28,6 +29,7 @@ const setup = (golferStore: GolferStore = createInMemoryGolferStore()) => {
     getMe: getMyGolfer({ golferStore, idGenerator }),
     updateMe: updateMyGolfer({ golferStore, idGenerator }),
     record: getMyRecord({ golferStore, projectionStore, clock }),
+    courseRecord: getMyCourseRecord({ golferStore, projectionStore }),
     myRounds: getMyRounds({ golferStore, projectionStore }),
     myLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
   };
@@ -423,6 +425,79 @@ describe("getMyRecord", () => {
     expect(record.history.find((l) => l.roundId === roundId("r6"))?.differential).toBe(postedDifferential(3.05));
     expect(record.history.find((l) => l.roundId === roundId("r6"))?.differential).toBe(3.1);
     expect(record.history.find((l) => l.roundId === roundId("r3"))?.differential).toBe(3.0);
+  });
+});
+
+// GET /me/courses/{courseId}/record (analytics spec 2026-07-21 §4): the getMyRecord idiom
+// exactly, filtered to one course via domain's courseRecord (courseRecord.test.ts owns the fold's
+// own tie-break/gating rules — this file proves the use case's own get-or-nothing wiring + the
+// filter actually reaches only the requested course).
+describe("getMyCourseRecord", () => {
+  it("returns an honest empty record (rounds: 0) for a sub with no golfer row at all — no throw, no create", async () => {
+    const ctx = setup();
+    const record = await ctx.courseRecord({ sub: "sub-1" }, courseId("course-1"));
+    expect(record).toEqual({ courseId: courseId("course-1"), rounds: 0 });
+  });
+
+  it("round-trips a two-course line set: filters to just the requested course, ignoring the other course's lines entirely", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    // fullyHoledOut (analytics.ts) requires 18 strokes-kind holeResults summing to `gross` — the
+    // par-4-every-hole shape with the "over" strokes loaded onto the first N holes is arbitrary
+    // but sums correctly; courseRecord's best/scoringAverage only consume the sum + line par.
+    const holeResultsFor = (gross: number) => {
+      const over = gross - 72;
+      return Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: 4, result: { kind: "strokes" as const, strokes: 4 + (i < over ? 1 : 0) } }));
+    };
+    const line = (id: string, ms: number, course: { id: string; name: string }, gross: number) => ({
+      roundId: roundId(id),
+      courseName: course.name,
+      courseId: courseId(course.id),
+      tee: "white",
+      holes: 18 as const,
+      par: 72,
+      courseHandicap: 8,
+      ags: gross,
+      differential: gross - 72,
+      distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
+      holeResults: holeResultsFor(gross),
+      finalizedAtMs: ms,
+    });
+    const courseA = { id: "course-1", name: "Casa Verde GC" };
+    const courseB = { id: "course-2", name: "Pebble Municipal" };
+    await ctx.projectionStore.putLine(golfer.golferId, line("r1", 1_000, courseA, 90));
+    await ctx.projectionStore.putLine(golfer.golferId, line("r2", 2_000, courseA, 84));
+    await ctx.projectionStore.putLine(golfer.golferId, line("r3", 3_000, courseB, 79));
+
+    const record = await ctx.courseRecord({ sub: "sub-1" }, courseId("course-1"));
+
+    // Two lines at course-1 only — course-2's r3 (a lower gross, which would otherwise win
+    // "best") never enters the fold.
+    expect(record).toEqual({
+      courseId: courseId("course-1"),
+      rounds: 2,
+      best: { roundId: roundId("r2"), gross: 84, toPar: 12 },
+      scoringAverage: 87.0,
+    });
+  });
+
+  it("a sub with a real golfer but zero lines at the requested course returns rounds: 0, not a throw", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    await ctx.projectionStore.putLine(golfer.golferId, {
+      roundId: roundId("r1"),
+      courseName: "Pebble Municipal",
+      courseId: courseId("course-2"),
+      tee: "white",
+      holes: 18,
+      par: 72,
+      courseHandicap: 8,
+      distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
+      finalizedAtMs: 1_000,
+    });
+
+    const record = await ctx.courseRecord({ sub: "sub-1" }, courseId("course-1"));
+    expect(record).toEqual({ courseId: courseId("course-1"), rounds: 0 });
   });
 });
 

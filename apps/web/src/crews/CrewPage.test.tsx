@@ -102,7 +102,7 @@ const emptyStandings = (seasonId: string, name: string): SeasonStandingsResponse
   status: "open",
   rounds: [],
   ledger: [],
-  headToHead: [],
+  headToHead: [], partners: [], superlatives: {},
 });
 
 // Probe for "Leave crew" -> navigate home.

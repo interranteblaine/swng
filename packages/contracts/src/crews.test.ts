@@ -7,6 +7,7 @@ import {
   createCrewRequestSchema,
   createSeasonRequestSchema,
   createSeasonResponseSchema,
+  crewRecordsResponseSchema,
   crewViewSchema,
   getCrewResponseSchema,
   joinCrewRequestSchema,
@@ -138,7 +139,7 @@ describe("season + standings schemas", () => {
     roundTrips(listSeasonsResponseSchema, { seasons: [season] });
   });
 
-  it("seasonStandingsResponseSchema round-trips ledger (with name) + head-to-head + rounds", () => {
+  it("seasonStandingsResponseSchema round-trips ledger (with name) + head-to-head + rounds, partners/superlatives empty", () => {
     roundTrips(seasonStandingsResponseSchema, {
       seasonId: "s-1",
       name: "2026",
@@ -146,7 +147,90 @@ describe("season + standings schemas", () => {
       rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, appendedBy: golferId("ann") }],
       ledger: [{ golferId: golferId("ann"), rounds: 1, wins: 1, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann" }],
       headToHead: [{ a: golferId("ann"), b: golferId("bo"), aWins: 1, bWins: 0, halves: 0 }],
+      partners: [],
+      superlatives: {},
     });
+  });
+
+  // Analytics spec 2026-07-21 §5: partners (four-ball W-L-H pairs) + superlatives (lowestNet,
+  // mostImproved) grow the same standings read.
+  it("seasonStandingsResponseSchema round-trips a full partners + superlatives payload", () => {
+    roundTrips(seasonStandingsResponseSchema, {
+      seasonId: "s-1",
+      name: "2026",
+      status: "open",
+      rounds: [],
+      ledger: [],
+      headToHead: [],
+      partners: [{ a: golferId("ann"), b: golferId("bo"), nameA: "Ann", nameB: "Bo", wins: 3, losses: 1, halves: 0 }],
+      superlatives: {
+        lowestNet: { holes: 18, average: 78.5, rounds: 4, golfers: [{ golferId: golferId("ann"), name: "Ann" }] },
+        mostImproved: [{ golferId: golferId("bo"), name: "Bo", from: 14.2, to: 11.8 }],
+      },
+    });
+  });
+
+  // mostImproved is ABSENT (not []) when nobody qualifies per the application's own invariant
+  // (getSeasonStandings.ts, pinned in seasonSlice.test.ts) — the schema itself is permissive
+  // (an explicit [] round-trips too), since enforcing "never send []" is an application concern,
+  // not a wire-shape one.
+  it("seasonStandingsResponseSchema round-trips an explicit empty-array mostImproved (schema-permissive; the absent-not-empty rule is application-level)", () => {
+    roundTrips(seasonStandingsResponseSchema, {
+      seasonId: "s-1",
+      name: "2026",
+      status: "open",
+      rounds: [],
+      ledger: [],
+      headToHead: [],
+      partners: [],
+      superlatives: { mostImproved: [] },
+    });
+  });
+
+  it("rejects a response missing partners", () => {
+    expect(() =>
+      parse(seasonStandingsResponseSchema, {
+        seasonId: "s-1",
+        name: "2026",
+        status: "open",
+        rounds: [],
+        ledger: [],
+        headToHead: [],
+        superlatives: {},
+      }),
+    ).toThrow(ContractError);
+  });
+
+  it("rejects a response missing superlatives", () => {
+    expect(() =>
+      parse(seasonStandingsResponseSchema, {
+        seasonId: "s-1",
+        name: "2026",
+        status: "open",
+        rounds: [],
+        ledger: [],
+        headToHead: [],
+        partners: [],
+      }),
+    ).toThrow(ContractError);
+  });
+});
+
+// GET /crews/{crewId}/records (analytics spec 2026-07-21 §5): all-time — dedupe-by-roundId is an
+// application concern; this schema just carries the shape.
+describe("crewRecordsResponseSchema", () => {
+  it("round-trips an all-time records payload with titles", () => {
+    roundTrips(crewRecordsResponseSchema, {
+      rounds: 12,
+      ledger: [{ golferId: golferId("ann"), rounds: 12, wins: 5, losses: 5, halves: 2, points: 430, skins: 54, name: "Ann" }],
+      headToHead: [{ a: golferId("ann"), b: golferId("bo"), aWins: 5, bWins: 5, halves: 2 }],
+      partners: [{ a: golferId("ann"), b: golferId("bo"), nameA: "Ann", nameB: "Bo", wins: 3, losses: 1, halves: 0 }],
+      titles: [{ seasonId: "s-2025", name: "2025", golfers: [{ golferId: golferId("ann"), name: "Ann" }] }],
+    });
+  });
+
+  it("round-trips an empty all-time records payload — no rounds, no titles", () => {
+    roundTrips(crewRecordsResponseSchema, { rounds: 0, ledger: [], headToHead: [], partners: [], titles: [] });
   });
 });
 

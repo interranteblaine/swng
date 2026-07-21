@@ -98,7 +98,7 @@ describe("SeasonPanel — standings", () => {
         { golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann" },
         { golferId: BO, rounds: 10, wins: 6, losses: 3, halves: 1, points: 180, skins: 7, name: "Bo" },
       ],
-      headToHead: [],
+      headToHead: [], partners: [], superlatives: {},
     });
 
     renderPanel();
@@ -119,7 +119,7 @@ describe("SeasonPanel — standings", () => {
       status: "open",
       rounds: [],
       ledger: [{ golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann" }],
-      headToHead: [],
+      headToHead: [], partners: [], superlatives: {},
     });
 
     renderPanel();
@@ -145,7 +145,7 @@ describe("SeasonPanel — standings", () => {
         { golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann" },
         { golferId: BO, rounds: 10, wins: 6, losses: 3, halves: 1, points: 180, skins: 7, name: "Bo" },
       ],
-      headToHead: [],
+      headToHead: [], partners: [], superlatives: {},
     });
 
     renderPanel();
@@ -166,7 +166,7 @@ describe("SeasonPanel — standings", () => {
         { golferId: ANN, rounds: 12, wins: 5, losses: 5, halves: 2, points: 0, skins: 0, name: "Ann" },
         { golferId: BO, rounds: 12, wins: 5, losses: 5, halves: 2, points: 0, skins: 0, name: "Bo" },
       ],
-      headToHead: [{ a: ANN, b: BO, aWins: 5, bWins: 5, halves: 2 }],
+      headToHead: [{ a: ANN, b: BO, aWins: 5, bWins: 5, halves: 2 }], partners: [], superlatives: {},
     });
 
     renderPanel();
@@ -195,7 +195,7 @@ describe("SeasonPanel — standings", () => {
         { golferId: ANN, rounds: 9, wins: 4, losses: 5, halves: 0, points: 0, skins: 0, name: "Ann" },
         { golferId: BO, rounds: 9, wins: 5, losses: 4, halves: 0, points: 0, skins: 0, name: "Bo" },
       ],
-      headToHead: [{ a: ANN, b: BO, aWins: 4, bWins: 5, halves: 0 }],
+      headToHead: [{ a: ANN, b: BO, aWins: 4, bWins: 5, halves: 0 }], partners: [], superlatives: {},
     });
 
     renderPanel();
@@ -219,7 +219,7 @@ describe("SeasonPanel — standings", () => {
       status: "open",
       rounds: [],
       ledger: [{ golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann" }],
-      headToHead: [],
+      headToHead: [], partners: [], superlatives: {},
     });
 
     renderPanel();
@@ -235,7 +235,7 @@ describe("SeasonPanel — standings", () => {
   it("zero counted rounds: shows the build-up explainer, not an empty table", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
-    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
+    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [], partners: [], superlatives: {} });
 
     renderPanel();
 
@@ -252,7 +252,7 @@ describe("SeasonPanel — standings", () => {
       status: "open",
       rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, appendedBy: ANN }],
       ledger: [],
-      headToHead: [],
+      headToHead: [], partners: [], superlatives: {},
     });
 
     renderPanel();
@@ -267,7 +267,7 @@ describe("SeasonPanel — standings", () => {
   it("empty ledger: the table footnote does not render (nothing to gloss)", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
-    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
+    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [], partners: [], superlatives: {} });
 
     renderPanel();
 
@@ -300,7 +300,7 @@ describe("SeasonPanel — counted rounds", () => {
         { roundId: roundId("round-2"), finalizedAt: 1_700_100_000_000, appendedBy: BO }, // not mine
       ],
       ledger: [],
-      headToHead: [],
+      headToHead: [], partners: [], superlatives: {},
     });
 
     renderPanel(ANN);
@@ -328,9 +328,9 @@ describe("SeasonPanel — counted rounds", () => {
         status: "open",
         rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, appendedBy: ANN }],
         ledger: [],
-        headToHead: [],
+        headToHead: [], partners: [], superlatives: {},
       })
-      .mockResolvedValueOnce({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
+      .mockResolvedValueOnce({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [], partners: [], superlatives: {} });
     mockedRemoveCountedRound.mockResolvedValue({ roundId: roundId("round-1") });
 
     renderPanel();
@@ -359,7 +359,7 @@ describe("SeasonPanel — count a round", () => {
       status: "open",
       rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_699_000_000_000, appendedBy: ANN }], // already counted this season
       ledger: [],
-      headToHead: [],
+      headToHead: [], partners: [], superlatives: {},
     });
     mockedGetMyRounds.mockResolvedValue({ rounds: myRounds });
 
@@ -376,7 +376,7 @@ describe("SeasonPanel — count a round", () => {
   it("no uncounted finalized rounds: the empty state says so", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
-    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
+    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [], partners: [], superlatives: {} });
     mockedGetMyRounds.mockResolvedValue({ rounds: [] });
 
     renderPanel();
@@ -391,14 +391,14 @@ describe("SeasonPanel — count a round", () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings
-      .mockResolvedValueOnce({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] })
+      .mockResolvedValueOnce({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [], partners: [], superlatives: {} })
       .mockResolvedValueOnce({
         seasonId: "season-1",
         name: "2026",
         status: "open",
         rounds: [{ roundId: roundId("round-9"), finalizedAt: 1_700_000_000_000, appendedBy: ANN }],
         ledger: [],
-        headToHead: [],
+        headToHead: [], partners: [], superlatives: {},
       });
     mockedGetMyRounds.mockResolvedValue({ rounds: myRounds });
     mockedAppendCountedRound.mockResolvedValue({ round: { roundId: roundId("round-9"), finalizedAt: 1_700_000_000_000, appendedBy: ANN } });
@@ -416,7 +416,7 @@ describe("SeasonPanel — count a round", () => {
   it("409 round-already-counted surfaces as 'Already counted for this season.' — never raw error text (M9 discipline)", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
-    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
+    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [], partners: [], superlatives: {} });
     mockedGetMyRounds.mockResolvedValue({ rounds: myRounds });
     mockedAppendCountedRound.mockRejectedValue(new ApiError("round-already-counted", 409, "round round-9 is already counted in season season-1 of crew crew-1"));
 
@@ -434,7 +434,7 @@ describe("SeasonPanel — count a round", () => {
   it("409 season-closed surfaces as 'This season is closed.' — never raw error text (M9 discipline)", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
-    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [] });
+    mockedGetSeasonStandings.mockResolvedValue({ seasonId: "season-1", name: "2026", status: "open", rounds: [], ledger: [], headToHead: [], partners: [], superlatives: {} });
     mockedGetMyRounds.mockResolvedValue({ rounds: myRounds });
     mockedAppendCountedRound.mockRejectedValue(new ApiError("season-closed", 409, "season season-1 of crew crew-1 is closed"));
 
@@ -462,7 +462,7 @@ describe("SeasonPanel — count a round", () => {
       ledger: [
         { golferId: ANN, rounds: 1, wins: 0, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann" },
       ],
-      headToHead: [],
+      headToHead: [], partners: [], superlatives: {},
     });
 
     renderPanel();

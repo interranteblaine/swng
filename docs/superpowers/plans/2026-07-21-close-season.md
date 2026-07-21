@@ -19,7 +19,7 @@ titles remain a read fold. Web: organizer-only Close/Reopen + badge + teaching l
 - No stored-shape change; nothing about a title is ever stored (analytics-arc law).
 - Organizer guard = the EXISTING `removeCrewMember` idiom verbatim: load membership, `if (caller?.role !== "organizer") throw new ApplicationError("not-organizer")`.
 - 409 codes wire-distinct and exact: `season-already-closed`, `season-not-closed`.
-- Routes NOT anon-throttled; auth `golfer`; stack pins move 42→44 HTTP / 44→46 total (read the current pins — the analytics arc moved them to 42/44).
+- Routes NOT anon-throttled; auth `golfer`; stack pins move 40→42 HTTP / 42→44 total (CORRECTED post-build: the plan originally said 42→44/44→46, an arithmetic slip conflating HTTP count with total; the implementer verified reality per this line's own read-the-pins instruction).
 - Web: no new gold; `btnQuiet` verbs, `badge` for `closed`; closed seasons offer no count-a-round affordance; errors render the honest-fallback idiom.
 - `crewSeason.spec.ts`: the FROZEN deck's numbers stay byte-identical. Test 9's provisional `titles: []` pin (its own comment names this arc) is the ONE sanctioned existing-assertion update — new expected titles hand-derived from the frozen deck BEFORE the live run.
 - Work on local `main`; never push.
@@ -72,13 +72,13 @@ extract the season→view mapper into one shared function rather than duplicatin
 **Files:**
 - Modify: `packages/lambda/src/http/routes.ts` (+2), `packages/lambda/src/compositionRoot.ts`
 - Modify: `apps/infra-cdk/lib/swngStack.ts` (+2 HTTP routes; NOT anon-throttled)
-- Test: `packages/lambda/src/http/dispatch.test.ts`, stack tests (pins 42→44 HTTP / 44→46 total), routesParity stubs
+- Test: `packages/lambda/src/http/dispatch.test.ts`, stack tests (pins 40→42 HTTP / 42→44 total (corrected — see Global Constraints)), routesParity stubs
 
 **Interfaces:** consumes Task 1's use cases/schemas. Produces `POST /crews/{crewId}/seasons/{seasonId}/close` and `.../reopen`, auth `golfer`, 200.
 
 - [ ] **Step 1:** Route entries — the crew-verb idiom (`POST /crews/{crewId}/transfer`) verbatim, both path params through their ctors (`crewId(...)`, seasonId as plain string per the existing season routes).
 - [ ] **Step 2:** Composition wiring; dispatch tests: both routes exist, 401 bare, organizer 200 + non-organizer 403 through the REAL use case, 409 arms mapped.
-- [ ] **Step 3:** CDK + pins + routesParity. **Step 4: `pnpm validate`.** **Step 5: Commit** — `feat(lambda,infra): close/reopen season routes (42→44 HTTP)`
+- [ ] **Step 3:** CDK + pins + routesParity. **Step 4: `pnpm validate`.** **Step 5: Commit** — `feat(lambda,infra): close/reopen season routes (40→42 HTTP)`
 
 ---
 

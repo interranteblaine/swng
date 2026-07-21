@@ -1032,6 +1032,46 @@ trustworthy one (the declared-index precedent). Riding note from the wave's revi
 `GamePanel.tsx` sorts live stableford game lines client-side (pre-existing, out of this
 ruling's scope — a future boundary-sweep item).
 
+The season closes — the organizer's verb that makes titles real (2026-07-21, spec
+`docs/superpowers/specs/2026-07-21-close-season-design.md`, plan
+`2026-07-21-close-season.md`, 4 SDD tasks + 1 review fix, commits `0f8f244..a25a60a`, base
+`1b87e78` — the ruling-wave item (4) executed): `CrewSeason.status: "open"|"closed"` was
+load-bearing (append/remove-counted-round 409 on closed; `getCrewRecords` awards Stableford
+titles from closed seasons only) but nothing could SET it. Now: **organizer-only
+close/reopen verbs** — `POST /crews/{crewId}/seasons/{seasonId}/close` + `/reopen` (auth
+golfer, 40→42 HTTP/44 total, not anon-throttled), organizer-check BEFORE season lookup (a
+non-organizer never learns whether a seasonId exists), 409s wire-distinct
+(`season-already-closed`/`season-not-closed`), the verbs flip `status` via `putSeason` and
+store NOTHING else — titles stay a read fold, permanently. **Reopen is first-class, not an
+apology** (one tap, no confirm — a correctable system is the trustworthy one, the
+declared-index precedent); reopening is provably lossless since nothing about a title is
+ever stored. Web: Close season (`btnQuiet`, confirm + teaching line "Closing locks this
+season's counted rounds and awards its titles — you can reopen it later."), `closed` badge,
+Reopen in place of Close, and BOTH mutation doors hidden on a closed season — count-a-round
+AND the per-round Remove (the task review caught Remove still showing, the exact
+"door the server has closed" rule; fixed `52dc926` with the one-rule comment
+cross-referenced). E2E: crewSeason test 9's provisional `titles: []` pin (its own comment
+named this arc) upgraded — close the FROZEN deck's season live → the crown lands on the
+{Al, Bo} 430 tie ("The Golden Dozen"; Cy/Dee's 435s roster-filtered out — the
+counter-intuitive-but-correct case, independently re-derived by the oracle review) → reopen
+→ `[]`, deck numbers untouched, rerun-safe. Whole-branch review (fable): READY TO DEPLOY —
+YES, 0 Critical/0 Important (guard surface complete, wire additive-only, one-gold holds);
+noted as design-not-defect: a closed season's title can still shift with roster changes —
+aggregation scope is the standing law, and the teaching line claims only what's true.
+Close-out (controller-run): validate exit 0 → `deploy:beta` LAMBDA-FIRST (UPDATE_COMPLETE,
+42 HTTP routes confirmed incl. close/reopen) → `publish:web:beta` (`index-BYhpsnXh.js`,
+curl-verified) → e2e:beta 17/17 ×2 → **crewSeason 10/10 live, the title crown on its FIRST
+live run** → full e2e:field 66/1-skip → a browser walk on DEPLOYED beta.swng.golf (fresh
+"Golfer 0023", real PKCE): season "2026" closed through the real confirm (teaching line
+verbatim, oxblood Confirm — a careful action, no gold), the closed state wearing the badge
+with Reopen and NO count door, reopened in one tap restoring everything; console zero app
+errors (the on-screen title with a real crown is API+unit-verified — staging a multi-player
+stableford season live wasn't warranted, the plus-handicap-walk precedent). NO wipe.
+Riding: refetch-failure shows the generic line after a SUCCESSFUL close (idiom-consistent
+with count/remove), picker state survives a close/reopen cycle (cosmetic), the organizer
+guard now duplicated 4× (extract on next occurrence), the plan's pin-arithmetic slip
+corrected in the doc post-build.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

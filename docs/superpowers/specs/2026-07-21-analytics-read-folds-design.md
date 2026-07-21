@@ -76,8 +76,10 @@ Served on `GET /me/record` and `GET /golfers/{golferId}` through the existing sh
   qualifying round in canonical line order:
   - `first-birdie` / `first-eagle` — first round (9s count) containing a hole result 1
     (resp. ≥2) under its frozen par.
-  - `broke-100` / `broke-90` / `broke-80` / `broke-70` — first fully holed-out **18**
-    with gross under the threshold.
+  - `broke-100` / `broke-90` / `broke-80` — first fully holed-out **18** with gross
+    under the threshold. (product.md §5 names 90/80; 100 added as the target golfer's
+    most common real threshold. `broke-70` was considered and CUT — slop audit,
+    2026-07-21: fires for approximately nobody in the product's audience.)
   - The web may render a "Best round" line inside the Milestones block from `bests`.
   - Milestones are computed on read: a corrected card self-heals them.
 
@@ -153,6 +155,9 @@ existing ledger (leave → rows vanish; rejoin → restored).
   this same pipeline as additive line fields.
 - Milestone *firing* (push/feed) and the Season-in-Golf recap: the Feed pillar's push
   side; the computed values here are its future inputs.
+- Streaks (product.md §5 names them): deliberately absent from this build — not on the
+  owner-reviewed mockup and they need their own definition work (what streak, over what
+  window). A future metrics-fold addition, same pipeline.
 - Warehouse/S3 export: only ever as an additional consumer of snapshots for internal
   analysis, never an authority; nothing built now.
 

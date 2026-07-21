@@ -5,6 +5,7 @@ import type { CourseView } from "@swng/contracts";
 import { ApiError, getCourse } from "../api";
 import { btnPrimary, inputBox } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
+import { CourseRecordSection } from "./CourseRecordSection";
 import { teeNumbers } from "./teeNumbers";
 
 // Course-cards spec §7: the course hub — a read-only summary of a lineage's CURRENT card
@@ -114,6 +115,10 @@ function CoursePageForId({ courseIdParam }: { readonly courseIdParam: string }) 
           Add a tee
         </Link>
       </div>
+
+      {/* Analytics read-folds spec 2026-07-21 §4: "Your record here" — signed-in only; the
+          section gates itself since this page's own GET /courses read stays "none"-auth. */}
+      <CourseRecordSection courseId={view.courseId} />
     </main>
   );
 }

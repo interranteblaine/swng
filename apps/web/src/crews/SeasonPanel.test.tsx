@@ -275,6 +275,91 @@ describe("SeasonPanel — standings", () => {
     expect(screen.queryByText("From this season's counted rounds — match results, Stableford points, and skins for current members.")).toBeNull();
   });
 
+  // Analytics read-folds spec 2026-07-21 §5: partners + superlatives from a fixture.
+  it("renders partners and season superlatives from a fixture", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({
+      seasonId: "season-1",
+      name: "2026",
+      status: "open",
+      rounds: [],
+      ledger: [
+        { golferId: ANN, rounds: 6, wins: 3, losses: 2, halves: 1, points: 120, skins: 2, name: "Ann" },
+        { golferId: BO, rounds: 6, wins: 2, losses: 3, halves: 1, points: 100, skins: 1, name: "Bo" },
+      ],
+      headToHead: [],
+      partners: [{ a: ANN, b: BO, nameA: "Ann", nameB: "Bo", wins: 4, losses: 1, halves: 2 }],
+      superlatives: {
+        lowestNet: { holes: 18, average: 78.4, rounds: 4, golfers: [{ golferId: ANN, name: "Ann" }] },
+        mostImproved: [{ golferId: BO, name: "Bo", from: 14.2, to: 11.8 }],
+      },
+    });
+
+    renderPanel();
+
+    expect(await screen.findByRole("heading", { name: "Partners — four-ball" })).toBeTruthy();
+    expect(screen.getByText("Ann & Bo — 4–1 · 2 halved")).toBeTruthy();
+
+    expect(screen.getByRole("heading", { name: "Season superlatives" })).toBeTruthy();
+    expect(screen.getByText("Lowest net average — Ann · 78.4 (4 rounds)")).toBeTruthy();
+    expect(screen.getByText("Most improved — Bo · 14.2 → 11.8")).toBeTruthy();
+  });
+
+  it("a tied lowest net and a 9-hole hole count render correctly; zero halves omits the suffix", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({
+      seasonId: "season-1",
+      name: "2026",
+      status: "open",
+      rounds: [],
+      ledger: [{ golferId: ANN, rounds: 3, wins: 1, losses: 0, halves: 0, points: 20, skins: 0, name: "Ann" }],
+      headToHead: [],
+      partners: [{ a: ANN, b: BO, nameA: "Ann", nameB: "Bo", wins: 1, losses: 0, halves: 0 }],
+      superlatives: {
+        lowestNet: {
+          holes: 9,
+          average: 4.0,
+          rounds: 3,
+          golfers: [
+            { golferId: ANN, name: "Ann" },
+            { golferId: BO, name: "Bo" },
+          ],
+        },
+      },
+    });
+
+    renderPanel();
+
+    expect(await screen.findByText("Ann & Bo — 1–0")).toBeTruthy(); // no halves suffix at 0
+    expect(screen.getByText("Lowest net average — Ann & Bo · 4.0 (3 rounds · 9 holes)")).toBeTruthy();
+    expect(screen.queryByText(/Most improved/)).toBeNull();
+  });
+
+  it("empty partners and absent superlatives render NOTHING — no empty-state footnote", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({
+      seasonId: "season-1",
+      name: "2026",
+      status: "open",
+      rounds: [],
+      ledger: [{ golferId: ANN, rounds: 3, wins: 1, losses: 0, halves: 0, points: 20, skins: 0, name: "Ann" }],
+      headToHead: [],
+      partners: [],
+      superlatives: {},
+    });
+
+    renderPanel();
+
+    await screen.findByRole("table");
+    expect(screen.queryByRole("heading", { name: "Partners — four-ball" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Season superlatives" })).toBeNull();
+    expect(screen.queryByText(/Lowest net average/)).toBeNull();
+    expect(screen.queryByText(/Most improved/)).toBeNull();
+  });
+
   it("a standings load failure renders an honest quiet message, never a thrown render", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });

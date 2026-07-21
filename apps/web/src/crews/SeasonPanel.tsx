@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { CrewId, GolferId, RoundId } from "@swng/domain";
+import { formatHandicapIndex } from "@swng/domain";
 import type { GetMyRoundsResponse, SeasonStandingsResponse } from "@swng/contracts";
 import { appendCountedRound, ApiError, getMyRounds, getSeasonStandings, removeCountedRound } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnSecondary, cardBox } from "../ui/classes";
+import { headToHeadLine } from "./headToHeadLine";
 
 export interface SeasonPanelProps {
   readonly crewId: CrewId;
@@ -26,27 +27,6 @@ const humanizeAppendError = (caught: unknown): string => {
   if (caught instanceof ApiError && caught.code === "round-already-counted") return "Already counted for this season.";
   if (caught instanceof ApiError && caught.code === "season-closed") return "This season is closed.";
   return "Could not count that round — try again.";
-};
-
-// Head-to-head as a sentence, leader first — never the raw a/b row order. Names are GolferLinks
-// (the link sweep, task 6); the connective words/score/halves suffix stay plain text — joined so
-// the rendered TEXT is byte-identical to the old plain-string sentence.
-const headToHeadLine = (h2h: SeasonStandingsResponse["headToHead"][number], nameOf: (id: GolferId) => string): ReactNode => {
-  const tied = h2h.aWins === h2h.bWins;
-  const aLeads = h2h.aWins > h2h.bWins;
-  const firstId = tied || aLeads ? h2h.a : h2h.b;
-  const secondId = tied || aLeads ? h2h.b : h2h.a;
-  const score = tied || aLeads ? `${h2h.aWins}–${h2h.bWins}` : `${h2h.bWins}–${h2h.aWins}`;
-  return (
-    <>
-      <GolferLink golferId={firstId} name={nameOf(firstId)} />
-      {tied ? " and " : " leads "}
-      <GolferLink golferId={secondId} name={nameOf(secondId)} />
-      {tied ? " are tied " : " "}
-      {score}
-      {h2h.halves > 0 && ` · ${h2h.halves} halved`}
-    </>
-  );
 };
 
 // GET /crews/{crewId}/seasons/{seasonId}/standings (architecture-realignment Task 9/11):
@@ -192,6 +172,49 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
           <ul aria-label="Head to head" className="flex flex-col gap-1 text-sm text-fairway">
             {standings.headToHead.map((h2h) => (
               <li key={`${h2h.a}#${h2h.b}`}>{headToHeadLine(h2h, nameOf)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Partner records (analytics read-folds spec 2026-07-21 §5): four-ball pairs, both current
+          roster members — an empty list renders NOTHING (the ledger's own empty-state discipline,
+          no footnote into an empty state). */}
+      {standings.partners.length > 0 && (
+        <div>
+          <h4 className="text-base font-semibold text-forest">Partners — four-ball</h4>
+          <ul className="flex flex-col gap-1 text-sm text-fairway">
+            {standings.partners.map((pair) => (
+              <li key={`${pair.a}#${pair.b}`}>
+                {pair.nameA} & {pair.nameB} — {pair.wins}–{pair.losses}
+                {pair.halves > 0 && ` · ${pair.halves} halved`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Season superlatives (analytics read-folds spec 2026-07-21 §5): lowest net average (ties
+          share the entry, `golfers` naming all of them) and most improved (biggest swng-index drop
+          first) — each superlative is independently absent when nobody qualifies, and the WHOLE
+          block renders NOTHING when both are absent (no empty-state footnote). `from`/`to` are raw
+          swng index values — rendered through `formatHandicapIndex` (never a bare signed number),
+          same as every other index on screen. */}
+      {(standings.superlatives.lowestNet ?? standings.superlatives.mostImproved) && (
+        <div>
+          <h4 className="text-base font-semibold text-forest">Season superlatives</h4>
+          <ul className="flex flex-col gap-1 text-sm text-fairway">
+            {standings.superlatives.lowestNet && (
+              <li>
+                Lowest net average — {standings.superlatives.lowestNet.golfers.map((golfer) => golfer.name).join(" & ")} ·{" "}
+                {standings.superlatives.lowestNet.average.toFixed(1)} ({standings.superlatives.lowestNet.rounds} rounds
+                {standings.superlatives.lowestNet.holes === 9 ? " · 9 holes" : ""})
+              </li>
+            )}
+            {standings.superlatives.mostImproved?.map((entry) => (
+              <li key={entry.golferId}>
+                Most improved — {entry.name} · {formatHandicapIndex(entry.from)} → {formatHandicapIndex(entry.to)}
+              </li>
             ))}
           </ul>
         </div>

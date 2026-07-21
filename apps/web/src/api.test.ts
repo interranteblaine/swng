@@ -23,7 +23,9 @@ import {
   finalizeRound,
   getCourse,
   getCrew,
+  getCrewRecords,
   getMe,
+  getMyCourseRecord,
   getMyLiveRounds,
   getMyRecord,
   getMyRounds,
@@ -528,6 +530,24 @@ describe("getSeasonStandings", () => {
   });
 });
 
+describe("getCrewRecords", () => {
+  it("GETs /crews/{crewId}/records with the bearer token and parses a CrewRecordsResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { rounds: 5, ledger: [], headToHead: [], partners: [], titles: [] });
+    });
+
+    const result = await getCrewRecords("tok-crew", crewId("crew-1"));
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/records`);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-crew");
+    expect(result).toEqual({ rounds: 5, ledger: [], headToHead: [], partners: [], titles: [] });
+  });
+});
+
 describe("leaveCrew", () => {
   it("POSTs to /crews/{crewId}/leave with the bearer token and parses a LeaveCrewResponse", async () => {
     let seenUrl: string | undefined;
@@ -804,6 +824,24 @@ describe("getMyRecord", () => {
       metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [], bests: {}, milestones: [] },
       history: [],
     });
+  });
+});
+
+describe("getMyCourseRecord", () => {
+  it("GETs /me/courses/{courseId}/record with the bearer token and parses a GetMyCourseRecordResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { courseId: "course-1", rounds: 3 });
+    });
+
+    const result = await getMyCourseRecord("tok-me", courseId("course-1"));
+
+    expect(seenUrl).toBe(`${HTTP_URL}/me/courses/course-1/record`);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
+    expect(result).toEqual({ courseId: courseId("course-1"), rounds: 3 });
   });
 });
 

@@ -115,6 +115,60 @@ describe("RecordSections", () => {
     expect(screen.queryByText(/you've/)).toBeNull();
   });
 
+  it("renders Best rounds + Milestones from a fixture, each linked to its round via the history join", () => {
+    const best18Round = line("b18", { courseId: courseId("course-1") }); // courseName defaults to "Pebble Beach"
+    const best9Round = line("b9", { courseId: courseId("course-2"), courseName: "Old Muni", holes: 9, par: 36 });
+    const milestoneRound = line("m1", { courseId: courseId("course-3"), courseName: "Sandy Hollow" });
+    const metrics: GolferMetrics = {
+      ...ZERO_METRICS,
+      bests: {
+        best18: { roundId: best18Round.roundId, gross: 74, toPar: 2 },
+        best9: { roundId: best9Round.roundId, gross: 35, toPar: -1 },
+      },
+      milestones: [
+        { kind: "first-birdie", roundId: milestoneRound.roundId },
+        { kind: "broke-90", roundId: milestoneRound.roundId },
+      ],
+    };
+    renderSections(metrics, [best18Round, best9Round, milestoneRound]);
+
+    expect(screen.getByRole("heading", { name: "Best rounds" })).toBeTruthy();
+    expect(screen.getByText(/Best 18: 74 \(\+2\)/)).toBeTruthy();
+    const best18Link = screen.getByRole("link", { name: "Pebble Beach" });
+    expect(best18Link.getAttribute("href")).toBe(`/rounds/${best18Round.roundId}`);
+
+    expect(screen.getByText(/Best 9: 35 \(-1\)/)).toBeTruthy();
+    const best9Link = screen.getByRole("link", { name: "Old Muni" });
+    expect(best9Link.getAttribute("href")).toBe(`/rounds/${best9Round.roundId}`);
+
+    expect(screen.getByRole("heading", { name: "Milestones" })).toBeTruthy();
+    expect(screen.getByText(/First birdie/)).toBeTruthy();
+    expect(screen.getByText(/Broke 90/)).toBeTruthy();
+    const milestoneLinks = screen.getAllByRole("link", { name: "Sandy Hollow" });
+    expect(milestoneLinks).toHaveLength(2); // one per milestone entry, same round
+    expect(milestoneLinks[0]!.getAttribute("href")).toBe(`/rounds/${milestoneRound.roundId}`);
+  });
+
+  it("no bests/milestones ({bests: {}, milestones: []}): neither section renders, even with history present", () => {
+    renderSections(ZERO_METRICS, [line("1")]);
+
+    expect(screen.queryByRole("heading", { name: "Best rounds" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Milestones" })).toBeNull();
+  });
+
+  it("a best/milestone roundId with no matching history row falls back to plain text — no crash, no link", () => {
+    const metrics: GolferMetrics = {
+      ...ZERO_METRICS,
+      bests: { best18: { roundId: roundId("missing-round"), gross: 90, toPar: 18 } },
+      milestones: [{ kind: "broke-100", roundId: roundId("missing-round") }],
+    };
+    renderSections(metrics, []);
+
+    expect(screen.getByText("Best 18: 90 (+18)")).toBeTruthy();
+    expect(screen.getByText("Broke 100")).toBeTruthy();
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+  });
+
   it('person="their", 8+ rounds: the chart heading, aria-label, and "last N rounds" caption all mirror pronouns', () => {
     const history = Array.from({ length: 8 }, (_, i) => line(String(i + 1)));
     const indexHistory = history.map((entry, i) => ({ roundId: entry.roundId, swngIndex: 12 - i * 0.2, whsIndex: 12.5 - i * 0.15 }));

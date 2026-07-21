@@ -2,6 +2,7 @@ import {
   abandonRoundResponseSchema,
   addGameResponseSchema,
   appendCountedRoundResponseSchema,
+  crewRecordsResponseSchema,
   createCourseResponseSchema,
   createCrewResponseSchema,
   createSeasonResponseSchema,
@@ -11,6 +12,7 @@ import {
   getCrewResponseSchema,
   getGolferResponseSchema,
   getMeResponseSchema,
+  getMyCourseRecordResponseSchema,
   getMyLiveRoundsResponseSchema,
   getMyRecordResponseSchema,
   getMyRoundsResponseSchema,
@@ -47,11 +49,13 @@ import type {
   CreateCrewResponse,
   CreateSeasonRequest,
   CreateSeasonResponse,
+  CrewRecordsResponse,
   FinalizeRoundResponse,
   GetCourseResponse,
   GetCrewResponse,
   GetGolferResponse,
   GetMeResponse,
+  GetMyCourseRecordResponse,
   GetMyLiveRoundsResponse,
   GetMyRecordResponse,
   GetMyRoundsResponse,
@@ -257,6 +261,14 @@ export const getMyRecord = async (token: string): Promise<GetMyRecordResponse> =
   return parse(getMyRecordResponseSchema, json);
 };
 
+// GET /me/courses/{courseId}/record (analytics read-folds spec 2026-07-21 §4): "Your record
+// here" — the caller's own rows at one course. Same requestJson + per-endpoint idiom as
+// getMyRecord above, "golfer"-gated the same way.
+export const getMyCourseRecord = async (token: string, courseId: CourseId): Promise<GetMyCourseRecordResponse> => {
+  const json = await requestJson(`/me/courses/${courseId}/record`, { token });
+  return parse(getMyCourseRecordResponseSchema, json);
+};
+
 // Navigation spec §6a: GET /golfers/{golferId} — any signed-in golfer may view any golfer's
 // record (handicaps are posted in every clubhouse, not private). Same requestJson + per-endpoint
 // idiom as getMyRecord above, "golfer"-gated the same way — the target golferId rides the path,
@@ -406,4 +418,12 @@ export const getSeasonStandings = async (token: string, id: CrewId, seasonId: st
 export const leaveCrew = async (token: string, id: CrewId): Promise<LeaveCrewResponse> => {
   const json = await requestJson(`/crews/${id}/leave`, { method: "POST", token });
   return parse(leaveCrewResponseSchema, json);
+};
+
+// GET /crews/{crewId}/records (analytics read-folds spec 2026-07-21 §5): "All-time" — every
+// counted round across every season, folded once. Same requestJson + per-endpoint idiom as
+// getSeasonStandings above, "golfer"-gated the same way (member-only, application-side).
+export const getCrewRecords = async (token: string, id: CrewId): Promise<CrewRecordsResponse> => {
+  const json = await requestJson(`/crews/${id}/records`, { token });
+  return parse(crewRecordsResponseSchema, json);
 };

@@ -22,6 +22,7 @@ vi.mock("../api", () => ({
   createSeason: vi.fn(),
   listSeasons: vi.fn(),
   getSeasonStandings: vi.fn(),
+  getCrewRecords: vi.fn(),
   leaveCrew: vi.fn(),
   mintCrewInvite: vi.fn(),
   removeCrewMember: vi.fn(),
@@ -38,7 +39,7 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, createSeason, getCrew, getMe, getSeasonStandings, leaveCrew, listSeasons, mintCrewInvite, removeCrewMember, transferOrganizer } from "../api";
+import { ApiError, createSeason, getCrew, getCrewRecords, getMe, getSeasonStandings, leaveCrew, listSeasons, mintCrewInvite, removeCrewMember, transferOrganizer } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { CrewPage } from "./CrewPage";
@@ -48,6 +49,7 @@ const mockedGetMe = vi.mocked(getMe);
 const mockedCreateSeason = vi.mocked(createSeason);
 const mockedListSeasons = vi.mocked(listSeasons);
 const mockedGetSeasonStandings = vi.mocked(getSeasonStandings);
+const mockedGetCrewRecords = vi.mocked(getCrewRecords);
 const mockedLeaveCrew = vi.mocked(leaveCrew);
 const mockedMintCrewInvite = vi.mocked(mintCrewInvite);
 const mockedRemoveCrewMember = vi.mocked(removeCrewMember);
@@ -61,6 +63,7 @@ beforeEach(() => {
   mockedCreateSeason.mockReset();
   mockedListSeasons.mockReset();
   mockedGetSeasonStandings.mockReset();
+  mockedGetCrewRecords.mockReset();
   mockedLeaveCrew.mockReset();
   mockedMintCrewInvite.mockReset();
   mockedRemoveCrewMember.mockReset();
@@ -548,6 +551,26 @@ describe("CrewPage — seasons", () => {
     // exact echo must never reach the page, even though "Summer Cup" itself is still sitting
     // in the (uncontrolled-by-this-assertion) input value.
     expect(document.body.textContent).not.toMatch(/season name must be 1-60 characters: "Summer Cup"/);
+  });
+});
+
+// Analytics read-folds spec 2026-07-21 §5: CrewRecordsSection composes below the season list,
+// wired to THIS crew's own id — its own full behavior (the table, head-to-head, partners,
+// titles) is pinned directly against CrewRecordsSection.test.tsx, not re-tested here
+// (SeasonPanel's own precedent one describe block up).
+describe("CrewPage — all-time records", () => {
+  it("composes CrewRecordsSection, wired to this crew's own id", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetCrew.mockResolvedValue({ crew });
+    mockedListSeasons.mockResolvedValue(emptySeasons);
+    mockedGetCrewRecords.mockResolvedValue({ rounds: 0, ledger: [], headToHead: [], partners: [], titles: [] });
+
+    renderPage();
+    await waitForLoaded();
+
+    expect(await screen.findByText("No rounds counted yet.")).toBeTruthy();
+    expect(mockedGetCrewRecords).toHaveBeenCalledWith(expect.any(String), crewId("crew-1"));
   });
 });
 

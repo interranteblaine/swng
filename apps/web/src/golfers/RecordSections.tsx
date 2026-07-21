@@ -1,7 +1,8 @@
+import type { ReactNode } from "react";
 import { Link } from "react-router";
-import type { GolferMetrics, GolferRoundLine, IndexPoint } from "@swng/domain";
+import type { BestRound, GolferMetrics, GolferRoundLine, IndexPoint, Milestone, MilestoneKind } from "@swng/domain";
 import { formatHandicapIndex } from "@swng/domain";
-import { cardBox } from "../ui/classes";
+import { cardBox, linkEntity } from "../ui/classes";
 
 // "Your index over time" (metrics-projection-grows spec, papercut 17's follow-on) — a
 // dependency-free inline SVG (no chart lib needed: two plain polylines are enough to show
@@ -130,6 +131,49 @@ const vsPar = (ags: number, par: number): string => {
   return d === 0 ? "E" : d > 0 ? `+${d}` : `${d}`;
 };
 
+// Bests + milestones (analytics read-folds spec 2026-07-21 §3): both name a `roundId` only —
+// the course name comes from a JOIN against this same response's own `history` (rendering, not
+// compute; the domain fold already produced gross/toPar). A `roundId` with no matching history
+// row (a corrected fold outrunning a stale card — shouldn't happen in practice) falls back to
+// the plain score/label text rather than a crash. `vsPar(best.toPar, 0)` reuses the FILE'S own
+// sign convention above: `toPar` already IS a signed relative-to-par delta, so treating it as the
+// "ags" against a par of 0 yields the identical "E"/"+n"/"n" formatting, no second sign helper.
+const bestLine = (label: string, best: BestRound, history: readonly GolferRoundLine[]): ReactNode => {
+  const row = history.find((line) => line.roundId === best.roundId);
+  const scoreText = `${label}: ${best.gross} (${vsPar(best.toPar, 0)})`;
+  if (!row) return scoreText;
+  return (
+    <>
+      {scoreText} —{" "}
+      <Link to={`/rounds/${best.roundId}`} className={linkEntity}>
+        {row.courseName}
+      </Link>
+    </>
+  );
+};
+
+const MILESTONE_LABELS: Record<MilestoneKind, string> = {
+  "first-birdie": "First birdie",
+  "first-eagle": "First eagle",
+  "broke-100": "Broke 100",
+  "broke-90": "Broke 90",
+  "broke-80": "Broke 80",
+};
+
+const milestoneLine = (milestone: Milestone, history: readonly GolferRoundLine[]): ReactNode => {
+  const row = history.find((line) => line.roundId === milestone.roundId);
+  const label = MILESTONE_LABELS[milestone.kind];
+  if (!row) return label;
+  return (
+    <>
+      {label} —{" "}
+      <Link to={`/rounds/${milestone.roundId}`} className={linkEntity}>
+        {row.courseName}
+      </Link>
+    </>
+  );
+};
+
 // "Your typical 18" (metrics.typicalEighteen — always present, zeroed rather than absent below
 // any bootstrap): the career scoring shape normalized to one 18-hole round, so a golfer who
 // mostly plays 9s isn't shown a deflated total.
@@ -203,6 +247,28 @@ export function RecordSections({ metrics, history, historyLimit, person = "your"
   return (
     <>
       <IndexOverTime points={metrics.indexHistory} roundsPlayed={history.length} person={person} />
+
+      {/* Best rounds + Milestones (analytics read-folds spec 2026-07-21 §3) — render nothing
+          when empty (the ledger's own empty-state discipline: no footnote, just absence). */}
+      {(metrics.bests.best18 ?? metrics.bests.best9) && (
+        <div>
+          <h3 className="text-base font-semibold">Best rounds</h3>
+          <ul className="flex flex-col gap-1 text-sm text-fairway tabular-nums">
+            {metrics.bests.best18 && <li>{bestLine("Best 18", metrics.bests.best18, history)}</li>}
+            {metrics.bests.best9 && <li>{bestLine("Best 9", metrics.bests.best9, history)}</li>}
+          </ul>
+        </div>
+      )}
+      {metrics.milestones.length > 0 && (
+        <div>
+          <h3 className="text-base font-semibold">Milestones</h3>
+          <ul className="flex flex-col gap-1 text-sm text-fairway">
+            {metrics.milestones.map((m) => (
+              <li key={m.kind}>{milestoneLine(m, history)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <p className="text-sm text-fairway tabular-nums">{describeTypicalEighteen(metrics.typicalEighteen)}</p>
 

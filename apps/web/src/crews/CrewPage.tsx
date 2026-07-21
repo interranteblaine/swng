@@ -9,6 +9,7 @@ import { useAuth } from "../auth/useAuth";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnDanger, btnDangerSolid, btnPrimary, btnSecondary, cardBox, inputBox } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
+import { CrewRecordsSection } from "./CrewRecordsSection";
 import { SeasonPanel } from "./SeasonPanel";
 
 // A crew load can fail two honest ways the wire names (errorMapping.ts) — both get human
@@ -415,6 +416,11 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
             reset — no seasonId-changed effect dance needed inside SeasonPanel itself. */}
         {selectedSeasonId && <SeasonPanel key={selectedSeasonId} crewId={id} seasonId={selectedSeasonId} myGolferId={auth.golfer?.golferId} />}
       </section>
+
+      {/* Analytics read-folds spec 2026-07-21 §5: "All-time" — every season's counted rounds
+          folded once, below the season list (not inside it — this spans every season, not just
+          the selected one). */}
+      <CrewRecordsSection crewId={id} />
 
       {/* Architecture-realignment Task 11: "Leave crew" — the caller's own membership only,
           with a confirm step (a click-to-reveal Confirm/Cancel idiom, not a native confirm() —

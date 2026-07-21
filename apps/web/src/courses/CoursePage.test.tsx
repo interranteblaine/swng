@@ -1,12 +1,18 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { courseId, teeId } from "@swng/domain";
+import { courseId, golferId, teeId } from "@swng/domain";
 import type { CourseView } from "@swng/contracts";
+import { createMemoryStorage } from "../testSupport/memoryStorage";
 
-// Faking the api.ts module boundary (M5's own idiom) — CoursePage only ever calls getCourse.
+// Faking the api.ts module boundary (M5's own idiom) — CoursePage itself only ever calls
+// getCourse; getMe/getMyCourseRecord are here because CourseRecordSection (analytics read-folds
+// spec 2026-07-21 §4) is now composed onto this page and reaches useAuth (which calls getMe) and
+// its own fetch through the SAME "../api" module boundary.
 vi.mock("../api", () => ({
   getCourse: vi.fn(),
+  getMe: vi.fn(),
+  getMyCourseRecord: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -19,10 +25,25 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { getCourse } from "../api";
+import { getCourse, getMe, getMyCourseRecord } from "../api";
+import { AuthProvider } from "../auth/useAuth";
+import { tokenStore } from "../auth/tokenStore";
 import { CoursePage } from "./CoursePage";
 
 const mockedGetCourse = vi.mocked(getCourse);
+const mockedGetMe = vi.mocked(getMe);
+const mockedGetMyCourseRecord = vi.mocked(getMyCourseRecord);
+
+const base64url = (obj: unknown): string =>
+  btoa(JSON.stringify(obj))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+const signIn = (): void => {
+  const idToken = `${base64url({ alg: "none" })}.${base64url({ sub: "sub-1", email: "ann@example.com" })}.sig`;
+  tokenStore.save({ idToken, refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
+};
 
 const view: CourseView = {
   courseId: courseId("course-1"),
@@ -75,21 +96,28 @@ function EditStub() {
 
 const renderPage = (initialEntry = "/courses/course-1") =>
   render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/courses/:courseId" element={<CoursePage />} />
-        <Route path="/create" element={<CreateStub />} />
-        <Route path="/courses/:courseId/edit" element={<EditStub />} />
-      </Routes>
-    </MemoryRouter>,
+    <AuthProvider>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/courses/:courseId" element={<CoursePage />} />
+          <Route path="/create" element={<CreateStub />} />
+          <Route path="/courses/:courseId/edit" element={<EditStub />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthProvider>,
   );
 
 beforeEach(() => {
+  vi.stubGlobal("localStorage", createMemoryStorage());
+  vi.stubGlobal("sessionStorage", createMemoryStorage());
   mockedGetCourse.mockReset();
+  mockedGetMe.mockReset();
+  mockedGetMyCourseRecord.mockReset();
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe("CoursePage", () => {
@@ -188,5 +216,32 @@ describe("CoursePage", () => {
 
     expect(screen.getByRole("option", { name: "white — rating 71.8, slope 130" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "red — unrated" })).toBeTruthy();
+  });
+
+  // Analytics read-folds spec 2026-07-21 §4: CourseRecordSection composes onto the page after
+  // the card block, wired to THIS course's own id — its own full behavior (the gate copy, the
+  // per-hole phrases) is pinned directly against CourseRecordSection.test.tsx, not re-tested
+  // here (SeasonPanel/CrewPage.test.tsx's own precedent for a composed section).
+  it("composes CourseRecordSection, wired to this course's own id, once signed in", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann", indexSource: { kind: "swng" } } });
+    mockedGetCourse.mockResolvedValue({ course: view });
+    mockedGetMyCourseRecord.mockResolvedValue({ courseId: view.courseId, rounds: 2 });
+
+    renderPage();
+    await screen.findByRole("heading", { name: "Pebble Beach" });
+
+    expect(await screen.findByRole("heading", { name: "Your record here" })).toBeTruthy();
+    expect(mockedGetMyCourseRecord).toHaveBeenCalledWith(expect.any(String), view.courseId);
+  });
+
+  it("renders no course-record section when signed out", async () => {
+    mockedGetCourse.mockResolvedValue({ course: view });
+
+    renderPage();
+    await screen.findByRole("heading", { name: "Pebble Beach" });
+
+    expect(screen.queryByRole("heading", { name: "Your record here" })).toBeNull();
+    expect(mockedGetMyCourseRecord).not.toHaveBeenCalled();
   });
 });

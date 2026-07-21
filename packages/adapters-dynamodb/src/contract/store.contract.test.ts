@@ -37,6 +37,22 @@ describe("createDynamoRoundStore", () => {
     const store = createDynamoRoundStore({ client: local.client, tableName: local.roundsTable });
     expect(await store.findByJoinCode(`missing-${randomUUID()}`)).toBeUndefined();
   });
+
+  it("getJoinCode returns the code createRound stored", async () => {
+    const store = createDynamoRoundStore({ client: local.client, tableName: local.roundsTable });
+    const id = roundId(randomUUID());
+    const joinCode = randomUUID().slice(0, 6).toUpperCase();
+
+    await store.createRound({ roundId: id, joinCode });
+
+    expect(await store.getJoinCode(id)).toBe(joinCode);
+  });
+
+  it("getJoinCode returns undefined for an unknown round", async () => {
+    const store = createDynamoRoundStore({ client: local.client, tableName: local.roundsTable });
+    const unknownId = roundId(randomUUID());
+    expect(await store.getJoinCode(unknownId)).toBeUndefined();
+  });
 });
 
 describe("createDynamoConnectionRegistry", () => {

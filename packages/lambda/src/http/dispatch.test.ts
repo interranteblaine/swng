@@ -182,7 +182,7 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
     getRoundArchive: getRoundArchive({ snapshots }),
-    mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
+    mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens, store }),
     createCourse: createCourse({ cardStore, golferStore, idGenerator: ids, clock, logger }),
     supersedeCard: supersedeCard({ cardStore, golferStore, idGenerator: ids, clock, logger }),
     getCourse: getCourse({ cardStore }),
@@ -1923,7 +1923,9 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(200);
     const minted = joinRoundResponseSchema.parse(JSON.parse(resp.body!));
-    expect(minted).toEqual({ roundId: started.roundId, token: expect.any(String), golferId: started.golferId });
+    // The join code rides the credential (spec 2026-07-20 §2) — mint's own response carries the
+    // SAME code startRound minted, read back off the round's meta item.
+    expect(minted).toEqual({ roundId: started.roundId, token: expect.any(String), golferId: started.golferId, joinCode: started.joinCode });
 
     // The re-minted token actually authorizes a "participant"-tier route — a real round trip,
     // not just a response-shape check.

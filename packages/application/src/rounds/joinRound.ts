@@ -69,5 +69,7 @@ export const joinRound =
 
     const token = deps.tokens.issue({ scope: "participant", roundId: id, golferId: golfer });
 
-    return { roundId: id, token, golferId: golfer };
+    // Echo, not a second read: findByJoinCode(command.code) just matched, so command.code IS
+    // the canonical stored code (spec 2026-07-20 §2).
+    return { roundId: id, token, golferId: golfer, joinCode: command.code };
   };

@@ -1,5 +1,5 @@
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import type { RoundId } from "@swng/domain";
 import type { RoundStore } from "@swng/application";
 import { metaSk, roundPk } from "./keys.js";
@@ -37,6 +37,20 @@ export const createDynamoRoundStore = (config: { client: DynamoDBDocumentClient;
       );
       const item = result.Items?.[0] as { roundId: RoundId } | undefined;
       return item?.roundId;
+    },
+
+    getJoinCode: async (roundId: RoundId) => {
+      // Base-table read of createRound's meta item — ConsistentRead like every other base-table
+      // read here (the GSI caveat above is findByJoinCode's alone).
+      const result = await client.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: { pk: roundPk(roundId), sk: metaSk },
+          ConsistentRead: true,
+        }),
+      );
+      const item = result.Item as { joinCode: string } | undefined;
+      return item?.joinCode;
     },
   };
 };

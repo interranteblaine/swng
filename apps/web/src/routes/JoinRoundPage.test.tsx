@@ -184,7 +184,7 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
   it("uppercases the code and joins as-self: code + tee/handicap + the account's Bearer (seat resolved server-side, never a typed name)", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });
-    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-self"), token: "tok-self", golferId: golferId("bo-g") });
+    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-self"), token: "tok-self", golferId: golferId("bo-g"), joinCode: "SELF01" });
 
     renderJoin();
     await screen.findByText(/playing as/i);
@@ -239,7 +239,7 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("dee-g"), name: "Dee" } });
     mockedPeekRound.mockRejectedValue(new Error("no round with that code"));
-    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-3"), token: "tok-3", golferId: golferId("dee-g") });
+    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-3"), token: "tok-3", golferId: golferId("dee-g"), joinCode: "ZZZ999" });
 
     renderJoin();
     await screen.findByText(/playing as/i);
@@ -404,7 +404,7 @@ describe("JoinRoundPage — strokes you get here", () => {
   it("a typed value is never overwritten by the peek/record seed", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G", indexSource: { kind: "declared", value: 12.4 } } });
-    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-typed"), token: "tok-typed", golferId: golferId("bo-g") });
+    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-typed"), token: "tok-typed", golferId: golferId("bo-g"), joinCode: "ABC123" });
     mockedPeekRound.mockResolvedValue({
       courseName: "Fixture Links 18",
       teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.6, slope: 128 }],

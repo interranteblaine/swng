@@ -92,6 +92,10 @@ export interface JoinRoundResponse {
   readonly roundId: RoundId;
   readonly token: string;
   readonly golferId: GolferId;
+  // The round's join code — participant-scoped round metadata, delivered with the credential
+  // (spec 2026-07-20 §2): holding a participant token means holding the code, on every door in
+  // (join here, re-mint via POST /rounds/{roundId}/token; StartRoundResponse already carries it).
+  readonly joinCode: string;
 }
 
 export interface AddGameResponse {
@@ -134,6 +138,7 @@ export const joinRoundResponseSchema: z.ZodType<JoinRoundResponse> = z.object({
   roundId: roundIdSchema,
   token: z.string(),
   golferId: golferIdSchema,
+  joinCode: z.string(),
 });
 
 export const addGameResponseSchema: z.ZodType<AddGameResponse> = z.object({

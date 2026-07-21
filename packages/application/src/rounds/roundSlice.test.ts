@@ -433,6 +433,7 @@ describe("JoinRound — as-self only", () => {
 
     const joined = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: BO.sub });
     expect(joined.golferId).toBe(BO.id);
+    expect(joined.joinCode).toBe(host.joinCode);
 
     const boJoinedEvent = (await ctx.events(host.roundId, 3)).events[0];
     expect(boJoinedEvent).toMatchObject({ kind: "participant-joined", authorId: BO.id, participant: { golferId: BO.id, name: BO.name } });

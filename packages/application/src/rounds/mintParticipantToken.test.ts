@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { cardId, courseId, fixtureLinks, golferId, roundId } from "@swng/domain";
+import type { RoundStore } from "../ports/roundStore.js";
 import type { TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
@@ -51,15 +52,21 @@ const setup = async () => {
   const cardRecord = await seedCard(cardStore, courseId("course-1"), cardId("card-1"), fixtureLinks);
   const course = { courseId: cardRecord.courseId, cardId: cardRecord.cardId };
 
+  // getJoinCode is deliberately overridden to a fixed value here — start/join still exercise
+  // the real createRound/findByJoinCode round-trip; mint's own assertions pin the fixed value
+  // so they read independently of whatever code startRound happened to mint.
+  const mintStore: RoundStore = { ...store, getJoinCode: async () => "ABC123" };
+
   return {
     journal,
     golferStore,
     tokens,
     course,
+    store: mintStore,
     start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
-    mint: mintParticipantToken({ journal, golferStore, tokens }),
+    mint: mintParticipantToken({ journal, golferStore, tokens, store: mintStore }),
   };
 };
 
@@ -78,6 +85,7 @@ describe("mintParticipantToken — new-device re-mint", () => {
 
     expect(minted.roundId).toBe(host.roundId);
     expect(minted.golferId).toBe(annId);
+    expect(minted.joinCode).toBe("ABC123");
     expect(ctx.tokens.verify(minted.token)).toEqual({ scope: "participant", roundId: host.roundId, golferId: annId });
   });
 
@@ -99,6 +107,7 @@ describe("mintParticipantToken — new-device re-mint", () => {
     const minted = await ctx.mint({ sub: "sub-bo" }, host.roundId);
 
     expect(minted.golferId).toBe(boId);
+    expect(minted.joinCode).toBe("ABC123");
     expect(ctx.tokens.verify(minted.token)).toEqual({ scope: "participant", roundId: host.roundId, golferId: boId });
   });
 
@@ -142,6 +151,26 @@ describe("mintParticipantToken — new-device re-mint", () => {
     await ctx.finalize({ roundId: host.roundId, golferId: annId });
 
     await expect(ctx.mint({ sub: "sub-ann" }, host.roundId)).rejects.toMatchObject({ code: "round-final" });
+  });
+
+  it("throws round-not-found 404 when the round's meta item is missing (getJoinCode returns undefined) — an actual participant, folded round, no meta row", async () => {
+    const ctx = await setup();
+    const annId = golferId("ann-account");
+    await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
+
+    const host = await ctx.start(
+      { course: ctx.course, host: { tee: "white", courseHandicap: 8 } },
+      { sub: "sub-ann" },
+    );
+
+    const mintNoMeta = mintParticipantToken({
+      journal: ctx.journal,
+      golferStore: ctx.golferStore,
+      tokens: ctx.tokens,
+      store: { ...ctx.store, getJoinCode: async () => undefined },
+    });
+
+    await expect(mintNoMeta({ sub: "sub-ann" }, host.roundId)).rejects.toMatchObject({ code: "round-not-found" });
   });
 
   it("throws round-not-found 404 for a roundId that was never created", async () => {

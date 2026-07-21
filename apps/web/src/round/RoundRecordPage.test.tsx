@@ -245,7 +245,7 @@ describe("RoundRecordPage — resolution when the archive read fails (navigation
         }
         if (path === `/rounds/${ROUND_ID}/token` && method === "POST") {
           expect((init?.headers as Record<string, string>).authorization).toBe(`Bearer ${idToken}`);
-          return fakeResponse(200, { roundId: ROUND_ID, token: "fresh-token", golferId: ANN_ID });
+          return fakeResponse(200, { roundId: ROUND_ID, token: "fresh-token", golferId: ANN_ID, joinCode: "FRESH1" });
         }
         throw new Error(`unexpected fetch ${path} ${method}`);
       }),

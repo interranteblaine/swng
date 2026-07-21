@@ -296,8 +296,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     getRoundArchive: getRoundArchive({ snapshots }),
     // journal/golferStore/tokens (architecture-realignment Task 14): the SAME journal/tokens
     // instances startRound/joinRound above already share, plus the SAME golferStore
-    // startRound/joinRound above share.
-    mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens }),
+    // startRound/joinRound above share. store (spec 2026-07-20 §2): the SAME createDynamoRoundStore
+    // instance startRound/joinRound above already share — mint now reads the round's own join
+    // code off it too.
+    mintParticipantToken: mintParticipantToken({ journal, golferStore, tokens, store }),
     // Course-cards spec §4: createCourse/supersedeCard derive enteredBy from the account
     // (golferStore's own get-or-create), so they take the SAME golferStore startRound/joinRound
     // share; the two reads take only the cardStore.

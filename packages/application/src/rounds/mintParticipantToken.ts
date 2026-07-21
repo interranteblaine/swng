@@ -4,6 +4,7 @@ import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
+import type { RoundStore } from "../ports/roundStore.js";
 import type { TokenIssuer } from "../ports/tokenIssuer.js";
 import { loadRoundState } from "./loadRoundState.js";
 
@@ -30,7 +31,7 @@ import { loadRoundState } from "./loadRoundState.js";
 //    is rejected before liveness is ever considered, so a stranger can't probe whether a round
 //    they've never played is live or final.
 export const mintParticipantToken =
-  (deps: { journal: EventJournal; golferStore: GolferStore; tokens: TokenIssuer }) =>
+  (deps: { journal: EventJournal; golferStore: GolferStore; tokens: TokenIssuer; store: RoundStore }) =>
   async (claims: AccountClaims, id: RoundId): Promise<JoinRoundResponse> => {
     const found = await deps.golferStore.getBySub(claims.sub);
     if (!found) throw new ApplicationError("not-a-participant");
@@ -42,6 +43,13 @@ export const mintParticipantToken =
 
     if (state.status === "final") throw new ApplicationError("round-final");
 
+    // The join code rides the credential (spec 2026-07-20 §2): a device re-minting on a new
+    // phone must leave knowing the round's code, or the Join code panel goes blank (the former
+    // papercut 19). A round with events but no meta item is unknown/corrupt — same 404 as any
+    // missing round.
+    const joinCode = await deps.store.getJoinCode(id);
+    if (joinCode === undefined) throw new ApplicationError("round-not-found");
+
     const token = deps.tokens.issue({ scope: "participant", roundId: id, golferId: found.golfer.id });
-    return { roundId: id, token, golferId: found.golfer.id };
+    return { roundId: id, token, golferId: found.golfer.id, joinCode };
   };

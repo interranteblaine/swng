@@ -138,14 +138,14 @@ describe("joinRound", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(201, { roundId: "round-1", token: "tok-2", golferId: "bo" });
+      return fakeResponse(201, { roundId: "round-1", token: "tok-2", golferId: "bo", joinCode: "ABC123" });
     });
 
     const result = await joinRound(input);
 
     expect(seenUrl).toBe(`${HTTP_URL}/rounds/join`);
     expect(JSON.parse(String(seenInit?.body))).toEqual(input);
-    expect(result).toEqual({ roundId: roundId("round-1"), token: "tok-2", golferId: golferId("bo") });
+    expect(result).toEqual({ roundId: roundId("round-1"), token: "tok-2", golferId: golferId("bo"), joinCode: "ABC123" });
   });
 
   it("throws a coded ApiError on a bad join code", async () => {
@@ -162,7 +162,7 @@ describe("joinRound", () => {
     let seenInit: RequestInit | undefined;
     stubFetch(async (_url, init) => {
       seenInit = init;
-      return fakeResponse(201, { roundId: "round-1", token: "tok-2", golferId: "bo-g" });
+      return fakeResponse(201, { roundId: "round-1", token: "tok-2", golferId: "bo-g", joinCode: "ABC123" });
     });
 
     await joinRound(input, "tok-caller");
@@ -862,7 +862,7 @@ describe("mintParticipantToken", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { roundId: "round-1", token: "fresh-token", golferId: "golfer-1" });
+      return fakeResponse(200, { roundId: "round-1", token: "fresh-token", golferId: "golfer-1", joinCode: "FRESH1" });
     });
 
     const result = await mintParticipantToken("tok-mint", roundId("round-1"));
@@ -870,7 +870,7 @@ describe("mintParticipantToken", () => {
     expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/token`);
     expect(seenInit?.method).toBe("POST");
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-mint");
-    expect(result).toEqual({ roundId: roundId("round-1"), token: "fresh-token", golferId: golferId("golfer-1") });
+    expect(result).toEqual({ roundId: roundId("round-1"), token: "fresh-token", golferId: golferId("golfer-1"), joinCode: "FRESH1" });
   });
 });
 

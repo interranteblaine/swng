@@ -84,12 +84,15 @@ export const createInMemoryJournal = (snapshotSink?: Pick<InMemorySnapshotStore,
 
 export const createInMemoryRoundStore = (): RoundStore => {
   const roundIdByJoinCode = new Map<string, RoundId>();
+  const joinCodeByRoundId = new Map<RoundId, string>();
 
   return {
     createRound: async ({ roundId, joinCode }) => {
       roundIdByJoinCode.set(joinCode, roundId);
+      joinCodeByRoundId.set(roundId, joinCode);
     },
     findByJoinCode: async (code) => roundIdByJoinCode.get(code),
+    getJoinCode: async (roundId) => joinCodeByRoundId.get(roundId),
   };
 };
 

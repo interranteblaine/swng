@@ -127,4 +127,34 @@ describe("archiveGolferLine", () => {
     const line = archiveGolferLine(extremes, G);
     expect(line.distribution).toEqual({ eagles: 1, birdies: 0, pars: 0, bogeys: 0, doublePlus: 1 });
   });
+
+  it("holeResults records every decided hole with its frozen par, in card order", () => {
+    // fixtureWhite18 pars: h1=4, h2=4, h3=3 (h4 is left unscored — no par pin needed).
+    const mixed: RoundArchive = {
+      ...baseArchive,
+      cells: {
+        [cellKey(G, 1)]: cell(1, 5), // strokes
+        [cellKey(G, 2)]: { result: { kind: "picked-up" }, recordedBy: G, hlc: { wallMs: 2, counter: 0, deviceId: deviceId("d") }, opId: opId("op-pu") },
+        [cellKey(G, 3)]: { result: { kind: "conceded" }, recordedBy: G, hlc: { wallMs: 3, counter: 0, deviceId: deviceId("d") }, opId: opId("op-cc") },
+        // hole 4: no cell at all — unscored.
+        [cellKey(G, 5)]: { result: { kind: "cleared" }, recordedBy: G, hlc: { wallMs: 5, counter: 0, deviceId: deviceId("d") }, opId: opId("op-cl") },
+      },
+    };
+    const line = archiveGolferLine(mixed, G);
+    expect(line.holeResults).toEqual([
+      { hole: 1, par: 4, result: { kind: "strokes", strokes: 5 } },
+      { hole: 2, par: 4, result: { kind: "picked-up" } },
+      { hole: 3, par: 3, result: { kind: "conceded" } },
+      // hole 4 (silence) and hole 5 (cleared) are OMITTED — cellAt's own contract.
+    ]);
+  });
+
+  it("holeResults and distribution agree — one walk, strokes cells only in the buckets", () => {
+    const line = archiveGolferLine(baseArchive, G);
+    const strokesHoles = line.holeResults!.filter((h) => h.result.kind === "strokes");
+    const bucketTotal =
+      line.distribution.eagles + line.distribution.birdies + line.distribution.pars +
+      line.distribution.bogeys + line.distribution.doublePlus;
+    expect(strokesHoles.length).toBe(bucketTotal);
+  });
 });

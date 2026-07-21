@@ -8,3 +8,8 @@ export type HoleResult =
   // The fold RETAINS cleared cells under HLC-latest — deleting would let a late-arriving
   // older write resurrect the score — and cellAt (round/state.ts) hides them from readers.
   | { readonly kind: "cleared" };
+
+// What a reader sees through cellAt (round/state.ts): absent-or-cleared is undefined, so a
+// cell a reader actually receives is never "cleared". The narrowed alias exists so extracts
+// built through cellAt (golfer/record.ts's holeResults) carry the truth in their type.
+export type DecidedHoleResult = Exclude<HoleResult, { kind: "cleared" }>;

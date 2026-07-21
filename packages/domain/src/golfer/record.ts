@@ -2,7 +2,16 @@ import { findTeeSet } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import type { CourseId, GolferId, RoundId } from "../ids.js";
 import type { RoundArchive } from "../round/archive.js";
+import type { DecidedHoleResult } from "../round/holeResult.js";
 import { cellAt } from "../round/state.js";
+
+// One decided hole from the frozen card (analytics spec 2026-07-21 §2) — par is the card's
+// par for that hole AS PLAYED, so a later card supersession never rewrites a historical line.
+export interface GolferHoleLine {
+  readonly hole: number;
+  readonly par: number;
+  readonly result: DecidedHoleResult;
+}
 
 // What one archive contributes to one golfer's permanent record — the per-round line a
 // history view lists and the index projector folds over (architecture.md §2's "everything
@@ -26,6 +35,12 @@ export interface GolferRoundLine {
     readonly bogeys: number;
     readonly doublePlus: number;
   };
+  // The player's hole-by-hole facts from the frozen card (analytics spec 2026-07-21 §2):
+  // decided cells only via cellAt (unscored + cleared omitted), card order, par frozen at play
+  // time — a later card supersession never rewrites a historical line. OPTIONAL because lines
+  // written before this field exist until one rebuildProjections run backfills them; readers
+  // exclude such lines from hole-based stats with honest sample counts, never throw.
+  readonly holeResults?: readonly GolferHoleLine[];
 }
 
 export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): GolferRoundLine => {
@@ -38,9 +53,13 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
   // holed out (no stroke count to compare against par) and an unscored hole is silence,
   // not a zero; both count nowhere, per the hand-pinned distribution this mirrors.
   const distribution = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
+  const holeResults: GolferHoleLine[] = [];
   for (const hole of teeSet.holes) {
     const cell = cellAt(archive.cells, golferId, hole.number);
-    if (!cell || cell.result.kind !== "strokes") continue;
+    if (!cell) continue;
+    if (cell.result.kind === "cleared") continue; // unreachable (cellAt hides cleared) — narrows the type
+    holeResults.push({ hole: hole.number, par: hole.par, result: cell.result });
+    if (cell.result.kind !== "strokes") continue;
     const relativeToPar = cell.result.strokes - hole.par;
     if (relativeToPar <= -2) distribution.eagles += 1;
     else if (relativeToPar === -1) distribution.birdies += 1;
@@ -65,5 +84,6 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
     ...(handicapping?.kind === "complete" ? { ags: handicapping.ags, differential: handicapping.differential } : {}),
     ...(handicapping?.kind === "unrated" ? { ags: handicapping.ags } : {}),
     distribution,
+    holeResults,
   };
 };

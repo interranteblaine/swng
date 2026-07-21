@@ -167,6 +167,11 @@ export default [
                 // crew season aggregation
                 "crewContribution",
                 "aggregateSeason",
+                // crew analytics — partner records / net averages / most improved / season titles
+                "partnerRecords",
+                "netAverages",
+                "mostImproved",
+                "stablefordTitle",
                 // golden-deck runners (barrel-exported, run domain compute — nonsensical in
                 // product, but fenced so the ban covers EVERY barrel-exported golf computation)
                 "playGoldenRound",

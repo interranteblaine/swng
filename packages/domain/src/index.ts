@@ -45,6 +45,10 @@ export { courseRecord } from "./golfer/courseRecord.js";
 export * from "./golfer/present.js";
 export * from "./crew/crew.js";
 export * from "./crew/ledger.js";
+// crew/analytics.ts (analytics spec 2026-07-21 §5): partner records / net averages / most
+// improved / season titles — folds beside the existing standings, banned onto the web-side
+// fence below like every other barrel-exported golf computation.
+export * from "./crew/analytics.js";
 // GameConfig is already re-exported via ./round/events.js (game.ts owns the
 // type; events.ts re-exports it so RoundEvent's "game-added" arm has a name to
 // reference) — re-export game.ts's other members individually so `export *`

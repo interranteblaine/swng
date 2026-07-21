@@ -30,8 +30,9 @@ export interface CrewRoundContribution {
 // archive.games and archive.results share ids (settleRound builds every result directly
 // from a config in archive.games — round/archive.ts), so a result always has a matching
 // config at the same id; the lookup below narrows the union for TS, not for a case that can
-// actually happen at runtime.
-const configForResult = <Kind extends string>(archive: RoundArchive, id: string, kind: Kind): Extract<RoundArchive["games"][number], { readonly kind: Kind }> => {
+// actually happen at runtime. Exported (analytics spec 2026-07-21 §5) so crew/analytics.ts's
+// partnerRecords reuses this SAME lookup for fourball configs — one copy, never duplicated.
+export const configForResult = <Kind extends string>(archive: RoundArchive, id: string, kind: Kind): Extract<RoundArchive["games"][number], { readonly kind: Kind }> => {
   const config = archive.games.find((candidate) => candidate.id === id);
   if (config?.kind !== kind) {
     throw new DomainError("crew-ledger-config-mismatch", `no "${kind}" config for result "${id}" in archive "${archive.roundId}"`);

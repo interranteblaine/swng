@@ -64,6 +64,9 @@ const stubUseCases: UseCases = {
   getMyRecord: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
+  getMyCourseRecord: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
   getMyRounds: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
@@ -110,6 +113,9 @@ const stubUseCases: UseCases = {
     throw new Error("not implemented: parity test never dispatches");
   },
   getSeasonStandings: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  getCrewRecords: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
   leaveCrew: () => {

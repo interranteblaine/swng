@@ -14,12 +14,14 @@ import type {
   CreateCrewResponse,
   CreateSeasonRequest,
   CreateSeasonResponse,
+  CrewRecordsResponse,
   EventsResponse,
   FinalizeRoundResponse,
   GetCourseResponse,
   GetCrewResponse,
   GetGolferResponse,
   GetMeResponse,
+  GetMyCourseRecordResponse,
   GetMyLiveRoundsResponse,
   GetMyRecordResponse,
   GetMyRoundsResponse,
@@ -124,6 +126,9 @@ export interface UseCases {
   getMyGolfer: (claims: AccountClaims) => Promise<GetMeResponse>;
   updateMyGolfer: (claims: AccountClaims, command: UpdateMeRequest) => Promise<GolferResponse>;
   getMyRecord: (claims: AccountClaims) => Promise<GetMyRecordResponse>;
+  // Analytics spec 2026-07-21 §4: "your record here" — the SAME get-or-nothing shape as
+  // getMyRecord above, filtered to one course. The target courseId rides the path.
+  getMyCourseRecord: (claims: AccountClaims, id: CourseId) => Promise<GetMyCourseRecordResponse>;
   // Projection-realignment Task 6: "list my rounds" — same golfer-tier auth as getMyRecord.
   getMyRounds: (claims: AccountClaims) => Promise<GetMyRoundsResponse>;
   // Projection-realignment Task 13: "your rounds, right now" — presence pointers, not
@@ -155,6 +160,11 @@ export interface UseCases {
   appendCountedRound: (claims: AccountClaims, id: CrewId, seasonId: string, command: AppendCountedRoundRequest) => Promise<AppendCountedRoundResponse>;
   removeCountedRound: (claims: AccountClaims, id: CrewId, seasonId: string, roundId: RoundId) => Promise<RemoveCountedRoundResponse>;
   getSeasonStandings: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<SeasonStandingsResponse>;
+  // Analytics spec 2026-07-21 §5: all-time — every counted round across every season, deduped by
+  // roundId — the SAME roster-filter + aggregateSeason composition getSeasonStandings above runs,
+  // plus partner records and each closed season's Stableford title. Member-only authorization
+  // lives in application (crews/membership.ts), never re-checked here.
+  getCrewRecords: (claims: AccountClaims, id: CrewId) => Promise<CrewRecordsResponse>;
   leaveCrew: (claims: AccountClaims, id: CrewId) => Promise<LeaveCrewResponse>;
   // Crew membership (invited in, accountable out — spec §1): the organizer's authority.
   // Organizer-gated inside application (crews/membership.ts's requireCrewMember, then a role
@@ -444,6 +454,15 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     successStatus: 200,
     handler: async (ctx) => useCases.getMyRecord(ctx.account!),
   },
+  // Analytics spec 2026-07-21 §4: "your record here" — same golfer tier, same shape of call as
+  // GET /me/record just above, filtered to one course (the target courseId rides the path).
+  {
+    method: "GET",
+    path: "/me/courses/{courseId}/record",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getMyCourseRecord(ctx.account!, courseId(ctx.pathParams.courseId!)),
+  },
   // Projection-realignment Task 6: "list my rounds" — same golfer tier, same shape of call as
   // GET /me/record just above.
   {
@@ -574,6 +593,15 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 200,
     handler: async (ctx) => useCases.getSeasonStandings(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!),
+  },
+  // Analytics spec 2026-07-21 §5: all-time records across every season — same golfer tier,
+  // member-only authorization inside application (crews/membership.ts), never re-checked here.
+  {
+    method: "GET",
+    path: "/crews/{crewId}/records",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getCrewRecords(ctx.account!, crewId(ctx.pathParams.crewId!)),
   },
   {
     method: "POST",

@@ -45,9 +45,11 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (37, as of the navigation spec's GET /golfers/{golferId} — the
-// course-cards wire switch had trimmed this to 36 by dropping add-tee/verify for one whole-
-// card PUT /courses/{courseId}) routes are declared here explicitly (matching
+// function — but the (40, as of analytics spec 2026-07-21's two reads, GET
+// /me/courses/{courseId}/record and GET /crews/{crewId}/records — the navigation spec's GET
+// /golfers/{golferId} had brought this to 37; the course-cards wire switch trimmed it to 36
+// before that by dropping add-tee/verify for one whole-card PUT /courses/{courseId}) routes
+// are declared here explicitly (matching
 // packages/lambda/src/http/routes.ts) rather than via a single $default catch-all, so the API's
 // shape is visible in the CloudFormation template and the AWS console, not hidden inside the
 // Lambda. Exported (not module-private) so test/routesParity.test.ts can pin this table against
@@ -93,6 +95,9 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.GET, path: "/me" },
   { method: HttpMethod.PUT, path: "/me" },
   { method: HttpMethod.GET, path: "/me/record" },
+  // Analytics spec 2026-07-21 §4: "your record here" — same golfer tier as GET /me/record,
+  // filtered to one course.
+  { method: HttpMethod.GET, path: "/me/courses/{courseId}/record" },
   // Projection-realignment Task 6: "list my rounds" — same golfer tier as GET /me/record.
   { method: HttpMethod.GET, path: "/me/rounds" },
   // Projection-realignment Task 13: "your rounds, right now" — presence, not finalized
@@ -121,12 +126,16 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // is conscripted onto a roster; they accept an invite (spec §3).
   { method: HttpMethod.POST, path: "/crews/{crewId}/invites" },
   // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave.
-  // GET /crews/{crewId}/records is GONE (the crew projection layer it read from is deleted).
+  // (GET /crews/{crewId}/records was GONE here — the old crew projection layer it read from was
+  // deleted — until analytics spec 2026-07-21 §5 brought it back, computed on read below.)
   { method: HttpMethod.POST, path: "/crews/{crewId}/seasons" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/seasons" },
   { method: HttpMethod.POST, path: "/crews/{crewId}/seasons/{seasonId}/rounds" },
   { method: HttpMethod.DELETE, path: "/crews/{crewId}/seasons/{seasonId}/rounds/{roundId}" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/seasons/{seasonId}/standings" },
+  // Analytics spec 2026-07-21 §5: all-time records across every season — same golfer tier as
+  // the standings route just above.
+  { method: HttpMethod.GET, path: "/crews/{crewId}/records" },
   { method: HttpMethod.POST, path: "/crews/{crewId}/leave" },
   // Crew membership (invited in, accountable out — spec §1): the organizer's authority — remove
   // (organizer-only, target in the path) and transfer (organizer-only, target in the body).

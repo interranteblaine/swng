@@ -23,7 +23,9 @@ import {
   finalizeRound,
   getCourse,
   getCrew,
+  getCrewRecords,
   getGolfer,
+  getMyCourseRecord,
   getMyGolfer,
   getMyLiveRounds,
   getMyRecord,
@@ -60,6 +62,7 @@ import {
   createCourseResponseSchema,
   createCrewResponseSchema,
   createSeasonResponseSchema,
+  crewRecordsResponseSchema,
   errorResponseSchema,
   eventsResponseSchema,
   finalizeRoundResponseSchema,
@@ -67,6 +70,7 @@ import {
   getCrewResponseSchema,
   getGolferResponseSchema,
   getMeResponseSchema,
+  getMyCourseRecordResponseSchema,
   getMyLiveRoundsResponseSchema,
   getMyRecordResponseSchema,
   getMyRoundsResponseSchema,
@@ -191,6 +195,7 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
     getMyRecord: getMyRecord({ golferStore, projectionStore, clock }),
+    getMyCourseRecord: getMyCourseRecord({ golferStore, projectionStore }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
     getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
     getGolfer: getGolfer({ golferStore, projectionStore }),
@@ -205,6 +210,7 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
     removeCountedRound: removeCountedRound({ crewStore, golferStore }),
     getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
+    getCrewRecords: getCrewRecords({ crewStore, golferStore, snapshots }),
     leaveCrew: leaveCrew({ crewStore, golferStore }),
     removeCrewMember: removeCrewMember({ crewStore, golferStore }),
     transferOrganizer: transferOrganizer({ crewStore, golferStore }),
@@ -894,6 +900,26 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
       history: [],
     });
   });
+
+  // Analytics spec 2026-07-21 §4: GET /me/courses/{courseId}/record — the SAME get-or-nothing
+  // idiom as GET /me/record just above, filtered to one course.
+  describe("GET /me/courses/{courseId}/record", () => {
+    it("returns rounds: 0 for a golfer who has never played a finalized round at this course — call-through to getMyCourseRecord", async () => {
+      const { dispatcher } = await setupGolfer();
+      const resp = asStructured(
+        await dispatcher(makeEvent({ method: "GET", path: `/me/courses/${DEFAULT_COURSE.courseId}/record`, token: golferBearer(ann) })),
+      );
+      expect(resp.statusCode).toBe(200);
+      expect(getMyCourseRecordResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ courseId: DEFAULT_COURSE.courseId, rounds: 0 });
+    });
+
+    it("401s with no bearer token at all — golfer-tier auth", async () => {
+      const { dispatcher } = await setupGolfer();
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/me/courses/${DEFAULT_COURSE.courseId}/record` })));
+      expect(resp.statusCode).toBe(401);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+    });
+  });
 });
 
 // Accounts-only identity (spec §3): StartRound/JoinRound are the "golfer" auth tier now (there is
@@ -1407,6 +1433,87 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/leave`, token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(409);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "organizer-must-transfer" });
+  });
+
+  // Analytics spec 2026-07-21 §5: GET /crews/{crewId}/records — all-time records across every
+  // season, folded through the SAME roster-filter + aggregateSeason composition getSeasonStandings
+  // above runs (getCrewRecords.ts's own doc comment).
+  describe("GET /crews/{crewId}/records", () => {
+    it("returns rounds: 0 and an empty ledger for a crew with no counted rounds yet — call-through to getCrewRecords", async () => {
+      const { dispatcher } = await setupCrews();
+      await putMe(dispatcher, ann, "Ann");
+      const created = createCrewResponseSchema.parse(
+        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      );
+
+      const resp = asStructured(
+        await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/records`, token: golferBearer(ann) })),
+      );
+      expect(resp.statusCode).toBe(200);
+      expect(crewRecordsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: 0, ledger: [], headToHead: [], partners: [], titles: [] });
+    });
+
+    it("counts a finalized round appended into a season — the SAME counted-round lifecycle the un-count test above drives", async () => {
+      const { dispatcher } = await setupCrews();
+      const annGolfer = await putMe(dispatcher, ann, "Ann");
+
+      const started = startRoundResponseSchema.parse(
+        JSON.parse(
+          asStructured(
+            await dispatcher(
+              makeEvent({
+                method: "POST",
+                path: "/rounds",
+                token: golferBearer(ann),
+                body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } },
+              }),
+            ),
+          ).body!,
+        ),
+      );
+      expect(
+        asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token }))).statusCode,
+      ).toBe(200);
+
+      const created = createCrewResponseSchema.parse(
+        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      );
+      const season = createSeasonResponseSchema.parse(
+        JSON.parse(
+          asStructured(
+            await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026" } })),
+          ).body!,
+        ),
+      ).season;
+      await dispatcher(
+        makeEvent({
+          method: "POST",
+          path: `/crews/${created.crew.crewId}/seasons/${season.seasonId}/rounds`,
+          token: golferBearer(ann),
+          body: { roundId: started.roundId },
+        }),
+      );
+
+      const resp = asStructured(
+        await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/records`, token: golferBearer(ann) })),
+      );
+      expect(resp.statusCode).toBe(200);
+      // rounds counts the distinct roundId — the finalized round had no games added, so it
+      // contributes no ledger LINE (crewContribution.ts: a golfer needs >=1 counted game to get
+      // one), the exact same "counted, but a scoreless ledger" shape the standings-DELETE test
+      // above never has to distinguish either. rounds:1 alone proves the call-through.
+      const parsed = crewRecordsResponseSchema.parse(JSON.parse(resp.body!));
+      expect(parsed.rounds).toBe(1);
+      expect(parsed.ledger).toEqual([]);
+      expect(annGolfer).toBeDefined();
+    });
+
+    it("401s with no bearer token at all — golfer-tier auth", async () => {
+      const { dispatcher } = await setupCrews();
+      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/crews/anything/records" })));
+      expect(resp.statusCode).toBe(401);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+    });
   });
 });
 

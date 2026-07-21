@@ -24,7 +24,9 @@ import {
   finalizeRound,
   getCourse,
   getCrew,
+  getCrewRecords,
   getGolfer,
+  getMyCourseRecord,
   getMyGolfer,
   getMyLiveRounds,
   getMyRecord,
@@ -317,6 +319,9 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // the SAME lines the response already carries — never a stored snapshot. The SAME system
     // clock every other use case above shares.
     getMyRecord: getMyRecord({ golferStore, projectionStore, clock }),
+    // analytics spec 2026-07-21 §4: the SAME golferStore/projectionStore instances getMyRecord
+    // above shares — get-or-nothing, filtered to one course.
+    getMyCourseRecord: getMyCourseRecord({ golferStore, projectionStore }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
     // journal (accounts-only identity spec §5): the live list derives each round's created-at from
     // its genesis at read time — the SAME journal every round use case above shares.
@@ -349,6 +354,9 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // listLines query per roster member — the SAME projectionStore instance getMyRecord above
     // shares.
     getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
+    // analytics spec 2026-07-21 §5: the SAME crewStore/golferStore/snapshots instances
+    // getSeasonStandings above shares — all-time, deduped across every season.
+    getCrewRecords: getCrewRecords({ crewStore, golferStore, snapshots }),
     leaveCrew: leaveCrew({ crewStore, golferStore }),
     // Crew membership (invited in, accountable out — spec §1): the organizer's authority — the
     // SAME crewStore/golferStore instances leaveCrew above shares.

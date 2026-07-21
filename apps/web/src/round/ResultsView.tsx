@@ -40,8 +40,6 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
     <section className="flex flex-col gap-6 p-4">
       <h1 className="text-xl font-bold text-forest">Final results</h1>
 
-      {shareToken && <ShareButton roundId={state.id} token={shareToken} />}
-
       <div>
         <h2 className="text-lg font-semibold text-forest">Roster</h2>
         <ul aria-label="Roster" className="flex flex-col gap-2">
@@ -82,6 +80,9 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
             ever opens), matching the brief's "the archived card... entry locked". */}
         <ScorecardGrid state={state} recordScore={() => {}} readOnly />
       </div>
+
+      {/* Share sits last on results too — same least-used ruling as the live view (spec 2026-07-20 §1). */}
+      {shareToken && <ShareButton roundId={state.id} token={shareToken} />}
     </section>
   );
 }

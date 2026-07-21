@@ -73,6 +73,9 @@ interface CellProps {
 
 // A tappable scorecard cell — dots above, gross (large) + net (small, only where dots apply)
 // below. This IS the "tap 1" of the two-tap contract; ScorePad below is "tap 2".
+// w-full: the cell fills its column so it stays centered under the (centered) name header at
+// any column width — min-w alone shrink-wraps and hugs the column's left edge (owner field
+// report, 2026-07-20).
 function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
   const gross = cell?.result.kind === "strokes" ? cell.result.strokes : undefined;
   const net = gross !== undefined && dots !== 0 ? netStrokes(gross, dots) : undefined;
@@ -83,7 +86,7 @@ function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
       aria-label={`${participant.name} hole ${hole.number}`}
       onClick={onTap}
       disabled={readOnly}
-      className={`${cardBox} flex min-h-14 min-w-14 flex-col items-center justify-center gap-0.5 px-1 py-1 active:bg-goldwash`}
+      className={`${cardBox} flex min-h-14 w-full min-w-14 flex-col items-center justify-center gap-0.5 px-1 py-1 active:bg-goldwash`}
     >
       {(() => {
         const grant = strokeGrant(dots);

@@ -285,15 +285,18 @@ interface LiveRoundProps {
 // chips are pure disclosure toggles now), so this component's only remaining job is composing
 // the live-only chrome that unmounts once status flips to "final".
 function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave, onSetHandicap }: LiveRoundProps) {
+  // Order is the owner's ruling (spec 2026-07-20 §1): the card and its setup first, then
+  // Finalize (the round's one big action), then the personal/destructive pair, then Share —
+  // the least-used affordance — dead last.
   return (
     <>
-      <ShareButton roundId={state.id} token={token} />
       <StandingsHeader state={state} games={games} onTerminate={onTerminate} />
       <ScorecardGrid state={state} recordScore={recordScore} />
-      <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
       <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} onSetHandicap={onSetHandicap} />
-      <ScrapControl onAbandon={onAbandon} />
+      <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
       <LeaveControl onLeave={onLeave} />
+      <ScrapControl onAbandon={onAbandon} />
+      <ShareButton roundId={state.id} token={token} />
     </>
   );
 }

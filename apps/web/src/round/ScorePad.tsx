@@ -27,8 +27,9 @@ export interface ScorePadProps {
 }
 
 // The two-tap bottom sheet (product.md §9): every button here posts and closes in one tap —
-// there is no separate confirm step. `Clear selection` is the only button that does NOT call
-// onSubmit — it exists purely to back out without posting anything.
+// there is no separate confirm step. `Cancel` is the only button that does NOT call onSubmit —
+// it backs out without posting anything (renamed from the M5-era 'Clear selection', which read
+// as a data action beside `Clear score`).
 export function ScorePad({ golfer, hole, current, onSubmit, onCancel }: ScorePadProps) {
   const values = orderedStrokeValues(hole.par);
 
@@ -61,7 +62,7 @@ export function ScorePad({ golfer, hole, current, onSubmit, onCancel }: ScorePad
         )}
       </div>
       <button type="button" className={`${btnSecondary} min-h-14`} onClick={onCancel}>
-        Clear selection
+        Cancel
       </button>
     </div>
   );

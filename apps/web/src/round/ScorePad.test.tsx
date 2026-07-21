@@ -32,13 +32,13 @@ describe("ScorePad", () => {
     for (const value of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) expect(buttons).toContain(String(value));
     expect(buttons).toContain("Picked up");
     expect(buttons).toContain("Conceded");
-    expect(screen.getByRole("button", { name: /clear selection/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
   });
 
   it("renders exactly 14 buttons (12 values + Picked up + Conceded) in the value grid", () => {
     render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={vi.fn()} onCancel={vi.fn()} />);
 
-    // 15 total on the sheet: the 14-button value grid plus the separate Clear selection button.
+    // 15 total on the sheet: the 14-button value grid plus the separate Cancel button.
     expect(screen.getAllByRole("button")).toHaveLength(15);
   });
 
@@ -84,12 +84,12 @@ describe("ScorePad", () => {
     expect(onSubmit).toHaveBeenLastCalledWith({ kind: "conceded" });
   });
 
-  it("tapping Clear selection cancels without posting anything", () => {
+  it("tapping Cancel closes without posting anything", () => {
     const onSubmit = vi.fn();
     const onCancel = vi.fn();
     render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={onSubmit} onCancel={onCancel} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /clear selection/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onSubmit).not.toHaveBeenCalled();
@@ -98,7 +98,7 @@ describe("ScorePad", () => {
 
 // A mis-tap is removable: `Clear score` posts { kind: "cleared" } — a real event through the
 // same onSubmit path as any other tap, folded/rendered as unscored everywhere (round/state.ts's
-// cellAt). Distinct from `Clear selection` above, which backs out of the pad without posting
+// cellAt). Distinct from `Cancel` above, which backs out of the pad without posting
 // anything at all.
 describe("ScorePad — Clear score", () => {
   it("shows a Clear score button when the cell currently holds a result", () => {

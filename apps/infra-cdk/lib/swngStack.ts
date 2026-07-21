@@ -45,11 +45,12 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (40, as of analytics spec 2026-07-21's two reads, GET
-// /me/courses/{courseId}/record and GET /crews/{crewId}/records — the navigation spec's GET
-// /golfers/{golferId} had brought this to 37; the course-cards wire switch trimmed it to 36
-// before that by dropping add-tee/verify for one whole-card PUT /courses/{courseId}) routes
-// are declared here explicitly (matching
+// function — but the (42, as of close-season spec 2026-07-21 §1's two organizer verbs,
+// POST .../seasons/{seasonId}/close and .../reopen — analytics spec 2026-07-21's two reads, GET
+// /me/courses/{courseId}/record and GET /crews/{crewId}/records, had brought this to 40 first;
+// the navigation spec's GET /golfers/{golferId} had brought this to 37 before that; the
+// course-cards wire switch trimmed it to 36 before that by dropping add-tee/verify for one
+// whole-card PUT /courses/{courseId}) routes are declared here explicitly (matching
 // packages/lambda/src/http/routes.ts) rather than via a single $default catch-all, so the API's
 // shape is visible in the CloudFormation template and the AWS console, not hidden inside the
 // Lambda. Exported (not module-private) so test/routesParity.test.ts can pin this table against
@@ -130,6 +131,11 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // deleted — until analytics spec 2026-07-21 §5 brought it back, computed on read below.)
   { method: HttpMethod.POST, path: "/crews/{crewId}/seasons" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/seasons" },
+  // close-season spec 2026-07-21 §1: the organizer's own verbs that flip CrewSeason.status —
+  // "golfer"-gated same as every other season route, deliberately NOT in ANON_THROTTLED_ROUTES
+  // below (a signed-in crew organizer is required to reach either).
+  { method: HttpMethod.POST, path: "/crews/{crewId}/seasons/{seasonId}/close" },
+  { method: HttpMethod.POST, path: "/crews/{crewId}/seasons/{seasonId}/reopen" },
   { method: HttpMethod.POST, path: "/crews/{crewId}/seasons/{seasonId}/rounds" },
   { method: HttpMethod.DELETE, path: "/crews/{crewId}/seasons/{seasonId}/rounds/{roundId}" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/seasons/{seasonId}/standings" },

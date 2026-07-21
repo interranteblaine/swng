@@ -18,6 +18,7 @@ import {
   abandonRound,
   addGame,
   appendCountedRound,
+  closeSeason,
   createCourse,
   createCrew,
   createSeason,
@@ -50,6 +51,7 @@ import {
   recordScore,
   removeCountedRound,
   removeCrewMember,
+  reopenSeason,
   searchCourses,
   setHandicap,
   startRound,
@@ -348,6 +350,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // cases above already share (standings fold the counted snapshots, never a stored ledger).
     createSeason: createSeason({ crewStore, golferStore, ids, clock }),
     listSeasons: listSeasons({ crewStore, golferStore }),
+    // close-season spec 2026-07-21 §1: the organizer's own verbs — the SAME crewStore/
+    // golferStore instances every other crew/season use case above shares.
+    closeSeason: closeSeason({ crewStore, golferStore }),
+    reopenSeason: reopenSeason({ crewStore, golferStore }),
     appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
     removeCountedRound: removeCountedRound({ crewStore, golferStore }),
     // projectionStore (analytics spec 2026-07-21 §5): most-improved's bounded cross-read — one

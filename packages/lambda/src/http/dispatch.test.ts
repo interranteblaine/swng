@@ -6,6 +6,7 @@ import {
   abandonRound,
   addGame,
   appendCountedRound,
+  closeSeason,
   createCapturingBroadcast,
   createCourse,
   createCrew,
@@ -47,6 +48,7 @@ import {
   recordScore,
   removeCountedRound,
   removeCrewMember,
+  reopenSeason,
   searchCourses,
   seedCard,
   setHandicap,
@@ -59,6 +61,7 @@ import {
 import {
   addGameResponseSchema,
   appendCountedRoundResponseSchema,
+  closeSeasonResponseSchema,
   createCourseResponseSchema,
   createCrewResponseSchema,
   createSeasonResponseSchema,
@@ -86,6 +89,7 @@ import {
   peekRoundResponseSchema,
   recordScoreResponseSchema,
   removeCountedRoundResponseSchema,
+  reopenSeasonResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
   setHandicapResponseSchema,
@@ -207,6 +211,8 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     joinCrewByInvite: joinCrewByInvite({ crewStore, golferStore, tokenIssuer: tokens, clock }),
     createSeason: createSeason({ crewStore, golferStore, ids, clock }),
     listSeasons: listSeasons({ crewStore, golferStore }),
+    closeSeason: closeSeason({ crewStore, golferStore }),
+    reopenSeason: reopenSeason({ crewStore, golferStore }),
     appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
     removeCountedRound: removeCountedRound({ crewStore, golferStore }),
     getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
@@ -1513,6 +1519,105 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/crews/anything/records" })));
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+    });
+  });
+
+  // close-season spec 2026-07-21 §1: the organizer's own verbs that flip CrewSeason.status —
+  // driven through the REAL dispatcher, same "mirrors transferOrganizer/removeCrewMember's own
+  // organizer-guard idiom" story the use cases themselves document.
+  describe("POST /crews/{crewId}/seasons/{seasonId}/close and .../reopen (close-season spec 2026-07-21 §1)", () => {
+    it("the organizer closes an open season (200) then reopens it (200) — status flips both ways, through the real use case", async () => {
+      const { dispatcher } = await setupCrews();
+      await putMe(dispatcher, ann, "Ann");
+      const created = createCrewResponseSchema.parse(
+        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      );
+      const season = createSeasonResponseSchema.parse(
+        JSON.parse(
+          asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026" } }))).body!,
+        ),
+      ).season;
+      expect(season.status).toBe("open");
+      const seasonPath = `/crews/${created.crew.crewId}/seasons/${season.seasonId}`;
+
+      const closeResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `${seasonPath}/close`, token: golferBearer(ann) })));
+      expect(closeResp.statusCode).toBe(200);
+      const closed = closeSeasonResponseSchema.parse(JSON.parse(closeResp.body!));
+      expect(closed.season).toMatchObject({ seasonId: season.seasonId, status: "closed" });
+
+      const reopenResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `${seasonPath}/reopen`, token: golferBearer(ann) })));
+      expect(reopenResp.statusCode).toBe(200);
+      const reopened = reopenSeasonResponseSchema.parse(JSON.parse(reopenResp.body!));
+      expect(reopened.season).toMatchObject({ seasonId: season.seasonId, status: "open" });
+    });
+
+    it("POST .../close: an ordinary member attempting to close is rejected — 403 not-organizer", async () => {
+      const { dispatcher } = await setupCrews();
+      await putMe(dispatcher, ann, "Ann");
+      const boGolfer = await putMe(dispatcher, bo, "Bo");
+      const created = createCrewResponseSchema.parse(
+        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      );
+      const invite = mintCrewInviteResponseSchema.parse(
+        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+      );
+      await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
+      const season = createSeasonResponseSchema.parse(
+        JSON.parse(
+          asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026" } }))).body!,
+        ),
+      ).season;
+
+      const resp = asStructured(
+        await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons/${season.seasonId}/close`, token: golferBearer(bo) })),
+      );
+      expect(resp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-organizer" });
+      expect(boGolfer).toBeDefined();
+    });
+
+    it("POST .../close: 401s with no bearer token at all — golfer-tier auth", async () => {
+      const { dispatcher } = await setupCrews();
+      const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews/anything/seasons/anything/close" })));
+      expect(resp.statusCode).toBe(401);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+    });
+
+    it("POST .../close on an already-closed season is rejected — 409 season-already-closed", async () => {
+      const { dispatcher } = await setupCrews();
+      await putMe(dispatcher, ann, "Ann");
+      const created = createCrewResponseSchema.parse(
+        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      );
+      const season = createSeasonResponseSchema.parse(
+        JSON.parse(
+          asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026" } }))).body!,
+        ),
+      ).season;
+      const seasonPath = `/crews/${created.crew.crewId}/seasons/${season.seasonId}`;
+
+      await dispatcher(makeEvent({ method: "POST", path: `${seasonPath}/close`, token: golferBearer(ann) }));
+      const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `${seasonPath}/close`, token: golferBearer(ann) })));
+      expect(resp.statusCode).toBe(409);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "season-already-closed" });
+    });
+
+    it("POST .../reopen on an already-open season is rejected — 409 season-not-closed", async () => {
+      const { dispatcher } = await setupCrews();
+      await putMe(dispatcher, ann, "Ann");
+      const created = createCrewResponseSchema.parse(
+        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      );
+      const season = createSeasonResponseSchema.parse(
+        JSON.parse(
+          asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026" } }))).body!,
+        ),
+      ).season;
+      const seasonPath = `/crews/${created.crew.crewId}/seasons/${season.seasonId}`;
+
+      const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `${seasonPath}/reopen`, token: golferBearer(ann) })));
+      expect(resp.statusCode).toBe(409);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "season-not-closed" });
     });
   });
 });

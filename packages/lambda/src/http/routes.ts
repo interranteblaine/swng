@@ -8,6 +8,7 @@ import type {
   AddGameResponse,
   AppendCountedRoundRequest,
   AppendCountedRoundResponse,
+  CloseSeasonResponse,
   CreateCourseRequest,
   CreateCourseResponse,
   CreateCrewRequest,
@@ -42,6 +43,7 @@ import type {
   RecordScoreRequest,
   RecordScoreResponse,
   RemoveCountedRoundResponse,
+  ReopenSeasonResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
   SetHandicapRequest,
@@ -157,6 +159,12 @@ export interface UseCases {
   // UUID — never branded, never parsed), unlike roundId which keeps its brand.
   createSeason: (claims: AccountClaims, id: CrewId, command: CreateSeasonRequest) => Promise<CreateSeasonResponse>;
   listSeasons: (claims: AccountClaims, id: CrewId) => Promise<ListSeasonsResponse>;
+  // close-season spec 2026-07-21 §1: the organizer's own verbs that flip CrewSeason.status —
+  // same golfer tier + seasonId-as-plain-string shape as createSeason/listSeasons/
+  // appendCountedRound; organizer-only authorization lives in application (crews/membership.ts
+  // + closeSeason.ts/reopenSeason.ts's own guard), never re-checked here.
+  closeSeason: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<CloseSeasonResponse>;
+  reopenSeason: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<ReopenSeasonResponse>;
   appendCountedRound: (claims: AccountClaims, id: CrewId, seasonId: string, command: AppendCountedRoundRequest) => Promise<AppendCountedRoundResponse>;
   removeCountedRound: (claims: AccountClaims, id: CrewId, seasonId: string, roundId: RoundId) => Promise<RemoveCountedRoundResponse>;
   getSeasonStandings: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<SeasonStandingsResponse>;
@@ -569,6 +577,23 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 200,
     handler: async (ctx) => useCases.listSeasons(ctx.account!, crewId(ctx.pathParams.crewId!)),
+  },
+  // close-season spec 2026-07-21 §1: the organizer's verbs — no request body (no schema),
+  // seasonId rides the path as a plain string same as every other season route below. Both an
+  // act on an existing resource, not a mint (200, same status-code spirit as transferOrganizer).
+  {
+    method: "POST",
+    path: "/crews/{crewId}/seasons/{seasonId}/close",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.closeSeason(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!),
+  },
+  {
+    method: "POST",
+    path: "/crews/{crewId}/seasons/{seasonId}/reopen",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.reopenSeason(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!),
   },
   {
     method: "POST",

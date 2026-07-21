@@ -106,6 +106,12 @@ const stubUseCases: UseCases = {
   listSeasons: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
+  closeSeason: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
+  reopenSeason: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
   appendCountedRound: () => {
     throw new Error("not implemented: parity test never dispatches");
   },

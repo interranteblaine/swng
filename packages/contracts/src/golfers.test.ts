@@ -4,6 +4,7 @@ import { courseId, golferId, roundId } from "@swng/domain";
 import type { GolferRoundLine } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
 import {
+  getGolferResponseSchema,
   getMeResponseSchema,
   getMyCourseRecordResponseSchema,
   getMyLiveRoundsResponseSchema,
@@ -175,6 +176,23 @@ describe("getMyRecordResponseSchema", () => {
     });
   });
 
+  // index-chart-polish spec §1.6: finalizedAt/createdAt are OPTIONAL on a history line — a new
+  // bundle against an old lambda (which never sends them) still parses clean; always present in
+  // practice for finalizedAt.
+  it("round-trips a history line carrying finalizedAt and createdAt", () => {
+    roundTrips(getMyRecordResponseSchema, {
+      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones },
+      history: [{ ...completeLine, finalizedAt: 2_000, createdAt: 1_500 }],
+    });
+  });
+
+  it("round-trips a history line with no finalizedAt/createdAt (the old-lambda tolerance pin)", () => {
+    roundTrips(getMyRecordResponseSchema, {
+      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones },
+      history: [completeLine],
+    });
+  });
+
   // typicalEighteen, indexHistory, bests, and milestones are all REQUIRED — a metrics object
   // missing any one of them is rejected, not silently defaulted.
   it("rejects a metrics object missing typicalEighteen", () => {
@@ -197,6 +215,45 @@ describe("getMyRecordResponseSchema", () => {
     expect(() =>
       parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], bests: {} }, history: [] }),
     ).toThrow(ContractError);
+  });
+});
+
+// GET /golfers/{golferId} (navigation spec §6a) — the same history-line shape as
+// getMyRecordResponseSchema above, including the index-chart-polish spec §1.6 finalizedAt/
+// createdAt fields, since both share golferRoundLineFields.
+describe("getGolferResponseSchema", () => {
+  const zeroTypicalEighteen = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
+  const zeroBestsMilestones = { bests: {}, milestones: [] };
+  const bareMetrics = { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones };
+  const completeLine: GolferRoundLine = {
+    roundId: roundId("r1"),
+    courseName: "Casa Verde GC",
+    tee: "white",
+    holes: 18,
+    par: 72,
+    courseHandicap: 8,
+    ags: 90,
+    differential: 12.3,
+    distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
+  };
+
+  it("round-trips a bare golfer with no history", () => {
+    roundTrips(getGolferResponseSchema, { name: "Ann", indexSource: { kind: "swng" }, metrics: bareMetrics, history: [] });
+  });
+
+  it("round-trips a history line carrying finalizedAt and createdAt", () => {
+    roundTrips(getGolferResponseSchema, {
+      name: "Ann",
+      indexSource: { kind: "swng" },
+      metrics: bareMetrics,
+      history: [{ ...completeLine, finalizedAt: 2_000, createdAt: 1_500 }],
+    });
+  });
+
+  // The old-lambda tolerance pin (index-chart-polish spec §1.6): a history row without the new
+  // fields still parses clean.
+  it("round-trips a history line with no finalizedAt/createdAt", () => {
+    roundTrips(getGolferResponseSchema, { name: "Ann", indexSource: { kind: "swng" }, metrics: bareMetrics, history: [completeLine] });
   });
 });
 

@@ -72,10 +72,10 @@ export const updateMeRequestSchema = z
 export type UpdateMeRequest = z.infer<typeof updateMeRequestSchema>;
 
 // The wire mirror of domain's GolferRoundLine (golfer/record.ts) — structurally identical,
-// same as round.ts's participantSchema mirroring Participant. Field object, not just the
-// finished schema, so GetMyRoundsResponse below can extend it with `finalizedAt` (same
-// "shared fields object" idiom as round.ts's gameConfigFields) rather than duplicating five
-// field declarations a second time.
+// same as round.ts's participantSchema mirroring Participant. Field object, not just a
+// finished schema, so GetMyRecordResponse/GetGolferResponse/GetMyRoundsResponse below can each
+// extend it with `finalizedAt`/`createdAt` (same "shared fields object" idiom as round.ts's
+// gameConfigFields) rather than duplicating the field declarations a second/third time.
 const golferRoundLineFields = {
   roundId: roundIdSchema,
   courseName: z.string(),
@@ -94,8 +94,6 @@ const golferRoundLineFields = {
     doublePlus: z.number().int(),
   }),
 } as const;
-
-const golferRoundLineSchema: z.ZodType<GolferRoundLine> = z.object(golferRoundLineFields);
 
 // The metrics read projection (handicap-model legibility spec §2, §9; unrated-courses spec §6;
 // papercut 17, domain/golfer/metrics.ts's golferMetrics): every derived index in one place,
@@ -159,7 +157,11 @@ export interface GetMyRecordResponse {
     readonly bests: GolferBests;
     readonly milestones: readonly Milestone[];
   };
-  readonly history: readonly GolferRoundLine[]; // newest first (application/src/golfers/getMyRecord.ts)
+  // newest first (application/src/golfers/getMyRecord.ts); finalizedAt/createdAt (index-chart-
+  // polish spec §1.6, the chart's date anchors) mirror GetMyRounds' own rename discipline
+  // (finalizedAtMs/createdAtMs -> finalizedAt/createdAt). Optional on the wire so a new bundle
+  // against an old lambda still parses; always present in practice for finalizedAt.
+  readonly history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number })[];
 }
 
 export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.object({
@@ -171,7 +173,7 @@ export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.objec
     bests: bestsSchema,
     milestones: z.array(milestoneSchema).readonly(),
   }),
-  history: z.array(golferRoundLineSchema).readonly(),
+  history: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int().optional(), createdAt: z.number().int().optional() })).readonly(),
 });
 
 // GET /me/courses/{courseId}/record (analytics spec 2026-07-21 §4): "Your record here" — the
@@ -217,14 +219,16 @@ export interface GetGolferResponse {
   readonly name: string;
   readonly indexSource: IndexSource;
   readonly metrics: GolferMetrics;
-  readonly history: readonly GolferRoundLine[];
+  // finalizedAt/createdAt (index-chart-polish spec §1.6) — same rename discipline and
+  // old-lambda tolerance as GetMyRecordResponse's own history above.
+  readonly history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number })[];
 }
 
 export const getGolferResponseSchema: z.ZodType<GetGolferResponse> = z.object({
   name: z.string(),
   indexSource: indexSourceSchema,
   metrics: golferMetricsSchema,
-  history: z.array(golferRoundLineSchema).readonly(),
+  history: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int().optional(), createdAt: z.number().int().optional() })).readonly(),
 });
 
 // GET /me/rounds (projection-realignment Task 6): "list my rounds" — every finalized round

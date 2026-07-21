@@ -2,9 +2,12 @@ import type { GolferMetrics, GolferRoundLine } from "@swng/domain";
 import { golferMetrics, postedDifferential } from "@swng/domain";
 import { sortLines } from "../projections/projectArchive.js";
 
-// Strips the projection store's internal finalizedAtMs (sort metadata, not part of the
-// wire shape) — a wire history line is exactly GolferRoundLine, not an extension of it.
-const toWireLine = (line: GolferRoundLine & { readonly finalizedAtMs: number }): GolferRoundLine => ({
+// The store's finalizedAtMs/createdAtMs cross the wire under GetMyRounds' own names
+// (finalizedAt/createdAt) — the index chart's date anchors need them (index-chart-polish
+// spec §1.6). Optional on the wire; always present in practice for finalizedAt.
+const toWireLine = (
+  line: GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number },
+): GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number } => ({
   roundId: line.roundId,
   courseName: line.courseName,
   // courseId (course-cards spec §4, the analytics join key) — omitted for pre-scrap lines
@@ -20,6 +23,8 @@ const toWireLine = (line: GolferRoundLine & { readonly finalizedAtMs: number }):
   // this display step rounds; golferMetrics below still folds the RAW `sorted` lines.
   ...(line.differential !== undefined ? { differential: postedDifferential(line.differential) } : {}),
   distribution: line.distribution,
+  finalizedAt: line.finalizedAtMs,
+  ...(line.createdAtMs !== undefined ? { createdAt: line.createdAtMs } : {}),
 });
 
 // The shared lines→{metrics, history} fold (navigation spec §6a): "the SAME lines-to-
@@ -38,7 +43,7 @@ const toWireLine = (line: GolferRoundLine & { readonly finalizedAtMs: number }):
 // no computed indexes) — there is no separate "no data" branch to keep in sync.
 export const recordOf = (
   lines: readonly (GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number })[],
-): { metrics: GolferMetrics; history: readonly GolferRoundLine[] } => {
+): { metrics: GolferMetrics; history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number })[] } => {
   const sorted = sortLines(lines);
   return {
     metrics: golferMetrics(sorted),

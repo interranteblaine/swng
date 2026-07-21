@@ -209,7 +209,9 @@ describe("getMyRecord", () => {
   // courseId (course-cards spec §4, the analytics join key): carried when the stored line has
   // it, omitted for a pre-scrap line without it — absent means ABSENT, never an explicit
   // undefined key (toWireLine's conditional-spread idiom, same as ags/differential).
-  it("carries courseId on a history line when the stored line has it, omitting it for a line without", async () => {
+  // finalizedAt/createdAt (index-chart-polish spec §1.6, the chart's date anchors): finalizedAt
+  // always equals the stored finalizedAtMs; createdAt carries only when the line has createdAtMs.
+  it("carries courseId/finalizedAt/createdAt on a history line when the stored line has them, omitting courseId/createdAt for a line without", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
@@ -222,8 +224,9 @@ describe("getMyRecord", () => {
       courseHandicap: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 2_000,
+      createdAtMs: 1_900,
     });
-    // A pre-scrap line: no courseId at all (frozen before cards carried a source).
+    // A pre-scrap line: no courseId, no createdAtMs at all (frozen before cards carried a source).
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r0"),
       courseName: "Casa Verde GC",
@@ -239,6 +242,10 @@ describe("getMyRecord", () => {
     expect(record.history.map((line) => line.roundId)).toEqual(["r1", "r0"]); // newest first
     expect(record.history[0]!.courseId).toBe(courseId("course-1"));
     expect(record.history[1]).not.toHaveProperty("courseId");
+    expect(record.history[0]!.finalizedAt).toBe(2_000);
+    expect(record.history[0]!.createdAt).toBe(1_900);
+    expect(record.history[1]!.finalizedAt).toBe(1_000);
+    expect(record.history[1]).not.toHaveProperty("createdAt");
   });
 
   // Below the 3-differential bootstrap (Rule 5.2a's own minimum), the whsIndex is ABSENT, not

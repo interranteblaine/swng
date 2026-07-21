@@ -30,6 +30,7 @@ describe("getGolfer", () => {
       differential: 9.0,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
+      createdAtMs: 900,
     };
     await ctx.projectionStore.putLine(annId, line);
 
@@ -37,6 +38,11 @@ describe("getGolfer", () => {
 
     const expected = recordOf([line]);
     expect(response).toEqual({ name: "Ann", indexSource: { kind: "swng" }, metrics: expected.metrics, history: expected.history });
+    // finalizedAt/createdAt (index-chart-polish spec §1.6, the chart's date anchors): asserted
+    // directly against the fixture's own stored values, not just agreement-with-recordOf (which
+    // would pass even if both sides silently stripped the same fields).
+    expect(response.history[0]!.finalizedAt).toBe(1_000);
+    expect(response.history[0]!.createdAt).toBe(900);
   });
 
   it("404s golfer-not-found for a golferId with no row at all", async () => {

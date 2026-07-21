@@ -1,28 +1,69 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
-import type { BestRound, GolferMetrics, GolferRoundLine, IndexPoint, Milestone, MilestoneKind } from "@swng/domain";
-import { formatHandicapIndex } from "@swng/domain";
+import type { BestRound, GolferMetrics, GolferRoundLine, IndexPoint, Milestone, MilestoneKind, RoundId } from "@swng/domain";
+import { formatCourseHandicap, formatHandicapIndex } from "@swng/domain";
 import { cardBox, linkEntity } from "../ui/classes";
+import { useContainerWidth } from "../ui/useContainerWidth";
 
-// "Your index over time" (metrics-projection-grows spec, papercut 17's follow-on) — a
-// dependency-free inline SVG (no chart lib needed: two plain polylines are enough to show
-// swng drifting under/over WHS). `points` is the served metrics projection's own `indexHistory`
+// "Your index over time" (index-chart-polish spec, following the metrics-projection-grows /
+// papercut-17 chart this rewrites) — a dependency-free inline SVG (no chart lib: two polylines
+// plus per-round markers). `points` is the served metrics projection's own `indexHistory`
 // (domain/golfer/metrics.ts's golferMetrics) — one point per round, oldest → newest, each
-// carrying the golfer's swng/WHS index AS OF that round; this component only renders it, it
-// never derives index math (SVG coordinate placement is presentation, not golf compute). Below
-// INDEX_HISTORY_MIN_ROUNDS rounds the chart is GATED, not drawn — a 1-3 point sparkline is noise,
-// not a trend (the exact defect this redesign replaces: the OLD page plotted an unlabeled
-// score-differential line from round one).
+// carrying the golfer's swng/WHS index AS OF that round; DRAWN is capped to the last
+// INDEX_CHART_WINDOW rounds (spec §1.1, the WHS Rule 5.2a window) — a VIEW, not a shorter fold,
+// since every point still folds every round before it. Geometry is presentation math, never golf
+// compute: `yBounds`/`ticksFor` (spec §1.2) pick a "nice" whole-index axis with a min-span
+// honesty rule (a tight cluster of values is padded to a real 4-point span before rounding, so a
+// flat week of golf doesn't draw a misleadingly dramatic slope), and tick labels render through
+// `formatCourseHandicap` — the model's one integer plus-convention formatter, so a tick below
+// scratch reads "+2", never a bare "-2". The svg is FLUID (spec §1.4, `useContainerWidth`) — it
+// renders at the column's real CSS-pixel width, no card frame (the chart sits directly on the
+// page). The last point of each series draws larger (endpoint emphasis), and the axis anchors the
+// first/last DRAWN round's date at the bottom corners (spec §1.6 — a render JOIN against
+// `history`, `createdAt` preferred over `finalizedAt`, shown only when BOTH ends have a date, the
+// year appended only when the two ends cross a year boundary). This component still never derives
+// index math — it renders what the wire already computed. Below INDEX_HISTORY_MIN_ROUNDS rounds
+// the chart is GATED, not drawn — a 1-3 point sparkline is noise, not a trend (the exact defect
+// the original redesign replaced: the OLD page plotted an unlabeled score-differential line from
+// round one).
 const INDEX_HISTORY_MIN_ROUNDS = 8;
+const INDEX_CHART_WINDOW = 20; // the WHS window (Rule 5.2a) — spec §1.1; slicing is honest: every point folds the whole career before it
+
+// Chart geometry (spec §1.2–§1.4) — presentation math, not golf compute: nice bounds with the
+// min-span honesty rule, whole-index ticks, CSS-pixel coordinates.
+const yBounds = (values: readonly number[]): { lo: number; hi: number; step: number } => {
+  let lo = Math.min(...values);
+  let hi = Math.max(...values);
+  if (hi - lo < 4) {
+    const mid = (hi + lo) / 2;
+    lo = mid - 2;
+    hi = mid + 2;
+  }
+  lo = Math.floor(lo);
+  hi = Math.ceil(hi);
+  const span = hi - lo;
+  return { lo, hi, step: span <= 4 ? 1 : span <= 8 ? 2 : 5 };
+};
+const ticksFor = ({ lo, hi, step }: { lo: number; hi: number; step: number }): readonly number[] => {
+  const out: number[] = [];
+  for (let t = Math.ceil(lo / step) * step; t <= hi; t += step) out.push(t);
+  return out;
+};
 
 function IndexOverTime({
   points,
   roundsPlayed,
   person,
+  history,
 }: {
   readonly points: readonly IndexPoint[];
   readonly roundsPlayed: number;
   readonly person: "your" | "their";
+  // The render JOIN for anchor dates (spec §1.6) — the same already-fetched response array
+  // RecordSections holds (the bests/milestones precedent). GolferRoundLine plus the two OPTIONAL
+  // wire fields Task 1 added; a plain GolferRoundLine (missing both) is still structurally
+  // assignable here, so RecordSections's own `history` prop type didn't need to change.
+  readonly history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number })[];
 }) {
   // Person-aware copy (navigation arc review finding: RecordSections rendered second-person text
   // verbatim on GolferPage, addressed to a viewer about someone else's rounds). Mirrors
@@ -30,6 +71,10 @@ function IndexOverTime({
   // "their" arm drops the exhortation below the gate ("Keep going.") — a nudge belongs on your
   // own page, not a spectator's.
   const heading = person === "your" ? "Your index over time" : "Their index over time";
+  // Called unconditionally, ABOVE the gate's early return (Rules of Hooks) — the gate branch
+  // below never mounts the svg, so the measured width goes unused on that path, but the hook
+  // itself must run on every render regardless of which branch renders.
+  const { ref, width } = useContainerWidth();
 
   if (roundsPlayed < INDEX_HISTORY_MIN_ROUNDS) {
     return (
@@ -44,79 +89,134 @@ function IndexOverTime({
     );
   }
 
-  const width = 280;
-  const height = 96;
-  const n = points.length;
-  const values = points.flatMap((point) => [point.swngIndex, point.whsIndex].filter((value): value is number => value !== undefined));
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  // The drawn window (spec §1.1): the last INDEX_CHART_WINDOW points only — `roundsPlayed` above
+  // gates on the FULL career, this slices what's actually plotted.
+  const drawn = points.slice(-INDEX_CHART_WINDOW);
+  const drawnN = drawn.length;
 
-  // The SAME point index maps to the same x whichever series it belongs to, so the two lines
+  // Layout constants (spec §1.2–§1.4), CSS pixels: ML leaves room for tick labels, MB for the
+  // date anchors. `width` is the measured column width (useContainerWidth above) — the svg is
+  // fluid, never a fixed viewBox rescaled by the browser.
+  const ML = 30;
+  const MR = 12;
+  const MT = 10;
+  const MB = 24;
+  const height = 150;
+  const plotW = width - ML - MR;
+  const plotH = height - MT - MB;
+
+  // The SAME drawn index maps to the same x whichever series it belongs to, so the two lines
   // stay comparable; a LOWER index sits LOWER on screen (improving play trends the line down).
+  const x = (i: number): number => (drawnN <= 1 ? ML : ML + (i / (drawnN - 1)) * plotW);
+  const values = drawn.flatMap((point) => [point.swngIndex, point.whsIndex].filter((value): value is number => value !== undefined));
+  const { lo, hi, step } = yBounds(values);
+  const ticks = ticksFor({ lo, hi, step });
+  const y = (v: number): number => MT + plotH - ((v - lo) / (hi - lo)) * plotH;
+
   const pointsFor = (key: "swngIndex" | "whsIndex"): readonly { readonly x: number; readonly y: number }[] =>
-    points
+    drawn
       .map((point, i) => ({ i, value: point[key] }))
       .filter((entry): entry is { i: number; value: number } => entry.value !== undefined)
-      .map(({ i, value }) => ({
-        x: n <= 1 ? 0 : (i / (n - 1)) * width,
-        y: max === min ? height / 2 : height - ((value - min) / (max - min)) * height,
-      }));
+      .map(({ i, value }) => ({ x: x(i), y: y(value) }));
   const asLine = (pts: readonly { readonly x: number; readonly y: number }[]) => pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
 
   const swngPts = pointsFor("swngIndex");
   const whsPts = pointsFor("whsIndex");
   const swngLine = asLine(swngPts);
   const whsLine = asLine(whsPts);
-  const latestSwng = [...points].reverse().find((point) => point.swngIndex !== undefined)?.swngIndex;
-  const latestWhs = [...points].reverse().find((point) => point.whsIndex !== undefined)?.whsIndex;
+  const latestSwng = [...drawn].reverse().find((point) => point.swngIndex !== undefined)?.swngIndex;
+  const latestWhs = [...drawn].reverse().find((point) => point.whsIndex !== undefined)?.whsIndex;
+
+  // Date anchors (spec §1.6): a render JOIN of the drawn endpoints' roundIds against `history`,
+  // createdAt preferred over finalizedAt (the round's own wall-clock start over its finalize
+  // time). Both ends must resolve a date, or neither anchor renders — a lone anchor implies a
+  // span the chart isn't actually showing.
+  const anchorDate = (roundId: RoundId): number | undefined => {
+    const row = history.find((line) => line.roundId === roundId);
+    return row?.createdAt ?? row?.finalizedAt;
+  };
+  const firstMs = drawn.length > 0 ? anchorDate(drawn[0]!.roundId) : undefined;
+  const lastMs = drawn.length > 0 ? anchorDate(drawn[drawn.length - 1]!.roundId) : undefined;
+  const crossYear = firstMs !== undefined && lastMs !== undefined && new Date(firstMs).getFullYear() !== new Date(lastMs).getFullYear();
+  const anchorLabel = (ms: number): string =>
+    new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", ...(crossYear ? { year: "numeric" } : {}) }).format(new Date(ms));
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">
         <h3 className="text-base font-semibold">{heading}</h3>
         <span className="text-xs text-fairway/70">
-          {person} last {n} round{n === 1 ? "" : "s"}
+          {person} last {drawnN} round{drawnN === 1 ? "" : "s"}
         </span>
       </div>
-      <div className="flex items-center gap-3 text-xs text-fairway">
-        <span>● swng</span>
-        <span>○ WHS</span>
+      {/* No card frame (spec §1.4) — the chart sits directly on the page, fluid to the column's
+          real CSS-pixel width via useContainerWidth (happy-dom has no ResizeObserver, so tests
+          see the hook's 320px fallback). */}
+      <div ref={ref} className="max-w-xl">
+        <svg data-testid="index-chart" role="img" aria-label={heading} viewBox={`0 0 ${width} ${height}`} width={width} height={height}>
+          {/* Gridlines + whole-index tick labels (spec §1.2) — formatCourseHandicap is the
+              model's own integer plus-convention formatter (a tick below scratch reads "+2"),
+              reused here rather than re-deciding the sign convention in this component. */}
+          {ticks.map((t) => (
+            <g key={`tick-${t}`}>
+              <line data-testid="index-gridline" x1={ML} x2={width - MR} y1={y(t)} y2={y(t)} stroke="currentColor" strokeWidth={1} className="text-hairline" />
+              <text data-testid="index-tick-label" x={ML - 7} y={y(t)} dominantBaseline="middle" textAnchor="end" fill="currentColor" className="font-mono text-[10px] text-fairway">
+                {formatCourseHandicap(t)}
+              </text>
+            </g>
+          ))}
+          {whsLine && (
+            <polyline
+              data-testid="index-line-whs"
+              aria-label="WHS index"
+              points={whsLine}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeDasharray="3 3"
+              className="text-fairway"
+            />
+          )}
+          {swngLine && (
+            <polyline data-testid="index-line-swng" aria-label="swng index" points={swngLine} fill="none" stroke="currentColor" strokeWidth={2} className="text-forest" />
+          )}
+          {/* Per-round markers (● swng filled, ○ WHS hollow) so a single-vertex series stays
+              visible: a lone point — e.g. one rated round among unrated play — draws no line, but
+              its dot shows. The hollow WHS fill is the cream page color (not "none"), so it reads
+              as a punched-out dot rather than a transparent ring over whatever's underneath.
+              Endpoint emphasis: the LAST drawn point of each series draws larger. */}
+          {whsPts.map((p, i) => (
+            <circle
+              key={`w${i}`}
+              data-testid="index-dot-whs"
+              cx={p.x}
+              cy={p.y}
+              r={i === whsPts.length - 1 ? 4 : 2.5}
+              fill="var(--color-cream)"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              className="text-fairway"
+            />
+          ))}
+          {swngPts.map((p, i) => (
+            <circle key={`s${i}`} data-testid="index-dot-swng" cx={p.x} cy={p.y} r={i === swngPts.length - 1 ? 4 : 2.5} fill="currentColor" className="text-forest" />
+          ))}
+          {firstMs !== undefined && lastMs !== undefined && (
+            <>
+              <text data-testid="index-anchor" x={ML} y={height - 6} textAnchor="start" fill="currentColor" className="font-mono text-[11px] text-fairway">
+                {anchorLabel(firstMs)}
+              </text>
+              <text data-testid="index-anchor" x={width - MR} y={height - 6} textAnchor="end" fill="currentColor" className="font-mono text-[11px] text-fairway">
+                {anchorLabel(lastMs)}
+              </text>
+            </>
+          )}
+        </svg>
       </div>
-      <svg
-        data-testid="index-chart"
-        role="img"
-        aria-label={heading}
-        viewBox={`0 0 ${width} ${height}`}
-        width={width}
-        height={height}
-        className={cardBox}
-      >
-        {swngLine && (
-          <polyline data-testid="index-line-swng" aria-label="swng index" points={swngLine} fill="none" stroke="currentColor" strokeWidth={2} className="text-forest" />
-        )}
-        {whsLine && (
-          <polyline
-            data-testid="index-line-whs"
-            aria-label="WHS index"
-            points={whsLine}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeDasharray="3 3"
-            className="text-fairway"
-          />
-        )}
-        {/* Per-round markers (● swng filled, ○ WHS hollow) so a single-vertex series stays visible:
-            a lone point — e.g. one rated round among unrated play — draws no line, but its dot shows. */}
-        {swngPts.map((p, i) => (
-          <circle key={`s${i}`} data-testid="index-dot-swng" cx={p.x} cy={p.y} r={2.5} fill="currentColor" className="text-forest" />
-        ))}
-        {whsPts.map((p, i) => (
-          <circle key={`w${i}`} data-testid="index-dot-whs" cx={p.x} cy={p.y} r={2.5} fill="none" stroke="currentColor" strokeWidth={1.5} className="text-fairway" />
-        ))}
-      </svg>
+      {/* The caption replaces both the old bare "● swng"/"○ WHS" legend row and the old
+          value-only summary line — one line, markers AND numbers together. */}
       <p className="text-sm text-fairway">
-        swng {latestSwng !== undefined ? formatHandicapIndex(latestSwng) : "—"} · WHS {latestWhs !== undefined ? formatHandicapIndex(latestWhs) : "—"}
+        ● swng {latestSwng !== undefined ? formatHandicapIndex(latestSwng) : "—"} · ○ WHS {latestWhs !== undefined ? formatHandicapIndex(latestWhs) : "—"}
       </p>
     </div>
   );
@@ -246,7 +346,7 @@ export interface RecordSectionsProps {
 export function RecordSections({ metrics, history, historyLimit, person = "your" }: RecordSectionsProps) {
   return (
     <>
-      <IndexOverTime points={metrics.indexHistory} roundsPlayed={history.length} person={person} />
+      <IndexOverTime points={metrics.indexHistory} roundsPlayed={history.length} person={person} history={history} />
 
       {/* Best rounds + Milestones (analytics read-folds spec 2026-07-21 §3) — render nothing
           when empty (the ledger's own empty-state discipline: no footnote, just absence). */}

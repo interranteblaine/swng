@@ -26,10 +26,12 @@ import { loadRoundState } from "./loadRoundState.js";
 // 3. Participation — a signed-in stranger with a real account gets the SAME 403 a no-account
 //    caller gets, never a different code that would leak "this round exists but you're not in
 //    it" vs. "you have no account at all."
-// 4. Liveness LAST: a final round still 409s for an ACTUAL participant (nothing left to score —
+// 4. Liveness: a final round still 409s for an ACTUAL participant (nothing left to score —
 //    the archive view, not a live session, is the read path from here), but a non-participant
 //    is rejected before liveness is ever considered, so a stranger can't probe whether a round
 //    they've never played is live or final.
+// 5. The joinCode read (spec 2026-07-20 §2), after every authorization check — only a proven
+//    participant can learn whether the round's meta item exists.
 export const mintParticipantToken =
   (deps: { journal: EventJournal; golferStore: GolferStore; tokens: TokenIssuer; store: RoundStore }) =>
   async (claims: AccountClaims, id: RoundId): Promise<JoinRoundResponse> => {

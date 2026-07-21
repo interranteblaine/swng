@@ -168,8 +168,8 @@ export function JoinRoundPage() {
         joinRound({ code: upperCode, tee: tee.trim(), courseHandicap: parsedHandicap }, token),
       );
       // The server now echoes the round's canonical join code on JoinRoundResponse (spec
-      // 2026-07-20 §2) — that's what's saved, not the typed form value (upperCode is whatever
-      // the golfer happened to type, before any server-side normalization).
+      // 2026-07-20 §2) — that's what's saved, not the typed form value: the server echoes the
+      // exact stored code its lookup just matched.
       credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer.name, joinCode: response.joinCode });
       navigate(`/round/${response.roundId}`);
     } catch (caught) {

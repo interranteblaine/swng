@@ -167,9 +167,10 @@ export function JoinRoundPage() {
       const response = await auth.withAuth((token) =>
         joinRound({ code: upperCode, tee: tee.trim(), courseHandicap: parsedHandicap }, token),
       );
-      // JoinRoundResponse carries no joinCode (only StartRoundResponse does) — the code the
-      // golfer just typed IS the round's join code, so that's what's saved.
-      credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer.name, joinCode: upperCode });
+      // The server now echoes the round's canonical join code on JoinRoundResponse (spec
+      // 2026-07-20 §2) — that's what's saved, not the typed form value (upperCode is whatever
+      // the golfer happened to type, before any server-side normalization).
+      credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer.name, joinCode: response.joinCode });
       navigate(`/round/${response.roundId}`);
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not join the round — try again.");

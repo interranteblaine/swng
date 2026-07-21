@@ -184,7 +184,10 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
   it("uppercases the code and joins as-self: code + tee/handicap + the account's Bearer (seat resolved server-side, never a typed name)", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });
-    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-self"), token: "tok-self", golferId: golferId("bo-g"), joinCode: "SELF01" });
+    // The response's own joinCode is DELIBERATELY different from the typed "self01"/"SELF01" —
+    // the saved-credential assertion below must pin the RESPONSE's code, not the typed form
+    // value, and a matching pair of strings wouldn't distinguish the two sources.
+    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-self"), token: "tok-self", golferId: golferId("bo-g"), joinCode: "RESP01" });
 
     renderJoin();
     await screen.findByText(/playing as/i);
@@ -202,7 +205,9 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
     expect(token).toBe(idToken);
 
     await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
-    expect(credentialStore.load(roundId("round-self"))).toEqual({ token: "tok-self", golferId: golferId("bo-g"), name: "Bo G", joinCode: "SELF01" });
+    // Pins the RESPONSE's joinCode ("RESP01"), not the typed form value ("SELF01") — the server
+    // now echoes the canonical code, and that's what's saved (spec 2026-07-20 §2/§3).
+    expect(credentialStore.load(roundId("round-self"))).toEqual({ token: "tok-self", golferId: golferId("bo-g"), name: "Bo G", joinCode: "RESP01" });
   });
 
   // Real timers here (not fake): the join form only renders once the AuthProvider's async GET

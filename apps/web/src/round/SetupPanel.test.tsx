@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -213,6 +213,46 @@ describe("SetupPanel — share the code, not add a player", () => {
     // Every fetch the whole tree ever made was the AuthProvider's GET /me — SetupPanel itself
     // reached no endpoint (no /players, no /share, no /crews).
     for (const call of fetchMock.mock.calls) expect(new URL(String(call[0])).pathname).toBe("/me");
+  });
+});
+
+// The joinCode-in-JoinRoundResponse arc (spec 2026-07-20 §2/§3): the join code panel is also the
+// invite panel — a golfer already on the card can hand the code to the next player as a link, not
+// just a code to retype. Derived on THIS device's own origin (never minted server-side), same
+// discipline as ShareButton's own clipboard idiom.
+describe("SetupPanel — Copy invite link", () => {
+  it("Copy invite link copies the origin-relative join URL and shows Link copied with the url", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy invite link" }));
+
+    // No trailing space in the pattern (ShareButton.test.tsx's own idiom, same reason): the URL
+    // lives in a sibling <span>, so this <p>'s own direct text node is "Link copied — " — and
+    // dom-testing-library's default normalizer TRIMS that node's text before matching, so a
+    // pattern requiring the trailing space right before the (sibling, not-included) url never
+    // matches.
+    await screen.findByText(/Link copied —/);
+    const url = `${window.location.origin}/join?code=ABC123`;
+    expect(writeText).toHaveBeenCalledWith(url);
+    expect(screen.getByText(url)).toBeTruthy();
+  });
+
+  it("still shows the raw url with 'Copy this link' when clipboard access fails", async () => {
+    vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy invite link" }));
+
+    await screen.findByText(/Copy this link —/);
+    expect(screen.getByText(`${window.location.origin}/join?code=ABC123`)).toBeTruthy();
+  });
+
+  it("hides Copy invite link entirely on an empty cached code (legacy re-mint credential)", () => {
+    renderPanel({ state: baseState(), games: [], joinCode: "", onAddGame: noopAddGame, onSetHandicap: noopSetHandicap });
+
+    expect(screen.queryByRole("button", { name: "Copy invite link" })).toBeNull();
   });
 });
 

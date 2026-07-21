@@ -287,7 +287,9 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
 
     await screen.findByText("round page probe");
     expect(mockedMintParticipantToken).toHaveBeenCalledWith(idToken, roundId("live-1"));
-    expect(credentialStore.load(roundId("live-1"))).toEqual({ token: "fresh-token", golferId: golferId("ann-g"), name: "Ann G", joinCode: "" });
+    // The re-mint response's own joinCode is what's saved (spec 2026-07-20 §2), not a blank —
+    // the same credential shape a real join stores.
+    expect(credentialStore.load(roundId("live-1"))).toEqual({ token: "fresh-token", golferId: golferId("ann-g"), name: "Ann G", joinCode: "FRESH1" });
   });
 
   it("a local credential already exists: navigates directly, never calling the re-mint", async () => {

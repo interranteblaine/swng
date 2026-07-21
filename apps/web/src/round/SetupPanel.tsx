@@ -42,6 +42,25 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
 
+  const [inviteUrl, setInviteUrl] = useState<string | undefined>(undefined);
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  const copyInviteLink = async () => {
+    // The receiving path already exists whole: /join?code= seeds the form and survives the
+    // sign-in round trip (returnTo). The link is derived from the code on this device's own
+    // origin — never minted server-side (ShareButton's precedent).
+    const url = `${window.location.origin}/join?code=${joinCode}`;
+    setInviteUrl(url);
+    setInviteCopied(false);
+    try {
+      await navigator.clipboard.writeText(url);
+      setInviteCopied(true);
+    } catch {
+      // Clipboard denied/unavailable — the visible raw-url line below still lets the golfer
+      // copy by hand (ShareButton's discipline: success is never only a vanished toast).
+    }
+  };
+
   const startEdit = (p: Participant) => {
     setEditing(p.golferId);
     setValue(String(p.courseHandicap));
@@ -83,6 +102,22 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
         <p className={eyebrow}>Join code</p>
         <p className="font-mono text-3xl font-bold tracking-widest text-forest">{joinCode}</p>
         <p className="mt-2 text-sm text-fairway">Players join with this code — new players create their account on the way.</p>
+        {/* Legacy tolerance, not a live state (spec 2026-07-20 §3): only a credential cached by a
+            pre-fix re-mint entry holds an empty code; it dies on the next entry through any door. */}
+        {joinCode !== "" && (
+          <>
+            {/* btnQuiet, never gold — AddGameForm's submit is this screen's one gold action. */}
+            <button type="button" className={`${btnQuiet} mt-2 text-sm`} onClick={() => void copyInviteLink()}>
+              Copy invite link
+            </button>
+            {inviteUrl && (
+              <p className="mt-1 text-xs text-fairway">
+                {inviteCopied ? "Link copied — " : "Copy this link — "}
+                <span className="select-all font-mono">{inviteUrl}</span>
+              </p>
+            )}
+          </>
+        )}
       </div>
 
       <div>

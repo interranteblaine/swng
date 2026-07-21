@@ -255,8 +255,9 @@ describe("RoundRecordPage — resolution when the archive read fails (navigation
 
     await waitFor(() => expect(screen.getByText("round page probe")).toBeTruthy());
     // The SAME credential shape a real join/re-mint stores (openLiveRound.ts) — name from the
-    // caller's own account golfer, joinCode "" (no code known outside the join flow).
-    expect(credentialStore.load(ROUND_ID)).toEqual({ token: "fresh-token", golferId: ANN_ID, name: "Ann", joinCode: "" });
+    // caller's own account golfer, joinCode from the re-mint response itself (spec 2026-07-20
+    // §2 — the token mint now echoes the round's own join code).
+    expect(credentialStore.load(ROUND_ID)).toEqual({ token: "fresh-token", golferId: ANN_ID, name: "Ann", joinCode: "FRESH1" });
   });
 
   it("non-200 archive fetch + NOT in the caller's live rounds: the honest fallback, with a join-here link to /join", async () => {

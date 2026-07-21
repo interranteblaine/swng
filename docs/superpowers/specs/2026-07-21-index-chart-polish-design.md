@@ -47,7 +47,10 @@ Y-bounds are computed from the DRAWN points only, exactly:
    on a border, the shipped defect.
 
 Ticks at whole index values: step 1 when the span ≤ 4, step 2 when ≤ 8, else step 5
-(3–5 ticks always); ticks run from `ceil(lo/step)*step` up to `hi`. Every tick draws a
+(typically 3–5 ticks — CORRECTED post-build: the whole-branch review probed the algorithm
+and extreme spans can yield 2 or 6+ ticks, e.g. an ≥8-point index swing inside 20 rounds;
+values stay honest and the render is fine, so the algorithm stands and this parenthetical
+was the overclaim); ticks run from `ceil(lo/step)*step` up to `hi`. Every tick draws a
 full-width hairline gridline (`--color-hairline`) and a mono 11px label in the left
 gutter. **Tick labels render through the domain's integer plus-convention formatter
 `formatCourseHandicap`** — a tick below scratch reads `+2`, never `-2`; the whole-tree

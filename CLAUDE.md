@@ -1072,6 +1072,54 @@ with count/remove), picker state survives a close/reopen cycle (cosmetic), the o
 guard now duplicated 4× (extract on next occurrence), the plan's pin-arithmetic slip
 corrected in the doc post-build.
 
+The index chart is finished — a windowed, scaled, honest plot (2026-07-21, spec
+`docs/superpowers/specs/2026-07-21-index-chart-polish-design.md`, plan
+`2026-07-21-index-chart-polish.md`, 3 SDD tasks + a controller fix, commits
+`ebe861d..52b5623`, base `1003d1e`): the owner's field report — "the trend graph isn't
+polished" — un-accepted the record-redesign's riding note (a compact sparkline, no axis,
+no padding, fixed 280px, unbounded points) and closed it via an owner-approved rendered
+mockup (artifact `117821fb`, the reskin precedent), with the design converging under owner
+probing (width? point growth? range choice?) to: **the chart windows to the last 20 rounds
+— the WHS window (Rule 5.2a), so the plot shows exactly the run of rounds the number at
+the end of the line was built from** (a presentation `slice(-20)`; honest by construction
+since every IndexPoint folds the whole career before it; month/year/all-time/range-picker
+all rejected on record — "no choice, just data" stands); **scale honesty** (nice integer
+bounds, a MINIMUM y-span of 4 index points so a quiet season looks quiet — the 8-round
+gate's own refusing-to-draw-noise principle applied to amplitude; ticks step 1/2/5, every
+tick a hairline gridline; tick labels through `formatCourseHandicap` so the plus
+convention holds on the axis — the whole-tree grep gate has no axis carve-out); **no
+frame** (gridlines on the paper replace the cardBox border; the old line-on-the-border and
+half-clipped end markers are geometrically impossible under the ML30/MR12/MT10/MB24
+insets); **fluid width** (a new `useContainerWidth` ResizeObserver hook, fallback 320 for
+happy-dom, `max-w-xl` cap; CSS-pixel coordinates so type/dots/strokes never scale);
+endpoint emphasis (each series' latest dot r=4 — it IS the number the caption names); the
+legend row and summary merged into ONE caption (`● swng 7.8 · ○ WHS 7.8`); and **date
+anchors** (`May 12 … Jul 21`, mono, year appended only cross-year) — "over time" finally
+says which time, fed by the arc's ONE wire change: record history rows (`GET /me/record` +
+`GET /golfers/{id}`) gain OPTIONAL `finalizedAt`/`createdAt` (recordOf's `toWireLine`
+passthrough, GetMyRounds' rename discipline; old-lambda tolerance contract-pinned both
+directions), joined to chart points by `roundId` (order-independent — wire history is
+newest-first, indexHistory oldest-first). Review culture: Task 2's implementer caught its
+own Rules-of-Hooks bug (hook after the gate's early return — hoisted); the opus task
+review re-derived both tick oracles by hand and read test STDERR (not just exit codes);
+the fable whole-branch review (READY TO DEPLOY — YES, 0 Critical/0 Important) probed the
+algorithm's boundary conditions by execution (span-exactly-4, all-identical, single-point,
+empty-values — NaN never reaches a DOM attribute) and caught the spec's own "(3–5 ticks
+always)" parenthetical as an overclaim (amended with a dated correction; extreme spans can
+yield 2 ticks, values honest). Close-out (controller-run): validate exit 0 → `deploy:beta`
+LAMBDA-FIRST (either order provably safe; precedent held) → `publish:web:beta` (bundle
+`index-fgwhW71J.js`) → `e2e:beta` 17/17 ×3 → `e2e:field` **66 passed / 1 documented-skip
+FIRST RUN** → a browser walk on DEPLOYED beta.swng.golf (a throwaway 9-round seeded
+account: ticks 8/10/12 from real data, the descending trend floating frameless with
+nothing clipped, the larger 7.8 endpoint dot, both `Jul 21` anchors, the merged caption,
+"your last 9 rounds"; the single visible line is the documented rated-only swng/WHS
+overlap; console zero app errors — the lone entry is the pre-existing pre-sign-in
+stale-token 400; walk user deleted, screenshot read then removed). NO wipe (additive
+optional wire only). Riding as notes: an all-downgraded 8+-round golfer gets an empty
+plot rather than a gate message (future "no postable rounds yet" branch candidate); the
+20-point window's e2e coverage is unit-level by design (no ≥21-round live fixture). On
+local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

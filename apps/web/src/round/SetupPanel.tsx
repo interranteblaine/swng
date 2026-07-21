@@ -4,6 +4,7 @@ import type { GameState, GolferId, Participant, RoundState } from "@swng/domain"
 import type { GameConfigInput } from "@swng/contracts";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnQuiet, cardBox, eyebrow, inputBox } from "../ui/classes";
+import { CopiedLinkLine } from "../ui/CopiedLinkLine";
 import { AddGameForm } from "./AddGameForm";
 
 // Mid-round handicap correction (spec 2026-07-20): "-2" and "13" both parse fine via
@@ -110,12 +111,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
             <button type="button" className={`${btnQuiet} mt-2 text-sm`} onClick={() => void copyInviteLink()}>
               Copy invite link
             </button>
-            {inviteUrl && (
-              <p className="mt-1 text-xs text-fairway">
-                {inviteCopied ? "Link copied — " : "Copy this link — "}
-                <span className="select-all font-mono">{inviteUrl}</span>
-              </p>
-            )}
+            {inviteUrl && <CopiedLinkLine url={inviteUrl} copied={inviteCopied} className="mt-1" />}
           </>
         )}
       </div>

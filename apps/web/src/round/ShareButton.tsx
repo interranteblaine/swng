@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { RoundId } from "@swng/domain";
 import { shareRound } from "../api";
 import { btnSecondary } from "../ui/classes";
+import { CopiedLinkLine } from "../ui/CopiedLinkLine";
 
 export interface ShareButtonProps {
   readonly roundId: RoundId;
@@ -55,12 +56,7 @@ export function ShareButton({ roundId, token }: ShareButtonProps) {
       <button type="button" onClick={() => void onClick()} disabled={busy} className={`${btnSecondary} min-h-12 disabled:opacity-50`}>
         {busy ? "Getting link…" : "Share round"}
       </button>
-      {shareUrl && (
-        <p className="text-xs text-fairway">
-          {copied ? "Link copied — " : "Copy this link — "}
-          <span className="select-all font-mono">{shareUrl}</span>
-        </p>
-      )}
+      {shareUrl && <CopiedLinkLine url={shareUrl} copied={copied} />}
       {error && (
         <p role="alert" className="text-xs text-oxblood">
           {error}

@@ -170,8 +170,16 @@ export const aggregateSeason = (
     }
   }
 
+  // Standings order is domain truth, served — the web never re-ranks (domain-boundary arc
+  // precedent: golf logic lives in ONE tested place, not re-derived per screen). A TOTAL
+  // comparator, not left to JS's stable sort over an already-alphabetical Map iteration order:
+  // wins desc, then points desc, then golferId asc as the final tiebreak (a full tie on wins AND
+  // points — the only case that can still be ambiguous — always resolves the same way).
   const ledger = [...ledgerByGolfer.entries()]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .sort(
+      ([golferIdA, statsA], [golferIdB, statsB]) =>
+        statsB.wins - statsA.wins || statsB.points - statsA.points || (golferIdA < golferIdB ? -1 : golferIdA > golferIdB ? 1 : 0),
+    )
     .map(([golferId, stats]) => ({ golferId, ...stats }));
 
   const headToHead = [...h2hByPair.values()].sort((x, y) => (x.a !== y.a ? (x.a < y.a ? -1 : 1) : x.b < y.b ? -1 : x.b > y.b ? 1 : 0));

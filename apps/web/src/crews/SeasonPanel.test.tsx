@@ -86,7 +86,12 @@ const renderPanel = (myGolferId = ANN) =>
   );
 
 describe("SeasonPanel — standings", () => {
-  it("renders the ledger sorted by wins then points (both descending)", async () => {
+  // Standings order is domain truth, served (domain-boundary arc precedent — aggregateSeason,
+  // packages/domain/src/crew/ledger.ts, ranks wins desc/points desc/golferId asc): the component
+  // renders the ledger EXACTLY as served, with no re-ranking of its own. The fixture below is
+  // already in served order (Bo: 6 wins, ahead of Ann's 5) — this pins render-in-served-order,
+  // not a client-side sort (that invariant is pinned in ledger.test.ts, not here).
+  it("renders the ledger rows in the order the API serves them", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValue({
@@ -95,8 +100,8 @@ describe("SeasonPanel — standings", () => {
       status: "open",
       rounds: [],
       ledger: [
-        { golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann" },
         { golferId: BO, rounds: 10, wins: 6, losses: 3, halves: 1, points: 180, skins: 7, name: "Bo" },
+        { golferId: ANN, rounds: 10, wins: 5, losses: 4, halves: 1, points: 210, skins: 3, name: "Ann" },
       ],
       headToHead: [], partners: [], superlatives: {},
     });

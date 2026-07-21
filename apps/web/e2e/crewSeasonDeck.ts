@@ -204,15 +204,20 @@ const FROZEN_LINE: Readonly<Record<Role, Omit<SeasonLedgerLine, "golferId" | "ro
 };
 
 // The frozen expectation, mapped onto whichever real golferIds the live crew mints — ledger
-// sorted lexicographically by golferId (aggregateSeason's own order, crew/ledger.ts) since the
-// live response comes back in that same order. H2H: Al's wins (5) equal Bo's (5), so aWins/
-// bWins is symmetric regardless of which of the two sorts first into "a" lexicographically —
-// no ambiguity to resolve at run time.
+// ordered by aggregateSeason's own standings comparator (crew/ledger.ts, standings-order-is-
+// served fix): wins desc, then points desc, then golferId asc as the final tiebreak. Al and Bo
+// are a FULL tie on both wins (5) and points (430) — same for Cy and Dee (0 wins, 435 points) —
+// so within each pair the order still falls back to golferId asc; across the two pairs, Al/Bo's
+// 5 wins always outrank Cy/Dee's 0. The sort below is the SAME comparator, applied to the real
+// (live-minted) golferIds rather than hardcoded, so this stays correct regardless of which UUIDs
+// the live crew happens to mint. H2H: Al's wins (5) equal Bo's (5), so aWins/bWins is symmetric
+// regardless of which of the two sorts first into "a" lexicographically — no ambiguity to
+// resolve at run time.
 export const frozenSeasonExpectation = (
   ids: SeasonGolferIds,
 ): { readonly ledger: readonly SeasonLedgerLine[]; readonly headToHead: readonly HeadToHeadRecord[] } => {
-  const ledger = ROLES.map((role) => ({ golferId: ids[role], rounds: SEASON_ROUNDS, ...FROZEN_LINE[role] })).sort((a, b) =>
-    a.golferId < b.golferId ? -1 : a.golferId > b.golferId ? 1 : 0,
+  const ledger = ROLES.map((role) => ({ golferId: ids[role], rounds: SEASON_ROUNDS, ...FROZEN_LINE[role] })).sort(
+    (a, b) => b.wins - a.wins || b.points - a.points || (a.golferId < b.golferId ? -1 : a.golferId > b.golferId ? 1 : 0),
   );
   const [a, b] = ids.al < ids.bo ? [ids.al, ids.bo] : [ids.bo, ids.al];
   const headToHead: readonly HeadToHeadRecord[] = [{ a, b, aWins: 5, bWins: 5, halves: 2 }];

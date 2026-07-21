@@ -46,17 +46,19 @@ export function CrewRecordsSection({ crewId }: { readonly crewId: CrewId }) {
   }
   if (!records) return null;
 
-  // Same name-resolution + sort idiom as SeasonPanel's own standings table — the all-time ledger
-  // is the SAME SeasonStandingLine shape, so it reads identically.
+  // Same name-resolution idiom as SeasonPanel's own standings table — the all-time ledger is the
+  // SAME SeasonStandingLine shape, so it reads identically. Order is served, not computed here
+  // (domain-boundary arc precedent): aggregateSeason (packages/domain/src/crew/ledger.ts) ranks
+  // the ledger wins desc, then points desc, then golferId asc — this component renders it as
+  // served.
   const nameByGolfer = new Map(records.ledger.map((line) => [line.golferId, line.name]));
   const nameOf = (id: GolferId): string => nameByGolfer.get(id) ?? id;
-  const sortedLedger = [...records.ledger].sort((a, b) => b.wins - a.wins || b.points - a.points);
 
   return (
     <div className={`${cardBox} flex flex-col gap-4 p-4`}>
       <h3 className="text-lg font-semibold text-forest">All-time</h3>
 
-      {sortedLedger.length === 0 ? (
+      {records.ledger.length === 0 ? (
         // Same two-truths distinction SeasonPanel's own empty-ledger copy draws (papercut 9):
         // never counted vs. counted-but-nobody-on-the-current-roster read differently.
         <p className="text-fairway">{records.rounds === 0 ? "No rounds counted yet." : "No current members appear in these counted rounds."}</p>
@@ -73,7 +75,7 @@ export function CrewRecordsSection({ crewId }: { readonly crewId: CrewId }) {
               </tr>
             </thead>
             <tbody>
-              {sortedLedger.map((line) => (
+              {records.ledger.map((line) => (
                 <tr key={line.golferId} className="border-t border-hairline text-forest">
                   <td className="py-2 pr-2">
                     <GolferLink golferId={line.golferId} name={line.name} />

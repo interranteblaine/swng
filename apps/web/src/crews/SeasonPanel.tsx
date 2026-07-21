@@ -114,9 +114,9 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
   const nameByGolfer = new Map(standings.ledger.map((line) => [line.golferId, line.name]));
   const nameOf = (id: GolferId): string => nameByGolfer.get(id) ?? id;
 
-  // Wins first, then points, both descending — the same standings order CrewPage's own (now
-  // deleted) records table used.
-  const sortedLedger = [...standings.ledger].sort((a, b) => b.wins - a.wins || b.points - a.points);
+  // Standings order is served, not computed here (domain-boundary arc precedent: the web renders
+  // no golf result) — aggregateSeason (packages/domain/src/crew/ledger.ts) ranks the ledger wins
+  // desc, then points desc, then golferId asc, and this component renders it exactly as served.
 
   const countedIds = new Set(standings.rounds.map((round) => round.roundId));
   const uncounted = (myRounds ?? []).filter((round) => !countedIds.has(round.roundId));
@@ -128,7 +128,7 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
         {standings.status === "closed" && <span className={`ml-2 ${badge}`}>closed</span>}
       </h3>
 
-      {sortedLedger.length === 0 ? (
+      {standings.ledger.length === 0 ? (
         <p className="text-fairway">
           {standings.rounds.length === 0
             ? "Standings build as rounds are counted."
@@ -148,7 +148,7 @@ export function SeasonPanel({ crewId, seasonId, myGolferId }: SeasonPanelProps) 
                 </tr>
               </thead>
               <tbody>
-                {sortedLedger.map((line) => (
+                {standings.ledger.map((line) => (
                   <tr key={line.golferId} className="border-t border-hairline text-forest">
                     <td className="py-2 pr-2">
                       <GolferLink golferId={line.golferId} name={line.name} />

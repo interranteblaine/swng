@@ -209,4 +209,27 @@ describe("aggregateSeason", () => {
   it("returns empty ledger and headToHead for no contributions", () => {
     expect(aggregateSeason([])).toEqual({ ledger: [], headToHead: [] });
   });
+
+  // Standings order is domain truth, served (domain-boundary arc precedent) — the web no longer
+  // ranks the ledger client-side, so aggregateSeason's own comparator must be TOTAL: wins desc,
+  // then points desc, then golferId asc as the final tiebreak (never left to sort stability).
+  // A: wins 3 — alone at the top. B/D: wins 2, points 50 — a FULL tie (equal wins AND equal
+  // points), broken by golferId asc (bo < dee). C: wins 2, points 20 — same wins tier as B/D but
+  // fewer points, so it sorts after both despite "cal" < "dee" lexicographically (proving points
+  // outranks golferId in the comparator, not just a lucky alphabetical coincidence).
+  it("ledger orders by wins desc, then points desc, then golferId asc as the final tiebreak (a full tie on wins AND points)", () => {
+    const contribution: CrewRoundContribution = {
+      roundId: roundId("r-order"),
+      lines: [
+        { golferId: A, wins: 3, losses: 0, halves: 0, points: 10, skins: 0 },
+        { golferId: B, wins: 2, losses: 0, halves: 0, points: 50, skins: 0 },
+        { golferId: C, wins: 2, losses: 0, halves: 0, points: 20, skins: 0 },
+        { golferId: D, wins: 2, losses: 0, halves: 0, points: 50, skins: 0 },
+      ],
+      headToHead: [],
+    };
+
+    const { ledger } = aggregateSeason([contribution]);
+    expect(ledger.map((line) => line.golferId)).toEqual([A, B, D, C]);
+  });
 });

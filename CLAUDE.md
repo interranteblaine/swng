@@ -1010,16 +1010,27 @@ byte-identical, the course-record beat); adversarial USE pass on DEPLOYED beta.s
 "Best 18: 88 (+16)" linked + First birdie/Broke 100/Broke 90 live, course "Your record
 here" + gate line, crew All-time both empty truths through the real route; console zero app
 errors). Deploy #(lambda-first) + publishWeb (`index-D_awqjG5.js`) + the one rebuild; NO
-wipe. RECORDED FOR OWNER, not scheduled: (1) a plan contradiction — SeasonPanel/
-CrewRecordsSection client-side ledger ranking sort (pre-existing idiom) violates "web
-computes no golf result," but the server-side fix changes wire order the frozen crewSeason
-deck pins; proposed fix on approval: total domain comparator in `aggregateSeason` +
-values-identical deck reorder + both client sorts deleted, one commit; (2) **no API path
-closes a season** — `status:"closed"` exists and titles consume it, but nothing sets it, so
-Stableford titles are inert until a close path lands (owner-ruled design needed); (3)
-milestone labels wear plain ink vs the mockup's oxblood (the stricter brand reading —
-oxblood is for under-par scores); (4) a gameless counted round shows "No current members
-appear…" (pre-existing two-truths copy, slightly imprecise for played-but-no-games).
+wipe. **Post-close ruling wave (same day, `c894df5`+`4a5f216`, owner directive: "provide
+your judgment"):** the four surfaced items became controller rulings, not owner questions.
+(1) The client-side ledger ranking sort was FIXED, not escalated — the frozen-deck law
+protects the hand-designed NUMBERS, and the expected arrays' ORDER was a documented wire
+coupling (locator-class), so **standings order became domain truth**: `aggregateSeason`
+sorts totally (wins desc → points desc → golferId asc, full-tie tested), both client sorts
+deleted, the deck derives order via the textually-same comparator with values proven
+byte-identical three ways (diff-context, the spec's local-fold-vs-frozen backstop at
+crewSeason.spec.ts:139, validate ×2); redeployed lambda-first + `index-DT1Ju2d6.js`,
+e2e:beta 17/17 ×3, crewSeason 10/10 live, full field 66/1-skip. (2) The gameless-counted-
+round copy was false and is fixed: one sentence true in both empty cases ("No standings
+from these rounds yet — standings build from games between current members."), both
+components. (3) Milestone labels stay plain ink — ruled correct (oxblood's job list is
+closed; a label isn't an under-par score; the mockup predated the discipline). (4) **No
+API path closes a season** — Stableford titles stay inert until one lands; ruled the next
+arc: organizer-only close/reopen verbs (the transfer/leave route idiom; the
+counted-round-mutation 409 guard on `status:"closed"` is already load-bearing), one
+"Close season" button + teaching line, reopen because a correctable system is the
+trustworthy one (the declared-index precedent). Riding note from the wave's review:
+`GamePanel.tsx` sorts live stableford game lines client-side (pre-existing, out of this
+ruling's scope — a future boundary-sweep item).
 
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.

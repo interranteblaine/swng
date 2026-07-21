@@ -7,7 +7,12 @@ import { RecordSections } from "./RecordSections";
 
 afterEach(cleanup);
 
-const ZERO_METRICS: GolferMetrics = { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] };
+const ZERO_METRICS: GolferMetrics = {
+  typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+  indexHistory: [],
+  bests: {},
+  milestones: [],
+};
 
 const line = (suffix: string, overrides: Partial<GolferRoundLine> = {}): GolferRoundLine => ({
   roundId: roundId(`round-${suffix}`),

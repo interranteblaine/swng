@@ -2,6 +2,8 @@ import type { IndexComputation } from "../handicap/whs.js";
 import { combineNineHoleDifferentials, computeIndexDetail, swngIndex } from "../handicap/whs.js";
 import type { RoundId } from "../ids.js";
 import { roundHalfUp } from "../scoring/strokes.js";
+import type { GolferBests, Milestone } from "./analytics.js";
+import { bestsOf, milestonesOf } from "./analytics.js";
 import type { GolferRoundLine } from "./record.js";
 import type { IndexSource } from "./golfer.js";
 
@@ -45,14 +47,20 @@ export interface IndexPoint {
 // mostly 9s isn't shown a deflated total. `indexHistory` is "your index over time" — one point
 // per round, oldest → newest (the order `lines` itself arrives in — getMyRecord's own sortLines
 // contract), each recomputed from every line up to and including it; the headline whsIndex/
-// swngIndex above is exactly `indexHistory`'s own last point. Grows to N members when a surface
-// needs them — adding a metric is adding a field here, not carving a new pathway. Read-time only,
-// never stored: the fold is pure (no clock); the application stamps time on the wire.
+// swngIndex above is exactly `indexHistory`'s own last point. `bests`/`milestones` (analytics
+// spec 2026-07-21 §3) are read over the same lines' `holeResults` via `analytics.ts`'s
+// `bestsOf`/`milestonesOf` — REQUIRED like typicalEighteen/indexHistory (an empty `{}`/`[]` is
+// the honest answer for a golfer with no fully holed-out lines yet, never absent). Grows to N
+// members when a surface needs them — adding a metric is adding a field here, not carving a new
+// pathway. Read-time only, never stored: the fold is pure (no clock); the application stamps
+// time on the wire.
 export interface GolferMetrics {
   readonly whsIndex?: IndexMetric;
   readonly swngIndex?: IndexMetric;
   readonly typicalEighteen: ScoringShape; // per-18 rate (zeros when no decided holes)
   readonly indexHistory: readonly IndexPoint[]; // oldest → newest
+  readonly bests: GolferBests;
+  readonly milestones: readonly Milestone[];
 }
 
 // The current whs + swng index detail from a set of lines — ONE fold, reused by the headline
@@ -104,6 +112,8 @@ export const golferMetrics = (lines: readonly GolferRoundLine[]): GolferMetrics 
     ...(swng !== undefined ? { swngIndex: { value: swng.value, differentialsUsed: swng.differentialsUsed } } : {}),
     typicalEighteen: typicalEighteenOf(lines),
     indexHistory,
+    bests: bestsOf(lines),
+    milestones: milestonesOf(lines),
   };
 };
 

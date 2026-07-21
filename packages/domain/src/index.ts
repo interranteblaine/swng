@@ -29,6 +29,13 @@ export * from "./golfer/placeholderName.js";
 export * from "./golfer/record.js";
 export * from "./golfer/metrics.js";
 export * from "./golfer/coursesPlayed.js";
+// analytics.ts (analytics spec 2026-07-21 §3): export the types every consumer needs to name
+// (GolferMetrics.bests/milestones' own member shapes) plus fullyHoledOut/grossOf — the "fully
+// holed out" definition Task 4's course-record fold reuses. bestsOf/milestonesOf stay
+// package-internal (metrics.ts imports them directly): nothing outside @swng/domain calls them —
+// golferMetrics is the one sanctioned way to reach a bests/milestones value.
+export type { BestRound, GolferBests, MilestoneKind, Milestone } from "./golfer/analytics.js";
+export { fullyHoledOut, grossOf } from "./golfer/analytics.js";
 export * from "./crew/crew.js";
 export * from "./crew/ledger.js";
 // GameConfig is already re-exported via ./round/events.js (game.ts owns the

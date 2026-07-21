@@ -890,7 +890,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/record", token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(200);
     expect(getMyRecordResponseSchema.parse(JSON.parse(resp.body!))).toEqual({
-      metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] },
+      metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [], bests: {}, milestones: [] },
       history: [],
     });
   });
@@ -1854,7 +1854,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       expect(parsed).toEqual({
         name: "Ann",
         indexSource: { kind: "swng" },
-        metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] },
+        metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [], bests: {}, milestones: [] },
         history: [],
       });
     });

@@ -43,10 +43,10 @@ const mockedGetMe = vi.mocked(getMe);
 const mockedUpdateMe = vi.mocked(updateMe);
 const mockedGetMyRecord = vi.mocked(getMyRecord);
 
-// GetMyRecordResponse.metrics.typicalEighteen/indexHistory are required (metrics-projection-grows
-// spec) — these tests only exercise the whsIndex/swngIndex suggestion, so every fixture here
-// spreads a zeroed/empty pair.
-const zeroMetrics = { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] } as const;
+// GetMyRecordResponse.metrics.typicalEighteen/indexHistory/bests/milestones are required
+// (metrics-projection-grows spec; analytics spec 2026-07-21 §3) — these tests only exercise the
+// whsIndex/swngIndex suggestion, so every fixture here spreads a zeroed/empty set.
+const zeroMetrics = { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [], bests: {}, milestones: [] } as const;
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());

@@ -156,6 +156,11 @@ export default [
                 // golfer metrics + per-round archive line
                 "golferMetrics",
                 "archiveGolferLine",
+                // analytics read folds — bests/milestones + the "fully holed out" definition
+                "bestsOf",
+                "milestonesOf",
+                "fullyHoledOut",
+                "grossOf",
                 // crew season aggregation
                 "crewContribution",
                 "aggregateSeason",

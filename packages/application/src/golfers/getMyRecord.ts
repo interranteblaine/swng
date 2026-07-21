@@ -33,6 +33,8 @@ export const getMyRecord =
         ...(metrics.swngIndex !== undefined ? { swngIndex: metrics.swngIndex } : {}),
         typicalEighteen: metrics.typicalEighteen,
         indexHistory: metrics.indexHistory,
+        bests: metrics.bests,
+        milestones: metrics.milestones,
       },
       history,
     };

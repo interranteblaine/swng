@@ -70,11 +70,13 @@ describe("golferMetrics — the read projection (handicap-model legibility spec 
     expect(metrics.swngIndex).toEqual({ value: s.value, differentialsUsed: s.differentialsUsed });
   });
 
-  it("an empty history yields no whsIndex/swngIndex, an all-zero typicalEighteen, and an empty indexHistory — no distribution/trend keys", () => {
+  it("an empty history yields no whsIndex/swngIndex, an all-zero typicalEighteen, an empty indexHistory, and empty bests/milestones — no distribution/trend keys", () => {
     const metrics = golferMetrics([]);
     expect(metrics).toEqual({
       typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
       indexHistory: [],
+      bests: {},
+      milestones: [],
     });
     expect(metrics).not.toHaveProperty("distribution");
     expect(metrics).not.toHaveProperty("trend");
@@ -84,6 +86,26 @@ describe("golferMetrics — the read projection (handicap-model legibility spec 
     const metrics = golferMetrics([line({ ags: 90, differential: 9.0 }), line({ ags: 95, differential: 14.0 }), line({ ags: 92, differential: 11.0 })]);
     expect(metrics).not.toHaveProperty("distribution");
     expect(metrics).not.toHaveProperty("trend");
+  });
+
+  // bests/milestones (analytics spec 2026-07-21 §3): golferMetrics wires straight through to
+  // analytics.ts's own bestsOf/milestonesOf over the same lines — this pins that the wiring
+  // exists and lands one hand-computed value (a fully holed-out 18 with a birdie hole sets both
+  // best18 and fires first-birdie/broke-100/broke-90, not broke-80).
+  it("wires bests/milestones from a line's holeResults", () => {
+    const holeResults = [
+      { hole: 1, par: 4, result: { kind: "strokes" as const, strokes: 3 } }, // -1, birdie
+      ...Array.from({ length: 17 }, (_, i) => ({ hole: i + 2, par: 4, result: { kind: "strokes" as const, strokes: 5 } })),
+    ];
+    // gross = 3 + 17*5 = 88; toPar = 88 - 72 = 16.
+    const metrics = golferMetrics([line({ roundId: roundId("m1"), holes: 18, par: 72, holeResults })]);
+
+    expect(metrics.bests).toEqual({ best18: { roundId: roundId("m1"), gross: 88, toPar: 16 } });
+    expect(metrics.milestones).toEqual([
+      { kind: "first-birdie", roundId: roundId("m1") },
+      { kind: "broke-100", roundId: roundId("m1") },
+      { kind: "broke-90", roundId: roundId("m1") },
+    ]);
   });
 });
 

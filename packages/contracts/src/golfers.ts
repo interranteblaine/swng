@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CourseId, GolferId, GolferMetrics, GolferRoundLine, IndexSource, RoundId } from "@swng/domain";
+import type { CourseId, GolferBests, GolferId, GolferMetrics, GolferRoundLine, IndexSource, Milestone, RoundId } from "@swng/domain";
 import { courseIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
 
 // The index a golfer is ON is a SOURCE they choose (index-source model spec §3): swng/whs are
@@ -110,7 +110,8 @@ const golferRoundLineSchema: z.ZodType<GolferRoundLine> = z.object(golferRoundLi
 // buckets, summed across ALL lines and normalized to a per-18-hole rate) and `indexHistory` ("your
 // index over time" — one point per round, oldest → newest, each recomputed from every line up to
 // and including it; the headline whsIndex/swngIndex above is exactly indexHistory's own last
-// point) are REQUIRED — both always present, zeros/`[]` rather than absent.
+// point) are REQUIRED — both always present, zeros/`[]` rather than absent. `bests`/`milestones`
+// (analytics spec §3) are REQUIRED the same way, `{}`/`[]` rather than absent.
 // Shared metrics sub-schemas — the domain `GolferMetrics` fold's own shape (domain/golfer/
 // metrics.ts), reused verbatim below by BOTH getMyRecordResponseSchema (which layers a
 // read-time `computedAtMs` stamp onto its own whsIndex — a Clock reading the pure fold never
@@ -125,6 +126,18 @@ const scoringShapeSchema = z.object({
 });
 const indexHistorySchema = z.array(z.object({ roundId: roundIdSchema, swngIndex: z.number().optional(), whsIndex: z.number().optional() })).readonly();
 
+// bests/milestones (analytics spec 2026-07-21 §3, domain/golfer/analytics.ts): a contingency
+// fix landing in the SAME task that made them required GolferMetrics members (Task 2 of the
+// analytics-read-folds arc) — schema-vs-type assignability below would otherwise fail at build.
+// Task 5 owns the rest of the wire (GetMyRecordResponse's own bests/milestones, the course-page
+// route); these two sub-schemas mirror the domain shapes exactly, no richer than that.
+const bestRoundSchema = z.object({ roundId: roundIdSchema, gross: z.number().int(), toPar: z.number().int() });
+const bestsSchema: z.ZodType<GolferBests> = z.object({ best18: bestRoundSchema.optional(), best9: bestRoundSchema.optional() });
+const milestoneSchema: z.ZodType<Milestone> = z.object({
+  kind: z.union([z.literal("first-birdie"), z.literal("first-eagle"), z.literal("broke-100"), z.literal("broke-90"), z.literal("broke-80")]),
+  roundId: roundIdSchema,
+});
+
 // The bare domain GolferMetrics shape, straight off golferMetrics() — no computedAtMs (that's
 // getMyRecordResponseSchema's own read-time addition below); getGolferResponseSchema serves
 // this as-is.
@@ -133,6 +146,8 @@ const golferMetricsSchema: z.ZodType<GolferMetrics> = z.object({
   swngIndex: indexMetricSchema.optional(),
   typicalEighteen: scoringShapeSchema,
   indexHistory: indexHistorySchema,
+  bests: bestsSchema,
+  milestones: z.array(milestoneSchema).readonly(),
 });
 
 export interface GetMyRecordResponse {
@@ -141,6 +156,8 @@ export interface GetMyRecordResponse {
     readonly swngIndex?: { readonly value: number; readonly differentialsUsed: number };
     readonly typicalEighteen: { readonly eagles: number; readonly birdies: number; readonly pars: number; readonly bogeys: number; readonly doublePlus: number };
     readonly indexHistory: readonly { readonly roundId: RoundId; readonly swngIndex?: number; readonly whsIndex?: number }[];
+    readonly bests: GolferBests;
+    readonly milestones: readonly Milestone[];
   };
   readonly history: readonly GolferRoundLine[]; // newest first (application/src/golfers/getMyRecord.ts)
 }
@@ -151,6 +168,8 @@ export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.objec
     swngIndex: indexMetricSchema.optional(),
     typicalEighteen: scoringShapeSchema,
     indexHistory: indexHistorySchema,
+    bests: bestsSchema,
+    milestones: z.array(milestoneSchema).readonly(),
   }),
   history: z.array(golferRoundLineSchema).readonly(),
 });

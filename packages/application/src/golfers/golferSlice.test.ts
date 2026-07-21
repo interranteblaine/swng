@@ -144,7 +144,10 @@ describe("getMyRecord", () => {
   it("returns an empty record (no computed indexes, zeroed typicalEighteen, empty indexHistory, empty history) for a sub with no golfer at all — no throw, no create", async () => {
     const ctx = setup();
     const record = await ctx.record({ sub: "sub-1" });
-    expect(record).toEqual({ metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] }, history: [] });
+    expect(record).toEqual({
+      metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [], bests: {}, milestones: [] },
+      history: [],
+    });
   });
 
   it("bootstrap not met: history present, whsIndex absent below 3 differentials", async () => {

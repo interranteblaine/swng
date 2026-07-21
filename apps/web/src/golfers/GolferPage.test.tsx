@@ -8,9 +8,15 @@ import { GolferPage } from "./GolferPage";
 
 const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
 
-// GetGolferResponse.metrics.typicalEighteen/indexHistory are REQUIRED on the wire (same contract
-// as GetMyRecordResponse) — every fixture below spreads this in.
-const emptyMetricsExtras = { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] as unknown[] };
+// GetGolferResponse.metrics.typicalEighteen/indexHistory/bests/milestones are REQUIRED on the
+// wire (same contract as GetMyRecordResponse; analytics spec 2026-07-21 §3) — every fixture
+// below spreads this in.
+const emptyMetricsExtras = {
+  typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+  indexHistory: [] as unknown[],
+  bests: {},
+  milestones: [] as unknown[],
+};
 
 function ProfileProbe() {
   return <div data-testid="profile-probe">profile page probe</div>;

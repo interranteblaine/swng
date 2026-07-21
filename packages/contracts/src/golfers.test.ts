@@ -109,13 +109,18 @@ describe("getMyRecordResponseSchema", () => {
   // asserts otherwise below.
   const zeroTypicalEighteen = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
 
-  it("round-trips a record with both metrics (whsIndex + swngIndex), a typicalEighteen shape, an indexHistory with both indices, and mixed complete/incomplete history lines", () => {
+  // Both required (analytics spec §3): {} / [] unless a fixture asserts otherwise below.
+  const zeroBestsMilestones = { bests: {}, milestones: [] };
+
+  it("round-trips a record with both metrics (whsIndex + swngIndex), a typicalEighteen shape, an indexHistory with both indices, a best18, and an achieved milestone, plus mixed complete/incomplete history lines", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: {
         whsIndex: { value: 7.2, computedAtMs: 5_000, differentialsUsed: 1 },
         swngIndex: { value: 9.4, differentialsUsed: 1 },
         typicalEighteen: { eagles: 0, birdies: 3, pars: 20, bogeys: 12, doublePlus: 2 },
         indexHistory: [{ roundId: roundId("r1"), swngIndex: 9.4, whsIndex: 7.2 }],
+        bests: { best18: { roundId: roundId("r1"), gross: 82, toPar: 10 } },
+        milestones: [{ kind: "broke-90", roundId: roundId("r1") }],
       },
       history: [completeLine, incompleteLine],
     });
@@ -129,6 +134,7 @@ describe("getMyRecordResponseSchema", () => {
         swngIndex: { value: 9.4, differentialsUsed: 1 },
         typicalEighteen: zeroTypicalEighteen,
         indexHistory: [{ roundId: roundId("r2"), swngIndex: 9.4 }],
+        ...zeroBestsMilestones,
       },
       history: [incompleteLine],
     });
@@ -136,36 +142,53 @@ describe("getMyRecordResponseSchema", () => {
 
   it("round-trips a bootstrap-not-met record: no computed indexes, zeroed typicalEighteen, empty indexHistory, history present", () => {
     roundTrips(getMyRecordResponseSchema, {
-      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [] },
+      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones },
       history: [incompleteLine],
     });
   });
 
   it("round-trips an entirely empty record", () => {
-    roundTrips(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [] }, history: [] });
+    roundTrips(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones }, history: [] });
   });
 
   // course-cards spec §4: courseId (the analytics join key) is OPTIONAL on a history line —
   // pre-scrap lines carry none, tolerated as absent.
   it("round-trips a history line carrying courseId", () => {
     roundTrips(getMyRecordResponseSchema, {
-      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [] },
+      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones },
       history: [{ ...completeLine, courseId: courseId("course-1") }],
     });
   });
 
   it("round-trips a pre-scrap history line with no courseId", () => {
-    roundTrips(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [] }, history: [completeLine] });
+    roundTrips(getMyRecordResponseSchema, {
+      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones },
+      history: [completeLine],
+    });
   });
 
-  // Both typicalEighteen and indexHistory are REQUIRED — a metrics object missing either is
-  // rejected, not silently defaulted.
+  // typicalEighteen, indexHistory, bests, and milestones are all REQUIRED — a metrics object
+  // missing any one of them is rejected, not silently defaulted.
   it("rejects a metrics object missing typicalEighteen", () => {
-    expect(() => parse(getMyRecordResponseSchema, { metrics: { indexHistory: [] }, history: [] })).toThrow(ContractError);
+    expect(() => parse(getMyRecordResponseSchema, { metrics: { indexHistory: [], ...zeroBestsMilestones }, history: [] })).toThrow(ContractError);
   });
 
   it("rejects a metrics object missing indexHistory", () => {
-    expect(() => parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen }, history: [] })).toThrow(ContractError);
+    expect(() => parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, ...zeroBestsMilestones }, history: [] })).toThrow(
+      ContractError,
+    );
+  });
+
+  it("rejects a metrics object missing bests", () => {
+    expect(() =>
+      parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], milestones: [] }, history: [] }),
+    ).toThrow(ContractError);
+  });
+
+  it("rejects a metrics object missing milestones", () => {
+    expect(() =>
+      parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], bests: {} }, history: [] }),
+    ).toThrow(ContractError);
   });
 });
 

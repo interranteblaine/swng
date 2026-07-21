@@ -12,12 +12,17 @@ import { ProfilePage } from "./ProfilePage";
 const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
 
 // GetMyRecordResponse.metrics.typicalEighteen/indexHistory are REQUIRED on the wire now
-// (metrics-projection-grows spec, papercut 17's follow-on) — api.ts's getMyRecord parses every
-// /me/record response through the real zod schema, so a mock missing either field throws at
-// runtime and silently leaves `record` unset (the effect's own `.catch(() => {})`). Every
-// /me/record fixture below spreads this in; tests that care about a SPECIFIC typicalEighteen/
-// indexHistory override it explicitly.
-const emptyMetricsExtras = { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] as GetMyRecordResponse["metrics"]["indexHistory"] };
+// (metrics-projection-grows spec, papercut 17's follow-on; bests/milestones, analytics spec
+// 2026-07-21 §3) — api.ts's getMyRecord parses every /me/record response through the real zod
+// schema, so a mock missing any required field throws at runtime and silently leaves `record`
+// unset (the effect's own `.catch(() => {})`). Every /me/record fixture below spreads this in;
+// tests that care about a SPECIFIC typicalEighteen/indexHistory override it explicitly.
+const emptyMetricsExtras = {
+  typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+  indexHistory: [] as GetMyRecordResponse["metrics"]["indexHistory"],
+  bests: {} as GetMyRecordResponse["metrics"]["bests"],
+  milestones: [] as GetMyRecordResponse["metrics"]["milestones"],
+};
 
 // ProfilePage's history lines are now react-router <Link>s (projection-realignment Task 6) —
 // every render needs a Router ancestor, same MemoryRouter-wrapping idiom WatchPage.test.tsx's
@@ -370,7 +375,10 @@ describe("ProfilePage — signed in", () => {
         if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
         if (path === "/me/crews") return fakeResponse(200, { crews: [] });
         if (path === "/me/record") {
-          return fakeResponse(200, { metrics: { indexHistory: [], typicalEighteen: { eagles: 0, birdies: 2, pars: 8, bogeys: 5, doublePlus: 3 } }, history: [] });
+          return fakeResponse(200, {
+            metrics: { indexHistory: [], typicalEighteen: { eagles: 0, birdies: 2, pars: 8, bogeys: 5, doublePlus: 3 }, bests: {}, milestones: [] },
+            history: [],
+          });
         }
         throw new Error(`unexpected fetch ${path}`);
       }),

@@ -15,7 +15,12 @@ import { usePageTitle } from "../ui/usePageTitle";
 // before GET /me/record resolves — its `metrics` prop is REQUIRED (a shared component takes a
 // real default, never an implicit fallback baked into itself), so this is that default: zeroed
 // rather than absent, matching the wire's own zeroed-not-absent contract for typicalEighteen.
-const ZERO_METRICS: GolferMetrics = { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [] };
+const ZERO_METRICS: GolferMetrics = {
+  typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+  indexHistory: [],
+  bests: {},
+  milestones: [],
+};
 
 // The two adoptable computed sources shown beneath "Your index" (index-source model spec §6) —
 // each a labeled data point read straight off GET /me/record's metrics, with a one-tap "Use this"

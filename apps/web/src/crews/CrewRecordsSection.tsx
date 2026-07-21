@@ -7,6 +7,12 @@ import { GolferLink } from "../ui/GolferLink";
 import { cardBox } from "../ui/classes";
 import { headToHeadLine } from "./headToHeadLine";
 
+// Season names are FREE TEXT (docs/architecture.md's own examples include "Summer Cup"; the
+// crewSeason e2e fixture season is "The Golden Dozen") — the "'{yy}" form is a CONVENTION for
+// year-named seasons only, never a schema guarantee. Applies iff the name ends in two digits;
+// otherwise the season's own name renders verbatim beside the golfer name.
+const seasonTitleSuffix = (seasonName: string): string => (/\d{2}$/.test(seasonName) ? ` '${seasonName.slice(-2)}` : ` — ${seasonName}`);
+
 // GET /crews/{crewId}/records (analytics read-folds spec 2026-07-21 §5): "All-time" — every
 // counted round across every season, deduped by roundId, folded once. CrewPage renders this
 // below the season list; unlike SeasonPanel (mounted `key={seasonId}` per season selection),
@@ -108,11 +114,12 @@ export function CrewRecordsSection({ crewId }: { readonly crewId: CrewId }) {
       )}
 
       {/* Season titles (spec §5): each CLOSED season's Stableford points leader(s), rendered
-          "{names} '{yy}" per season (the season's own name supplies the year — "2024" → '24),
-          joined "·". Renders nothing when no season has closed with a title yet. */}
+          "{names} '{yy}" per season when the season's own name IS a year ("2024" → '24), else
+          "{names} — {season name}" verbatim (seasonTitleSuffix above) — joined "·". Renders
+          nothing when no season has closed with a title yet. */}
       {records.titles.length > 0 && (
         <p className="text-sm text-fairway">
-          Stableford titles — {records.titles.map((title) => `${title.golfers.map((golfer) => golfer.name).join(" & ")} '${title.name.slice(-2)}`).join(" · ")}
+          Stableford titles — {records.titles.map((title) => `${title.golfers.map((golfer) => golfer.name).join(" & ")}${seasonTitleSuffix(title.name)}`).join(" · ")}
         </p>
       )}
     </div>

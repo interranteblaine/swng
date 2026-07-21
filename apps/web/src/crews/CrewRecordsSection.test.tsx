@@ -91,7 +91,10 @@ describe("CrewRecordsSection", () => {
       partners: [{ a: ANN, b: BO, nameA: "Ann", nameB: "Bo", wins: 9, losses: 2, halves: 0 }],
       titles: [
         { seasonId: "s-2024", name: "2024", golfers: [{ golferId: BO, name: "Bo" }] },
-        { seasonId: "s-2025", name: "2025", golfers: [{ golferId: ANN, name: "Ann" }] },
+        // Season names are FREE TEXT (docs/architecture.md's own examples include "Summer
+        // Cup"; the crewSeason e2e fixture season is "The Golden Dozen") — pinning both the
+        // year-name shape and a free-text shape from the SAME fixture proves the fallback.
+        { seasonId: "s-dozen", name: "The Golden Dozen", golfers: [{ golferId: ANN, name: "Ann" }] },
       ],
     };
     mockedGetCrewRecords.mockResolvedValue(records);
@@ -109,7 +112,9 @@ describe("CrewRecordsSection", () => {
 
     expect(screen.getByText("Ann & Bo — 9–2")).toBeTruthy();
 
-    expect(screen.getByText("Stableford titles — Bo '24 · Ann '25")).toBeTruthy();
+    // "2024" ends in two digits -> the "'{yy}" convention; "The Golden Dozen" does not -> the
+    // season's own name renders verbatim beside the golfer name.
+    expect(screen.getByText("Stableford titles — Bo '24 · Ann — The Golden Dozen")).toBeTruthy();
   });
 
   it("no rounds counted ever: the table shows the honest empty state, not a blank table", async () => {

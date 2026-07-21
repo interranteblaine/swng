@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
-import type { GetMyRecordResponse, PartnerStandingRecord, SeasonStandingLine, SeasonSuperlatives } from "@swng/contracts";
+import type { CrewRecordsResponse, GetMyRecordResponse, PartnerStandingRecord, SeasonStandingLine, SeasonSuperlatives } from "@swng/contracts";
 import { golferId } from "@swng/domain";
 import type { CrewId, GolferId, HeadToHeadRecord, RoundId, SeasonLedgerLine } from "@swng/domain";
 import {
   addGameDirect,
   appendCountedRoundDirect,
+  closeSeasonDirect,
   createCrewDirect,
   createScoreOps,
   createSeasonDirect,
@@ -23,6 +24,7 @@ import {
   recordScoreDirect,
   removeCountedRoundDirect,
   removeCrewMemberDirect,
+  reopenSeasonDirect,
   startRoundDirect,
 } from "./support.js";
 import type { AccountGolfer } from "./support.js";
@@ -492,7 +494,8 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expectAbsentMostImproved(standingsAfterRejoin.superlatives);
   });
 
-  test("9: all-time crew records fold every counted round across all seasons — partners [], titles [] (no close-season path yet)", async () => {
+  test("9: all-time crew records fold every counted round across all seasons — closing the season awards its Stableford title, reopening empties it", async () => {
+    test.setTimeout(120_000);
     const { httpUrl } = loadWebEnv();
     const frozen = frozenSeasonExpectation(ids);
     // The roster after 8b is {Al, Bo} again (Bo re-joined), and all 12 rounds are counted into the
@@ -511,12 +514,63 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(records.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
     expect(records.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
 
-    // Partners: still no four-ball in the deck → []. Titles: each CLOSED season's Stableford
-    // leader — but there is NO API path that closes a season (createSeason always writes "open",
-    // no close route exists), so `titles` is ALWAYS [] over this wire (getCrewRecords skips every
-    // non-closed season). This is the honest expectation; titles will activate when a close-season
-    // path lands.
+    // Partners: still no four-ball in the deck → [].
     expect(records.partners).toEqual(EXPECTED_PARTNERS);
+
+    // Titles are a READ FOLD over CLOSED seasons ONLY (getCrewRecords.ts: `if (season.status !==
+    // "closed") continue`) — nothing about a title is ever stored (close-season spec §1.3/§3). The
+    // one season is still OPEN on every read above, so `titles` is [] here NOT because no close
+    // route exists (the analytics arc's provisional reason, now retired by the close-season arc)
+    // but because the season simply isn't closed yet. That is the assertion the analytics arc's
+    // comment promised this arc would replace — the derivation below is the replacement.
     expect(records.titles).toEqual([]);
+
+    // --- The crown, hand-derived from the FROZEN deck (the oracle discipline: derived here, never
+    // read back off the system) --------------------------------------------------------------------
+    // Roster at step 9 = {Al, Bo} (Bo re-joined in 8b; Cy/Dee held accounts all season but joined
+    //   no roster) — the same `memberIds` every assertion above filters against.
+    // A season's title is its Stableford POINTS leader(s) over the CURRENT-ROSTER-filtered ledger:
+    //   getCrewRecords → stablefordTitle(seasonLedger), where seasonLedger is aggregateSeason over
+    //   rosterFilteredContribution — the SAME fold `records.ledger` above already asserts. The
+    //   roster-filtered Stableford points over all 12 counted rounds (crewSeasonDeck.ts FROZEN_LINE):
+    //       Al 430, Bo 430   (Cy/Dee's 435 apiece are FILTERED OUT — neither is on the roster)
+    //   maxPoints = 430 > 0, so a title IS awarded; Al and Bo TIE at 430, so BOTH are crowned
+    //   (stablefordTitle returns every line at the max). The raw deck leaders are Cy/Dee at 435, but
+    //   the roster filter never lets them into this ledger — the aggregation-scope law reaching the
+    //   title itself.
+    // stablefordTitle sorts its winners by golferId ASCENDING (analytics arc Task 4's pin), and
+    //   getCrewRecords preserves that order into `golfers`, each `{ golferId, name }` with name from
+    //   the roster's own CrewMember.name (Al→"Al", Bo→"Bo", asserted in steps 2/8/8b). golferIds are
+    //   live-minted per run, so the pin is expressed via the deck handles + the same ascending sort,
+    //   exactly like expectedStandingLines — not literal ids. The entry's seasonId/name are the one
+    //   live-minted season's own (`seasonId` from step 4, SEASON_NAME).
+    const closed = await closeSeasonDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
+    expect(closed.season.status).toBe("closed");
+
+    const closedRecords = await getCrewRecordsDirect(httpUrl, al.tokens.idToken, crewId);
+    const expectedTitles: CrewRecordsResponse["titles"] = [
+      {
+        seasonId,
+        name: SEASON_NAME,
+        golfers: [ids.al, ids.bo].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map((id) => ({ golferId: id, name: nameOf(id) })),
+      },
+    ];
+    expect(closedRecords.titles).toEqual(expectedTitles);
+
+    // Closing is a read-time filter on `titles` ALONE — the counted rounds and the standings fold
+    // are untouched, so everything else about the records is byte-identical to the open read above.
+    expect(closedRecords.rounds).toBe(SEASON_ROUNDS);
+    expect(closedRecords.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
+    expect(closedRecords.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
+    expect(closedRecords.partners).toEqual(EXPECTED_PARTNERS);
+
+    // Reopen — the crown simply stops appearing (reopening un-awards nothing durable; titles are a
+    // read fold, spec §1.3). This also returns the season to `open`, so it ends this spec in exactly
+    // the state it began (never closed), leaving reruns and every other suite with no residue.
+    const reopened = await reopenSeasonDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
+    expect(reopened.season.status).toBe("open");
+
+    const reopenedRecords = await getCrewRecordsDirect(httpUrl, al.tokens.idToken, crewId);
+    expect(reopenedRecords.titles).toEqual([]);
   });
 });

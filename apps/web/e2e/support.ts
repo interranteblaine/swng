@@ -16,6 +16,7 @@ import {
   addGameResponseSchema,
   appendCountedRoundRequestSchema,
   appendCountedRoundResponseSchema,
+  closeSeasonResponseSchema,
   createCourseRequestSchema,
   createCourseResponseSchema,
   createCrewRequestSchema,
@@ -37,6 +38,7 @@ import {
   recordScoreRequestSchema,
   recordScoreResponseSchema,
   removeCountedRoundResponseSchema,
+  reopenSeasonResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
   shareLinkResponseSchema,
@@ -47,6 +49,7 @@ import {
 import type {
   AddGameResponse,
   AppendCountedRoundResponse,
+  CloseSeasonResponse,
   CreateCrewResponse,
   CreateSeasonResponse,
   CrewRecordsResponse,
@@ -60,6 +63,7 @@ import type {
   JoinRoundResponse,
   MintCrewInviteResponse,
   RemoveCountedRoundResponse,
+  ReopenSeasonResponse,
   SeasonStandingsResponse,
   ShareLinkResponse,
   StartRoundResponse,
@@ -417,6 +421,32 @@ export const getCrewRecordsDirect = async (httpUrl: string, token: string, id: C
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`GET /crews/${id}/records -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(crewRecordsResponseSchema, json);
+};
+
+// POST /crews/{crewId}/seasons/{seasonId}/close and .../reopen (close-season spec 2026-07-21 §1):
+// the ORGANIZER's verbs that flip CrewSeason.status — organizer-gated on the wire (routes.ts +
+// closeSeason.ts/reopenSeason.ts's own guard), so the Bearer must be the organizer's ID token.
+// Both take an EMPTY request body (no schema) and return the updated season view — the SAME
+// `{ season }` shape createSeasonDirect parses. crewSeason.spec.ts's step 9 closes the season to
+// make its Stableford title live in getCrewRecords, then reopens to empty `titles` again.
+export const closeSeasonDirect = async (httpUrl: string, token: string, id: CrewId, seasonId: string): Promise<CloseSeasonResponse> => {
+  const response = await fetch(`${httpUrl}/crews/${id}/seasons/${seasonId}/close`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /crews/${id}/seasons/${seasonId}/close -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(closeSeasonResponseSchema, json);
+};
+
+export const reopenSeasonDirect = async (httpUrl: string, token: string, id: CrewId, seasonId: string): Promise<ReopenSeasonResponse> => {
+  const response = await fetch(`${httpUrl}/crews/${id}/seasons/${seasonId}/reopen`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` },
+  });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`POST /crews/${id}/seasons/${seasonId}/reopen -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(reopenSeasonResponseSchema, json);
 };
 
 // Generic "keep reading until an asynchronous projector catches up" poller — identityRecord.

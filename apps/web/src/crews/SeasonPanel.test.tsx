@@ -416,6 +416,28 @@ describe("SeasonPanel — counted rounds", () => {
     expect(await screen.findByTestId("archive-probe")).toBeTruthy();
   });
 
+  // Review finding (task-3): a closed season 409s removeCountedRound (season-closed) for ANY
+  // caller, including the round's own appender — the same "door the server has closed" rule
+  // the count-a-round affordance below already honors. Without this gate, the appender's own
+  // Remove button stayed clickable-and-doomed on a closed season.
+  it("a closed season hides Remove even on the caller's own appended round", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+    mockedGetSeasonStandings.mockResolvedValue({
+      seasonId: "season-1",
+      name: "2026",
+      status: "closed",
+      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, appendedBy: ANN }], // mine
+      ledger: [],
+      headToHead: [], partners: [], superlatives: {},
+    });
+
+    renderPanel(ANN);
+
+    const list = await screen.findByRole("list", { name: /counted rounds/i });
+    expect(within(list).queryByRole("button", { name: /remove/i })).toBeNull();
+  });
+
   it("removing a counted round DELETEs it and refreshes standings", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });

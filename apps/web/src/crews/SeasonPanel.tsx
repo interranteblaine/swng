@@ -324,8 +324,13 @@ export function SeasonPanel({ crewId, seasonId, myGolferId, isOrganizer }: Seaso
                 </Link>
                 {/* Remove affordance ONLY on rows the caller themselves appended (task-11-brief.md
                     binding resolution) — mirrors removeCountedRound.ts's own not-the-appender
-                    403, shown here as an absent button rather than a doomed request. */}
-                {round.appendedBy === myGolferId && (
+                    403, shown here as an absent button rather than a doomed request. AND only on
+                    an open season — the same close-season spec 2026-07-21 §2 rule the
+                    count-a-round affordance below applies ("the server already 409s;
+                    the UI simply doesn't show a door the server has closed"): removeCountedRound
+                    409s season-closed for ANY caller, appender included, so this is the second
+                    of the two doors that rule closes, not a special case of its own. */}
+                {round.appendedBy === myGolferId && standings.status === "open" && (
                   <button type="button" onClick={() => void remove(round.roundId)} disabled={pendingRoundId === round.roundId} className="text-xs text-oxblood underline disabled:opacity-50">
                     Remove
                   </button>
@@ -344,7 +349,8 @@ export function SeasonPanel({ crewId, seasonId, myGolferId, isOrganizer }: Seaso
       {/* close-season spec 2026-07-21 §2: "the server already 409s; the UI simply doesn't show a
           door the server has closed" — the count-a-round affordance (and its picker) render only
           on an OPEN season, for every member (not organizer-scoped — anyone could count a round
-          before closure, so the door closes for everyone alike). */}
+          before closure, so the door closes for everyone alike). The counted-round Remove button
+          above applies the SAME rule (a second door the server closes identically). */}
       {standings.status === "open" && (
         <>
           {!picking ? (

@@ -88,6 +88,11 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "season-closed": 409,
   "did-not-play": 403,
   "not-the-appender": 403,
+  // Close-season spec (2026-07-21): closeSeason/reopenSeason's own explicit conflicts — same 409
+  // bucket as season-closed/round-already-counted above, wire-distinct codes so a stale client
+  // (double-tap Close, or Reopen on a season someone else already reopened) learns the truth.
+  "season-already-closed": 409,
+  "season-not-closed": 409,
   // Crew membership (invited in, accountable out — spec §1): removeCrewMember/transferOrganizer's
   // organizer-only gate — a forbidden actor, same 403 bucket as not-a-member/not-the-appender
   // above. organizer-must-transfer is leaveCrew's own guard — a failed lifecycle precondition

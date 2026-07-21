@@ -153,6 +153,20 @@ export interface ListSeasonsResponse {
 }
 export const listSeasonsResponseSchema: z.ZodType<ListSeasonsResponse> = z.object({ seasons: z.array(crewSeasonViewSchema).readonly() });
 
+// POST /crews/{crewId}/seasons/{seasonId}/close and .../reopen (close-season spec 2026-07-21
+// §1): the organizer's verbs that flip CrewSeason.status — empty request bodies (no schema
+// needed), each returning the updated season view, the SAME `{ season }` shape
+// createSeasonResponseSchema uses.
+export interface CloseSeasonResponse {
+  readonly season: CrewSeasonView;
+}
+export const closeSeasonResponseSchema: z.ZodType<CloseSeasonResponse> = z.object({ season: crewSeasonViewSchema });
+
+export interface ReopenSeasonResponse {
+  readonly season: CrewSeasonView;
+}
+export const reopenSeasonResponseSchema: z.ZodType<ReopenSeasonResponse> = z.object({ season: crewSeasonViewSchema });
+
 // One finished round counted into a season, as the wire sees it: `finalizedAt` is epoch ms (the
 // round-finalized event's own wall time), `appendedBy` is the member who counted it. Reused by
 // the append response and the standings' own `rounds` list.

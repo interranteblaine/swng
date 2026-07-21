@@ -13,6 +13,7 @@ import {
   putAndBindGolfer,
 } from "../testing/fakes.js";
 import { appendCountedRound } from "./appendCountedRound.js";
+import { closeSeason } from "./closeSeason.js";
 import { createCrew } from "./createCrew.js";
 import { createSeason } from "./createSeason.js";
 import { getCrewRecords } from "./getCrewRecords.js";
@@ -22,6 +23,7 @@ import { leaveCrew } from "./leaveCrew.js";
 import { listSeasons } from "./listSeasons.js";
 import { mintCrewInvite } from "./mintCrewInvite.js";
 import { removeCountedRound } from "./removeCountedRound.js";
+import { reopenSeason } from "./reopenSeason.js";
 
 // A finalized-round snapshot (RoundArchive) with a decided singles match — the smallest shape
 // crewContribution produces a ledger line + head-to-head entry from. `names` lets a test give
@@ -147,6 +149,8 @@ const setup = () => {
     listSeasons: listSeasons({ crewStore, golferStore }),
     append: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
     remove: removeCountedRound({ crewStore, golferStore }),
+    close: closeSeason({ crewStore, golferStore }),
+    reopen: reopenSeason({ crewStore, golferStore }),
     standings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
     records: getCrewRecords({ crewStore, golferStore, snapshots }),
     leave: leaveCrew({ crewStore, golferStore }),
@@ -298,9 +302,8 @@ describe("appendCountedRound", () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
     ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-    // Close the season directly (there is no close route in v1 — putSeason upsert).
-    const season = await ctx.crewStore.getSeason(crewId, seasonId);
-    await ctx.crewStore.putSeason(crewId, { ...season!, status: "closed" });
+    // Close via the organizer's own verb — end to end, now reachable (close-season arc).
+    await ctx.close(asClaims("ann"), crewId, seasonId);
 
     await expect(ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") })).rejects.toMatchObject({ code: "season-closed" });
   });
@@ -342,8 +345,8 @@ describe("removeCountedRound", () => {
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
     ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
     await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
-    const season = await ctx.crewStore.getSeason(crewId, seasonId);
-    await ctx.crewStore.putSeason(crewId, { ...season!, status: "closed" });
+    // Close via the organizer's own verb — end to end, now reachable (close-season arc).
+    await ctx.close(asClaims("ann"), crewId, seasonId);
 
     await expect(ctx.remove(asClaims("ann"), crewId, seasonId, roundId("r1"))).rejects.toMatchObject({ code: "season-closed" });
   });
@@ -715,5 +718,78 @@ describe("getCrewRecords", () => {
       partners: [],
       titles: [],
     });
+  });
+});
+
+// Close-season spec (2026-07-21): the two verbs that flip CrewSeason.status. Nothing about a
+// title is ever stored — closing/reopening just flips `status`, and getCrewRecords' own
+// on-read title fold (already covered above) reacts.
+describe("closeSeason / reopenSeason", () => {
+  it(
+    "organizer closes an open season → its Stableford title appears in getCrewRecords (reuses the existing " +
+      "titles fixture arithmetic — Ann 40 pts beats Bo 30 pts); reopening makes the title vanish again",
+    async () => {
+      const ctx = setup();
+      const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
+      ctx.snapshots.record(stablefordArchive("r1", 5_000, [ann, bo], { [ann]: 40, [bo]: 30 }));
+      await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
+
+      const beforeClose = await ctx.records(asClaims("ann"), crewId);
+      expect(beforeClose.titles).toEqual([]); // open season awards nothing yet
+
+      const closed = await ctx.close(asClaims("ann"), crewId, seasonId);
+      expect(closed.season).toMatchObject({ seasonId, status: "closed" });
+
+      const afterClose = await ctx.records(asClaims("ann"), crewId);
+      expect(afterClose.titles).toEqual([{ seasonId, name: "2026", golfers: [{ golferId: ann, name: "Ann" }] }]);
+
+      const reopened = await ctx.reopen(asClaims("ann"), crewId, seasonId);
+      expect(reopened.season).toMatchObject({ seasonId, status: "open" });
+
+      const afterReopen = await ctx.records(asClaims("ann"), crewId);
+      expect(afterReopen.titles).toEqual([]);
+    },
+  );
+
+  it("closing an already-closed season is rejected — season-already-closed", async () => {
+    const ctx = setup();
+    const { crewId, seasonId } = await crewWithSeason(ctx);
+    await ctx.close(asClaims("ann"), crewId, seasonId);
+
+    await expect(ctx.close(asClaims("ann"), crewId, seasonId)).rejects.toMatchObject({ code: "season-already-closed" });
+  });
+
+  it("reopening an OPEN season is rejected — season-not-closed", async () => {
+    const ctx = setup();
+    const { crewId, seasonId } = await crewWithSeason(ctx);
+
+    await expect(ctx.reopen(asClaims("ann"), crewId, seasonId)).rejects.toMatchObject({ code: "season-not-closed" });
+  });
+
+  it("a non-organizer member is rejected on both verbs — not-organizer", async () => {
+    const ctx = setup();
+    const { crewId, seasonId } = await crewWithSeason(ctx); // Bo joined, Ann is organizer
+
+    await expect(ctx.close(asClaims("bo"), crewId, seasonId)).rejects.toMatchObject({ code: "not-organizer" });
+
+    await ctx.close(asClaims("ann"), crewId, seasonId);
+    await expect(ctx.reopen(asClaims("bo"), crewId, seasonId)).rejects.toMatchObject({ code: "not-organizer" });
+  });
+
+  it("a non-member is rejected on both verbs — not-a-member", async () => {
+    const ctx = setup();
+    const { crewId, seasonId } = await crewWithSeason(ctx);
+    await seedGolfer(ctx, "stranger", "Stranger");
+
+    await expect(ctx.close(asClaims("stranger"), crewId, seasonId)).rejects.toMatchObject({ code: "not-a-member" });
+    await expect(ctx.reopen(asClaims("stranger"), crewId, seasonId)).rejects.toMatchObject({ code: "not-a-member" });
+  });
+
+  it("an unknown seasonId is rejected on both verbs — season-not-found", async () => {
+    const ctx = setup();
+    const { crewId } = await crewWithSeason(ctx);
+
+    await expect(ctx.close(asClaims("ann"), crewId, "no-such-season")).rejects.toMatchObject({ code: "season-not-found" });
+    await expect(ctx.reopen(asClaims("ann"), crewId, "no-such-season")).rejects.toMatchObject({ code: "season-not-found" });
   });
 });

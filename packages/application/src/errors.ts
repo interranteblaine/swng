@@ -91,6 +91,12 @@ export type ApplicationErrorCode =
   // Task 9: an append or remove against a CLOSED season — a failed precondition on the season's
   // own lifecycle, same 409 bucket as round-already-counted/crew-conflict above.
   | "season-closed"
+  // Close-season spec (2026-07-21): closeSeason/reopenSeason's own explicit-conflict pair — a
+  // stale client learns the truth, never a silent no-op (the tee-set-revised/card-superseded
+  // precedent). Deliberately DISTINCT wire codes from season-closed above (that one guards
+  // append/remove; these guard the close/reopen verbs themselves), same 409 bucket.
+  | "season-already-closed"
+  | "season-not-closed"
   // Task 9: the appender's own golferId isn't among the counted round's snapshot participants
   // ("you can only count a round you actually played" — spec §4). A forbidden actor, same 403
   // bucket as not-a-member/not-a-viewer above.

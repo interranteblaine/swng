@@ -79,6 +79,9 @@ export { createSeason } from "./crews/createSeason.js";
 export { listSeasons } from "./crews/listSeasons.js";
 export { appendCountedRound } from "./crews/appendCountedRound.js";
 export { removeCountedRound } from "./crews/removeCountedRound.js";
+// Close-season spec (2026-07-21): the organizer's verbs that flip CrewSeason.status.
+export { closeSeason } from "./crews/closeSeason.js";
+export { reopenSeason } from "./crews/reopenSeason.js";
 export { getSeasonStandings } from "./crews/getSeasonStandings.js";
 // Analytics spec 2026-07-21 §5: GET /crews/{crewId}/records — all-time ledger/head-to-head/
 // partners + per-closed-season Stableford titles. rosterFilteredContribution (the shared

@@ -4,12 +4,11 @@ import { Navigate, useNavigate, useParams } from "react-router";
 import { crewId as makeCrewId } from "@swng/domain";
 import type { GolferId } from "@swng/domain";
 import type { CrewSeasonView, CrewView } from "@swng/contracts";
-import { ApiError, createSeason, getCrew, leaveCrew, listSeasons, mintCrewInvite, removeCrewMember, transferOrganizer } from "../api";
+import { ApiError, createSeason, getCrew, leaveCrew, listSeasons, mintCrewInvite, removeCrewMember, transferOrganizer, updateCrew } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { GolferLink } from "../ui/GolferLink";
-import { badge, btnDanger, btnDangerSolid, btnPrimary, btnSecondary, cardBox, inputBox } from "../ui/classes";
+import { badge, btnDanger, btnDangerSolid, btnPrimary, btnQuiet, btnSecondary, cardBox, inputBox } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
-import { CrewRecordsSection } from "./CrewRecordsSection";
 import { SeasonPanel } from "./SeasonPanel";
 
 // A crew load can fail two honest ways the wire names (errorMapping.ts) — both get human
@@ -46,6 +45,16 @@ const humanizeLeaveError = (caught: unknown): string => {
   return "Could not leave the crew — try again.";
 };
 
+// Spec 2026-07-22 "the season is the record" §2: the crew name is editable — organizer-only,
+// mirroring humanizeCreateSeasonError's own "one documented failure code, plus the shared
+// member-gate 403/404s" shape.
+const humanizeUpdateCrewNameError = (caught: unknown): string => {
+  if (caught instanceof ApiError && caught.code === "invalid-crew-name") return "Crew name must be 1–60 characters.";
+  if (caught instanceof ApiError && caught.code === "not-organizer") return "You're no longer the organizer — reload the page to see who is.";
+  if (caught instanceof ApiError && caught.code === "unknown-crew") return "This crew doesn't exist — check the link.";
+  return "Could not rename the crew — try again.";
+};
+
 // Crew membership (invited in, accountable out — spec §2): mint failures are about the CALLER's
 // own membership (any member may invite — mintCrewInvite.ts), so this reuses the SAME
 // "not-a-member" copy humanizeCrewLoadError uses — no forward-flag risk here, unlike remove/
@@ -70,6 +79,14 @@ const humanizeMemberActionError = (caught: unknown, verb: "remove that member" |
   if (caught instanceof ApiError && caught.code === "not-organizer") return "You're no longer the organizer — reload the page to see who is.";
   if (caught instanceof ApiError && caught.code === "unknown-crew") return "This crew doesn't exist — check the link.";
   return `Could not ${verb} — try again.`;
+};
+
+// Spec 2026-07-22 "the season is the record" §2: the create-season form's own default — name =
+// the current UTC calendar year, dates = Jan 1 – Dec 31 of it, the SAME window createCrew's own
+// auto-season opens with server-side.
+const yearDefaults = (): { readonly name: string; readonly startsAt: string; readonly endsAt: string } => {
+  const year = new Date().getUTCFullYear();
+  return { name: String(year), startsAt: `${year}-01-01`, endsAt: `${year}-12-31` };
 };
 
 // The confirm/cancel target for a per-row organizer action (Remove… / Make organizer…) — at
@@ -108,13 +125,26 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
   const [seasons, setSeasons] = useState<readonly CrewSeasonView[] | undefined>(undefined);
   const [seasonsError, setSeasonsError] = useState(false);
   const [selectedSeasonId, setSelectedSeasonId] = useState<string | undefined>(undefined);
-  const [newSeasonName, setNewSeasonName] = useState("");
+  // Spec 2026-07-22 "the season is the record" §2: dates are CHOSEN, VISIBLE, and REQUIRED —
+  // the form comes prefilled with the common case (name = the current year, dates = Jan 1 –
+  // Dec 31 of it), same defaults createCrew's own auto-season opens with, so "2027" is one tap.
+  const [newSeasonName, setNewSeasonName] = useState(() => yearDefaults().name);
+  const [newSeasonStartsAt, setNewSeasonStartsAt] = useState(() => yearDefaults().startsAt);
+  const [newSeasonEndsAt, setNewSeasonEndsAt] = useState(() => yearDefaults().endsAt);
   const [creatingSeason, setCreatingSeason] = useState(false);
   const [createSeasonError, setCreateSeasonError] = useState<string | undefined>(undefined);
 
   const [confirmingLeave, setConfirmingLeave] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [leaveError, setLeaveError] = useState<string | undefined>(undefined);
+
+  // Spec 2026-07-22 §2: the crew name is editable — organizer-only, the roster-row edit idiom
+  // (SetupPanel.tsx's mid-round handicap correction: an Edit swaps the static text for an
+  // input + Save/Cancel, one PUT then the response replaces local state).
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState("");
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | undefined>(undefined);
 
   // Crew membership (invited in, accountable out — spec §2): the code panel is gone — an Invite
   // button mints a fresh 7-day link and copies it, same busy/copied/fallback-url shape as
@@ -180,18 +210,20 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
   const submitNewSeason = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const trimmed = newSeasonName.trim();
-    if (!trimmed || creatingSeason) return;
+    // Both dates are required — no clearable/optional bound (spec §1's owner ruling). The
+    // `type="date"` inputs below carry `required` too, but a fresh-state guard here keeps the
+    // submit handler honest regardless of what the browser enforces.
+    if (!trimmed || !newSeasonStartsAt || !newSeasonEndsAt || creatingSeason) return;
 
     setCreatingSeason(true);
     setCreateSeasonError(undefined);
     try {
-      // Spec 2026-07-22 "the season is the record" §2: dates are CHOSEN and REQUIRED now — the
-      // common case (a season for the current calendar year) is the default here, the same
-      // Jan 1 – Dec 31 window createCrew's own auto-season opens.
-      const year = new Date().getUTCFullYear();
-      const response = await withAuth((token) => createSeason(token, id, { name: trimmed, startsAt: `${year}-01-01`, endsAt: `${year}-12-31` }));
+      const response = await withAuth((token) => createSeason(token, id, { name: trimmed, startsAt: newSeasonStartsAt, endsAt: newSeasonEndsAt }));
       setSeasons((current) => [response.season, ...(current ?? [])]);
-      setNewSeasonName("");
+      const fresh = yearDefaults();
+      setNewSeasonName(fresh.name);
+      setNewSeasonStartsAt(fresh.startsAt);
+      setNewSeasonEndsAt(fresh.endsAt);
       setSelectedSeasonId(response.season.seasonId); // straight into the season just created
     } catch (caught) {
       setCreateSeasonError(humanizeCreateSeasonError(caught));
@@ -209,6 +241,36 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
     } catch (caught) {
       setLeaveError(humanizeLeaveError(caught));
       setLeaving(false);
+    }
+  };
+
+  // Spec 2026-07-22 §2: the crew name is editable — organizer-only, one PUT then the response
+  // replaces local state (no separate reload — same "produces the crew" shape removeCrewMember/
+  // transferOrganizer already follow above).
+  const startNameEdit = () => {
+    setNameValue(crew.name);
+    setNameError(undefined);
+    setEditingName(true);
+  };
+
+  const cancelNameEdit = () => {
+    setEditingName(false);
+    setNameError(undefined);
+  };
+
+  const saveCrewName = async () => {
+    const trimmed = nameValue.trim();
+    if (!trimmed || nameSaving) return;
+    setNameSaving(true);
+    setNameError(undefined);
+    try {
+      const response = await withAuth((token) => updateCrew(token, id, { name: trimmed }));
+      setCrew(response.crew);
+      setEditingName(false);
+    } catch (caught) {
+      setNameError(humanizeUpdateCrewNameError(caught));
+    } finally {
+      setNameSaving(false);
     }
   };
 
@@ -268,7 +330,41 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-cream p-6">
-      <h1 className="text-2xl font-bold text-forest">{crew.name}</h1>
+      <div className="flex flex-col gap-2">
+        {/* Spec 2026-07-22 §2: the crew name is editable — organizer-only, the roster-row edit
+            idiom (SetupPanel.tsx's mid-round handicap correction). */}
+        {editingName ? (
+          <span className="flex items-center gap-2">
+            <input
+              aria-label="Crew name"
+              className={`${inputBox} text-2xl font-bold`}
+              value={nameValue}
+              maxLength={60}
+              onChange={(event) => setNameValue(event.target.value)}
+            />
+            <button type="button" className={btnQuiet} disabled={nameSaving || !nameValue.trim()} onClick={() => void saveCrewName()}>
+              Save
+            </button>
+            <button type="button" className={btnQuiet} disabled={nameSaving} onClick={cancelNameEdit}>
+              Cancel
+            </button>
+          </span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-forest">{crew.name}</h1>
+            {isOrganizer && (
+              <button type="button" className={`${btnQuiet} text-sm`} onClick={startNameEdit}>
+                Edit
+              </button>
+            )}
+          </span>
+        )}
+        {nameError && (
+          <p role="alert" className="text-oxblood">
+            {nameError}
+          </p>
+        )}
+      </div>
 
       {/* Crew membership (invited in, accountable out — spec §2): the permanent join code is
           gone — ANY member mints a fresh 7-day invite link (mirrors ShareButton.tsx's own
@@ -298,7 +394,6 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
             <li key={member.golferId} className={`${cardBox} flex flex-col gap-2 p-3`}>
               <div className="flex items-center gap-2 text-forest">
                 <GolferLink golferId={member.golferId} name={member.name} />
-                {member.claimed && <span className={badge}>account</span>}
                 {member.role === "organizer" && <span className={badge}>organizer</span>}
               </div>
 
@@ -316,7 +411,7 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                     >
                       <span className="text-fairway">
                         {memberAction.type === "remove"
-                          ? `Remove ${member.name} from the crew? Their rounds stay counted; their standings return if they're invited back.`
+                          ? `Remove ${member.name} from the crew? Their rounds stay on their own record; their crew standings return if they're invited back.`
                           : `Make ${member.name} organizer? They'll be the only one who can remove members or transfer the role — you won't be able to anymore.`}
                       </span>
                       <span className="flex items-center gap-2">
@@ -400,11 +495,40 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
           </ul>
         )}
 
+        {/* Spec 2026-07-22 "the season is the record" §2: dates are CHOSEN, VISIBLE, and
+            REQUIRED — the form comes prefilled with the common case (name = the current year,
+            dates = Jan 1 – Dec 31 of it), so "2027" is one tap; "Summer Cup, Jun 1 – Aug 31" is
+            typed once and means what it says. Dates are editable, never clearable. */}
         <form onSubmit={(event) => void submitNewSeason(event)} className="flex flex-col gap-2">
           <label className="flex flex-col gap-1 text-forest">
             New season
             <input value={newSeasonName} onChange={(event) => setNewSeasonName(event.target.value)} maxLength={60} className={`${inputBox} text-lg`} />
           </label>
+          <span className="flex gap-2">
+            <label className="flex flex-1 flex-col gap-1 text-forest">
+              Starts
+              <input
+                type="date"
+                aria-label="New season starts"
+                value={newSeasonStartsAt}
+                onChange={(event) => setNewSeasonStartsAt(event.target.value)}
+                required
+                className={inputBox}
+              />
+            </label>
+            <label className="flex flex-1 flex-col gap-1 text-forest">
+              Ends
+              <input
+                type="date"
+                aria-label="New season ends"
+                value={newSeasonEndsAt}
+                onChange={(event) => setNewSeasonEndsAt(event.target.value)}
+                required
+                className={inputBox}
+              />
+            </label>
+          </span>
+          <p className="text-xs text-fairway">Want an all-time board? Give it wide dates.</p>
           {createSeasonError && (
             <p role="alert" className="text-oxblood">
               {createSeasonError}
@@ -419,11 +543,6 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
             reset — no seasonId-changed effect dance needed inside SeasonPanel itself. */}
         {selectedSeasonId && <SeasonPanel key={selectedSeasonId} crewId={id} seasonId={selectedSeasonId} isOrganizer={isOrganizer} />}
       </section>
-
-      {/* Analytics read-folds spec 2026-07-21 §5: "All-time" — every season's counted rounds
-          folded once, below the season list (not inside it — this spans every season, not just
-          the selected one). */}
-      <CrewRecordsSection crewId={id} />
 
       {/* Architecture-realignment Task 11: "Leave crew" — the caller's own membership only,
           with a confirm step (a click-to-reveal Confirm/Cancel idiom, not a native confirm() —

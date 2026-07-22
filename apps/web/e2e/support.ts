@@ -20,7 +20,6 @@ import {
   createCrewResponseSchema,
   createSeasonRequestSchema,
   createSeasonResponseSchema,
-  crewRecordsResponseSchema,
   finalizeRoundResponseSchema,
   getCourseResponseSchema,
   getCrewResponseSchema,
@@ -45,7 +44,6 @@ import type {
   AddGameResponse,
   CreateCrewResponse,
   CreateSeasonResponse,
-  CrewRecordsResponse,
   FinalizeRoundResponse,
   GameConfigInput,
   GetCrewResponse,
@@ -390,15 +388,6 @@ export const getSeasonStandingsDirect = async (httpUrl: string, token: string, i
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`GET /crews/${id}/seasons/${seasonId}/standings -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(seasonStandingsResponseSchema, json);
-};
-
-// GET /crews/{crewId}/records (analytics spec 2026-07-21 §5): all-time crew records across every
-// season, member-gated exactly like standings above.
-export const getCrewRecordsDirect = async (httpUrl: string, token: string, id: CrewId): Promise<CrewRecordsResponse> => {
-  const response = await fetch(`${httpUrl}/crews/${id}/records`, { headers: { authorization: `Bearer ${token}` } });
-  const json: unknown = await response.json();
-  if (!response.ok) throw new Error(`GET /crews/${id}/records -> ${response.status}: ${JSON.stringify(json)}`);
-  return parse(crewRecordsResponseSchema, json);
 };
 
 // Spec 2026-07-22 "the season is the record" §2: editing the end date IS the whole lifecycle —

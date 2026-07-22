@@ -12,7 +12,6 @@ import type {
   CreateCrewResponse,
   CreateSeasonRequest,
   CreateSeasonResponse,
-  CrewRecordsResponse,
   EventsResponse,
   FinalizeRoundResponse,
   GetCourseResponse,
@@ -166,11 +165,6 @@ export interface UseCases {
   // The crew name is editable too (spec §2), organizer-only, no season lookup.
   updateCrew: (claims: AccountClaims, id: CrewId, command: UpdateCrewRequest) => Promise<GetCrewResponse>;
   getSeasonStandings: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<SeasonStandingsResponse>;
-  // Analytics spec 2026-07-21 §5: all-time — every counted round across every season, deduped by
-  // roundId — the SAME roster-filter + aggregateSeason composition getSeasonStandings above runs,
-  // plus partner records and each closed season's Stableford title. Member-only authorization
-  // lives in application (crews/membership.ts), never re-checked here.
-  getCrewRecords: (claims: AccountClaims, id: CrewId) => Promise<CrewRecordsResponse>;
   leaveCrew: (claims: AccountClaims, id: CrewId) => Promise<LeaveCrewResponse>;
   // Crew membership (invited in, accountable out — spec §1): the organizer's authority.
   // Organizer-gated inside application (crews/membership.ts's requireCrewMember, then a role
@@ -605,15 +599,6 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 200,
     handler: async (ctx) => useCases.getSeasonStandings(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!),
-  },
-  // Analytics spec 2026-07-21 §5: all-time records across every season — same golfer tier,
-  // member-only authorization inside application (crews/membership.ts), never re-checked here.
-  {
-    method: "GET",
-    path: "/crews/{crewId}/records",
-    auth: "golfer",
-    successStatus: 200,
-    handler: async (ctx) => useCases.getCrewRecords(ctx.account!, crewId(ctx.pathParams.crewId!)),
   },
   {
     method: "POST",

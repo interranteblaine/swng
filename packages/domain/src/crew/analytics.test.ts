@@ -3,8 +3,7 @@ import { gameId, golferId, roundId } from "../ids.js";
 import type { GolferId, RoundId } from "../ids.js";
 import type { CourseCard } from "../course/card.js";
 import type { RoundArchive } from "../round/archive.js";
-import type { SeasonLedgerLine } from "./ledger.js";
-import { partnerRecords, stablefordTitle } from "./analytics.js";
+import { partnerRecords } from "./analytics.js";
 
 // Alphabetical golferIds so lexicographic pair/tie-break comparisons line up with the letters
 // used throughout — the ledger.test.ts precedent (A < B < C < D as both names and ids).
@@ -86,21 +85,5 @@ describe("partnerRecords — four-ball sides only (analytics spec 2026-07-21 §5
       { a: A, b: C, wins: 0, losses: 1, halves: 0 }, // 0-wins tie: "ann" < "cal" (a asc)
       { a: C, b: D, wins: 0, losses: 2, halves: 0 },
     ]);
-  });
-});
-
-describe("stablefordTitle — season points leader(s) of a roster-filtered ledger (analytics spec §5)", () => {
-  const line = (golferId: GolferId, points: number): SeasonLedgerLine => ({ golferId, rounds: 1, wins: 0, losses: 0, halves: 0, points, skins: 0 });
-
-  it("a tie for the lead returns BOTH golfers", () => {
-    expect(stablefordTitle([line(A, 40), line(B, 40), line(C, 30)])).toEqual([A, B]);
-  });
-
-  it("returns [] when the leading points are 0 — a scoreless season crowns no one", () => {
-    expect(stablefordTitle([line(A, 0), line(B, 0)])).toEqual([]);
-  });
-
-  it("returns [] for an empty ledger", () => {
-    expect(stablefordTitle([])).toEqual([]);
   });
 });

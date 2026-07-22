@@ -96,8 +96,8 @@ export type ApplicationErrorCode =
   | "not-organizer"
   // Crew membership (invited in, accountable out — spec §1): leaveCrew's organizer guard — the
   // organizer cannot leave (the crew would be left with none). A failed lifecycle precondition,
-  // same 409 bucket as season-already-closed/crew-conflict above; the message names the way out
-  // (transfer the role first, then leave).
+  // same 409 bucket as crew-conflict above; the message names the way out (transfer the role
+  // first, then leave).
   | "organizer-must-transfer"
   // Course-cards spec §6: CardStore.supersede's collision signal — the CURRENT pointer no
   // longer names the card the caller reviewed (record.supersedes). No retry, no revision

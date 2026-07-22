@@ -21,11 +21,11 @@ vi.mock("../api", () => ({
   createSeason: vi.fn(),
   listSeasons: vi.fn(),
   getSeasonStandings: vi.fn(),
-  getCrewRecords: vi.fn(),
   leaveCrew: vi.fn(),
   mintCrewInvite: vi.fn(),
   removeCrewMember: vi.fn(),
   transferOrganizer: vi.fn(),
+  updateCrew: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -38,7 +38,7 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, createSeason, getCrew, getCrewRecords, getMe, getSeasonStandings, leaveCrew, listSeasons, mintCrewInvite, removeCrewMember, transferOrganizer } from "../api";
+import { ApiError, createSeason, getCrew, getMe, getSeasonStandings, leaveCrew, listSeasons, mintCrewInvite, removeCrewMember, transferOrganizer, updateCrew } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { CrewPage } from "./CrewPage";
@@ -48,11 +48,11 @@ const mockedGetMe = vi.mocked(getMe);
 const mockedCreateSeason = vi.mocked(createSeason);
 const mockedListSeasons = vi.mocked(listSeasons);
 const mockedGetSeasonStandings = vi.mocked(getSeasonStandings);
-const mockedGetCrewRecords = vi.mocked(getCrewRecords);
 const mockedLeaveCrew = vi.mocked(leaveCrew);
 const mockedMintCrewInvite = vi.mocked(mintCrewInvite);
 const mockedRemoveCrewMember = vi.mocked(removeCrewMember);
 const mockedTransferOrganizer = vi.mocked(transferOrganizer);
+const mockedUpdateCrew = vi.mocked(updateCrew);
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
@@ -62,11 +62,11 @@ beforeEach(() => {
   mockedCreateSeason.mockReset();
   mockedListSeasons.mockReset();
   mockedGetSeasonStandings.mockReset();
-  mockedGetCrewRecords.mockReset();
   mockedLeaveCrew.mockReset();
   mockedMintCrewInvite.mockReset();
   mockedRemoveCrewMember.mockReset();
   mockedTransferOrganizer.mockReset();
+  mockedUpdateCrew.mockReset();
 });
 
 afterEach(() => {
@@ -90,9 +90,9 @@ const crew: CrewView = {
   crewId: crewId("crew-1"),
   name: "Sunday crew",
   members: [
-    { golferId: golferId("ann-g"), name: "Ann", role: "organizer", claimed: true },
-    { golferId: golferId("bo-g"), name: "Bo", role: "member", claimed: false },
-    { golferId: golferId("cy-g"), name: "Cy", role: "member", claimed: true },
+    { golferId: golferId("ann-g"), name: "Ann", role: "organizer" },
+    { golferId: golferId("bo-g"), name: "Bo", role: "member" },
+    { golferId: golferId("cy-g"), name: "Cy", role: "member" },
   ],
 };
 
@@ -132,7 +132,7 @@ const renderPage = () =>
 const waitForLoaded = () => screen.findByRole("button", { name: "Invite" });
 
 describe("CrewPage", () => {
-  it("shows an Invite button (no join code) and the roster with claimed + organizer badges", async () => {
+  it("shows an Invite button (no join code) and the roster with the organizer badge (no account badge)", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
@@ -150,10 +150,9 @@ describe("CrewPage", () => {
     const roster = screen.getByRole("list", { name: /roster/i });
     const items = within(roster).getAllByRole("listitem");
     expect(items.map((li) => li.textContent)).toEqual([expect.stringContaining("Ann"), expect.stringContaining("Bo"), expect.stringContaining("Cy")]);
-    // Claimed badge on Ann and Cy, not on ghost Bo.
-    expect(within(items[0]!).getByText(/account/i)).toBeTruthy();
-    expect(within(items[1]!).queryByText(/account/i)).toBeNull();
-    expect(within(items[2]!).getByText(/account/i)).toBeTruthy();
+    // Spec 2026-07-22 §5: the "account" badge is deleted whole — every crew member is a signed-in
+    // account under accounts-only identity, so it told the reader nothing.
+    expect(within(roster).queryByText(/account/i)).toBeNull();
     // Organizer badge on Ann only — an EXACT "organizer" match, since Bo/Cy's own rows also
     // carry a "Make organizer…" button whose text a loose /organizer/i substring would wrongly
     // match too.
@@ -360,7 +359,7 @@ describe("CrewPage — organizer authority", () => {
     fireEvent.click(await within(boRow).findByRole("button", { name: /^remove…$/i }));
 
     const dialog = within(boRow).getByRole("dialog");
-    expect(dialog.textContent).toContain("Remove Bo from the crew? Their rounds stay counted; their standings return if they're invited back.");
+    expect(dialog.textContent).toContain("Remove Bo from the crew? Their rounds stay on their own record; their crew standings return if they're invited back.");
     expect(mockedRemoveCrewMember).not.toHaveBeenCalled();
 
     fireEvent.click(within(dialog).getByRole("button", { name: /cancel/i }));
@@ -491,7 +490,7 @@ describe("CrewPage — seasons", () => {
     fireEvent.click(screen.getByRole("button", { name: "2026" }));
 
     await waitFor(() => expect(mockedGetSeasonStandings).toHaveBeenCalledWith(expect.any(String), crewId("crew-1"), "season-b"));
-    expect(await screen.findByText(/standings build automatically once members play together/i)).toBeTruthy();
+    expect(await screen.findByText(/appears when members play a round together/i)).toBeTruthy();
   });
 
   it("creates a season with the typed name, POSTs it, and adds it to the list", async () => {
@@ -505,7 +504,7 @@ describe("CrewPage — seasons", () => {
     renderPage();
     await waitForLoaded();
 
-    fireEvent.change(screen.getByLabelText(/new season/i), { target: { value: "2026" } });
+    fireEvent.change(screen.getByLabelText(/^new season$/i), { target: { value: "2026" } });
     fireEvent.click(screen.getByRole("button", { name: /create season/i }));
 
     // Spec 2026-07-22 "the season is the record" §2: dates are CHOSEN and REQUIRED — the current
@@ -534,7 +533,7 @@ describe("CrewPage — seasons", () => {
     renderPage();
     await waitForLoaded();
 
-    fireEvent.change(screen.getByLabelText(/new season/i), { target: { value: "Summer Cup" } });
+    fireEvent.change(screen.getByLabelText(/^new season$/i), { target: { value: "Summer Cup" } });
     fireEvent.click(screen.getByRole("button", { name: /create season/i }));
 
     const alert = await screen.findByRole("alert");
@@ -546,23 +545,110 @@ describe("CrewPage — seasons", () => {
   });
 });
 
-// Analytics read-folds spec 2026-07-21 §5: CrewRecordsSection composes below the season list,
-// wired to THIS crew's own id — its own full behavior (the table, head-to-head, partners,
-// titles) is pinned directly against CrewRecordsSection.test.tsx, not re-tested here
-// (SeasonPanel's own precedent one describe block up).
-describe("CrewPage — all-time records", () => {
-  it("composes CrewRecordsSection, wired to this crew's own id", async () => {
+// Spec 2026-07-22 "the season is the record" §4: the All-time surface is deleted whole — a
+// season can represent any span, including effectively all of a crew's history, by stating wide
+// dates, so a second surface aggregating "everything" is redundant machinery.
+describe("CrewPage — no all-time surface", () => {
+  it("renders no separate 'all-time' section (the record's own old empty-state copy) — a season's own wide dates are the whole story", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
-    mockedGetCrewRecords.mockResolvedValue({ rounds: 0, ledger: [], headToHead: [], partners: [], titles: [] });
 
     renderPage();
     await waitForLoaded();
 
-    expect(await screen.findByText("No rounds counted yet.")).toBeTruthy();
-    expect(mockedGetCrewRecords).toHaveBeenCalledWith(expect.any(String), crewId("crew-1"));
+    // The deleted CrewRecordsSection's own heading/empty-state copy — never a bare "all-time"
+    // substring match, since the create-season helper line legitimately says "all-time board"
+    // now (the discoverability line for the wide-dates path, spec §5).
+    expect(screen.queryByRole("heading", { name: /all.time/i })).toBeNull();
+    expect(screen.queryByText(/no rounds counted yet/i)).toBeNull();
+  });
+});
+
+// Spec 2026-07-22 "the season is the record" §2: the crew name is editable — organizer-only.
+describe("CrewPage — crew name edit", () => {
+  it("the organizer sees an Edit button beside the crew name; a non-organizer does not", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetCrew.mockResolvedValue({ crew });
+    mockedListSeasons.mockResolvedValue(emptySeasons);
+
+    renderPage();
+    await waitForLoaded();
+
+    expect(await screen.findByRole("button", { name: "Edit" })).toBeTruthy();
+  });
+
+  it("a non-organizer sees no Edit button beside the crew name", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo" } });
+    mockedGetCrew.mockResolvedValue({ crew });
+    mockedListSeasons.mockResolvedValue(emptySeasons);
+
+    renderPage();
+    await waitForLoaded();
+
+    // Waited via findBy first (auth.golfer's own async GET /me settles on its own schedule) so a
+    // false negative here can't be an artifact of the loading window.
+    await screen.findByText("Sunday crew");
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  it("Edit swaps the name for an input; Save PUTs the trimmed name and replaces it with the server's response", async () => {
+    const idToken = signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetCrew.mockResolvedValue({ crew });
+    mockedListSeasons.mockResolvedValue(emptySeasons);
+    const renamed: CrewView = { ...crew, name: "Sunday Regulars" };
+    mockedUpdateCrew.mockResolvedValue({ crew: renamed });
+
+    renderPage();
+    await waitForLoaded();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Crew name"), { target: { value: "  Sunday Regulars  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mockedUpdateCrew).toHaveBeenCalledWith(idToken, crewId("crew-1"), { name: "Sunday Regulars" }));
+    expect(await screen.findByText("Sunday Regulars")).toBeTruthy();
+    expect(screen.queryByLabelText("Crew name")).toBeNull();
+  });
+
+  it("Cancel discards the edit without calling updateCrew", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetCrew.mockResolvedValue({ crew });
+    mockedListSeasons.mockResolvedValue(emptySeasons);
+
+    renderPage();
+    await waitForLoaded();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Crew name"), { target: { value: "Nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByLabelText("Crew name")).toBeNull();
+    expect(screen.getByText("Sunday crew")).toBeTruthy();
+    expect(mockedUpdateCrew).not.toHaveBeenCalled();
+  });
+
+  it("a not-organizer failure (a stale role underneath the caller) shows honest copy, never the raw server text", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetCrew.mockResolvedValue({ crew });
+    mockedListSeasons.mockResolvedValue(emptySeasons);
+    mockedUpdateCrew.mockRejectedValue(new ApiError("not-organizer", 403, 'golfer "ann-g" is not the organizer of crew "crew-1"'));
+
+    renderPage();
+    await waitForLoaded();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/no longer the organizer/i);
+    expect(document.body.textContent).not.toMatch(/is not the organizer of crew "crew-1"/);
   });
 });
 

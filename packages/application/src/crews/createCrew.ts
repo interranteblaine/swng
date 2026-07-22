@@ -41,5 +41,5 @@ export const createCrew =
     const season: CrewSeason = { seasonId: deps.ids.newId(), name: String(year), createdAtMs: now, startsAt: `${year}-01-01`, endsAt: `${year}-12-31` };
     await deps.crewStore.putSeason(id, season);
 
-    return { crew: await toCrewView({ golferStore: deps.golferStore }, crew) };
+    return { crew: toCrewView(crew) };
   };

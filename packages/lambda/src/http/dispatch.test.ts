@@ -22,7 +22,6 @@ import {
   finalizeRound,
   getCourse,
   getCrew,
-  getCrewRecords,
   getGolfer,
   getMyCourseRecord,
   getMyGolfer,
@@ -61,7 +60,6 @@ import {
   createCourseResponseSchema,
   createCrewResponseSchema,
   createSeasonResponseSchema,
-  crewRecordsResponseSchema,
   errorResponseSchema,
   eventsResponseSchema,
   finalizeRoundResponseSchema,
@@ -208,7 +206,6 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     updateSeason: updateSeason({ crewStore, golferStore }),
     updateCrew: updateCrew({ crewStore, golferStore }),
     getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
-    getCrewRecords: getCrewRecords({ crewStore, golferStore, snapshots, projectionStore }),
     leaveCrew: leaveCrew({ crewStore, golferStore }),
     removeCrewMember: removeCrewMember({ crewStore, golferStore }),
     transferOrganizer: transferOrganizer({ crewStore, golferStore }),
@@ -1089,7 +1086,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}`, token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(200);
     const fetched = getCrewResponseSchema.parse(JSON.parse(resp.body!));
-    expect(fetched.crew.members).toEqual([{ golferId: annGolfer.golferId, name: "Ann", role: "organizer", claimed: true }]);
+    expect(fetched.crew.members).toEqual([{ golferId: annGolfer.golferId, name: "Ann", role: "organizer" }]);
   });
 
   it("GET /crews/{crewId} for an unknown crewId is rejected — 404 unknown-crew", async () => {
@@ -1126,7 +1123,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       );
       expect(createResp.statusCode).toBe(201);
       const created = createCrewResponseSchema.parse(JSON.parse(createResp.body!));
-      expect(created.crew.members).toEqual([{ golferId: annGolfer.golferId, name: "Ann", role: "organizer", claimed: true }]);
+      expect(created.crew.members).toEqual([{ golferId: annGolfer.golferId, name: "Ann", role: "organizer" }]);
       expect(created.crew).not.toHaveProperty("joinCode"); // the permanent join code is gone (crew membership, invited in)
 
       const inviteResp = asStructured(
@@ -1334,7 +1331,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     );
     expect(removeResp.statusCode).toBe(200);
     const removed = getCrewResponseSchema.parse(JSON.parse(removeResp.body!));
-    expect(removed.crew.members).toEqual([{ golferId: annGolfer.golferId, name: "Ann", role: "organizer", claimed: true }]);
+    expect(removed.crew.members).toEqual([{ golferId: annGolfer.golferId, name: "Ann", role: "organizer" }]);
   });
 
   it("DELETE /crews/{crewId}/members/{golferId}: an ordinary member attempting to remove someone is rejected — 403 not-organizer", async () => {
@@ -1381,8 +1378,8 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     expect(transferResp.statusCode).toBe(200);
     const transferred = getCrewResponseSchema.parse(JSON.parse(transferResp.body!));
     expect(transferred.crew.members).toEqual([
-      { golferId: annGolfer.golferId, name: "Ann", role: "member", claimed: true },
-      { golferId: boGolfer.golferId, name: "Bo", role: "organizer", claimed: true },
+      { golferId: annGolfer.golferId, name: "Ann", role: "member" },
+      { golferId: boGolfer.golferId, name: "Bo", role: "organizer" },
     ]);
 
     // Ann (now an ordinary member) can no longer remove/transfer — not-organizer.
@@ -1430,72 +1427,6 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/leave`, token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(409);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "organizer-must-transfer" });
-  });
-
-  // Analytics spec 2026-07-21 §5: GET /crews/{crewId}/records — all-time records across every
-  // season, folded through the SAME roster-filter + aggregateSeason composition getSeasonStandings
-  // above runs (getCrewRecords.ts's own doc comment).
-  describe("GET /crews/{crewId}/records", () => {
-    it("returns rounds: 0 and an empty ledger for a crew with no counted rounds yet — call-through to getCrewRecords", async () => {
-      const { dispatcher } = await setupCrews();
-      await putMe(dispatcher, ann, "Ann");
-      const created = createCrewResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
-      );
-
-      const resp = asStructured(
-        await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/records`, token: golferBearer(ann) })),
-      );
-      expect(resp.statusCode).toBe(200);
-      expect(crewRecordsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: 0, ledger: [], headToHead: [], partners: [], titles: [] });
-    });
-
-    it("GET /crews/{crewId}/records route wiring — a solo crew's all-time stays honestly empty even with a finalized round on record", async () => {
-      const { dispatcher } = await setupCrews();
-      const annGolfer = await putMe(dispatcher, ann, "Ann");
-
-      const started = startRoundResponseSchema.parse(
-        JSON.parse(
-          asStructured(
-            await dispatcher(
-              makeEvent({
-                method: "POST",
-                path: "/rounds",
-                token: golferBearer(ann),
-                body: { course: DEFAULT_COURSE, host: { tee: "white", courseHandicap: 8 } },
-              }),
-            ),
-          ).body!,
-        ),
-      );
-      expect(
-        asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token }))).statusCode,
-      ).toBe(200);
-
-      const created = createCrewResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
-      );
-
-      const resp = asStructured(
-        await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/records`, token: golferBearer(ann) })),
-      );
-      expect(resp.statusCode).toBe(200);
-      // "Played together" needs >=2 CURRENT roster members (crew-scoreboard spec §3a/§3b) — Ann
-      // is the crew's only member, so all-time stays honestly empty regardless of Ann's own
-      // finalized round. This is the SAME finding the standings test above pins; the
-      // crew-scoreboard derivation itself is covered in seasonSlice.test.ts.
-      const parsed = crewRecordsResponseSchema.parse(JSON.parse(resp.body!));
-      expect(parsed.rounds).toBe(0);
-      expect(parsed.ledger).toEqual([]);
-      expect(annGolfer).toBeDefined();
-    });
-
-    it("401s with no bearer token at all — golfer-tier auth", async () => {
-      const { dispatcher } = await setupCrews();
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/crews/anything/records" })));
-      expect(resp.statusCode).toBe(401);
-      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
-    });
   });
 
   // Spec 2026-07-22 "the season is the record" §2: editing the end date IS the whole

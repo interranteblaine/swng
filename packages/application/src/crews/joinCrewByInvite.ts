@@ -42,7 +42,7 @@ export const joinCrewByInvite =
     // wasted write and no chance of a duplicate-member race on an unconditional add
     // (joinCrewByCode's own precedent).
     if (found.crew.members.some((member) => member.golferId === account.golfer.id)) {
-      return { crew: await toCrewView({ golferStore: deps.golferStore }, found.crew) };
+      return { crew: toCrewView(found.crew) };
     }
 
     const crew = await retryOnConflict(
@@ -63,5 +63,5 @@ export const joinCrewByInvite =
       { notFound: "unknown-crew", conflict: "crew-conflict" },
     );
 
-    return { crew: await toCrewView({ golferStore: deps.golferStore }, crew) };
+    return { crew: toCrewView(crew) };
   };

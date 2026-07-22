@@ -9,7 +9,9 @@ import type {
   JoinRoundRequest,
   StartRoundRequest,
   SupersedeCardRequest,
+  UpdateCrewRequest,
   UpdateMeRequest,
+  UpdateSeasonRequest,
 } from "@swng/contracts";
 import {
   addGame,
@@ -21,7 +23,6 @@ import {
   finalizeRound,
   getCourse,
   getCrew,
-  getCrewRecords,
   getMe,
   getMyCourseRecord,
   getMyLiveRounds,
@@ -46,7 +47,9 @@ import {
   supersedeCard,
   terminateGame,
   transferOrganizer,
+  updateCrew,
   updateMe,
+  updateSeason,
 } from "./api";
 
 // Pinned to match vitest.config.ts's test.env.VITE_HTTP_URL — config.ts reads it at import
@@ -472,21 +475,68 @@ describe("getSeasonStandings", () => {
   });
 });
 
-describe("getCrewRecords", () => {
-  it("GETs /crews/{crewId}/records with the bearer token and parses a CrewRecordsResponse", async () => {
+// Spec 2026-07-22 "the season is the record" §2: editing the end date IS the whole lifecycle —
+// updateSeason PUTs {name?, startsAt?, endsAt?} and reuses createSeasonResponseSchema's
+// `{ season }` shape (the response is byte-identical).
+describe("updateSeason", () => {
+  it("PUTs /crews/{crewId}/seasons/{seasonId} with the bearer token and parses a CreateSeasonResponse", async () => {
     let seenUrl: string | undefined;
     let seenInit: RequestInit | undefined;
+    const input: UpdateSeasonRequest = { endsAt: "2050-06-30" };
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { rounds: 5, ledger: [], headToHead: [], partners: [], titles: [] });
+      return fakeResponse(200, { season: { seasonId: "s-1", name: "2026", createdAtMs: 1_700_000_000_000, startsAt: "2026-01-01", endsAt: "2050-06-30" } });
     });
 
-    const result = await getCrewRecords("tok-crew", crewId("crew-1"));
+    const result = await updateSeason("tok-crew", crewId("crew-1"), "s-1", input);
 
-    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/records`);
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/seasons/s-1`);
+    expect(seenInit?.method).toBe("PUT");
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-crew");
-    expect(result).toEqual({ rounds: 5, ledger: [], headToHead: [], partners: [], titles: [] });
+    expect(result.season.endsAt).toBe("2050-06-30");
+  });
+
+  it("throws a coded ApiError('invalid-season-window') on a 400", async () => {
+    stubFetch(async () => fakeResponse(400, { code: "invalid-season-window", message: "startsAt must be on or before endsAt" }));
+
+    const error: unknown = await updateSeason("tok-crew", crewId("crew-1"), "s-1", { startsAt: "2050-01-01" }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("invalid-season-window");
+  });
+});
+
+// PUT /crews/{crewId} (spec 2026-07-22 §2): the crew name is editable — organizer-only. Reuses
+// getCrewResponseSchema's `{ crew }` shape.
+describe("updateCrew", () => {
+  it("PUTs /crews/{crewId} with the bearer token and parses a GetCrewResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    const input: UpdateCrewRequest = { name: "Sunday Regulars" };
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { crew: { crewId: "crew-1", name: "Sunday Regulars", members: [] } });
+    });
+
+    const result = await updateCrew("tok-crew", crewId("crew-1"), input);
+
+    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1`);
+    expect(seenInit?.method).toBe("PUT");
+    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-crew");
+    expect(result.crew.name).toBe("Sunday Regulars");
+  });
+
+  it("throws a coded ApiError('not-organizer') on a 403", async () => {
+    stubFetch(async () => fakeResponse(403, { code: "not-organizer", message: "only the organizer can rename the crew" }));
+
+    const error: unknown = await updateCrew("tok-crew", crewId("crew-1"), { name: "Nope" }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("not-organizer");
   });
 });
 

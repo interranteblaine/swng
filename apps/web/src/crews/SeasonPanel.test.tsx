@@ -12,6 +12,7 @@ import { createMemoryStorage } from "../testSupport/memoryStorage";
 vi.mock("../api", () => ({
   getSeasonStandings: vi.fn(),
   getMe: vi.fn(),
+  updateSeason: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -24,19 +25,21 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { getMe, getSeasonStandings } from "../api";
+import { getMe, getSeasonStandings, updateSeason } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { SeasonPanel } from "./SeasonPanel";
 
 const mockedGetSeasonStandings = vi.mocked(getSeasonStandings);
 const mockedGetMe = vi.mocked(getMe);
+const mockedUpdateSeason = vi.mocked(updateSeason);
 
 beforeEach(() => {
   vi.stubGlobal("localStorage", createMemoryStorage());
   vi.stubGlobal("sessionStorage", createMemoryStorage());
   mockedGetSeasonStandings.mockReset();
   mockedGetMe.mockReset();
+  mockedUpdateSeason.mockReset();
 });
 
 afterEach(() => {
@@ -79,9 +82,8 @@ const baseStandings: SeasonStandingsResponse = {
 
 // Renders SeasonPanel directly (not through CrewPage) — CrewPage.test.tsx only pins that
 // selecting a season wires the right crewId/seasonId/isOrganizer through; SeasonPanel's own full
-// behavior (scoreboard, standings, head-to-head, played-together) is pinned here in isolation.
-// `isOrganizer` defaults false — reserved for the organizer-only season-editing affordance,
-// unused by SeasonPanel itself today (SeasonPanel.tsx's own doc comment on the prop).
+// behavior (scoreboard, standings, head-to-head, played-together, season editing) is pinned here
+// in isolation. `isOrganizer` defaults false — the season-edit describe block below opts in.
 const renderPanel = (isOrganizer = false) =>
   render(
     <AuthProvider>
@@ -123,6 +125,117 @@ describe("SeasonPanel — window header", () => {
   });
 });
 
+// Spec 2026-07-22 §1/§5 (Spec §7's own test plan): Live vs. Final is derived, never stored — a
+// date-string compare against today's UTC date, frozen here so it's assertable (an inline
+// `new Date()` can't be pinned otherwise).
+describe("SeasonPanel — Live/Final marker", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("today's UTC date past endsAt: renders a Final marker", async () => {
+    vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValue({ ...baseStandings, startsAt: "2026-01-01", endsAt: "2026-12-31" });
+
+    renderPanel();
+
+    expect(await screen.findByText("Jan 1, 2026 – Dec 31, 2026")).toBeTruthy();
+    expect(screen.getByText("Final")).toBeTruthy();
+  });
+
+  it("today's UTC date on or before endsAt: no marker", async () => {
+    vi.setSystemTime(new Date("2026-06-01T00:00:00Z"));
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValue({ ...baseStandings, startsAt: "2026-01-01", endsAt: "2026-12-31" });
+
+    renderPanel();
+
+    expect(await screen.findByText("Jan 1, 2026 – Dec 31, 2026")).toBeTruthy();
+    expect(screen.queryByText("Final")).toBeNull();
+  });
+});
+
+// Spec 2026-07-22 §2: editing the end date IS the whole lifecycle — an organizer-only Edit swaps
+// the header for name + two date inputs + Save/Cancel.
+describe("SeasonPanel — season edit", () => {
+  it("a non-organizer sees no Edit button", async () => {
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValue(baseStandings);
+
+    renderPanel(false);
+
+    await screen.findByText("2026");
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  it("the organizer sees an Edit button; tapping it swaps the header for an editable form prefilled from the current season", async () => {
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValue({ ...baseStandings, name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" });
+
+    renderPanel(true);
+    await screen.findByText("2026");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect((screen.getByLabelText("Season name") as HTMLInputElement).value).toBe("2026");
+    expect((screen.getByLabelText("Season starts") as HTMLInputElement).value).toBe("2026-01-01");
+    expect((screen.getByLabelText("Season ends") as HTMLInputElement).value).toBe("2026-12-31");
+  });
+
+  it("Save PUTs the edited name/dates and reloads standings from the server", async () => {
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValueOnce({ ...baseStandings, name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" });
+    mockedUpdateSeason.mockResolvedValue({
+      season: { seasonId: "season-1", name: "2026", createdAtMs: 1_700_000_000_000, startsAt: "2026-01-01", endsAt: "2050-06-30" },
+    });
+    mockedGetSeasonStandings.mockResolvedValueOnce({ ...baseStandings, name: "2026", startsAt: "2026-01-01", endsAt: "2050-06-30" });
+
+    renderPanel(true);
+    await screen.findByText("2026");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Season ends"), { target: { value: "2050-06-30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mockedUpdateSeason).toHaveBeenCalledWith(expect.any(String), CREW, "season-1", { name: "2026", startsAt: "2026-01-01", endsAt: "2050-06-30" });
+    expect(await screen.findByText("Jan 1, 2026 – Jun 30, 2050")).toBeTruthy();
+    expect(screen.queryByLabelText("Season name")).toBeNull();
+  });
+
+  it("Cancel discards the edit without calling updateSeason", async () => {
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValue({ ...baseStandings, name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" });
+
+    renderPanel(true);
+    await screen.findByText("2026");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Season name"), { target: { value: "Nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByLabelText("Season name")).toBeNull();
+    expect(screen.getByText("2026")).toBeTruthy();
+    expect(mockedUpdateSeason).not.toHaveBeenCalled();
+  });
+
+  it("an invalid-season-window failure shows honest copy, never the raw server text", async () => {
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValue({ ...baseStandings, name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" });
+    mockedUpdateSeason.mockRejectedValue(new Error("startsAt must be on or before endsAt"));
+
+    renderPanel(true);
+    await screen.findByText("2026");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/could not update this season/i);
+    expect(document.body.textContent).not.toMatch(/startsAt must be on or before endsAt/);
+  });
+});
+
 describe("SeasonPanel — scoreboard", () => {
   it("renders scoreboard rows in SERVED order — no client sort", async () => {
     signInAsAnn();
@@ -138,7 +251,7 @@ describe("SeasonPanel — scoreboard", () => {
 
     renderPanel();
 
-    const table = await screen.findByRole("table", { name: "Scoreboard" });
+    const table = await screen.findByRole("table", { name: "Standings" });
     const rows = within(table).getAllByRole("row").slice(1); // drop the header row
     expect(rows.map((row) => within(row).getAllByRole("cell")[0]!.textContent)).toEqual([expect.stringContaining("Bo"), expect.stringContaining("Ann")]);
   });
@@ -149,7 +262,7 @@ describe("SeasonPanel — scoreboard", () => {
 
     renderPanel();
 
-    const table = await screen.findByRole("table", { name: "Scoreboard" });
+    const table = await screen.findByRole("table", { name: "Standings" });
     const link = within(table).getByRole("link", { name: "Ann" });
     expect(link.getAttribute("href")).toBe(`/golfers/${ANN}`);
   });
@@ -160,7 +273,7 @@ describe("SeasonPanel — scoreboard", () => {
 
     renderPanel();
 
-    const table = await screen.findByRole("table", { name: "Scoreboard" });
+    const table = await screen.findByRole("table", { name: "Standings" });
     const row = within(table).getAllByRole("row")[1]!;
     const cells = within(row).getAllByRole("cell");
     expect(cells[1]!.textContent).toBe("1"); // rounds
@@ -181,7 +294,7 @@ describe("SeasonPanel — scoreboard", () => {
 
     renderPanel();
 
-    const table = await screen.findByRole("table", { name: "Scoreboard" });
+    const table = await screen.findByRole("table", { name: "Standings" });
     const rows = within(table).getAllByRole("row").slice(1);
     expect(within(rows[0]!).getAllByRole("cell")[2]!.textContent).toBe("82 (+10)");
     expect(within(rows[1]!).getAllByRole("cell")[2]!.textContent).toBe("68 (-4)");
@@ -203,7 +316,7 @@ describe("SeasonPanel — scoreboard", () => {
 
     renderPanel();
 
-    const table = await screen.findByRole("table", { name: "Scoreboard" });
+    const table = await screen.findByRole("table", { name: "Standings" });
     const rows = within(table).getAllByRole("row").slice(1);
     expect(within(rows[0]!).getAllByRole("cell")[3]!.textContent).toBe("+1.2");
     expect(within(rows[1]!).getAllByRole("cell")[3]!.textContent).toBe("-0.5");
@@ -223,7 +336,7 @@ describe("SeasonPanel — scoreboard", () => {
 
     renderPanel();
 
-    const table = await screen.findByRole("table", { name: "Scoreboard" });
+    const table = await screen.findByRole("table", { name: "Standings" });
     const rows = within(table).getAllByRole("row").slice(1);
     expect(within(rows[0]!).getAllByRole("cell")[4]!.textContent).toBe("14.1 (−0.4)");
     expect(within(rows[1]!).getAllByRole("cell")[4]!.textContent).toBe("9.0 (+0.6)");
@@ -253,7 +366,7 @@ describe("SeasonPanel — scoreboard", () => {
 
     renderPanel();
 
-    await screen.findByRole("table", { name: "Scoreboard" });
+    await screen.findByRole("table", { name: "Standings" });
     expect(await screen.findByText("Rounds appear here automatically when members finalize them.")).toBeTruthy();
   });
 
@@ -269,7 +382,7 @@ describe("SeasonPanel — scoreboard", () => {
 
     renderPanel();
 
-    await screen.findByRole("table", { name: "Scoreboard" });
+    await screen.findByRole("table", { name: "Standings" });
     expect(screen.queryByText("Rounds appear here automatically when members finalize them.")).toBeNull();
   });
 });
@@ -287,7 +400,7 @@ describe("SeasonPanel — together records (ledger, head-to-head, partners)", ()
 
     renderPanel();
 
-    const table = await screen.findByRole("table", { name: "Season standings" });
+    const table = await screen.findByRole("table", { name: "Games together" });
     const rows = within(table).getAllByRole("row").slice(1);
     expect(rows.map((row) => within(row).getAllByRole("cell")[0]!.textContent)).toEqual([expect.stringContaining("Bo"), expect.stringContaining("Ann")]);
   });
@@ -301,7 +414,7 @@ describe("SeasonPanel — together records (ledger, head-to-head, partners)", ()
 
     renderPanel();
 
-    const table = await screen.findByRole("table", { name: "Season standings" });
+    const table = await screen.findByRole("table", { name: "Games together" });
     const annLink = within(table).getByRole("link", { name: "Ann" });
     expect(annLink.getAttribute("href")).toBe(`/golfers/${ANN}`);
   });
@@ -318,7 +431,7 @@ describe("SeasonPanel — together records (ledger, head-to-head, partners)", ()
 
     renderPanel();
 
-    await screen.findByRole("table", { name: "Season standings" });
+    await screen.findByRole("table", { name: "Games together" });
     expect(screen.queryByText(/guest/i)).toBeNull();
   });
 
@@ -371,7 +484,7 @@ describe("SeasonPanel — together records (ledger, head-to-head, partners)", ()
 
     renderPanel();
 
-    const table = await screen.findByRole("table", { name: "Season standings" });
+    const table = await screen.findByRole("table", { name: "Games together" });
     const headers = within(table).getAllByRole("columnheader").map((th) => th.textContent);
     expect(headers).toEqual(["Member", "Rounds", "Matches (W–L–H)", "Stableford pts", "Skins"]);
     expect(screen.getByText("From this season's shared rounds — match results, Stableford points, and skins for current members.")).toBeTruthy();
@@ -383,8 +496,8 @@ describe("SeasonPanel — together records (ledger, head-to-head, partners)", ()
 
     renderPanel();
 
-    expect(await screen.findByText("Standings build automatically once members play together.")).toBeTruthy();
-    expect(screen.queryByRole("table", { name: "Season standings" })).toBeNull();
+    expect(await screen.findByText("Appears when members play a round together.")).toBeTruthy();
+    expect(screen.queryByRole("table", { name: "Games together" })).toBeNull();
   });
 
   it("shared rounds exist but an empty ledger (departed members, or no games at all): tells the truth instead of the build-up copy", async () => {
@@ -397,8 +510,8 @@ describe("SeasonPanel — together records (ledger, head-to-head, partners)", ()
     renderPanel();
 
     expect(await screen.findByText("No standings from these rounds yet — standings build from games between current members.")).toBeTruthy();
-    expect(screen.queryByText("Standings build automatically once members play together.")).toBeNull();
-    expect(screen.queryByRole("table", { name: "Season standings" })).toBeNull();
+    expect(screen.queryByText("Appears when members play a round together.")).toBeNull();
+    expect(screen.queryByRole("table", { name: "Games together" })).toBeNull();
   });
 
   it("empty ledger: the season-standings footnote does not render (nothing to gloss)", async () => {
@@ -407,7 +520,7 @@ describe("SeasonPanel — together records (ledger, head-to-head, partners)", ()
 
     renderPanel();
 
-    await screen.findByText("Standings build automatically once members play together.");
+    await screen.findByText("Appears when members play a round together.");
     expect(screen.queryByText("From this season's shared rounds — match results, Stableford points, and skins for current members.")).toBeNull();
   });
 
@@ -434,7 +547,7 @@ describe("SeasonPanel — together records (ledger, head-to-head, partners)", ()
 
     renderPanel();
 
-    await screen.findByRole("table", { name: "Season standings" });
+    await screen.findByRole("table", { name: "Games together" });
     expect(screen.queryByRole("heading", { name: "Partners — four-ball" })).toBeNull();
   });
 });

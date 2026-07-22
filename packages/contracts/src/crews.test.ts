@@ -6,7 +6,6 @@ import {
   createCrewRequestSchema,
   createSeasonRequestSchema,
   createSeasonResponseSchema,
-  crewRecordsResponseSchema,
   crewViewSchema,
   getCrewResponseSchema,
   joinCrewRequestSchema,
@@ -73,19 +72,6 @@ describe("joinCrewRequestSchema", () => {
 });
 
 describe("crewViewSchema (via getCrewResponseSchema)", () => {
-  it("round-trips a crew with members carrying claimed true and false", () => {
-    roundTrips(getCrewResponseSchema, {
-      crew: {
-        crewId: crewId("crew-1"),
-        name: "Sunday Skins",
-        members: [
-          { golferId: golferId("ann"), name: "Ann", role: "organizer", claimed: true },
-          { golferId: golferId("ghost-1"), name: "Cal", role: "member", claimed: false },
-        ],
-      },
-    });
-  });
-
   // crewViewSchema isn't `.strict()` (that discipline is request-bodies-only — this file's own
   // house-style comment above createCrewRequestSchema) — a legacy `joinCode` on the wire is
   // silently stripped, never round-tripped back out, proving the permanent join code really is
@@ -120,9 +106,12 @@ describe("listMyCrewsResponseSchema", () => {
   });
 });
 
-// Architecture-realignment Task 9/11: crew seasons + counted rounds + standings-on-read
-// replaced GET /crews/{crewId}/records (and its own getCrewRecordsResponseSchema) entirely —
-// seasonStandingsResponseSchema below is the one ledger/head-to-head wire shape left.
+// Architecture-realignment Task 9/11 replaced the old crew projection layer's GET
+// /crews/{crewId}/records entirely; the analytics read-folds spec 2026-07-21 §5 briefly brought
+// an all-time GET /crews/{crewId}/records back, computed on read — spec 2026-07-22 §4 deletes it
+// again, this time for good ("a season can represent any span, including effectively all of a
+// crew's history, by stating wide dates"). seasonStandingsResponseSchema below is the one
+// ledger/head-to-head wire shape left.
 describe("season + standings schemas", () => {
   it("createSeasonRequestSchema requires both dates and rejects a server-assigned seasonId (.strict())", () => {
     roundTrips(createSeasonRequestSchema, { name: "Summer Cup", startsAt: "2026-06-01", endsAt: "2026-08-31" });
@@ -254,24 +243,6 @@ describe("season + standings schemas", () => {
         partners: [],
       }),
     ).toThrow(ContractError);
-  });
-});
-
-// GET /crews/{crewId}/records (analytics spec 2026-07-21 §5): all-time — dedupe-by-roundId is an
-// application concern; this schema just carries the shape.
-describe("crewRecordsResponseSchema", () => {
-  it("round-trips an all-time records payload with titles", () => {
-    roundTrips(crewRecordsResponseSchema, {
-      rounds: 12,
-      ledger: [{ golferId: golferId("ann"), rounds: 12, wins: 5, losses: 5, halves: 2, points: 430, skins: 54, name: "Ann" }],
-      headToHead: [{ a: golferId("ann"), b: golferId("bo"), aWins: 5, bWins: 5, halves: 2 }],
-      partners: [{ a: golferId("ann"), b: golferId("bo"), nameA: "Ann", nameB: "Bo", wins: 3, losses: 1, halves: 0 }],
-      titles: [{ seasonId: "s-2025", name: "2025", golfers: [{ golferId: golferId("ann"), name: "Ann" }] }],
-    });
-  });
-
-  it("round-trips an empty all-time records payload — no rounds, no titles", () => {
-    roundTrips(crewRecordsResponseSchema, { rounds: 0, ledger: [], headToHead: [], partners: [], titles: [] });
   });
 });
 

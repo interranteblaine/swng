@@ -84,7 +84,7 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // Crew membership (invited in, accountable out — spec §1): removeCrewMember/transferOrganizer's
   // organizer-only gate — a forbidden actor, same 403 bucket as not-a-member
   // above. organizer-must-transfer is leaveCrew's own guard — a failed lifecycle precondition
-  // (the crew would be left with no organizer), same 409 bucket as season-already-closed above.
+  // (the crew would be left with no organizer), same 409 bucket as crew-conflict below.
   "not-organizer": 403,
   "organizer-must-transfer": 409,
   // Course-cards spec §6 (application/src/errors.ts): CardStore.supersede's moved-pointer

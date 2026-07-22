@@ -10,9 +10,9 @@ import type { SnapshotStore } from "../ports/snapshotStore.js";
 import { sortLines } from "../projections/projectArchive.js";
 import { requireCrewMember } from "./membership.js";
 
-// The members-only filter (spec §11a) applied BEFORE crewContribution's own fold — shared by
-// getSeasonStandings (season-scoped) AND getCrewRecords.ts (all-time + per-season titles) so the
-// "current roster only" rule is never re-derived a second time.
+// The members-only filter (spec §11a) applied BEFORE crewContribution's own fold. (The now-deleted
+// getCrewRecords.ts used to share this too, spec 2026-07-22 §4 — a season's own wide-dated window
+// replaces the all-time surface, so this is getSeasonStandings' alone again.)
 export const rosterFilteredContribution = (archive: RoundArchive, memberIds: ReadonlySet<GolferId>): CrewRoundContribution => {
   const contribution = crewContribution(archive);
   return {

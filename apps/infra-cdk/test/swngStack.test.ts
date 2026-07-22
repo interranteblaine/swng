@@ -596,7 +596,7 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "$disconnect" });
     });
 
-    it("wires all forty HTTP routes (38 + the two analytics reads: GET /me/courses/{courseId}/record, GET /crews/{crewId}/records)", () => {
+    it("wires all thirty-nine HTTP routes (38 + GET /me/courses/{courseId}/record — the all-time analytics read, GET /crews/{crewId}/records, is deleted whole, spec 2026-07-22 §4)", () => {
       const expectedRouteKeys = [
         "POST /rounds",
         "POST /rounds/join",
@@ -657,9 +657,6 @@ describe("SwngStack", () => {
         // lifecycle — this ONE PUT replaces the deleted close/reopen verbs.
         "PUT /crews/{crewId}/seasons/{seasonId}",
         "GET /crews/{crewId}/seasons/{seasonId}/standings",
-        // Analytics spec 2026-07-21 §5: all-time records across every season, computed on read
-        // (the old crew projection layer this path once read from stays deleted).
-        "GET /crews/{crewId}/records",
         "POST /crews/{crewId}/leave",
         // Crew membership (invited in, accountable out — spec §1): the organizer's authority.
         "DELETE /crews/{crewId}/members/{golferId}",
@@ -672,11 +669,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (40 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (39 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 42 routes total (40 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 42);
+    it("has exactly 41 routes total (39 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 41);
     });
 
     // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route

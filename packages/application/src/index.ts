@@ -83,11 +83,6 @@ export { updateSeason } from "./crews/updateSeason.js";
 // The crew name is editable too (spec §2), organizer-only, no season lookup.
 export { updateCrew } from "./crews/updateCrew.js";
 export { getSeasonStandings } from "./crews/getSeasonStandings.js";
-// Analytics spec 2026-07-21 §5: GET /crews/{crewId}/records — all-time ledger/head-to-head/
-// partners + per-closed-season Stableford titles. rosterFilteredContribution (the shared
-// roster-filter this consumes) stays an internal getSeasonStandings.ts export — a same-package
-// relative import, like sortLines — never routed through this barrel.
-export { getCrewRecords } from "./crews/getCrewRecords.js";
 
 export { projectArchive, finalizedAtMsOf } from "./projections/projectArchive.js";
 export { rebuildProjections } from "./projections/rebuildProjections.js";

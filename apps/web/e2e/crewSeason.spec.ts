@@ -9,7 +9,6 @@ import {
   createSeasonDirect,
   ensureCourse,
   finalizeRoundDirect,
-  getCrewRecordsDirect,
   getMyRecordDirect,
   getSeasonStandingsDirect,
   invokeRebuild,
@@ -177,7 +176,7 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
     const created = await createCrewDirect(httpUrl, al.tokens.idToken, "The Saturday Boys");
     crewId = created.crew.crewId;
-    expect(created.crew.members).toEqual([{ golferId: ids.al, name: "Al", role: "organizer", claimed: true }]);
+    expect(created.crew.members).toEqual([{ golferId: ids.al, name: "Al", role: "organizer" }]);
   });
 
   // One deck round, played entirely via the API: the season's three games added, all 18 holes
@@ -382,7 +381,6 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     const boMember = joined.crew.members.find((member) => member.golferId === ids.bo);
     expect(boMember?.name).toBe("Bo");
     expect(boMember?.role).toBe("member");
-    expect(boMember?.claimed).toBe(true);
 
     // Standings, re-fetched: Bo's frozen rows and the Al-Bo head-to-head materialize on the
     // very next read — nothing was lost while Bo was a non-member, since the counted rounds
@@ -455,40 +453,11 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(standingsAfterRejoin.partners).toEqual(EXPECTED_PARTNERS);
   });
 
-  // Spec 2026-07-22 "the season is the record" §1/§3: crowning is deleted whole — there is no
-  // more close/reopen verb, no `status`, and `titles` is transitional-empty always
-  // (getCrewRecords.ts's own doc comment; the whole use case + route is itself deleted next
-  // task, plan Task 3 §4 "All-time collapses into the concept"). The retired close→title→reopen
-  // sequence this test used to also drive is DELETED per plan Task 4 ("no crown concept
-  // remains") — the ledger-value assertions below STAY, since they are aggregateSeason output,
-  // not title output. The window-pin tests that replace the deleted close-moves-the-window
-  // coverage (test 10, formerly here) are Task 4's own deliverable (updateSeasonDirect against
-  // a past-dated season, then widening endsAt) — not reconstructed here.
-  test("9: all-time crew records fold every counted round across all seasons — no crown, titles always empty", async () => {
-    test.setTimeout(120_000);
-    const { httpUrl } = loadWebEnv();
-    const frozen = frozenSeasonExpectation(ids);
-    // The roster after 8b is {Al, Bo} again (Bo re-joined), and all 12 rounds are counted into the
-    // one season. GET /crews/{crewId}/records folds ALL seasons' counted rounds deduped by roundId
-    // (getCrewRecords.ts) — with a single season that is just the 12 rounds once.
-    const records = await getCrewRecordsDirect(httpUrl, al.tokens.idToken, crewId);
-    const memberIds = new Set<GolferId>([ids.al, ids.bo]);
-
-    // rounds = distinct counted rounds all-time = the 12 of the one season.
-    expect(records.rounds).toBe(SEASON_ROUNDS);
-
-    // All-time ledger/head-to-head fold through the SAME roster-filtered aggregateSeason as the
-    // season standings (getCrewRecords reuses getSeasonStandings' rosterFilteredContribution), so
-    // over one season of all 12 rounds they equal the frozen expectation filtered to {Al, Bo}
-    // exactly — byte-identical to step 8's own standings ledger/head-to-head.
-    expect(records.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
-    expect(records.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
-
-    // Partners: still no four-ball in the deck → [].
-    expect(records.partners).toEqual(EXPECTED_PARTNERS);
-
-    // No crown (spec §1/§3): titles is always empty now — never computed from a deleted
-    // lifecycle flag.
-    expect(records.titles).toEqual([]);
-  });
+  // Test 9 (all-time crew records) is DELETED whole (spec 2026-07-22 "the season is the record"
+  // §4): the All-time surface — GET /crews/{crewId}/records, its use case, and its route — is
+  // gone outright, not merely title-less. A season can represent any span, including effectively
+  // all of a crew's history, by stating wide dates, so a second surface aggregating "everything"
+  // is redundant machinery; lifetime head-to-head is a wide-dated season's own games table now.
+  // The window-pin tests that cover that path (a season created with both dates in the past, then
+  // widened via updateSeasonDirect) are Task 4's own deliverable, not reconstructed here.
 });

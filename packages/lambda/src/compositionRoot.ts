@@ -23,7 +23,6 @@ import {
   finalizeRound,
   getCourse,
   getCrew,
-  getCrewRecords,
   getGolfer,
   getMyCourseRecord,
   getMyGolfer,
@@ -357,9 +356,6 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // scoreboard, the shared-round derivation, AND the index boundaries alike — the SAME
     // projectionStore instance getMyRecord above shares.
     getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
-    // crew-scoreboard spec §3b: the SAME crewStore/golferStore/snapshots/projectionStore
-    // instances getSeasonStandings above shares — all-time, deduped across every season.
-    getCrewRecords: getCrewRecords({ crewStore, golferStore, snapshots, projectionStore }),
     leaveCrew: leaveCrew({ crewStore, golferStore }),
     // Crew membership (invited in, accountable out — spec §1): the organizer's authority — the
     // SAME crewStore/golferStore instances leaveCrew above shares.

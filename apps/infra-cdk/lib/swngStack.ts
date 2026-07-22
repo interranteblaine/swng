@@ -45,12 +45,12 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (42, as of close-season spec 2026-07-21 §1's two organizer verbs,
-// POST .../seasons/{seasonId}/close and .../reopen — analytics spec 2026-07-21's two reads, GET
-// /me/courses/{courseId}/record and GET /crews/{crewId}/records, had brought this to 40 first;
-// the navigation spec's GET /golfers/{golferId} had brought this to 37 before that; the
-// course-cards wire switch trimmed it to 36 before that by dropping add-tee/verify for one
-// whole-card PUT /courses/{courseId}) routes are declared here explicitly (matching
+// function — but the (39, as of "the season is the record" spec 2026-07-22: +PUT
+// .../seasons/{seasonId} and +PUT /crews/{crewId} replace the deleted POST close/reopen
+// verbs, and GET /crews/{crewId}/records — the all-time surface, §4 — is deleted whole,
+// netting 40 back down to 39; the navigation spec's GET /golfers/{golferId} had brought this
+// to 37 before that; the course-cards wire switch trimmed it to 36 before that by dropping
+// add-tee/verify for one whole-card PUT /courses/{courseId}) routes are declared here explicitly (matching
 // packages/lambda/src/http/routes.ts) rather than via a single $default catch-all, so the API's
 // shape is visible in the CloudFormation template and the AWS console, not hidden inside the
 // Lambda. Exported (not module-private) so test/routesParity.test.ts can pin this table against
@@ -131,10 +131,12 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.POST, path: "/crews/{crewId}/invites" },
   // Architecture-realignment Task 9: crew seasons + standings-on-read + leave. (GET
   // /crews/{crewId}/records was GONE here — the old crew projection layer it read from was
-  // deleted — until analytics spec 2026-07-21 §5 brought it back, computed on read below. The
-  // counting apparatus — POST/DELETE .../seasons/{seasonId}/rounds — is deleted whole,
-  // crew-scoreboard spec §2b: standings are a computed window over shared rounds now, never a
-  // stored ledger of counted rounds.)
+  // deleted — analytics spec 2026-07-21 §5 briefly brought it back, computed on read, but spec
+  // 2026-07-22 §4 deletes the whole all-time surface for good: a season can represent any span,
+  // including effectively all of a crew's history, by stating wide dates, so a second surface
+  // aggregating "everything" is redundant machinery. The counting apparatus — POST/DELETE
+  // .../seasons/{seasonId}/rounds — is deleted whole too, crew-scoreboard spec §2b: standings
+  // are a computed window over shared rounds now, never a stored ledger of counted rounds.)
   { method: HttpMethod.POST, path: "/crews/{crewId}/seasons" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/seasons" },
   // Spec 2026-07-22 "the season is the record" §2: editing the end date IS the whole lifecycle
@@ -143,9 +145,6 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // is required to reach it).
   { method: HttpMethod.PUT, path: "/crews/{crewId}/seasons/{seasonId}" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/seasons/{seasonId}/standings" },
-  // Analytics spec 2026-07-21 §5: all-time records across every season — same golfer tier as
-  // the standings route just above.
-  { method: HttpMethod.GET, path: "/crews/{crewId}/records" },
   { method: HttpMethod.POST, path: "/crews/{crewId}/leave" },
   // Crew membership (invited in, accountable out — spec §1): the organizer's authority — remove
   // (organizer-only, target in the path) and transfer (organizer-only, target in the body).

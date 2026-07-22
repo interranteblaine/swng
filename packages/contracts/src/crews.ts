@@ -7,20 +7,16 @@ import { crewIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
 // surfaced/enforced later without a data migration.
 export const crewRoleSchema: z.ZodType<CrewRole> = z.enum(["organizer", "member"]);
 
-// claimed is NOT on the domain CrewMember — it's a golfer-store lookup done at read time
-// (crews/crewView.ts), same "derive, don't store" reasoning as courseView's teeSets badges.
 export interface CrewMemberView {
   readonly golferId: GolferId;
   readonly name: string;
   readonly role: CrewRole;
-  readonly claimed: boolean;
 }
 
 export const crewMemberViewSchema: z.ZodType<CrewMemberView> = z.object({
   golferId: golferIdSchema,
   name: z.string(),
   role: crewRoleSchema,
-  claimed: z.boolean(),
 });
 
 // The wire projection of a Crew aggregate (application/src/crews/crewView.ts builds it). The
@@ -41,7 +37,7 @@ export const crewViewSchema: z.ZodType<CrewView> = z.object({
 });
 
 // Request bodies are `.strict()` (courses.ts' house style): every server-assigned field
-// (crewId, role, claimed, member ids) is a rejection, not a silently-dropped extra key, if a
+// (crewId, role, member ids) is a rejection, not a silently-dropped extra key, if a
 // client proposes it.
 export const createCrewRequestSchema = z.object({ name: z.string().min(1) }).strict();
 export type CreateCrewRequest = z.infer<typeof createCrewRequestSchema>;
@@ -202,9 +198,9 @@ const seasonStandingLineSchema: z.ZodType<SeasonStandingLine> = z.object({
 
 // Partner records (analytics spec 2026-07-21 §5): four-ball pairs, both current roster members —
 // `nameA`/`nameB` resolved from the roster the SAME way SeasonStandingLine.name is
-// (getSeasonStandings.ts's own nameByGolfer), never the snapshot's own participant name. Shared
-// by SeasonStandingsResponse (season-scoped) and CrewRecordsResponse (all-time) below — one
-// shape, never redeclared.
+// (getSeasonStandings.ts's own nameByGolfer), never the snapshot's own participant name. Used by
+// SeasonStandingsResponse below (the now-deleted all-time CrewRecordsResponse used to share this
+// shape too, spec 2026-07-22 §4).
 export interface PartnerStandingRecord {
   readonly a: GolferId;
   readonly b: GolferId;
@@ -285,27 +281,6 @@ export const seasonStandingsResponseSchema: z.ZodType<SeasonStandingsResponse> =
   ledger: z.array(seasonStandingLineSchema).readonly(),
   headToHead: z.array(headToHeadRecordSchema).readonly(),
   partners: z.array(partnerStandingRecordSchema).readonly(),
-});
-
-// GET /crews/{crewId}/records (analytics spec 2026-07-21 §5): all-time — every counted round
-// across every season, deduped by roundId (the SAME round counted twice contributes once),
-// folded through the SAME roster-filter + aggregateSeason composition as standings above, plus
-// `titles` (each CLOSED season's Stableford points leader(s) under the current-roster filter —
-// included only when non-empty; an open season, or a closed one with a scoreless/tied-at-zero
-// ledger, contributes no entry).
-export interface CrewRecordsResponse {
-  readonly rounds: number; // distinct counted rounds all-time
-  readonly ledger: readonly SeasonStandingLine[];
-  readonly headToHead: readonly HeadToHeadRecord[];
-  readonly partners: readonly PartnerStandingRecord[];
-  readonly titles: readonly { readonly seasonId: string; readonly name: string; readonly golfers: readonly { readonly golferId: GolferId; readonly name: string }[] }[];
-}
-export const crewRecordsResponseSchema: z.ZodType<CrewRecordsResponse> = z.object({
-  rounds: z.number().int(),
-  ledger: z.array(seasonStandingLineSchema).readonly(),
-  headToHead: z.array(headToHeadRecordSchema).readonly(),
-  partners: z.array(partnerStandingRecordSchema).readonly(),
-  titles: z.array(z.object({ seasonId: z.string(), name: z.string(), golfers: z.array(z.object({ golferId: golferIdSchema, name: z.string() })).readonly() })).readonly(),
 });
 
 export interface LeaveCrewResponse {

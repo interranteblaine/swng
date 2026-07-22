@@ -1,7 +1,6 @@
 import type { GolferId } from "../ids.js";
 import type { RoundArchive } from "../round/archive.js";
 import { configForResult } from "./ledger.js";
-import type { SeasonLedgerLine } from "./ledger.js";
 
 // Crew analytics — folds beside the existing standings (analytics spec 2026-07-21 §5): compute
 // on read over a season's shared snapshots, nothing stored, current-roster scoping applies
@@ -63,17 +62,4 @@ export const partnerRecords = (archives: readonly RoundArchive[], memberIds: Rea
   return [...pairs.values()].sort((x, y) =>
     x.wins !== y.wins ? y.wins - x.wins : x.a !== y.a ? (x.a < y.a ? -1 : 1) : x.b < y.b ? -1 : x.b > y.b ? 1 : 0,
   );
-};
-
-// Season title (spec §5): the Stableford points leader(s) of one season's ALREADY
-// roster-filtered ledger (aggregateSeason's own output, current-roster-scoped one layer up) —
-// [] when the ledger is empty or the leading points are 0 (a scoreless season crowns no one).
-export const stablefordTitle = (ledger: readonly SeasonLedgerLine[]): readonly GolferId[] => {
-  if (ledger.length === 0) return [];
-  const maxPoints = Math.max(...ledger.map((line) => line.points));
-  if (maxPoints === 0) return [];
-  return ledger
-    .filter((line) => line.points === maxPoints)
-    .map((line) => line.golferId)
-    .sort();
 };

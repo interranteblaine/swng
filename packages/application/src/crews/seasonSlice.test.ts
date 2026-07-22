@@ -17,7 +17,6 @@ import {
 import type { InMemorySnapshotStore } from "../testing/fakes.js";
 import { createCrew } from "./createCrew.js";
 import { createSeason } from "./createSeason.js";
-import { getCrewRecords } from "./getCrewRecords.js";
 import { getSeasonStandings } from "./getSeasonStandings.js";
 import { joinCrewByInvite } from "./joinCrewByInvite.js";
 import { leaveCrew } from "./leaveCrew.js";
@@ -138,7 +137,6 @@ const setup = () => {
     listSeasons: listSeasons({ crewStore, golferStore }),
     updateSeason: updateSeason({ crewStore, golferStore }),
     standings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
-    records: getCrewRecords({ crewStore, golferStore, snapshots, projectionStore }),
     leave: leaveCrew({ crewStore, golferStore }),
   };
 };
@@ -556,69 +554,6 @@ describe("leaveCrew", () => {
     // Nothing changed — Ann is still on the roster, still organizer.
     const crew = await ctx.crewStore.get(crewId);
     expect(crew!.crew.members.find((member) => member.golferId === ann)).toMatchObject({ role: "organizer" });
-  });
-});
-
-// GET /crews/{crewId}/records (crew-scoreboard spec §3b): all-time, over every round the roster
-// has ever shared.
-describe("getCrewRecords", () => {
-  it("all-time folds every round the roster has ever shared, once each, through the SAME roster-filter + aggregateSeason composition standings uses", async () => {
-    const ctx = setup();
-    const ann = await seedGolfer(ctx, "ann", "Ann");
-    const bo = await seedGolfer(ctx, "bo", "Bo");
-    const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
-    const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
-    await ctx.join(asClaims("bo"), { token: invite.token });
-
-    await recordPlayed(ctx, singlesArchive("r1", 5_000, ann, bo, ann, {}), 5_000);
-
-    const records = await ctx.records(asClaims("ann"), created.crew.crewId);
-
-    expect(records.rounds).toBe(1);
-    expect(records.ledger).toEqual(
-      expect.arrayContaining([expect.objectContaining({ golferId: ann, rounds: 1, wins: 1 }), expect.objectContaining({ golferId: bo, rounds: 1, losses: 1 })]),
-    );
-    expect(records.headToHead).toEqual([expect.objectContaining({ aWins: 1, bWins: 0 })]);
-  });
-
-  // Crowning is deleted whole (spec 2026-07-22 §1/§3) — there is no more `status`/`closedAtMs`
-  // for a "closed season" title to gate on, so `titles` is transitional-empty even with a
-  // Stableford-scored shared round on record (getCrewRecords.ts itself is deleted next task).
-  it("titles is always empty now — crowning is deleted, even with a Stableford-scored shared round on record", async () => {
-    const ctx = setup();
-    const ann = await seedGolfer(ctx, "ann", "Ann");
-    const bo = await seedGolfer(ctx, "bo", "Bo");
-    const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
-    const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
-    await ctx.join(asClaims("bo"), { token: invite.token });
-
-    await recordPlayed(ctx, stablefordArchive("r1", 5_000, [ann, bo], { [ann]: 40, [bo]: 30 }), 5_000);
-
-    const records = await ctx.records(asClaims("ann"), created.crew.crewId);
-
-    expect(records.titles).toEqual([]);
-  });
-
-  it("a non-member is rejected — not-a-member", async () => {
-    const ctx = setup();
-    const { crewId } = await crewWithSeason(ctx);
-    await seedGolfer(ctx, "stranger", "Stranger");
-    await expect(ctx.records(asClaims("stranger"), crewId)).rejects.toMatchObject({ code: "not-a-member" });
-  });
-
-  it("a fresh crew (only its own auto-opened season, nothing counted) yields an empty, non-throwing response", async () => {
-    const ctx = setup();
-    const ann = await seedGolfer(ctx, "ann", "Ann");
-    const created = await ctx.create(asClaims("ann"), { name: "Solo Crew" });
-    expect(ann).toBeDefined();
-
-    await expect(ctx.records(asClaims("ann"), created.crew.crewId)).resolves.toEqual({
-      rounds: 0,
-      ledger: [],
-      headToHead: [],
-      partners: [],
-      titles: [],
-    });
   });
 });
 

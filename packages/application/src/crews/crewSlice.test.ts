@@ -68,7 +68,7 @@ describe("createCrew", () => {
 
     expect(created.crew.name).toBe("Sunday Skins");
     expect(created.crew).not.toHaveProperty("joinCode");
-    expect(created.crew.members).toEqual([{ golferId: golferId("golfer-sub-ann"), name: "Ann", role: "organizer", claimed: true }]);
+    expect(created.crew.members).toEqual([{ golferId: golferId("golfer-sub-ann"), name: "Ann", role: "organizer" }]);
   });
 
   it("a caller with no account golfer yet is rejected — golfer-required (wire honesty, not a flow)", async () => {
@@ -249,7 +249,7 @@ describe("joinCrewByInvite", () => {
 
     const joined = await ctx.join({ sub: "sub-bo" }, { token: minted.token });
 
-    expect(joined.crew.members).toEqual(expect.arrayContaining([{ golferId: boId, name: "Bo", role: "member", claimed: true }]));
+    expect(joined.crew.members).toEqual(expect.arrayContaining([{ golferId: boId, name: "Bo", role: "member" }]));
   });
 
   it("re-joining with an already-a-member caller is idempotent — same crew returned, no duplicate roster entry (no-op, spec §2)", async () => {
@@ -332,7 +332,7 @@ describe("removeCrewMember", () => {
 
     const result = await ctx.remove({ sub: "sub-ann" }, created.crew.crewId, boId);
 
-    expect(result.crew.members).toEqual([{ golferId: annId, name: "Ann", role: "organizer", claimed: true }]);
+    expect(result.crew.members).toEqual([{ golferId: annId, name: "Ann", role: "organizer" }]);
     // Removal really landed in the store, not just the response shape.
     const stored = await ctx.crewStore.get(created.crew.crewId);
     expect(stored!.crew.members.map((m) => m.golferId)).toEqual([annId]);
@@ -394,8 +394,8 @@ describe("transferOrganizer", () => {
 
     expect(result.crew.members.map((m) => m.golferId)).toEqual([annId, boId]); // order preserved
     expect(result.crew.members).toEqual([
-      { golferId: annId, name: "Ann", role: "member", claimed: true },
-      { golferId: boId, name: "Bo", role: "organizer", claimed: true },
+      { golferId: annId, name: "Ann", role: "member" },
+      { golferId: boId, name: "Bo", role: "organizer" },
     ]);
     expect(result.crew.members.filter((m) => m.role === "organizer")).toHaveLength(1);
 

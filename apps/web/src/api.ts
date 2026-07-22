@@ -1,7 +1,6 @@
 import {
   abandonRoundResponseSchema,
   addGameResponseSchema,
-  crewRecordsResponseSchema,
   createCourseResponseSchema,
   createCrewResponseSchema,
   createSeasonResponseSchema,
@@ -45,7 +44,6 @@ import type {
   CreateCrewResponse,
   CreateSeasonRequest,
   CreateSeasonResponse,
-  CrewRecordsResponse,
   FinalizeRoundResponse,
   GetCourseResponse,
   GetCrewResponse,
@@ -80,7 +78,9 @@ import type {
   SupersedeCardResponse,
   TerminateGameResponse,
   TransferOrganizerRequest,
+  UpdateCrewRequest,
   UpdateMeRequest,
+  UpdateSeasonRequest,
 } from "@swng/contracts";
 import type { CourseId, CrewId, GameId, GolferId, RoundId } from "@swng/domain";
 import { config } from "./config";
@@ -390,6 +390,20 @@ export const listSeasons = async (token: string, id: CrewId): Promise<ListSeason
   return parse(listSeasonsResponseSchema, json);
 };
 
+// PUT /crews/{crewId}/seasons/{seasonId} (spec 2026-07-22 "the season is the record" §2):
+// editing the end date IS the whole lifecycle — there is no separate close/reopen verb
+// anymore. Reuses createSeasonResponseSchema's `{ season }` shape (the wire's own reuse
+// precedent — the response is byte-identical).
+export const updateSeason = async (token: string, id: CrewId, seasonId: string, input: UpdateSeasonRequest): Promise<CreateSeasonResponse> => {
+  const json = await requestJson(`/crews/${id}/seasons/${seasonId}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+    token,
+  });
+  return parse(createSeasonResponseSchema, json);
+};
+
 export const getSeasonStandings = async (token: string, id: CrewId, seasonId: string): Promise<SeasonStandingsResponse> => {
   const json = await requestJson(`/crews/${id}/seasons/${seasonId}/standings`, { token });
   return parse(seasonStandingsResponseSchema, json);
@@ -400,10 +414,10 @@ export const leaveCrew = async (token: string, id: CrewId): Promise<LeaveCrewRes
   return parse(leaveCrewResponseSchema, json);
 };
 
-// GET /crews/{crewId}/records (analytics read-folds spec 2026-07-21 §5): "All-time" — every
-// counted round across every season, folded once. Same requestJson + per-endpoint idiom as
-// getSeasonStandings above, "golfer"-gated the same way (member-only, application-side).
-export const getCrewRecords = async (token: string, id: CrewId): Promise<CrewRecordsResponse> => {
-  const json = await requestJson(`/crews/${id}/records`, { token });
-  return parse(crewRecordsResponseSchema, json);
+// PUT /crews/{crewId} (spec 2026-07-22 "the season is the record" §2): the crew name is
+// editable — organizer-only. Reuses getCrewResponseSchema's `{ crew }` shape, the SAME
+// "produces the crew" reuse precedent removeCrewMember/transferOrganizer already follow.
+export const updateCrew = async (token: string, id: CrewId, input: UpdateCrewRequest): Promise<GetCrewResponse> => {
+  const json = await requestJson(`/crews/${id}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(input), token });
+  return parse(getCrewResponseSchema, json);
 };

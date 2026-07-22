@@ -40,5 +40,5 @@ export const transferOrganizer =
       { notFound: "unknown-crew", conflict: "crew-conflict" },
     );
 
-    return { crew: await toCrewView({ golferStore: deps.golferStore }, updated) };
+    return { crew: toCrewView(updated) };
   };

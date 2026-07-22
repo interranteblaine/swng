@@ -571,6 +571,9 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(closedStandings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
     expect(closedStandings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
     expect(closedStandings.partners).toEqual(EXPECTED_PARTNERS);
+    // Full-row equality here leans on round 13 being ALL PARS: `index` is career-scoped (never
+    // windowed), and a par round's 0.0 differential displaces nobody's lowest-4 — lower round
+    // 13's scores and this closed-read assertion breaks on `index` even though the window held.
     expect(closedStandings.scoreboard).toEqual(expectedScoreboardRows(memberIds));
 
     // Reopen — the window opens back up (closedAtMs cleared), so the 13th round now falls inside

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
-import type { CrewRecordsResponse, GetMyRecordResponse, PartnerStandingRecord, SeasonStandingLine } from "@swng/contracts";
-import { golferId } from "@swng/domain";
-import type { CrewId, GolferId, HeadToHeadRecord, RoundId, SeasonLedgerLine } from "@swng/domain";
+import type { CrewRecordsResponse, GetMyRecordResponse, PartnerStandingRecord, ScoreboardRow, SeasonStandingLine } from "@swng/contracts";
+import { archiveGolferLine, crewScoreboard, golferId } from "@swng/domain";
+import type { CrewId, GolferId, HeadToHeadRecord, RoundId, SeasonLedgerLine, StoredLine } from "@swng/domain";
 import {
   addGameDirect,
   closeSeasonDirect,
@@ -27,7 +27,17 @@ import {
 } from "./support.js";
 import type { AccountGolfer } from "./support.js";
 import type { SeasonGolferIds } from "./crewSeasonDeck.js";
-import { HOLES, SEASON_ROUNDS, buildCourseCard, computeLocalSeason, frozenSeasonExpectation, roundScoresByGolfer, seasonGames } from "./crewSeasonDeck.js";
+import {
+  HOLES,
+  SEASON_ROUNDS,
+  buildCourseCard,
+  computeLocalArchives,
+  computeLocalSeason,
+  frozenScoreboardExpectation,
+  frozenSeasonExpectation,
+  roundScoresByGolfer,
+  seasonGames,
+} from "./crewSeasonDeck.js";
 
 // The golden season gate, rewritten accounts-only (accounts-only identity spec §1-3; the
 // FROZEN deck M8 Task 7 minted is still played byte-for-byte): rounds are sealed leaves —
@@ -81,14 +91,24 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
   const expectedHeadToHead = (records: readonly HeadToHeadRecord[], memberIds: ReadonlySet<GolferId>): readonly HeadToHeadRecord[] =>
     records.filter((record) => memberIds.has(record.a) && memberIds.has(record.b));
 
+  // The scoreboard's own frozen rows (crew-scoreboard plan Task 4), roster-filtered exactly like
+  // the together-folds above but WITHOUT the both-sides rule (a scoreboard row needs only ITS
+  // OWN golfer on the roster — Al alone still gets a row; see test 4/5) and with `name` from the
+  // same roster-name source every other row on this response uses.
+  const expectedScoreboardRows = (memberIds: ReadonlySet<GolferId>): readonly ScoreboardRow[] =>
+    frozenScoreboardExpectation(ids)
+      .filter((row) => memberIds.has(row.golferId))
+      .map((row) => ({ ...row, name: nameOf(row.golferId) }));
+
   // --- Additive analytics oracles (analytics read-folds spec 2026-07-21 §5) -------------------
   // Every value below is hand-derived from the FROZEN deck BEFORE any live call (the deck
   // discipline, task-8-brief.md) — never read back off the system. The existing standings
   // assertions above are byte-unchanged; this only ADDS partner/all-time coverage. The season
   // superlatives (lowestNet/mostImproved) this section used to also cover are SUPERSEDED whole
   // by the crew-scoreboard redesign (spec §3c) — gone from the wire; their oracle helpers are
-  // deleted with them. `standings.scoreboard`'s own new oracles land in a later task (crew-
-  // scoreboard plan Task 4), not here — this task is compile + frozen-number reconciliation only.
+  // deleted with them. `standings.scoreboard`'s own new oracles (frozenScoreboardExpectation,
+  // crewSeasonDeck.ts) land HERE (crew-scoreboard plan Task 4) — the comment this replaces named
+  // this exact task as the later home for them.
 
   // PARTNERS: four-ball ONLY (partnerRecords, packages/domain/src/crew/analytics.ts). This deck
   // plays exactly three games every round — singles-match, skins, stableford (crewSeasonDeck.ts
@@ -110,6 +130,36 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
       dee: golferId("local-dee"),
     };
     expect(computeLocalSeason(placeholderIds)).toEqual(frozenSeasonExpectation(placeholderIds));
+
+    // --- The scoreboard oracle (crew-scoreboard plan Task 4 Step 1) ----------------------------
+    // A SEPARATE local fold from the ledger/head-to-head one above: crewScoreboard folds over
+    // each member's OWN StoredLine[] (never the together-archives), so its lines are built here
+    // directly from the SAME 12 settled archives via archiveGolferLine (never a hand-rolled line
+    // shape — the "the fold is the derivation tool" rule) plus synthetic chronology —
+    // finalizedAtMs = the deck's own round order (0..11), no createdAtMs (playedAtMs then falls
+    // back to finalizedAtMs, scoreboard.ts's own rule). The result is asserted against
+    // frozenScoreboardExpectation (crewSeasonDeck.ts) — hand-frozen from running this exact fold
+    // ONCE and reading its printed output, never adjusted to match a live run.
+    const archives = computeLocalArchives(placeholderIds);
+    const members = (["al", "bo", "cy", "dee"] as const).map((role) => ({
+      golferId: placeholderIds[role],
+      lines: archives.map((archive, i): StoredLine => ({ ...archiveGolferLine(archive, placeholderIds[role]), finalizedAtMs: i })),
+    }));
+    const scoreboard = crewScoreboard(members, { startMs: 0 });
+    expect(scoreboard).toEqual(frozenScoreboardExpectation(placeholderIds));
+
+    // Expected shape (crew-scoreboard spec §3a, verified rather than assumed): 12 rounds each;
+    // best18/netPer18/index all present (>=3 qualifying lines clears the netPer18 floor); no
+    // member has a pre-window line, so indexDelta is ABSENT for everyone — never a `0`/`undefined`
+    // value sitting on the object, no key at all.
+    expect(scoreboard).toHaveLength(4);
+    for (const row of scoreboard) {
+      expect(row.rounds).toBe(SEASON_ROUNDS);
+      expect(row.best18).toBeDefined();
+      expect(row.netPer18).toBeDefined();
+      expect(row.index).toBeDefined();
+      expect(row).not.toHaveProperty("indexDelta");
+    }
   });
 
   test("2: four accounts sign up (Al/Bo/Cy/Dee); Al creates 'The Saturday Boys' — its only member for now", async () => {
@@ -198,16 +248,17 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
     // The window rule reaches back (crew-scoreboard spec §2): with no closed seasons yet, this
     // season's own window starts Jan 1 UTC of THIS year — comfortably covering all 12 rounds
-    // played moments ago in test 3 — with no per-round counting act anywhere. Al's own
-    // scoreboard row already reflects all 12 (crewScoreboard counts a member's OWN in-window
-    // lines regardless of roster size). `standings.rounds` — the DERIVED "played together"
-    // list — stays empty here: sharedRoundIds requires >=2 CURRENT roster members holding a
-    // line for the same round (spec §3a/§3b), and Al is still the crew's ONLY member (Bo/Cy/Dee
-    // hold accounts and played every round, but joined no roster until test 8) — it populates
-    // once Bo joins.
+    // played moments ago in test 3 — with no per-round counting act anywhere. Al is the crew's
+    // ONLY member here (Bo/Cy/Dee hold accounts and played every round, but joined no roster
+    // until test 8), and a scoreboard row needs only ITS OWN golfer on the roster — unlike the
+    // together-folds below, crewScoreboard counts a member's OWN in-window lines regardless of
+    // roster size — so `standings.scoreboard` is EXACTLY Al's frozen row (plus his roster name),
+    // the full upgrade of the provisional `rounds === 12` check this test used to make (crew-
+    // scoreboard plan Task 4 Step 2). `standings.rounds` — the DERIVED "played together" list —
+    // stays empty here: sharedRoundIds requires >=2 CURRENT roster members holding a line for the
+    // same round (spec §3a/§3b) — it populates once Bo joins.
     const standings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    const alRow = standings.scoreboard.find((row) => row.golferId === ids.al);
-    expect(alRow?.rounds).toBe(SEASON_ROUNDS);
+    expect(standings.scoreboard).toEqual(expectedScoreboardRows(new Set<GolferId>([ids.al])));
     expect(standings.rounds).toEqual([]);
   });
 
@@ -335,6 +386,21 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
     expect(standings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
 
+    // The board now carries Bo's frozen row too (crew-scoreboard plan Task 4 Step 2) — the
+    // aggregation-scope law reaching the scoreboard exactly as it reaches the ledger above.
+    expect(standings.scoreboard).toEqual(expectedScoreboardRows(memberIds));
+
+    // The deferred ⚠️ (task-3 review): `standings.rounds` — "played together" — is now POPULATED
+    // with >=2 CURRENT roster members sharing a line on every one of the 12 deck rounds. Asserted
+    // as an actual SET (not merely a length) against the roundIds test 3 minted, in the wire's
+    // `{roundId, finalizedAt}` shape, newest-first by finalizedAt (getSeasonStandings.ts's own
+    // sort) — a real ordering property, not just "some rounds came back."
+    expect(standings.rounds).toHaveLength(SEASON_ROUNDS);
+    expect([...standings.rounds.map((round) => round.roundId)].sort()).toEqual([...roundIds].sort());
+    for (let i = 1; i < standings.rounds.length; i += 1) {
+      expect(standings.rounds[i - 1]!.finalizedAt).toBeGreaterThanOrEqual(standings.rounds[i]!.finalizedAt);
+    }
+
     // Additive analytics with Bo now scoped in (spec §5): still no four-ball → partners [].
     expect(standings.partners).toEqual(EXPECTED_PARTNERS);
   });
@@ -460,5 +526,75 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
     const reopenedRecords = await getCrewRecordsDirect(httpUrl, al.tokens.idToken, crewId);
     expect(reopenedRecords.titles).toEqual([]);
+  });
+
+  test("10: the window on the wire — a gameless 13th round stays out at close, then ticks the scoreboard on reopen; the together-fold never moves", async () => {
+    test.setTimeout(120_000);
+    const { httpUrl } = loadWebEnv();
+    const frozen = frozenSeasonExpectation(ids);
+    // Roster is still {Al, Bo}: test 8b's re-join, unchanged by test 9's own close/reopen cycle
+    // (closing/reopening touches ONLY `status`/`closedAtMs` — never membership).
+    const memberIds = new Set<GolferId>([ids.al, ids.bo]);
+
+    // "The Golden Dozen" closes AGAIN (organizer Al) — closedAtMs stamps NOW, strictly after all
+    // 12 deck rounds (played moments ago, in test 3) and strictly before the round about to be
+    // played below (crew-scoreboard plan Task 4 Step 3, spec §2's window-end rule live).
+    const closed = await closeSeasonDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
+    expect(closed.season.status).toBe("closed");
+
+    // A 13th round, shared by Al+Bo ONLY, with NO games — deliberately OUTSIDE the frozen deck
+    // (crewSeasonDeck.ts's own machinery is untouched by this test; the round exists only to
+    // prove the window, never to move a single frozen number). Join + score + finalize via the
+    // same out-of-browser helpers test 3 already uses, minus addGameDirect entirely — a
+    // gameless round is exactly what spec §3b's "contributes nothing to the together-fold" needs.
+    const started = await startRoundDirect(httpUrl, al, { course, tee: "member", courseHandicap: 0 });
+    expect(started.golferId).toBe(ids.al);
+    const joined = await joinRoundDirect(httpUrl, bo, { code: started.joinCode, tee: "member", courseHandicap: 0 });
+    expect(joined.golferId).toBe(ids.bo);
+
+    const ops = createScoreOps("crew-r13");
+    for (let hole = 1; hole <= HOLES; hole += 1) {
+      await Promise.all([
+        recordScoreDirect(httpUrl, started.roundId, started.token, { golferId: ids.al, hole, strokes: 4 }, ops),
+        recordScoreDirect(httpUrl, started.roundId, started.token, { golferId: ids.bo, hole, strokes: 4 }, ops),
+      ]);
+    }
+    await finalizeRoundDirect(httpUrl, started.roundId, started.token);
+
+    // Closed standings: the window's end (closedAtMs, stamped above) is BEFORE this round's
+    // played date, so it stays OUT — `rounds` is still the same 12 deck roundIds, and every
+    // window-derived fold (the together-fold AND the scoreboard alike) reads byte-identical to
+    // test 9's own closed read.
+    const closedStandings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
+    expect(closedStandings.rounds).toHaveLength(SEASON_ROUNDS);
+    expect([...closedStandings.rounds.map((round) => round.roundId)].sort()).toEqual([...roundIds].sort());
+    expect(closedStandings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
+    expect(closedStandings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
+    expect(closedStandings.partners).toEqual(EXPECTED_PARTNERS);
+    expect(closedStandings.scoreboard).toEqual(expectedScoreboardRows(memberIds));
+
+    // Reopen — the window opens back up (closedAtMs cleared), so the 13th round now falls inside
+    // it: `rounds` grows to 13 (the round-13 roundId joins the set), and Al/Bo's own scoreboard
+    // `rounds` tick to 13 right alongside it (crewScoreboard counts a member's OWN in-window
+    // lines, roster size irrelevant — test 4's own rule). The ledger/head-to-head STILL don't
+    // move: a gameless round contributes NOTHING to crewContribution (no games -> no lines, no
+    // head-to-head entries) — the together-fold's own truth, not a special case carved out for
+    // this test.
+    const reopened = await reopenSeasonDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
+    expect(reopened.season.status).toBe("open");
+
+    const reopenedStandings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
+    expect(reopenedStandings.rounds).toHaveLength(SEASON_ROUNDS + 1);
+    expect(reopenedStandings.rounds.map((round) => round.roundId)).toContain(started.roundId);
+    expect(reopenedStandings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
+    expect(reopenedStandings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
+    expect(reopenedStandings.partners).toEqual(EXPECTED_PARTNERS);
+
+    const reopenedAlRow = reopenedStandings.scoreboard.find((row) => row.golferId === ids.al);
+    const reopenedBoRow = reopenedStandings.scoreboard.find((row) => row.golferId === ids.bo);
+    expect(reopenedAlRow?.rounds).toBe(SEASON_ROUNDS + 1);
+    expect(reopenedBoRow?.rounds).toBe(SEASON_ROUNDS + 1);
+
+    // The season is left OPEN — nothing follows this test (crew-scoreboard plan Task 4 Step 3).
   });
 });

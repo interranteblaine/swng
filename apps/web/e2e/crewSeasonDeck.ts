@@ -19,7 +19,7 @@ import {
   playGoldenRoundLog,
   settleRound,
 } from "@swng/domain";
-import type { CourseCard, GameConfig, GolferId, HeadToHeadRecord, Participant, SeasonLedgerLine } from "@swng/domain";
+import type { CourseCard, GameConfig, GolferId, HeadToHeadRecord, Participant, RoundArchive, ScoreboardLine, SeasonLedgerLine } from "@swng/domain";
 
 export const SEASON_ROUNDS = 12;
 export const HOLES = 18;
@@ -163,15 +163,12 @@ const idConfigs = (ids: SeasonGolferIds): readonly GameConfig[] => [
   { id: gameId("stableford"), kind: "stableford", players: [ids.al, ids.bo, ids.cy, ids.dee] },
 ];
 
-// The local oracle (brief: "verify your deck against the domain engines locally first"): plays
-// all 12 rounds through the SAME playGoldenRoundLog -> settleRound -> crewContribution ->
-// aggregateSeason pipeline the real server exercises, entirely in-process, no network.
-// crewSeason.spec.ts's own step 1 asserts this equals frozenSeasonExpectation (below) BEFORE
-// any live call — a mismatch here is a bug in ROUND_PLAN/roundScores, never something to
-// adjust to match a live run.
-export const computeLocalSeason = (
-  ids: SeasonGolferIds,
-): { readonly ledger: readonly SeasonLedgerLine[]; readonly headToHead: readonly HeadToHeadRecord[] } => {
+// The deck's 12 settled archives, in round order — the ONE local play-through
+// (playGoldenRoundLog -> settleRound) both computeLocalSeason (the ledger/head-to-head oracle)
+// and crewSeason.spec.ts's own scoreboard oracle (crew-scoreboard plan Task 4 Step 1) fold over,
+// so the two oracles can never desync on what "the deck" produced. No network, no wall clock —
+// entirely in-process.
+export const computeLocalArchives = (ids: SeasonGolferIds): readonly RoundArchive[] => {
   const card = buildCourseCard("Local Oracle Course");
   const participants: readonly Participant[] = [
     { golferId: ids.al, name: "Al", tee: "member", courseHandicap: 0 },
@@ -181,15 +178,23 @@ export const computeLocalSeason = (
   ];
   const games = idConfigs(ids);
 
-  const contributions = Array.from({ length: SEASON_ROUNDS }, (_, i) => {
+  return Array.from({ length: SEASON_ROUNDS }, (_, i) => {
     const roundNumber = i + 1;
     const scores = roundScoresByGolfer(ids, roundNumber);
     const events = playGoldenRoundLog(card, participants, games, scores, [], true);
-    return crewContribution(settleRound(events));
+    return settleRound(events);
   });
-
-  return aggregateSeason(contributions);
 };
+
+// The local oracle (brief: "verify your deck against the domain engines locally first"): folds
+// computeLocalArchives through crewContribution -> aggregateSeason, the SAME pipeline the real
+// server exercises. crewSeason.spec.ts's own step 1 asserts this equals frozenSeasonExpectation
+// (below) BEFORE any live call — a mismatch here is a bug in ROUND_PLAN/roundScores, never
+// something to adjust to match a live run.
+export const computeLocalSeason = (
+  ids: SeasonGolferIds,
+): { readonly ledger: readonly SeasonLedgerLine[]; readonly headToHead: readonly HeadToHeadRecord[] } =>
+  aggregateSeason(computeLocalArchives(ids).map((archive) => crewContribution(archive)));
 
 // Hand-derived per-role season totals (task-7-report.md carries the full per-round trace this
 // freezes): Al/Bo both 5W-5L-2H (the singles H2H) at 430 stableford points and 54 skins each;
@@ -222,4 +227,46 @@ export const frozenSeasonExpectation = (
   const [a, b] = ids.al < ids.bo ? [ids.al, ids.bo] : [ids.bo, ids.al];
   const headToHead: readonly HeadToHeadRecord[] = [{ a, b, aWins: 5, bWins: 5, halves: 2 }];
   return { ledger, headToHead };
+};
+
+// --- The scoreboard oracle (crew-scoreboard plan Task 4 Step 1) ------------------------------
+// A NEW, separate frozen oracle — crewScoreboard (packages/domain/src/crew/scoreboard.ts) folds
+// over each member's OWN lines, never the together-archives ledger/headToHead above fold over,
+// so it needed its own local run, not a re-derivation from FROZEN_LINE. Values below are
+// HAND-FROZEN from running crewScoreboard ONCE, locally, over computeLocalArchives (via
+// archiveGolferLine + synthetic chronology — the exact construction crewSeason.spec.ts's own
+// test 1 repeats) and reading the printed output — the test-1 discipline (BLOCKED-don't-fudge):
+// a mismatch here is a bug in this file or in scoreboard.ts, never something adjusted to match a
+// live run. Every role's row is independent of which real golferId it lands on: course handicap
+// is 0 for everyone all season (this file's header), so best18/netPer18/index differ only by the
+// H2H holes ROUND_PLAN gives Al/Bo (never Cy/Dee, who only ever move off par to win hole 18's
+// skins pot). best18 71 (-1) for all four: the lowest 18-hole gross anyone ever cards is a flat
+// par-71 with hole 18 birdied (3), which happens for whoever is that round's hole18Winner —
+// every role wins hole 18 in exactly 3 of the 12 rounds (frozenSeasonExpectation's own skins
+// derivation), so every role reaches 71 at least once. indexDelta is intentionally ABSENT from
+// every row: crewScoreboard's `before` cohort is lines with playedAtMs < window.startMs, and
+// this file always windows from {startMs: 0} — no line is ever that early.
+interface FrozenScoreboardRow {
+  readonly rounds: number;
+  readonly best18: { readonly gross: number; readonly toPar: number };
+  readonly netPer18: number;
+  readonly index: number;
+}
+const FROZEN_SCOREBOARD: Readonly<Record<Role, FrozenScoreboardRow>> = {
+  al: { rounds: SEASON_ROUNDS, best18: { gross: 71, toPar: -1 }, netPer18: 0.2, index: -0.5 },
+  bo: { rounds: SEASON_ROUNDS, best18: { gross: 71, toPar: -1 }, netPer18: 0.2, index: -0.2 },
+  cy: { rounds: SEASON_ROUNDS, best18: { gross: 71, toPar: -1 }, netPer18: -0.2, index: -0.7 },
+  dee: { rounds: SEASON_ROUNDS, best18: { gross: 71, toPar: -1 }, netPer18: -0.2, index: -0.7 },
+};
+
+// The frozen scoreboard, mapped onto whichever real golferIds the live crew mints, PRE-SORTED
+// via crewScoreboard's own total order (netPer18 asc, rounds desc, golferId asc — scoreboard.ts)
+// so callers compare directly with toEqual, never re-sorting at the call site. Cy and Dee are a
+// FULL tie (both -0.2/12/whatever their live golferIds are) exactly like Al and Bo (both 0.2/12)
+// — both pairs fall back to golferId asc, same shape as frozenSeasonExpectation's own tie
+// handling above.
+export const frozenScoreboardExpectation = (ids: SeasonGolferIds): readonly ScoreboardLine[] => {
+  const rows: (FrozenScoreboardRow & { readonly golferId: GolferId })[] = ROLES.map((role) => ({ golferId: ids[role], ...FROZEN_SCOREBOARD[role] }));
+  rows.sort((a, b) => a.netPer18 - b.netPer18 || b.rounds - a.rounds || (a.golferId < b.golferId ? -1 : a.golferId > b.golferId ? 1 : 0));
+  return rows;
 };

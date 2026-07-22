@@ -9,11 +9,13 @@ import {
   createSeasonDirect,
   ensureCourse,
   finalizeRoundDirect,
+  getCrewDirect,
   getMyRecordDirect,
   getSeasonStandingsDirect,
   invokeRebuild,
   joinCrewDirect,
   joinRoundDirect,
+  listSeasonsDirect,
   loadWebEnv,
   mintAccountGolfer,
   mintCrewInviteDirect,
@@ -21,6 +23,8 @@ import {
   recordScoreDirect,
   removeCrewMemberDirect,
   startRoundDirect,
+  updateCrewDirect,
+  updateSeasonDirect,
 } from "./support.js";
 import type { AccountGolfer } from "./support.js";
 import type { SeasonGolferIds } from "./crewSeasonDeck.js";
@@ -177,6 +181,16 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     const created = await createCrewDirect(httpUrl, al.tokens.idToken, "The Saturday Boys");
     crewId = created.crew.crewId;
     expect(created.crew.members).toEqual([{ golferId: ids.al, name: "Al", role: "organizer" }]);
+
+    // Every crew is born alive (createCrew.ts, spec 2026-07-22 "the season is the record" §2):
+    // its FIRST season exists before anyone asks — named for the current calendar year, with
+    // VISIBLE Jan 1 – Dec 31 dates, no derivation and no `status`. `year` is read live, NEVER a
+    // literal — a hardcoded year would fail the moment the calendar rolls. It's the only season
+    // on a just-created crew.
+    const year = new Date().getUTCFullYear();
+    const seasons = await listSeasonsDirect(httpUrl, al.tokens.idToken, crewId);
+    expect(seasons.seasons).toHaveLength(1);
+    expect(seasons.seasons[0]).toMatchObject({ name: String(year), startsAt: `${year}-01-01`, endsAt: `${year}-12-31` });
   });
 
   // One deck round, played entirely via the API: the season's three games added, all 18 holes
@@ -299,8 +313,60 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
   // Test 6 (un-count/re-count round 1) is DELETED whole (crew-scoreboard plan Task 3, Step 5):
   // the counting apparatus it exercised is gone from standings' own derivation (a round is
   // shared or it isn't, purely by window + roster — nothing to un-count or re-count). Its window
-  // replacement (closing a season and proving a round played after the close stays out, then
-  // re-enters on reopen) lands in Task 4.
+  // replacement — a season whose declared dates exclude the deck's rounds, then a live edit that
+  // widens the window to include them — is THIS test (Task 4, spec 2026-07-22 §1/§2: editing the
+  // end date IS the whole lifecycle now, no separate close/reopen).
+  test("6: a season windowed entirely in the past holds zero rounds; widening its endsAt to the present re-scopes them in live", async () => {
+    test.setTimeout(60_000);
+    const { httpUrl } = loadWebEnv();
+
+    // A fixed PAST literal year is the ONE place a hardcoded year is correct in this whole file
+    // (task-4-brief.md's own carve-out): the point of this half is a window that EXCLUDES the
+    // live "now" rounds test 3 just played, so it must fall before any real run of this suite —
+    // unlike every other date in this file, it must NOT track `new Date().getUTCFullYear()`.
+    const past = await createSeasonDirect(httpUrl, al.tokens.idToken, crewId, "Ancient History", "2020-01-01", "2020-12-31");
+    const pastSeasonId = past.season.seasonId;
+    expect(past.season).toMatchObject({ name: "Ancient History", startsAt: "2020-01-01", endsAt: "2020-12-31" });
+
+    // Date exclusion, proven live: every one of Al's 12 rounds finalized moments ago in test 3,
+    // well outside 2020 — crewScoreboard.ts still returns a row per roster member (Al alone,
+    // here) but with zero in-window lines, so `rounds: 0` and neither best18 nor netPer18 (both
+    // window-scoped). `index` is deliberately NOT asserted here — it folds the golfer's WHOLE
+    // career regardless of window (scoreboard.ts's own rule), so it's real even on an empty
+    // window; asserting it absent would be asserting something false about the model.
+    const excluded = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, pastSeasonId);
+    expect(excluded.scoreboard).toHaveLength(1);
+    expect(excluded.scoreboard[0]).toMatchObject({ golferId: ids.al, name: "Al", rounds: 0 });
+    expect(excluded.scoreboard[0]).not.toHaveProperty("best18");
+    expect(excluded.scoreboard[0]).not.toHaveProperty("netPer18");
+    // "Played together" and the together-folds need >=2 CURRENT roster members regardless of
+    // window (test 5's own finding) — Al is still alone here, so these stay empty for that
+    // reason too, not merely because the window excludes everything.
+    expect(excluded.rounds).toEqual([]);
+    expect(excluded.ledger).toEqual([]);
+    expect(excluded.headToHead).toEqual([]);
+
+    // Editing the window IS the whole lifecycle (spec §2, replacing the deleted close/reopen
+    // pair): widen endsAt to the CURRENT UTC year's Dec 31 — read live, NEVER a literal, since a
+    // hardcoded current year would empty the board the moment the calendar rolls — and the same
+    // 12 rounds that were excluded above appear on the very next read, no re-creation needed.
+    const year = new Date().getUTCFullYear();
+    const widened = await updateSeasonDirect(httpUrl, al.tokens.idToken, crewId, pastSeasonId, { endsAt: `${year}-12-31` });
+    expect(widened.season).toMatchObject({ name: "Ancient History", startsAt: "2020-01-01", endsAt: `${year}-12-31` });
+
+    const included = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, pastSeasonId);
+    expect(included.scoreboard).toHaveLength(1);
+    expect(included.scoreboard[0]?.golferId).toBe(ids.al);
+    expect(included.scoreboard[0]?.rounds).toBe(SEASON_ROUNDS);
+    expect(included.scoreboard[0]?.best18).toBeDefined();
+    expect(included.scoreboard[0]?.netPer18).toBeDefined();
+    expect(included.scoreboard[0]?.index).toBeDefined();
+    // Al is still the roster's only member (Bo doesn't join until test 8) — the together-folds
+    // stay honestly empty through the widen too, the same law as above, not a special case of it.
+    expect(included.rounds).toEqual([]);
+    expect(included.ledger).toEqual([]);
+    expect(included.headToHead).toEqual([]);
+  });
 
   test("7: rebuild parity — the paged snapshot backfill reproduces Al's record; standings never depended on it", async () => {
     test.setTimeout(360_000); // the rebuild lambda replays every finalized round on beta (5-minute CDK timeout) — comfortably slower than every other step here
@@ -459,5 +525,25 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
   // all of a crew's history, by stating wide dates, so a second surface aggregating "everything"
   // is redundant machinery; lifetime head-to-head is a wide-dated season's own games table now.
   // The window-pin tests that cover that path (a season created with both dates in the past, then
-  // widened via updateSeasonDirect) are Task 4's own deliverable, not reconstructed here.
+  // widened via updateSeasonDirect) are test 6 above, Task 4's own deliverable.
+
+  // Sequenced LAST, deliberately: "The Saturday Boys" (test 2) is the only crew-name literal
+  // this file asserts anywhere, so renaming it here — after every other beat, including the
+  // roster mutations in 8/8b — can't disturb a single earlier assertion that depends on the
+  // original name.
+  test("9: Al renames the crew — PUT /crews/{crewId} lands on the wire, a fresh GET returns it", async () => {
+    test.setTimeout(60_000);
+    const { httpUrl } = loadWebEnv();
+
+    const renamed = await updateCrewDirect(httpUrl, al.tokens.idToken, crewId, "The Saturday Regulars");
+    expect(renamed.crew.name).toBe("The Saturday Regulars");
+    // The roster itself is untouched by a rename — the crew-name-edit path is orthogonal to
+    // membership (Al + Bo, restored by test 8b's own rejoin).
+    expect(renamed.crew.members.map((member) => member.golferId).sort()).toEqual([ids.al, ids.bo].sort());
+
+    // Not merely echoed by the mutation's own response — a SEPARATE GET proves it actually
+    // landed server-side.
+    const fetched = await getCrewDirect(httpUrl, al.tokens.idToken, crewId);
+    expect(fetched.crew.name).toBe("The Saturday Regulars");
+  });
 });

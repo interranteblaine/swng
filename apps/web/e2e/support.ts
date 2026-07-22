@@ -29,6 +29,7 @@ import {
   joinCrewResponseSchema,
   joinRoundRequestSchema,
   joinRoundResponseSchema,
+  listSeasonsResponseSchema,
   mintCrewInviteResponseSchema,
   parse,
   recordScoreRequestSchema,
@@ -38,6 +39,7 @@ import {
   shareLinkResponseSchema,
   startRoundRequestSchema,
   startRoundResponseSchema,
+  updateCrewRequestSchema,
   updateMeRequestSchema,
 } from "@swng/contracts";
 import type {
@@ -52,6 +54,7 @@ import type {
   GolferView,
   JoinCrewResponse,
   JoinRoundResponse,
+  ListSeasonsResponse,
   MintCrewInviteResponse,
   SeasonStandingsResponse,
   ShareLinkResponse,
@@ -306,6 +309,33 @@ export const createCrewDirect = async (httpUrl: string, token: string, name: str
   return parse(createCrewResponseSchema, json);
 };
 
+// GET /crews/{crewId} — the plain crew read, "golfer"-gated (member-only authorization inside
+// application). Used after updateCrewDirect below to prove a rename landed on the wire itself,
+// not merely echoed by the mutation's own response.
+export const getCrewDirect = async (httpUrl: string, token: string, id: CrewId): Promise<GetCrewResponse> => {
+  const response = await fetch(`${httpUrl}/crews/${id}`, { headers: { authorization: `Bearer ${token}` } });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`GET /crews/${id} -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(getCrewResponseSchema, json);
+};
+
+// PUT /crews/{crewId} (spec 2026-07-22 "the season is the record" §2): the crew name is
+// editable — organizer-only authorization lives in application (updateCrew.ts's own guard),
+// never re-checked here. Reuses getCrewResponseSchema's `{ crew }` shape (the SAME "produces
+// the crew" reuse precedent createCrewDirect/joinCrewDirect/removeCrewMemberDirect already
+// follow), never a parallel type.
+export const updateCrewDirect = async (httpUrl: string, token: string, id: CrewId, name: string): Promise<GetCrewResponse> => {
+  const body = parse(updateCrewRequestSchema, { name });
+  const response = await fetch(`${httpUrl}/crews/${id}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`PUT /crews/${id} -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(getCrewResponseSchema, json);
+};
+
 // POST /crews/{crewId}/invites (crew membership, invited in, accountable out — spec §2): ANY
 // member mints a fresh 7-day HMAC invite token — the self-service counterpart to the deleted
 // permanent join code. crewSeason.spec.ts's step 8 (the late crew join) mints one as Al (the
@@ -381,6 +411,17 @@ export const createSeasonDirect = async (
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`POST /crews/${id}/seasons -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(createSeasonResponseSchema, json);
+};
+
+// GET /crews/{crewId}/seasons (spec 2026-07-22 "the season is the record" §2): every season on
+// the crew, newest-first (listSeasons.ts's own sort). Used to find the auto-minted season
+// createCrew seeds every crew with (task-4-brief.md item 1) — the only season on a
+// just-created crew.
+export const listSeasonsDirect = async (httpUrl: string, token: string, id: CrewId): Promise<ListSeasonsResponse> => {
+  const response = await fetch(`${httpUrl}/crews/${id}/seasons`, { headers: { authorization: `Bearer ${token}` } });
+  const json: unknown = await response.json();
+  if (!response.ok) throw new Error(`GET /crews/${id}/seasons -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(listSeasonsResponseSchema, json);
 };
 
 export const getSeasonStandingsDirect = async (httpUrl: string, token: string, id: CrewId, seasonId: string): Promise<SeasonStandingsResponse> => {

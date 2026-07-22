@@ -243,13 +243,11 @@ const partnerStandingRecordSchema: z.ZodType<PartnerStandingRecord> = z.object({
   halves: z.number().int(),
 });
 
-// Season superlatives (analytics spec 2026-07-21 §5): computed on read over the season's counted
-// snapshots, nothing stored. `lowestNet` is the single lowest per-member net average (ties share
-// the entry, `golfers` naming all of them) — ABSENT, not zeroed, when nobody has ≥3 qualifying
-// rounds. `mostImproved` is domain's own `mostImproved()` fold verbatim (every member whose swng
-// index dropped between the season's first and last counted round, ranked biggest-drop-first),
-// each entry given a roster name — ABSENT (never `[]`) when nobody qualifies, e.g. an empty
-// season or a season where no member has an index at both ends.
+// Season superlatives (analytics spec 2026-07-21 §5) — SUPERSEDED by the per-member scoreboard
+// below (crew-scoreboard spec §3c: a board where everyone has a line supersedes winner-only
+// callouts; keeping both would put two differently-defined net numbers on one page). Left
+// EXPORTED but unreferenced by SeasonStandingsResponse — the counting apparatus this fed is a
+// whole later deletion, not this one.
 export interface SeasonSuperlatives {
   readonly lowestNet?: {
     readonly holes: 9 | 18;
@@ -259,7 +257,7 @@ export interface SeasonSuperlatives {
   };
   readonly mostImproved?: readonly { readonly golferId: GolferId; readonly name: string; readonly from: number; readonly to: number }[];
 }
-const seasonSuperlativesSchema: z.ZodType<SeasonSuperlatives> = z.object({
+export const seasonSuperlativesSchema: z.ZodType<SeasonSuperlatives> = z.object({
   lowestNet: z
     .object({
       holes: z.union([z.literal(9), z.literal(18)]),
@@ -274,28 +272,65 @@ const seasonSuperlativesSchema: z.ZodType<SeasonSuperlatives> = z.object({
     .optional(),
 });
 
-// Standings are computed on read (spec §4): the counted snapshots folded through the SAME
-// domain crewContribution/aggregateSeason the M8 projector used — no stored ledger. `partners`/
-// `superlatives` (analytics spec §5) grow the same read, over the SAME archives/memberIds.
+// The per-member scoreboard row (crew-scoreboard spec §3a/§4): the domain's own ScoreboardLine
+// (crew/scoreboard.ts) plus the roster's own name (the nameByGolfer precedent every other row
+// on this response already follows) — never the golfer store's name, which can drift from what
+// THIS crew calls someone.
+export interface ScoreboardRow {
+  readonly golferId: GolferId;
+  readonly name: string;
+  readonly rounds: number;
+  readonly best18?: { readonly gross: number; readonly toPar: number };
+  readonly netPer18?: number;
+  readonly index?: number;
+  readonly indexDelta?: number;
+}
+const scoreboardRowSchema: z.ZodType<ScoreboardRow> = z.object({
+  golferId: golferIdSchema,
+  name: z.string(),
+  rounds: z.number().int(),
+  best18: z.object({ gross: z.number().int(), toPar: z.number().int() }).optional(),
+  netPer18: z.number().optional(),
+  index: z.number().optional(),
+  indexDelta: z.number().optional(),
+});
+
+// "Played together" — a derived shared round (crew-scoreboard spec §3b), the successor of
+// CountedRoundView above for THIS response's own `rounds` list: same `finalizedAt` wire name,
+// but no `appendedBy` — a shared round is a fact nobody appended, `sharedRoundIds` derived it.
+export interface SharedRoundView {
+  readonly roundId: RoundId;
+  readonly finalizedAt: number;
+}
+const sharedRoundViewSchema: z.ZodType<SharedRoundView> = z.object({ roundId: roundIdSchema, finalizedAt: z.number().int() });
+
+// Standings are computed on read (crew-scoreboard spec §3/§4): the season's WINDOW
+// (startsAtMs/closedAtMs) fed through crewScoreboard/sharedRoundIds over each roster member's own
+// golfer projection lines — no stored ledger, no counted rounds. `scoreboard` is REQUIRED (every
+// roster member gets a row, `rounds: 0` included) and replaces `superlatives` outright.
 export interface SeasonStandingsResponse {
   readonly seasonId: string;
   readonly name: string;
   readonly status: "open" | "closed";
-  readonly rounds: readonly CountedRoundView[]; // newest-first by finalizedAt
+  readonly startsAtMs: number;
+  readonly closedAtMs?: number;
+  readonly scoreboard: readonly ScoreboardRow[];
+  readonly rounds: readonly SharedRoundView[]; // newest-first by finalizedAt
   readonly ledger: readonly SeasonStandingLine[];
   readonly headToHead: readonly HeadToHeadRecord[];
   readonly partners: readonly PartnerStandingRecord[];
-  readonly superlatives: SeasonSuperlatives;
 }
 export const seasonStandingsResponseSchema: z.ZodType<SeasonStandingsResponse> = z.object({
   seasonId: z.string(),
   name: z.string(),
   status: z.enum(["open", "closed"]),
-  rounds: z.array(countedRoundViewSchema).readonly(),
+  startsAtMs: z.number().int(),
+  closedAtMs: z.number().int().optional(),
+  scoreboard: z.array(scoreboardRowSchema).readonly(),
+  rounds: z.array(sharedRoundViewSchema).readonly(),
   ledger: z.array(seasonStandingLineSchema).readonly(),
   headToHead: z.array(headToHeadRecordSchema).readonly(),
   partners: z.array(partnerStandingRecordSchema).readonly(),
-  superlatives: seasonSuperlativesSchema,
 });
 
 // GET /crews/{crewId}/records (analytics spec 2026-07-21 §5): all-time — every counted round

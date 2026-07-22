@@ -1,10 +1,9 @@
 import { expect, test } from "@playwright/test";
-import type { CrewRecordsResponse, GetMyRecordResponse, PartnerStandingRecord, SeasonStandingLine, SeasonSuperlatives } from "@swng/contracts";
+import type { CrewRecordsResponse, GetMyRecordResponse, PartnerStandingRecord, SeasonStandingLine } from "@swng/contracts";
 import { golferId } from "@swng/domain";
 import type { CrewId, GolferId, HeadToHeadRecord, RoundId, SeasonLedgerLine } from "@swng/domain";
 import {
   addGameDirect,
-  appendCountedRoundDirect,
   closeSeasonDirect,
   createCrewDirect,
   createScoreOps,
@@ -22,7 +21,6 @@ import {
   mintCrewInviteDirect,
   pollUntil,
   recordScoreDirect,
-  removeCountedRoundDirect,
   removeCrewMemberDirect,
   reopenSeasonDirect,
   startRoundDirect,
@@ -86,44 +84,17 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
   // --- Additive analytics oracles (analytics read-folds spec 2026-07-21 §5) -------------------
   // Every value below is hand-derived from the FROZEN deck BEFORE any live call (the deck
   // discipline, task-8-brief.md) — never read back off the system. The existing standings
-  // assertions above are byte-unchanged; these only ADD partner/superlative/all-time coverage.
+  // assertions above are byte-unchanged; this only ADDS partner/all-time coverage. The season
+  // superlatives (lowestNet/mostImproved) this section used to also cover are SUPERSEDED whole
+  // by the crew-scoreboard redesign (spec §3c) — gone from the wire; their oracle helpers are
+  // deleted with them. `standings.scoreboard`'s own new oracles land in a later task (crew-
+  // scoreboard plan Task 4), not here — this task is compile + frozen-number reconciliation only.
 
   // PARTNERS: four-ball ONLY (partnerRecords, packages/domain/src/crew/analytics.ts). This deck
   // plays exactly three games every round — singles-match, skins, stableford (crewSeasonDeck.ts
   // seasonGames) — and NO four-ball anywhere, so the partner fold has zero results to accumulate
   // at every roster. `[]` is the honest, permanent expectation, not an omission.
   const EXPECTED_PARTNERS: readonly PartnerStandingRecord[] = [];
-
-  // LOWEST NET (netAverages, crew/analytics.ts): per member, mean of (gross − courseHandicap)
-  // over fully holed-out counted rounds, per hole count, min 3 rounds; ties SHARE the entry with
-  // every tied member named (getSeasonStandings gathers all at the min), golfers sorted by
-  // golferId. Course handicap is 0 all season so net === gross, and all 12 rounds are fully
-  // holed-out 18s. Hand-read Al/Bo grosses off ROUND_PLAN (crewSeasonDeck.ts), cross-checked
-  // against the domain netAverages fold before this file was trusted for a live call:
-  //   Al: 71,72,72,72,71,72,72,73,73,72,73,73  → sum 866, mean 866/12 = 72.1667 → 72.2
-  //   Bo: 72,73,73,73,72,72,72,72,72,71,72,72  → sum 866, mean 72.2 (an EXACT tie with Al)
-  // (roundHalfUp on the tenth: 721.667 → 722 → 72.2.) So over the full 12-round deck every
-  // member averages 72.2 over 18 holes / 12 rounds. When round 1 (Al's 71) is un-counted, Al's
-  // 11 remaining grosses sum 795, mean 795/11 = 72.2727 → 72.3 over 11 rounds (step 6).
-  const AL_BO_NET_AVERAGE = 72.2;
-  const expectedLowestNet = (memberIds: ReadonlySet<GolferId>, average: number, rounds: number): SeasonSuperlatives["lowestNet"] => ({
-    holes: 18,
-    average,
-    rounds,
-    golfers: [...memberIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map((id) => ({ golferId: id, name: nameOf(id) })),
-  });
-
-  // MOST IMPROVED (mostImproved, crew/analytics.ts + getSeasonStandings' boundary lookup): needs a
-  // swng index at BOTH the season's first and last counted round. The swng index needs ≥3 rounds
-  // to exist at all (computeIndexDetail returns undefined below 3 — handicap/whs.ts). At the FIRST
-  // counted round's finalize time every member has exactly ONE finalized round in their whole
-  // record (these are fresh accounts; rounds are played strictly in order), so `from` is undefined
-  // for everyone → nobody qualifies → the superlative is ABSENT (not `[]`) at every read here. A
-  // helper that asserts that absence uniformly, so a future deck change that made someone qualify
-  // would fail loudly rather than silently.
-  const expectAbsentMostImproved = (superlatives: SeasonSuperlatives): void => {
-    expect(superlatives.mostImproved).toBeUndefined();
-  };
 
   test("1: local verification — the hand-derived deck matches the domain engines exactly", () => {
     // Placeholder golferIds are enough here: this step never touches the network, it only
@@ -216,8 +187,8 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(roundIds).toHaveLength(SEASON_ROUNDS);
   });
 
-  test("4: one season is created and every finished round is counted into it by a member who played it", async () => {
-    test.setTimeout(180_000);
+  test("4: a season created AFTER the 12 rounds still contains them — the window reaches back, no counting act", async () => {
+    test.setTimeout(60_000);
     const { httpUrl } = loadWebEnv();
 
     const created = await createSeasonDirect(httpUrl, al.tokens.idToken, crewId, SEASON_NAME);
@@ -225,118 +196,54 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(created.season.name).toBe(SEASON_NAME);
     expect(created.season.status).toBe("open");
 
-    // appendCountedRound's did-not-play guard: the appender must be a signed-in crew member
-    // who is a PARTICIPANT of the round being counted. Al is in every one of the deck's 12
-    // rounds (the host seat, as-self) and is the crew's only member, so Al counts them all —
-    // each response echoing appendedBy as Al's own golferId is that guard's positive half.
-    for (const id of roundIds) {
-      const appended = await appendCountedRoundDirect(httpUrl, al.tokens.idToken, crewId, seasonId, id);
-      expect(appended.round.roundId).toBe(id);
-      expect(appended.round.appendedBy).toBe(ids.al);
-    }
+    // The window rule reaches back (crew-scoreboard spec §2): with no closed seasons yet, this
+    // season's own window starts Jan 1 UTC of THIS year — comfortably covering all 12 rounds
+    // played moments ago in test 3 — with no per-round counting act anywhere. Al's own
+    // scoreboard row already reflects all 12 (crewScoreboard counts a member's OWN in-window
+    // lines regardless of roster size). `standings.rounds` — the DERIVED "played together"
+    // list — stays empty here: sharedRoundIds requires >=2 CURRENT roster members holding a
+    // line for the same round (spec §3a/§3b), and Al is still the crew's ONLY member (Bo/Cy/Dee
+    // hold accounts and played every round, but joined no roster until test 8) — it populates
+    // once Bo joins.
+    const standings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
+    const alRow = standings.scoreboard.find((row) => row.golferId === ids.al);
+    expect(alRow?.rounds).toBe(SEASON_ROUNDS);
+    expect(standings.rounds).toEqual([]);
   });
 
-  test("5: season standings equal the frozen ledger exactly — computed on read from the counted rounds", async () => {
+  // TASK-3 FINDING (flagged for Task 4, which owns the new live oracles): under the
+  // crew-scoreboard redesign, EVERY together-fold (ledger/headToHead/partners), not merely the
+  // "played together" `rounds` list, is derived from `sharedRoundIds` — which is undefined
+  // (empty) whenever fewer than 2 CURRENT roster members hold a line for the same round. With Al
+  // ALONE on the roster (as this deck's steps 5-7 deliberately are), `getSeasonStandings` never
+  // even FETCHES an archive — the frozen ledger/H2H numbers this test used to verify against a
+  // solo-counted list are consequently unreachable here now; they first become verifiable once
+  // Bo joins the roster in test 8 (both hold lines for every round → sharedRoundIds returns all
+  // 12 → the together-folds run for real). This is a genuine, load-bearing behavior change from
+  // the old counted-round model (where a lone member's own counted round DID populate a ledger
+  // row) — not a gap in this reconciliation task's own derivation.
+  test("5: with Al alone on the roster, the together-folds are honestly empty — 'played together' needs a second member", async () => {
     const { httpUrl } = loadWebEnv();
     const standings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    const frozen = frozenSeasonExpectation(ids);
 
     expect(standings.seasonId).toBe(seasonId);
     expect(standings.name).toBe(SEASON_NAME);
     expect(standings.status).toBe("open");
 
-    // All 12 counted, every entry appended by Al, newest-first by the rounds' own finalize
-    // times (getSeasonStandings' documented order).
-    expect([...standings.rounds.map((round) => round.roundId)].sort()).toEqual([...roundIds].sort());
-    for (const round of standings.rounds) expect(round.appendedBy).toBe(ids.al);
-    for (let i = 1; i < standings.rounds.length; i += 1) {
-      expect(standings.rounds[i - 1]!.finalizedAt).toBeGreaterThanOrEqual(standings.rounds[i]!.finalizedAt);
-    }
-
-    // THE frozen numbers (crewSeasonDeck.ts): singles H2H 5W-5L-2H, skins 54 each, stableford
-    // 430/430/435/435 — identical to what the M8 projector once served from the deleted
-    // GET /crews/{id}/records, now folded on read. A mismatch is a PRODUCT defect
-    // (BLOCKED-don't-fudge), never an assertion to bend. Membership is Al ALONE at this point
-    // (Bo/Cy/Dee hold accounts and played every round, but joined no roster) — a members-only
-    // aggregation (owner ruling, spec §11a) surfaces only Al's row and an EMPTY head-to-head
-    // (no pair has two members yet). The others' frozen numbers stay pinned in
-    // crewSeasonDeck.ts as constants; Bo's resurface once he joins the roster in step 8.
-    const memberIds = new Set<GolferId>([ids.al]);
-    expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
-    expect(standings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
-
-    // Additive analytics (spec §5): no four-ball in the deck → no partner records; Al's lowest-net
-    // is his 12-round average 72.2; most improved is absent (no member has a swng index at the
-    // first counted round — see the helper derivations above).
-    expect(standings.partners).toEqual(EXPECTED_PARTNERS);
-    expect(standings.superlatives.lowestNet).toEqual(expectedLowestNet(memberIds, AL_BO_NET_AVERAGE, SEASON_ROUNDS));
-    expectAbsentMostImproved(standings.superlatives);
+    // "Played together" needs >=2 CURRENT roster members (spec §3a) — Al is still alone, so
+    // nothing together-shaped exists yet, even though he played all 12 rounds himself (test 4's
+    // own scoreboard-row proof of that).
+    expect(standings.rounds).toEqual([]);
+    expect(standings.ledger).toEqual([]);
+    expect(standings.headToHead).toEqual([]);
+    expect(standings.partners).toEqual(EXPECTED_PARTNERS); // [] either way — no four-ball in the deck at all
   });
 
-  test("6: un-counting round 1 shifts the standings by exactly its contribution; re-counting restores the frozen ledger", async () => {
-    test.setTimeout(120_000);
-    const { httpUrl } = loadWebEnv();
-    const roundOne = roundIds[0]!;
-
-    // DELETE by the appender (Al) — removeCountedRound's not-the-appender guard is why nobody
-    // else could.
-    const removed = await removeCountedRoundDirect(httpUrl, al.tokens.idToken, crewId, seasonId, roundOne);
-    expect(removed.roundId).toBe(roundOne);
-
-    const without = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    expect(without.rounds).toHaveLength(SEASON_ROUNDS - 1);
-    expect(without.rounds.map((round) => round.roundId)).not.toContain(roundOne);
-
-    // Round 1's own contribution, hand-read straight off the frozen deck (crewSeasonDeck.ts
-    // ROUND_PLAN[0]: no decisive holes, hole18Winner "al"): Al birdies 18 while Bo pars it, so
-    // Al wins the singles 1 up AND takes the whole carried 18-skin pot; stableford on this
-    // all-par-4, handicap-0 card is 6-gross per hole, so Al scores 17×2+3 = 37 points and
-    // Bo/Cy/Dee 18×2 = 36 each. The expected 11-round ledger is therefore the frozen one minus
-    // exactly: Al -1 win, -37 points, -18 skins; Bo -1 loss, -36 points; Cy/Dee -36 points;
-    // everyone -1 round; H2H Al 5→4 wins. Derived by SUBTRACTION from frozenSeasonExpectation
-    // so the frozen numbers stay the single source of truth — asserted against the wire
-    // members-only (Al alone; the H2H delta is computed for completeness but resolves to empty
-    // either way, same as step 5, since Bo still isn't on the roster).
-    const frozen = frozenSeasonExpectation(ids);
-    const minusRoundOne = frozen.ledger.map((line) =>
-      line.golferId === ids.al
-        ? { ...line, rounds: SEASON_ROUNDS - 1, wins: line.wins - 1, points: line.points - 37, skins: line.skins - 18 }
-        : line.golferId === ids.bo
-          ? { ...line, rounds: SEASON_ROUNDS - 1, losses: line.losses - 1, points: line.points - 36 }
-          : { ...line, rounds: SEASON_ROUNDS - 1, points: line.points - 36 },
-    );
-    const minusRoundOneHeadToHead = frozen.headToHead.map((record) =>
-      record.a === ids.al ? { ...record, aWins: record.aWins - 1 } : { ...record, bWins: record.bWins - 1 },
-    );
-    const memberIds = new Set<GolferId>([ids.al]);
-    expect(without.ledger).toEqual(expectedStandingLines(minusRoundOne, memberIds));
-    expect(without.headToHead).toEqual(expectedHeadToHead(minusRoundOneHeadToHead, memberIds));
-
-    // Additive analytics, perturbed by the removal (spec §5): the lowest-net superlative is
-    // compute-on-read too, so dropping round 1 (Al's 71) shifts Al's average to his 11 remaining
-    // grosses' mean — 795/11 = 72.2727 → 72.3 over 11 rounds (see the helper derivation above).
-    // Partners stays [] (still no four-ball); most improved stays absent (dropping a round can
-    // only remove index data, never manufacture a from-index at the new first counted round).
-    expect(without.partners).toEqual(EXPECTED_PARTNERS);
-    expect(without.superlatives.lowestNet).toEqual(expectedLowestNet(memberIds, 72.3, SEASON_ROUNDS - 1));
-    expectAbsentMostImproved(without.superlatives);
-
-    // Re-count it — standings return to the frozen values exactly (counting is a pure inbound
-    // reference; nothing about the round itself changed while it was uncounted).
-    const reappended = await appendCountedRoundDirect(httpUrl, al.tokens.idToken, crewId, seasonId, roundOne);
-    expect(reappended.round.roundId).toBe(roundOne);
-
-    const restored = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    expect([...restored.rounds.map((round) => round.roundId)].sort()).toEqual([...roundIds].sort());
-    expect(restored.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
-    expect(restored.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
-
-    // Re-counting restores the superlatives to their full-deck values too — Al's lowest-net is
-    // back to 72.2 over all 12 rounds.
-    expect(restored.partners).toEqual(EXPECTED_PARTNERS);
-    expect(restored.superlatives.lowestNet).toEqual(expectedLowestNet(memberIds, AL_BO_NET_AVERAGE, SEASON_ROUNDS));
-    expectAbsentMostImproved(restored.superlatives);
-  });
+  // Test 6 (un-count/re-count round 1) is DELETED whole (crew-scoreboard plan Task 3, Step 5):
+  // the counting apparatus it exercised is gone from standings' own derivation (a round is
+  // shared or it isn't, purely by window + roster — nothing to un-count or re-count). Its window
+  // replacement (closing a season and proving a round played after the close stays out, then
+  // re-enters on reopen) lands in Task 4.
 
   test("7: rebuild parity — the paged snapshot backfill reproduces Al's record; standings never depended on it", async () => {
     test.setTimeout(360_000); // the rebuild lambda replays every finalized round on beta (5-minute CDK timeout) — comfortably slower than every other step here
@@ -374,23 +281,17 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
     expect(post.metrics.whsIndex?.computedAtMs).not.toBe(pre.metrics.whsIndex?.computedAtMs);
 
-    // Standings are computed on read from the counted rounds' own snapshots — there is no
-    // season projection for a rebuild to touch, and the frozen ledger must hold verbatim,
-    // still filtered to the same Al-alone roster as steps 5-6 (membership itself is untouched
-    // by a rebuild — it lives on the crew, not the snapshots).
+    // Standings are computed on read from the DERIVED shared rounds — there is no season
+    // projection for a rebuild to touch, and membership itself is untouched by a rebuild (it
+    // lives on the crew, not the golfer projection a rebuild replays). Al is still the roster's
+    // only member (test 5's own finding: "played together" needs a second member), so the
+    // together-folds stay honestly empty through the rebuild too — the same law, not a special
+    // case of it.
     const standings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    const frozen = frozenSeasonExpectation(ids);
-    const memberIds = new Set<GolferId>([ids.al]);
-    expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
-    expect(standings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
-
-    // Additive analytics (spec §5): the partner/superlative folds are compute-on-read from the
-    // counted snapshots too — a rebuild touches the golfer projection, never the season standings,
-    // so these hold verbatim through it (Al alone, full deck: partners [], lowest-net 72.2/12,
-    // most improved absent).
+    expect(standings.rounds).toEqual([]);
+    expect(standings.ledger).toEqual([]);
+    expect(standings.headToHead).toEqual([]);
     expect(standings.partners).toEqual(EXPECTED_PARTNERS);
-    expect(standings.superlatives.lowestNet).toEqual(expectedLowestNet(memberIds, AL_BO_NET_AVERAGE, SEASON_ROUNDS));
-    expectAbsentMostImproved(standings.superlatives);
   });
 
   test("8: Bo joins the crew late — his frozen rows and the Al-Bo head-to-head materialize; membership is pure aggregation scope", async () => {
@@ -434,15 +335,8 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(standings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
     expect(standings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
 
-    // Additive analytics with Bo now scoped in (spec §5): still no four-ball → partners []. The
-    // lowest-net superlative is now a TWO-way TIE — Al and Bo both average 72.2 over their 12
-    // rounds — so the single entry names BOTH (getSeasonStandings gathers every member at the min
-    // average), golfers sorted by golferId. Most improved is still absent (neither has a swng
-    // index at the first counted round). This is the aggregation-scope law reaching the
-    // superlatives: a pair whose rows only exist because both are members.
+    // Additive analytics with Bo now scoped in (spec §5): still no four-ball → partners [].
     expect(standings.partners).toEqual(EXPECTED_PARTNERS);
-    expect(standings.superlatives.lowestNet).toEqual(expectedLowestNet(memberIds, AL_BO_NET_AVERAGE, SEASON_ROUNDS));
-    expectAbsentMostImproved(standings.superlatives);
   });
 
   test("8b: Al removes Bo — his standings rows vanish; a fresh invite and re-join restore them byte-identical — the aggregation-scope law, reached through remove", async () => {
@@ -459,16 +353,14 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     const afterRemoval = await removeCrewMemberDirect(httpUrl, al.tokens.idToken, crewId, ids.bo);
     expect(afterRemoval.crew.members.map((member) => member.golferId)).toEqual([ids.al]);
 
-    const remainingMemberIds = new Set<GolferId>([ids.al]);
+    // Al alone again — "played together" needs >=2 CURRENT roster members (spec §3a/test 5's
+    // own finding), so the together-folds go straight back to empty, not to Al's own frozen row
+    // (nothing about a together-fold can name a lone member — that is what "together" means).
     const standingsAfterRemoval = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    expect(standingsAfterRemoval.ledger).toEqual(expectedStandingLines(frozen.ledger, remainingMemberIds));
-    expect(standingsAfterRemoval.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, remainingMemberIds));
-
-    // The superlatives narrow with the roster too (spec §5): with Bo removed, the lowest-net entry
-    // drops back to Al alone (72.2/12) and partners/most-improved are unchanged (empty/absent).
+    expect(standingsAfterRemoval.rounds).toEqual([]);
+    expect(standingsAfterRemoval.ledger).toEqual([]);
+    expect(standingsAfterRemoval.headToHead).toEqual([]);
     expect(standingsAfterRemoval.partners).toEqual(EXPECTED_PARTNERS);
-    expect(standingsAfterRemoval.superlatives.lowestNet).toEqual(expectedLowestNet(remainingMemberIds, AL_BO_NET_AVERAGE, SEASON_ROUNDS));
-    expectAbsentMostImproved(standingsAfterRemoval.superlatives);
 
     // Getting back in takes a FRESH invite — the permanent join code this file swapped away
     // from (C-T3) has no comeback, and neither does the one Bo used in step 8; it already spent
@@ -487,11 +379,7 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(standingsAfterRejoin.ledger).toEqual(expectedStandingLines(frozen.ledger, restoredMemberIds));
     expect(standingsAfterRejoin.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, restoredMemberIds));
 
-    // And the superlatives restore byte-identical alongside the ledger — the Al+Bo two-way
-    // lowest-net tie (72.2/12, both named) reappears exactly as step 8 asserted it.
     expect(standingsAfterRejoin.partners).toEqual(EXPECTED_PARTNERS);
-    expect(standingsAfterRejoin.superlatives.lowestNet).toEqual(expectedLowestNet(restoredMemberIds, AL_BO_NET_AVERAGE, SEASON_ROUNDS));
-    expectAbsentMostImproved(standingsAfterRejoin.superlatives);
   });
 
   test("9: all-time crew records fold every counted round across all seasons — closing the season awards its Stableford title, reopening empties it", async () => {

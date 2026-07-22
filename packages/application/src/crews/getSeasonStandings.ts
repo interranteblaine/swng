@@ -1,6 +1,6 @@
-import { aggregateSeason, crewContribution, golferMetrics, mostImproved, netAverages, partnerRecords } from "@swng/domain";
-import type { CrewId, CrewRoundContribution, GolferId, RoundArchive } from "@swng/domain";
-import type { CountedRoundView, SeasonStandingsResponse } from "@swng/contracts";
+import { aggregateSeason, crewContribution, crewScoreboard, partnerRecords, sharedRoundIds } from "@swng/domain";
+import type { CrewId, CrewRoundContribution, GolferId, RoundArchive, RoundId, SeasonWindow } from "@swng/domain";
+import type { SeasonStandingsResponse } from "@swng/contracts";
 import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { CrewStore } from "../ports/crewStore.js";
@@ -22,20 +22,20 @@ export const rosterFilteredContribution = (archive: RoundArchive, memberIds: Rea
   };
 };
 
-// GET /crews/{crewId}/seasons/{seasonId}/standings (architecture-realignment Task 9): standings
-// are COMPUTED ON READ (spec §4) — there is no stored ledger. The season's counted snapshots
-// are folded through the SAME domain crewContribution/aggregateSeason the M8 projector used, in
-// the call, so scoring math is never re-derived and the crew projection layer that used to
-// precompute this is gone.
+// GET /crews/{crewId}/seasons/{seasonId}/standings (crew-scoreboard spec §3/§4): a season is a
+// time WINDOW now, not a stored list of counted rounds — everything below is derived on read
+// from each roster member's OWN golfer projection lines (ONE listLines fetch per member) plus
+// the snapshots those "we played together" facts point at. There is no per-round act any member
+// performs for the crew, ever (spec §1: "the crew watches; members just play").
 //
 // A crew is a grouping/competition ONLY (owner ruling, spec §11a, 2026-07-13): standings
-// aggregate the CURRENT roster only. Each contribution's `lines`/`headToHead` are filtered to
-// golferIds on the roster BEFORE the fold — a departed member or a guest who was never on the
-// roster contributes NO row and no head-to-head pair; nothing is stored, so re-adding a member
-// restores their rows on the very next read (compute-on-read reversibility). Names come from
-// the roster's own `CrewMember.name` — never the snapshot's, which can drift from what the crew
-// actually calls someone (e.g. a nickname on the roster vs. whatever name a round happened to
-// carry).
+// aggregate the CURRENT roster only. Each together-record contribution's `lines`/`headToHead`
+// are filtered to golferIds on the roster BEFORE the fold — a departed member or a guest who was
+// never on the roster contributes NO row and no head-to-head pair; nothing is stored, so
+// re-adding a member restores their rows on the very next read (compute-on-read reversibility).
+// Names come from the roster's own `CrewMember.name` — never the snapshot's, which can drift from
+// what the crew actually calls someone (e.g. a nickname on the roster vs. whatever name a round
+// happened to carry).
 export const getSeasonStandings =
   (deps: { crewStore: CrewStore; golferStore: GolferStore; snapshots: SnapshotStore; projectionStore: ProjectionStore }) =>
   async (claims: AccountClaims, id: CrewId, seasonId: string): Promise<SeasonStandingsResponse> => {
@@ -44,78 +44,51 @@ export const getSeasonStandings =
     const season = await deps.crewStore.getSeason(id, seasonId);
     if (!season) throw new ApplicationError("season-not-found");
 
-    const counted = await deps.crewStore.listCountedRounds(id, seasonId);
-    // getMany omits absent ids and promises no order (its own port doc); pair each returned
-    // archive back to its counted entry's finalizedAtMs by roundId for the rounds list below.
-    const archives = await deps.snapshots.getMany(counted.map((entry) => entry.roundId));
+    // The window (spec §2): [startsAtMs, closedAtMs ?? ∞], both ends inclusive (inWindow's own
+    // contract) — an open season's window has no endMs at all, never a sentinel Infinity.
+    const window: SeasonWindow = { startMs: season.startsAtMs, ...(season.closedAtMs !== undefined ? { endMs: season.closedAtMs } : {}) };
 
-    const memberIds = new Set(crew.members.map((member) => member.golferId));
+    // ONE listLines per roster member (Promise.all — never sequential) feeds the scoreboard, the
+    // shared-round derivation, AND the index boundaries alike (spec §3b) — the fetch the old
+    // mostImproved boundary code already paid for, now serving three uses instead of one.
+    // sortLines applies golferMetrics' own chronological contract before any fold sees the lines.
+    const members = await Promise.all(
+      crew.members.map(async (member) => ({
+        golferId: member.golferId,
+        lines: sortLines(await deps.projectionStore.listLines(member.golferId)),
+      })),
+    );
+
     const nameByGolfer = new Map(crew.members.map((member) => [member.golferId, member.name]));
+    const scoreboard = crewScoreboard(members, window).map((row) => ({ ...row, name: nameByGolfer.get(row.golferId) ?? row.golferId }));
 
-    // Members-only filter BEFORE the fold: a non-member golfer's own line vanishes, and a
-    // head-to-head pair survives only when BOTH sides are current members — never a
-    // half-resolved pair naming someone who isn't on the roster.
+    // "We played together" is a DERIVED fact now (spec §3b) — a shared roundId IS the fact,
+    // never a curated list. The together-folds (ledger/head-to-head/partners) run over the SAME
+    // archives this derives, exactly as they did over the old counted list.
+    const shared = sharedRoundIds(members, window);
+    const archives = await deps.snapshots.getMany([...shared]);
+    const memberIds = new Set(crew.members.map((member) => member.golferId));
     const memberOnlyContributions = archives.map((archive) => rosterFilteredContribution(archive, memberIds));
-
     const { ledger, headToHead } = aggregateSeason(memberOnlyContributions);
-
-    const rounds: readonly CountedRoundView[] = [...counted]
-      .sort((a, b) => b.finalizedAtMs - a.finalizedAtMs) // newest-first
-      .map((entry) => ({ roundId: entry.roundId, finalizedAt: entry.finalizedAtMs, appendedBy: entry.appendedBy }));
-
-    // Partner records (analytics spec §5): four-ball pairs over the SAME archives/memberIds
-    // already in scope, names resolved the same way ledger lines are.
     const partners = partnerRecords(archives, memberIds).map((pair) => ({
       ...pair,
       nameA: nameByGolfer.get(pair.a) ?? pair.a,
       nameB: nameByGolfer.get(pair.b) ?? pair.b,
     }));
 
-    // Lowest net average superlative: netAverages already sorts ascending by average (ties broken
-    // by golferId), so the lowest is always at index 0 — gather every entry tied at that exact
-    // value (a real tie, since averages are already rounded to one decimal by the domain fold).
-    const nets = netAverages(archives, memberIds);
-    const lowestNet =
-      nets.length > 0
-        ? (() => {
-            const best = nets[0]!;
-            const tied = nets.filter((entry) => entry.average === best.average);
-            return {
-              holes: best.holes,
-              average: best.average,
-              rounds: best.rounds,
-              golfers: tied.map((entry) => ({ golferId: entry.golferId, name: nameByGolfer.get(entry.golferId) ?? entry.golferId })),
-            };
-          })()
-        : undefined;
-
-    // Most improved (spec §5): skip both boundary fetches and omit the superlative entirely when
-    // the season counts no rounds at all — there is no "first"/"last" to bound by. One
-    // listLines query per roster member (Promise.all), never sequential.
-    let mostImprovedResult: SeasonStandingsResponse["superlatives"]["mostImproved"];
-    if (counted.length > 0) {
-      const firstMs = Math.min(...counted.map((entry) => entry.finalizedAtMs));
-      const lastMs = Math.max(...counted.map((entry) => entry.finalizedAtMs));
-      const boundaryEntries = await Promise.all(
-        crew.members.map(async (member) => {
-          const lines = sortLines(await deps.projectionStore.listLines(member.golferId));
-          return {
-            golferId: member.golferId,
-            from: golferMetrics(lines.filter((line) => line.finalizedAtMs <= firstMs)).swngIndex?.value,
-            to: golferMetrics(lines.filter((line) => line.finalizedAtMs <= lastMs)).swngIndex?.value,
-          };
-        }),
-      );
-      const improved = mostImproved(boundaryEntries);
-      if (improved.length > 0) {
-        mostImprovedResult = improved.map((entry) => ({ ...entry, name: nameByGolfer.get(entry.golferId) ?? entry.golferId }));
-      }
-    }
+    // Shared rounds newest-first by finalizedAtMs; any holder's line carries the same value for
+    // a given roundId (a round finalizes once), so the first holder found is authoritative.
+    const finalizedByRound = new Map<RoundId, number>();
+    for (const { lines } of members) for (const line of lines) if (!finalizedByRound.has(line.roundId)) finalizedByRound.set(line.roundId, line.finalizedAtMs);
+    const rounds = shared.map((roundId) => ({ roundId, finalizedAt: finalizedByRound.get(roundId)! })).sort((a, b) => b.finalizedAt - a.finalizedAt);
 
     return {
       seasonId: season.seasonId,
       name: season.name,
       status: season.status,
+      startsAtMs: season.startsAtMs,
+      ...(season.closedAtMs !== undefined ? { closedAtMs: season.closedAtMs } : {}),
+      scoreboard,
       rounds,
       // Every golferId reaching here is, by construction, a current roster member (the filter
       // above) — nameByGolfer.get is never undefined in practice; the golferId fallback exists
@@ -123,9 +96,5 @@ export const getSeasonStandings =
       ledger: ledger.map((line) => ({ ...line, name: nameByGolfer.get(line.golferId) ?? line.golferId })),
       headToHead,
       partners,
-      superlatives: {
-        ...(lowestNet !== undefined ? { lowestNet } : {}),
-        ...(mostImprovedResult !== undefined ? { mostImproved: mostImprovedResult } : {}),
-      },
     };
   };

@@ -1,41 +1,42 @@
-import { aggregateSeason, partnerRecords, stablefordTitle } from "@swng/domain";
+import { aggregateSeason, partnerRecords, sharedRoundIds, stablefordTitle } from "@swng/domain";
 import type { CrewId, RoundArchive, RoundId } from "@swng/domain";
 import type { CrewRecordsResponse } from "@swng/contracts";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
+import type { ProjectionStore } from "../ports/projectionStore.js";
 import type { SnapshotStore } from "../ports/snapshotStore.js";
+import { sortLines } from "../projections/projectArchive.js";
 import { rosterFilteredContribution } from "./getSeasonStandings.js";
 import { requireCrewMember } from "./membership.js";
 
-// GET /crews/{crewId}/records (analytics spec 2026-07-21 §5): all-time — every counted round
-// across EVERY season, deduped by roundId (the SAME round counted into two seasons of this crew
-// contributes once, fetched once via ONE snapshots.getMany), folded through the exact
-// roster-filter + aggregateSeason composition getSeasonStandings.ts already runs
+// GET /crews/{crewId}/records (crew-scoreboard spec §3b): all-time — every round the roster ever
+// shared, derived the SAME way getSeasonStandings.ts derives one season's (sharedRoundIds over an
+// open-ended window, `{ startMs: 0 }`), fetched once via ONE snapshots.getMany, folded through the
+// exact roster-filter + aggregateSeason composition getSeasonStandings.ts already runs
 // (rosterFilteredContribution — one implementation, never a second), plus partner records and
 // each CLOSED season's Stableford title.
 export const getCrewRecords =
-  (deps: { crewStore: CrewStore; golferStore: GolferStore; snapshots: SnapshotStore }) =>
+  (deps: { crewStore: CrewStore; golferStore: GolferStore; snapshots: SnapshotStore; projectionStore: ProjectionStore }) =>
   async (claims: AccountClaims, id: CrewId): Promise<CrewRecordsResponse> => {
     const { crew } = await requireCrewMember(deps, claims, id);
     const memberIds = new Set(crew.members.map((member) => member.golferId));
     const nameByGolfer = new Map(crew.members.map((member) => [member.golferId, member.name]));
 
-    // listSeasons/listCountedRounds make no order promise (their own port docs) — newest-first
-    // by createdAtMs, the same order listSeasons.ts itself imposes, so `titles` below reads
-    // deterministically.
-    const seasons = [...(await deps.crewStore.listSeasons(id))].sort(
-      (a, b) => b.createdAtMs - a.createdAtMs || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
-    );
-    const countedBySeason = await Promise.all(
-      seasons.map(async (season) => ({ season, counted: await deps.crewStore.listCountedRounds(id, season.seasonId) })),
+    // ONE listLines per roster member (Promise.all) — the same fetch getSeasonStandings.ts
+    // performs, feeding both the all-time shared-round derivation and every CLOSED season's own
+    // window below (no second fetch per season).
+    const members = await Promise.all(
+      crew.members.map(async (member) => ({
+        golferId: member.golferId,
+        lines: sortLines(await deps.projectionStore.listLines(member.golferId)),
+      })),
     );
 
-    // Dedupe by roundId — the SAME round counted into two seasons of this crew is fetched once,
-    // counted once.
-    const roundIds = new Set<RoundId>();
-    for (const { counted } of countedBySeason) for (const entry of counted) roundIds.add(entry.roundId);
-    const archives = await deps.snapshots.getMany([...roundIds]);
+    // All-time = every round the CURRENT roster ever shared, no window (startMs: 0 — the epoch,
+    // so no round can ever fall outside it).
+    const sharedEver = sharedRoundIds(members, { startMs: 0 });
+    const archives = await deps.snapshots.getMany([...sharedEver]);
     const archiveByRoundId = new Map(archives.map((archive) => [archive.roundId, archive]));
 
     const memberOnlyContributions = archives.map((archive) => rosterFilteredContribution(archive, memberIds));
@@ -46,21 +47,20 @@ export const getCrewRecords =
       nameB: nameByGolfer.get(pair.b) ?? pair.b,
     }));
 
-    // Titles: each CLOSED season's Stableford points leader(s) under the CURRENT roster filter —
-    // an open season, or a closed one whose roster-filtered ledger is empty/scoreless, contributes
-    // no entry (stablefordTitle's own [] rule). A title list reads as a timeline, not a feed —
-    // built oldest-first (spec §5's own example order: "Bo '24 · Al '25"), the REVERSE of
-    // `countedBySeason`'s newest-first order above (which stays newest-first for its other use,
-    // deduping roundIds — whole-branch review, 2026-07-21, Finding 3).
-    const chronological = [...countedBySeason].sort(
-      (a, b) => a.season.createdAtMs - b.season.createdAtMs || (a.season.name < b.season.name ? -1 : a.season.name > b.season.name ? 1 : 0),
+    // Titles: each CLOSED season's Stableford points leader(s), each over the shared rounds of
+    // THAT season's own window — a legacy closed season (closed before this arc) has no
+    // closedAtMs, so its window reads as open-ended rather than crashing (the conditional spread
+    // below). listSeasons makes no order promise (its own port doc) — sorted oldest-first here so
+    // `titles` reads as a timeline (spec §5's own example order: "Bo '24 · Al '25").
+    const chronological = [...(await deps.crewStore.listSeasons(id))].sort(
+      (a, b) => a.createdAtMs - b.createdAtMs || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
     );
     const titles: CrewRecordsResponse["titles"][number][] = [];
-    for (const { season, counted } of chronological) {
+    for (const season of chronological) {
       if (season.status !== "closed") continue;
-      const seasonArchives = counted
-        .map((entry) => archiveByRoundId.get(entry.roundId))
-        .filter((archive): archive is RoundArchive => archive !== undefined);
+      const window = { startMs: season.startsAtMs, ...(season.closedAtMs !== undefined ? { endMs: season.closedAtMs } : {}) };
+      const seasonRoundIds: readonly RoundId[] = sharedRoundIds(members, window);
+      const seasonArchives = seasonRoundIds.map((roundId) => archiveByRoundId.get(roundId)).filter((archive): archive is RoundArchive => archive !== undefined);
       const seasonLedger = aggregateSeason(seasonArchives.map((archive) => rosterFilteredContribution(archive, memberIds))).ledger;
       const winners = stablefordTitle(seasonLedger);
       if (winners.length === 0) continue;
@@ -72,7 +72,7 @@ export const getCrewRecords =
     }
 
     return {
-      rounds: roundIds.size,
+      rounds: sharedEver.length,
       ledger: ledger.map((line) => ({ ...line, name: nameByGolfer.get(line.golferId) ?? line.golferId })),
       headToHead,
       partners,

@@ -359,13 +359,13 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     reopenSeason: reopenSeason({ crewStore, golferStore }),
     appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
     removeCountedRound: removeCountedRound({ crewStore, golferStore }),
-    // projectionStore (analytics spec 2026-07-21 §5): most-improved's bounded cross-read — one
-    // listLines query per roster member — the SAME projectionStore instance getMyRecord above
-    // shares.
+    // projectionStore (crew-scoreboard spec §3): ONE listLines query per roster member feeds the
+    // scoreboard, the shared-round derivation, AND the index boundaries alike — the SAME
+    // projectionStore instance getMyRecord above shares.
     getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
-    // analytics spec 2026-07-21 §5: the SAME crewStore/golferStore/snapshots instances
-    // getSeasonStandings above shares — all-time, deduped across every season.
-    getCrewRecords: getCrewRecords({ crewStore, golferStore, snapshots }),
+    // crew-scoreboard spec §3b: the SAME crewStore/golferStore/snapshots/projectionStore
+    // instances getSeasonStandings above shares — all-time, deduped across every season.
+    getCrewRecords: getCrewRecords({ crewStore, golferStore, snapshots, projectionStore }),
     leaveCrew: leaveCrew({ crewStore, golferStore }),
     // Crew membership (invited in, accountable out — spec §1): the organizer's authority — the
     // SAME crewStore/golferStore instances leaveCrew above shares.

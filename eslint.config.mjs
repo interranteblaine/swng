@@ -172,6 +172,12 @@ export default [
                 "netAverages",
                 "mostImproved",
                 "stablefordTitle",
+                // crew scoreboard (crew-scoreboard spec §3a/§3b) — the per-member window fold +
+                // the shared-rounds derivation; the web renders SERVED scoreboard rows only
+                "crewScoreboard",
+                "sharedRoundIds",
+                "playedAtMs",
+                "inWindow",
                 // golden-deck runners (barrel-exported, run domain compute — nonsensical in
                 // product, but fenced so the ban covers EVERY barrel-exported golf computation)
                 "playGoldenRound",

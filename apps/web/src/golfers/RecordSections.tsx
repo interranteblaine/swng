@@ -4,6 +4,7 @@ import type { BestRound, GolferMetrics, GolferRoundLine, IndexPoint, Milestone, 
 import { formatCourseHandicap, formatHandicapIndex } from "@swng/domain";
 import { cardBox, linkEntity } from "../ui/classes";
 import { useContainerWidth } from "../ui/useContainerWidth";
+import { vsPar } from "../ui/vsPar";
 
 // "Your index over time" (index-chart-polish spec, following the metrics-projection-grows /
 // papercut-17 chart this rewrites) — a dependency-free inline SVG (no chart lib: two polylines
@@ -221,15 +222,6 @@ function IndexOverTime({
     </div>
   );
 }
-
-// Local presentation-only helpers for the record section below — arithmetic view logic over
-// numbers the wire already computed (ags − par; a literal join of already-summed typicalEighteen
-// buckets), never golf rules, so no `@swng/domain` compute import is warranted (the ESLint
-// compute fence stays clean).
-const vsPar = (ags: number, par: number): string => {
-  const d = ags - par;
-  return d === 0 ? "E" : d > 0 ? `+${d}` : `${d}`;
-};
 
 // Bests + milestones (analytics read-folds spec 2026-07-21 §3): both name a `roundId` only —
 // the course name comes from a JOIN against this same response's own `history` (rendering, not

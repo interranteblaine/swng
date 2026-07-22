@@ -144,51 +144,38 @@ describe("season + standings schemas", () => {
     roundTrips(listSeasonsResponseSchema, { seasons: [open, closed] });
   });
 
-  it("seasonStandingsResponseSchema round-trips ledger (with name) + head-to-head + rounds, partners/superlatives empty", () => {
+  it("seasonStandingsResponseSchema round-trips scoreboard + ledger (with name) + head-to-head + rounds, partners empty", () => {
     roundTrips(seasonStandingsResponseSchema, {
       seasonId: "s-1",
       name: "2026",
       status: "closed",
-      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, appendedBy: golferId("ann") }],
+      startsAtMs: 1_690_000_000_000,
+      closedAtMs: 1_700_000_000_000,
+      scoreboard: [{ golferId: golferId("ann"), name: "Ann", rounds: 1 }],
+      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000 }],
       ledger: [{ golferId: golferId("ann"), rounds: 1, wins: 1, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann" }],
       headToHead: [{ a: golferId("ann"), b: golferId("bo"), aWins: 1, bWins: 0, halves: 0 }],
       partners: [],
-      superlatives: {},
     });
   });
 
-  // Analytics spec 2026-07-21 §5: partners (four-ball W-L-H pairs) + superlatives (lowestNet,
-  // mostImproved) grow the same standings read.
-  it("seasonStandingsResponseSchema round-trips a full partners + superlatives payload", () => {
+  // crew-scoreboard spec §4: an OPEN season carries no closedAtMs at all (optional, not null),
+  // and a scoreboard row's every optional (best18/netPer18/index/indexDelta) round-trips both
+  // present (a full row) and absent (rounds-only — the dash-arm case the web renders "—" for).
+  it("seasonStandingsResponseSchema round-trips a full scoreboard row and a bare rounds-only row; partners grow alongside", () => {
     roundTrips(seasonStandingsResponseSchema, {
       seasonId: "s-1",
       name: "2026",
       status: "open",
+      startsAtMs: 1_690_000_000_000,
+      scoreboard: [
+        { golferId: golferId("ann"), name: "Ann", rounds: 4, best18: { gross: 82, toPar: 10 }, netPer18: 1.2, index: 14.1, indexDelta: -0.4 },
+        { golferId: golferId("bo"), name: "Bo", rounds: 0 },
+      ],
       rounds: [],
       ledger: [],
       headToHead: [],
       partners: [{ a: golferId("ann"), b: golferId("bo"), nameA: "Ann", nameB: "Bo", wins: 3, losses: 1, halves: 0 }],
-      superlatives: {
-        lowestNet: { holes: 18, average: 78.5, rounds: 4, golfers: [{ golferId: golferId("ann"), name: "Ann" }] },
-        mostImproved: [{ golferId: golferId("bo"), name: "Bo", from: 14.2, to: 11.8 }],
-      },
-    });
-  });
-
-  // mostImproved is ABSENT (not []) when nobody qualifies per the application's own invariant
-  // (getSeasonStandings.ts, pinned in seasonSlice.test.ts) — the schema itself is permissive
-  // (an explicit [] round-trips too), since enforcing "never send []" is an application concern,
-  // not a wire-shape one.
-  it("seasonStandingsResponseSchema round-trips an explicit empty-array mostImproved (schema-permissive; the absent-not-empty rule is application-level)", () => {
-    roundTrips(seasonStandingsResponseSchema, {
-      seasonId: "s-1",
-      name: "2026",
-      status: "open",
-      rounds: [],
-      ledger: [],
-      headToHead: [],
-      partners: [],
-      superlatives: { mostImproved: [] },
     });
   });
 
@@ -198,20 +185,37 @@ describe("season + standings schemas", () => {
         seasonId: "s-1",
         name: "2026",
         status: "open",
+        startsAtMs: 1_690_000_000_000,
+        scoreboard: [],
         rounds: [],
         ledger: [],
         headToHead: [],
-        superlatives: {},
       }),
     ).toThrow(ContractError);
   });
 
-  it("rejects a response missing superlatives", () => {
+  it("rejects a response missing scoreboard", () => {
     expect(() =>
       parse(seasonStandingsResponseSchema, {
         seasonId: "s-1",
         name: "2026",
         status: "open",
+        startsAtMs: 1_690_000_000_000,
+        rounds: [],
+        ledger: [],
+        headToHead: [],
+        partners: [],
+      }),
+    ).toThrow(ContractError);
+  });
+
+  it("rejects a response missing startsAtMs", () => {
+    expect(() =>
+      parse(seasonStandingsResponseSchema, {
+        seasonId: "s-1",
+        name: "2026",
+        status: "open",
+        scoreboard: [],
         rounds: [],
         ledger: [],
         headToHead: [],

@@ -103,9 +103,12 @@ const emptyStandings = (seasonId: string, name: string): SeasonStandingsResponse
   seasonId,
   name,
   status: "open",
+  startsAtMs: 0,
+  scoreboard: [],
   rounds: [],
   ledger: [],
-  headToHead: [], partners: [], superlatives: {},
+  headToHead: [],
+  partners: [],
 });
 
 // Probe for "Leave crew" -> navigate home.
@@ -489,7 +492,7 @@ describe("CrewPage — seasons", () => {
     fireEvent.click(screen.getByRole("button", { name: "2026" }));
 
     await waitFor(() => expect(mockedGetSeasonStandings).toHaveBeenCalledWith(expect.any(String), crewId("crew-1"), "season-b"));
-    expect(await screen.findByText(/standings build as rounds are counted/i)).toBeTruthy();
+    expect(await screen.findByText(/standings build automatically once members play together/i)).toBeTruthy();
   });
 
   it("a season list containing a closed season renders its closed badge", async () => {

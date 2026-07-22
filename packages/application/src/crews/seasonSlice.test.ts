@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { cellKey, deviceId, fixtureLinks18, gameId, golferId, golferMetrics, opId, roundId } from "@swng/domain";
-import type { GolferId, GolferRoundLine, Participant, RoundArchive, RoundEvent, ScoreCell } from "@swng/domain";
+import { archiveGolferLine, crewScoreboard, deviceId, fixtureLinks18, gameId, golferId, opId, roundId } from "@swng/domain";
+import type { GolferId, GolferRoundLine, Participant, RoundArchive, RoundEvent } from "@swng/domain";
 import type { AccountClaims } from "../ports/accountClaims.js";
+import type { ProjectionStore } from "../ports/projectionStore.js";
 import {
   createFixedClock,
   createFrozenClock,
@@ -13,6 +14,7 @@ import {
   createTestTokenIssuer,
   putAndBindGolfer,
 } from "../testing/fakes.js";
+import type { InMemorySnapshotStore } from "../testing/fakes.js";
 import { appendCountedRound } from "./appendCountedRound.js";
 import { closeSeason } from "./closeSeason.js";
 import { createCrew } from "./createCrew.js";
@@ -97,36 +99,25 @@ const stablefordArchive = (id: string, wallMs: number, players: readonly GolferI
   };
 };
 
-// ---- netAverages fixture: a single-golfer solo round with an EXACT gross (mirrors domain/crew/
-// analytics.test.ts's own roundOf/cellsForGross — kept local, a different layer's own test) — so
-// getSeasonStandings' own "pick the global-minimum net average, group exact ties" reduction runs
-// against a real archive, not just netAverages' already-domain-tested array.
-const teeSet18 = fixtureLinks18.teeSets[0]!;
-const scoreCell = (golfer: GolferId, hole: number, strokes: number): ScoreCell => ({
-  result: { kind: "strokes", strokes },
-  recordedBy: golfer,
-  hlc: { wallMs: hole, counter: 0, deviceId: deviceId("d") },
-  opId: opId(`op-${golfer}-${hole}`),
-});
-const cellsForGross = (golfer: GolferId, gross: number): Record<string, ScoreCell> => {
-  const [first, ...rest] = teeSet18.holes;
-  const restSum = rest.reduce((sum, h) => sum + h.par, 0);
-  return Object.fromEntries([
-    [cellKey(golfer, first!.number), scoreCell(golfer, first!.number, gross - restSum)],
-    ...rest.map((h): [string, ScoreCell] => [cellKey(golfer, h.number), scoreCell(golfer, h.number, h.par)]),
-  ]);
+// Crew-scoreboard spec §3b: a "played together" round is DERIVED, never counted — it exists
+// iff >=2 current roster members each hold their OWN golfer-projection line for it. This seeds
+// both halves a real finalized round leaves behind: the archive (for the together-folds) and
+// each named golfer's own line (for the derivation), via `archiveGolferLine` — the SAME domain
+// function `projectArchive` itself calls, never a hand re-derivation of a GolferRoundLine's
+// shape. `golferIds` defaults to every archive participant; pass a subset to model "only some
+// of them are roster members" (a guest, or a member who simply wasn't in this round).
+const recordPlayed = async (
+  ctx: { readonly snapshots: InMemorySnapshotStore; readonly projectionStore: ProjectionStore },
+  archive: RoundArchive,
+  wallMs: number,
+  golferIds?: readonly GolferId[],
+): Promise<void> => {
+  ctx.snapshots.record(archive);
+  const ids = golferIds ?? archive.participants.map((p) => p.golferId);
+  for (const golfer of ids) {
+    await ctx.projectionStore.putLine(golfer, { ...archiveGolferLine(archive, golfer), finalizedAtMs: wallMs });
+  }
 };
-const soloArchive = (id: string, wallMs: number, golfer: GolferId, courseHandicap: number, gross: number): RoundArchive => ({
-  roundId: roundId(id),
-  card: fixtureLinks18,
-  participants: [{ golferId: golfer, name: String(golfer), tee: teeSet18.name, courseHandicap }],
-  games: [],
-  cells: cellsForGross(golfer, gross),
-  events: [{ kind: "round-finalized", opId: opId(`f-${id}`), hlc: { wallMs, counter: 0, deviceId: deviceId("server") }, authorId: golfer }],
-  results: [],
-  handicapping: [],
-  terminatedGameIds: [],
-});
 
 const setup = () => {
   const crewStore = createInMemoryCrewStore();
@@ -154,7 +145,7 @@ const setup = () => {
     close: closeSeason({ crewStore, golferStore, clock }),
     reopen: reopenSeason({ crewStore, golferStore }),
     standings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
-    records: getCrewRecords({ crewStore, golferStore, snapshots }),
+    records: getCrewRecords({ crewStore, golferStore, snapshots, projectionStore }),
     leave: leaveCrew({ crewStore, golferStore }),
   };
 };
@@ -381,17 +372,16 @@ describe("removeCountedRound", () => {
 });
 
 describe("getSeasonStandings", () => {
-  it("folds the counted snapshots through crewContribution/aggregateSeason, newest-round-first", async () => {
+  it("folds the together-records over DERIVED shared rounds, newest-round-first — no counting act", async () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {})); // Ann beats Bo
-    ctx.snapshots.record(singlesArchive("r2", 9_000, ann, bo, bo, {})); // Bo beats Ann
-    await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
-    await ctx.append(asClaims("bo"), crewId, seasonId, { roundId: roundId("r2") });
+    await recordPlayed(ctx, singlesArchive("r1", 5_000, ann, bo, ann, {}), 5_000); // Ann beats Bo
+    await recordPlayed(ctx, singlesArchive("r2", 9_000, ann, bo, bo, {}), 9_000); // Bo beats Ann
 
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
 
-    expect(standings).toMatchObject({ seasonId, name: "2026", status: "open" });
+    expect(standings).toMatchObject({ seasonId, name: "2026", status: "open", startsAtMs: 0 });
+    expect(standings.closedAtMs).toBeUndefined();
     expect(standings.rounds.map((r) => r.roundId)).toEqual([roundId("r2"), roundId("r1")]); // newest-first
     expect(standings.ledger).toEqual(
       expect.arrayContaining([
@@ -402,59 +392,64 @@ describe("getSeasonStandings", () => {
     expect(standings.headToHead).toEqual([expect.objectContaining({ aWins: 1, bWins: 1, halves: 0 })]);
   });
 
-  // Architecture-realignment Phase 3 correction (spec §11a, 2026-07-13, owner ruling): a crew
-  // is a grouping/competition ONLY — standings aggregate the CURRENT roster, full stop. A
-  // golfer in a counted round who never made the roster contributes no row and no
-  // head-to-head pair; a roster member's OWN row in that same round is untouched.
-  it("a golfer in a counted round who is NOT on the roster yields no row for them and no head-to-head pair", async () => {
+  // Architecture-realignment Phase 3 correction (spec §11a, 2026-07-13, owner ruling), carried
+  // into the crew-scoreboard redesign: a crew is a grouping/competition ONLY — standings
+  // aggregate the CURRENT roster, full stop. A shared round derivation requires >=2 CURRENT
+  // roster members to each hold their own line for it (spec §3a) — a guest never does, so a
+  // round a member played against a guest is only "shared" (and only reaches the together-folds
+  // at all) once a SECOND roster member's own line makes it so; that second member's presence
+  // is what makes the round visible, and the guest's own row/pair still never appears.
+  it("a participant NOT on the roster contributes no row, even once the round is shared via two real members", async () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
     const guest = golferId("gus"); // never a crew member, never a golfer row
-    // Ann (member) played a round against a guest; Ann appends it.
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, guest, ann, { [guest]: "Gus the Guest" }));
-    await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
-    expect(bo).toBeDefined();
+    const archive = stablefordArchive("r1", 5_000, [ann, bo, guest], { [ann]: 40, [bo]: 35, [guest]: 30 });
+    // Only Ann and Bo (both roster members) get their own projection line — Gus never does, so
+    // his own row is excluded from the ledger even though the round IS shared (Ann + Bo).
+    await recordPlayed(ctx, archive, 5_000, [ann, bo]);
 
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
+    expect(standings.rounds.map((r) => r.roundId)).toEqual([roundId("r1")]);
     expect(standings.ledger.find((line) => line.golferId === guest)).toBeUndefined();
-    expect(standings.ledger.find((line) => line.golferId === ann)).toMatchObject({ wins: 1 }); // Ann's own row is untouched
-    expect(standings.headToHead).toEqual([]); // the guest half of the pair can't stand alone
+    expect(standings.ledger.find((line) => line.golferId === ann)).toMatchObject({ points: 40 });
+    expect(standings.ledger.find((line) => line.golferId === bo)).toMatchObject({ points: 35 });
   });
 
-  // Compute-on-read reversibility: nothing is stored, so a departed member's rows disappear on
-  // the very next read and a re-added member's rows reappear on the read after THAT — no stale
-  // membership history anywhere.
-  it("a departed member's rows vanish from standings while their counted round stays listed; re-adding them restores the rows", async () => {
+  // Compute-on-read reversibility, sharpened by the window redesign: "we played together" is
+  // itself a CURRENT-roster fact now (sharedRoundIds requires >=2 CURRENT members), so a
+  // departed member's shared round drops out of the played-together list ENTIRELY — not merely
+  // their own ledger row — the instant only one roster member remains holding a line for it.
+  // Rejoining restores everything, byte-identical (nothing was ever stored).
+  it("a departed member's shared round drops out of standings entirely (not just their own row); rejoining restores it", async () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-    await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
+    await recordPlayed(ctx, singlesArchive("r1", 5_000, ann, bo, ann, {}), 5_000);
 
     const before = await ctx.standings(asClaims("ann"), crewId, seasonId);
+    expect(before.rounds.map((r) => r.roundId)).toEqual([roundId("r1")]);
     expect(before.ledger.find((line) => line.golferId === bo)).toBeDefined();
     expect(before.headToHead).toHaveLength(1);
 
     await ctx.leave(asClaims("bo"), crewId);
     const afterLeave = await ctx.standings(asClaims("ann"), crewId, seasonId);
-    expect(afterLeave.rounds.map((r) => r.roundId)).toEqual([roundId("r1")]); // the round stays counted
-    expect(afterLeave.ledger.find((line) => line.golferId === bo)).toBeUndefined(); // Bo's row vanished
-    expect(afterLeave.ledger.find((line) => line.golferId === ann)).toBeDefined(); // Ann's own row remains
-    expect(afterLeave.headToHead).toEqual([]); // Bo is half the pair now — the pair goes too
+    expect(afterLeave.rounds).toEqual([]); // only Ann remains -> no longer >=2 current holders
+    expect(afterLeave.ledger).toEqual([]); // the round itself is no longer "together" for anyone
+    expect(afterLeave.headToHead).toEqual([]);
 
     const rejoinInvite = await ctx.mint(asClaims("ann"), crewId);
     await ctx.join(asClaims("bo"), { token: rejoinInvite.token });
     const afterRejoin = await ctx.standings(asClaims("ann"), crewId, seasonId);
+    expect(afterRejoin.rounds.map((r) => r.roundId)).toEqual([roundId("r1")]); // restored
     expect(afterRejoin.ledger.find((line) => line.golferId === bo)).toBeDefined(); // restored
     expect(afterRejoin.headToHead).toHaveLength(1); // restored
   });
 
-  it("names are sourced from the CURRENT roster, never the counted snapshot's own participant name", async () => {
+  it("names are sourced from the CURRENT roster, never the played round's own participant name", async () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
     // The snapshot spells Ann "Ann From The Round" — irrelevant now; standings show whatever
     // the roster says, not whatever a round happened to carry.
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, { [ann]: "Ann From The Round" }));
-    await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
+    await recordPlayed(ctx, singlesArchive("r1", 5_000, ann, bo, ann, { [ann]: "Ann From The Round" }), 5_000);
 
     // Rename Ann on the roster directly — there is no rename-member use case yet, so this
     // mirrors the contract test's own "changed name/role" idiom (a direct store mutation).
@@ -464,6 +459,7 @@ describe("getSeasonStandings", () => {
 
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
     expect(standings.ledger.find((line) => line.golferId === ann)?.name).toBe("Annie");
+    expect(standings.scoreboard.find((row) => row.golferId === ann)?.name).toBe("Annie");
   });
 
   it("an unknown seasonId is rejected — season-not-found", async () => {
@@ -479,19 +475,141 @@ describe("getSeasonStandings", () => {
     await expect(ctx.standings(asClaims("stranger"), crewId, seasonId)).rejects.toMatchObject({ code: "not-a-member" });
   });
 
-  it("an empty season yields empty rounds/ledger/headToHead, not an error", async () => {
+  // The scoreboard is REQUIRED (spec §3a) — every roster member gets a row, `rounds: 0`
+  // included, even when nothing has ever been shared. Sorted golferId asc on a full tie
+  // (netPer18 absent for both, rounds 0 for both — crewScoreboard's own total order).
+  it("an empty season yields empty rounds/ledger/headToHead and a zero-row scoreboard for every member, not an error", async () => {
     const ctx = setup();
-    const { crewId, seasonId } = await crewWithSeason(ctx);
-    await expect(ctx.standings(asClaims("ann"), crewId, seasonId)).resolves.toMatchObject({ rounds: [], ledger: [], headToHead: [] });
+    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
+    const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
+    expect(standings).toMatchObject({ rounds: [], ledger: [], headToHead: [] });
+    expect(standings.scoreboard).toEqual([
+      { golferId: ann, name: "Ann", rounds: 0 },
+      { golferId: bo, name: "Bo", rounds: 0 },
+    ]);
+  });
+
+  // The window redesign's own core promise: a season is [startsAtMs, closedAtMs ?? ∞], and a
+  // round played AFTER a close stays out of it — until reopen widens the window back out. A
+  // bespoke frozen-clock setup gives precise control over the boundary, unlike crewWithSeason's
+  // shared ticking clock (fine everywhere else since an OPEN season's window has no upper bound
+  // at all — spec §2).
+  it("a round played after the season closes stays out of both `rounds` and the scoreboard's own count; reopening lets it back in", async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const crewStore = createInMemoryCrewStore();
+    const golferStore = createInMemoryGolferStore();
+    const snapshots = createInMemorySnapshotStore();
+    const projectionStore = createInMemoryProjectionStore();
+    const tokenIssuer = createTestTokenIssuer();
+    const ids = createSequentialIds("w");
+    const create = createCrew({ crewStore, golferStore, ids, clock: createFrozenClock(0) });
+    const mint = mintCrewInvite({ crewStore, golferStore, tokenIssuer, clock: createFrozenClock(0) });
+    const join = joinCrewByInvite({ crewStore, golferStore, tokenIssuer, clock: createFrozenClock(0) });
+    const close = closeSeason({ crewStore, golferStore, clock: createFrozenClock(10 * day) });
+    const reopen = reopenSeason({ crewStore, golferStore });
+    const standings = getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore });
+
+    const ann = golferId("golfer-ann");
+    const bo = golferId("golfer-bo");
+    await putAndBindGolfer(golferStore, ann, "ann", "Ann");
+    await putAndBindGolfer(golferStore, bo, "bo", "Bo");
+    const created = await create(asClaims("ann"), { name: "Sunday Skins" });
+    const invite = await mint(asClaims("ann"), created.crew.crewId);
+    await join(asClaims("bo"), { token: invite.token });
+    const seasonId = (await crewStore.listSeasons(created.crew.crewId))[0]!.seasonId;
+
+    await recordPlayed({ snapshots, projectionStore }, singlesArchive("r1", 5 * day, ann, bo, ann, {}), 5 * day); // before the close
+
+    await close(asClaims("ann"), created.crew.crewId, seasonId);
+    await recordPlayed({ snapshots, projectionStore }, singlesArchive("r2", 20 * day, ann, bo, bo, {}), 20 * day); // after the close
+
+    const closed = await standings(asClaims("ann"), created.crew.crewId, seasonId);
+    expect(closed.rounds.map((r) => r.roundId)).toEqual([roundId("r1")]); // r2 stays out
+    expect(closed.scoreboard.find((row) => row.golferId === ann)?.rounds).toBe(1);
+
+    await reopen(asClaims("ann"), created.crew.crewId, seasonId);
+    const reopened = await standings(asClaims("ann"), created.crew.crewId, seasonId);
+    expect(reopened.rounds.map((r) => r.roundId).sort()).toEqual([roundId("r1"), roundId("r2")].sort());
+    expect(reopened.scoreboard.find((row) => row.golferId === ann)?.rounds).toBe(2);
+  });
+});
+
+// Crew-scoreboard spec §3a: the per-member scoreboard SeasonPanel leads with — a reuse proof
+// against the SAME domain fold scoreboard.test.ts already covers exhaustively, so this only pins
+// the wiring (which lines, which window, roster names attached, served order untouched) rather
+// than re-deriving netPer18/best18/index arithmetic a second time.
+describe("getSeasonStandings — scoreboard", () => {
+  it("scoreboard rows are exactly crewScoreboard(members, window) with roster names attached, in served order", async () => {
+    const ctx = setup();
+    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
+
+    // Ann: three rated 18-hole lines within the (open, unbounded) window -> netPer18 present.
+    // Bo: none at all -> a zero row, sorted after Ann's real netPer18 (crewScoreboard's own
+    // "absent last" rule).
+    const annLine = (id: string, ms: number, ags: number, differential: number): GolferRoundLine & { finalizedAtMs: number } => ({
+      roundId: roundId(id),
+      courseName: "Casa Verde GC",
+      tee: "white",
+      holes: 18,
+      par: 72,
+      courseHandicap: 8,
+      ags,
+      differential,
+      distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+      finalizedAtMs: ms,
+    });
+    const annLines = [annLine("a1", 1_000, 90, 12.0), annLine("a2", 2_000, 88, 10.0), annLine("a3", 3_000, 86, 8.0)];
+    for (const line of annLines) await ctx.projectionStore.putLine(ann, line);
+
+    const window = { startMs: 0 };
+    const expected = crewScoreboard(
+      [
+        { golferId: ann, lines: annLines },
+        { golferId: bo, lines: [] },
+      ],
+      window,
+    ).map((row) => ({ ...row, name: row.golferId === ann ? "Ann" : "Bo" }));
+
+    const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
+    expect(standings.scoreboard).toEqual(expected);
+  });
+
+  // Partners keep folding the SAME shared-archive derivation ledger/headToHead use (spec §3b) —
+  // this only pins that partners still arrive, sourced from the new derivation, now that the old
+  // "carries hand-pinned partners + mostImproved" fixture's mostImproved/lowestNet halves are
+  // gone with the superlatives they fed.
+  it("partners are carried from shared archives, roster names attached", async () => {
+    const ctx = setup();
+    const ann = await seedGolfer(ctx, "ann", "Ann");
+    const bo = await seedGolfer(ctx, "bo", "Bo");
+    const cal = await seedGolfer(ctx, "cal", "Cal");
+    const dee = await seedGolfer(ctx, "dee", "Dee");
+    const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
+    for (const sub of ["bo", "cal", "dee"]) {
+      const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
+      await ctx.join(asClaims(sub), { token: invite.token });
+    }
+    const season = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026" });
+
+    // Two fourball rounds: (Ann,Bo) beat (Cal,Dee) both times — 2-0 for each pair.
+    await recordPlayed(ctx, fourballArchive("r1", 5_000, [ann, bo], [cal, dee], "a"), 5_000);
+    await recordPlayed(ctx, fourballArchive("r2", 9_000, [ann, bo], [cal, dee], "a"), 9_000);
+
+    const standings = await ctx.standings(asClaims("ann"), created.crew.crewId, season.season.seasonId);
+
+    expect(standings.partners).toEqual([
+      { a: ann, b: bo, nameA: "Ann", nameB: "Bo", wins: 2, losses: 0, halves: 0 },
+      { a: cal, b: dee, nameA: "Cal", nameB: "Dee", wins: 0, losses: 2, halves: 0 },
+    ]);
   });
 });
 
 describe("leaveCrew", () => {
-  it("removes the caller's own member item; their past counted rounds REMAIN counted, but their standings rows vanish (members-only, compute-on-read)", async () => {
+  it("removes the caller's own member item; the OLD counted-round entry (a separate, still-standing legacy mechanism) is untouched, but the round drops out of the DERIVED standings entirely once only one roster member remains (members-only, compute-on-read)", async () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-    await ctx.append(asClaims("bo"), crewId, seasonId, { roundId: roundId("r1") }); // Bo appended it
+    await recordPlayed(ctx, singlesArchive("r1", 5_000, ann, bo, ann, {}), 5_000);
+    await ctx.append(asClaims("bo"), crewId, seasonId, { roundId: roundId("r1") }); // Bo appended it (legacy mechanism)
 
     const left = await ctx.leave(asClaims("bo"), crewId);
 
@@ -499,12 +617,14 @@ describe("leaveCrew", () => {
     // Bo is off the roster now...
     const crew = await ctx.crewStore.get(crewId);
     expect(crew!.crew.members.some((member) => member.golferId === bo)).toBe(false);
-    // ...but the round Bo counted is still counted (nothing about a counted round is deleted),
-    // and standings no longer show Bo's own row — a members-only read-time filter, not stored
-    // membership history.
+    // ...the OLD counted-round entry is untouched (nothing about it is deleted; it simply feeds
+    // nothing standings reads anymore)...
     expect(await ctx.crewStore.listCountedRounds(crewId, seasonId)).toHaveLength(1);
+    // ...but standings are derived fresh from the CURRENT roster: with only Ann left, r1 no
+    // longer has >=2 current-member holders, so it drops out of standings entirely — a
+    // members-only read-time filter, not stored membership history.
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
-    expect(standings.rounds).toHaveLength(1);
+    expect(standings.rounds).toEqual([]);
     expect(standings.ledger.find((line) => line.golferId === bo)).toBeUndefined();
   });
 
@@ -530,148 +650,29 @@ describe("leaveCrew", () => {
   });
 });
 
-// Analytics spec 2026-07-21 §5: partner records + superlatives grow the SAME standings read,
-// beside the existing ledger/head-to-head this file already covers above.
-describe("getSeasonStandings — partners + superlatives", () => {
-  it("carries hand-pinned partners + mostImproved from a two-archive fixture; lowestNet stays absent below the 3-round floor", async () => {
-    const ctx = setup();
-    const ann = await seedGolfer(ctx, "ann", "Ann");
-    const bo = await seedGolfer(ctx, "bo", "Bo");
-    const cal = await seedGolfer(ctx, "cal", "Cal");
-    const dee = await seedGolfer(ctx, "dee", "Dee");
-    const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
-    for (const sub of ["bo", "cal", "dee"]) {
-      const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
-      await ctx.join(asClaims(sub), { token: invite.token });
-    }
-    const season = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026" });
-
-    // Two fourball rounds: (Ann,Bo) beat (Cal,Dee) both times — 2-0 for each pair.
-    ctx.snapshots.record(fourballArchive("r1", 5_000, [ann, bo], [cal, dee], "a"));
-    ctx.snapshots.record(fourballArchive("r2", 9_000, [ann, bo], [cal, dee], "a"));
-    await ctx.append(asClaims("ann"), created.crew.crewId, season.season.seasonId, { roundId: roundId("r1") });
-    await ctx.append(asClaims("ann"), created.crew.crewId, season.season.seasonId, { roundId: roundId("r2") });
-
-    // Ann's own projection lines (independent of the two counted archives above — mostImproved
-    // reads projectionStore, not snapshots): 3 early differentials (all <= r1's finalize time,
-    // 5_000, so they alone form the "from" boundary) plus 3 much-better ones landing between the
-    // two counted rounds (<= r2's finalize time, 9_000, so the "to" boundary folds all six) — a
-    // real drop, computed by the SAME golferMetrics oracle the use case itself calls, never
-    // hand-derived against the small-sample table. Bo/Cal/Dee get no projection lines at all.
-    const annLine = (id: string, ms: number, differential: number): GolferRoundLine & { finalizedAtMs: number } => ({
-      roundId: roundId(id),
-      courseName: "Casa Verde GC",
-      tee: "white",
-      holes: 18,
-      par: 72,
-      courseHandicap: 8,
-      ags: 72 + differential,
-      differential,
-      distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
-      finalizedAtMs: ms,
-    });
-    const early = [annLine("e1", 1_000, 20.0), annLine("e2", 2_000, 19.0), annLine("e3", 3_000, 21.0)];
-    const later = [annLine("l1", 6_000, 8.0), annLine("l2", 7_000, 9.0), annLine("l3", 7_500, 7.0)];
-    for (const line of [...early, ...later]) await ctx.projectionStore.putLine(ann, line);
-
-    const standings = await ctx.standings(asClaims("ann"), created.crew.crewId, season.season.seasonId);
-
-    expect(standings.partners).toEqual([
-      { a: ann, b: bo, nameA: "Ann", nameB: "Bo", wins: 2, losses: 0, halves: 0 },
-      { a: cal, b: dee, nameA: "Cal", nameB: "Dee", wins: 0, losses: 2, halves: 0 },
-    ]);
-    // Only 2 counted rounds all season — netAverages' 3-round floor can never be met, so
-    // lowestNet is ABSENT, not a zeroed/partial entry.
-    expect(standings.superlatives.lowestNet).toBeUndefined();
-
-    const expectedFrom = golferMetrics(early).swngIndex!.value;
-    const expectedTo = golferMetrics([...early, ...later]).swngIndex!.value;
-    expect(expectedTo).toBeLessThan(expectedFrom); // sanity: the fixture really is a drop
-    expect(standings.superlatives.mostImproved).toEqual([{ golferId: ann, name: "Ann", from: expectedFrom, to: expectedTo }]);
-  });
-
-  it("a member with no lines yields no mostImproved entry, not a crash", async () => {
-    const ctx = setup();
-    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-    await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
-    // Neither Ann nor Bo has ANY projectionStore line — golferMetrics([]).swngIndex is
-    // undefined at both boundaries for both members, so domain's mostImproved excludes both
-    // (never a zeroed/thrown entry), and the superlative is omitted entirely.
-
-    const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
-
-    expect(standings.superlatives.mostImproved).toBeUndefined();
-  });
-
-  it("omits mostImproved entirely (no boundary fetches) when the season counts no rounds at all", async () => {
-    const ctx = setup();
-    const { crewId, seasonId } = await crewWithSeason(ctx);
-
-    const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
-
-    expect(standings.superlatives.mostImproved).toBeUndefined();
-    expect(standings.superlatives.lowestNet).toBeUndefined();
-  });
-
-  it("picks the single lowest net average across the roster; an exact tie groups into one entry naming every tied golfer", async () => {
-    const ctx = setup();
-    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-
-    // Ann: 3 rounds at CH 8, gross 90 each -> net 82 flat, average 82.0.
-    for (const [i, id] of ["a1", "a2", "a3"].entries()) {
-      ctx.snapshots.record(soloArchive(id, 1_000 * (i + 1), ann, 8, 90));
-      await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId(id) });
-    }
-    // Bo: 3 rounds at CH 0, gross 82 each -> net 82 flat too — an exact tie with Ann.
-    for (const [i, id] of ["b1", "b2", "b3"].entries()) {
-      ctx.snapshots.record(soloArchive(id, 4_000 * (i + 1), bo, 0, 82));
-      await ctx.append(asClaims("bo"), crewId, seasonId, { roundId: roundId(id) });
-    }
-
-    const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
-
-    expect(standings.superlatives.lowestNet).toEqual({
-      holes: 18,
-      average: 82,
-      rounds: 3,
-      golfers: [
-        { golferId: ann, name: "Ann" },
-        { golferId: bo, name: "Bo" },
-      ],
-    });
-  });
-});
-
-// GET /crews/{crewId}/records (analytics spec 2026-07-21 §5): all-time, deduped across seasons.
+// GET /crews/{crewId}/records (crew-scoreboard spec §3b): all-time, over every round the roster
+// has ever shared.
 describe("getCrewRecords", () => {
-  it("dedupes a round counted in two seasons of the same crew — rounds: 1, ledger/partners built from ONE contribution, not two", async () => {
+  it("all-time folds every round the roster has ever shared, once each, through the SAME roster-filter + aggregateSeason composition standings uses", async () => {
     const ctx = setup();
     const ann = await seedGolfer(ctx, "ann", "Ann");
     const bo = await seedGolfer(ctx, "bo", "Bo");
     const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
     const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
     await ctx.join(asClaims("bo"), { token: invite.token });
-    const seasonA = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2025" });
-    const seasonB = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026" });
 
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-    await ctx.append(asClaims("ann"), created.crew.crewId, seasonA.season.seasonId, { roundId: roundId("r1") });
-    await ctx.append(asClaims("ann"), created.crew.crewId, seasonB.season.seasonId, { roundId: roundId("r1") });
+    await recordPlayed(ctx, singlesArchive("r1", 5_000, ann, bo, ann, {}), 5_000);
 
     const records = await ctx.records(asClaims("ann"), created.crew.crewId);
 
-    expect(records.rounds).toBe(1); // the SAME round counted twice contributes once
+    expect(records.rounds).toBe(1);
     expect(records.ledger).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ golferId: ann, rounds: 1, wins: 1 }), // not 2
-        expect.objectContaining({ golferId: bo, rounds: 1, losses: 1 }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ golferId: ann, rounds: 1, wins: 1 }), expect.objectContaining({ golferId: bo, rounds: 1, losses: 1 })]),
     );
-    expect(records.headToHead).toEqual([expect.objectContaining({ aWins: 1, bWins: 0 })]); // one entry, not two
+    expect(records.headToHead).toEqual([expect.objectContaining({ aWins: 1, bWins: 0 })]);
   });
 
-  it("titles: each CLOSED season's Stableford points leader, roster-filtered — an open season contributes no title", async () => {
+  it("titles: each CLOSED season's Stableford points leader, windowed to that season's own dates — an open season contributes no title", async () => {
     const ctx = setup();
     const ann = await seedGolfer(ctx, "ann", "Ann");
     const bo = await seedGolfer(ctx, "bo", "Bo");
@@ -681,13 +682,40 @@ describe("getCrewRecords", () => {
     const closedSeason = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2025" });
     const openSeason = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026" });
 
-    ctx.snapshots.record(stablefordArchive("r1", 5_000, [ann, bo], { [ann]: 40, [bo]: 30 }));
-    await ctx.append(asClaims("ann"), created.crew.crewId, closedSeason.season.seasonId, { roundId: roundId("r1") });
-    ctx.snapshots.record(stablefordArchive("r2", 6_000, [ann, bo], { [ann]: 20, [bo]: 25 }));
-    await ctx.append(asClaims("bo"), created.crew.crewId, openSeason.season.seasonId, { roundId: roundId("r2") });
-
+    // Directly stamp each season's own window — the closed season's is [0, 10_000), the open
+    // one's starts right where it ends and never closes — so r1 (wallMs 5_000) falls inside the
+    // closed season's window and r2 (wallMs 20_000) falls only inside the still-open one's.
     const closed = await ctx.crewStore.getSeason(created.crew.crewId, closedSeason.season.seasonId);
-    await ctx.crewStore.putSeason(created.crew.crewId, { ...closed!, status: "closed" });
+    await ctx.crewStore.putSeason(created.crew.crewId, { ...closed!, startsAtMs: 0, status: "closed", closedAtMs: 10_000 });
+    const open = await ctx.crewStore.getSeason(created.crew.crewId, openSeason.season.seasonId);
+    await ctx.crewStore.putSeason(created.crew.crewId, { ...open!, startsAtMs: 10_000 });
+
+    await recordPlayed(ctx, stablefordArchive("r1", 5_000, [ann, bo], { [ann]: 40, [bo]: 30 }), 5_000);
+    await recordPlayed(ctx, stablefordArchive("r2", 20_000, [ann, bo], { [ann]: 20, [bo]: 25 }), 20_000);
+
+    const records = await ctx.records(asClaims("ann"), created.crew.crewId);
+
+    expect(records.titles).toEqual([{ seasonId: closedSeason.season.seasonId, name: "2025", golfers: [{ golferId: ann, name: "Ann" }] }]);
+  });
+
+  // The conditional endMs spread (spec §3b): a LEGACY closed season (closed before this arc) has
+  // no closedAtMs at all — its window must read as open-ended rather than crash or silently
+  // exclude everything.
+  it("a LEGACY closed season with no closedAtMs reads as an open-ended window, never a crash", async () => {
+    const ctx = setup();
+    const ann = await seedGolfer(ctx, "ann", "Ann");
+    const bo = await seedGolfer(ctx, "bo", "Bo");
+    const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
+    const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
+    await ctx.join(asClaims("bo"), { token: invite.token });
+    const closedSeason = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2025" });
+
+    // The legacy shape: status "closed", no closedAtMs.
+    const stored = await ctx.crewStore.getSeason(created.crew.crewId, closedSeason.season.seasonId);
+    await ctx.crewStore.putSeason(created.crew.crewId, { ...stored!, startsAtMs: 0, status: "closed" });
+
+    // Played long after — nothing about the legacy season's own window excludes it.
+    await recordPlayed(ctx, stablefordArchive("r1", 999_999, [ann, bo], { [ann]: 40, [bo]: 30 }), 999_999);
 
     const records = await ctx.records(asClaims("ann"), created.crew.crewId);
 
@@ -708,15 +736,13 @@ describe("getCrewRecords", () => {
     const season2024 = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2024" });
     const season2025 = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2025" });
 
-    ctx.snapshots.record(stablefordArchive("r1", 5_000, [ann, bo], { [ann]: 40, [bo]: 30 })); // Ann wins 2024
-    await ctx.append(asClaims("ann"), created.crew.crewId, season2024.season.seasonId, { roundId: roundId("r1") });
-    ctx.snapshots.record(stablefordArchive("r2", 6_000, [ann, bo], { [ann]: 20, [bo]: 35 })); // Bo wins 2025
-    await ctx.append(asClaims("bo"), created.crew.crewId, season2025.season.seasonId, { roundId: roundId("r2") });
+    const stored2024 = await ctx.crewStore.getSeason(created.crew.crewId, season2024.season.seasonId);
+    await ctx.crewStore.putSeason(created.crew.crewId, { ...stored2024!, startsAtMs: 0, status: "closed", closedAtMs: 10_000 });
+    const stored2025 = await ctx.crewStore.getSeason(created.crew.crewId, season2025.season.seasonId);
+    await ctx.crewStore.putSeason(created.crew.crewId, { ...stored2025!, startsAtMs: 10_000, status: "closed", closedAtMs: 20_000 });
 
-    const closed2024 = await ctx.crewStore.getSeason(created.crew.crewId, season2024.season.seasonId);
-    await ctx.crewStore.putSeason(created.crew.crewId, { ...closed2024!, status: "closed" });
-    const closed2025 = await ctx.crewStore.getSeason(created.crew.crewId, season2025.season.seasonId);
-    await ctx.crewStore.putSeason(created.crew.crewId, { ...closed2025!, status: "closed" });
+    await recordPlayed(ctx, stablefordArchive("r1", 5_000, [ann, bo], { [ann]: 40, [bo]: 30 }), 5_000); // in 2024's window, Ann wins
+    await recordPlayed(ctx, stablefordArchive("r2", 15_000, [ann, bo], { [ann]: 20, [bo]: 35 }), 15_000); // in 2025's window, Bo wins
 
     const records = await ctx.records(asClaims("ann"), created.crew.crewId);
 
@@ -759,8 +785,10 @@ describe("closeSeason / reopenSeason", () => {
     async () => {
       const ctx = setup();
       const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-      ctx.snapshots.record(stablefordArchive("r1", 5_000, [ann, bo], { [ann]: 40, [bo]: 30 }));
-      await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
+      // wallMs 500 — comfortably before whatever tiny clock reading ctx.close() below stamps
+      // (the shared fixed clock starts at 1_000 and only advances), so the round stays inside
+      // the closed season's own window regardless of how many prior calls ticked it forward.
+      await recordPlayed(ctx, stablefordArchive("r1", 500, [ann, bo], { [ann]: 40, [bo]: 30 }), 500);
 
       const beforeClose = await ctx.records(asClaims("ann"), crewId);
       expect(beforeClose.titles).toEqual([]); // open season awards nothing yet

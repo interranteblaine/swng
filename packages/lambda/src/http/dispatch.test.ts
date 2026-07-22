@@ -216,7 +216,7 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
     removeCountedRound: removeCountedRound({ crewStore, golferStore }),
     getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
-    getCrewRecords: getCrewRecords({ crewStore, golferStore, snapshots }),
+    getCrewRecords: getCrewRecords({ crewStore, golferStore, snapshots, projectionStore }),
     leaveCrew: leaveCrew({ crewStore, golferStore }),
     removeCrewMember: removeCrewMember({ crewStore, golferStore }),
     transferOrganizer: transferOrganizer({ crewStore, golferStore }),
@@ -1248,10 +1248,13 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "crew-invite-invalid" });
   });
 
-  // The counted-round lifecycle end-to-end (Task 9): finalize a round the caller played, count it
-  // into a season, read standings (rounds list carries it), then un-count via DELETE. Exercises
-  // POST .../rounds, GET .../standings, and the DELETE route's method wiring in one pass.
-  it("drives finalize -> create season -> append counted round -> standings -> DELETE (un-count)", async () => {
+  // The counted-round ROUTE wiring end-to-end (Task 9; the counted-round mechanism itself is
+  // superseded — crew-scoreboard spec §3b — standings.rounds is now DERIVED, requiring >=2
+  // CURRENT roster members holding a line for the same round, so this solo-crew append no longer
+  // changes what standings.rounds returns; the point here is only that POST .../rounds, GET
+  // .../standings, and the DELETE route are all reachable and schema-valid end to end — the
+  // crew-scoreboard derivation itself is covered in seasonSlice.test.ts).
+  it("drives finalize -> create season -> append counted round -> standings -> DELETE (un-count) — route wiring only", async () => {
     const { dispatcher } = await setupCrews();
     const annGolfer = await putMe(dispatcher, ann, "Ann");
 
@@ -1293,7 +1296,9 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const standingsResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `${seasonPath}/standings`, token: golferBearer(ann) })));
     expect(standingsResp.statusCode).toBe(200);
     const standings = seasonStandingsResponseSchema.parse(JSON.parse(standingsResp.body!));
-    expect(standings.rounds.map((r) => r.roundId)).toEqual([started.roundId]);
+    // "Played together" needs >=2 CURRENT roster members (spec §3a) — Ann is the crew's only
+    // member, so the derived list stays empty regardless of the append call above.
+    expect(standings.rounds).toEqual([]);
 
     const deleteResp = asStructured(await dispatcher(makeEvent({ method: "DELETE", path: `${seasonPath}/rounds/${started.roundId}`, token: golferBearer(ann) })));
     expect(deleteResp.statusCode).toBe(200);
@@ -1463,7 +1468,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       expect(crewRecordsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: 0, ledger: [], headToHead: [], partners: [], titles: [] });
     });
 
-    it("counts a finalized round appended into a season — the SAME counted-round lifecycle the un-count test above drives", async () => {
+    it("GET /crews/{crewId}/records route wiring — a solo crew's all-time stays honestly empty regardless of the (now-inert) counted-round append", async () => {
       const { dispatcher } = await setupCrews();
       const annGolfer = await putMe(dispatcher, ann, "Ann");
 
@@ -1508,12 +1513,12 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
         await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/records`, token: golferBearer(ann) })),
       );
       expect(resp.statusCode).toBe(200);
-      // rounds counts the distinct roundId — the finalized round had no games added, so it
-      // contributes no ledger LINE (crewContribution.ts: a golfer needs >=1 counted game to get
-      // one), the exact same "counted, but a scoreless ledger" shape the standings-DELETE test
-      // above never has to distinguish either. rounds:1 alone proves the call-through.
+      // "Played together" needs >=2 CURRENT roster members (crew-scoreboard spec §3a/§3b) — Ann
+      // is the crew's only member, so all-time stays honestly empty no matter what the (now
+      // route-wiring-only) append call above did. This is the SAME finding the standings test
+      // above pins; the crew-scoreboard derivation itself is covered in seasonSlice.test.ts.
       const parsed = crewRecordsResponseSchema.parse(JSON.parse(resp.body!));
-      expect(parsed.rounds).toBe(1);
+      expect(parsed.rounds).toBe(0);
       expect(parsed.ledger).toEqual([]);
       expect(annGolfer).toBeDefined();
     });

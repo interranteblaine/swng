@@ -203,7 +203,7 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
     getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
     getGolfer: getGolfer({ golferStore, projectionStore }),
-    createCrew: createCrew({ crewStore, golferStore, ids }),
+    createCrew: createCrew({ crewStore, golferStore, ids, clock }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
     mintCrewInvite: mintCrewInvite({ crewStore, golferStore, tokenIssuer: tokens, clock }),
@@ -211,7 +211,7 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     joinCrewByInvite: joinCrewByInvite({ crewStore, golferStore, tokenIssuer: tokens, clock }),
     createSeason: createSeason({ crewStore, golferStore, ids, clock }),
     listSeasons: listSeasons({ crewStore, golferStore }),
-    closeSeason: closeSeason({ crewStore, golferStore }),
+    closeSeason: closeSeason({ crewStore, golferStore, clock }),
     reopenSeason: reopenSeason({ crewStore, golferStore }),
     appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
     removeCountedRound: removeCountedRound({ crewStore, golferStore }),
@@ -1197,7 +1197,11 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const listResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann) })));
       expect(listResp.statusCode).toBe(200);
       const listed = listSeasonsResponseSchema.parse(JSON.parse(listResp.body!));
-      expect(listed.seasons.map((s) => s.seasonId)).toEqual([season.season.seasonId]);
+      // POST /crews already auto-opened the crew's own first season (crew-scoreboard spec §2) —
+      // the OLDER of the two, so newest-first puts the just-created "2026" season ahead of it.
+      expect(listed.seasons.map((s) => s.seasonId)).toEqual([season.season.seasonId, expect.any(String)]);
+      expect(listed.seasons).toHaveLength(2);
+      expect(listed.seasons[1]).toMatchObject({ status: "open" });
     },
   );
 

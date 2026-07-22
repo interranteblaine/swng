@@ -20,12 +20,20 @@ import {
 import { queryAllPages } from "./paginate.js";
 
 // One item per season (keys.ts's seasonSk) — the WHOLE CrewSeason nested under `season`, same
-// nest-the-whole-domain-value idiom CrewItem's own `crew` attribute uses above.
+// nest-the-whole-domain-value idiom CrewItem's own `crew` attribute uses above. `season` here is
+// the RAW stored shape, which may predate `startsAtMs` (legacy rows) — `seasonOf` below is the
+// ONE place that normalizes a raw item into a current CrewSeason on every read path.
 interface SeasonItem {
   readonly pk: string;
   readonly sk: string;
-  readonly season: CrewSeason;
+  readonly season: Omit<CrewSeason, "startsAtMs"> & { readonly startsAtMs?: number };
 }
+
+// The one item->season mapping (crew-scoreboard spec §2's legacy fold): a stored row without
+// `startsAtMs` (written before this field existed) reads as `startsAtMs = createdAtMs` — no
+// migration, no wipe. `closedAtMs` needs no fold — it was always optional, so an absent stored
+// value already reads back as `undefined` through the spread.
+const seasonOf = (item: SeasonItem): CrewSeason => ({ ...item.season, startsAtMs: item.season.startsAtMs ?? item.season.createdAtMs });
 
 // One item per round counted into a season (keys.ts's countedRoundSk) — the WHOLE CountedRound
 // nested under `entry`, mirroring createDynamoProjectionStore's own crew-round-contribution
@@ -207,9 +215,21 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
 
     putSeason: async (crewId: CrewId, season: CrewSeason) => {
       validateSeasonId(season.seasonId);
-      // Unconditional upsert — create, rename, and close are all the SAME put keyed by
-      // seasonId (the port doc's own contract). No revision to conflict on.
-      const item: SeasonItem = { pk: crewPk(crewId), sk: seasonSk(season.seasonId), season };
+      // Unconditional upsert — create, rename, close, and reopen are all the SAME put keyed by
+      // seasonId (the port doc's own contract): a PutCommand replaces the WHOLE item, so
+      // whichever CrewSeason a caller supplies wins outright — an absent closedAtMs on the
+      // caller's value (reopenSeason.ts) really leaves storage, not just this call's echo.
+      // Built field-by-field (never spread `season`) so an absent closedAtMs never becomes an
+      // explicit `undefined` key, which DynamoDB's marshall() rejects (the M8 lesson).
+      const stored: CrewSeason = {
+        seasonId: season.seasonId,
+        name: season.name,
+        status: season.status,
+        createdAtMs: season.createdAtMs,
+        startsAtMs: season.startsAtMs,
+        ...(season.closedAtMs !== undefined ? { closedAtMs: season.closedAtMs } : {}),
+      };
+      const item: SeasonItem = { pk: crewPk(crewId), sk: seasonSk(season.seasonId), season: stored };
       await client.send(new PutCommand({ TableName: tableName, Item: item }));
     },
 
@@ -218,7 +238,7 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
         new GetCommand({ TableName: tableName, Key: { pk: crewPk(crewId), sk: seasonSk(seasonId) }, ConsistentRead: true }),
       );
       const item = result.Item as SeasonItem | undefined;
-      return item?.season;
+      return item ? seasonOf(item) : undefined;
     },
 
     listSeasons: async (crewId: CrewId) => {
@@ -237,7 +257,7 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
         },
         (item) => item as unknown as SeasonItem,
       );
-      return items.filter((item) => !item.sk.includes(countedRoundSkMarker)).map((item) => item.season);
+      return items.filter((item) => !item.sk.includes(countedRoundSkMarker)).map((item) => seasonOf(item));
     },
 
     addCountedRound: async (crewId: CrewId, seasonId: string, entry: CountedRound) => {

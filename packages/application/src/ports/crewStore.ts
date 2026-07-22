@@ -18,6 +18,14 @@ export interface CrewSeason {
   readonly name: string;
   readonly status: "open" | "closed";
   readonly createdAtMs: number;
+  // Window bounds (crew-scoreboard spec §2): a round is IN this season iff its played date
+  // falls in [startsAtMs, closedAtMs ?? ∞]. startsAtMs is fixed at creation (seasonStart.ts's
+  // own `seasonStartMs` — the tiling start rule) and never recomputed. closedAtMs is set by
+  // closeSeason and DELETED by reopenSeason (a season's own re-open is lossless by
+  // construction — putSeason below is a whole-item put, so an absent closedAtMs on a caller's
+  // CrewSeason truly removes it from storage, not just from this in-memory value).
+  readonly startsAtMs: number;
+  readonly closedAtMs?: number;
 }
 
 // One finished round counted into a season — entity data ABOUT the crew (the crew's own

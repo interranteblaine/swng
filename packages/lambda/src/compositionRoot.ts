@@ -332,7 +332,9 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // shares (getGolfer runs the identical recordOf fold, just for a golferId off the path
     // instead of the caller's own sub).
     getGolfer: getGolfer({ golferStore, projectionStore }),
-    createCrew: createCrew({ crewStore, golferStore, ids }),
+    // crew-scoreboard spec §2: createCrew now auto-opens the crew's first season (clock stamps
+    // its window start) — the SAME system clock every other use case above shares.
+    createCrew: createCrew({ crewStore, golferStore, ids, clock }),
     getCrew: getCrew({ crewStore, golferStore }),
     listMyCrews: listMyCrews({ crewStore, golferStore }),
     // Crew membership (invited in, accountable out): mintCrewInvite needs tokens (the SAME
@@ -351,8 +353,9 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     createSeason: createSeason({ crewStore, golferStore, ids, clock }),
     listSeasons: listSeasons({ crewStore, golferStore }),
     // close-season spec 2026-07-21 §1: the organizer's own verbs — the SAME crewStore/
-    // golferStore instances every other crew/season use case above shares.
-    closeSeason: closeSeason({ crewStore, golferStore }),
+    // golferStore instances every other crew/season use case above shares. closeSeason also
+    // stamps the window's end (crew-scoreboard spec §2), the SAME clock.
+    closeSeason: closeSeason({ crewStore, golferStore, clock }),
     reopenSeason: reopenSeason({ crewStore, golferStore }),
     appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
     removeCountedRound: removeCountedRound({ crewStore, golferStore }),

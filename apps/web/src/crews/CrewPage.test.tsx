@@ -458,8 +458,8 @@ describe("CrewPage — organizer authority", () => {
 // Architecture-realignment Task 11: the crew page speaks seasons — a list + "New season", and
 // picking one renders SeasonPanel.
 describe("CrewPage — seasons", () => {
-  const seasonA: CrewSeasonView = { seasonId: "season-a", name: "2025", status: "open", createdAtMs: 1_000 };
-  const seasonB: CrewSeasonView = { seasonId: "season-b", name: "2026", status: "open", createdAtMs: 2_000 };
+  const seasonA: CrewSeasonView = { seasonId: "season-a", name: "2025", status: "open", createdAtMs: 1_000, startsAtMs: 1_000 };
+  const seasonB: CrewSeasonView = { seasonId: "season-b", name: "2026", status: "open", createdAtMs: 2_000, startsAtMs: 2_000 };
 
   it("lists seasons newest-createdAtMs-first, even when the wire returns them in another order", async () => {
     signIn();
@@ -496,7 +496,7 @@ describe("CrewPage — seasons", () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
-    const closedSeason: CrewSeasonView = { seasonId: "season-closed", name: "2025", status: "closed", createdAtMs: 1_000 };
+    const closedSeason: CrewSeasonView = { seasonId: "season-closed", name: "2025", status: "closed", createdAtMs: 1_000, startsAtMs: 1_000, closedAtMs: 1_500 };
     mockedListSeasons.mockResolvedValue({ seasons: [seasonB, closedSeason] });
 
     renderPage();

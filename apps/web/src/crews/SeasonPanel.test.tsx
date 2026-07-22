@@ -632,7 +632,7 @@ describe("SeasonPanel — close/reopen season", () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValueOnce(openSeason).mockResolvedValueOnce(closedSeason);
-    mockedCloseSeason.mockResolvedValue({ season: { seasonId: "season-1", name: "2026", status: "closed", createdAtMs: 1 } });
+    mockedCloseSeason.mockResolvedValue({ season: { seasonId: "season-1", name: "2026", status: "closed", createdAtMs: 1, startsAtMs: 1, closedAtMs: 2 } });
 
     renderPanel(ANN, true);
 
@@ -663,7 +663,7 @@ describe("SeasonPanel — close/reopen season", () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
     mockedGetSeasonStandings.mockResolvedValueOnce(closedSeason).mockResolvedValueOnce(openSeason);
-    mockedReopenSeason.mockResolvedValue({ season: { seasonId: "season-1", name: "2026", status: "open", createdAtMs: 1 } });
+    mockedReopenSeason.mockResolvedValue({ season: { seasonId: "season-1", name: "2026", status: "open", createdAtMs: 1, startsAtMs: 1 } });
 
     renderPanel(ANN, true);
 

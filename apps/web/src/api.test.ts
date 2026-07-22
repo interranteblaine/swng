@@ -414,7 +414,7 @@ describe("createSeason", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(201, { season: { seasonId: "s-1", name: "2026", status: "open", createdAtMs: 1_700_000_000_000 } });
+      return fakeResponse(201, { season: { seasonId: "s-1", name: "2026", status: "open", createdAtMs: 1_700_000_000_000, startsAtMs: 1_700_000_000_000 } });
     });
 
     const input: CreateSeasonRequest = { name: "2026" };
@@ -444,7 +444,7 @@ describe("listSeasons", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { seasons: [{ seasonId: "s-1", name: "2026", status: "open", createdAtMs: 1_700_000_000_000 }] });
+      return fakeResponse(200, { seasons: [{ seasonId: "s-1", name: "2026", status: "open", createdAtMs: 1_700_000_000_000, startsAtMs: 1_700_000_000_000 }] });
     });
 
     const result = await listSeasons("tok-crew", crewId("crew-1"));

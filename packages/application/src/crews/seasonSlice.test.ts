@@ -139,7 +139,7 @@ const setup = () => {
     golferStore,
     snapshots,
     projectionStore,
-    create: createCrew({ crewStore, golferStore, ids }),
+    create: createCrew({ crewStore, golferStore, ids, clock }),
     // Crew membership (invited in, accountable out): the permanent join code is gone —
     // mint/join replace it. `mint` and `join` share this ctx's ONE tokenIssuer/clock, same as
     // every real caller shares ONE hmacTokenIssuer/system clock through compositionRoot.
@@ -149,7 +149,7 @@ const setup = () => {
     listSeasons: listSeasons({ crewStore, golferStore }),
     append: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
     remove: removeCountedRound({ crewStore, golferStore }),
-    close: closeSeason({ crewStore, golferStore }),
+    close: closeSeason({ crewStore, golferStore, clock }),
     reopen: reopenSeason({ crewStore, golferStore }),
     standings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
     records: getCrewRecords({ crewStore, golferStore, snapshots }),
@@ -203,9 +203,12 @@ describe("createSeason", () => {
     const ctx = setup();
     await seedGolfer(ctx, "ann", "Ann");
     const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
+    // createCrew auto-opens the crew's own first season (crew-scoreboard spec §2) — captured
+    // BEFORE the rejected call so "nothing created" means exactly that, not "list is empty".
+    const before = await ctx.listSeasons(asClaims("ann"), created.crew.crewId);
 
     await expect(ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "   " })).rejects.toMatchObject({ code: "invalid-season-name" });
-    await expect(ctx.listSeasons(asClaims("ann"), created.crew.crewId)).resolves.toEqual({ seasons: [] });
+    await expect(ctx.listSeasons(asClaims("ann"), created.crew.crewId)).resolves.toEqual(before);
   });
 
   it("a name past 60 characters is rejected — invalid-season-name", async () => {
@@ -218,16 +221,20 @@ describe("createSeason", () => {
 });
 
 describe("listSeasons", () => {
-  it("returns a member's crew seasons newest-first by createdAtMs", async () => {
+  it("returns a member's crew seasons newest-first by createdAtMs, including the crew's own auto-opened season", async () => {
     const ctx = setup();
     await seedGolfer(ctx, "ann", "Ann");
     const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
+    // createCrew auto-opens the crew's own first season (crew-scoreboard spec §2) — the
+    // OLDEST of the three by construction, so it sorts last below.
+    const auto = await ctx.listSeasons(asClaims("ann"), created.crew.crewId);
+    const autoSeasonId = auto.seasons[0]!.seasonId;
     const first = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2025" });
     const second = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026" });
 
     const listed = await ctx.listSeasons(asClaims("ann"), created.crew.crewId);
     // createFixedClock advances 1ms per call, so `second` has the later createdAtMs → first out.
-    expect(listed.seasons.map((s) => s.seasonId)).toEqual([second.season.seasonId, first.season.seasonId]);
+    expect(listed.seasons.map((s) => s.seasonId)).toEqual([second.season.seasonId, first.season.seasonId, autoSeasonId]);
   });
 
   it("a non-member is rejected — not-a-member", async () => {
@@ -705,7 +712,7 @@ describe("getCrewRecords", () => {
     await expect(ctx.records(asClaims("stranger"), crewId)).rejects.toMatchObject({ code: "not-a-member" });
   });
 
-  it("a crew with no seasons at all yields an empty, non-throwing response", async () => {
+  it("a fresh crew (only its own auto-opened season, nothing counted) yields an empty, non-throwing response", async () => {
     const ctx = setup();
     const ann = await seedGolfer(ctx, "ann", "Ann");
     const created = await ctx.create(asClaims("ann"), { name: "Solo Crew" });

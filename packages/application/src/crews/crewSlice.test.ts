@@ -37,7 +37,7 @@ const setup = (
     tokenIssuer,
     clock,
     ids,
-    create: createCrew({ crewStore, golferStore, ids }),
+    create: createCrew({ crewStore, golferStore, ids, clock }),
     get: getCrew({ crewStore, golferStore }),
     list: listMyCrews({ crewStore, golferStore }),
     mint: mintCrewInvite({ crewStore, golferStore, tokenIssuer, clock }),
@@ -224,7 +224,7 @@ describe("peekCrewInvite", () => {
     const golferStore = createInMemoryGolferStore();
     const tokenIssuer = createTestTokenIssuer();
     await seedAccountGolfer(golferStore, "sub-ann", "Ann");
-    const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("c") });
+    const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("c"), clock: createFixedClock(1_000) });
     const created = await create({ sub: "sub-ann" }, { name: "Sunday Skins" });
 
     // Minted against a clock frozen well BEFORE its own expiresAtMs...
@@ -302,7 +302,7 @@ describe("joinCrewByInvite", () => {
     const golferStore = createInMemoryGolferStore();
     const tokenIssuer = createTestTokenIssuer();
     await seedAccountGolfer(golferStore, "sub-ann", "Ann");
-    const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("c") });
+    const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("c"), clock: createFixedClock(1_000) });
     const created = await create({ sub: "sub-ann" }, { name: "Sunday Skins" });
     await seedAccountGolfer(golferStore, "sub-bo", "Bo");
 
@@ -471,7 +471,7 @@ describe("joinCrewByInvite conflict retry", () => {
     const clock = createFixedClock(1_000);
     await seedAccountGolfer(golferStore, "sub-ann", "Ann");
     const calId = await seedAccountGolfer(golferStore, "sub-cal", "Cal");
-    const created = await createCrew({ crewStore: inner, golferStore, ids: createSequentialIds("c") })({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    const created = await createCrew({ crewStore: inner, golferStore, ids: createSequentialIds("c"), clock })({ sub: "sub-ann" }, { name: "Sunday Skins" });
     const minted = await mintCrewInvite({ crewStore: inner, golferStore, tokenIssuer, clock })({ sub: "sub-ann" }, created.crew.crewId);
 
     const flaky = createFlakyCrewStore(inner, 1);
@@ -492,7 +492,7 @@ describe("joinCrewByInvite conflict retry", () => {
     const clock = createFixedClock(1_000);
     await seedAccountGolfer(golferStore, "sub-ann", "Ann");
     await seedAccountGolfer(golferStore, "sub-cal", "Cal");
-    const created = await createCrew({ crewStore: inner, golferStore, ids: createSequentialIds("c") })({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    const created = await createCrew({ crewStore: inner, golferStore, ids: createSequentialIds("c"), clock })({ sub: "sub-ann" }, { name: "Sunday Skins" });
     const minted = await mintCrewInvite({ crewStore: inner, golferStore, tokenIssuer, clock })({ sub: "sub-ann" }, created.crew.crewId);
 
     const flaky = createFlakyCrewStore(inner, Number.POSITIVE_INFINITY);

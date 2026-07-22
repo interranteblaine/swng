@@ -120,21 +120,27 @@ const headToHeadRecordSchema: z.ZodType<HeadToHeadRecord> = z.object({
   halves: z.number().int(),
 });
 
-// Architecture-realignment Task 9 (crew seasons + counted rounds + standings-on-read). A season
-// is a named, open/closed thing a member creates ("2026", "Summer Cup"); `seasonId` is an
-// opaque server-minted id (never accepted from the wire), `createdAtMs` lets a client sort
-// newest-first (the use case sorts too — this just carries the fact).
+// Architecture-realignment Task 9 (crew seasons + counted rounds + standings-on-read); window
+// bounds added by the crew-scoreboard spec §2. A season is a named, open/closed thing a member
+// creates ("2026", "Summer Cup"); `seasonId` is an opaque server-minted id (never accepted from
+// the wire), `createdAtMs` lets a client sort newest-first (the use case sorts too — this just
+// carries the fact). `startsAtMs`/`closedAtMs` are the window bounds — CrewSeasonView IS
+// CrewSeason field-for-field (createSeason.ts's own standing rule), no separate mapper.
 export interface CrewSeasonView {
   readonly seasonId: string;
   readonly name: string;
   readonly status: "open" | "closed";
   readonly createdAtMs: number;
+  readonly startsAtMs: number;
+  readonly closedAtMs?: number;
 }
 export const crewSeasonViewSchema: z.ZodType<CrewSeasonView> = z.object({
   seasonId: z.string(),
   name: z.string(),
   status: z.enum(["open", "closed"]),
   createdAtMs: z.number().int(),
+  startsAtMs: z.number().int(),
+  closedAtMs: z.number().int().optional(),
 });
 
 // `name` is `.min(1)` on the wire (the same non-empty floor createCrewRequestSchema uses); the

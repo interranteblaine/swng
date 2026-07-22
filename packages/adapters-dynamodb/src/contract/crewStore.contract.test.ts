@@ -5,7 +5,7 @@ import type { Crew, CrewMember } from "@swng/domain";
 import { addMember, crewId, golferId, roundId } from "@swng/domain";
 import type { CountedRound, CrewSeason } from "@swng/application";
 import { createDynamoCrewStore } from "../createDynamoCrewStore.js";
-import { crewPk, crewSk, memberSk } from "../keys.js";
+import { crewPk, crewSk, memberSk, seasonSk } from "../keys.js";
 import type { LocalDynamo } from "../testing/local.js";
 import { startLocalDynamo } from "../testing/local.js";
 
@@ -217,6 +217,7 @@ describe("createDynamoCrewStore", () => {
       name,
       status,
       createdAtMs: Date.now(),
+      startsAtMs: Date.now(),
     });
 
     const newCountedRound = (roundIdValue = roundId(randomUUID())): CountedRound => ({
@@ -283,6 +284,91 @@ describe("createDynamoCrewStore", () => {
         await store.put(crew, undefined);
 
         expect(await store.listSeasons(crew.id)).toEqual([]);
+      });
+    });
+
+    // Window bounds (crew-scoreboard spec §2): startsAtMs is required and always carried;
+    // closedAtMs is optional and present ONLY once a season has been closed. The legacy fold and
+    // the whole-item-put reopen guarantee are both real invariants beta storage depends on, so
+    // they're proven here against DynamoDB Local, not just the in-memory fake.
+    describe("season window bounds (crew-scoreboard spec §2)", () => {
+      it("an OPEN season round-trips startsAtMs and carries NO closedAtMs at all", async () => {
+        const store = newStore();
+        const crew = makeCrew("Window Crew");
+        await store.put(crew, undefined);
+        const season = newSeason("2026");
+
+        await store.putSeason(crew.id, season);
+
+        const found = await store.getSeason(crew.id, season.seasonId);
+        expect(found).toEqual(season);
+        expect(found).not.toHaveProperty("closedAtMs");
+        expect(await store.listSeasons(crew.id)).toEqual([season]);
+      });
+
+      it("a CLOSED season round-trips both startsAtMs and closedAtMs", async () => {
+        const store = newStore();
+        const crew = makeCrew("Closed Window Crew");
+        await store.put(crew, undefined);
+        const closed: CrewSeason = { ...newSeason("2026"), status: "closed", closedAtMs: Date.now() };
+
+        await store.putSeason(crew.id, closed);
+
+        expect(await store.getSeason(crew.id, closed.seasonId)).toEqual(closed);
+        expect(await store.listSeasons(crew.id)).toEqual([closed]);
+      });
+
+      // Legacy fold: a season row written before startsAtMs existed (seeded directly with a raw
+      // PutCommand, never through the store API — which can no longer even TYPE a CrewSeason
+      // missing the field) reads back as startsAtMs === createdAtMs, no migration.
+      it("a legacy season item with no stored startsAtMs reads back as startsAtMs === createdAtMs", async () => {
+        const store = newStore();
+        const crew = makeCrew("Legacy Season Crew");
+        await store.put(crew, undefined);
+        const seasonId = randomUUID();
+        const createdAtMs = Date.now();
+
+        await local.client.send(
+          new PutCommand({
+            TableName: local.coreTable,
+            Item: { pk: crewPk(crew.id), sk: seasonSk(seasonId), season: { seasonId, name: "2020", status: "open", createdAtMs } },
+          }),
+        );
+
+        const found = await store.getSeason(crew.id, seasonId);
+        expect(found?.startsAtMs).toBe(createdAtMs);
+        expect(found).toEqual({ seasonId, name: "2020", status: "open", createdAtMs, startsAtMs: createdAtMs });
+
+        const listed = await store.listSeasons(crew.id);
+        expect(listed).toEqual([{ seasonId, name: "2020", status: "open", createdAtMs, startsAtMs: createdAtMs }]);
+      });
+
+      // Whole-item-put proof (the port doc's own contract, reopenSeason.ts's reason for
+      // existing): closing sets closedAtMs, reopening — putSeason called with a CrewSeason that
+      // has NO closedAtMs property at all — must leave the field truly ABSENT in storage, not
+      // present-but-undefined. Checked with a raw GetCommand, not the store's own getSeason
+      // (which would tolerate either shape).
+      it("close-then-reopen (a putSeason with no closedAtMs property) ends with closedAtMs truly ABSENT from storage", async () => {
+        const store = newStore();
+        const crew = makeCrew("Reopen Crew");
+        await store.put(crew, undefined);
+        const open = newSeason("2026");
+        await store.putSeason(crew.id, open);
+
+        const closed: CrewSeason = { ...open, status: "closed", closedAtMs: Date.now() };
+        await store.putSeason(crew.id, closed);
+        const rawClosed = await local.client.send(new GetCommand({ TableName: local.coreTable, Key: { pk: crewPk(crew.id), sk: seasonSk(open.seasonId) } }));
+        expect(rawClosed.Item?.season).toHaveProperty("closedAtMs");
+
+        // Reopen: the caller's own CrewSeason (mirroring reopenSeason.ts) carries no
+        // closedAtMs property whatsoever.
+        const reopened: CrewSeason = { seasonId: open.seasonId, name: open.name, status: "open", createdAtMs: open.createdAtMs, startsAtMs: open.startsAtMs };
+        expect(reopened).not.toHaveProperty("closedAtMs");
+        await store.putSeason(crew.id, reopened);
+
+        const raw = await local.client.send(new GetCommand({ TableName: local.coreTable, Key: { pk: crewPk(crew.id), sk: seasonSk(open.seasonId) } }));
+        expect(raw.Item?.season).not.toHaveProperty("closedAtMs");
+        expect(await store.getSeason(crew.id, open.seasonId)).toEqual(reopened);
       });
     });
 
@@ -421,7 +507,7 @@ describe("createDynamoCrewStore", () => {
         const store = newStore();
         const crew = makeCrew("Guard Crew");
         await store.put(crew, undefined);
-        const badSeason: CrewSeason = { seasonId: "X#ROUND#Y", name: "Bad Season", status: "open", createdAtMs: Date.now() };
+        const badSeason: CrewSeason = { seasonId: "X#ROUND#Y", name: "Bad Season", status: "open", createdAtMs: Date.now(), startsAtMs: Date.now() };
 
         await expect(store.putSeason(crew.id, badSeason)).rejects.toThrow(/seasonId contains "#"/);
 

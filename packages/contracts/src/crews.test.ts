@@ -133,10 +133,15 @@ describe("season + standings schemas", () => {
     expect(() => parse(appendCountedRoundRequestSchema, { roundId: "round-1", appendedBy: "sneaky" })).toThrow(ContractError);
   });
 
-  it("createSeasonResponseSchema / listSeasonsResponseSchema round-trip a season view", () => {
-    const season = { seasonId: "s-1", name: "2026", status: "open" as const, createdAtMs: 1_700_000_000_000 };
-    roundTrips(createSeasonResponseSchema, { season });
-    roundTrips(listSeasonsResponseSchema, { seasons: [season] });
+  it("createSeasonResponseSchema / listSeasonsResponseSchema round-trip a season view — open (no closedAtMs) and closed (both bounds)", () => {
+    const open = { seasonId: "s-1", name: "2026", status: "open" as const, createdAtMs: 1_700_000_000_000, startsAtMs: 1_700_000_000_000 };
+    roundTrips(createSeasonResponseSchema, { season: open });
+    roundTrips(listSeasonsResponseSchema, { seasons: [open] });
+
+    // crew-scoreboard spec §2: closedAtMs is optional, present only once a season has closed.
+    const closed = { ...open, seasonId: "s-2", status: "closed" as const, closedAtMs: 1_710_000_000_000 };
+    roundTrips(createSeasonResponseSchema, { season: closed });
+    roundTrips(listSeasonsResponseSchema, { seasons: [open, closed] });
   });
 
   it("seasonStandingsResponseSchema round-trips ledger (with name) + head-to-head + rounds, partners/superlatives empty", () => {

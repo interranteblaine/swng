@@ -479,6 +479,14 @@ return {
 
 ### Task 4: E2E — frozen scoreboard oracles and the window taught on the wire
 
+> AMENDED post-Task-3 (2026-07-21): `sharedRoundIds` requires ≥2 CURRENT roster members,
+> so during the deck's solo-Al phases (tests 4/5/7) `ledger`/`headToHead`/`partners`/
+> `rounds` are ALL empty — Task 3's reconciliation asserts that emptiness honestly and
+> relocated the frozen-number assertions to the {Al, Bo} tests (8/8b/9). This task's live
+> oracles build on that reality; the original Step 2 wording predates it. Task 3's
+> reviewer also deferred ONE ⚠️ here: no e2e yet asserts a POPULATED `rounds` list in the
+> new `{roundId, finalizedAt}` shape — Step 2 now owns it.
+
 **Files:**
 - Modify: `apps/web/e2e/crewSeason.spec.ts`
 - Sweep: `grep -rn "counted\|season" e2e/ apps/web/e2e/` for any other surface (expected:
@@ -494,10 +502,12 @@ return {
   don't assume): 12 rounds each; `best18` present; `netPer18` present (≥3); `index`
   present; `indexDelta` ABSENT for everyone (no pre-window lines).
 - [ ] **Step 2: Live assertions, roster-scoped.** Test 5 (roster is Al alone at that
-  point): `standings.scoreboard` is exactly Al's frozen row (plus his roster name).
-  Test 8 (Bo joins late): the board now carries Bo's frozen row too — the
-  aggregation-scope law reaching the scoreboard. Live lines differ from the local
-  synthesis only in real timestamps, which no column reads.
+  point): `standings.scoreboard` is exactly Al's frozen row (plus his roster name) —
+  upgrading Task 3's provisional `alRow.rounds === 12` to the full row. Test 8 (Bo joins
+  late): the board now carries Bo's frozen row too — the aggregation-scope law reaching
+  the scoreboard — AND `standings.rounds` is now POPULATED: all 12 deck roundIds in
+  `{roundId, finalizedAt}` shape, newest-first (the deferred ⚠️). Live lines differ from
+  the local synthesis only in real timestamps, which no column reads.
 - [ ] **Step 3: New final test — "the window on the wire."** Close "The Golden Dozen"
   (organizer) → play a 13th round shared by Al+Bo with NO games (join + scores +
   finalize) → closed standings: `rounds` still the 12, ledger byte-identical (the window

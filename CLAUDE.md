@@ -1245,6 +1245,50 @@ product-facing): crew-name-edit trusts the PUT response while season-edit refetc
 stylistic, both correct); `crewSeason.spec` describe-title still narrates the deleted counted-round
 model (test-file comment, zero user impact). On local `main`, never pushed.
 
+"Played together" renders a round the canonical way — course · date, one shared helper
+(post-season-is-the-record, 2026-07-22, spec
+`docs/superpowers/specs/2026-07-22-played-together-round-label-design.md`, plan
+`2026-07-22-played-together-round-label.md`, 4 SDD tasks, commits `3503450..25c548c`, base
+`ca569c0`): the owner, reviewing the shipped crew surface, caught the crew page's "Played
+together" list rendering each shared round as a bare `new Date(finalizedAt).toLocaleDateString()`
+("7/22/2026") — uninformative (no course, no context) and off-idiom (the raw locale date the app
+deliberately never uses for a round; near midnight it shows the neighboring calendar day). Every
+OTHER round list renders the canonical `roundLabel` ("Casa Verde GC · Wed, Jul 22" — course + date,
+tee time appended only to disambiguate two rounds sharing course AND day). The fix makes "Played
+together" match, via **facts-on-the-wire, formatting-in-the-web** (the owner probed "are you
+building the backend for the frontend?" — the answer held: `courseName`/`createdAt` are round-
+identity FACTS the golfer-record history wire already serves per round; the label string and the
+collision decision stay web-side). ONE shared helper extracted — `dayCollisionChecker` lifted from
+HomePage's inline map into `roundLabel.ts` (the ONE canonical in-list collision rule, reused by
+HomePage byte-identically + the crew list; presentation, not on the compute fence). The wire grew
+additively-but-required: `SharedRoundView` gains `courseName` (REQUIRED — it is required on
+`GolferRoundLine`, the line it's derived from) + `createdAt?` (OPTIONAL — a pre-`createdAtMs` line
+renders as the bare course name), populated in `getSeasonStandings` from the SAME authoritative
+member line it already reads for `finalizedAt` (first-holder-wins is safe: course + created-at are
+frozen identically on every participant's line; no new lookup, sort unchanged). `SeasonPanel`
+renders `roundLabel({courseName, createdAt}, {withTime: roundCollidesOnDay(round)})` as the whole-row
+link; `toLocaleDateString`/the `finalizedAt`-as-display use are gone from the file. Compile-forced
+fixture edits (contracts round-trip line + three SeasonPanel fixtures) kept validate green inside
+Task 2's atomic commit; the slice test proves createdAt round-trips present AND absent, window-
+neutral (the fold reads `createdAtMs ?? finalizedAtMs`). Task 4 tightened `crewSeason.spec` test 8 to
+assert every shared round carries the deck course's name over the wire (an API-level test — the
+plan's "link to /rounds/:id" was a browser notion reconciled to the field assertion the API can
+prove). Whole-branch review was controller-run against source (subagents exhausted this session):
+READY TO DEPLOY — YES, 0 Critical/0 Important. Close-out (controller-run): `validate` exit 0 at HEAD
+→ `deploy:beta` LAMBDA-FIRST (`swng-beta` UPDATE_COMPLETE 53.15s — new required `courseName`; old
+bundle tolerates the extra field via zod's default strip, so lambda-first is safe) →
+`publish:web:beta` (bundle `index-D1hdc4dX.js`, CF invalidation `I8PR1B7RNXOJ1OX61P6KLRMRXW`) →
+`e2e:beta` 17/17 ×2 → **crewSeason live 10/10 ×2** (test 8's courseName assertion + the frozen deck
+byte-identical) → full `e2e:field` **66 passed / 1 documented-skip FIRST RUN** → an eyes-on-pixels
+USE walk on the DEPLOYED `beta.swng.golf` (seeded two throwaway accounts sharing one finalized round,
+injected auth, opened the crew page: the "Played together" row rendered **`Casa Verde GC … · Wed, Jul
+22`** as the underlined whole-row link to `/rounds/:id` — screenshot read, the canonical roundLabel
+live, NOT a bare locale date; "Games together" showed the honest empty-state copy; throwaway Cognito
+users torn down, test crew left on disposable beta) → this docs sweep. NO wipe (all compute-on-read;
+additive wire only). Riding as notes: the `(typeof members)[number]["lines"][number]` inline map type
+in getSeasonStandings is dense (named-alias candidate); the USE walk didn't capture console messages
+(the e2e suites assert clean behavior; the render is visually clean). On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

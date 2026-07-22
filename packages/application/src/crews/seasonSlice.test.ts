@@ -4,6 +4,7 @@ import type { GolferId, GolferRoundLine, Participant, RoundArchive, RoundEvent, 
 import type { AccountClaims } from "../ports/accountClaims.js";
 import {
   createFixedClock,
+  createFrozenClock,
   createInMemoryCrewStore,
   createInMemoryGolferStore,
   createInMemoryProjectionStore,
@@ -24,6 +25,7 @@ import { listSeasons } from "./listSeasons.js";
 import { mintCrewInvite } from "./mintCrewInvite.js";
 import { removeCountedRound } from "./removeCountedRound.js";
 import { reopenSeason } from "./reopenSeason.js";
+import { yearStartUtcMs } from "./seasonStart.js";
 
 // A finalized-round snapshot (RoundArchive) with a decided singles match — the smallest shape
 // crewContribution produces a ledger line + head-to-head entry from. `names` lets a test give
@@ -176,6 +178,25 @@ const crewWithSeason = async (ctx: ReturnType<typeof setup>) => {
   const season = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026" });
   return { ann, bo, crewId: created.crew.crewId, seasonId: season.season.seasonId };
 };
+
+describe("createCrew — auto-opened season window", () => {
+  it("listSeasons yields exactly one OPEN season named for the year, startsAtMs === yearStartUtcMs(now) asserted directly (the start rule's no-closed-seasons arm)", async () => {
+    const crewStore = createInMemoryCrewStore();
+    const golferStore = createInMemoryGolferStore();
+    const now = Date.UTC(2026, 5, 15); // June 15, 2026 (fixed) — mid-year, so Jan 1 is a real computation
+    const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("y"), clock: createFrozenClock(now) });
+    await putAndBindGolfer(golferStore, golferId("golfer-ann"), "ann", "Ann");
+
+    const created = await create(asClaims("ann"), { name: "Sunday Skins" });
+    const seasons = await crewStore.listSeasons(created.crew.crewId);
+
+    expect(seasons).toHaveLength(1);
+    expect(seasons[0]).toMatchObject({ name: "2026", status: "open" });
+    expect(seasons[0]!.startsAtMs).toBe(yearStartUtcMs(now));
+    // Pinned literal too, not just self-referential against the function under test.
+    expect(seasons[0]!.startsAtMs).toBe(Date.UTC(2026, 0, 1));
+  });
+});
 
 describe("createSeason", () => {
   it("a member creates an OPEN season with a server-minted id", async () => {
@@ -798,5 +819,40 @@ describe("closeSeason / reopenSeason", () => {
 
     await expect(ctx.close(asClaims("ann"), crewId, "no-such-season")).rejects.toMatchObject({ code: "season-not-found" });
     await expect(ctx.reopen(asClaims("ann"), crewId, "no-such-season")).rejects.toMatchObject({ code: "season-not-found" });
+  });
+
+  it("closeSeason stamps closedAtMs to the exact clock reading, on both the returned and the stored season", async () => {
+    const crewStore = createInMemoryCrewStore();
+    const golferStore = createInMemoryGolferStore();
+    const closeAt = Date.UTC(2026, 6, 1); // July 1, 2026 (fixed) — the ONE value close() should stamp
+    const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("w"), clock: createFrozenClock(Date.UTC(2026, 0, 15)) });
+    const close = closeSeason({ crewStore, golferStore, clock: createFrozenClock(closeAt) });
+    await putAndBindGolfer(golferStore, golferId("golfer-ann"), "ann", "Ann");
+    const created = await create(asClaims("ann"), { name: "Sunday Skins" });
+    const seasonId = (await crewStore.listSeasons(created.crew.crewId))[0]!.seasonId;
+
+    const closed = await close(asClaims("ann"), created.crew.crewId, seasonId);
+
+    expect(closed.season.closedAtMs).toBe(closeAt);
+    const stored = await crewStore.getSeason(created.crew.crewId, seasonId);
+    expect(stored?.closedAtMs).toBe(closeAt);
+  });
+
+  it("reopenSeason removes closedAtMs entirely — absent (not undefined) on both the returned and the stored season", async () => {
+    const crewStore = createInMemoryCrewStore();
+    const golferStore = createInMemoryGolferStore();
+    const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("w2"), clock: createFrozenClock(Date.UTC(2026, 0, 15)) });
+    const close = closeSeason({ crewStore, golferStore, clock: createFrozenClock(Date.UTC(2026, 6, 1)) });
+    const reopen = reopenSeason({ crewStore, golferStore });
+    await putAndBindGolfer(golferStore, golferId("golfer-ann"), "ann", "Ann");
+    const created = await create(asClaims("ann"), { name: "Sunday Skins" });
+    const seasonId = (await crewStore.listSeasons(created.crew.crewId))[0]!.seasonId;
+    await close(asClaims("ann"), created.crew.crewId, seasonId);
+
+    const reopened = await reopen(asClaims("ann"), created.crew.crewId, seasonId);
+
+    expect(reopened.season).not.toHaveProperty("closedAtMs");
+    const stored = await crewStore.getSeason(created.crew.crewId, seasonId);
+    expect(stored).not.toHaveProperty("closedAtMs");
   });
 });

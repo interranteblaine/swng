@@ -464,13 +464,19 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // The deferred ⚠️ (task-3 review): `standings.rounds` — "played together" — is now POPULATED
     // with >=2 CURRENT roster members sharing a line on every one of the 12 deck rounds. Asserted
     // as an actual SET (not merely a length) against the roundIds test 3 minted, in the wire's
-    // `{roundId, finalizedAt}` shape, newest-first by finalizedAt (getSeasonStandings.ts's own
-    // sort) — a real ordering property, not just "some rounds came back."
+    // `{roundId, finalizedAt, courseName, createdAt?}` shape (grown by spec 2026-07-22 §3 so the
+    // "Played together" list renders the canonical roundLabel), newest-first by finalizedAt
+    // (getSeasonStandings.ts's own sort) — a real ordering property, not just "some rounds came back."
     expect(standings.rounds).toHaveLength(SEASON_ROUNDS);
     expect([...standings.rounds.map((round) => round.roundId)].sort()).toEqual([...roundIds].sort());
     for (let i = 1; i < standings.rounds.length; i += 1) {
       expect(standings.rounds[i - 1]!.finalizedAt).toBeGreaterThanOrEqual(standings.rounds[i]!.finalizedAt);
     }
+    // The canonical-label inputs land live: every shared round carries the deck course's OWN name
+    // (frozen into each golfer line at play time, echoed here for roundLabel to render as
+    // "‹course› · ‹date›" instead of a bare locale date) — the Task 2 wire+server change, proven
+    // over the wire against beta, not merely unit-mocked.
+    expect(standings.rounds.every((round) => round.courseName === courseName)).toBe(true);
 
     // Additive analytics with Bo now scoped in (spec §5): still no four-ball → partners [].
     expect(standings.partners).toEqual(EXPECTED_PARTNERS);

@@ -522,7 +522,7 @@ describe("SeasonPanel — together records (ledger, head-to-head, partners)", ()
 
     renderPanel();
 
-    expect(await screen.findByText("No standings from these rounds yet — standings build from games between current members.")).toBeTruthy();
+    expect(await screen.findByText("No games between current members in these rounds yet — matches, points, and skins show up here.")).toBeTruthy();
     expect(screen.queryByText("Appears when members play a round together.")).toBeNull();
     expect(screen.queryByRole("table", { name: "Games together" })).toBeNull();
   });

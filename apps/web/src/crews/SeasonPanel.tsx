@@ -277,9 +277,11 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
               : // Two truths, one honest sentence (papercut 9's distinction, widened): shared
                 // rounds exist but the roster-filtered ledger is empty either because the
                 // contributors have since left the roster, OR because the shared rounds carried
-                // no games between current members at all (e.g. a solo gameless round) — both
-                // read as "no standings yet," never a false claim that members are missing.
-                "No standings from these rounds yet — standings build from games between current members."}
+                // no games between current members at all (e.g. a solo gameless round). Says
+                // "games," not "standings" — the word "standings" is now the sibling section's
+                // name above, and this is the GAMES ledger; never a false claim that members
+                // are missing.
+                "No games between current members in these rounds yet — matches, points, and skins show up here."}
           </p>
         ) : (
           <>

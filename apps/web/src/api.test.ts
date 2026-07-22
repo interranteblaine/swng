@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cardId, courseId, crewId, gameId, golferId, roundId } from "@swng/domain";
 import type {
   AddGameRequest,
-  AppendCountedRoundRequest,
   CreateCourseRequest,
   CreateCrewRequest,
   CreateSeasonRequest,
@@ -14,7 +13,6 @@ import type {
 } from "@swng/contracts";
 import {
   addGame,
-  appendCountedRound,
   ApiError,
   createCourse,
   createCrew,
@@ -41,7 +39,6 @@ import {
   mintParticipantToken,
   peekCrewInvite,
   peekRound,
-  removeCountedRound,
   removeCrewMember,
   searchCourses,
   setHandicap,
@@ -452,63 +449,6 @@ describe("listSeasons", () => {
     expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/seasons`);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-crew");
     expect(result.seasons).toHaveLength(1);
-  });
-});
-
-describe("appendCountedRound", () => {
-  it("POSTs { roundId } to /crews/{crewId}/seasons/{seasonId}/rounds with the bearer token and parses an AppendCountedRoundResponse", async () => {
-    let seenUrl: string | undefined;
-    let seenInit: RequestInit | undefined;
-    stubFetch(async (url, init) => {
-      seenUrl = String(url);
-      seenInit = init;
-      return fakeResponse(201, { round: { roundId: "round-1", finalizedAt: 1_700_000_000_000, appendedBy: "ann-g" } });
-    });
-
-    const input: AppendCountedRoundRequest = { roundId: roundId("round-1") };
-    const result = await appendCountedRound("tok-crew", crewId("crew-1"), "season-1", input);
-
-    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/seasons/season-1/rounds`);
-    expect(seenInit?.method).toBe("POST");
-    expect(JSON.parse(String(seenInit?.body))).toEqual(input);
-    expect(result.round.roundId).toBe(roundId("round-1"));
-  });
-
-  it("throws a coded ApiError('round-already-counted') on a 409", async () => {
-    stubFetch(async () => fakeResponse(409, { code: "round-already-counted", message: "round round-1 is already counted in season season-1 of crew crew-1" }));
-
-    const error: unknown = await appendCountedRound("tok-crew", crewId("crew-1"), "season-1", { roundId: roundId("round-1") }).catch((caught: unknown) => caught);
-
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).code).toBe("round-already-counted");
-  });
-});
-
-describe("removeCountedRound", () => {
-  it("DELETEs /crews/{crewId}/seasons/{seasonId}/rounds/{roundId} with the bearer token and parses a RemoveCountedRoundResponse", async () => {
-    let seenUrl: string | undefined;
-    let seenInit: RequestInit | undefined;
-    stubFetch(async (url, init) => {
-      seenUrl = String(url);
-      seenInit = init;
-      return fakeResponse(200, { roundId: "round-1" });
-    });
-
-    const result = await removeCountedRound("tok-crew", crewId("crew-1"), "season-1", roundId("round-1"));
-
-    expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/seasons/season-1/rounds/round-1`);
-    expect(seenInit?.method).toBe("DELETE");
-    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-crew");
-    expect(result).toEqual({ roundId: roundId("round-1") });
-  });
-
-  it("throws a coded ApiError('not-the-appender') on a 403", async () => {
-    stubFetch(async () => fakeResponse(403, { code: "not-the-appender", message: "only the appending member may remove this round" }));
-
-    const error: unknown = await removeCountedRound("tok-crew", crewId("crew-1"), "season-1", roundId("round-1")).catch((caught: unknown) => caught);
-
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).code).toBe("not-the-appender");
   });
 });
 

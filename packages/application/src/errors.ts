@@ -74,12 +74,7 @@ export type ApplicationErrorCode =
   // "participant" tier check) — a forbidden actor, same shape as not-a-participant above (403,
   // not 401: the bearer verified fine, it just isn't allowed to do this).
   | "read-only-token"
-  // Architecture-realignment Task 8 (task-8-brief.md): CrewStore.addCountedRound's collision
-  // signal — the SAME roundId is already counted in THIS season of the crew. Storage-level
-  // dedupe only; the SAME round counted in a DIFFERENT season of the same crew is allowed and
-  // never trips this.
-  | "round-already-counted"
-  // Architecture-realignment Task 9 (crew seasons + counted rounds + standings-on-read):
+  // Architecture-realignment Task 9 (crew seasons + standings-on-read):
   // createSeason validates the season name inline — trimmed 1-60, the SAME bounds
   // validateCrewName holds a crew name to, but application-layer (a season is store data, not a
   // domain entity), so it lives here rather than in domain/crew. A bad-body precondition the
@@ -88,21 +83,16 @@ export type ApplicationErrorCode =
   // Task 9: getSeason found nothing under (crewId, seasonId) — an unresolvable season id, the
   // same "identified resource not found" 404 shape as unknown-crew/round-not-found above.
   | "season-not-found"
-  // Task 9: an append or remove against a CLOSED season — a failed precondition on the season's
-  // own lifecycle, same 409 bucket as round-already-counted/crew-conflict above.
-  | "season-closed"
   // Close-season spec (2026-07-21): closeSeason/reopenSeason's own explicit-conflict pair — a
   // stale client learns the truth, never a silent no-op (the tee-set-revised/card-superseded
-  // precedent). Deliberately DISTINCT wire codes from season-closed above (that one guards
-  // append/remove; these guard the close/reopen verbs themselves), same 409 bucket.
+  // precedent), same 409 bucket as crew-conflict.
   | "season-already-closed"
   | "season-not-closed"
-  // Task 9: the appender's own golferId isn't among the counted round's snapshot participants
-  // ("you can only count a round you actually played" — spec §4). A forbidden actor, same 403
-  // bucket as not-a-member/not-a-viewer above.
+  // Task 9: originally the counted-round use cases' own forbidden-actor codes (a member
+  // appending a round they didn't play / removing one they didn't append). The counting
+  // apparatus these guarded is deleted whole (crew-scoreboard spec §2b) — kept here, unused,
+  // rather than chased as a separate cleanup this task's scope didn't cover.
   | "did-not-play"
-  // Task 9: only the member who appended a counted round may remove it. A forbidden actor, same
-  // 403 bucket as did-not-play/not-a-member above.
   | "not-the-appender"
   // Crew membership (invited in, accountable out — spec §1): removeCrewMember/transferOrganizer's
   // authorization gate — the caller passed requireCrewMember (they ARE a member) but isn't the
@@ -110,7 +100,7 @@ export type ApplicationErrorCode =
   | "not-organizer"
   // Crew membership (invited in, accountable out — spec §1): leaveCrew's organizer guard — the
   // organizer cannot leave (the crew would be left with none). A failed lifecycle precondition,
-  // same 409 bucket as season-closed/round-already-counted above; the message names the way out
+  // same 409 bucket as season-already-closed/crew-conflict above; the message names the way out
   // (transfer the role first, then leave).
   | "organizer-must-transfer"
   // Course-cards spec §6: CardStore.supersede's collision signal — the CURRENT pointer no

@@ -3,7 +3,6 @@ import type { z } from "zod";
 import { crewId, golferId, roundId } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
 import {
-  appendCountedRoundRequestSchema,
   createCrewRequestSchema,
   createSeasonRequestSchema,
   createSeasonResponseSchema,
@@ -126,11 +125,6 @@ describe("season + standings schemas", () => {
   it("createSeasonRequestSchema rejects a server-assigned seasonId (.strict())", () => {
     roundTrips(createSeasonRequestSchema, { name: "Summer Cup" });
     expect(() => parse(createSeasonRequestSchema, { name: "Summer Cup", seasonId: "sneaky" })).toThrow(ContractError);
-  });
-
-  it("appendCountedRoundRequestSchema round-trips a roundId, rejects extras", () => {
-    roundTrips(appendCountedRoundRequestSchema, { roundId: roundId("round-1") });
-    expect(() => parse(appendCountedRoundRequestSchema, { roundId: "round-1", appendedBy: "sneaky" })).toThrow(ContractError);
   });
 
   it("createSeasonResponseSchema / listSeasonsResponseSchema round-trip a season view — open (no closedAtMs) and closed (both bounds)", () => {

@@ -1,16 +1,16 @@
 import type { GolferId } from "../ids.js";
-import { fullyHoledOut, grossOf } from "../golfer/analytics.js";
-import { archiveGolferLine } from "../golfer/record.js";
 import type { RoundArchive } from "../round/archive.js";
-import { roundHalfUp } from "../scoring/strokes.js";
 import { configForResult } from "./ledger.js";
 import type { SeasonLedgerLine } from "./ledger.js";
 
-// Crew analytics — new folds beside the existing standings (analytics spec 2026-07-21 §5):
-// compute on read over the season's counted snapshots, nothing stored, current-roster scoping
-// applies exactly as the existing ledger (`memberIds` narrows every fold, same as
-// aggregateSeason's own roster filter one layer up). Mirrors ledger.ts's own idiom — a pure
-// accumulator Map keyed on a canonical string, sorted once at the end.
+// Crew analytics — folds beside the existing standings (analytics spec 2026-07-21 §5): compute
+// on read over a season's shared snapshots, nothing stored, current-roster scoping applies
+// exactly as the existing ledger (`memberIds` narrows every fold, same as aggregateSeason's own
+// roster filter one layer up). Mirrors ledger.ts's own idiom — a pure accumulator Map keyed on
+// a canonical string, sorted once at the end. The lowest-net-average and most-improved-index
+// folds (and their own result types) — the season superlatives these fed — are deleted whole
+// (crew-scoreboard spec §3c: the per-member scoreboard supersedes winner-only callouts; keeping
+// both would put two differently-defined net numbers on one page).
 
 export interface PartnerRecord {
   readonly a: GolferId;
@@ -63,79 +63,6 @@ export const partnerRecords = (archives: readonly RoundArchive[], memberIds: Rea
   return [...pairs.values()].sort((x, y) =>
     x.wins !== y.wins ? y.wins - x.wins : x.a !== y.a ? (x.a < y.a ? -1 : 1) : x.b < y.b ? -1 : x.b > y.b ? 1 : 0,
   );
-};
-
-export interface NetAverage {
-  readonly golferId: GolferId;
-  readonly holes: 9 | 18;
-  readonly rounds: number;
-  readonly average: number;
-}
-
-const NET_AVERAGE_MIN_ROUNDS = 3;
-
-// Lowest net average (spec §5): per member, mean of (gross − courseHandicap) over fully
-// holed-out counted rounds they played, grouped by hole count independently (a 9 never blends
-// into an 18 — the bestsOf/courseRecord precedent). A member QUALIFIES for a hole count at >=3
-// rounds; qualifying at BOTH hole counts keeps only the one with more qualifying rounds (tie ->
-// 18); qualifying at NEITHER omits the member entirely — missing data is never ranked as zero.
-// `archiveGolferLine` throws `unknown-participant` for a golfer not on that archive's roster, so
-// every read is guarded by `participants.some(...)` first — sitting out a round is silent, never
-// a throw.
-export const netAverages = (archives: readonly RoundArchive[], memberIds: ReadonlySet<GolferId>): readonly NetAverage[] => {
-  const nets = new Map<GolferId, { 9: number[]; 18: number[] }>();
-
-  for (const archive of archives) {
-    for (const golferId of memberIds) {
-      if (!archive.participants.some((p) => p.golferId === golferId)) continue;
-      const line = archiveGolferLine(archive, golferId);
-      if (!fullyHoledOut(line)) continue;
-      const net = grossOf(line) - line.courseHandicap;
-      const byHoles = nets.get(golferId) ?? { 9: [], 18: [] };
-      byHoles[line.holes].push(net);
-      nets.set(golferId, byHoles);
-    }
-  }
-
-  const results: NetAverage[] = [];
-  for (const [golferId, byHoles] of nets) {
-    const nineQualifies = byHoles[9].length >= NET_AVERAGE_MIN_ROUNDS;
-    const eighteenQualifies = byHoles[18].length >= NET_AVERAGE_MIN_ROUNDS;
-    if (!nineQualifies && !eighteenQualifies) continue;
-    const holes: 9 | 18 = nineQualifies && (!eighteenQualifies || byHoles[9].length > byHoles[18].length) ? 9 : 18;
-    const rounds = byHoles[holes];
-    const average = roundHalfUp((rounds.reduce((sum, net) => sum + net, 0) / rounds.length) * 10) / 10;
-    results.push({ golferId, holes, rounds: rounds.length, average });
-  }
-
-  return results.sort((x, y) => (x.average !== y.average ? x.average - y.average : x.golferId < y.golferId ? -1 : x.golferId > y.golferId ? 1 : 0));
-};
-
-export interface ImprovementEntry {
-  readonly golferId: GolferId;
-  readonly from: number;
-  readonly to: number;
-}
-
-// Most improved (spec §5): a PURE sorter/filter over application-computed entries — each
-// member's own swng index as of the season's first and last counted round. The index-at-boundary
-// lookup itself (a bounded cross-read: one query per roster member) is Task 5's job in the
-// application layer, deliberately NOT here — this stays a domain fold over already-resolved
-// numbers, never a fetcher. Only a DROP (to < from) counts as improvement; a riser or a member
-// missing either end is silently excluded, never zeroed or flagged.
-export const mostImproved = (
-  entries: readonly { readonly golferId: GolferId; readonly from?: number; readonly to?: number }[],
-): readonly ImprovementEntry[] => {
-  const drops: ImprovementEntry[] = [];
-  for (const entry of entries) {
-    if (entry.from === undefined || entry.to === undefined || !(entry.to < entry.from)) continue;
-    drops.push({ golferId: entry.golferId, from: entry.from, to: entry.to });
-  }
-  return drops.sort((x, y) => {
-    const dropX = x.from - x.to;
-    const dropY = y.from - y.to;
-    return dropX !== dropY ? dropY - dropX : x.golferId < y.golferId ? -1 : x.golferId > y.golferId ? 1 : 0;
-  });
 };
 
 // Season title (spec §5): the Stableford points leader(s) of one season's ALREADY

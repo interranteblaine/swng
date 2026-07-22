@@ -1,19 +1,22 @@
 import type { Crew, CrewId, GolferId, RoundId } from "@swng/domain";
 
-// Crew seasons + counted rounds (architecture-realignment task-8-brief.md §4): a crew defines
-// its own seasons and counts FINISHED rounds into them by roundId, on the crew's side only —
-// a round itself records no crewId/seasonId back-reference (round-is-a-sealed-leaf, the
-// realignment's own correction to M8's crewId-on-round weld). `seasonId` is minted by CALLERS
-// (Task 9's create-season use case, via IdGenerator.newId()) — this store treats it as an
-// opaque string.
+// Crew seasons (architecture-realignment task-8-brief.md §4; the counting apparatus this
+// comment used to describe (a season's own stored, appendable, removable ledger of counted
+// rounds) is deleted whole, crew-scoreboard spec §2b: standings are computed on read over a
+// window instead, never a stored ledger). A crew defines its own seasons
+// as named time windows on its own side only — a round itself records no crewId/seasonId
+// back-reference (round-is-a-sealed-leaf, the realignment's own correction to M8's
+// crewId-on-round weld). `seasonId` is minted by CALLERS (Task 9's create-season use case, via
+// IdGenerator.newId()) — this store treats it as an opaque string.
 export interface CrewSeason {
   // CALLER CONTRACT: seasonId is an opaque server-minted id (IdGenerator.newId() → UUID) and
   // MUST NEVER contain the "#" character. The store's key vocabulary composites seasonId
-  // between "#" separators: seasonSk(seasonId) = "SEASON#<seasonId>" and
-  // countedRoundSk(seasonId, roundId) = "SEASON#<seasonId>#ROUND#<roundId>". A "#" in
-  // seasonId would create a key collision between season items and counted-round items,
-  // breaking listSeasons' ability to filter them apart. Guards in putSeason/addCountedRound
-  // enforce this invariant at the store level.
+  // between "#" separators: seasonSk(seasonId) = "SEASON#<seasonId>". Orphaned legacy
+  // "SEASON#<seasonId>#ROUND#<roundId>" items — written by the now-deleted counting
+  // apparatus — share this prefix on purpose (createDynamoCrewStore.ts's own comment) and are
+  // tolerated forever, filtered out of listSeasons client-side (the standingGame precedent) —
+  // never a migration. The guard in putSeason below still enforces no "#" in a caller's
+  // seasonId, since the shared prefix scheme itself is unchanged.
   readonly seasonId: string;
   readonly name: string;
   readonly status: "open" | "closed";
@@ -26,15 +29,6 @@ export interface CrewSeason {
   // CrewSeason truly removes it from storage, not just from this in-memory value).
   readonly startsAtMs: number;
   readonly closedAtMs?: number;
-}
-
-// One finished round counted into a season — entity data ABOUT the crew (the crew's own
-// pointer TO a round), never the reverse.
-export interface CountedRound {
-  readonly roundId: RoundId;
-  readonly finalizedAtMs: number;
-  readonly appendedBy: GolferId;
-  readonly appendedAtMs: number;
 }
 
 // A crew's persistence, mirroring CourseStore/GolferStore's revision-conditional CRUD
@@ -56,7 +50,7 @@ export interface CrewStore {
   // GetCrew's job once a specific crew is picked).
   listByGolfer(golferId: GolferId): Promise<readonly { crewId: CrewId; name: string; memberCount: number }[]>;
 
-  // Seasons + counted rounds (task-8-brief.md). Entity data about the crew, stored under the
+  // Seasons (task-8-brief.md). Entity data about the crew, stored under the
   // crew's own key space (not a projection, not event-sourced) — a season is created, renamed,
   // or closed via the SAME upsert-by-seasonId put; there is no separate create-vs-update call,
   // and no revision to conflict on (whichever CrewSeason a caller supplies wins outright,
@@ -64,22 +58,16 @@ export interface CrewStore {
   putSeason(crewId: CrewId, season: CrewSeason): Promise<void>;
   getSeason(crewId: CrewId, seasonId: string): Promise<CrewSeason | undefined>;
   // NO ORDER PROMISED (mirrors ProjectionStore.listLines' own doc-comment idiom) — callers sort
-  // by `createdAtMs`/`name` themselves. Counted-round entries filed under any of this crew's
-  // seasons are excluded from the result (see createDynamoCrewStore's own comment for why: one
-  // Query serves both item kinds under a shared key prefix, filtered client-side).
+  // by `createdAtMs`/`name` themselves. Orphaned legacy counted-round entries filed under any of
+  // this crew's seasons (the now-deleted counting apparatus' own item shape) are excluded from
+  // the result (see createDynamoCrewStore's own comment for why: one Query serves both item
+  // kinds under a shared key prefix, filtered client-side — the standingGame tolerate-forever
+  // precedent, never a migration).
   listSeasons(crewId: CrewId): Promise<readonly CrewSeason[]>;
 
-  // Appends one counted round to a season. Collision — the SAME roundId already counted in
-  // THIS season — throws ApplicationError("round-already-counted"); this is only the
-  // storage-level dedupe, WHO may append is a Task 9 use-case concern. The SAME roundId counted
-  // in a DIFFERENT season of the same crew is allowed and entirely independent — each season is
-  // its own lens over a crew's rounds, never a global crew-wide set.
-  addCountedRound(crewId: CrewId, seasonId: string, entry: CountedRound): Promise<void>;
-  // A plain delete — removing an entry that was never there (or was already removed) is a
-  // no-op, not an error. WHO may remove is Task 9's concern, not this store's.
-  removeCountedRound(crewId: CrewId, seasonId: string, roundId: RoundId): Promise<void>;
-  // NO ORDER PROMISED, same as listSeasons above — callers sort by `finalizedAtMs` themselves.
-  listCountedRounds(crewId: CrewId, seasonId: string): Promise<readonly CountedRound[]>;
-  // True iff roundId is counted in ANY season of this crew (not scoped to one season).
+  // True iff roundId is counted in ANY season of this crew (not scoped to one season). Kept
+  // for legacy orphaned counted-round data (see listSeasons above) even though nothing writes
+  // new entries anymore — the counting apparatus that used to populate this is deleted whole
+  // (crew-scoreboard spec §2b).
   countsRound(crewId: CrewId, roundId: RoundId): Promise<boolean>;
 }

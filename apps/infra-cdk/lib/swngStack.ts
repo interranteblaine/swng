@@ -126,9 +126,12 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // ANY member, not organizer-only. POST /crews/{crewId}/members (add-by-id) is GONE — nobody
   // is conscripted onto a roster; they accept an invite (spec §3).
   { method: HttpMethod.POST, path: "/crews/{crewId}/invites" },
-  // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave.
-  // (GET /crews/{crewId}/records was GONE here — the old crew projection layer it read from was
-  // deleted — until analytics spec 2026-07-21 §5 brought it back, computed on read below.)
+  // Architecture-realignment Task 9: crew seasons + standings-on-read + leave. (GET
+  // /crews/{crewId}/records was GONE here — the old crew projection layer it read from was
+  // deleted — until analytics spec 2026-07-21 §5 brought it back, computed on read below. The
+  // counting apparatus — POST/DELETE .../seasons/{seasonId}/rounds — is deleted whole,
+  // crew-scoreboard spec §2b: standings are a computed window over shared rounds now, never a
+  // stored ledger of counted rounds.)
   { method: HttpMethod.POST, path: "/crews/{crewId}/seasons" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/seasons" },
   // close-season spec 2026-07-21 §1: the organizer's own verbs that flip CrewSeason.status —
@@ -136,8 +139,6 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // below (a signed-in crew organizer is required to reach either).
   { method: HttpMethod.POST, path: "/crews/{crewId}/seasons/{seasonId}/close" },
   { method: HttpMethod.POST, path: "/crews/{crewId}/seasons/{seasonId}/reopen" },
-  { method: HttpMethod.POST, path: "/crews/{crewId}/seasons/{seasonId}/rounds" },
-  { method: HttpMethod.DELETE, path: "/crews/{crewId}/seasons/{seasonId}/rounds/{roundId}" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/seasons/{seasonId}/standings" },
   // Analytics spec 2026-07-21 §5: all-time records across every season — same golfer tier as
   // the standings route just above.

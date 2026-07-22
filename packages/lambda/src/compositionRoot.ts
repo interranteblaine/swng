@@ -17,7 +17,6 @@ import type {
 import {
   abandonRound,
   addGame,
-  appendCountedRound,
   closeSeason,
   createCourse,
   createCrew,
@@ -49,7 +48,6 @@ import {
   readEvents,
   rebuildProjections,
   recordScore,
-  removeCountedRound,
   removeCrewMember,
   reopenSeason,
   searchCourses,
@@ -169,9 +167,6 @@ const unavailableCrewStore = (): CrewStore => {
     putSeason: unavailable,
     getSeason: unavailable,
     listSeasons: unavailable,
-    addCountedRound: unavailable,
-    removeCountedRound: unavailable,
-    listCountedRounds: unavailable,
     countsRound: unavailable,
   };
 };
@@ -347,9 +342,10 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     mintCrewInvite: mintCrewInvite({ crewStore, golferStore, tokenIssuer: tokens, clock }),
     peekCrewInvite: peekCrewInvite({ crewStore, tokenIssuer: tokens, clock }),
     joinCrewByInvite: joinCrewByInvite({ crewStore, golferStore, tokenIssuer: tokens, clock }),
-    // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read + leave
-    // — the SAME crewStore/golferStore/snapshots/clock/ids instances the crew + finalize use
-    // cases above already share (standings fold the counted snapshots, never a stored ledger).
+    // Architecture-realignment Task 9: crew seasons + standings-on-read + leave — the SAME
+    // crewStore/golferStore/snapshots/clock/ids instances the crew + finalize use cases above
+    // already share (standings fold a window of snapshots on read, never a stored ledger — the
+    // counting apparatus this comment used to describe is deleted whole, crew-scoreboard §2b).
     createSeason: createSeason({ crewStore, golferStore, ids, clock }),
     listSeasons: listSeasons({ crewStore, golferStore }),
     // close-season spec 2026-07-21 §1: the organizer's own verbs — the SAME crewStore/
@@ -357,8 +353,6 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // stamps the window's end (crew-scoreboard spec §2), the SAME clock.
     closeSeason: closeSeason({ crewStore, golferStore, clock }),
     reopenSeason: reopenSeason({ crewStore, golferStore }),
-    appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
-    removeCountedRound: removeCountedRound({ crewStore, golferStore }),
     // projectionStore (crew-scoreboard spec §3): ONE listLines query per roster member feeds the
     // scoreboard, the shared-round derivation, AND the index boundaries alike — the SAME
     // projectionStore instance getMyRecord above shares.

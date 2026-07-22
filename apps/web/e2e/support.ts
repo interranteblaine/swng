@@ -14,8 +14,6 @@ import type { BrowserContext, Locator, Page, WebSocketRoute } from "@playwright/
 import {
   addGameRequestSchema,
   addGameResponseSchema,
-  appendCountedRoundRequestSchema,
-  appendCountedRoundResponseSchema,
   closeSeasonResponseSchema,
   createCourseRequestSchema,
   createCourseResponseSchema,
@@ -37,7 +35,6 @@ import {
   parse,
   recordScoreRequestSchema,
   recordScoreResponseSchema,
-  removeCountedRoundResponseSchema,
   reopenSeasonResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
@@ -48,7 +45,6 @@ import {
 } from "@swng/contracts";
 import type {
   AddGameResponse,
-  AppendCountedRoundResponse,
   CloseSeasonResponse,
   CreateCrewResponse,
   CreateSeasonResponse,
@@ -62,7 +58,6 @@ import type {
   JoinCrewResponse,
   JoinRoundResponse,
   MintCrewInviteResponse,
-  RemoveCountedRoundResponse,
   ReopenSeasonResponse,
   SeasonStandingsResponse,
   ShareLinkResponse,
@@ -232,8 +227,8 @@ export const joinRoundDirect = async (
 // Accounts-only (the wall): the creator IS an account and the round seats them alone — nobody
 // puts anyone on a card, so extra participants join as themselves (joinRoundDirect above). The
 // Bearer rides along and the seat is resolved server-side (ensureGolfer), so the body carries no
-// name/golferId. No crewId here: round-is-a-sealed-leaf — a crew counts a FINISHED round into a
-// season by roundId instead (appendCountedRoundDirect below).
+// name/golferId. No crewId here: round-is-a-sealed-leaf — a crew's own season standings are
+// derived on read from shared golfer projection lines, never a round-side back-reference.
 export const startRoundDirect = async (
   httpUrl: string,
   account: AccountGolfer,
@@ -366,12 +361,12 @@ export const removeCrewMemberDirect = async (httpUrl: string, token: string, id:
   return parse(getCrewResponseSchema, json);
 };
 
-// Architecture-realignment Task 12: crew seasons + counted rounds + standings-on-read replace
-// the deleted GET /crews/{id}/records projection surface (Task 9). Every helper below is
-// "golfer"-gated on the wire (routes.ts) — the Bearer must be a crew MEMBER's ID token — and
-// append/remove additionally require the caller to have PLAYED the round (did-not-play) /
-// APPENDED the entry (not-the-appender): application/src/crews/appendCountedRound.ts and
-// removeCountedRound.ts hold those guards.
+// Architecture-realignment Task 12: crew seasons + standings-on-read replace the deleted GET
+// /crews/{id}/records projection surface (Task 9). Every helper below is "golfer"-gated on the
+// wire (routes.ts) — the Bearer must be a crew MEMBER's ID token. The whole append/remove
+// mutation surface this comment used to also describe (plus its did-not-play/not-the-appender
+// guards) is deleted (crew-scoreboard spec §2b) — standings are a derived window over shared
+// rounds now, nothing left to mutate.
 
 export const createSeasonDirect = async (httpUrl: string, token: string, id: CrewId, name: string): Promise<CreateSeasonResponse> => {
   const body = parse(createSeasonRequestSchema, { name });
@@ -383,28 +378,6 @@ export const createSeasonDirect = async (httpUrl: string, token: string, id: Cre
   const json: unknown = await response.json();
   if (!response.ok) throw new Error(`POST /crews/${id}/seasons -> ${response.status}: ${JSON.stringify(json)}`);
   return parse(createSeasonResponseSchema, json);
-};
-
-export const appendCountedRoundDirect = async (httpUrl: string, token: string, id: CrewId, seasonId: string, round: RoundId): Promise<AppendCountedRoundResponse> => {
-  const body = parse(appendCountedRoundRequestSchema, { roundId: round });
-  const response = await fetch(`${httpUrl}/crews/${id}/seasons/${seasonId}/rounds`, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-  });
-  const json: unknown = await response.json();
-  if (!response.ok) throw new Error(`POST /crews/${id}/seasons/${seasonId}/rounds -> ${response.status}: ${JSON.stringify(json)}`);
-  return parse(appendCountedRoundResponseSchema, json);
-};
-
-export const removeCountedRoundDirect = async (httpUrl: string, token: string, id: CrewId, seasonId: string, round: RoundId): Promise<RemoveCountedRoundResponse> => {
-  const response = await fetch(`${httpUrl}/crews/${id}/seasons/${seasonId}/rounds/${round}`, {
-    method: "DELETE",
-    headers: { authorization: `Bearer ${token}` },
-  });
-  const json: unknown = await response.json();
-  if (!response.ok) throw new Error(`DELETE /crews/${id}/seasons/${seasonId}/rounds/${round} -> ${response.status}: ${JSON.stringify(json)}`);
-  return parse(removeCountedRoundResponseSchema, json);
 };
 
 export const getSeasonStandingsDirect = async (httpUrl: string, token: string, id: CrewId, seasonId: string): Promise<SeasonStandingsResponse> => {

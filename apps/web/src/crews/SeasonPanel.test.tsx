@@ -7,8 +7,8 @@ import { createMemoryStorage } from "../testSupport/memoryStorage";
 
 // Faking the api.ts module boundary (established idiom) — SeasonPanel owns its own fetching
 // (useAuth's withAuth). Crew-scoreboard spec (2026-07-21): standings are derived on read — no
-// counting act, so appendCountedRound/removeCountedRound/getMyRounds are no longer called by this
-// component at all (Task 5 deletes the routes; this component simply stopped using them first).
+// counting act, so the old counted-round mutations and getMyRounds are no longer called by this
+// component at all (this component stopped using them before Task 5 deleted the routes).
 vi.mock("../api", () => ({
   getSeasonStandings: vi.fn(),
   closeSeason: vi.fn(),

@@ -5,7 +5,7 @@ import type { AppendOptions, AppendResult, EventJournal } from "../ports/eventJo
 import type { Broadcast } from "../ports/broadcast.js";
 import type { CardStore } from "../ports/cardStore.js";
 import type { Clock } from "../ports/clock.js";
-import type { CountedRound, CrewSeason, CrewStore } from "../ports/crewStore.js";
+import type { CrewSeason, CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
@@ -275,18 +275,18 @@ export const seedCard = async (store: CardStore, courseId: CourseId, id: CardId,
 // scale; the real GSI is what makes this cheap in adapters-dynamodb).
 export const createInMemoryCrewStore = (): CrewStore => {
   const byId = new Map<CrewId, { crew: Crew; revision: number }>();
-  // Seasons + counted rounds (task-8-brief.md), reproducing createDynamoCrewStore's own key
-  // scheme without Dynamo: one Map<seasonId, CrewSeason> per crew, and one
-  // Map<seasonId, Map<roundId, CountedRound>> per crew for counted rounds — the SAME roundId
-  // in TWO different seasons of one crew lives in two different inner Maps, so they never
-  // collide (mirrors the real adapter's independent "SEASON#<a>#ROUND#<r>" vs.
-  // "SEASON#<b>#ROUND#<r>" sort keys).
+  // Seasons (task-8-brief.md), reproducing createDynamoCrewStore's own key scheme without
+  // Dynamo: one Map<seasonId, CrewSeason> per crew. The counting apparatus this used to also
+  // reproduce (a parallel per-crew map of counted-round entries, populated by the old
+  // append-a-round use case) is deleted whole (crew-scoreboard spec §2b) — countsRound below
+  // now always answers false in the fake, since nothing writes to it anymore (the real adapter
+  // still answers legacy orphaned beta data; there is no such legacy data to reproduce here).
   const seasonsByCrew = new Map<CrewId, Map<string, CrewSeason>>();
-  const countedRoundsByCrew = new Map<CrewId, Map<string, Map<RoundId, CountedRound>>>();
 
   // Guard: seasonId MUST NOT contain "#" (mirrors createDynamoCrewStore's validator — the key
-  // vocabulary composites it between separators, so a "#" in seasonId would create a collision
-  // breaking the ability to filter season items apart from counted-round items).
+  // vocabulary composites it under a shared prefix legacy orphaned counted-round items also
+  // use, so a "#" in seasonId would create a collision breaking the ability to filter those
+  // orphans apart from real season items).
   const validateSeasonId = (seasonId: string): void => {
     if (seasonId.includes("#")) {
       throw new Error(`seasonId contains "#" — key vocabulary collision: "${seasonId}"`);
@@ -325,26 +325,10 @@ export const createInMemoryCrewStore = (): CrewStore => {
     // NO ORDER PROMISED (port doc) — insertion order here is incidental, never relied upon.
     listSeasons: async (crewId) => [...(seasonsByCrew.get(crewId)?.values() ?? [])],
 
-    addCountedRound: async (crewId, seasonId, entry) => {
-      validateSeasonId(seasonId);
-      const seasons = countedRoundsByCrew.get(crewId) ?? new Map<string, Map<RoundId, CountedRound>>();
-      const rounds = seasons.get(seasonId) ?? new Map<RoundId, CountedRound>();
-      if (rounds.has(entry.roundId)) {
-        throw new ApplicationError("round-already-counted", `round ${entry.roundId} is already counted in season ${seasonId} of crew ${crewId}`);
-      }
-      rounds.set(entry.roundId, entry);
-      seasons.set(seasonId, rounds);
-      countedRoundsByCrew.set(crewId, seasons);
-    },
-    removeCountedRound: async (crewId, seasonId, roundId) => {
-      countedRoundsByCrew.get(crewId)?.get(seasonId)?.delete(roundId); // absent entry: no-op, not an error
-    },
-    listCountedRounds: async (crewId, seasonId) => [...(countedRoundsByCrew.get(crewId)?.get(seasonId)?.values() ?? [])],
-    countsRound: async (crewId, roundId) => {
-      const seasons = countedRoundsByCrew.get(crewId);
-      if (!seasons) return false;
-      return [...seasons.values()].some((rounds) => rounds.has(roundId));
-    },
+    // Always false: the counting apparatus that used to populate this is deleted whole
+    // (crew-scoreboard spec §2b), and this in-memory fake has no legacy orphaned data to
+    // reproduce the way the real DynamoDB adapter still can.
+    countsRound: async () => false,
   };
 };
 

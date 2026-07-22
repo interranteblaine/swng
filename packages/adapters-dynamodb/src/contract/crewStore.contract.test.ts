@@ -3,7 +3,7 @@ import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Crew, CrewMember } from "@swng/domain";
 import { addMember, crewId, golferId, roundId } from "@swng/domain";
-import type { CountedRound, CrewSeason } from "@swng/application";
+import type { CrewSeason } from "@swng/application";
 import { createDynamoCrewStore } from "../createDynamoCrewStore.js";
 import { crewPk, crewSk, memberSk, seasonSk } from "../keys.js";
 import type { LocalDynamo } from "../testing/local.js";
@@ -205,26 +205,19 @@ describe("createDynamoCrewStore", () => {
     });
   });
 
-  // Seasons + counted rounds (realignment task-8-brief.md): proves createDynamoCrewStore
-  // against the SAME spec createInMemoryCrewStore (application/testing/fakes.ts) satisfies —
-  // upsert-by-seasonId, listSeasons' client-side exclusion of counted-round entries,
-  // addCountedRound's attribute_not_exists(sk) collision → round-already-counted, the SAME
-  // round counted in TWO seasons of one crew independently, remove-then-list, and countsRound's
-  // any-season scope.
-  describe("seasons + counted rounds", () => {
+  // Seasons (realignment task-8-brief.md): proves createDynamoCrewStore against the SAME spec
+  // createInMemoryCrewStore (application/testing/fakes.ts) satisfies — upsert-by-seasonId,
+  // listSeasons' client-side exclusion of orphaned legacy counted-round entries (the deleted
+  // counting apparatus' own item shape, tolerated forever — crew-scoreboard spec §2b, the
+  // standingGame precedent). The counting apparatus itself (addCountedRound/removeCountedRound/
+  // listCountedRounds, and the countsRound tests that exercised them) is deleted whole with it.
+  describe("seasons", () => {
     const newSeason = (name: string, status: CrewSeason["status"] = "open"): CrewSeason => ({
       seasonId: randomUUID(),
       name,
       status,
       createdAtMs: Date.now(),
       startsAtMs: Date.now(),
-    });
-
-    const newCountedRound = (roundIdValue = roundId(randomUUID())): CountedRound => ({
-      roundId: roundIdValue,
-      finalizedAtMs: Date.now(),
-      appendedBy: golferId(randomUUID()),
-      appendedAtMs: Date.now(),
     });
 
     describe("putSeason / getSeason / listSeasons", () => {
@@ -261,7 +254,13 @@ describe("createDynamoCrewStore", () => {
         expect(await store.listSeasons(crew.id)).toEqual([closed]);
       });
 
-      it("listSeasons returns every season for the crew and EXCLUDES counted-round entries", async () => {
+      // Orphan tolerance (crew-scoreboard spec §2b, the standingGame precedent): the deleted
+      // counting apparatus used to write items shaped "SEASON#<seasonId>#ROUND#<roundId>" —
+      // seeded here with a raw PutCommand (never through the store API, which can no longer
+      // even construct that sk) mirroring the legacy-startsAtMs test's own raw-insert idiom
+      // below. Old beta data written before this arc looks exactly like this; listSeasons must
+      // never resurface it as a "season," forever, with no migration.
+      it("listSeasons EXCLUDES an orphaned legacy SEASON#<id>#ROUND#<id> item — the deleted counting apparatus' own shape", async () => {
         const store = newStore();
         const crew = makeCrew("Multi-Season Crew");
         await store.put(crew, undefined);
@@ -269,13 +268,22 @@ describe("createDynamoCrewStore", () => {
         const seasonB = newSeason("2026");
         await store.putSeason(crew.id, seasonA);
         await store.putSeason(crew.id, seasonB);
-        await store.addCountedRound(crew.id, seasonA.seasonId, newCountedRound());
-        await store.addCountedRound(crew.id, seasonA.seasonId, newCountedRound());
+
+        await local.client.send(
+          new PutCommand({
+            TableName: local.coreTable,
+            Item: {
+              pk: crewPk(crew.id),
+              sk: `${seasonSk(seasonA.seasonId)}#ROUND#${roundId(randomUUID())}`,
+              entry: { roundId: roundId(randomUUID()), finalizedAtMs: Date.now(), appendedBy: golferId(randomUUID()), appendedAtMs: Date.now() },
+            },
+          }),
+        );
 
         const found = await store.listSeasons(crew.id);
 
         expect(new Set(found.map((s) => s.seasonId))).toEqual(new Set([seasonA.seasonId, seasonB.seasonId]));
-        expect(found).toHaveLength(2); // the two counted-round entries under seasonA are NOT seasons
+        expect(found).toHaveLength(2); // the orphaned item under seasonA is NOT a season
       });
 
       it("listSeasons returns [] for a crew with no seasons", async () => {
@@ -372,136 +380,6 @@ describe("createDynamoCrewStore", () => {
       });
     });
 
-    describe("addCountedRound / listCountedRounds", () => {
-      it("addCountedRound + listCountedRounds round-trip", async () => {
-        const store = newStore();
-        const crew = makeCrew("Counting Crew");
-        await store.put(crew, undefined);
-        const season = newSeason("2026");
-        await store.putSeason(crew.id, season);
-        const entry = newCountedRound();
-
-        await store.addCountedRound(crew.id, season.seasonId, entry);
-
-        expect(await store.listCountedRounds(crew.id, season.seasonId)).toEqual([entry]);
-      });
-
-      it("a duplicate addCountedRound for the SAME roundId in the SAME season throws round-already-counted", async () => {
-        const store = newStore();
-        const crew = makeCrew("Duplicate Crew");
-        await store.put(crew, undefined);
-        const season = newSeason("2026");
-        await store.putSeason(crew.id, season);
-        const entry = newCountedRound();
-        await store.addCountedRound(crew.id, season.seasonId, entry);
-
-        await expect(store.addCountedRound(crew.id, season.seasonId, newCountedRound(entry.roundId))).rejects.toMatchObject({
-          code: "round-already-counted",
-        });
-        // Untouched by the failed second attempt.
-        expect(await store.listCountedRounds(crew.id, season.seasonId)).toEqual([entry]);
-      });
-
-      it("the SAME round counted in TWO seasons of one crew is allowed — each season is its own lens", async () => {
-        const store = newStore();
-        const crew = makeCrew("Two-Season Crew");
-        await store.put(crew, undefined);
-        const seasonA = newSeason("2025");
-        const seasonB = newSeason("2026");
-        await store.putSeason(crew.id, seasonA);
-        await store.putSeason(crew.id, seasonB);
-        const shared = roundId(randomUUID());
-        const entryA = newCountedRound(shared);
-        const entryB = newCountedRound(shared);
-
-        await store.addCountedRound(crew.id, seasonA.seasonId, entryA);
-        await store.addCountedRound(crew.id, seasonB.seasonId, entryB);
-
-        expect(await store.listCountedRounds(crew.id, seasonA.seasonId)).toEqual([entryA]);
-        expect(await store.listCountedRounds(crew.id, seasonB.seasonId)).toEqual([entryB]);
-      });
-
-      it("listCountedRounds returns [] for a season with none, and scopes strictly to its own season", async () => {
-        const store = newStore();
-        const crew = makeCrew("Scoped Crew");
-        await store.put(crew, undefined);
-        const seasonA = newSeason("2025");
-        const seasonB = newSeason("2026");
-        await store.putSeason(crew.id, seasonA);
-        await store.putSeason(crew.id, seasonB);
-        await store.addCountedRound(crew.id, seasonA.seasonId, newCountedRound());
-
-        expect(await store.listCountedRounds(crew.id, seasonB.seasonId)).toEqual([]);
-      });
-
-      it("removeCountedRound then listCountedRounds no longer shows it; removing an absent entry is a no-op", async () => {
-        const store = newStore();
-        const crew = makeCrew("Removal Crew");
-        await store.put(crew, undefined);
-        const season = newSeason("2026");
-        await store.putSeason(crew.id, season);
-        const keep = newCountedRound();
-        const drop = newCountedRound();
-        await store.addCountedRound(crew.id, season.seasonId, keep);
-        await store.addCountedRound(crew.id, season.seasonId, drop);
-
-        await store.removeCountedRound(crew.id, season.seasonId, drop.roundId);
-
-        expect(await store.listCountedRounds(crew.id, season.seasonId)).toEqual([keep]);
-
-        // Removing again (already gone) and removing a roundId that was never there: both no-ops.
-        await expect(store.removeCountedRound(crew.id, season.seasonId, drop.roundId)).resolves.toBeUndefined();
-        await expect(store.removeCountedRound(crew.id, season.seasonId, roundId(randomUUID()))).resolves.toBeUndefined();
-        expect(await store.listCountedRounds(crew.id, season.seasonId)).toEqual([keep]);
-      });
-    });
-
-    describe("countsRound", () => {
-      it("is true when the round is counted in ANY season of the crew", async () => {
-        const store = newStore();
-        const crew = makeCrew("Counts Crew");
-        await store.put(crew, undefined);
-        const seasonA = newSeason("2025");
-        const seasonB = newSeason("2026");
-        await store.putSeason(crew.id, seasonA);
-        await store.putSeason(crew.id, seasonB);
-        const entry = newCountedRound();
-        await store.addCountedRound(crew.id, seasonB.seasonId, entry);
-
-        expect(await store.countsRound(crew.id, entry.roundId)).toBe(true);
-      });
-
-      it("is false for a round never counted in this crew, and false for one counted only in a DIFFERENT crew", async () => {
-        const store = newStore();
-        const crewA = makeCrew("Crew A");
-        const crewB = makeCrew("Crew B");
-        await store.put(crewA, undefined);
-        await store.put(crewB, undefined);
-        const season = newSeason("2026");
-        await store.putSeason(crewB.id, season);
-        const entry = newCountedRound();
-        await store.addCountedRound(crewB.id, season.seasonId, entry);
-
-        expect(await store.countsRound(crewA.id, entry.roundId)).toBe(false); // never counted anywhere in crewA
-        expect(await store.countsRound(crewA.id, roundId(randomUUID()))).toBe(false); // an unrelated roundId entirely
-      });
-
-      it("is false after the ONLY counted entry for a round is removed", async () => {
-        const store = newStore();
-        const crew = makeCrew("Uncounts Crew");
-        await store.put(crew, undefined);
-        const season = newSeason("2026");
-        await store.putSeason(crew.id, season);
-        const entry = newCountedRound();
-        await store.addCountedRound(crew.id, season.seasonId, entry);
-        expect(await store.countsRound(crew.id, entry.roundId)).toBe(true);
-
-        await store.removeCountedRound(crew.id, season.seasonId, entry.roundId);
-
-        expect(await store.countsRound(crew.id, entry.roundId)).toBe(false);
-      });
-    });
-
     describe("seasonId guard — # character forbidden", () => {
       it("putSeason rejects seasonId containing '#' with a plain Error and writes nothing", async () => {
         const store = newStore();
@@ -514,20 +392,6 @@ describe("createDynamoCrewStore", () => {
         // Verify nothing was written: getSeason returns undefined and listSeasons is empty.
         expect(await store.getSeason(crew.id, badSeason.seasonId)).toBeUndefined();
         expect(await store.listSeasons(crew.id)).toEqual([]);
-      });
-
-      it("addCountedRound rejects seasonId containing '#' with a plain Error and writes nothing", async () => {
-        const store = newStore();
-        const crew = makeCrew("Guard Crew 2");
-        await store.put(crew, undefined);
-        const badSeasonId = "X#ROUND#Y";
-        const entry = newCountedRound();
-
-        await expect(store.addCountedRound(crew.id, badSeasonId, entry)).rejects.toThrow(/seasonId contains "#"/);
-
-        // Verify nothing was written: listCountedRounds is empty and countsRound is false.
-        expect(await store.listCountedRounds(crew.id, badSeasonId)).toEqual([]);
-        expect(await store.countsRound(crew.id, entry.roundId)).toBe(false);
       });
     });
   });

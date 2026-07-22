@@ -1,22 +1,11 @@
-import { ConditionalCheckFailedException, TransactionCanceledException } from "@aws-sdk/client-dynamodb";
+import { TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { BatchGetCommand, DeleteCommand, GetCommand, PutCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { BatchGetCommand, GetCommand, PutCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import type { Crew, CrewId, CrewMember, GolferId, RoundId } from "@swng/domain";
 import { golferId as toGolferId } from "@swng/domain";
-import type { CountedRound, CrewSeason, CrewStore } from "@swng/application";
+import type { CrewSeason, CrewStore } from "@swng/application";
 import { ApplicationError } from "@swng/application";
-import {
-  countedRoundSk,
-  countedRoundSkMarker,
-  countedRoundSkPrefix,
-  crewPk,
-  crewSk,
-  golferPk,
-  memberSk,
-  memberSkPrefix,
-  seasonSk,
-  seasonSkPrefix,
-} from "./keys.js";
+import { countedRoundSkMarker, crewPk, crewSk, golferPk, memberSk, memberSkPrefix, seasonSk, seasonSkPrefix } from "./keys.js";
 import { queryAllPages } from "./paginate.js";
 
 // One item per season (keys.ts's seasonSk) — the WHOLE CrewSeason nested under `season`, same
@@ -34,17 +23,6 @@ interface SeasonItem {
 // migration, no wipe. `closedAtMs` needs no fold — it was always optional, so an absent stored
 // value already reads back as `undefined` through the spread.
 const seasonOf = (item: SeasonItem): CrewSeason => ({ ...item.season, startsAtMs: item.season.startsAtMs ?? item.season.createdAtMs });
-
-// One item per round counted into a season (keys.ts's countedRoundSk) — the WHOLE CountedRound
-// nested under `entry`, mirroring createDynamoProjectionStore's own crew-round-contribution
-// item shape (its `entry: CrewRoundContribution` — same reasoning: countsRound's
-// FilterExpression below reads `entry.roundId` the identical way that store's own
-// listCrewRounds-adjacent write reads its own nested roundId).
-interface CountedRoundItem {
-  readonly pk: string;
-  readonly sk: string;
-  readonly entry: CountedRound;
-}
 
 // A crew root item's shape on the core table (keys.ts's crewPk/crewSk): unlike
 // createDynamoGolferStore's flattened attrs, the WHOLE domain Crew is nested under `crew` —
@@ -91,12 +69,12 @@ const memberItemOf = (crewId: CrewId, member: CrewMember): MemberItem => ({
 
 const golferIdFromMemberSk = (sk: string): GolferId => toGolferId(sk.slice(memberSkPrefix.length));
 
-// Guard: seasonId MUST NOT contain "#" (the store's key vocabulary composites it between
-// separators — seasonSk + countedRoundSk share the "SEASON#" prefix and use "#ROUND#" to
-// distinguish them; a "#" in seasonId would create a key collision, breaking listSeasons).
-// This is a programming-error guard (crewStore.ts port doc's caller contract), not a
-// business-logic error, so we throw plain Error like the journal's missing-snapshotsTableName
-// guard, never ApplicationError.
+// Guard: seasonId MUST NOT contain "#" (the store's key vocabulary composites it under the
+// shared "SEASON#" prefix — legacy orphaned counted-round items use the SAME prefix plus
+// "#ROUND#"; a "#" in seasonId would create a key collision, breaking listSeasons' ability to
+// filter those orphans out). This is a programming-error guard (crewStore.ts port doc's caller
+// contract), not a business-logic error, so we throw plain Error like the journal's
+// missing-snapshotsTableName guard, never ApplicationError.
 const validateSeasonId = (seasonId: string): void => {
   if (seasonId.includes("#")) {
     throw new Error(`seasonId contains "#" — key vocabulary collision: "${seasonId}"`);
@@ -243,10 +221,12 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
 
     listSeasons: async (crewId: CrewId) => {
       // One Query over the shared "SEASON#" prefix returns BOTH a season's own item AND every
-      // round entry filed under it (keys.ts's own doc comment on why: cheap at this scale) — so
-      // this filters OUT anything whose sk carries the "#ROUND#" marker client-side rather than
-      // running a second, narrower Query. Cheap because a crew's whole season + counted-round
-      // item count is small (task-8-brief.md: "hundreds at most").
+      // legacy orphaned counted-round entry filed under it (the now-deleted counting
+      // apparatus' own item shape, keys.ts's own doc comment) — so this filters OUT anything
+      // whose sk carries the "#ROUND#" marker client-side rather than running a second,
+      // narrower Query. The ORPHAN TOLERANCE (crew-scoreboard spec §2b, the standingGame
+      // precedent): those items are never written anymore, but old ones still on beta must
+      // never resurface as a "season" — forever, never a migration.
       const items = await queryAllPages(
         client,
         {
@@ -260,46 +240,16 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
       return items.filter((item) => !item.sk.includes(countedRoundSkMarker)).map((item) => seasonOf(item));
     },
 
-    addCountedRound: async (crewId: CrewId, seasonId: string, entry: CountedRound) => {
-      validateSeasonId(seasonId);
-      const item: CountedRoundItem = { pk: crewPk(crewId), sk: countedRoundSk(seasonId, entry.roundId), entry };
-      try {
-        await client.send(new PutCommand({ TableName: tableName, Item: item, ConditionExpression: "attribute_not_exists(sk)" }));
-      } catch (error) {
-        if (error instanceof ConditionalCheckFailedException) {
-          throw new ApplicationError("round-already-counted", `round ${entry.roundId} is already counted in season ${seasonId} of crew ${crewId}`);
-        }
-        throw error;
-      }
-    },
-
-    removeCountedRound: async (crewId: CrewId, seasonId: string, roundId: RoundId) => {
-      // No existence condition — removing an entry that was never there (or is already gone)
-      // is a no-op, not an error (the port doc's own contract). WHO may remove is enforced one
-      // layer up.
-      await client.send(new DeleteCommand({ TableName: tableName, Key: { pk: crewPk(crewId), sk: countedRoundSk(seasonId, roundId) } }));
-    },
-
-    listCountedRounds: async (crewId: CrewId, seasonId: string) =>
-      queryAllPages(
-        client,
-        {
-          TableName: tableName,
-          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-          ExpressionAttributeValues: { ":pk": crewPk(crewId), ":prefix": countedRoundSkPrefix(seasonId) },
-          ConsistentRead: true,
-        },
-        (item) => (item as unknown as CountedRoundItem).entry,
-      ),
-
+    // The counting apparatus (addCountedRound/removeCountedRound/listCountedRounds) is deleted
+    // whole (crew-scoreboard spec §2b) — countsRound survives it, unused by any use case today,
+    // querying only the legacy orphaned items listSeasons above tolerates: one Query over every
+    // season-namespaced item this crew has (season items AND orphaned counted-round entries
+    // alike — begins_with(sk, "SEASON#") catches both) FILTERED on the entry's own roundId
+    // attribute; a season item carries no `entry.roundId` at all, so it never matches the filter
+    // and is excluded for free — no separate exclusion step needed here the way listSeasons
+    // above needs one. Paginated to exhaustion (queryAllPages): a filter can produce empty pages
+    // with more left to scan, so a naive single-page check could false-negative.
     countsRound: async (crewId: CrewId, roundId: RoundId) => {
-      // Query every season-namespaced item this crew has (season items AND counted-round
-      // entries alike — begins_with(sk, "SEASON#") catches both) and FILTER on the entry's own
-      // roundId attribute; a season item carries no `entry.roundId` at all, so it never matches
-      // the filter and is excluded for free — no separate exclusion step needed here the way
-      // listSeasons above needs one. Paginated to exhaustion (queryAllPages): a filter can
-      // produce empty pages with more left to scan, so a naive single-page check could
-      // false-negative.
       const matches = await queryAllPages(
         client,
         {

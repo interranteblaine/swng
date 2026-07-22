@@ -10,9 +10,8 @@ import { createMemoryStorage } from "../testSupport/memoryStorage";
 // grouping/competition only (spec §11a, owner ruling) — CrewPage no longer composes a course
 // picker or any standing-game editor, so getCourse/searchCourses/saveStandingGame are gone from
 // this mock entirely. SeasonPanel only ever mounts once a season is selected, so its own calls
-// (getSeasonStandings/getMyRounds/appendCountedRound/removeCountedRound) are stubbed here for
-// the two tests that select a season — SeasonPanel's OWN full behavior (standings table,
-// head-to-head, the count-a-round picker, remove affordance) is pinned directly against
+// (getSeasonStandings) are stubbed here for the two tests that select a season — SeasonPanel's
+// OWN full behavior (the per-member scoreboard, ledger, head-to-head) is pinned directly against
 // SeasonPanel in SeasonPanel.test.tsx, not re-tested through this composition. Crew membership
 // (invited in, accountable out — spec §1/§2): mintCrewInvite/removeCrewMember/transferOrganizer
 // are the C-T3 additions replacing the deleted join-code/add-by-id surface.

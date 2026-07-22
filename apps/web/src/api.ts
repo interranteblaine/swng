@@ -1,7 +1,6 @@
 import {
   abandonRoundResponseSchema,
   addGameResponseSchema,
-  appendCountedRoundResponseSchema,
   closeSeasonResponseSchema,
   crewRecordsResponseSchema,
   createCourseResponseSchema,
@@ -29,7 +28,6 @@ import {
   parse,
   peekCrewInviteResponseSchema,
   peekRoundResponseSchema,
-  removeCountedRoundResponseSchema,
   reopenSeasonResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
@@ -43,8 +41,6 @@ import type {
   AbandonRoundResponse,
   AddGameRequest,
   AddGameResponse,
-  AppendCountedRoundRequest,
-  AppendCountedRoundResponse,
   CloseSeasonResponse,
   CreateCourseRequest,
   CreateCourseResponse,
@@ -76,7 +72,6 @@ import type {
   PeekCrewInviteRequest,
   PeekCrewInviteResponse,
   PeekRoundResponse,
-  RemoveCountedRoundResponse,
   ReopenSeasonResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
@@ -397,21 +392,6 @@ export const createSeason = async (token: string, id: CrewId, input: CreateSeaso
 export const listSeasons = async (token: string, id: CrewId): Promise<ListSeasonsResponse> => {
   const json = await requestJson(`/crews/${id}/seasons`, { token });
   return parse(listSeasonsResponseSchema, json);
-};
-
-export const appendCountedRound = async (token: string, id: CrewId, seasonId: string, input: AppendCountedRoundRequest): Promise<AppendCountedRoundResponse> => {
-  const json = await requestJson(`/crews/${id}/seasons/${seasonId}/rounds`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
-    token,
-  });
-  return parse(appendCountedRoundResponseSchema, json);
-};
-
-export const removeCountedRound = async (token: string, id: CrewId, seasonId: string, roundId: RoundId): Promise<RemoveCountedRoundResponse> => {
-  const json = await requestJson(`/crews/${id}/seasons/${seasonId}/rounds/${roundId}`, { method: "DELETE", token });
-  return parse(removeCountedRoundResponseSchema, json);
 };
 
 export const getSeasonStandings = async (token: string, id: CrewId, seasonId: string): Promise<SeasonStandingsResponse> => {

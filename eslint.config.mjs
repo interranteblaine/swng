@@ -167,10 +167,8 @@ export default [
                 // crew season aggregation
                 "crewContribution",
                 "aggregateSeason",
-                // crew analytics — partner records / net averages / most improved / season titles
+                // crew analytics — partner records / season titles
                 "partnerRecords",
-                "netAverages",
-                "mostImproved",
                 "stablefordTitle",
                 // crew scoreboard (crew-scoreboard spec §3a/§3b) — the per-member window fold +
                 // the shared-rounds derivation; the web renders SERVED scoreboard rows only

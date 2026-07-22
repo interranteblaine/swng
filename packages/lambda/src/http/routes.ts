@@ -6,8 +6,6 @@ import type {
   AbandonRoundResponse,
   AddGameRequest,
   AddGameResponse,
-  AppendCountedRoundRequest,
-  AppendCountedRoundResponse,
   CloseSeasonResponse,
   CreateCourseRequest,
   CreateCourseResponse,
@@ -42,7 +40,6 @@ import type {
   PeekRoundResponse,
   RecordScoreRequest,
   RecordScoreResponse,
-  RemoveCountedRoundResponse,
   ReopenSeasonResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
@@ -60,7 +57,6 @@ import type {
 import {
   ContractError,
   addGameRequestSchema,
-  appendCountedRoundRequestSchema,
   createCourseRequestSchema,
   createCrewRequestSchema,
   createSeasonRequestSchema,
@@ -153,20 +149,18 @@ export interface UseCases {
   mintCrewInvite: (claims: AccountClaims, id: CrewId) => Promise<MintCrewInviteResponse>;
   peekCrewInvite: (command: PeekCrewInviteRequest) => Promise<PeekCrewInviteResponse>;
   joinCrewByInvite: (claims: AccountClaims, command: JoinCrewRequest) => Promise<JoinCrewResponse>;
-  // Architecture-realignment Task 9: crew seasons + counted rounds + standings-on-read, plus
-  // leave. Every one is "golfer"-gated with member-only authorization inside application
-  // (crews/membership.ts). `seasonId` rides in the path as an opaque string (a server-minted
-  // UUID — never branded, never parsed), unlike roundId which keeps its brand.
+  // Architecture-realignment Task 9: crew seasons + standings-on-read, plus leave. Every one is
+  // "golfer"-gated with member-only authorization inside application (crews/membership.ts).
+  // `seasonId` rides in the path as an opaque string (a server-minted UUID — never branded,
+  // never parsed), unlike roundId which keeps its brand.
   createSeason: (claims: AccountClaims, id: CrewId, command: CreateSeasonRequest) => Promise<CreateSeasonResponse>;
   listSeasons: (claims: AccountClaims, id: CrewId) => Promise<ListSeasonsResponse>;
   // close-season spec 2026-07-21 §1: the organizer's own verbs that flip CrewSeason.status —
-  // same golfer tier + seasonId-as-plain-string shape as createSeason/listSeasons/
-  // appendCountedRound; organizer-only authorization lives in application (crews/membership.ts
-  // + closeSeason.ts/reopenSeason.ts's own guard), never re-checked here.
+  // same golfer tier + seasonId-as-plain-string shape as createSeason/listSeasons;
+  // organizer-only authorization lives in application (crews/membership.ts +
+  // closeSeason.ts/reopenSeason.ts's own guard), never re-checked here.
   closeSeason: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<CloseSeasonResponse>;
   reopenSeason: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<ReopenSeasonResponse>;
-  appendCountedRound: (claims: AccountClaims, id: CrewId, seasonId: string, command: AppendCountedRoundRequest) => Promise<AppendCountedRoundResponse>;
-  removeCountedRound: (claims: AccountClaims, id: CrewId, seasonId: string, roundId: RoundId) => Promise<RemoveCountedRoundResponse>;
   getSeasonStandings: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<SeasonStandingsResponse>;
   // Analytics spec 2026-07-21 §5: all-time — every counted round across every season, deduped by
   // roundId — the SAME roster-filter + aggregateSeason composition getSeasonStandings above runs,
@@ -596,23 +590,6 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     handler: async (ctx) => useCases.reopenSeason(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!),
   },
   {
-    method: "POST",
-    path: "/crews/{crewId}/seasons/{seasonId}/rounds",
-    schema: appendCountedRoundRequestSchema,
-    auth: "golfer",
-    successStatus: 201, // counts a new round into the season — a mint, same spirit as JoinRound/addGame.
-    handler: async (ctx, body) =>
-      useCases.appendCountedRound(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!, body as AppendCountedRoundRequest),
-  },
-  {
-    method: "DELETE",
-    path: "/crews/{crewId}/seasons/{seasonId}/rounds/{roundId}",
-    auth: "golfer",
-    successStatus: 200, // idempotent un-count (removing an uncounted round is a no-op) — an act on an existing resource, not a mint.
-    handler: async (ctx) =>
-      useCases.removeCountedRound(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!, roundId(ctx.pathParams.roundId!)),
-  },
-  {
     method: "GET",
     path: "/crews/{crewId}/seasons/{seasonId}/standings",
     auth: "golfer",
@@ -642,7 +619,7 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
   {
     method: "DELETE",
     path: "/crews/{crewId}/members/{golferId}",
-    auth: "golfer", // no request schema — the target golferId rides the path, same shape as DELETE .../rounds/{roundId} (removeCountedRound).
+    auth: "golfer", // no request schema — the target golferId rides the path.
     successStatus: 200,
     handler: async (ctx) => useCases.removeCrewMember(ctx.account!, crewId(ctx.pathParams.crewId!), golferId(ctx.pathParams.golferId!)),
   },

@@ -5,7 +5,6 @@ import type { AccountClaims, AccountVerifier } from "@swng/application";
 import {
   abandonRound,
   addGame,
-  appendCountedRound,
   closeSeason,
   createCapturingBroadcast,
   createCourse,
@@ -46,7 +45,6 @@ import {
   peekRound,
   readEvents,
   recordScore,
-  removeCountedRound,
   removeCrewMember,
   reopenSeason,
   searchCourses,
@@ -60,7 +58,6 @@ import {
 } from "@swng/application";
 import {
   addGameResponseSchema,
-  appendCountedRoundResponseSchema,
   closeSeasonResponseSchema,
   createCourseResponseSchema,
   createCrewResponseSchema,
@@ -88,7 +85,6 @@ import {
   peekCrewInviteResponseSchema,
   peekRoundResponseSchema,
   recordScoreResponseSchema,
-  removeCountedRoundResponseSchema,
   reopenSeasonResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
@@ -213,8 +209,6 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
     listSeasons: listSeasons({ crewStore, golferStore }),
     closeSeason: closeSeason({ crewStore, golferStore, clock }),
     reopenSeason: reopenSeason({ crewStore, golferStore }),
-    appendCountedRound: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
-    removeCountedRound: removeCountedRound({ crewStore, golferStore }),
     getSeasonStandings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
     getCrewRecords: getCrewRecords({ crewStore, golferStore, snapshots, projectionStore }),
     leaveCrew: leaveCrew({ crewStore, golferStore }),
@@ -1248,13 +1242,11 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "crew-invite-invalid" });
   });
 
-  // The counted-round ROUTE wiring end-to-end (Task 9; the counted-round mechanism itself is
-  // superseded — crew-scoreboard spec §3b — standings.rounds is now DERIVED, requiring >=2
-  // CURRENT roster members holding a line for the same round, so this solo-crew append no longer
-  // changes what standings.rounds returns; the point here is only that POST .../rounds, GET
-  // .../standings, and the DELETE route are all reachable and schema-valid end to end — the
-  // crew-scoreboard derivation itself is covered in seasonSlice.test.ts).
-  it("drives finalize -> create season -> append counted round -> standings -> DELETE (un-count) — route wiring only", async () => {
+  // The season + standings ROUTE wiring end-to-end (Task 9; the counting apparatus this test
+  // used to also drive — POST/DELETE .../rounds — is deleted whole, crew-scoreboard spec §2b:
+  // standings.rounds is DERIVED now, requiring >=2 CURRENT roster members holding a line for
+  // the same round; the crew-scoreboard derivation itself is covered in seasonSlice.test.ts).
+  it("drives finalize -> create season -> GET standings — route wiring only", async () => {
     const { dispatcher } = await setupCrews();
     const annGolfer = await putMe(dispatcher, ann, "Ann");
 
@@ -1284,28 +1276,15 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       ),
     ).season;
 
-    const seasonPath = `/crews/${created.crew.crewId}/seasons/${season.seasonId}`;
-
-    const appendResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: `${seasonPath}/rounds`, token: golferBearer(ann), body: { roundId: started.roundId } })),
+    const standingsResp = asStructured(
+      await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/seasons/${season.seasonId}/standings`, token: golferBearer(ann) })),
     );
-    expect(appendResp.statusCode).toBe(201);
-    const appended = appendCountedRoundResponseSchema.parse(JSON.parse(appendResp.body!));
-    expect(appended.round).toMatchObject({ roundId: started.roundId, appendedBy: annGolfer.golferId });
-
-    const standingsResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `${seasonPath}/standings`, token: golferBearer(ann) })));
     expect(standingsResp.statusCode).toBe(200);
     const standings = seasonStandingsResponseSchema.parse(JSON.parse(standingsResp.body!));
     // "Played together" needs >=2 CURRENT roster members (spec §3a) — Ann is the crew's only
-    // member, so the derived list stays empty regardless of the append call above.
+    // member, so the derived list stays empty.
     expect(standings.rounds).toEqual([]);
-
-    const deleteResp = asStructured(await dispatcher(makeEvent({ method: "DELETE", path: `${seasonPath}/rounds/${started.roundId}`, token: golferBearer(ann) })));
-    expect(deleteResp.statusCode).toBe(200);
-    expect(removeCountedRoundResponseSchema.parse(JSON.parse(deleteResp.body!))).toEqual({ roundId: started.roundId });
-
-    const afterResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `${seasonPath}/standings`, token: golferBearer(ann) })));
-    expect(seasonStandingsResponseSchema.parse(JSON.parse(afterResp.body!)).rounds).toEqual([]);
+    expect(annGolfer).toBeDefined();
   });
 
   // Leave (Task 9): a member removes themselves; POST /crews/{crewId}/leave echoes the crewId.
@@ -1468,7 +1447,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       expect(crewRecordsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: 0, ledger: [], headToHead: [], partners: [], titles: [] });
     });
 
-    it("GET /crews/{crewId}/records route wiring — a solo crew's all-time stays honestly empty regardless of the (now-inert) counted-round append", async () => {
+    it("GET /crews/{crewId}/records route wiring — a solo crew's all-time stays honestly empty even with a finalized round on record", async () => {
       const { dispatcher } = await setupCrews();
       const annGolfer = await putMe(dispatcher, ann, "Ann");
 
@@ -1493,30 +1472,15 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const created = createCrewResponseSchema.parse(
         JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
       );
-      const season = createSeasonResponseSchema.parse(
-        JSON.parse(
-          asStructured(
-            await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026" } })),
-          ).body!,
-        ),
-      ).season;
-      await dispatcher(
-        makeEvent({
-          method: "POST",
-          path: `/crews/${created.crew.crewId}/seasons/${season.seasonId}/rounds`,
-          token: golferBearer(ann),
-          body: { roundId: started.roundId },
-        }),
-      );
 
       const resp = asStructured(
         await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/records`, token: golferBearer(ann) })),
       );
       expect(resp.statusCode).toBe(200);
       // "Played together" needs >=2 CURRENT roster members (crew-scoreboard spec §3a/§3b) — Ann
-      // is the crew's only member, so all-time stays honestly empty no matter what the (now
-      // route-wiring-only) append call above did. This is the SAME finding the standings test
-      // above pins; the crew-scoreboard derivation itself is covered in seasonSlice.test.ts.
+      // is the crew's only member, so all-time stays honestly empty regardless of Ann's own
+      // finalized round. This is the SAME finding the standings test above pins; the
+      // crew-scoreboard derivation itself is covered in seasonSlice.test.ts.
       const parsed = crewRecordsResponseSchema.parse(JSON.parse(resp.body!));
       expect(parsed.rounds).toBe(0);
       expect(parsed.ledger).toEqual([]);

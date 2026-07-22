@@ -7,7 +7,7 @@ export type { SnapshotStore } from "./ports/snapshotStore.js";
 // Course-cards spec: the write-once-lineage store — the M6 CourseStore aggregate it replaced
 // is deleted whole (see ports/cardStore.ts's own doc comment).
 export type { CardStore } from "./ports/cardStore.js";
-export type { CountedRound, CrewSeason, CrewStore } from "./ports/crewStore.js";
+export type { CrewSeason, CrewStore } from "./ports/crewStore.js";
 export type { GolferStore } from "./ports/golferStore.js";
 export type { ProjectionStore } from "./ports/projectionStore.js";
 export type { Broadcast } from "./ports/broadcast.js";
@@ -77,8 +77,6 @@ export { removeCrewMember } from "./crews/removeCrewMember.js";
 export { transferOrganizer } from "./crews/transferOrganizer.js";
 export { createSeason } from "./crews/createSeason.js";
 export { listSeasons } from "./crews/listSeasons.js";
-export { appendCountedRound } from "./crews/appendCountedRound.js";
-export { removeCountedRound } from "./crews/removeCountedRound.js";
 // Close-season spec (2026-07-21): the organizer's verbs that flip CrewSeason.status.
 export { closeSeason } from "./crews/closeSeason.js";
 export { reopenSeason } from "./crews/reopenSeason.js";

@@ -15,7 +15,6 @@ import {
   putAndBindGolfer,
 } from "../testing/fakes.js";
 import type { InMemorySnapshotStore } from "../testing/fakes.js";
-import { appendCountedRound } from "./appendCountedRound.js";
 import { closeSeason } from "./closeSeason.js";
 import { createCrew } from "./createCrew.js";
 import { createSeason } from "./createSeason.js";
@@ -25,7 +24,6 @@ import { joinCrewByInvite } from "./joinCrewByInvite.js";
 import { leaveCrew } from "./leaveCrew.js";
 import { listSeasons } from "./listSeasons.js";
 import { mintCrewInvite } from "./mintCrewInvite.js";
-import { removeCountedRound } from "./removeCountedRound.js";
 import { reopenSeason } from "./reopenSeason.js";
 import { yearStartUtcMs } from "./seasonStart.js";
 
@@ -58,7 +56,7 @@ const singlesArchive = (
 // A fourball-match archive (analytics spec 2026-07-21 §5's own partner-records fixture shape,
 // mirrored from domain/crew/analytics.test.ts's buildResultArchive — kept local since it's a
 // different layer's own test) — participants included (unlike that domain fixture) so
-// appendCountedRound's did-not-play gate has real roster data to check against.
+// recordPlayed below has real roster data to default `golferIds` from.
 const fourballArchive = (
   id: string,
   wallMs: number,
@@ -140,8 +138,6 @@ const setup = () => {
     join: joinCrewByInvite({ crewStore, golferStore, tokenIssuer, clock }),
     createSeason: createSeason({ crewStore, golferStore, ids, clock }),
     listSeasons: listSeasons({ crewStore, golferStore }),
-    append: appendCountedRound({ crewStore, golferStore, snapshots, clock }),
-    remove: removeCountedRound({ crewStore, golferStore }),
     close: closeSeason({ crewStore, golferStore, clock }),
     reopen: reopenSeason({ crewStore, golferStore }),
     standings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
@@ -256,118 +252,6 @@ describe("listSeasons", () => {
     const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
 
     await expect(ctx.listSeasons(asClaims("stranger"), created.crew.crewId)).rejects.toMatchObject({ code: "not-a-member" });
-  });
-});
-
-describe("appendCountedRound", () => {
-  it("member ∧ played ∧ snapshot exists ∧ season open → entry written", async () => {
-    const ctx = setup();
-    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-
-    const appended = await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
-
-    expect(appended.round).toEqual({ roundId: roundId("r1"), finalizedAt: 5_000, appendedBy: ann });
-    expect(await ctx.crewStore.listCountedRounds(crewId, seasonId)).toHaveLength(1);
-  });
-
-  it("a non-member is rejected — not-a-member", async () => {
-    const ctx = setup();
-    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    await seedGolfer(ctx, "stranger", "Stranger");
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-
-    await expect(ctx.append(asClaims("stranger"), crewId, seasonId, { roundId: roundId("r1") })).rejects.toMatchObject({ code: "not-a-member" });
-  });
-
-  it("an unknown seasonId is rejected — season-not-found", async () => {
-    const ctx = setup();
-    const { ann, bo, crewId } = await crewWithSeason(ctx);
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-
-    await expect(ctx.append(asClaims("ann"), crewId, "no-such-season", { roundId: roundId("r1") })).rejects.toMatchObject({ code: "season-not-found" });
-  });
-
-  it("a round with no snapshot yet is rejected — round-not-found (finish the round first)", async () => {
-    const ctx = setup();
-    const { crewId, seasonId } = await crewWithSeason(ctx);
-
-    await expect(ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("never-finalized") })).rejects.toMatchObject({ code: "round-not-found" });
-  });
-
-  it("a member who did NOT play the round is rejected — did-not-play", async () => {
-    const ctx = setup();
-    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    const cy = await seedGolfer(ctx, "cy", "Cy");
-    const invite = await ctx.mint(asClaims("ann"), crewId);
-    await ctx.join(asClaims("cy"), { token: invite.token });
-    // The round is Ann vs Bo — Cy is a member but wasn't in it.
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-    expect(cy).toBeDefined();
-
-    await expect(ctx.append(asClaims("cy"), crewId, seasonId, { roundId: roundId("r1") })).rejects.toMatchObject({ code: "did-not-play" });
-  });
-
-  it("the SAME round appended twice into one season is rejected — round-already-counted", async () => {
-    const ctx = setup();
-    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-    await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
-
-    await expect(ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") })).rejects.toMatchObject({ code: "round-already-counted" });
-  });
-
-  it("a CLOSED season rejects an append — season-closed", async () => {
-    const ctx = setup();
-    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-    // Close via the organizer's own verb — end to end, now reachable (close-season arc).
-    await ctx.close(asClaims("ann"), crewId, seasonId);
-
-    await expect(ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") })).rejects.toMatchObject({ code: "season-closed" });
-  });
-});
-
-describe("removeCountedRound", () => {
-  it("the appender may remove their own counted round", async () => {
-    const ctx = setup();
-    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-    await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
-
-    const removed = await ctx.remove(asClaims("ann"), crewId, seasonId, roundId("r1"));
-
-    expect(removed).toEqual({ roundId: roundId("r1") });
-    expect(await ctx.crewStore.listCountedRounds(crewId, seasonId)).toHaveLength(0);
-  });
-
-  it("a member who did NOT append it may not remove it — not-the-appender", async () => {
-    const ctx = setup();
-    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    // Both Ann and Bo played; Bo appends it, so Ann may not remove it.
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-    await ctx.append(asClaims("bo"), crewId, seasonId, { roundId: roundId("r1") });
-
-    await expect(ctx.remove(asClaims("ann"), crewId, seasonId, roundId("r1"))).rejects.toMatchObject({ code: "not-the-appender" });
-    expect(await ctx.crewStore.listCountedRounds(crewId, seasonId)).toHaveLength(1); // still there
-  });
-
-  it("removing a round that was never counted is an idempotent no-op success", async () => {
-    const ctx = setup();
-    const { crewId, seasonId } = await crewWithSeason(ctx);
-
-    await expect(ctx.remove(asClaims("ann"), crewId, seasonId, roundId("never"))).resolves.toEqual({ roundId: roundId("never") });
-  });
-
-  it("a CLOSED season rejects a remove — season-closed", async () => {
-    const ctx = setup();
-    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    ctx.snapshots.record(singlesArchive("r1", 5_000, ann, bo, ann, {}));
-    await ctx.append(asClaims("ann"), crewId, seasonId, { roundId: roundId("r1") });
-    // Close via the organizer's own verb — end to end, now reachable (close-season arc).
-    await ctx.close(asClaims("ann"), crewId, seasonId);
-
-    await expect(ctx.remove(asClaims("ann"), crewId, seasonId, roundId("r1"))).rejects.toMatchObject({ code: "season-closed" });
   });
 });
 
@@ -576,8 +460,8 @@ describe("getSeasonStandings — scoreboard", () => {
 
   // Partners keep folding the SAME shared-archive derivation ledger/headToHead use (spec §3b) —
   // this only pins that partners still arrive, sourced from the new derivation, now that the old
-  // "carries hand-pinned partners + mostImproved" fixture's mostImproved/lowestNet halves are
-  // gone with the superlatives they fed.
+  // fixture's own most-improved/lowest-net superlative halves are gone with the superlatives
+  // they fed.
   it("partners are carried from shared archives, roster names attached", async () => {
     const ctx = setup();
     const ann = await seedGolfer(ctx, "ann", "Ann");
@@ -605,11 +489,10 @@ describe("getSeasonStandings — scoreboard", () => {
 });
 
 describe("leaveCrew", () => {
-  it("removes the caller's own member item; the OLD counted-round entry (a separate, still-standing legacy mechanism) is untouched, but the round drops out of the DERIVED standings entirely once only one roster member remains (members-only, compute-on-read)", async () => {
+  it("removes the caller's own member item; the round drops out of the DERIVED standings entirely once only one roster member remains (members-only, compute-on-read)", async () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
     await recordPlayed(ctx, singlesArchive("r1", 5_000, ann, bo, ann, {}), 5_000);
-    await ctx.append(asClaims("bo"), crewId, seasonId, { roundId: roundId("r1") }); // Bo appended it (legacy mechanism)
 
     const left = await ctx.leave(asClaims("bo"), crewId);
 
@@ -617,10 +500,7 @@ describe("leaveCrew", () => {
     // Bo is off the roster now...
     const crew = await ctx.crewStore.get(crewId);
     expect(crew!.crew.members.some((member) => member.golferId === bo)).toBe(false);
-    // ...the OLD counted-round entry is untouched (nothing about it is deleted; it simply feeds
-    // nothing standings reads anymore)...
-    expect(await ctx.crewStore.listCountedRounds(crewId, seasonId)).toHaveLength(1);
-    // ...but standings are derived fresh from the CURRENT roster: with only Ann left, r1 no
+    // ...and standings are derived fresh from the CURRENT roster: with only Ann left, r1 no
     // longer has >=2 current-member holders, so it drops out of standings entirely — a
     // members-only read-time filter, not stored membership history.
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);

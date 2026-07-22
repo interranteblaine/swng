@@ -37,7 +37,7 @@ export interface ScoreboardLine {
   readonly indexDelta?: number;
 }
 
-const NET_PER_18_MIN_ROUNDS = 3; // the netAverages refusing-to-draw-noise floor, carried forward (spec §3a)
+const NET_PER_18_MIN_ROUNDS = 3; // the deleted net-average superlative's own refusing-to-draw-noise floor, carried forward (spec §3a)
 
 export const crewScoreboard = (
   members: readonly { readonly golferId: GolferId; readonly lines: readonly StoredLine[] }[],

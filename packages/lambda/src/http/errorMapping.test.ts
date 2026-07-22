@@ -221,22 +221,15 @@ describe("toHttpError — M9 Task 3 read-only-token", () => {
   });
 });
 
-// Architecture-realignment Task 8 debt (paid here per task-9-brief.md) + Task 9's own crew
-// season/counted-round/standings codes — each constructed exactly as its throw site does
-// (CrewStore.addCountedRound throws round-already-counted; the season use cases throw the rest).
-describe("toHttpError — crew seasons + counted rounds (architecture-realignment Tasks 8/9)", () => {
+// Architecture-realignment Task 9's own crew season/standings codes — did-not-play/
+// not-the-appender were the deleted counted-round use cases' own forbidden-actor codes
+// (crew-scoreboard spec §2b) — kept in the exhaustive error map, unused, so still pinned here.
+describe("toHttpError — crew seasons (architecture-realignment Task 9)", () => {
   const logger = createNullLogger();
-
-  it("maps round-already-counted to 409 (Task 8 debt)", () => {
-    const result = toHttpError(new ApplicationError("round-already-counted", "round r-1 is already counted in season s-1 of crew c-1"), logger);
-    expect(result.statusCode).toBe(409);
-    expect(JSON.parse(result.body)).toEqual({ code: "round-already-counted", message: "round r-1 is already counted in season s-1 of crew c-1" });
-  });
 
   const codeToStatus = [
     ["invalid-season-name", 400],
     ["season-not-found", 404],
-    ["season-closed", 409],
     ["did-not-play", 403],
     ["not-the-appender", 403],
   ] as const;
@@ -283,7 +276,7 @@ describe("toHttpError — crew organizer authority (crew membership, invited in 
 
 // Course-cards spec Task 3: CardStore.supersede's own collision code, forward-provisioned
 // ahead of T4's actual card routes — same "exhaustive Record, so the mapping lands the moment
-// the union grows" precedent as round-already-counted (Task 8 debt) above.
+// the union grows" precedent as the crew-conflict/season-already-closed pairs above.
 describe("toHttpError — course-cards (Task 3)", () => {
   it("maps ApplicationError card-superseded to 409", () => {
     const result = toHttpError(new ApplicationError("card-superseded", "course c-1: the card being replaced is no longer current"), createNullLogger());

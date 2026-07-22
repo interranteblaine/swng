@@ -104,7 +104,7 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
   // Every value below is hand-derived from the FROZEN deck BEFORE any live call (the deck
   // discipline, task-8-brief.md) — never read back off the system. The existing standings
   // assertions above are byte-unchanged; this only ADDS partner/all-time coverage. The season
-  // superlatives (lowestNet/mostImproved) this section used to also cover are SUPERSEDED whole
+  // superlatives (lowest-net-average/most-improved-index) this section used to also cover are SUPERSEDED whole
   // by the crew-scoreboard redesign (spec §3c) — gone from the wire; their oracle helpers are
   // deleted with them. `standings.scoreboard`'s own new oracles (frozenScoreboardExpectation,
   // crewSeasonDeck.ts) land HERE (crew-scoreboard plan Task 4) — the comment this replaces named

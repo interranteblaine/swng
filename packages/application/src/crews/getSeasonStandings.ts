@@ -50,8 +50,9 @@ export const getSeasonStandings =
 
     // ONE listLines per roster member (Promise.all — never sequential) feeds the scoreboard, the
     // shared-round derivation, AND the index boundaries alike (spec §3b) — the fetch the old
-    // mostImproved boundary code already paid for, now serving three uses instead of one.
-    // sortLines applies golferMetrics' own chronological contract before any fold sees the lines.
+    // most-improved-superlative boundary code already paid for, now serving three uses instead
+    // of one. sortLines applies golferMetrics' own chronological contract before any fold sees
+    // the lines.
     const members = await Promise.all(
       crew.members.map(async (member) => ({
         golferId: member.golferId,

@@ -71,37 +71,31 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // route accepts — a "forbidden actor" 403, same bucket as not-a-participant above, never a 401
   // (401 means "no usable identity at all", which a spectator token isn't).
   "read-only-token": 403,
-  // Architecture-realignment Task 8 (application/src/errors.ts): CrewStore.addCountedRound's
-  // collision signal, forward-provisioned ahead of any real route that calls it (same
-  // "exhaustive Record" precedent as crew-conflict above) — a failed
-  // precondition on an append, same bucket as crew-conflict/golfer-already-in-round, not a
-  // genuine-bug 500.
-  "round-already-counted": 409,
-  // Architecture-realignment Task 9 (crew seasons + counted rounds + standings-on-read): the
-  // append/remove/standings/create-season use cases. Bucketed by the SAME shapes above —
-  // invalid-season-name is a bad-body 400 (like invalid-crew-name); season-not-found is an
-  // unresolvable id 404 (like unknown-crew); season-closed is a failed lifecycle precondition
-  // 409 (like round-already-counted); did-not-play and not-the-appender are forbidden actors
-  // 403 (like not-a-member).
+  // Architecture-realignment Task 9 (crew seasons + standings-on-read): create-season/
+  // list-seasons/standings. invalid-season-name is a bad-body 400 (like invalid-crew-name);
+  // season-not-found is an unresolvable id 404 (like unknown-crew). did-not-play and
+  // not-the-appender were the deleted counted-round use cases' own forbidden-actor codes
+  // (crew-scoreboard spec §2b) — kept here, unused, forward-bucketed as 403 like not-a-member
+  // (this Record is exhaustive over ApplicationErrorCode by construction, so an entry is
+  // required regardless of whether a route still throws it).
   "invalid-season-name": 400,
   "season-not-found": 404,
-  "season-closed": 409,
   "did-not-play": 403,
   "not-the-appender": 403,
-  // Close-season spec (2026-07-21): closeSeason/reopenSeason's own explicit conflicts — same 409
-  // bucket as season-closed/round-already-counted above, wire-distinct codes so a stale client
-  // (double-tap Close, or Reopen on a season someone else already reopened) learns the truth.
+  // Close-season spec (2026-07-21): closeSeason/reopenSeason's own explicit conflicts — a 409
+  // bucket like crew-conflict above, wire-distinct codes so a stale client (double-tap Close,
+  // or Reopen on a season someone else already reopened) learns the truth.
   "season-already-closed": 409,
   "season-not-closed": 409,
   // Crew membership (invited in, accountable out — spec §1): removeCrewMember/transferOrganizer's
   // organizer-only gate — a forbidden actor, same 403 bucket as not-a-member/not-the-appender
   // above. organizer-must-transfer is leaveCrew's own guard — a failed lifecycle precondition
-  // (the crew would be left with no organizer), same 409 bucket as season-closed above.
+  // (the crew would be left with no organizer), same 409 bucket as season-already-closed above.
   "not-organizer": 403,
   "organizer-must-transfer": 409,
   // Course-cards spec §6 (application/src/errors.ts): CardStore.supersede's moved-pointer
   // signal — the CURRENT pointer no longer names the card the caller reviewed. A failed
-  // precondition on the write, same 409 bucket as crew-conflict/round-already-counted above.
+  // precondition on the write, same 409 bucket as crew-conflict above.
   "card-superseded": 409,
 };
 

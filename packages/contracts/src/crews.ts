@@ -173,33 +173,6 @@ export interface ReopenSeasonResponse {
 }
 export const reopenSeasonResponseSchema: z.ZodType<ReopenSeasonResponse> = z.object({ season: crewSeasonViewSchema });
 
-// One finished round counted into a season, as the wire sees it: `finalizedAt` is epoch ms (the
-// round-finalized event's own wall time), `appendedBy` is the member who counted it. Reused by
-// the append response and the standings' own `rounds` list.
-export interface CountedRoundView {
-  readonly roundId: RoundId;
-  readonly finalizedAt: number;
-  readonly appendedBy: GolferId;
-}
-export const countedRoundViewSchema: z.ZodType<CountedRoundView> = z.object({
-  roundId: roundIdSchema,
-  finalizedAt: z.number().int(),
-  appendedBy: golferIdSchema,
-});
-
-export const appendCountedRoundRequestSchema = z.object({ roundId: roundIdSchema }).strict();
-export type AppendCountedRoundRequest = z.infer<typeof appendCountedRoundRequestSchema>;
-
-export interface AppendCountedRoundResponse {
-  readonly round: CountedRoundView;
-}
-export const appendCountedRoundResponseSchema: z.ZodType<AppendCountedRoundResponse> = z.object({ round: countedRoundViewSchema });
-
-export interface RemoveCountedRoundResponse {
-  readonly roundId: RoundId;
-}
-export const removeCountedRoundResponseSchema: z.ZodType<RemoveCountedRoundResponse> = z.object({ roundId: roundIdSchema });
-
 // A season ledger line resolved for display: the pure SeasonLedgerLine (crew/ledger.ts) plus a
 // `name` resolved from the CURRENT roster's own CrewMember.name (getSeasonStandings.ts) — a
 // crew is members-only (owner ruling, spec §11a): the ledger and head-to-head are ALREADY
@@ -243,35 +216,6 @@ const partnerStandingRecordSchema: z.ZodType<PartnerStandingRecord> = z.object({
   halves: z.number().int(),
 });
 
-// Season superlatives (analytics spec 2026-07-21 §5) — SUPERSEDED by the per-member scoreboard
-// below (crew-scoreboard spec §3c: a board where everyone has a line supersedes winner-only
-// callouts; keeping both would put two differently-defined net numbers on one page). Left
-// EXPORTED but unreferenced by SeasonStandingsResponse — the counting apparatus this fed is a
-// whole later deletion, not this one.
-export interface SeasonSuperlatives {
-  readonly lowestNet?: {
-    readonly holes: 9 | 18;
-    readonly average: number;
-    readonly rounds: number;
-    readonly golfers: readonly { readonly golferId: GolferId; readonly name: string }[];
-  };
-  readonly mostImproved?: readonly { readonly golferId: GolferId; readonly name: string; readonly from: number; readonly to: number }[];
-}
-export const seasonSuperlativesSchema: z.ZodType<SeasonSuperlatives> = z.object({
-  lowestNet: z
-    .object({
-      holes: z.union([z.literal(9), z.literal(18)]),
-      average: z.number(),
-      rounds: z.number().int(),
-      golfers: z.array(z.object({ golferId: golferIdSchema, name: z.string() })).readonly(),
-    })
-    .optional(),
-  mostImproved: z
-    .array(z.object({ golferId: golferIdSchema, name: z.string(), from: z.number(), to: z.number() }))
-    .readonly()
-    .optional(),
-});
-
 // The per-member scoreboard row (crew-scoreboard spec §3a/§4): the domain's own ScoreboardLine
 // (crew/scoreboard.ts) plus the roster's own name (the nameByGolfer precedent every other row
 // on this response already follows) — never the golfer store's name, which can drift from what
@@ -295,9 +239,10 @@ const scoreboardRowSchema: z.ZodType<ScoreboardRow> = z.object({
   indexDelta: z.number().optional(),
 });
 
-// "Played together" — a derived shared round (crew-scoreboard spec §3b), the successor of
-// CountedRoundView above for THIS response's own `rounds` list: same `finalizedAt` wire name,
-// but no `appendedBy` — a shared round is a fact nobody appended, `sharedRoundIds` derived it.
+// "Played together" — a derived shared round (crew-scoreboard spec §3b), the successor of the
+// deleted counting apparatus' own per-round wire view (spec §2b) for THIS response's own
+// `rounds` list: same `finalizedAt` wire name, but no `appendedBy` — a shared round is a fact
+// nobody appended, `sharedRoundIds` derived it.
 export interface SharedRoundView {
   readonly roundId: RoundId;
   readonly finalizedAt: number;
@@ -360,9 +305,8 @@ export interface LeaveCrewResponse {
 export const leaveCrewResponseSchema: z.ZodType<LeaveCrewResponse> = z.object({ crewId: crewIdSchema });
 
 // Crew membership (invited in, accountable out — spec §1): the organizer's authority.
-// DELETE /crews/{crewId}/members/{golferId} (remove) takes NO body — the target rides the path,
-// same "path param, no schema" shape as DELETE /crews/{crewId}/seasons/{seasonId}/rounds/{roundId}
-// (removeCountedRound) — so it needs no request schema here. Both mutations return the crew's
+// DELETE /crews/{crewId}/members/{golferId} (remove) takes NO body — the target rides the
+// path — so it needs no request schema here. Both mutations return the crew's
 // OWN updated view (getCrewResponseSchema/GetCrewResponse) — the organizer stays authorized to
 // see the roster they just changed, same "produces the crew" shape as createCrew/getCrew/
 // joinCrewByInvite, unlike leaveCrew's minimal `{ crewId }` (the leaver's own authorization to

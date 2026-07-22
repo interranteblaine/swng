@@ -45,9 +45,10 @@ export { courseRecord } from "./golfer/courseRecord.js";
 export * from "./golfer/present.js";
 export * from "./crew/crew.js";
 export * from "./crew/ledger.js";
-// crew/analytics.ts (analytics spec 2026-07-21 §5): partner records / net averages / most
-// improved / season titles — folds beside the existing standings, banned onto the web-side
-// fence below like every other barrel-exported golf computation.
+// crew/analytics.ts (analytics spec 2026-07-21 §5): partner records / season titles — folds
+// beside the existing standings, banned onto the web-side fence below like every other
+// barrel-exported golf computation. (The lowest-net/most-improved season superlatives these
+// once also fed are deleted whole, crew-scoreboard spec §3c.)
 export * from "./crew/analytics.js";
 // crew/scoreboard.ts (crew-scoreboard spec §3a/§3b): the per-member crew scoreboard fold +
 // sharedRoundIds — banned onto the web-side fence below like every other barrel-exported golf

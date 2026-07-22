@@ -426,8 +426,7 @@ describe("transferOrganizer", () => {
 
 // getCrewRecords (the M8 GET /crews/{crewId}/records use case) is GONE (architecture-realignment
 // Task 9): the crew projection layer it read from is deleted. Season standings are computed on
-// read now — see seasonSlice.test.ts (createSeason/listSeasons/appendCountedRound/
-// removeCountedRound/getSeasonStandings/leaveCrew).
+// read now — see seasonSlice.test.ts (createSeason/listSeasons/getSeasonStandings/leaveCrew).
 
 // A CrewStore decorator that fails its first `failCount` `put` calls with a synthetic
 // "crew-conflict" before delegating to `inner` — mirrors courseSlice.test.ts's own
@@ -445,9 +444,6 @@ const createFlakyCrewStore = (inner: CrewStore, failCount: number): FlakyCrewSto
     putSeason: inner.putSeason,
     getSeason: inner.getSeason,
     listSeasons: inner.listSeasons,
-    addCountedRound: inner.addCountedRound,
-    removeCountedRound: inner.removeCountedRound,
-    listCountedRounds: inner.listCountedRounds,
     countsRound: inner.countsRound,
     put: async (crew, expectedRevision) => {
       putAttempts += 1;

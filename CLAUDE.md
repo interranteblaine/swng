@@ -1235,10 +1235,15 @@ Live season, "Standings"/"Games together" headings, "Appears when members play a
 NO close/reopen/records anywhere; then **the whole lifecycle live** — Edit the end date to
 `2026-06-30` → window re-rendered "Jan 1 – Jun 30, 2026" AND a **"FINAL"** marker appeared [today >
 endsAt]; crew-name Edit → "Renamed Close-Out Crew"; console zero errors/warnings). NO wipe (legacy
-rows fold via I4). Riding as notes: SeasonPanel's second games-empty-state arm keeps its prior-ruling
-copy (product-copy call, deferred); crew-name-edit trusts the PUT response while season-edit
-refetches (stylistic); `crewSeason.spec` describe-title still narrates the deleted counted-round
-model (docs-sweep candidate). On local `main`, never pushed.
+rows fold via I4). Post-close-out follow-up (owner-pushed, `a39adba`): the SeasonPanel "Games
+together" empty state said "No standings from these rounds yet…" — the word "standings" collided
+with the sibling `<h4>Standings` section the arc introduced; the prior owner ruling that set that
+copy predated the two-section layout and only governed its TRUTHFULNESS, so the deferral over-claimed.
+Reworded to "No games between current members in these rounds yet — matches, points, and skins show
+up here." (validate green, republished bundle `index-CqeeR2yZ.js`). Riding as notes (neither is
+product-facing): crew-name-edit trusts the PUT response while season-edit refetches (internal
+stylistic, both correct); `crewSeason.spec` describe-title still narrates the deleted counted-round
+model (test-file comment, zero user impact). On local `main`, never pushed.
 
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.

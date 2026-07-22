@@ -588,6 +588,26 @@ describe("SeasonPanel — played together", () => {
     expect(await screen.findByTestId("archive-probe")).toBeTruthy();
   });
 
+  it("Played together renders each round's canonical label (course · date), a whole-row link — never a bare locale date", async () => {
+    signInAsAnn();
+    const day = Date.UTC(2026, 6, 12, 14, 0);
+    mockedGetSeasonStandings.mockResolvedValue({
+      ...baseStandings,
+      rounds: [
+        { roundId: roundId("r-morning"), finalizedAt: day + 1, courseName: "Casa Verde GC", createdAt: Date.UTC(2026, 6, 12, 8, 0) },
+        { roundId: roundId("r-afternoon"), finalizedAt: day + 2, courseName: "Casa Verde GC", createdAt: Date.UTC(2026, 6, 12, 15, 0) },
+      ],
+    });
+    renderPanel();
+    // The canonical roundLabel — course + date, so each link's accessible name carries the course
+    // name (the old toLocaleDateString rendered NONE); links point at /rounds/:id, newest-first.
+    const links = await screen.findAllByRole("link", { name: /Casa Verde GC · /i });
+    expect(links).toHaveLength(2);
+    expect(links.map((l) => l.getAttribute("href"))).toEqual(["/rounds/r-morning", "/rounds/r-afternoon"]);
+    // The bare locale date the section used to show is gone from the section.
+    expect(screen.queryByText(new Date(day + 1).toLocaleDateString())).toBeNull();
+  });
+
   it("no shared rounds: the empty state is honest", async () => {
     signInAsAnn();
     mockedGetSeasonStandings.mockResolvedValue(baseStandings);

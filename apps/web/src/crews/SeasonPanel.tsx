@@ -5,6 +5,7 @@ import { formatHandicapIndex } from "@swng/domain";
 import type { SeasonStandingsResponse } from "@swng/contracts";
 import { getSeasonStandings, updateSeason } from "../api";
 import { useAuth } from "../auth/useAuth";
+import { dayCollisionChecker, roundLabel } from "../roundLabel";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnQuiet, cardBox, inputBox } from "../ui/classes";
 import { vsPar } from "../ui/vsPar";
@@ -146,6 +147,10 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
   // rendered here in SERVED order.
 
   const scoreboardEmpty = standings.scoreboard.every((row) => row.rounds === 0);
+  // The canonical designation (spec 2026-07-22): each shared round renders as course + date, tee
+  // time appended only to disambiguate two rounds that share course and day — the ONE shared
+  // dayCollisionChecker, over exactly the rounds this list renders.
+  const roundCollidesOnDay = dayCollisionChecker(standings.rounds);
 
   return (
     <div className={`${cardBox} flex flex-col gap-4 p-4`}>
@@ -356,7 +361,7 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
             {standings.rounds.map((round) => (
               <li key={round.roundId} className={`${cardBox} flex items-center justify-between gap-2 p-3`}>
                 <Link to={`/rounds/${round.roundId}`} className="font-mono text-forest underline decoration-fairway">
-                  {new Date(round.finalizedAt).toLocaleDateString()}
+                  {roundLabel({ courseName: round.courseName, createdAt: round.createdAt }, { withTime: roundCollidesOnDay(round) })}
                 </Link>
               </li>
             ))}

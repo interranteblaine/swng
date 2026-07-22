@@ -250,8 +250,18 @@ const scoreboardRowSchema: z.ZodType<ScoreboardRow> = z.object({
 export interface SharedRoundView {
   readonly roundId: RoundId;
   readonly finalizedAt: number;
+  // The canonical round designation's inputs (spec 2026-07-22 §3): courseName is REQUIRED (it is
+  // required on GolferRoundLine, the line this is derived from); createdAt is OPTIONAL, matching
+  // the golfer-record history line — a pre-createdAtMs line renders as its bare course name.
+  readonly courseName: string;
+  readonly createdAt?: number;
 }
-const sharedRoundViewSchema: z.ZodType<SharedRoundView> = z.object({ roundId: roundIdSchema, finalizedAt: z.number().int() });
+export const sharedRoundViewSchema: z.ZodType<SharedRoundView> = z.object({
+  roundId: roundIdSchema,
+  finalizedAt: z.number().int(),
+  courseName: z.string(),
+  createdAt: z.number().int().optional(),
+});
 
 // Standings are computed on read (crew-scoreboard spec §3/§4; window bounds per spec
 // 2026-07-22 §1): the season's WINDOW (startsAt/endsAt, converted via domain's seasonWindowOf)

@@ -517,7 +517,7 @@ describe("SeasonPanel — together records (ledger, head-to-head, partners)", ()
     signInAsAnn();
     mockedGetSeasonStandings.mockResolvedValue({
       ...baseStandings,
-      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000 }],
+      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC" }],
     });
 
     renderPanel();
@@ -571,8 +571,8 @@ describe("SeasonPanel — played together", () => {
     mockedGetSeasonStandings.mockResolvedValue({
       ...baseStandings,
       rounds: [
-        { roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000 },
-        { roundId: roundId("round-2"), finalizedAt: 1_700_100_000_000 },
+        { roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC" },
+        { roundId: roundId("round-2"), finalizedAt: 1_700_100_000_000, courseName: "Casa Verde GC" },
       ],
     });
 

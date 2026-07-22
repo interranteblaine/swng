@@ -106,11 +106,15 @@ const recordPlayed = async (
   archive: RoundArchive,
   wallMs: number,
   golferIds?: readonly GolferId[],
+  // The round's played instant — optional, matching the real line's `createdAtMs?`. When set it
+  // seeds the line's createdAtMs (the canonical-label input the standings wire now carries); the
+  // window fold reads `createdAtMs ?? finalizedAtMs`, so setting it to wallMs is behavior-neutral.
+  createdAtMs?: number,
 ): Promise<void> => {
   ctx.snapshots.record(archive);
   const ids = golferIds ?? archive.participants.map((p) => p.golferId);
   for (const golfer of ids) {
-    await ctx.projectionStore.putLine(golfer, { ...archiveGolferLine(archive, golfer), finalizedAtMs: wallMs });
+    await ctx.projectionStore.putLine(golfer, { ...archiveGolferLine(archive, golfer), finalizedAtMs: wallMs, ...(createdAtMs !== undefined ? { createdAtMs } : {}) });
   }
 };
 
@@ -288,13 +292,19 @@ describe("getSeasonStandings", () => {
   it("folds the together-records over DERIVED shared rounds, newest-round-first — no counting act", async () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-    await recordPlayed(ctx, singlesArchive("r1", 5_000, ann, bo, ann, {}), 5_000); // Ann beats Bo
-    await recordPlayed(ctx, singlesArchive("r2", 9_000, ann, bo, bo, {}), 9_000); // Bo beats Ann
+    await recordPlayed(ctx, singlesArchive("r1", 5_000, ann, bo, ann, {}), 5_000); // Ann beats Bo (no createdAtMs)
+    await recordPlayed(ctx, singlesArchive("r2", 9_000, ann, bo, bo, {}), 9_000, undefined, 8_900); // Bo beats Ann; played 8_900
 
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
 
     expect(standings).toMatchObject({ seasonId, name: "2026", startsAt: WIDE_WINDOW.startsAt, endsAt: WIDE_WINDOW.endsAt });
     expect(standings.rounds.map((r) => r.roundId)).toEqual([roundId("r2"), roundId("r1")]); // newest-first
+    // The canonical-label inputs ride the wire (spec 2026-07-22 §3): courseName (from the frozen
+    // card) is REQUIRED; createdAt (the played instant) rides when the line carries one, and is
+    // absent otherwise (r1 had no createdAtMs → renders as the bare course name).
+    expect(standings.rounds[0]).toMatchObject({ roundId: roundId("r2"), courseName: "Fixture Links 18", createdAt: 8_900 });
+    expect(standings.rounds[1]).toMatchObject({ roundId: roundId("r1"), courseName: "Fixture Links 18" });
+    expect(standings.rounds[1]!.createdAt).toBeUndefined();
     expect(standings.ledger).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ golferId: ann, wins: 1, losses: 1 }),

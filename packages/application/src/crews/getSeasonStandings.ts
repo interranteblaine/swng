@@ -78,11 +78,17 @@ export const getSeasonStandings =
       nameB: nameByGolfer.get(pair.b) ?? pair.b,
     }));
 
-    // Shared rounds newest-first by finalizedAtMs; any holder's line carries the same value for
-    // a given roundId (a round finalizes once), so the first holder found is authoritative.
-    const finalizedByRound = new Map<RoundId, number>();
-    for (const { lines } of members) for (const line of lines) if (!finalizedByRound.has(line.roundId)) finalizedByRound.set(line.roundId, line.finalizedAtMs);
-    const rounds = shared.map((roundId) => ({ roundId, finalizedAt: finalizedByRound.get(roundId)! })).sort((a, b) => b.finalizedAt - a.finalizedAt);
+    // Shared rounds newest-first by finalizedAtMs; any holder's line is authoritative for a given
+    // roundId (a round finalizes once — same finalizedAt, frozen courseName, createdAt on every
+    // participant's line), so the first holder found supplies the canonical designation (spec §3).
+    const lineByRound = new Map<RoundId, (typeof members)[number]["lines"][number]>();
+    for (const { lines } of members) for (const line of lines) if (!lineByRound.has(line.roundId)) lineByRound.set(line.roundId, line);
+    const rounds = shared
+      .map((roundId) => {
+        const line = lineByRound.get(roundId)!;
+        return { roundId, finalizedAt: line.finalizedAtMs, courseName: line.courseName, createdAt: line.createdAtMs };
+      })
+      .sort((a, b) => b.finalizedAt - a.finalizedAt);
 
     return {
       seasonId: season.seasonId,

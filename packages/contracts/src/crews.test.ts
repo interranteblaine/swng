@@ -15,6 +15,7 @@ import {
   peekCrewInviteRequestSchema,
   peekCrewInviteResponseSchema,
   seasonStandingsResponseSchema,
+  sharedRoundViewSchema,
   transferOrganizerRequestSchema,
   updateCrewRequestSchema,
   updateSeasonRequestSchema,
@@ -167,6 +168,17 @@ describe("season + standings schemas", () => {
     });
   });
 
+  it("sharedRoundViewSchema round-trips courseName and an optional createdAt", () => {
+    const withDate = { roundId: "r1", finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC", createdAt: 1_699_000_000_000 };
+    expect(sharedRoundViewSchema.parse(withDate)).toEqual(withDate);
+    const noDate = { roundId: "r2", finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC" };
+    expect(sharedRoundViewSchema.parse(noDate)).toEqual(noDate);
+  });
+
+  it("sharedRoundViewSchema rejects a missing courseName", () => {
+    expect(() => sharedRoundViewSchema.parse({ roundId: "r1", finalizedAt: 1, createdAt: 1 })).toThrow();
+  });
+
   it("seasonStandingsResponseSchema round-trips scoreboard + ledger (with name) + head-to-head + rounds, partners empty", () => {
     roundTrips(seasonStandingsResponseSchema, {
       seasonId: "s-1",
@@ -174,7 +186,7 @@ describe("season + standings schemas", () => {
       startsAt: "2026-01-01",
       endsAt: "2026-12-31",
       scoreboard: [{ golferId: golferId("ann"), name: "Ann", rounds: 1 }],
-      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000 }],
+      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC", createdAt: 1_699_000_000_000 }],
       ledger: [{ golferId: golferId("ann"), rounds: 1, wins: 1, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann" }],
       headToHead: [{ a: golferId("ann"), b: golferId("bo"), aWins: 1, bWins: 0, halves: 0 }],
       partners: [],

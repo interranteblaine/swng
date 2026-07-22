@@ -44,7 +44,15 @@ export interface CrewSeason {
   existing ms `SeasonWindow` (`startsAt` → UTC midnight; `endsAt` → last ms of that UTC
   day) so `crewScoreboard`/`sharedRoundIds`/every fold is BYTE-UNTOUCHED. The known
   edge — a late-evening round near a boundary can land on the neighboring UTC day — is
-  accepted and documented at the helper: one rule, no timezone machinery.
+  accepted and documented at the helper: one rule, no timezone machinery. The parse
+  **rejects a semantically-invalid date** (`2026-02-30`, `2026-13-01`) via a round-trip
+  check (`isoOf(Date.UTC(...)) === input`), not just the `\d{4}-\d{2}-\d{2}` shape — a
+  fat-fingered day must not silently roll over. A malformed string reaching `seasonWindowOf`
+  is a **programmer guard** (a plain `Error`, not a `DomainError` — the wire regex already
+  gates every write path, so this fires only on a corrupted stored row; the same posture as
+  the adapter's existing seasonId "#" guard). The user-facing ordering check (`startsAt >
+  endsAt`) is a separate `ApplicationError("invalid-season-window")` → 400 in the use cases
+  (§2), NOT a domain throw — so no domain error code needs an HTTP mapping.
 - **DELETED:** the tiling start rule (`seasonStart.ts` whole), `startsAtMs`, and
   `closedAtMs`. No window fact is ever derived from when someone happened to tap a
   button. Legacy (one day of beta rows): the adapter folds stored `startsAtMs` → its UTC
@@ -83,12 +91,23 @@ export interface CrewSeason {
 awards the season's titles; reopening un-awards them. **Which rounds count NEVER changes
 with close or reopen** — the window is the declared dates, period. (The shipped
 behavior — close stamps the end, a 13th round enters on reopen — is exactly the
-strangeness this kills.) The close-confirm teaching line claims only what's true:
-"Closing awards this season's titles — you can reopen it later." **The title lives on
-its season:** `SeasonStandingsResponse` gains `title?: { golfers: readonly {golferId,
-name}[] }` — served for CLOSED seasons via the same `stablefordTitle` fold, absent when
-open or scoreless — and the closed season's panel renders it. There is no separate
-trophy shelf; the season list is the timeline.
+strangeness this kills.) **The title lives on its season:** `SeasonStandingsResponse`
+gains `title?: { golfers: readonly {golferId, name}[] }` — served for CLOSED seasons via
+the same `stablefordTitle` fold, absent when open or scoreless — and the closed season's
+panel renders it. There is no separate trophy shelf; the season list is the timeline.
+
+**The title is a live fold, and the close copy says so (design review 2026-07-22, the Q2
+seam).** Because the window is the dates and close never moves it, closing a season whose
+`endsAt` is still in the FUTURE (e.g. closing the year season in July) awards a crown that
+keeps recomputing as members play through `endsAt` — the title only truly settles once the
+end date has passed. This is deliberate, not hidden: the model stays "close is ceremony,
+the window is the dates," and we make it HONEST rather than block early close (a hard rule
+there is both product-hostile — you'd have to shrink the end date to crown early — and
+untestable on a live deck whose rounds are always "now"). The close-confirm teaching line
+therefore reads: **"Closing awards this season's titles and locks its dates. If its end
+date is still ahead, standings keep updating until then — reopen anytime to make changes."**
+In the common path (a year season closed after year-end, `endsAt` in the past) the title
+is stable by construction.
 
 ## 4. All-time collapses into the concept (owner ruling)
 
@@ -105,16 +124,32 @@ surface aggregating "everything" is redundant machinery. Lifetime head-to-head (
 The crew serves two scenarios — members who play together, and members comparing golf
 played apart — and the page names them honestly:
 
-- The scoreboard table is titled **"Standings"** — it IS the season standings for
-  everyone, remote or together, already sorted as a leaderboard. (Wire/fold unchanged.)
-- The game ledger table is titled **"Games together"** with the footnote it already has;
+- The scoreboard table gets a **VISIBLE heading `Standings`** — it IS the season standings
+  for everyone, remote or together, already sorted as a leaderboard. Today both tables
+  carry only aria-labels and no visible caption (unlike Head-to-head/Partners, which have
+  visible `<h4>`s) — so the owner's "the real board went unnamed" complaint is a MISSING
+  VISIBLE HEADING, not a rename. Render an `<h4>Standings` above the scoreboard and an
+  `<h4>Games together` above the ledger (the existing `<h4>` idiom), and update each
+  table's aria-label to match. (Wire/fold unchanged; the aria-label strings are e2e/unit
+  LOCATORS — treat the change as a real string-move, not "type-reconciliation.")
+- The game ledger, under its `Games together` heading, keeps the footnote it already has;
   its empty state becomes: "Appears when members play a round together." — never an
   implication that the standings are missing. Synthetic remote head-to-head (pairing up
   rounds never played against each other) is REJECTED on record: net-vs-par on the
   standings board is the honest cross-course comparison; manufactured match results are
   fake competition.
 - A season panel's window line renders the chosen dates verbatim, one form always:
-  `Jan 1 – Dec 31, 2026`.
+  `Jan 1 – Dec 31, 2026`, from the date STRINGS (a local month-name split — NEVER a
+  `new Date` local conversion, the "Dec 31, 2025" artifact class). Note the one accepted
+  inconsistency: season membership compares the UTC date of a round's played time (§1),
+  while a round's own date renders locally elsewhere — so a round finalized late on a
+  boundary evening can read locally as one date yet file under the neighboring UTC day.
+  UTC is the only deterministic stored option (no per-round timezone is stored); the miss
+  is confined to after-dark boundary rounds and is documented so support can explain it,
+  not hidden.
+- **Lifetime is discoverable:** the create-season form (or the season-list empty state)
+  carries one helper line naming the wide-dates path — "Want an all-time board? Give it
+  wide dates." — so collapsing the All-time surface (§4) never hides the lifetime use.
 - The **"account" roster badge is deleted** — a vestige of the ghost/claim era. It
   renders from `CrewMemberView.claimed` (`found?.sub !== undefined`), which distinguished
   real accounts from unclaimed ghosts back when a crew could hold either. Under

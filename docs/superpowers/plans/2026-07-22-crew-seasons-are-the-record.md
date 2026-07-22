@@ -47,7 +47,6 @@ modify `packages/domain/src/index.ts`; modify `eslint.config.mjs` (fence banlist
 **Produces (Task 2 + Task 3 consume verbatim):**
 
 ```ts
-import { DomainError } from "../errors.js";
 import type { SeasonWindow } from "./scoreboard.js";
 
 export interface SeasonBounds {
@@ -60,10 +59,19 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 // A season bound is a CALENDAR DATE, compared against the UTC date of a round's played
 // time (spec §1). Known, accepted edge: a late-evening local round near a boundary can
 // land on the neighboring UTC day — one rule, no timezone machinery.
+//
+// PROGRAMMER GUARD, not a DomainError (spec §1, review F-err): the wire regex gates every
+// write path, so a malformed string here means a corrupted stored row — a plain Error, the
+// posture of the adapter's own seasonId "#" guard. The round-trip check (not just the shape
+// regex) rejects a semantically-invalid date (2026-02-30 rolling to Mar 2) instead of
+// windowing to the wrong instant (review G6).
+const isoOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 const utcDayStartMs = (date: string): number => {
-  if (!DATE.test(date)) throw new DomainError("invalid-season-window", `not a YYYY-MM-DD date: "${date}"`);
+  if (!DATE.test(date)) throw new Error(`season bound not a YYYY-MM-DD date: "${date}"`);
   const [y, m, d] = date.split("-").map(Number);
-  return Date.UTC(y!, m! - 1, d!);
+  const ms = Date.UTC(y!, m! - 1, d!);
+  if (isoOf(ms) !== date) throw new Error(`season bound is not a real calendar date: "${date}"`);
+  return ms;
 };
 
 export const seasonWindowOf = (bounds: SeasonBounds): SeasonWindow => ({
@@ -72,13 +80,19 @@ export const seasonWindowOf = (bounds: SeasonBounds): SeasonWindow => ({
 });
 ```
 
+Note: the user-facing `startsAt > endsAt` ordering check is NOT here — it lives in the
+`createSeason`/`updateSeason` use cases as `ApplicationError("invalid-season-window")` →
+400 (Task 2). `seasonWindowOf` only converts and programmer-guards.
+
 - [ ] **Step 1: tests** (hand-pinned, composed with the existing `inWindow`):
   - `seasonWindowOf({startsAt:"2026-01-01", endsAt:"2026-12-31"})` →
     `{startMs: Date.UTC(2026,0,1), endMs: Date.UTC(2026,11,31)+86_399_999}`.
   - a `StoredLine` played at exactly `endMs` is `inWindow`; at `endMs + 1` is not; at
     `startMs - 1` is not (reuse `inWindow` from `scoreboard.js`, don't re-derive).
   - single-day season (`startsAt === endsAt`) contains a line played that UTC day.
-  - malformed (`"2026-1-1"`, `"garbage"`, `""`) throws `DomainError("invalid-season-window")`.
+  - malformed SHAPE (`"2026-1-1"`, `"garbage"`, `""`) throws `Error`; semantically-invalid
+    (`"2026-02-30"`, `"2026-13-01"`) throws `Error` too (the round-trip check — NOT silently
+    windowed to a rolled-over instant).
 - [ ] **Step 2:** export from `index.ts`; add `seasonWindowOf` beside `crewScoreboard` in
   the eslint fence banlist.
 - [ ] **Step 3:** `pnpm validate` exit 0. Commit:
@@ -100,6 +114,10 @@ export const seasonWindowOf = (bounds: SeasonBounds): SeasonWindow => ({
 - Modify: `packages/lambda/src/http/routes.ts` (+ `PUT /crews/{crewId}/seasons/{seasonId}`,
   + `PUT /crews/{crewId}`); `compositionRoot.ts`;
   `packages/adapters-dynamodb/src/createDynamoCrewStore.ts`.
+- Modify: **`apps/infra-cdk/lib/swngStack.ts`** — the hand-maintained `HTTP_ROUTES` const
+  (review G1): ADD the two `PUT` entries here, or `routesParity.test.ts` (which asserts
+  `HTTP_ROUTES` === `buildRoutes` exactly) fails and CDK never wires the routes. No
+  RouteSettings method-set change (`PUT` is already used by `PUT /me`, `PUT /courses/{id}`).
 - Modify: route pins — `swngStack.test.ts` (42 HTTP / 44 total TRANSIENT after this task),
   `routesParity.test.ts`, `dispatch.test.ts`.
 - Tests: crewStore contract tests; the crew slice tests.
@@ -122,18 +140,26 @@ Semantics (exact):
   by spreading over the stored season, then apply the SAME name + `startsAt > endsAt`
   validation before `putSeason`; return `{season}`.
 - `updateCrew` (new): guard `requireCrewMember → organizer` (no season lookup); body
-  `{name}`; `validateCrewName(command.name)` (domain, existing); `putCrew` with the
-  refreshed name (reuse the store's `put` with the current revision — read-modify-write
-  like the membership verbs); return the refreshed `CrewView` via `toCrewView`.
+  `{name}`; `validateCrewName(command.name)` (domain, existing); rename is just
+  `{...crew, name}` (no domain rename op exists); write via the store's `put` reusing the
+  **`retryOnConflict` idiom** (`removeCrewMember.ts:31` — a get→mutate→conditional-put
+  loop, NOT a naive get-then-put); return the refreshed `CrewView` via `toCrewView` (still
+  async here — `claimed` isn't deleted until Task 3).
 - Contracts: `crewSeasonViewSchema` gains `startsAt`/`endsAt` (regex-pinned, required),
   DROPS `startsAtMs`/`closedAtMs`; `createSeasonRequestSchema` gains the two required
   dates; new `updateSeasonRequestSchema` (`.strict()`, all-optional) and
   `updateCrewRequestSchema` (`.strict()`, `{name}`).
-- Adapter: write both date strings; read-fold legacy —
+- Adapter (review G7): add UTC helpers `isoDate(ms) = new Date(ms).toISOString().slice(0,10)`
+  and `utcYear(ms) = new Date(ms).getUTCFullYear()` (UTC to match `seasonWindowOf`); the
+  `SeasonItem` interface + `putSeason`'s field-by-field builder must be rewritten to store
+  `startsAt`/`endsAt` and STOP writing `startsAtMs`/`closedAtMs`; `createSeason` keeps
+  `createdAtMs: clock.now()`. Read-fold legacy at the ONE `seasonOf` mapping —
   `startsAt: item.startsAt ?? (item.startsAtMs !== undefined ? isoDate(item.startsAtMs) :
   undefined)` and `endsAt: item.endsAt ?? (item.startsAtMs !== undefined ?
-  `${utcYear(item.startsAtMs)}-12-31` : undefined)` at the ONE `seasonOf` mapping; a
-  legacy row therefore folds to that year's Jan-1 / Dec-31; `closedAtMs` never read.
+  `${utcYear(item.startsAtMs)}-12-31` : undefined)`; `closedAtMs` never read. COMMENT the
+  fold's assumption (review G8): a legacy CLOSED season that was `[start, closedAtMs=Nov 1]`
+  widens to Dec 31 — accepted only because beta rows are year-shaped auto-seasons and beta
+  is disposable; NOT a general migration.
 
 - [ ] **Contract tests:** date round-trips (create → read both dates); a raw legacy item
   (`startsAtMs` + `closedAtMs`, no date strings) reads as its UTC start date + Dec-31 end;
@@ -152,18 +178,26 @@ Semantics (exact):
 
 **Files:**
 - Modify: `packages/application/src/crews/getSeasonStandings.ts` (window via
-  `seasonWindowOf`; `title?` on close), `crews/crewView.ts` (drop the async `claimed`
-  lookup — `toCrewView` becomes sync unless another consumer surfaces).
-- DELETE: `crews/getCrewRecords.ts` + tests + the route `GET /crews/{crewId}/records` +
-  `CrewRecordsResponse`/schema + `apps/web/src/crews/CrewRecordsSection.tsx` + test + its
-  api-client fn (+ api.test coverage).
+  `seasonWindowOf`; `title?` on close).
+- Modify (review G2 — the `toCrewView` dead-dependency ripple): `crews/crewView.ts` drops
+  the async `claimed` sub-lookup and its `golferStore` dep → `toCrewView` becomes a pure
+  SYNC mapper; then remove the now-dead `golferStore`/`await` at EVERY caller —
+  `crews/createCrew.ts`, `crews/joinCrewByInvite.ts` (2 sites), `crews/transferOrganizer.ts`,
+  `crews/getCrew.ts`, `crews/removeCrewMember.ts`, AND Task 2's new `crews/updateCrew.ts`.
+  (Verify no other reader of `claimed` exists — review confirmed none but the roster badge.)
+- DELETE: `crews/getCrewRecords.ts` + tests + the route `GET /crews/{crewId}/records`
+  (from `routes.ts` AND `apps/infra-cdk/lib/swngStack.ts`'s `HTTP_ROUTES` const — review
+  G1) + `CrewRecordsResponse`/schema + `apps/web/src/crews/CrewRecordsSection.tsx` + test +
+  its api-client fn (+ api.test coverage).
 - Modify: `packages/contracts/src/crews.ts` — `SeasonStandingsResponse` header fields
   `startsAtMs`/`closedAtMs` → `startsAt`/`endsAt`, gains
   `title?: { golfers: readonly { golferId: GolferId; name: string }[] }`;
   `CrewMemberView` DROPS `claimed` (+ its schema field).
 - Modify: `apps/web/src/crews/SeasonPanel.tsx` + test, `CrewPage.tsx` + test,
-  `compositionRoot.ts`, route pins back to **41 HTTP / 43 total**,
-  `apps/web/e2e/crewSeason.spec.ts` (type-reconciliation only — Task 4 owns new oracles).
+  `compositionRoot.ts`, route pins back to **41 HTTP / 43 total** (`swngStack.test.ts`,
+  `routesParity.test.ts`, `dispatch.test.ts`),
+  `apps/web/e2e/crewSeason.spec.ts` (reconciliation — mostly type/field, BUT the table
+  aria-label locators change too; see the heading bullet).
 
 Semantics:
 - `getSeasonStandings`: `const window = seasonWindowOf(season)` replaces the hand-built
@@ -171,28 +205,45 @@ Semantics:
   `title` from the SAME roster-filtered ledger already in scope via `stablefordTitle`
   (absent when open or when it returns `[]`), names via `nameByGolfer`.
 - SeasonPanel copy (exact):
-  - scoreboard table title → **"Standings"**; games table title → **"Games together"**
-    (footnote unchanged); games empty state → `Appears when members play a round
-    together.`; the old "Standings build automatically once members play together." line
-    is DELETED.
+  - VISIBLE headings (review G4 — the tables are aria-labelled but unnamed on screen
+    today; the owner's complaint is a missing visible heading): render `<h4>Standings`
+    above the scoreboard and `<h4>Games together` above the ledger (the existing
+    Head-to-head/Partners `<h4>` idiom), and update each table's `aria-label` to match
+    (`"Scoreboard"`→`"Standings"`, `"Season standings"`→`"Games together"`). These
+    aria-labels are LOCATORS in `SeasonPanel.test.tsx` and `crewSeason.spec.ts` — a real
+    string-move, list every touched locator (the repeated string-breakage lesson).
+  - games empty state → `Appears when members play a round together.`; the old "Standings
+    build automatically once members play together." line is DELETED.
   - window line: a small local `YYYY-MM-DD` → `"Jan 1 – Dec 31, 2026"` formatter (split
     the strings, month-name table, NO `new Date` local conversion) — always both dates.
   - closed season with `title` → a line under the header: `Title — {names joined " · "}`.
   - create-season form: name prefilled `String(currentYear)`, two `type="date"` inputs
-    prefilled `{year}-01-01` / `{year}-12-31`, submitted always (both required).
+    prefilled `{year}-01-01` / `{year}-12-31`, submitted always (both required); PLUS one
+    helper line naming the lifetime path (review Q1): `Want an all-time board? Give it wide
+    dates.`
   - season edit (organizer, OPEN seasons): an `Edit` (btnQuiet) swapping the header for
     name + two date inputs + Save/Cancel (the roster-row edit idiom), one PUT then reload
     — new api fn `updateSeason`.
-  - close-confirm teaching line → `Closing awards this season's titles — you can reopen it
-    later.`
+  - close-confirm teaching line (review Q2 — disclose the moving title): `Closing awards
+    this season's titles and locks its dates. If its end date is still ahead, standings
+    keep updating until then — reopen anytime to make changes.`
 - CrewPage:
   - DELETE the `{member.claimed && <span className={badge}>account</span>}` render; keep
     the `organizer` badge.
   - crew-name edit (organizer): an `Edit` beside the `<h1>` crew name → an input +
     Save/Cancel, one `PUT /crews/{crewId}` via new api fn `updateCrew`, then reload.
-- Whole-tree copy grep: `grep -rn "counted" apps/web/src` → zero user-facing hits.
-- crewSeason.spec: compile-level only — records-helper imports/assertions out (Task 4
-  rebuilds those beats), `startsAtMs` references → `startsAt`, `claimed` off fixtures.
+  - REWORD the remove-member confirm line (review G3 — it still says "counted", the exact
+    stale vocabulary, and is wrong under the roster-filter model): `CrewPage.tsx`'s "…Their
+    rounds stay counted; their standings return if they're invited back." →
+    `Their rounds stay on their own record; their crew standings return if they're invited
+    back.`
+- Whole-tree copy grep: `grep -rn "counted" apps/web/src` → zero user-facing hits (the
+  remove-member line above is why this gate would otherwise fail).
+- crewSeason.spec reconciliation: records-helper imports/assertions out (Task 4 rebuilds
+  those beats); `startsAtMs` → `startsAt`; the table-name locators updated per the heading
+  bullet; DELETE the `claimed` assertions (e.g. `crewSeason.spec.ts:388`
+  `expect(boMember?.claimed).toBe(true)` is an ASSERTION, remove it — not just a fixture
+  edit) and strip `claimed` from `SeasonPanel.test.tsx`/`CrewPage.test.tsx` fixtures.
 
 - [ ] `pnpm validate` exit 0. Commit:
   `feat(crews): the season is the record — title on the season, honest table names, all-time surface and the dead account badge deleted`
@@ -206,10 +257,14 @@ Semantics:
 need them).
 
 - [ ] Crew-creation test asserts the auto-season's `name === String(year)` AND both
-  visible dates (`{year}-01-01` / `{year}-12-31`).
-- [ ] "The Golden Dozen" is created with explicit year dates
-  (`{startsAt: "2026-01-01", endsAt: "2026-12-31"}`) — the deck still lands inside it;
-  every frozen assertion (scoreboard literals included) byte-identical.
+  visible dates (`{year}-01-01` / `{year}-12-31`), where `year = new
+  Date().getUTCFullYear()` — NEVER a literal.
+- [ ] "The Golden Dozen" is created with the CURRENT UTC year's dates (review G5 — a
+  year-fragility time bomb): `const y = new Date().getUTCFullYear()` →
+  `{startsAt: `${y}-01-01`, endsAt: `${y}-12-31`}`. The deck's rounds are finalized LIVE
+  "now", so a hardcoded `"2026-..."` window would empty the board (and fail every frozen
+  assertion) the moment the calendar rolls to 2027. The deck still lands inside the current
+  year; every frozen assertion (scoreboard literals included) byte-identical.
 - [ ] The old records-route beats become season-title beats: close "The Golden Dozen" →
   its OWN standings carry `title` = the {Al, Bo} crown (same frozen numbers as the retired
   records assertion); reopen → `title` absent.

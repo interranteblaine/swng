@@ -174,6 +174,7 @@ export default [
                 // the shared-rounds derivation; the web renders SERVED scoreboard rows only
                 "crewScoreboard",
                 "sharedRoundIds",
+                "seasonWindowOf",
                 "playedAtMs",
                 "inWindow",
                 // golden-deck runners (barrel-exported, run domain compute — nonsensical in

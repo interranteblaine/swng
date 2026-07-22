@@ -54,6 +54,10 @@ export * from "./crew/analytics.js";
 // sharedRoundIds — banned onto the web-side fence below like every other barrel-exported golf
 // computation.
 export * from "./crew/scoreboard.js";
+// crew/seasonWindow.ts: a season's chosen YYYY-MM-DD dates become the SeasonWindow the crew
+// scoreboard fold above already consumes — banned onto the web-side fence below like every
+// other barrel-exported golf computation.
+export * from "./crew/seasonWindow.js";
 // GameConfig is already re-exported via ./round/events.js (game.ts owns the
 // type; events.ts re-exports it so RoundEvent's "game-added" arm has a name to
 // reference) — re-export game.ts's other members individually so `export *`

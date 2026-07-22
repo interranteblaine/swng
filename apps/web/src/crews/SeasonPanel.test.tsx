@@ -111,7 +111,20 @@ describe("SeasonPanel — window header", () => {
 
     renderPanel();
 
-    expect(await screen.findByText("Jan 1, 2026 – Jun 15, 2026")).toBeTruthy();
+    expect(await screen.findByText("Jan 1 – Jun 15, 2026")).toBeTruthy();
+  });
+
+  // Spec §5's "wide dates" all-time case (the feature the spec's own "Want an all-time board?
+  // Give it wide dates." line makes first-class): a single trailing year would be ambiguous
+  // across a cross-year window, so both ends carry their own year — the index-chart's own
+  // cross-year idiom (2026-07-21-index-chart-polish-design.md).
+  it("a cross-year window names the year on both ends", async () => {
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValue({ ...baseStandings, startsAt: "2020-01-01", endsAt: "2030-12-31" });
+
+    renderPanel();
+
+    expect(await screen.findByText("Jan 1, 2020 – Dec 31, 2030")).toBeTruthy();
   });
 
   it("a standings load failure renders an honest quiet message, never a thrown render", async () => {
@@ -140,7 +153,7 @@ describe("SeasonPanel — Live/Final marker", () => {
 
     renderPanel();
 
-    expect(await screen.findByText("Jan 1, 2026 – Dec 31, 2026")).toBeTruthy();
+    expect(await screen.findByText("Jan 1 – Dec 31, 2026")).toBeTruthy();
     expect(screen.getByText("Final")).toBeTruthy();
   });
 
@@ -151,7 +164,7 @@ describe("SeasonPanel — Live/Final marker", () => {
 
     renderPanel();
 
-    expect(await screen.findByText("Jan 1, 2026 – Dec 31, 2026")).toBeTruthy();
+    expect(await screen.findByText("Jan 1 – Dec 31, 2026")).toBeTruthy();
     expect(screen.queryByText("Final")).toBeNull();
   });
 });

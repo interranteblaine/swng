@@ -20,14 +20,23 @@ export interface SeasonPanelProps {
   readonly isOrganizer: boolean;
 }
 
-// Local presentation only — a plain "YYYY-MM-DD" string split into "Jan 1, 2026" (NEVER a
+// Local presentation only — plain "YYYY-MM-DD" strings split into month/day/year (NEVER a
 // `new Date` local-time conversion — a date-only string like "2026-01-01" parsed as local time
 // can roll to the PRIOR calendar day west of UTC, the exact artifact class spec 2026-07-22 §5
-// calls out).
+// calls out). The whole window is ONE function (not a per-date helper) because the year-once
+// decision depends on BOTH ends: spec §5 pins "Jan 1 – Dec 31, 2026" — the year stated ONCE, at
+// the very end, when both dates share a year. A cross-year window (the "wide dates" all-time
+// board the spec's own "Want an all-time board? Give it wide dates." line makes first-class)
+// would be ambiguous with a single trailing year, so both ends carry their own year instead —
+// "Jan 1, 2020 – Dec 31, 2030", the same idiom the index chart uses for cross-year date anchors
+// (2026-07-21-index-chart-polish-design.md).
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const formatWindowDate = (isoDate: string): string => {
-  const [year, month, day] = isoDate.split("-").map(Number);
-  return `${MONTH_NAMES[month! - 1]} ${day}, ${year}`;
+const formatWindowRange = (startIso: string, endIso: string): string => {
+  const [startYear, startMonth, startDay] = startIso.split("-").map(Number);
+  const [endYear, endMonth, endDay] = endIso.split("-").map(Number);
+  const start = `${MONTH_NAMES[startMonth! - 1]} ${startDay}`;
+  const end = `${MONTH_NAMES[endMonth! - 1]} ${endDay}`;
+  return startYear === endYear ? `${start} – ${end}, ${endYear}` : `${start}, ${startYear} – ${end}, ${endYear}`;
 };
 
 // Live vs. Final (spec 2026-07-22 §1/§5): a derived label, nothing more — no stored `status`, no
@@ -203,7 +212,7 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
                 ends. Beside it, a derived Live/Final marker (never stored, never interactive) —
                 a Live season shows no marker; the dates already say it's current. */}
             <p className="font-mono text-xs text-fairway">
-              {formatWindowDate(standings.startsAt)} – {formatWindowDate(standings.endsAt)}
+              {formatWindowRange(standings.startsAt, standings.endsAt)}
               {isFinal && <span className={`${badge} ml-2`}>Final</span>}
             </p>
           </>

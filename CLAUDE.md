@@ -1120,6 +1120,68 @@ plot rather than a gate message (future "no postable rounds yet" branch candidat
 20-point window's e2e coverage is unit-level by design (no ≥21-round live fixture). On
 local `main`, never pushed.
 
+The crew watches — window seasons and the automatic scoreboard (2026-07-21/22, spec
+`docs/superpowers/specs/2026-07-21-crew-scoreboard-window-seasons-design.md`, plan
+`2026-07-21-crew-scoreboard-window-seasons.md`, 5 SDD tasks + 3 fix waves + 2 controller
+fixes, commits `e362d94..bac0ed2`): the owner's field report — crews are "lacking and
+clunky" — diagnosed to ONE root: **the crew only knew what you told it** (every member
+manually counted each round into a season, a chore nobody performs, so the page sat empty
+while any stranger could already read the same facts on `/golfers/{id}`). Closed by ONE
+principle: **the crew watches; members just play** — it READS its members' golf, is never
+FED it, and automatic counting discloses NOTHING new (the decisive argument over Codex's
+"joining implies consent"). A **season is a time window now, not a list**: `CrewSeason`
+gains `startsAtMs` (the tiling rule — `max(last closed season's end, Jan 1 UTC)` — so
+sequential seasons tile and a memorialize-after-the-fact season reaches back) and
+`closedAtMs` (close stamps it, reopen deletes it; both verbs otherwise unchanged);
+`createCrew` auto-opens the year's season so a crew is born alive; a round is in-season
+iff its played date (`createdAtMs ?? finalizedAtMs`) falls in the inclusive window AND its
+golfer is on the CURRENT roster (tenure ignored — the standing aggregation-scope law;
+Codex's rounds-while-a-member rejected on record). One window feeds two boards from ONE
+`listLines` per member: the **scoreboard** (new `domain/crew/scoreboard.ts`, a pure fold —
+Rounds · Best 18 · Net/18 [AGS-based vs-par per 18, ≥3-round floor; avg-gross rejected as
+dishonest across mixed pars/hole-counts] · Index + season Δ; every member rows including
+rounds-0; total sort domain-owned) and **together-records** (`sharedRoundIds`: a round is
+"together" iff ≥2 current members' lines share its roundId — you can't accidentally play a
+match with a crew-mate; ledger/H2H/partners/titles fold EXACTLY as before over the derived
+set). DELETED whole: `CountedRound` + three store methods + both use cases + both routes
+(HTTP 42→40, total 44→42) + the wire schemas + both UI doors + the error vocabulary
+(`round-already-counted`, the counted `season-closed`, and — a review catching spec §2b's
+clause the plan under-enumerated — `did-not-play`/`not-the-appender`); the superlatives
+block + `netAverages`/`mostImproved` (SUPERSEDED: a board where everyone has a line beats
+winner-only callouts; `stablefordTitle` stays). Legacy: season rows fold
+`startsAtMs ← createdAtMs`; orphan `SEASON#…#ROUND#` items tolerated forever
+(contract-pinned); NO wipe, no migration. Review culture earned its keep at every level:
+task reviews caught a missing-slice-test wave (T2) and confirmed the T3 implementer's TWO
+correct deviations (`vsPar(netPer18, 0)` — the plan's `,1` was the controller's own bug,
+vsPar subtracts par; and the ≥2-member consequence honestly rewriting the deck's solo-Al
+phases to assert `[]` with frozen NUMBERS relocated intact to the {Al,Bo} tests); the T4
+opus review re-derived the frozen scoreboard literals from the deck by hand (+0.2/−0.2,
+71(−1), ags==gross proven) and verified them non-circular; the fable whole-branch review
+(READY TO DEPLOY — YES after one test-only fix) verified the played-date rule one-copy by
+execution, proved all four hypothesized seam defects absent, and caught the gate's TWO NEW
+projector-lag races (the scoreboard reads the async golfer projection where counted
+standings read transactional snapshots — `pollUntil` on COUNTS only, never values).
+Close-out (controller-run): validate exit 0 → `deploy:beta` LAMBDA-FIRST
+(`UPDATE_COMPLETE`; 40 HTTP routes live-verified, both counted routes gone; forbidden
+order proven: web-first would break the whole crew surface on required `startsAtMs`) →
+`publish:web:beta` (`index-Qp64GoEm.js` curl-verified) → `e2e:beta` 17/17 ×2 →
+**crewSeason live 10/10 ×2 FIRST RUN** (frozen deck byte-identical incl. the title crown;
+new oracles + the close/round-13/reopen window test all held) → full `e2e:field` **66
+passed / 1 documented-skip FIRST RUN** → an adversarial USE pass on DEPLOYED
+beta.swng.golf (phone viewport, real PKCE as "Wren Walker": the auto-season "2026" born
+with the crew; the board ALIVE with Sam Field's solo round he finalized having NEVER
+opened the crew page — rounds 2/1, best-18s live, honest "—" under the 3-round floors;
+"Played together" listing exactly the one shared round; the singles W-L and H2H "Sam
+leads 1–0" from the shared round only; Close season through the real confirm — the new
+teaching line verbatim — closed badge + window range "Dec 31, 2025 – Jul 21, 2026", reopen
+one-tap restoring everything; console ZERO app errors, zero CSP violations; walk users
+deleted). Riding as notes: `(+0.0)` index-delta rendering reachable and unpinned; Net/18
+integral values render `+2` not `+2.0`; the UTC year-start renders locally as "Since Dec
+31, 2025"; the Played-together row is a raw locale date (roundLabel candidate);
+`countsRound` kept dead-but-honest (prior-arc orphan, follow-up deletion candidate);
+`createCrew`'s crew+season writes non-atomic (degrades to the pre-arc empty state);
+hyphen-vs-minus split between vsPar columns and the Δ. On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

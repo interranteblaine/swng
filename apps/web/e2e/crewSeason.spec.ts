@@ -257,6 +257,16 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // scoreboard plan Task 4 Step 2). `standings.rounds` — the DERIVED "played together" list —
     // stays empty here: sharedRoundIds requires >=2 CURRENT roster members holding a line for the
     // same round (spec §3a/§3b) — it populates once Bo joins.
+    // The scoreboard reads the async golfer projection (DynamoDB Streams), unlike the
+    // snapshot-fed together-folds — poll for projection catch-up before reading standings; this
+    // pins the race, it never launders the values asserted below.
+    await pollUntil(
+      () => getMyRecordDirect(httpUrl, al.tokens.idToken),
+      (record) => record.history.length >= SEASON_ROUNDS,
+      120_000,
+      "Al's record (scoreboard projection catch-up)",
+    );
+
     const standings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
     expect(standings.scoreboard).toEqual(expectedScoreboardRows(new Set<GolferId>([ids.al])));
     expect(standings.rounds).toEqual([]);
@@ -586,9 +596,18 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     const reopened = await reopenSeasonDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
     expect(reopened.season.status).toBe("open");
 
-    const reopenedStandings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
+    // sharedRoundIds (rounds AND scoreboard alike) reads each roster member's own async golfer
+    // projection, not the snapshot directly — poll on the standings' own round COUNT until
+    // round 13 has landed for both Al and Bo before asserting; this pins the projector-lag race,
+    // never a value.
+    const reopenedStandings = await pollUntil(
+      () => getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId),
+      (standings) => standings.rounds.length === SEASON_ROUNDS + 1,
+      120_000,
+      "reopened standings (round-13 projection catch-up)",
+    );
     expect(reopenedStandings.rounds).toHaveLength(SEASON_ROUNDS + 1);
-    expect(reopenedStandings.rounds.map((round) => round.roundId)).toContain(started.roundId);
+    expect([...reopenedStandings.rounds.map((round) => round.roundId)].sort()).toEqual([...roundIds, started.roundId].sort());
     expect(reopenedStandings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
     expect(reopenedStandings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
     expect(reopenedStandings.partners).toEqual(EXPECTED_PARTNERS);

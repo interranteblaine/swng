@@ -49,6 +49,10 @@ export * from "./crew/ledger.js";
 // improved / season titles — folds beside the existing standings, banned onto the web-side
 // fence below like every other barrel-exported golf computation.
 export * from "./crew/analytics.js";
+// crew/scoreboard.ts (crew-scoreboard spec §3a/§3b): the per-member crew scoreboard fold +
+// sharedRoundIds — banned onto the web-side fence below like every other barrel-exported golf
+// computation.
+export * from "./crew/scoreboard.js";
 // GameConfig is already re-exported via ./round/events.js (game.ts owns the
 // type; events.ts re-exports it so RoundEvent's "game-added" arm has a name to
 // reference) — re-export game.ts's other members individually so `export *`

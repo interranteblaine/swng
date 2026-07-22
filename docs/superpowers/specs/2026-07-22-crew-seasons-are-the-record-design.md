@@ -69,11 +69,15 @@ export interface CrewSeason {
   semantically-invalid date** (`2026-02-30`, `2026-13-01`) via a round-trip check
   (`isoOf(Date.UTC(...)) === input`), not just the `\d{4}-\d{2}-\d{2}` shape — a
   fat-fingered day must not silently roll over. A malformed string reaching `seasonWindowOf`
-  is a **programmer guard** (a plain `Error`, not a `DomainError` — the wire regex already
-  gates every write path, so this fires only on a corrupted stored row; the same posture as
-  the adapter's existing seasonId "#" guard). The user-facing ordering check (`startsAt >
-  endsAt`) is a separate `ApplicationError("invalid-season-window")` → 400 in the use cases
-  (§2), NOT a domain throw — so no domain error code needs an HTTP mapping.
+  is a **programmer guard** (a plain `Error`, not a `DomainError`) — and it fires ONLY on a
+  corrupted stored row because the use cases (§2) validate every candidate BEFORE any write:
+  `createSeason`/`updateSeason` check the `startsAt > endsAt` ordering AND run
+  `seasonWindowOf` on the candidate (catching its throw), mapping BOTH to one
+  `ApplicationError("invalid-season-window")` → 400. So a shape-valid-but-unreal date
+  (`2026-02-30`) never reaches storage, no domain error code needs an HTTP mapping, and the
+  plain-`Error` guard is genuinely unreachable from the wire (same posture as the adapter's
+  existing seasonId "#" guard). The regex alone does NOT suffice — it pins shape, not calendar
+  validity, so the use-case check is load-bearing, not belt-and-suspenders.
 - **DELETED:** the tiling start rule (`seasonStart.ts` whole), `startsAtMs`, `closedAtMs`,
   AND `status`. No window fact is ever derived from when someone happened to tap a button,
   and no lifecycle flag is stored. Legacy (beta rows only, disposable): the adapter folds a
@@ -84,7 +88,10 @@ export interface CrewSeason {
 ## 2. Creation and editing — the user states the period, time ends it
 
 - **`CreateSeasonRequest` becomes `{name, startsAt, endsAt}`** (dates required, regex-pinned
-  on the wire, `invalid-season-window` when `startsAt > endsAt`). The web form comes
+  on the wire; `invalid-season-window` → 400 when `startsAt > endsAt` OR when a bound is
+  shape-valid but not a real calendar date, e.g. `2026-02-30` — the use case runs
+  `seasonWindowOf` on the candidate and maps its throw, so a bad date never reaches storage,
+  §1). The web form comes
   prefilled with the common case — name = the current year, dates = Jan 1 / Dec 31 of it —
   so "2027" is one tap; "Summer Cup, Jun 1 – Aug 31" is typed once and means what it says.
   Dates are editable in the form, never clearable.

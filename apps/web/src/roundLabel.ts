@@ -73,3 +73,20 @@ export const roundDayKey = ({ courseName, createdAt }: RoundDesignation, { timeZ
   const parts = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "2-digit", day: "2-digit", timeZone }).formatToParts(new Date(createdAt));
   return `${courseName} ${partValue(parts, "year")}-${partValue(parts, "month")}-${partValue(parts, "day")}`;
 };
+
+// A predicate over a list: true for a designation that shares course+day with ANOTHER in the
+// same list (so its roundLabel should render withTime to disambiguate — the "two indistinguishable
+// Walker rounds" bug). Local-zone by default, same basis as roundLabel/roundDayKey; a designation
+// with no createdAt has no day and never collides. The ONE canonical in-list collision helper —
+// HomePage and the crew "Played together" list both use it (spec 2026-07-22 §4).
+export const dayCollisionChecker = (rounds: readonly RoundDesignation[], { timeZone }: RoundDayKeyOptions = {}): ((round: RoundDesignation) => boolean) => {
+  const counts = new Map<string, number>();
+  for (const round of rounds) {
+    const key = roundDayKey(round, { timeZone });
+    if (key !== undefined) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return (round) => {
+    const key = roundDayKey(round, { timeZone });
+    return key !== undefined && (counts.get(key) ?? 0) > 1;
+  };
+};

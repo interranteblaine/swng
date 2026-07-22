@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { roundDayKey, roundLabel } from "./roundLabel";
+import { dayCollisionChecker, roundDayKey, roundLabel } from "./roundLabel";
 
 // A fixed instant used across the format assertions: 2025-07-12 07:58 UTC. July 12 2025 is a
 // Saturday. The tests below pass an EXPLICIT `timeZone: "UTC"` so the assertions read
@@ -87,5 +87,43 @@ describe("roundDayKey — the same-course-same-day collision key", () => {
 
   it("is undefined without a createdAt — a round with no day can't collide with anything", () => {
     expect(roundDayKey({ courseName: "Casa Verde GC" })).toBeUndefined();
+  });
+});
+
+describe("dayCollisionChecker — in-list same-course-same-day flagging", () => {
+  const casaMorning = { courseName: "Casa Verde GC", createdAt: Date.UTC(2025, 6, 12, 7, 58) };
+  const casaAfternoon = { courseName: "Casa Verde GC", createdAt: Date.UTC(2025, 6, 12, 15, 30) };
+  const casaNextDay = { courseName: "Casa Verde GC", createdAt: Date.UTC(2025, 6, 13, 7, 58) };
+  const pebble = { courseName: "Pebble Beach", createdAt: Date.UTC(2025, 6, 12, 7, 58) };
+  const noDate = { courseName: "Casa Verde GC" };
+
+  it("flags both rounds that share course AND day", () => {
+    const collides = dayCollisionChecker([casaMorning, casaAfternoon], { timeZone: "UTC" });
+    expect(collides(casaMorning)).toBe(true);
+    expect(collides(casaAfternoon)).toBe(true);
+  });
+
+  it("flags neither when the day differs", () => {
+    const collides = dayCollisionChecker([casaMorning, casaNextDay], { timeZone: "UTC" });
+    expect(collides(casaMorning)).toBe(false);
+    expect(collides(casaNextDay)).toBe(false);
+  });
+
+  it("flags neither when the course differs", () => {
+    const collides = dayCollisionChecker([casaMorning, pebble], { timeZone: "UTC" });
+    expect(collides(casaMorning)).toBe(false);
+    expect(collides(pebble)).toBe(false);
+  });
+
+  it("a round with no createdAt never collides", () => {
+    const collides = dayCollisionChecker([noDate, { courseName: "Casa Verde GC" }], { timeZone: "UTC" });
+    expect(collides(noDate)).toBe(false);
+  });
+
+  it("defaults to the local zone (matches an explicit local timeZone)", () => {
+    const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const a = { courseName: "X", createdAt: Date.UTC(2025, 6, 12, 12, 0) };
+    const b = { courseName: "X", createdAt: Date.UTC(2025, 6, 12, 13, 0) };
+    expect(dayCollisionChecker([a, b])(a)).toBe(dayCollisionChecker([a, b], { timeZone: localZone })(a));
   });
 });

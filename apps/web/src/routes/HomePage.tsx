@@ -8,7 +8,7 @@ import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { HistoryList } from "../golfers/RecordSections";
 import { credentialStore } from "../identity";
-import { roundDayKey, roundLabel } from "../roundLabel";
+import { dayCollisionChecker, roundLabel } from "../roundLabel";
 import { openLiveRound } from "../session/openLiveRound";
 import { btnCreamOutline, btnPrimary, btnSecondary, cardBox, eyebrow, inputCode } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
@@ -112,19 +112,10 @@ export function HomePage() {
     void enterLiveRound(id);
   };
 
-  // The canonical designation (spec §5): each live round renders as course + date, with the tee
-  // time appended ONLY to tell apart two rounds that share course and day (the "two
-  // indistinguishable Walker rounds" bug). Collisions are computed across exactly the rounds this
-  // list is rendering, by the shared roundDayKey.
-  const dayKeyCounts = new Map<string, number>();
-  for (const round of liveRounds ?? []) {
-    const key = roundDayKey({ courseName: round.courseName, createdAt: round.createdAt });
-    if (key !== undefined) dayKeyCounts.set(key, (dayKeyCounts.get(key) ?? 0) + 1);
-  }
-  const collidesOnDay = (round: GetMyLiveRoundsResponse["rounds"][number]): boolean => {
-    const key = roundDayKey({ courseName: round.courseName, createdAt: round.createdAt });
-    return key !== undefined && (dayKeyCounts.get(key) ?? 0) > 1;
-  };
+  // The canonical designation (spec §5): course + date, tee time appended only to disambiguate two
+  // rounds that share course and day, computed across exactly the rounds this list renders — the
+  // ONE shared dayCollisionChecker (spec 2026-07-22 §4).
+  const collidesOnDay = dayCollisionChecker(liveRounds ?? []);
 
   // Brand reskin spec §3: signed out, `/` IS the landing page — no app header (Layout suppresses
   // it), no "Your rounds" section (a heading whose only content is a locked-feature sign-in box

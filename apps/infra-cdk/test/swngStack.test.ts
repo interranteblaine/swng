@@ -647,13 +647,15 @@ describe("SwngStack", () => {
         "POST /crews/peek",
         "GET /me/crews",
         "GET /crews/{crewId}",
+        // Spec 2026-07-22 "the season is the record" §2: the crew name is editable.
+        "PUT /crews/{crewId}",
         "POST /crews/{crewId}/invites",
         // Architecture-realignment Task 9: crew seasons + counted rounds + standings + leave.
         "POST /crews/{crewId}/seasons",
         "GET /crews/{crewId}/seasons",
-        // close-season spec 2026-07-21 §1: the organizer's own verbs that flip CrewSeason.status.
-        "POST /crews/{crewId}/seasons/{seasonId}/close",
-        "POST /crews/{crewId}/seasons/{seasonId}/reopen",
+        // Spec 2026-07-22 "the season is the record" §2: editing the end date IS the whole
+        // lifecycle — this ONE PUT replaces the deleted close/reopen verbs.
+        "PUT /crews/{crewId}/seasons/{seasonId}",
         "GET /crews/{crewId}/seasons/{seasonId}/standings",
         // Analytics spec 2026-07-21 §5: all-time records across every season, computed on read
         // (the old crew projection layer this path once read from stays deleted).

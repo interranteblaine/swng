@@ -122,6 +122,9 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   { method: HttpMethod.POST, path: "/crews/peek" },
   { method: HttpMethod.GET, path: "/me/crews" },
   { method: HttpMethod.GET, path: "/crews/{crewId}" },
+  // Spec 2026-07-22 "the season is the record" §2: the crew name is editable — organizer-only,
+  // "golfer"-gated same as every other crew route.
+  { method: HttpMethod.PUT, path: "/crews/{crewId}" },
   // Crew membership (invited in, accountable out — spec §2): mints a fresh 7-day invite link —
   // ANY member, not organizer-only. POST /crews/{crewId}/members (add-by-id) is GONE — nobody
   // is conscripted onto a roster; they accept an invite (spec §3).
@@ -134,11 +137,11 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // stored ledger of counted rounds.)
   { method: HttpMethod.POST, path: "/crews/{crewId}/seasons" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/seasons" },
-  // close-season spec 2026-07-21 §1: the organizer's own verbs that flip CrewSeason.status —
-  // "golfer"-gated same as every other season route, deliberately NOT in ANON_THROTTLED_ROUTES
-  // below (a signed-in crew organizer is required to reach either).
-  { method: HttpMethod.POST, path: "/crews/{crewId}/seasons/{seasonId}/close" },
-  { method: HttpMethod.POST, path: "/crews/{crewId}/seasons/{seasonId}/reopen" },
+  // Spec 2026-07-22 "the season is the record" §2: editing the end date IS the whole lifecycle
+  // — this ONE PUT replaces the deleted close/reopen verbs — "golfer"-gated same as every other
+  // season route, deliberately NOT in ANON_THROTTLED_ROUTES below (a signed-in crew organizer
+  // is required to reach it).
+  { method: HttpMethod.PUT, path: "/crews/{crewId}/seasons/{seasonId}" },
   { method: HttpMethod.GET, path: "/crews/{crewId}/seasons/{seasonId}/standings" },
   // Analytics spec 2026-07-21 §5: all-time records across every season — same golfer tier as
   // the standings route just above.

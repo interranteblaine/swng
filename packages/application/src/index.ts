@@ -77,9 +77,11 @@ export { removeCrewMember } from "./crews/removeCrewMember.js";
 export { transferOrganizer } from "./crews/transferOrganizer.js";
 export { createSeason } from "./crews/createSeason.js";
 export { listSeasons } from "./crews/listSeasons.js";
-// Close-season spec (2026-07-21): the organizer's verbs that flip CrewSeason.status.
-export { closeSeason } from "./crews/closeSeason.js";
-export { reopenSeason } from "./crews/reopenSeason.js";
+// Spec 2026-07-22 "the season is the record": editing the end date IS the whole lifecycle —
+// updateSeason replaces close/reopen outright (there is no closed state left to gate on).
+export { updateSeason } from "./crews/updateSeason.js";
+// The crew name is editable too (spec §2), organizer-only, no season lookup.
+export { updateCrew } from "./crews/updateCrew.js";
 export { getSeasonStandings } from "./crews/getSeasonStandings.js";
 // Analytics spec 2026-07-21 §5: GET /crews/{crewId}/records — all-time ledger/head-to-head/
 // partners + per-closed-season Stableford titles. rosterFilteredContribution (the shared

@@ -83,11 +83,13 @@ export type ApplicationErrorCode =
   // Task 9: getSeason found nothing under (crewId, seasonId) — an unresolvable season id, the
   // same "identified resource not found" 404 shape as unknown-crew/round-not-found above.
   | "season-not-found"
-  // Close-season spec (2026-07-21): closeSeason/reopenSeason's own explicit-conflict pair — a
-  // stale client learns the truth, never a silent no-op (the tee-set-revised/card-superseded
-  // precedent), same 409 bucket as crew-conflict.
-  | "season-already-closed"
-  | "season-not-closed"
+  // Spec 2026-07-22 "the season is the record" §1/§2: createSeason/updateSeason's own date
+  // guard — an inverted window (`startsAt > endsAt`, a plain ordinal compare) OR a
+  // shape-valid-but-unreal date (e.g. "2026-02-30", caught via domain's seasonWindowOf throwing)
+  // — a bad-body precondition the caller can correct, same 400 bucket as invalid-season-name.
+  // Closes a client-triggerable 500 a bad date stored then thrown as a plain Error would
+  // otherwise cause on a later read (review I5).
+  | "invalid-season-window"
   // Crew membership (invited in, accountable out — spec §1): removeCrewMember/transferOrganizer's
   // authorization gate — the caller passed requireCrewMember (they ARE a member) but isn't the
   // crew's organizer. A forbidden ACTOR, same 403 bucket as not-a-member above.

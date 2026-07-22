@@ -3,26 +3,33 @@ import { Link } from "react-router";
 import type { CrewId, GolferId } from "@swng/domain";
 import { formatHandicapIndex } from "@swng/domain";
 import type { SeasonStandingsResponse } from "@swng/contracts";
-import { closeSeason, getSeasonStandings, reopenSeason } from "../api";
+import { getSeasonStandings } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { GolferLink } from "../ui/GolferLink";
-import { badge, btnDangerSolid, btnQuiet, btnSecondary, cardBox } from "../ui/classes";
+import { cardBox } from "../ui/classes";
 import { vsPar } from "../ui/vsPar";
 import { headToHeadLine } from "./headToHeadLine";
 
 export interface SeasonPanelProps {
   readonly crewId: CrewId;
   readonly seasonId: string;
-  // close-season spec 2026-07-21 §2: the organizer-only Close/Reopen verbs render off the SAME
-  // caller-role fact CrewPage already computes for the roster's Remove…/Make organizer…
-  // affordances (crew.members.some(role === "organizer")) — threaded through rather than
-  // recomputed here, since SeasonPanel has no roster of its own to derive it from.
+  // Reserved for the organizer-only season-editing affordance (spec 2026-07-22 "the season is
+  // the record" §2: editing the end date IS the whole lifecycle now — no close/reopen verb
+  // renders off this anymore) — threaded through from CrewPage the same way the roster's own
+  // Remove…/Make organizer… affordances are, since SeasonPanel has no roster of its own to
+  // derive it from.
   readonly isOrganizer: boolean;
 }
 
-// Local presentation only — arithmetic view logic over numbers the wire already computed
-// (window bounds → local dates), never golf rules.
-const formatWindowDate = (ms: number): string => new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(ms));
+// Local presentation only — a plain "YYYY-MM-DD" string split into "Jan 1, 2026" (NEVER a
+// `new Date` local-time conversion — a date-only string like "2026-01-01" parsed as local time
+// can roll to the PRIOR calendar day west of UTC, the exact artifact class spec 2026-07-22 §5
+// calls out).
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const formatWindowDate = (isoDate: string): string => {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  return `${MONTH_NAMES[month! - 1]} ${day}, ${year}`;
+};
 
 // GET /crews/{crewId}/seasons/{seasonId}/standings (crew-scoreboard spec §3/§4): the season is a
 // time WINDOW, and everything below is DERIVED on read from each roster member's own finalized
@@ -30,7 +37,7 @@ const formatWindowDate = (ms: number): string => new Intl.DateTimeFormat(undefin
 // renders this once a season is picked from its own list (`key={seasonId}` at that call site
 // gives every season selection a fresh mount — the simplest correct reset, no seasonId-changed
 // effect dance needed here).
-export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps) {
+export function SeasonPanel({ crewId, seasonId }: SeasonPanelProps) {
   const { withAuth } = useAuth();
 
   const [standings, setStandings] = useState<SeasonStandingsResponse | undefined>(undefined);
@@ -53,45 +60,6 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
   useEffect(() => {
     void load();
   }, [load]);
-
-  // close-season spec 2026-07-21 §2: the organizer's own verbs. Close gets a click-to-reveal
-  // confirm (CrewPage's own Leave crew/Remove member/Make organizer idiom — role="dialog", a
-  // btnDangerSolid Confirm + btnSecondary Cancel) carrying the EXACT teaching line the spec
-  // pins; Reopen is one tap, no confirm (spec §1.3: "first-class, not an apology" — reopening
-  // loses nothing, titles are a read fold that simply stop/resume appearing). Both are
-  // api-then-refetch through the SAME `load()` this component already uses above — no
-  // optimistic write, and the honest fallback line covers both verbs alike (no per-code text,
-  // since the UI never offers a door the server would 409 in the normal case).
-  const [confirmingClose, setConfirmingClose] = useState(false);
-  const [closeReopenBusy, setCloseReopenBusy] = useState(false);
-  const [closeReopenError, setCloseReopenError] = useState<string | undefined>(undefined);
-
-  const confirmClose = async () => {
-    setCloseReopenBusy(true);
-    setCloseReopenError(undefined);
-    try {
-      await withAuth((token) => closeSeason(token, crewId, seasonId));
-      await load();
-      setConfirmingClose(false);
-    } catch {
-      setCloseReopenError("Could not update the season — try again.");
-    } finally {
-      setCloseReopenBusy(false);
-    }
-  };
-
-  const reopen = async () => {
-    setCloseReopenBusy(true);
-    setCloseReopenError(undefined);
-    try {
-      await withAuth((token) => reopenSeason(token, crewId, seasonId));
-      await load();
-    } catch {
-      setCloseReopenError("Could not update the season — try again.");
-    } finally {
-      setCloseReopenBusy(false);
-    }
-  };
 
   if (standingsError) {
     return <p className="text-fairway">Could not load this season — try again.</p>;
@@ -120,60 +88,14 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
     <div className={`${cardBox} flex flex-col gap-4 p-4`}>
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-lg font-semibold text-forest">
-            {standings.name}
-            {standings.status === "closed" && <span className={`ml-2 ${badge}`}>closed</span>}
-          </h3>
-          {/* close-season spec 2026-07-21 §2: organizer-only, never gold (btnQuiet — the panel's
-              existing primary actions keep the screen's one gold). A non-organizer sees the badge
-              above with no verb at all. */}
-          {isOrganizer && standings.status === "open" && !confirmingClose && (
-            <button type="button" onClick={() => setConfirmingClose(true)} className={btnQuiet}>
-              Close season
-            </button>
-          )}
-          {isOrganizer && standings.status === "closed" && (
-            <button type="button" onClick={() => void reopen()} disabled={closeReopenBusy} className={btnQuiet}>
-              {closeReopenBusy ? "Reopening…" : "Reopen"}
-            </button>
-          )}
+          <h3 className="text-lg font-semibold text-forest">{standings.name}</h3>
         </div>
-        {/* The window (crew-scoreboard spec §2/§5): local dates, mono, the anchor-date precedent
-            (RecordSections.tsx's own chart anchors). Open reads as "Since {start}" — no end date
-            to name yet; closed names both ends. */}
+        {/* The window (spec 2026-07-22 §1/§5): both dates are now REQUIRED and always visible —
+            no more "Since {start}" open-ended reading; a season always names both ends. */}
         <p className="font-mono text-xs text-fairway">
-          {standings.status === "open" || standings.closedAtMs === undefined
-            ? `Since ${formatWindowDate(standings.startsAtMs)}`
-            : `${formatWindowDate(standings.startsAtMs)} – ${formatWindowDate(standings.closedAtMs)}`}
+          {formatWindowDate(standings.startsAt)} – {formatWindowDate(standings.endsAt)}
         </p>
       </div>
-
-      {confirmingClose && (
-        <span role="dialog" aria-label="Confirm close season" className="flex flex-col gap-2 text-sm">
-          <span className="text-fairway">Closing ends the season — rounds finalized after this stay out of it, and its titles are awarded. You can reopen it later.</span>
-          <span className="flex items-center gap-2">
-            <button type="button" onClick={() => void confirmClose()} disabled={closeReopenBusy} className={`${btnDangerSolid} disabled:opacity-50`}>
-              {closeReopenBusy ? "Closing…" : "Confirm"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setConfirmingClose(false);
-                setCloseReopenError(undefined);
-              }}
-              disabled={closeReopenBusy}
-              className={`${btnSecondary} disabled:opacity-50`}
-            >
-              Cancel
-            </button>
-          </span>
-        </span>
-      )}
-      {closeReopenError && (
-        <p role="alert" className="text-oxblood">
-          {closeReopenError}
-        </p>
-      )}
 
       {/* The scoreboard leads (crew-scoreboard spec §5) — one row per CURRENT roster member,
           `rounds: 0` included, served order (crewScoreboard's own total order — never re-sorted

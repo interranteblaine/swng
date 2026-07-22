@@ -10,19 +10,48 @@ import { queryAllPages } from "./paginate.js";
 
 // One item per season (keys.ts's seasonSk) — the WHOLE CrewSeason nested under `season`, same
 // nest-the-whole-domain-value idiom CrewItem's own `crew` attribute uses above. `season` here is
-// the RAW stored shape, which may predate `startsAtMs` (legacy rows) — `seasonOf` below is the
-// ONE place that normalizes a raw item into a current CrewSeason on every read path.
+// the RAW stored shape, which may predate `startsAt`/`endsAt` (legacy rows written before spec
+// 2026-07-22, back when a season stored `startsAtMs`/`closedAtMs`/`status` instead) — `seasonOf`
+// below is the ONE place that normalizes a raw item into a current CrewSeason on every read path.
 interface SeasonItem {
   readonly pk: string;
   readonly sk: string;
-  readonly season: Omit<CrewSeason, "startsAtMs"> & { readonly startsAtMs?: number };
+  readonly season: Partial<CrewSeason> & {
+    readonly seasonId: string;
+    readonly name: string;
+    readonly createdAtMs: number;
+    // Legacy-only fields (spec 2026-07-22 "the season is the record" §1) — never written by
+    // putSeason below, tolerated on read only.
+    readonly startsAtMs?: number;
+    readonly closedAtMs?: number;
+    readonly status?: "open" | "closed";
+  };
 }
 
-// The one item->season mapping (crew-scoreboard spec §2's legacy fold): a stored row without
-// `startsAtMs` (written before this field existed) reads as `startsAtMs = createdAtMs` — no
-// migration, no wipe. `closedAtMs` needs no fold — it was always optional, so an absent stored
-// value already reads back as `undefined` through the spread.
-const seasonOf = (item: SeasonItem): CrewSeason => ({ ...item.season, startsAtMs: item.season.startsAtMs ?? item.season.createdAtMs });
+const isoDate = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+const utcYear = (ms: number): number => new Date(ms).getUTCFullYear();
+
+// The one item->season mapping (spec 2026-07-22 §1's legacy fold) — reconstructed FIELD BY
+// FIELD, never `...item.season` spread (the get()-strips-standingGame builder below is the
+// precedent): a raw legacy item still carries `startsAtMs`/`closedAtMs`/`status`, and spreading
+// it would ride those straight into the CrewSeason this returns, failing the "old attrs absent
+// from the view" contract. A pre-dates-startsAt row falls back through `createdAtMs` — the
+// `?? item.season.createdAtMs` is LOAD-BEARING: those rows carry no `startsAtMs` at all, and an
+// `undefined` on a now-REQUIRED date would throw the zod parse (a 500) on listSeasons/getSeason.
+// `endsAt` synthesizes to Dec 31 of that same UTC year — accepted ONLY because beta rows are
+// year-shaped auto-seasons (crew-scoreboard's own createCrew auto-open) and beta is disposable;
+// a legacy CLOSED season whose real `closedAtMs` was e.g. November 1 widens to Dec 31 here, NOT
+// a general migration. `closedAtMs`/`status` are never read otherwise.
+const seasonOf = (item: SeasonItem): CrewSeason => {
+  const legacyStart = item.season.startsAtMs ?? item.season.createdAtMs;
+  return {
+    seasonId: item.season.seasonId,
+    name: item.season.name,
+    createdAtMs: item.season.createdAtMs,
+    startsAt: item.season.startsAt ?? isoDate(legacyStart),
+    endsAt: item.season.endsAt ?? `${utcYear(legacyStart)}-12-31`,
+  };
+};
 
 // A crew root item's shape on the core table (keys.ts's crewPk/crewSk): unlike
 // createDynamoGolferStore's flattened attrs, the WHOLE domain Crew is nested under `crew` —
@@ -193,19 +222,18 @@ export const createDynamoCrewStore = (config: { client: DynamoDBDocumentClient; 
 
     putSeason: async (crewId: CrewId, season: CrewSeason) => {
       validateSeasonId(season.seasonId);
-      // Unconditional upsert — create, rename, close, and reopen are all the SAME put keyed by
-      // seasonId (the port doc's own contract): a PutCommand replaces the WHOLE item, so
-      // whichever CrewSeason a caller supplies wins outright — an absent closedAtMs on the
-      // caller's value (reopenSeason.ts) really leaves storage, not just this call's echo.
-      // Built field-by-field (never spread `season`) so an absent closedAtMs never becomes an
-      // explicit `undefined` key, which DynamoDB's marshall() rejects (the M8 lesson).
+      // Unconditional upsert — create AND edit (crews/updateSeason.ts) are the SAME put keyed
+      // by seasonId (the port doc's own contract): a PutCommand replaces the WHOLE item, so
+      // whichever CrewSeason a caller supplies wins outright. Built field-by-field (never spread
+      // `season`) so this can never write the legacy `startsAtMs`/`closedAtMs`/`status`
+      // attributes — a subsequent put over a legacy item drops them from storage for good (spec
+      // 2026-07-22 §1's own "no migration" contract).
       const stored: CrewSeason = {
         seasonId: season.seasonId,
         name: season.name,
-        status: season.status,
         createdAtMs: season.createdAtMs,
-        startsAtMs: season.startsAtMs,
-        ...(season.closedAtMs !== undefined ? { closedAtMs: season.closedAtMs } : {}),
+        startsAt: season.startsAt,
+        endsAt: season.endsAt,
       };
       const item: SeasonItem = { pk: crewPk(crewId), sk: seasonSk(season.seasonId), season: stored };
       await client.send(new PutCommand({ TableName: tableName, Item: item }));

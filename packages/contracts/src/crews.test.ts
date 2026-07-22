@@ -17,6 +17,8 @@ import {
   peekCrewInviteResponseSchema,
   seasonStandingsResponseSchema,
   transferOrganizerRequestSchema,
+  updateCrewRequestSchema,
+  updateSeasonRequestSchema,
 } from "./crews.js";
 
 // parse(JSON.parse(JSON.stringify(x))) === x — the wire round-trip every schema here has to
@@ -122,29 +124,66 @@ describe("listMyCrewsResponseSchema", () => {
 // replaced GET /crews/{crewId}/records (and its own getCrewRecordsResponseSchema) entirely —
 // seasonStandingsResponseSchema below is the one ledger/head-to-head wire shape left.
 describe("season + standings schemas", () => {
-  it("createSeasonRequestSchema rejects a server-assigned seasonId (.strict())", () => {
-    roundTrips(createSeasonRequestSchema, { name: "Summer Cup" });
-    expect(() => parse(createSeasonRequestSchema, { name: "Summer Cup", seasonId: "sneaky" })).toThrow(ContractError);
+  it("createSeasonRequestSchema requires both dates and rejects a server-assigned seasonId (.strict())", () => {
+    roundTrips(createSeasonRequestSchema, { name: "Summer Cup", startsAt: "2026-06-01", endsAt: "2026-08-31" });
+    expect(() => parse(createSeasonRequestSchema, { name: "Summer Cup", startsAt: "2026-06-01", endsAt: "2026-08-31", seasonId: "sneaky" })).toThrow(
+      ContractError,
+    );
   });
 
-  it("createSeasonResponseSchema / listSeasonsResponseSchema round-trip a season view — open (no closedAtMs) and closed (both bounds)", () => {
-    const open = { seasonId: "s-1", name: "2026", status: "open" as const, createdAtMs: 1_700_000_000_000, startsAtMs: 1_700_000_000_000 };
-    roundTrips(createSeasonResponseSchema, { season: open });
-    roundTrips(listSeasonsResponseSchema, { seasons: [open] });
+  it("createSeasonRequestSchema rejects a missing date", () => {
+    expect(() => parse(createSeasonRequestSchema, { name: "Summer Cup", startsAt: "2026-06-01" })).toThrow(ContractError);
+  });
 
-    // crew-scoreboard spec §2: closedAtMs is optional, present only once a season has closed.
-    const closed = { ...open, seasonId: "s-2", status: "closed" as const, closedAtMs: 1_710_000_000_000 };
-    roundTrips(createSeasonResponseSchema, { season: closed });
-    roundTrips(listSeasonsResponseSchema, { seasons: [open, closed] });
+  it("createSeasonRequestSchema rejects a malformed date (not YYYY-MM-DD shape)", () => {
+    expect(() => parse(createSeasonRequestSchema, { name: "Summer Cup", startsAt: "2026-6-1", endsAt: "2026-08-31" })).toThrow(ContractError);
+  });
+
+  it("createSeasonResponseSchema / listSeasonsResponseSchema round-trip a season view — both dates, no status key", () => {
+    const season = { seasonId: "s-1", name: "2026", createdAtMs: 1_700_000_000_000, startsAt: "2026-01-01", endsAt: "2026-12-31" };
+    roundTrips(createSeasonResponseSchema, { season });
+    roundTrips(listSeasonsResponseSchema, { seasons: [season] });
+
+    const other = { ...season, seasonId: "s-2", name: "Summer Cup", startsAt: "2026-06-01", endsAt: "2026-08-31" };
+    roundTrips(createSeasonResponseSchema, { season: other });
+    roundTrips(listSeasonsResponseSchema, { seasons: [season, other] });
+  });
+
+  // Spec 2026-07-22 "the season is the record" §2: updateSeasonRequestSchema is all-optional
+  // (absent leaves a field, no null semantics) and .strict(); updateCrewRequestSchema is a bare
+  // required name.
+  describe("updateSeasonRequestSchema", () => {
+    it("round-trips an empty object (every field absent) and a full one", () => {
+      roundTrips(updateSeasonRequestSchema, {});
+      roundTrips(updateSeasonRequestSchema, { name: "Summer Cup", startsAt: "2026-06-01", endsAt: "2026-08-31" });
+    });
+
+    it("rejects a server-assigned extra field (.strict())", () => {
+      expect(() => parse(updateSeasonRequestSchema, { name: "Nope", seasonId: "sneaky" })).toThrow(ContractError);
+    });
+
+    it("rejects a malformed date", () => {
+      expect(() => parse(updateSeasonRequestSchema, { endsAt: "not-a-date" })).toThrow(ContractError);
+    });
+  });
+
+  describe("updateCrewRequestSchema", () => {
+    it("round-trips a valid rename request", () => {
+      roundTrips(updateCrewRequestSchema, { name: "Sunday Regulars" });
+    });
+
+    it("rejects an empty name and a server-assigned extra field (.strict())", () => {
+      expect(() => parse(updateCrewRequestSchema, { name: "" })).toThrow(ContractError);
+      expect(() => parse(updateCrewRequestSchema, { name: "Sunday Regulars", crewId: "sneaky" })).toThrow(ContractError);
+    });
   });
 
   it("seasonStandingsResponseSchema round-trips scoreboard + ledger (with name) + head-to-head + rounds, partners empty", () => {
     roundTrips(seasonStandingsResponseSchema, {
       seasonId: "s-1",
       name: "2026",
-      status: "closed",
-      startsAtMs: 1_690_000_000_000,
-      closedAtMs: 1_700_000_000_000,
+      startsAt: "2026-01-01",
+      endsAt: "2026-12-31",
       scoreboard: [{ golferId: golferId("ann"), name: "Ann", rounds: 1 }],
       rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000 }],
       ledger: [{ golferId: golferId("ann"), rounds: 1, wins: 1, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann" }],
@@ -153,15 +192,14 @@ describe("season + standings schemas", () => {
     });
   });
 
-  // crew-scoreboard spec §4: an OPEN season carries no closedAtMs at all (optional, not null),
-  // and a scoreboard row's every optional (best18/netPer18/index/indexDelta) round-trips both
+  // A scoreboard row's every optional (best18/netPer18/index/indexDelta) round-trips both
   // present (a full row) and absent (rounds-only — the dash-arm case the web renders "—" for).
   it("seasonStandingsResponseSchema round-trips a full scoreboard row and a bare rounds-only row; partners grow alongside", () => {
     roundTrips(seasonStandingsResponseSchema, {
       seasonId: "s-1",
       name: "2026",
-      status: "open",
-      startsAtMs: 1_690_000_000_000,
+      startsAt: "2026-01-01",
+      endsAt: "2026-12-31",
       scoreboard: [
         { golferId: golferId("ann"), name: "Ann", rounds: 4, best18: { gross: 82, toPar: 10 }, netPer18: 1.2, index: 14.1, indexDelta: -0.4 },
         { golferId: golferId("bo"), name: "Bo", rounds: 0 },
@@ -178,8 +216,8 @@ describe("season + standings schemas", () => {
       parse(seasonStandingsResponseSchema, {
         seasonId: "s-1",
         name: "2026",
-        status: "open",
-        startsAtMs: 1_690_000_000_000,
+        startsAt: "2026-01-01",
+        endsAt: "2026-12-31",
         scoreboard: [],
         rounds: [],
         ledger: [],
@@ -193,8 +231,8 @@ describe("season + standings schemas", () => {
       parse(seasonStandingsResponseSchema, {
         seasonId: "s-1",
         name: "2026",
-        status: "open",
-        startsAtMs: 1_690_000_000_000,
+        startsAt: "2026-01-01",
+        endsAt: "2026-12-31",
         rounds: [],
         ledger: [],
         headToHead: [],
@@ -203,12 +241,12 @@ describe("season + standings schemas", () => {
     ).toThrow(ContractError);
   });
 
-  it("rejects a response missing startsAtMs", () => {
+  it("rejects a response missing endsAt", () => {
     expect(() =>
       parse(seasonStandingsResponseSchema, {
         seasonId: "s-1",
         name: "2026",
-        status: "open",
+        startsAt: "2026-01-01",
         scoreboard: [],
         rounds: [],
         ledger: [],

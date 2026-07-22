@@ -19,16 +19,17 @@ export interface CrewSeason {
   // seasonId, since the shared prefix scheme itself is unchanged.
   readonly seasonId: string;
   readonly name: string;
-  readonly status: "open" | "closed";
   readonly createdAtMs: number;
-  // Window bounds (crew-scoreboard spec §2): a round is IN this season iff its played date
-  // falls in [startsAtMs, closedAtMs ?? ∞]. startsAtMs is fixed at creation (seasonStart.ts's
-  // own `seasonStartMs` — the tiling start rule) and never recomputed. closedAtMs is set by
-  // closeSeason and DELETED by reopenSeason (a season's own re-open is lossless by
-  // construction — putSeason below is a whole-item put, so an absent closedAtMs on a caller's
-  // CrewSeason truly removes it from storage, not just from this in-memory value).
-  readonly startsAtMs: number;
-  readonly closedAtMs?: number;
+  // Window bounds (spec 2026-07-22 "the season is the record" §1): CHOSEN, VISIBLE, REQUIRED
+  // calendar dates ("YYYY-MM-DD"), stated by the caller at creation and editable thereafter
+  // (crews/updateSeason.ts) — never derived from when someone happened to tap a button. A round
+  // is IN this season iff its played date falls in [startsAt, endsAt], inclusive (converted to
+  // ms via domain's `seasonWindowOf`). Time is the season's ONLY lifecycle state — there is no
+  // `status`/`closedAtMs` anymore (close/reopen are deleted whole): to end a season, set
+  // `endsAt` to today; to extend or reopen one, push `endsAt` back out. "Live" vs. "Final" is a
+  // label DERIVED on read (today's UTC date vs. `endsAt`), never stored here.
+  readonly startsAt: string;
+  readonly endsAt: string;
 }
 
 // A crew's persistence, mirroring CourseStore/GolferStore's revision-conditional CRUD
@@ -51,10 +52,10 @@ export interface CrewStore {
   listByGolfer(golferId: GolferId): Promise<readonly { crewId: CrewId; name: string; memberCount: number }[]>;
 
   // Seasons (task-8-brief.md). Entity data about the crew, stored under the
-  // crew's own key space (not a projection, not event-sourced) — a season is created, renamed,
-  // or closed via the SAME upsert-by-seasonId put; there is no separate create-vs-update call,
-  // and no revision to conflict on (whichever CrewSeason a caller supplies wins outright,
-  // unlike put's own expectedRevision-conditional crew replace above).
+  // crew's own key space (not a projection, not event-sourced) — a season is created OR edited
+  // (crews/createSeason.ts, crews/updateSeason.ts) via the SAME upsert-by-seasonId put; there is
+  // no revision to conflict on (whichever CrewSeason a caller supplies wins outright, unlike
+  // put's own expectedRevision-conditional crew replace above).
   putSeason(crewId: CrewId, season: CrewSeason): Promise<void>;
   getSeason(crewId: CrewId, seasonId: string): Promise<CrewSeason | undefined>;
   // NO ORDER PROMISED (mirrors ProjectionStore.listLines' own doc-comment idiom) — callers sort

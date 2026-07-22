@@ -101,8 +101,8 @@ const emptySeasons: { readonly seasons: readonly CrewSeasonView[] } = { seasons:
 const emptyStandings = (seasonId: string, name: string): SeasonStandingsResponse => ({
   seasonId,
   name,
-  status: "open",
-  startsAtMs: 0,
+  startsAt: "2026-01-01",
+  endsAt: "2026-12-31",
   scoreboard: [],
   rounds: [],
   ledger: [],
@@ -460,8 +460,8 @@ describe("CrewPage — organizer authority", () => {
 // Architecture-realignment Task 11: the crew page speaks seasons — a list + "New season", and
 // picking one renders SeasonPanel.
 describe("CrewPage — seasons", () => {
-  const seasonA: CrewSeasonView = { seasonId: "season-a", name: "2025", status: "open", createdAtMs: 1_000, startsAtMs: 1_000 };
-  const seasonB: CrewSeasonView = { seasonId: "season-b", name: "2026", status: "open", createdAtMs: 2_000, startsAtMs: 2_000 };
+  const seasonA: CrewSeasonView = { seasonId: "season-a", name: "2025", createdAtMs: 1_000, startsAt: "2025-01-01", endsAt: "2025-12-31" };
+  const seasonB: CrewSeasonView = { seasonId: "season-b", name: "2026", createdAtMs: 2_000, startsAt: "2026-01-01", endsAt: "2026-12-31" };
 
   it("lists seasons newest-createdAtMs-first, even when the wire returns them in another order", async () => {
     signIn();
@@ -494,22 +494,6 @@ describe("CrewPage — seasons", () => {
     expect(await screen.findByText(/standings build automatically once members play together/i)).toBeTruthy();
   });
 
-  it("a season list containing a closed season renders its closed badge", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
-    mockedGetCrew.mockResolvedValue({ crew });
-    const closedSeason: CrewSeasonView = { seasonId: "season-closed", name: "2025", status: "closed", createdAtMs: 1_000, startsAtMs: 1_000, closedAtMs: 1_500 };
-    mockedListSeasons.mockResolvedValue({ seasons: [seasonB, closedSeason] });
-
-    renderPage();
-    await waitForLoaded();
-
-    const seasonsList = await screen.findByRole("list", { name: /seasons/i });
-    const items = within(seasonsList).getAllByRole("button");
-    const closedItem = items.find((button) => button.textContent.includes("2025"))!;
-    expect(closedItem.textContent).toContain("closed");
-  });
-
   it("creates a season with the typed name, POSTs it, and adds it to the list", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
@@ -524,7 +508,13 @@ describe("CrewPage — seasons", () => {
     fireEvent.change(screen.getByLabelText(/new season/i), { target: { value: "2026" } });
     fireEvent.click(screen.getByRole("button", { name: /create season/i }));
 
-    await waitFor(() => expect(mockedCreateSeason).toHaveBeenCalledWith(idToken, crewId("crew-1"), { name: "2026" }));
+    // Spec 2026-07-22 "the season is the record" §2: dates are CHOSEN and REQUIRED — the current
+    // UTC year's own Jan 1 – Dec 31 window is CrewPage's own default, never a literal (the
+    // calendar can roll to a new year between when this test was written and when it runs).
+    const year = new Date().getUTCFullYear();
+    await waitFor(() =>
+      expect(mockedCreateSeason).toHaveBeenCalledWith(idToken, crewId("crew-1"), { name: "2026", startsAt: `${year}-01-01`, endsAt: `${year}-12-31` }),
+    );
 
     const seasonsList = await screen.findByRole("list", { name: /seasons/i });
     expect(within(seasonsList).getByText("2026")).toBeTruthy();

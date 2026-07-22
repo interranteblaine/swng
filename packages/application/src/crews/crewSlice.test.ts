@@ -23,6 +23,7 @@ import { CREW_INVITE_TTL_MS, mintCrewInvite } from "./mintCrewInvite.js";
 import { peekCrewInvite } from "./peekCrewInvite.js";
 import { removeCrewMember } from "./removeCrewMember.js";
 import { transferOrganizer } from "./transferOrganizer.js";
+import { updateCrew } from "./updateCrew.js";
 
 const setup = (
   crewStore: CrewStore = createInMemoryCrewStore(),
@@ -45,6 +46,7 @@ const setup = (
     join: joinCrewByInvite({ crewStore, golferStore, tokenIssuer, clock }),
     remove: removeCrewMember({ crewStore, golferStore }),
     transfer: transferOrganizer({ crewStore, golferStore }),
+    update: updateCrew({ crewStore, golferStore }),
   };
 };
 
@@ -421,6 +423,61 @@ describe("transferOrganizer", () => {
     await expect(ctx.transfer({ sub: "sub-ann" }, created.crew.crewId, { golferId: golferId("never-joined") })).rejects.toMatchObject({
       code: "not-a-member",
     });
+  });
+});
+
+// PUT /crews/{crewId} (spec 2026-07-22 "the season is the record" §2): the crew name is
+// editable — organizer-only, no season lookup. Guard order mirrors removeCrewMember/
+// transferOrganizer's own two-step gate exactly (requireCrewMember → organizer role check).
+describe("updateCrew", () => {
+  it("the organizer renames the crew", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+
+    const updated = await ctx.update({ sub: "sub-ann" }, created.crew.crewId, { name: "Sunday Regulars" });
+
+    expect(updated.crew.name).toBe("Sunday Regulars");
+    // The rename really landed in the store, not just the response shape.
+    const stored = await ctx.crewStore.get(created.crew.crewId);
+    expect(stored!.crew.name).toBe("Sunday Regulars");
+  });
+
+  it("an ordinary member attempting to rename is rejected — not-organizer", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    const boId = await seedAccountGolfer(ctx.golferStore, "sub-bo", "Bo");
+    await ctx.join({ sub: "sub-bo" }, { token: (await ctx.mint({ sub: "sub-ann" }, created.crew.crewId)).token });
+
+    await expect(ctx.update({ sub: "sub-bo" }, created.crew.crewId, { name: "Nope" })).rejects.toMatchObject({ code: "not-organizer" });
+    expect(boId).toBeDefined();
+  });
+
+  it("a non-member caller is rejected — not-a-member (requireCrewMember's own gate, before the role check)", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+    await seedAccountGolfer(ctx.golferStore, "sub-stranger", "Stranger");
+
+    await expect(ctx.update({ sub: "sub-stranger" }, created.crew.crewId, { name: "Nope" })).rejects.toMatchObject({ code: "not-a-member" });
+  });
+
+  it("a whitespace-only name is rejected — invalid-crew-name, nothing renamed", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+    const created = await ctx.create({ sub: "sub-ann" }, { name: "Sunday Skins" });
+
+    await expect(ctx.update({ sub: "sub-ann" }, created.crew.crewId, { name: "   " })).rejects.toMatchObject({ code: "invalid-crew-name" });
+    const stored = await ctx.crewStore.get(created.crew.crewId);
+    expect(stored!.crew.name).toBe("Sunday Skins");
+  });
+
+  it("an unknown crewId is rejected — unknown-crew", async () => {
+    const ctx = setup();
+    await seedAccountGolfer(ctx.golferStore, "sub-ann", "Ann");
+
+    await expect(ctx.update({ sub: "sub-ann" }, crewId("nope"), { name: "Nope" })).rejects.toMatchObject({ code: "unknown-crew" });
   });
 });
 

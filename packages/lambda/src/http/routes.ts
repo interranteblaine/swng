@@ -6,7 +6,6 @@ import type {
   AbandonRoundResponse,
   AddGameRequest,
   AddGameResponse,
-  CloseSeasonResponse,
   CreateCourseRequest,
   CreateCourseResponse,
   CreateCrewRequest,
@@ -40,7 +39,6 @@ import type {
   PeekRoundResponse,
   RecordScoreRequest,
   RecordScoreResponse,
-  ReopenSeasonResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
   SetHandicapRequest,
@@ -52,7 +50,9 @@ import type {
   SupersedeCardResponse,
   TerminateGameResponse,
   TransferOrganizerRequest,
+  UpdateCrewRequest,
   UpdateMeRequest,
+  UpdateSeasonRequest,
 } from "@swng/contracts";
 import {
   ContractError,
@@ -68,7 +68,9 @@ import {
   startRoundRequestSchema,
   supersedeCardRequestSchema,
   transferOrganizerRequestSchema,
+  updateCrewRequestSchema,
   updateMeRequestSchema,
+  updateSeasonRequestSchema,
 } from "@swng/contracts";
 
 // The deps-applied use-case functions from Task 2/M6 Task 2 (application/src/rounds/*.ts,
@@ -155,12 +157,14 @@ export interface UseCases {
   // never parsed), unlike roundId which keeps its brand.
   createSeason: (claims: AccountClaims, id: CrewId, command: CreateSeasonRequest) => Promise<CreateSeasonResponse>;
   listSeasons: (claims: AccountClaims, id: CrewId) => Promise<ListSeasonsResponse>;
-  // close-season spec 2026-07-21 §1: the organizer's own verbs that flip CrewSeason.status —
-  // same golfer tier + seasonId-as-plain-string shape as createSeason/listSeasons;
-  // organizer-only authorization lives in application (crews/membership.ts +
-  // closeSeason.ts/reopenSeason.ts's own guard), never re-checked here.
-  closeSeason: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<CloseSeasonResponse>;
-  reopenSeason: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<ReopenSeasonResponse>;
+  // Spec 2026-07-22 "the season is the record" §2: editing the end date IS the whole
+  // lifecycle — updateSeason replaces the deleted close/reopen verbs outright. Same golfer
+  // tier + seasonId-as-plain-string shape as createSeason/listSeasons; organizer-only
+  // authorization lives in application (crews/membership.ts + updateSeason.ts's own guard),
+  // never re-checked here.
+  updateSeason: (claims: AccountClaims, id: CrewId, seasonId: string, command: UpdateSeasonRequest) => Promise<CreateSeasonResponse>;
+  // The crew name is editable too (spec §2), organizer-only, no season lookup.
+  updateCrew: (claims: AccountClaims, id: CrewId, command: UpdateCrewRequest) => Promise<GetCrewResponse>;
   getSeasonStandings: (claims: AccountClaims, id: CrewId, seasonId: string) => Promise<SeasonStandingsResponse>;
   // Analytics spec 2026-07-21 §5: all-time — every counted round across every season, deduped by
   // roundId — the SAME roster-filter + aggregateSeason composition getSeasonStandings above runs,
@@ -542,6 +546,17 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     successStatus: 200,
     handler: async (ctx) => useCases.getCrew(ctx.account!, crewId(ctx.pathParams.crewId!)),
   },
+  // Spec 2026-07-22 "the season is the record" §2: the crew name is editable — organizer-only
+  // authorization lives in application (crews/updateCrew.ts's own guard), never re-checked
+  // here. An act on an existing resource, not a mint (200, not 201).
+  {
+    method: "PUT",
+    path: "/crews/{crewId}",
+    schema: updateCrewRequestSchema,
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx, body) => useCases.updateCrew(ctx.account!, crewId(ctx.pathParams.crewId!), body as UpdateCrewRequest),
+  },
   // Crew membership (invited in, accountable out — spec §2): mints a fresh 7-day invite link —
   // ANY member (not organizer-only, spec §1), same status-code spirit as getShareLink/
   // mintParticipantToken above (an act on an existing resource, not a top-level mint, even
@@ -572,22 +587,17 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     successStatus: 200,
     handler: async (ctx) => useCases.listSeasons(ctx.account!, crewId(ctx.pathParams.crewId!)),
   },
-  // close-season spec 2026-07-21 §1: the organizer's verbs — no request body (no schema),
-  // seasonId rides the path as a plain string same as every other season route below. Both an
-  // act on an existing resource, not a mint (200, same status-code spirit as transferOrganizer).
+  // Spec 2026-07-22 "the season is the record" §2: PUT — editing the end date IS the whole
+  // lifecycle, replacing the deleted close/reopen verbs; seasonId rides the path as a plain
+  // string same as every other season route below. An act on an existing resource, not a mint
+  // (200, same status-code spirit as transferOrganizer).
   {
-    method: "POST",
-    path: "/crews/{crewId}/seasons/{seasonId}/close",
+    method: "PUT",
+    path: "/crews/{crewId}/seasons/{seasonId}",
+    schema: updateSeasonRequestSchema,
     auth: "golfer",
     successStatus: 200,
-    handler: async (ctx) => useCases.closeSeason(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!),
-  },
-  {
-    method: "POST",
-    path: "/crews/{crewId}/seasons/{seasonId}/reopen",
-    auth: "golfer",
-    successStatus: 200,
-    handler: async (ctx) => useCases.reopenSeason(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!),
+    handler: async (ctx, body) => useCases.updateSeason(ctx.account!, crewId(ctx.pathParams.crewId!), ctx.pathParams.seasonId!, body as UpdateSeasonRequest),
   },
   {
     method: "GET",

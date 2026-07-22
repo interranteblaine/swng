@@ -76,11 +76,11 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // season-not-found is an unresolvable id 404 (like unknown-crew).
   "invalid-season-name": 400,
   "season-not-found": 404,
-  // Close-season spec (2026-07-21): closeSeason/reopenSeason's own explicit conflicts — a 409
-  // bucket like crew-conflict above, wire-distinct codes so a stale client (double-tap Close,
-  // or Reopen on a season someone else already reopened) learns the truth.
-  "season-already-closed": 409,
-  "season-not-closed": 409,
+  // Spec 2026-07-22 "the season is the record" §1/§2: createSeason/updateSeason's own
+  // inverted-window/unreal-date guard — a bad-body 400, same bucket as invalid-season-name
+  // above (close/reopen and their own "season-already-closed"/"season-not-closed" 409s are
+  // deleted whole — there is no closed state left to conflict on).
+  "invalid-season-window": 400,
   // Crew membership (invited in, accountable out — spec §1): removeCrewMember/transferOrganizer's
   // organizer-only gate — a forbidden actor, same 403 bucket as not-a-member
   // above. organizer-must-transfer is leaveCrew's own guard — a failed lifecycle precondition

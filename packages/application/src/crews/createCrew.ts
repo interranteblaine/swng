@@ -8,7 +8,6 @@ import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import { toCrewView } from "./crewView.js";
 import { requireAccountGolfer } from "./membership.js";
-import { yearStartUtcMs } from "./seasonStart.js";
 
 // Crew membership (invited in, accountable out): the permanent join code createCrew used to
 // mint here (M9 hardening's own bounded-retry `mintUniqueJoinCode`, `join-code-exhausted` on
@@ -34,10 +33,12 @@ export const createCrew =
     // retry against" reasoning as createCourse's own unconditional put.
     await deps.crewStore.put(crew, undefined);
 
-    // Every crew starts alive (spec §2): its first season exists before anyone asks —
-    // named for the year, window from Jan 1, the start rule's no-closed-seasons case.
+    // Every crew starts alive (spec 2026-07-22 §2): its first season exists before anyone
+    // asks — named for the current calendar year, with VISIBLE Jan 1 – Dec 31 dates (no
+    // derivation, no `status` — a season states its own dates).
     const now = deps.clock.now();
-    const season: CrewSeason = { seasonId: deps.ids.newId(), name: String(new Date(now).getUTCFullYear()), status: "open", createdAtMs: now, startsAtMs: yearStartUtcMs(now) };
+    const year = new Date(now).getUTCFullYear();
+    const season: CrewSeason = { seasonId: deps.ids.newId(), name: String(year), createdAtMs: now, startsAt: `${year}-01-01`, endsAt: `${year}-12-31` };
     await deps.crewStore.putSeason(id, season);
 
     return { crew: await toCrewView({ golferStore: deps.golferStore }, crew) };

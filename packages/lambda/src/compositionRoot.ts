@@ -17,7 +17,6 @@ import type {
 import {
   abandonRound,
   addGame,
-  closeSeason,
   createCourse,
   createCrew,
   createSeason,
@@ -49,14 +48,15 @@ import {
   rebuildProjections,
   recordScore,
   removeCrewMember,
-  reopenSeason,
   searchCourses,
   setHandicap,
   startRound,
   supersedeCard,
   terminateGame,
   transferOrganizer,
+  updateCrew,
   updateMyGolfer,
+  updateSeason,
 } from "@swng/application";
 import { createApiGatewayBroadcast, createManagementClient } from "@swng/adapters-apigateway";
 import { createCognitoVerifier } from "@swng/adapters-cognito";
@@ -348,11 +348,11 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
     // counting apparatus this comment used to describe is deleted whole, crew-scoreboard §2b).
     createSeason: createSeason({ crewStore, golferStore, ids, clock }),
     listSeasons: listSeasons({ crewStore, golferStore }),
-    // close-season spec 2026-07-21 §1: the organizer's own verbs — the SAME crewStore/
-    // golferStore instances every other crew/season use case above shares. closeSeason also
-    // stamps the window's end (crew-scoreboard spec §2), the SAME clock.
-    closeSeason: closeSeason({ crewStore, golferStore, clock }),
-    reopenSeason: reopenSeason({ crewStore, golferStore }),
+    // Spec 2026-07-22 "the season is the record" §2: editing the end date IS the whole
+    // lifecycle — the SAME crewStore/golferStore instances every other crew/season use case
+    // above shares. updateCrew shares the same two deps too (no season lookup).
+    updateSeason: updateSeason({ crewStore, golferStore }),
+    updateCrew: updateCrew({ crewStore, golferStore }),
     // projectionStore (crew-scoreboard spec §3): ONE listLines query per roster member feeds the
     // scoreboard, the shared-round derivation, AND the index boundaries alike — the SAME
     // projectionStore instance getMyRecord above shares.

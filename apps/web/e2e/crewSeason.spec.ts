@@ -1,10 +1,9 @@
 import { expect, test } from "@playwright/test";
-import type { CrewRecordsResponse, GetMyRecordResponse, PartnerStandingRecord, ScoreboardRow, SeasonStandingLine } from "@swng/contracts";
+import type { GetMyRecordResponse, PartnerStandingRecord, ScoreboardRow, SeasonStandingLine } from "@swng/contracts";
 import { archiveGolferLine, crewScoreboard, golferId } from "@swng/domain";
 import type { CrewId, GolferId, HeadToHeadRecord, RoundId, SeasonLedgerLine, StoredLine } from "@swng/domain";
 import {
   addGameDirect,
-  closeSeasonDirect,
   createCrewDirect,
   createScoreOps,
   createSeasonDirect,
@@ -22,7 +21,6 @@ import {
   pollUntil,
   recordScoreDirect,
   removeCrewMemberDirect,
-  reopenSeasonDirect,
   startRoundDirect,
 } from "./support.js";
 import type { AccountGolfer } from "./support.js";
@@ -241,21 +239,21 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     test.setTimeout(60_000);
     const { httpUrl } = loadWebEnv();
 
-    const created = await createSeasonDirect(httpUrl, al.tokens.idToken, crewId, SEASON_NAME);
+    // Spec 2026-07-22 "the season is the record" §1/§2: dates are CHOSEN and REQUIRED now, no
+    // tiling rule — the CURRENT UTC year's own Jan 1 – Dec 31 window is what "reaches back"
+    // means here, comfortably covering all 12 rounds played moments ago in test 3.
+    const year = new Date().getUTCFullYear();
+    const created = await createSeasonDirect(httpUrl, al.tokens.idToken, crewId, SEASON_NAME, `${year}-01-01`, `${year}-12-31`);
     seasonId = created.season.seasonId;
     expect(created.season.name).toBe(SEASON_NAME);
-    expect(created.season.status).toBe("open");
+    expect(created.season).toMatchObject({ startsAt: `${year}-01-01`, endsAt: `${year}-12-31` });
 
-    // The window rule reaches back (crew-scoreboard spec §2): with no closed seasons yet, this
-    // season's own window starts Jan 1 UTC of THIS year — comfortably covering all 12 rounds
-    // played moments ago in test 3 — with no per-round counting act anywhere. Al is the crew's
-    // ONLY member here (Bo/Cy/Dee hold accounts and played every round, but joined no roster
-    // until test 8), and a scoreboard row needs only ITS OWN golfer on the roster — unlike the
-    // together-folds below, crewScoreboard counts a member's OWN in-window lines regardless of
-    // roster size — so `standings.scoreboard` is EXACTLY Al's frozen row (plus his roster name),
-    // the full upgrade of the provisional `rounds === 12` check this test used to make (crew-
-    // scoreboard plan Task 4 Step 2). `standings.rounds` — the DERIVED "played together" list —
-    // stays empty here: sharedRoundIds requires >=2 CURRENT roster members holding a line for the
+    // Al is the crew's ONLY member here (Bo/Cy/Dee hold accounts and played every round, but
+    // joined no roster until test 8), and a scoreboard row needs only ITS OWN golfer on the
+    // roster — unlike the together-folds below, crewScoreboard counts a member's OWN in-window
+    // lines regardless of roster size — so `standings.scoreboard` is EXACTLY Al's frozen row
+    // (plus his roster name). `standings.rounds` — the DERIVED "played together" list — stays
+    // empty here: sharedRoundIds requires >=2 CURRENT roster members holding a line for the
     // same round (spec §3a/§3b) — it populates once Bo joins.
     // The scoreboard reads the async golfer projection (DynamoDB Streams), unlike the
     // snapshot-fed together-folds — poll for projection catch-up before reading standings; this
@@ -289,7 +287,6 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
     expect(standings.seasonId).toBe(seasonId);
     expect(standings.name).toBe(SEASON_NAME);
-    expect(standings.status).toBe("open");
 
     // "Played together" needs >=2 CURRENT roster members (spec §3a) — Al is still alone, so
     // nothing together-shaped exists yet, even though he played all 12 rounds himself (test 4's
@@ -458,7 +455,16 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(standingsAfterRejoin.partners).toEqual(EXPECTED_PARTNERS);
   });
 
-  test("9: all-time crew records fold every counted round across all seasons — closing the season awards its Stableford title, reopening empties it", async () => {
+  // Spec 2026-07-22 "the season is the record" §1/§3: crowning is deleted whole — there is no
+  // more close/reopen verb, no `status`, and `titles` is transitional-empty always
+  // (getCrewRecords.ts's own doc comment; the whole use case + route is itself deleted next
+  // task, plan Task 3 §4 "All-time collapses into the concept"). The retired close→title→reopen
+  // sequence this test used to also drive is DELETED per plan Task 4 ("no crown concept
+  // remains") — the ledger-value assertions below STAY, since they are aggregateSeason output,
+  // not title output. The window-pin tests that replace the deleted close-moves-the-window
+  // coverage (test 10, formerly here) are Task 4's own deliverable (updateSeasonDirect against
+  // a past-dated season, then widening endsAt) — not reconstructed here.
+  test("9: all-time crew records fold every counted round across all seasons — no crown, titles always empty", async () => {
     test.setTimeout(120_000);
     const { httpUrl } = loadWebEnv();
     const frozen = frozenSeasonExpectation(ids);
@@ -481,142 +487,8 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // Partners: still no four-ball in the deck → [].
     expect(records.partners).toEqual(EXPECTED_PARTNERS);
 
-    // Titles are a READ FOLD over CLOSED seasons ONLY (getCrewRecords.ts: `if (season.status !==
-    // "closed") continue`) — nothing about a title is ever stored (close-season spec §1.3/§3). The
-    // one season is still OPEN on every read above, so `titles` is [] here NOT because no close
-    // route exists (the analytics arc's provisional reason, now retired by the close-season arc)
-    // but because the season simply isn't closed yet. That is the assertion the analytics arc's
-    // comment promised this arc would replace — the derivation below is the replacement.
+    // No crown (spec §1/§3): titles is always empty now — never computed from a deleted
+    // lifecycle flag.
     expect(records.titles).toEqual([]);
-
-    // --- The crown, hand-derived from the FROZEN deck (the oracle discipline: derived here, never
-    // read back off the system) --------------------------------------------------------------------
-    // Roster at step 9 = {Al, Bo} (Bo re-joined in 8b; Cy/Dee held accounts all season but joined
-    //   no roster) — the same `memberIds` every assertion above filters against.
-    // A season's title is its Stableford POINTS leader(s) over the CURRENT-ROSTER-filtered ledger:
-    //   getCrewRecords → stablefordTitle(seasonLedger), where seasonLedger is aggregateSeason over
-    //   rosterFilteredContribution — the SAME fold `records.ledger` above already asserts. The
-    //   roster-filtered Stableford points over all 12 counted rounds (crewSeasonDeck.ts FROZEN_LINE):
-    //       Al 430, Bo 430   (Cy/Dee's 435 apiece are FILTERED OUT — neither is on the roster)
-    //   maxPoints = 430 > 0, so a title IS awarded; Al and Bo TIE at 430, so BOTH are crowned
-    //   (stablefordTitle returns every line at the max). The raw deck leaders are Cy/Dee at 435, but
-    //   the roster filter never lets them into this ledger — the aggregation-scope law reaching the
-    //   title itself.
-    // stablefordTitle sorts its winners by golferId ASCENDING (analytics arc Task 4's pin), and
-    //   getCrewRecords preserves that order into `golfers`, each `{ golferId, name }` with name from
-    //   the roster's own CrewMember.name (Al→"Al", Bo→"Bo", asserted in steps 2/8/8b). golferIds are
-    //   live-minted per run, so the pin is expressed via the deck handles + the same ascending sort,
-    //   exactly like expectedStandingLines — not literal ids. The entry's seasonId/name are the one
-    //   live-minted season's own (`seasonId` from step 4, SEASON_NAME).
-    const closed = await closeSeasonDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    expect(closed.season.status).toBe("closed");
-
-    const closedRecords = await getCrewRecordsDirect(httpUrl, al.tokens.idToken, crewId);
-    const expectedTitles: CrewRecordsResponse["titles"] = [
-      {
-        seasonId,
-        name: SEASON_NAME,
-        golfers: [ids.al, ids.bo].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map((id) => ({ golferId: id, name: nameOf(id) })),
-      },
-    ];
-    expect(closedRecords.titles).toEqual(expectedTitles);
-
-    // Closing is a read-time filter on `titles` ALONE — the counted rounds and the standings fold
-    // are untouched, so everything else about the records is byte-identical to the open read above.
-    expect(closedRecords.rounds).toBe(SEASON_ROUNDS);
-    expect(closedRecords.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
-    expect(closedRecords.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
-    expect(closedRecords.partners).toEqual(EXPECTED_PARTNERS);
-
-    // Reopen — the crown simply stops appearing (reopening un-awards nothing durable; titles are a
-    // read fold, spec §1.3). This also returns the season to `open`, so it ends this spec in exactly
-    // the state it began (never closed), leaving reruns and every other suite with no residue.
-    const reopened = await reopenSeasonDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    expect(reopened.season.status).toBe("open");
-
-    const reopenedRecords = await getCrewRecordsDirect(httpUrl, al.tokens.idToken, crewId);
-    expect(reopenedRecords.titles).toEqual([]);
-  });
-
-  test("10: the window on the wire — a gameless 13th round stays out at close, then ticks the scoreboard on reopen; the together-fold never moves", async () => {
-    test.setTimeout(120_000);
-    const { httpUrl } = loadWebEnv();
-    const frozen = frozenSeasonExpectation(ids);
-    // Roster is still {Al, Bo}: test 8b's re-join, unchanged by test 9's own close/reopen cycle
-    // (closing/reopening touches ONLY `status`/`closedAtMs` — never membership).
-    const memberIds = new Set<GolferId>([ids.al, ids.bo]);
-
-    // "The Golden Dozen" closes AGAIN (organizer Al) — closedAtMs stamps NOW, strictly after all
-    // 12 deck rounds (played moments ago, in test 3) and strictly before the round about to be
-    // played below (crew-scoreboard plan Task 4 Step 3, spec §2's window-end rule live).
-    const closed = await closeSeasonDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    expect(closed.season.status).toBe("closed");
-
-    // A 13th round, shared by Al+Bo ONLY, with NO games — deliberately OUTSIDE the frozen deck
-    // (crewSeasonDeck.ts's own machinery is untouched by this test; the round exists only to
-    // prove the window, never to move a single frozen number). Join + score + finalize via the
-    // same out-of-browser helpers test 3 already uses, minus addGameDirect entirely — a
-    // gameless round is exactly what spec §3b's "contributes nothing to the together-fold" needs.
-    const started = await startRoundDirect(httpUrl, al, { course, tee: "member", courseHandicap: 0 });
-    expect(started.golferId).toBe(ids.al);
-    const joined = await joinRoundDirect(httpUrl, bo, { code: started.joinCode, tee: "member", courseHandicap: 0 });
-    expect(joined.golferId).toBe(ids.bo);
-
-    const ops = createScoreOps("crew-r13");
-    for (let hole = 1; hole <= HOLES; hole += 1) {
-      await Promise.all([
-        recordScoreDirect(httpUrl, started.roundId, started.token, { golferId: ids.al, hole, strokes: 4 }, ops),
-        recordScoreDirect(httpUrl, started.roundId, started.token, { golferId: ids.bo, hole, strokes: 4 }, ops),
-      ]);
-    }
-    await finalizeRoundDirect(httpUrl, started.roundId, started.token);
-
-    // Closed standings: the window's end (closedAtMs, stamped above) is BEFORE this round's
-    // played date, so it stays OUT — `rounds` is still the same 12 deck roundIds, and every
-    // window-derived fold (the together-fold AND the scoreboard alike) reads byte-identical to
-    // test 9's own closed read.
-    const closedStandings = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    expect(closedStandings.rounds).toHaveLength(SEASON_ROUNDS);
-    expect([...closedStandings.rounds.map((round) => round.roundId)].sort()).toEqual([...roundIds].sort());
-    expect(closedStandings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
-    expect(closedStandings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
-    expect(closedStandings.partners).toEqual(EXPECTED_PARTNERS);
-    // Full-row equality here leans on round 13 being ALL PARS: `index` is career-scoped (never
-    // windowed), and a par round's 0.0 differential displaces nobody's lowest-4 — lower round
-    // 13's scores and this closed-read assertion breaks on `index` even though the window held.
-    expect(closedStandings.scoreboard).toEqual(expectedScoreboardRows(memberIds));
-
-    // Reopen — the window opens back up (closedAtMs cleared), so the 13th round now falls inside
-    // it: `rounds` grows to 13 (the round-13 roundId joins the set), and Al/Bo's own scoreboard
-    // `rounds` tick to 13 right alongside it (crewScoreboard counts a member's OWN in-window
-    // lines, roster size irrelevant — test 4's own rule). The ledger/head-to-head STILL don't
-    // move: a gameless round contributes NOTHING to crewContribution (no games -> no lines, no
-    // head-to-head entries) — the together-fold's own truth, not a special case carved out for
-    // this test.
-    const reopened = await reopenSeasonDirect(httpUrl, al.tokens.idToken, crewId, seasonId);
-    expect(reopened.season.status).toBe("open");
-
-    // sharedRoundIds (rounds AND scoreboard alike) reads each roster member's own async golfer
-    // projection, not the snapshot directly — poll on the standings' own round COUNT until
-    // round 13 has landed for both Al and Bo before asserting; this pins the projector-lag race,
-    // never a value.
-    const reopenedStandings = await pollUntil(
-      () => getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, seasonId),
-      (standings) => standings.rounds.length === SEASON_ROUNDS + 1,
-      120_000,
-      "reopened standings (round-13 projection catch-up)",
-    );
-    expect(reopenedStandings.rounds).toHaveLength(SEASON_ROUNDS + 1);
-    expect([...reopenedStandings.rounds.map((round) => round.roundId)].sort()).toEqual([...roundIds, started.roundId].sort());
-    expect(reopenedStandings.ledger).toEqual(expectedStandingLines(frozen.ledger, memberIds));
-    expect(reopenedStandings.headToHead).toEqual(expectedHeadToHead(frozen.headToHead, memberIds));
-    expect(reopenedStandings.partners).toEqual(EXPECTED_PARTNERS);
-
-    const reopenedAlRow = reopenedStandings.scoreboard.find((row) => row.golferId === ids.al);
-    const reopenedBoRow = reopenedStandings.scoreboard.find((row) => row.golferId === ids.bo);
-    expect(reopenedAlRow?.rounds).toBe(SEASON_ROUNDS + 1);
-    expect(reopenedBoRow?.rounds).toBe(SEASON_ROUNDS + 1);
-
-    // The season is left OPEN — nothing follows this test (crew-scoreboard plan Task 4 Step 3).
   });
 });

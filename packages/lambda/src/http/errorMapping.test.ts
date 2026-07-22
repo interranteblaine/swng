@@ -230,6 +230,10 @@ describe("toHttpError — crew seasons (architecture-realignment Task 9)", () =>
   const codeToStatus = [
     ["invalid-season-name", 400],
     ["season-not-found", 404],
+    // Spec 2026-07-22 "the season is the record" §1/§2: createSeason/updateSeason's own date
+    // guard (review M4 — this is the ONLY test edit in this describe block for that arc; the
+    // close/reopen codes it replaces had no rows here to delete).
+    ["invalid-season-window", 400],
   ] as const;
 
   it.each(codeToStatus)("maps %s to %d", (code, status) => {

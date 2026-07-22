@@ -120,33 +120,37 @@ const headToHeadRecordSchema: z.ZodType<HeadToHeadRecord> = z.object({
   halves: z.number().int(),
 });
 
-// Architecture-realignment Task 9 (crew seasons + counted rounds + standings-on-read); window
-// bounds added by the crew-scoreboard spec §2. A season is a named, open/closed thing a member
-// creates ("2026", "Summer Cup"); `seasonId` is an opaque server-minted id (never accepted from
-// the wire), `createdAtMs` lets a client sort newest-first (the use case sorts too — this just
-// carries the fact). `startsAtMs`/`closedAtMs` are the window bounds — CrewSeasonView IS
-// CrewSeason field-for-field (createSeason.ts's own standing rule), no separate mapper.
+// Date-only bound, "YYYY-MM-DD" — regex-pinned shape (semantic-calendar validity is domain's
+// own job, seasonWindowOf's round-trip check, application/src/crews/createSeason.ts's own
+// invalid-season-window guard). Shared by every season date field below.
+const seasonDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+// Spec 2026-07-22 "the season is the record" §1: a season carries CHOSEN, VISIBLE, REQUIRED
+// dates — time is its only lifecycle state (no `status`, no `closedAtMs`; "Live" vs. "Final" is
+// derived on read, web-side, never stored or served). `seasonId` is an opaque server-minted id
+// (never accepted from the wire), `createdAtMs` lets a client sort newest-first (the use case
+// sorts too — this just carries the fact). CrewSeasonView IS CrewSeason field-for-field
+// (createSeason.ts's own standing rule), no separate mapper.
 export interface CrewSeasonView {
   readonly seasonId: string;
   readonly name: string;
-  readonly status: "open" | "closed";
   readonly createdAtMs: number;
-  readonly startsAtMs: number;
-  readonly closedAtMs?: number;
+  readonly startsAt: string;
+  readonly endsAt: string;
 }
 export const crewSeasonViewSchema: z.ZodType<CrewSeasonView> = z.object({
   seasonId: z.string(),
   name: z.string(),
-  status: z.enum(["open", "closed"]),
   createdAtMs: z.number().int(),
-  startsAtMs: z.number().int(),
-  closedAtMs: z.number().int().optional(),
+  startsAt: seasonDateSchema,
+  endsAt: seasonDateSchema,
 });
 
 // `name` is `.min(1)` on the wire (the same non-empty floor createCrewRequestSchema uses); the
 // real trimmed 1-60 bound lives in createSeason (application) — the honest layer, since a
-// season isn't a domain entity.
-export const createSeasonRequestSchema = z.object({ name: z.string().min(1) }).strict();
+// season isn't a domain entity. Both dates are REQUIRED — a season without a period is not a
+// season (spec §1's own owner ruling: no optional/clearable bound).
+export const createSeasonRequestSchema = z.object({ name: z.string().min(1), startsAt: seasonDateSchema, endsAt: seasonDateSchema }).strict();
 export type CreateSeasonRequest = z.infer<typeof createSeasonRequestSchema>;
 
 export interface CreateSeasonResponse {
@@ -159,19 +163,23 @@ export interface ListSeasonsResponse {
 }
 export const listSeasonsResponseSchema: z.ZodType<ListSeasonsResponse> = z.object({ seasons: z.array(crewSeasonViewSchema).readonly() });
 
-// POST /crews/{crewId}/seasons/{seasonId}/close and .../reopen (close-season spec 2026-07-21
-// §1): the organizer's verbs that flip CrewSeason.status — empty request bodies (no schema
-// needed), each returning the updated season view, the SAME `{ season }` shape
-// createSeasonResponseSchema uses.
-export interface CloseSeasonResponse {
-  readonly season: CrewSeasonView;
-}
-export const closeSeasonResponseSchema: z.ZodType<CloseSeasonResponse> = z.object({ season: crewSeasonViewSchema });
+// PUT /crews/{crewId}/seasons/{seasonId} (spec 2026-07-22 §2): editing the end date IS the
+// whole lifecycle — there is no separate close/reopen verb anymore. Every field is optional
+// (absent leaves it — plain replacement values, no null semantics); the result is revalidated
+// with the SAME name/window rules createSeasonRequestSchema's use case runs. Reuses
+// createSeasonResponseSchema's `{ season }` shape (byte-identical — the mintParticipantToken/
+// JoinRoundResponse reuse precedent, routes.ts's own doc comment) rather than a parallel type.
+export const updateSeasonRequestSchema = z
+  .object({ name: z.string().min(1).optional(), startsAt: seasonDateSchema.optional(), endsAt: seasonDateSchema.optional() })
+  .strict();
+export type UpdateSeasonRequest = z.infer<typeof updateSeasonRequestSchema>;
 
-export interface ReopenSeasonResponse {
-  readonly season: CrewSeasonView;
-}
-export const reopenSeasonResponseSchema: z.ZodType<ReopenSeasonResponse> = z.object({ season: crewSeasonViewSchema });
+// PUT /crews/{crewId} (spec 2026-07-22 §2): the crew name is editable — organizer-only, no
+// other crew field is mutable through it (membership has its own verbs). Reuses
+// getCrewResponseSchema's `{ crew }` shape (defined above — the SAME "produces the crew" reuse
+// precedent removeCrewMember/transferOrganizer already follow).
+export const updateCrewRequestSchema = z.object({ name: z.string().min(1) }).strict();
+export type UpdateCrewRequest = z.infer<typeof updateCrewRequestSchema>;
 
 // A season ledger line resolved for display: the pure SeasonLedgerLine (crew/ledger.ts) plus a
 // `name` resolved from the CURRENT roster's own CrewMember.name (getSeasonStandings.ts) — a
@@ -249,16 +257,18 @@ export interface SharedRoundView {
 }
 const sharedRoundViewSchema: z.ZodType<SharedRoundView> = z.object({ roundId: roundIdSchema, finalizedAt: z.number().int() });
 
-// Standings are computed on read (crew-scoreboard spec §3/§4): the season's WINDOW
-// (startsAtMs/closedAtMs) fed through crewScoreboard/sharedRoundIds over each roster member's own
-// golfer projection lines — no stored ledger, no counted rounds. `scoreboard` is REQUIRED (every
-// roster member gets a row, `rounds: 0` included) and replaces `superlatives` outright.
+// Standings are computed on read (crew-scoreboard spec §3/§4; window bounds per spec
+// 2026-07-22 §1): the season's WINDOW (startsAt/endsAt, converted via domain's seasonWindowOf)
+// fed through crewScoreboard/sharedRoundIds over each roster member's own golfer projection
+// lines — no stored ledger, no counted rounds. `scoreboard` is REQUIRED (every roster member
+// gets a row, `rounds: 0` included) and replaces `superlatives` outright. NO `status`/
+// `closedAtMs`/title — time is the season's only lifecycle state, derived web-side, never
+// served (spec 2026-07-22 §1/§3 — crowning is deleted whole).
 export interface SeasonStandingsResponse {
   readonly seasonId: string;
   readonly name: string;
-  readonly status: "open" | "closed";
-  readonly startsAtMs: number;
-  readonly closedAtMs?: number;
+  readonly startsAt: string;
+  readonly endsAt: string;
   readonly scoreboard: readonly ScoreboardRow[];
   readonly rounds: readonly SharedRoundView[]; // newest-first by finalizedAt
   readonly ledger: readonly SeasonStandingLine[];
@@ -268,9 +278,8 @@ export interface SeasonStandingsResponse {
 export const seasonStandingsResponseSchema: z.ZodType<SeasonStandingsResponse> = z.object({
   seasonId: z.string(),
   name: z.string(),
-  status: z.enum(["open", "closed"]),
-  startsAtMs: z.number().int(),
-  closedAtMs: z.number().int().optional(),
+  startsAt: seasonDateSchema,
+  endsAt: seasonDateSchema,
   scoreboard: z.array(scoreboardRowSchema).readonly(),
   rounds: z.array(sharedRoundViewSchema).readonly(),
   ledger: z.array(seasonStandingLineSchema).readonly(),

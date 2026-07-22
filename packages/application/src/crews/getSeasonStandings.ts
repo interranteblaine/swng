@@ -1,5 +1,5 @@
-import { aggregateSeason, crewContribution, crewScoreboard, partnerRecords, sharedRoundIds } from "@swng/domain";
-import type { CrewId, CrewRoundContribution, GolferId, RoundArchive, RoundId, SeasonWindow } from "@swng/domain";
+import { aggregateSeason, crewContribution, crewScoreboard, partnerRecords, seasonWindowOf, sharedRoundIds } from "@swng/domain";
+import type { CrewId, CrewRoundContribution, GolferId, RoundArchive, RoundId } from "@swng/domain";
 import type { SeasonStandingsResponse } from "@swng/contracts";
 import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
@@ -44,9 +44,10 @@ export const getSeasonStandings =
     const season = await deps.crewStore.getSeason(id, seasonId);
     if (!season) throw new ApplicationError("season-not-found");
 
-    // The window (spec §2): [startsAtMs, closedAtMs ?? ∞], both ends inclusive (inWindow's own
-    // contract) — an open season's window has no endMs at all, never a sentinel Infinity.
-    const window: SeasonWindow = { startMs: season.startsAtMs, ...(season.closedAtMs !== undefined ? { endMs: season.closedAtMs } : {}) };
+    // The window (spec 2026-07-22 §1): [startsAt, endsAt], both ends inclusive, converted from
+    // the season's own chosen calendar dates via domain's ONE seasonWindowOf — every fold below
+    // is byte-untouched by the date-strings-not-ms model.
+    const window = seasonWindowOf(season);
 
     // ONE listLines per roster member (Promise.all — never sequential) feeds the scoreboard, the
     // shared-round derivation, AND the index boundaries alike (spec §3b) — the fetch the old
@@ -86,9 +87,8 @@ export const getSeasonStandings =
     return {
       seasonId: season.seasonId,
       name: season.name,
-      status: season.status,
-      startsAtMs: season.startsAtMs,
-      ...(season.closedAtMs !== undefined ? { closedAtMs: season.closedAtMs } : {}),
+      startsAt: season.startsAt,
+      endsAt: season.endsAt,
       scoreboard,
       rounds,
       // Every golferId reaching here is, by construction, a current roster member (the filter

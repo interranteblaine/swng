@@ -185,7 +185,11 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
     setCreatingSeason(true);
     setCreateSeasonError(undefined);
     try {
-      const response = await withAuth((token) => createSeason(token, id, { name: trimmed }));
+      // Spec 2026-07-22 "the season is the record" §2: dates are CHOSEN and REQUIRED now — the
+      // common case (a season for the current calendar year) is the default here, the same
+      // Jan 1 – Dec 31 window createCrew's own auto-season opens.
+      const year = new Date().getUTCFullYear();
+      const response = await withAuth((token) => createSeason(token, id, { name: trimmed, startsAt: `${year}-01-01`, endsAt: `${year}-12-31` }));
       setSeasons((current) => [response.season, ...(current ?? [])]);
       setNewSeasonName("");
       setSelectedSeasonId(response.season.seasonId); // straight into the season just created
@@ -390,7 +394,6 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                   className={`w-full px-4 py-3 text-left ${selectedSeasonId === season.seasonId ? "bg-forest text-cream" : cardBox}`}
                 >
                   {season.name}
-                  {season.status === "closed" && <span className={`ml-2 ${badge}`}>closed</span>}
                 </button>
               </li>
             ))}

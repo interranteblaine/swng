@@ -1,7 +1,6 @@
 import {
   abandonRoundResponseSchema,
   addGameResponseSchema,
-  closeSeasonResponseSchema,
   crewRecordsResponseSchema,
   createCourseResponseSchema,
   createCrewResponseSchema,
@@ -28,7 +27,6 @@ import {
   parse,
   peekCrewInviteResponseSchema,
   peekRoundResponseSchema,
-  reopenSeasonResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
   setHandicapResponseSchema,
@@ -41,7 +39,6 @@ import type {
   AbandonRoundResponse,
   AddGameRequest,
   AddGameResponse,
-  CloseSeasonResponse,
   CreateCourseRequest,
   CreateCourseResponse,
   CreateCrewRequest,
@@ -72,7 +69,6 @@ import type {
   PeekCrewInviteRequest,
   PeekCrewInviteResponse,
   PeekRoundResponse,
-  ReopenSeasonResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
   SetHandicapRequest,
@@ -397,20 +393,6 @@ export const listSeasons = async (token: string, id: CrewId): Promise<ListSeason
 export const getSeasonStandings = async (token: string, id: CrewId, seasonId: string): Promise<SeasonStandingsResponse> => {
   const json = await requestJson(`/crews/${id}/seasons/${seasonId}/standings`, { token });
   return parse(seasonStandingsResponseSchema, json);
-};
-
-// close-season spec 2026-07-21 §1: the organizer's own verbs that flip CrewSeason.status — no
-// request body (no schema needed), each returning the updated season view. Same requestJson +
-// per-endpoint idiom as every crew-season call above, "golfer"-gated on the wire; the
-// organizer-required guard is enforced application-side, not here.
-export const closeSeason = async (token: string, id: CrewId, seasonId: string): Promise<CloseSeasonResponse> => {
-  const json = await requestJson(`/crews/${id}/seasons/${seasonId}/close`, { method: "POST", token });
-  return parse(closeSeasonResponseSchema, json);
-};
-
-export const reopenSeason = async (token: string, id: CrewId, seasonId: string): Promise<ReopenSeasonResponse> => {
-  const json = await requestJson(`/crews/${id}/seasons/${seasonId}/reopen`, { method: "POST", token });
-  return parse(reopenSeasonResponseSchema, json);
 };
 
 export const leaveCrew = async (token: string, id: CrewId): Promise<LeaveCrewResponse> => {

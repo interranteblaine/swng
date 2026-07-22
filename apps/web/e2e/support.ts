@@ -14,7 +14,6 @@ import type { BrowserContext, Locator, Page, WebSocketRoute } from "@playwright/
 import {
   addGameRequestSchema,
   addGameResponseSchema,
-  closeSeasonResponseSchema,
   createCourseRequestSchema,
   createCourseResponseSchema,
   createCrewRequestSchema,
@@ -35,7 +34,6 @@ import {
   parse,
   recordScoreRequestSchema,
   recordScoreResponseSchema,
-  reopenSeasonResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
   shareLinkResponseSchema,
@@ -45,7 +43,6 @@ import {
 } from "@swng/contracts";
 import type {
   AddGameResponse,
-  CloseSeasonResponse,
   CreateCrewResponse,
   CreateSeasonResponse,
   CrewRecordsResponse,
@@ -58,7 +55,6 @@ import type {
   JoinCrewResponse,
   JoinRoundResponse,
   MintCrewInviteResponse,
-  ReopenSeasonResponse,
   SeasonStandingsResponse,
   ShareLinkResponse,
   StartRoundResponse,
@@ -368,8 +364,17 @@ export const removeCrewMemberDirect = async (httpUrl: string, token: string, id:
 // guards) is deleted (crew-scoreboard spec §2b) — standings are a derived window over shared
 // rounds now, nothing left to mutate.
 
-export const createSeasonDirect = async (httpUrl: string, token: string, id: CrewId, name: string): Promise<CreateSeasonResponse> => {
-  const body = parse(createSeasonRequestSchema, { name });
+// Spec 2026-07-22 "the season is the record" §1/§2: createSeasonRequestSchema now REQUIRES
+// both dates (chosen, visible, never derived) — every caller passes its own startsAt/endsAt.
+export const createSeasonDirect = async (
+  httpUrl: string,
+  token: string,
+  id: CrewId,
+  name: string,
+  startsAt: string,
+  endsAt: string,
+): Promise<CreateSeasonResponse> => {
+  const body = parse(createSeasonRequestSchema, { name, startsAt, endsAt });
   const response = await fetch(`${httpUrl}/crews/${id}/seasons`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
@@ -396,30 +401,26 @@ export const getCrewRecordsDirect = async (httpUrl: string, token: string, id: C
   return parse(crewRecordsResponseSchema, json);
 };
 
-// POST /crews/{crewId}/seasons/{seasonId}/close and .../reopen (close-season spec 2026-07-21 §1):
-// the ORGANIZER's verbs that flip CrewSeason.status — organizer-gated on the wire (routes.ts +
-// closeSeason.ts/reopenSeason.ts's own guard), so the Bearer must be the organizer's ID token.
-// Both take an EMPTY request body (no schema) and return the updated season view — the SAME
-// `{ season }` shape createSeasonDirect parses. crewSeason.spec.ts's step 9 closes the season to
-// make its Stableford title live in getCrewRecords, then reopens to empty `titles` again.
-export const closeSeasonDirect = async (httpUrl: string, token: string, id: CrewId, seasonId: string): Promise<CloseSeasonResponse> => {
-  const response = await fetch(`${httpUrl}/crews/${id}/seasons/${seasonId}/close`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}` },
+// Spec 2026-07-22 "the season is the record" §2: editing the end date IS the whole lifecycle —
+// PUT /crews/{crewId}/seasons/{seasonId} replaces the deleted close/reopen verb pair outright.
+// Organizer-gated on the wire (routes.ts + updateSeason.ts's own guard), so the Bearer must be
+// the organizer's ID token. Reuses createSeasonResponseSchema's `{ season }` shape (byte-
+// identical — createSeasonDirect's own reuse precedent), never a parallel type.
+export const updateSeasonDirect = async (
+  httpUrl: string,
+  token: string,
+  id: CrewId,
+  seasonId: string,
+  body: { readonly name?: string; readonly startsAt?: string; readonly endsAt?: string },
+): Promise<CreateSeasonResponse> => {
+  const response = await fetch(`${httpUrl}/crews/${id}/seasons/${seasonId}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
   });
   const json: unknown = await response.json();
-  if (!response.ok) throw new Error(`POST /crews/${id}/seasons/${seasonId}/close -> ${response.status}: ${JSON.stringify(json)}`);
-  return parse(closeSeasonResponseSchema, json);
-};
-
-export const reopenSeasonDirect = async (httpUrl: string, token: string, id: CrewId, seasonId: string): Promise<ReopenSeasonResponse> => {
-  const response = await fetch(`${httpUrl}/crews/${id}/seasons/${seasonId}/reopen`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${token}` },
-  });
-  const json: unknown = await response.json();
-  if (!response.ok) throw new Error(`POST /crews/${id}/seasons/${seasonId}/reopen -> ${response.status}: ${JSON.stringify(json)}`);
-  return parse(reopenSeasonResponseSchema, json);
+  if (!response.ok) throw new Error(`PUT /crews/${id}/seasons/${seasonId} -> ${response.status}: ${JSON.stringify(json)}`);
+  return parse(createSeasonResponseSchema, json);
 };
 
 // Generic "keep reading until an asynchronous projector catches up" poller — identityRecord.

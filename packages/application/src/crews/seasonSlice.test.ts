@@ -15,7 +15,6 @@ import {
   putAndBindGolfer,
 } from "../testing/fakes.js";
 import type { InMemorySnapshotStore } from "../testing/fakes.js";
-import { closeSeason } from "./closeSeason.js";
 import { createCrew } from "./createCrew.js";
 import { createSeason } from "./createSeason.js";
 import { getCrewRecords } from "./getCrewRecords.js";
@@ -24,8 +23,7 @@ import { joinCrewByInvite } from "./joinCrewByInvite.js";
 import { leaveCrew } from "./leaveCrew.js";
 import { listSeasons } from "./listSeasons.js";
 import { mintCrewInvite } from "./mintCrewInvite.js";
-import { reopenSeason } from "./reopenSeason.js";
-import { yearStartUtcMs } from "./seasonStart.js";
+import { updateSeason } from "./updateSeason.js";
 
 // A finalized-round snapshot (RoundArchive) with a decided singles match — the smallest shape
 // crewContribution produces a ledger line + head-to-head entry from. `names` lets a test give
@@ -138,8 +136,7 @@ const setup = () => {
     join: joinCrewByInvite({ crewStore, golferStore, tokenIssuer, clock }),
     createSeason: createSeason({ crewStore, golferStore, ids, clock }),
     listSeasons: listSeasons({ crewStore, golferStore }),
-    close: closeSeason({ crewStore, golferStore, clock }),
-    reopen: reopenSeason({ crewStore, golferStore }),
+    updateSeason: updateSeason({ crewStore, golferStore }),
     standings: getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore }),
     records: getCrewRecords({ crewStore, golferStore, snapshots, projectionStore }),
     leave: leaveCrew({ crewStore, golferStore }),
@@ -154,23 +151,28 @@ const seedGolfer = async (ctx: ReturnType<typeof setup>, sub: string, name: stri
 
 const asClaims = (sub: string): AccountClaims => ({ sub });
 
-// A crew with Ann (organizer) + Bo (joined), plus one open season. Returns everything a test
-// needs to count rounds into it.
+// A wide, effectively-unbounded window (spec 2026-07-22 "the season is the record" §1: dates
+// are now REQUIRED, never absent) — matches the old "startsAtMs: 0, no upper bound" fixture
+// shape these tests' small wallMs fixtures (500/5_000/9_000/...) always fell inside.
+const WIDE_WINDOW = { startsAt: "1970-01-01", endsAt: "2100-12-31" };
+
+// A crew with Ann (organizer) + Bo (joined), plus one open (wide-dated) season. Returns
+// everything a test needs to count rounds into it.
 const crewWithSeason = async (ctx: ReturnType<typeof setup>) => {
   const ann = await seedGolfer(ctx, "ann", "Ann");
   const bo = await seedGolfer(ctx, "bo", "Bo");
   const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
   const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
   await ctx.join(asClaims("bo"), { token: invite.token });
-  const season = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026" });
+  const season = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026", ...WIDE_WINDOW });
   return { ann, bo, crewId: created.crew.crewId, seasonId: season.season.seasonId };
 };
 
 describe("createCrew — auto-opened season window", () => {
-  it("listSeasons yields exactly one OPEN season named for the year, startsAtMs === yearStartUtcMs(now) asserted directly (the start rule's no-closed-seasons arm)", async () => {
+  it("listSeasons yields exactly one season named for the year, with VISIBLE Jan 1 – Dec 31 dates and no status key (spec 2026-07-22 §2)", async () => {
     const crewStore = createInMemoryCrewStore();
     const golferStore = createInMemoryGolferStore();
-    const now = Date.UTC(2026, 5, 15); // June 15, 2026 (fixed) — mid-year, so Jan 1 is a real computation
+    const now = Date.UTC(2026, 5, 15); // June 15, 2026 (fixed) — mid-year, so the year extraction is a real computation
     const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("y"), clock: createFrozenClock(now) });
     await putAndBindGolfer(golferStore, golferId("golfer-ann"), "ann", "Ann");
 
@@ -178,22 +180,23 @@ describe("createCrew — auto-opened season window", () => {
     const seasons = await crewStore.listSeasons(created.crew.crewId);
 
     expect(seasons).toHaveLength(1);
-    expect(seasons[0]).toMatchObject({ name: "2026", status: "open" });
-    expect(seasons[0]!.startsAtMs).toBe(yearStartUtcMs(now));
-    // Pinned literal too, not just self-referential against the function under test.
-    expect(seasons[0]!.startsAtMs).toBe(Date.UTC(2026, 0, 1));
+    expect(seasons[0]).toEqual({ seasonId: seasons[0]!.seasonId, name: "2026", createdAtMs: now, startsAt: "2026-01-01", endsAt: "2026-12-31" });
+    expect(seasons[0]).not.toHaveProperty("status");
+    expect(seasons[0]).not.toHaveProperty("closedAtMs");
+    expect(seasons[0]).not.toHaveProperty("startsAtMs");
   });
 });
 
 describe("createSeason", () => {
-  it("a member creates an OPEN season with a server-minted id", async () => {
+  it("a member creates a season with a server-minted id and its chosen dates, no status key", async () => {
     const ctx = setup();
     await seedGolfer(ctx, "ann", "Ann");
     const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
 
-    const season = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "Summer Cup" });
+    const season = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "Summer Cup", startsAt: "2026-06-01", endsAt: "2026-08-31" });
 
-    expect(season.season).toMatchObject({ name: "Summer Cup", status: "open" });
+    expect(season.season).toMatchObject({ name: "Summer Cup", startsAt: "2026-06-01", endsAt: "2026-08-31" });
+    expect(season.season).not.toHaveProperty("status");
     expect(season.season.seasonId).not.toContain("#"); // opaque, server-minted (CrewStore's caller contract)
     expect(season.season.createdAtMs).toBeGreaterThan(0);
   });
@@ -204,18 +207,18 @@ describe("createSeason", () => {
     await seedGolfer(ctx, "stranger", "Stranger");
     const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
 
-    await expect(ctx.createSeason(asClaims("stranger"), created.crew.crewId, { name: "2026" })).rejects.toMatchObject({ code: "not-a-member" });
+    await expect(ctx.createSeason(asClaims("stranger"), created.crew.crewId, { name: "2026", ...WIDE_WINDOW })).rejects.toMatchObject({ code: "not-a-member" });
   });
 
   it("a whitespace-only name is rejected — invalid-season-name, nothing created", async () => {
     const ctx = setup();
     await seedGolfer(ctx, "ann", "Ann");
     const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
-    // createCrew auto-opens the crew's own first season (crew-scoreboard spec §2) — captured
+    // createCrew auto-opens the crew's own first season (spec 2026-07-22 §2) — captured
     // BEFORE the rejected call so "nothing created" means exactly that, not "list is empty".
     const before = await ctx.listSeasons(asClaims("ann"), created.crew.crewId);
 
-    await expect(ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "   " })).rejects.toMatchObject({ code: "invalid-season-name" });
+    await expect(ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "   ", ...WIDE_WINDOW })).rejects.toMatchObject({ code: "invalid-season-name" });
     await expect(ctx.listSeasons(asClaims("ann"), created.crew.crewId)).resolves.toEqual(before);
   });
 
@@ -224,7 +227,35 @@ describe("createSeason", () => {
     await seedGolfer(ctx, "ann", "Ann");
     const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
 
-    await expect(ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "x".repeat(61) })).rejects.toMatchObject({ code: "invalid-season-name" });
+    await expect(ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "x".repeat(61), ...WIDE_WINDOW })).rejects.toMatchObject({ code: "invalid-season-name" });
+  });
+
+  // Spec 2026-07-22 §1/§2 (review I5): the date guard closes a client-triggerable 500 — a bad
+  // date must never reach storage.
+  it("an inverted window (startsAt after endsAt) is rejected — invalid-season-window, nothing created", async () => {
+    const ctx = setup();
+    await seedGolfer(ctx, "ann", "Ann");
+    const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
+    const before = await ctx.listSeasons(asClaims("ann"), created.crew.crewId);
+
+    await expect(ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026", startsAt: "2026-12-31", endsAt: "2026-01-01" })).rejects.toMatchObject({
+      code: "invalid-season-window",
+    });
+    await expect(ctx.listSeasons(asClaims("ann"), created.crew.crewId)).resolves.toEqual(before);
+  });
+
+  // A shape-valid but semantically-unreal date (Feb 30 rolls to Mar 2) — seasonWindowOf's own
+  // round-trip check catches it, remapped here rather than left to throw a plain Error later.
+  it("a shape-valid but unreal calendar date is rejected — invalid-season-window, nothing created", async () => {
+    const ctx = setup();
+    await seedGolfer(ctx, "ann", "Ann");
+    const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
+    const before = await ctx.listSeasons(asClaims("ann"), created.crew.crewId);
+
+    await expect(ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026", startsAt: "2026-01-01", endsAt: "2026-02-30" })).rejects.toMatchObject({
+      code: "invalid-season-window",
+    });
+    await expect(ctx.listSeasons(asClaims("ann"), created.crew.crewId)).resolves.toEqual(before);
   });
 });
 
@@ -237,8 +268,8 @@ describe("listSeasons", () => {
     // OLDEST of the three by construction, so it sorts last below.
     const auto = await ctx.listSeasons(asClaims("ann"), created.crew.crewId);
     const autoSeasonId = auto.seasons[0]!.seasonId;
-    const first = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2025" });
-    const second = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026" });
+    const first = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2025", ...WIDE_WINDOW });
+    const second = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026", ...WIDE_WINDOW });
 
     const listed = await ctx.listSeasons(asClaims("ann"), created.crew.crewId);
     // createFixedClock advances 1ms per call, so `second` has the later createdAtMs → first out.
@@ -264,8 +295,7 @@ describe("getSeasonStandings", () => {
 
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
 
-    expect(standings).toMatchObject({ seasonId, name: "2026", status: "open", startsAtMs: 0 });
-    expect(standings.closedAtMs).toBeUndefined();
+    expect(standings).toMatchObject({ seasonId, name: "2026", startsAt: WIDE_WINDOW.startsAt, endsAt: WIDE_WINDOW.endsAt });
     expect(standings.rounds.map((r) => r.roundId)).toEqual([roundId("r2"), roundId("r1")]); // newest-first
     expect(standings.ledger).toEqual(
       expect.arrayContaining([
@@ -373,12 +403,12 @@ describe("getSeasonStandings", () => {
     ]);
   });
 
-  // The window redesign's own core promise: a season is [startsAtMs, closedAtMs ?? ∞], and a
-  // round played AFTER a close stays out of it — until reopen widens the window back out. A
-  // bespoke frozen-clock setup gives precise control over the boundary, unlike crewWithSeason's
-  // shared ticking clock (fine everywhere else since an OPEN season's window has no upper bound
-  // at all — spec §2).
-  it("a round played after the season closes stays out of both `rounds` and the scoreboard's own count; reopening lets it back in", async () => {
+  // Spec 2026-07-22 "the season is the record" §2's own core promise: editing the end date IS
+  // the whole lifecycle — a season is [startsAt, endsAt], and a round played AFTER a narrowed
+  // `endsAt` stays out of it, until a later updateSeason widens `endsAt` back out. There is no
+  // close/reopen verb anymore — this is the SAME live re-scoping the crewSeason e2e's own
+  // "window pins" exercise over the real wire (plan 2026-07-22, Task 4).
+  it("a round played after the season's endsAt is narrowed stays out of both `rounds` and the scoreboard's own count; widening endsAt lets it back in", async () => {
     const day = 24 * 60 * 60 * 1000;
     const crewStore = createInMemoryCrewStore();
     const golferStore = createInMemoryGolferStore();
@@ -389,8 +419,7 @@ describe("getSeasonStandings", () => {
     const create = createCrew({ crewStore, golferStore, ids, clock: createFrozenClock(0) });
     const mint = mintCrewInvite({ crewStore, golferStore, tokenIssuer, clock: createFrozenClock(0) });
     const join = joinCrewByInvite({ crewStore, golferStore, tokenIssuer, clock: createFrozenClock(0) });
-    const close = closeSeason({ crewStore, golferStore, clock: createFrozenClock(10 * day) });
-    const reopen = reopenSeason({ crewStore, golferStore });
+    const update = updateSeason({ crewStore, golferStore });
     const standings = getSeasonStandings({ crewStore, golferStore, snapshots, projectionStore });
 
     const ann = golferId("golfer-ann");
@@ -402,19 +431,19 @@ describe("getSeasonStandings", () => {
     await join(asClaims("bo"), { token: invite.token });
     const seasonId = (await crewStore.listSeasons(created.crew.crewId))[0]!.seasonId;
 
-    await recordPlayed({ snapshots, projectionStore }, singlesArchive("r1", 5 * day, ann, bo, ann, {}), 5 * day); // before the close
+    await recordPlayed({ snapshots, projectionStore }, singlesArchive("r1", 5 * day, ann, bo, ann, {}), 5 * day); // day 5 — inside the narrowed window below
 
-    await close(asClaims("ann"), created.crew.crewId, seasonId);
-    await recordPlayed({ snapshots, projectionStore }, singlesArchive("r2", 20 * day, ann, bo, bo, {}), 20 * day); // after the close
+    await update(asClaims("ann"), created.crew.crewId, seasonId, { endsAt: "1970-01-10" }); // day 10 — narrows the window BEFORE day 20
+    await recordPlayed({ snapshots, projectionStore }, singlesArchive("r2", 20 * day, ann, bo, bo, {}), 20 * day); // day 20 — after the narrowed endsAt
 
-    const closed = await standings(asClaims("ann"), created.crew.crewId, seasonId);
-    expect(closed.rounds.map((r) => r.roundId)).toEqual([roundId("r1")]); // r2 stays out
-    expect(closed.scoreboard.find((row) => row.golferId === ann)?.rounds).toBe(1);
+    const narrowed = await standings(asClaims("ann"), created.crew.crewId, seasonId);
+    expect(narrowed.rounds.map((r) => r.roundId)).toEqual([roundId("r1")]); // r2 stays out
+    expect(narrowed.scoreboard.find((row) => row.golferId === ann)?.rounds).toBe(1);
 
-    await reopen(asClaims("ann"), created.crew.crewId, seasonId);
-    const reopened = await standings(asClaims("ann"), created.crew.crewId, seasonId);
-    expect(reopened.rounds.map((r) => r.roundId).sort()).toEqual([roundId("r1"), roundId("r2")].sort());
-    expect(reopened.scoreboard.find((row) => row.golferId === ann)?.rounds).toBe(2);
+    await update(asClaims("ann"), created.crew.crewId, seasonId, { endsAt: "1970-01-31" }); // widened back out
+    const widened = await standings(asClaims("ann"), created.crew.crewId, seasonId);
+    expect(widened.rounds.map((r) => r.roundId).sort()).toEqual([roundId("r1"), roundId("r2")].sort());
+    expect(widened.scoreboard.find((row) => row.golferId === ann)?.rounds).toBe(2);
   });
 });
 
@@ -473,7 +502,7 @@ describe("getSeasonStandings — scoreboard", () => {
       const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
       await ctx.join(asClaims(sub), { token: invite.token });
     }
-    const season = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026" });
+    const season = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026", ...WIDE_WINDOW });
 
     // Two fourball rounds: (Ann,Bo) beat (Cal,Dee) both times — 2-0 for each pair.
     await recordPlayed(ctx, fourballArchive("r1", 5_000, [ann, bo], [cal, dee], "a"), 5_000);
@@ -552,84 +581,22 @@ describe("getCrewRecords", () => {
     expect(records.headToHead).toEqual([expect.objectContaining({ aWins: 1, bWins: 0 })]);
   });
 
-  it("titles: each CLOSED season's Stableford points leader, windowed to that season's own dates — an open season contributes no title", async () => {
+  // Crowning is deleted whole (spec 2026-07-22 §1/§3) — there is no more `status`/`closedAtMs`
+  // for a "closed season" title to gate on, so `titles` is transitional-empty even with a
+  // Stableford-scored shared round on record (getCrewRecords.ts itself is deleted next task).
+  it("titles is always empty now — crowning is deleted, even with a Stableford-scored shared round on record", async () => {
     const ctx = setup();
     const ann = await seedGolfer(ctx, "ann", "Ann");
     const bo = await seedGolfer(ctx, "bo", "Bo");
     const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
     const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
     await ctx.join(asClaims("bo"), { token: invite.token });
-    const closedSeason = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2025" });
-    const openSeason = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2026" });
-
-    // Directly stamp each season's own window — the closed season's is [0, 10_000), the open
-    // one's starts right where it ends and never closes — so r1 (wallMs 5_000) falls inside the
-    // closed season's window and r2 (wallMs 20_000) falls only inside the still-open one's.
-    const closed = await ctx.crewStore.getSeason(created.crew.crewId, closedSeason.season.seasonId);
-    await ctx.crewStore.putSeason(created.crew.crewId, { ...closed!, startsAtMs: 0, status: "closed", closedAtMs: 10_000 });
-    const open = await ctx.crewStore.getSeason(created.crew.crewId, openSeason.season.seasonId);
-    await ctx.crewStore.putSeason(created.crew.crewId, { ...open!, startsAtMs: 10_000 });
 
     await recordPlayed(ctx, stablefordArchive("r1", 5_000, [ann, bo], { [ann]: 40, [bo]: 30 }), 5_000);
-    await recordPlayed(ctx, stablefordArchive("r2", 20_000, [ann, bo], { [ann]: 20, [bo]: 25 }), 20_000);
 
     const records = await ctx.records(asClaims("ann"), created.crew.crewId);
 
-    expect(records.titles).toEqual([{ seasonId: closedSeason.season.seasonId, name: "2025", golfers: [{ golferId: ann, name: "Ann" }] }]);
-  });
-
-  // The conditional endMs spread (spec §3b): a LEGACY closed season (closed before this arc) has
-  // no closedAtMs at all — its window must read as open-ended rather than crash or silently
-  // exclude everything.
-  it("a LEGACY closed season with no closedAtMs reads as an open-ended window, never a crash", async () => {
-    const ctx = setup();
-    const ann = await seedGolfer(ctx, "ann", "Ann");
-    const bo = await seedGolfer(ctx, "bo", "Bo");
-    const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
-    const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
-    await ctx.join(asClaims("bo"), { token: invite.token });
-    const closedSeason = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2025" });
-
-    // The legacy shape: status "closed", no closedAtMs.
-    const stored = await ctx.crewStore.getSeason(created.crew.crewId, closedSeason.season.seasonId);
-    await ctx.crewStore.putSeason(created.crew.crewId, { ...stored!, startsAtMs: 0, status: "closed" });
-
-    // Played long after — nothing about the legacy season's own window excludes it.
-    await recordPlayed(ctx, stablefordArchive("r1", 999_999, [ann, bo], { [ann]: 40, [bo]: 30 }), 999_999);
-
-    const records = await ctx.records(asClaims("ann"), created.crew.crewId);
-
-    expect(records.titles).toEqual([{ seasonId: closedSeason.season.seasonId, name: "2025", golfers: [{ golferId: ann, name: "Ann" }] }]);
-  });
-
-  it("titles read oldest-first — a timeline, not newest-first (spec §5's own example order: 'Bo '24 · Al '25', whole-branch review 2026-07-21 Finding 3)", async () => {
-    const ctx = setup();
-    const ann = await seedGolfer(ctx, "ann", "Ann");
-    const bo = await seedGolfer(ctx, "bo", "Bo");
-    const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
-    const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
-    await ctx.join(asClaims("bo"), { token: invite.token });
-
-    // Created in chronological order — the fixed clock (createFixedClock) advances 1ms per
-    // call, so season2024's createdAtMs < season2025's; getCrewRecords' own season listing
-    // sorts newest-first for other purposes, so this pins that `titles` is built separately.
-    const season2024 = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2024" });
-    const season2025 = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "2025" });
-
-    const stored2024 = await ctx.crewStore.getSeason(created.crew.crewId, season2024.season.seasonId);
-    await ctx.crewStore.putSeason(created.crew.crewId, { ...stored2024!, startsAtMs: 0, status: "closed", closedAtMs: 10_000 });
-    const stored2025 = await ctx.crewStore.getSeason(created.crew.crewId, season2025.season.seasonId);
-    await ctx.crewStore.putSeason(created.crew.crewId, { ...stored2025!, startsAtMs: 10_000, status: "closed", closedAtMs: 20_000 });
-
-    await recordPlayed(ctx, stablefordArchive("r1", 5_000, [ann, bo], { [ann]: 40, [bo]: 30 }), 5_000); // in 2024's window, Ann wins
-    await recordPlayed(ctx, stablefordArchive("r2", 15_000, [ann, bo], { [ann]: 20, [bo]: 35 }), 15_000); // in 2025's window, Bo wins
-
-    const records = await ctx.records(asClaims("ann"), created.crew.crewId);
-
-    expect(records.titles).toEqual([
-      { seasonId: season2024.season.seasonId, name: "2024", golfers: [{ golferId: ann, name: "Ann" }] },
-      { seasonId: season2025.season.seasonId, name: "2025", golfers: [{ golferId: bo, name: "Bo" }] },
-    ]);
+    expect(records.titles).toEqual([]);
   });
 
   it("a non-member is rejected — not-a-member", async () => {
@@ -655,112 +622,72 @@ describe("getCrewRecords", () => {
   });
 });
 
-// Close-season spec (2026-07-21): the two verbs that flip CrewSeason.status. Nothing about a
-// title is ever stored — closing/reopening just flips `status`, and getCrewRecords' own
-// on-read title fold (already covered above) reacts.
-describe("closeSeason / reopenSeason", () => {
-  it(
-    "organizer closes an open season → its Stableford title appears in getCrewRecords (reuses the existing " +
-      "titles fixture arithmetic — Ann 40 pts beats Bo 30 pts); reopening makes the title vanish again",
-    async () => {
-      const ctx = setup();
-      const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
-      // wallMs 500 — comfortably before whatever tiny clock reading ctx.close() below stamps
-      // (the shared fixed clock starts at 1_000 and only advances), so the round stays inside
-      // the closed season's own window regardless of how many prior calls ticked it forward.
-      await recordPlayed(ctx, stablefordArchive("r1", 500, [ann, bo], { [ann]: 40, [bo]: 30 }), 500);
-
-      const beforeClose = await ctx.records(asClaims("ann"), crewId);
-      expect(beforeClose.titles).toEqual([]); // open season awards nothing yet
-
-      const closed = await ctx.close(asClaims("ann"), crewId, seasonId);
-      expect(closed.season).toMatchObject({ seasonId, status: "closed" });
-
-      const afterClose = await ctx.records(asClaims("ann"), crewId);
-      expect(afterClose.titles).toEqual([{ seasonId, name: "2026", golfers: [{ golferId: ann, name: "Ann" }] }]);
-
-      const reopened = await ctx.reopen(asClaims("ann"), crewId, seasonId);
-      expect(reopened.season).toMatchObject({ seasonId, status: "open" });
-
-      const afterReopen = await ctx.records(asClaims("ann"), crewId);
-      expect(afterReopen.titles).toEqual([]);
-    },
-  );
-
-  it("closing an already-closed season is rejected — season-already-closed", async () => {
-    const ctx = setup();
-    const { crewId, seasonId } = await crewWithSeason(ctx);
-    await ctx.close(asClaims("ann"), crewId, seasonId);
-
-    await expect(ctx.close(asClaims("ann"), crewId, seasonId)).rejects.toMatchObject({ code: "season-already-closed" });
-  });
-
-  it("reopening an OPEN season is rejected — season-not-closed", async () => {
+// Spec 2026-07-22 "the season is the record" §2: editing the end date IS the whole lifecycle —
+// updateSeason replaces the deleted close/reopen verb pair outright. Guard order mirrors the
+// old closeSeason's exactly MINUS the closed-check — there is no closed state, so a season is
+// always editable (asserted directly below: editing a season twice in a row never 409s).
+describe("updateSeason", () => {
+  it("a partial update ({endsAt} only) leaves the name and startsAt untouched", async () => {
     const ctx = setup();
     const { crewId, seasonId } = await crewWithSeason(ctx);
 
-    await expect(ctx.reopen(asClaims("ann"), crewId, seasonId)).rejects.toMatchObject({ code: "season-not-closed" });
+    const updated = await ctx.updateSeason(asClaims("ann"), crewId, seasonId, { endsAt: "2050-06-30" });
+
+    expect(updated.season).toMatchObject({ seasonId, name: "2026", startsAt: WIDE_WINDOW.startsAt, endsAt: "2050-06-30" });
   });
 
-  it("a non-organizer member is rejected on both verbs — not-organizer", async () => {
+  it("a season is always editable — no closed-check anywhere, back-to-back edits both succeed", async () => {
+    const ctx = setup();
+    const { crewId, seasonId } = await crewWithSeason(ctx);
+
+    await expect(ctx.updateSeason(asClaims("ann"), crewId, seasonId, { name: "First edit" })).resolves.toMatchObject({ season: { name: "First edit" } });
+    await expect(ctx.updateSeason(asClaims("ann"), crewId, seasonId, { name: "Second edit" })).resolves.toMatchObject({ season: { name: "Second edit" } });
+  });
+
+  it("a non-organizer member is rejected — not-organizer", async () => {
     const ctx = setup();
     const { crewId, seasonId } = await crewWithSeason(ctx); // Bo joined, Ann is organizer
 
-    await expect(ctx.close(asClaims("bo"), crewId, seasonId)).rejects.toMatchObject({ code: "not-organizer" });
-
-    await ctx.close(asClaims("ann"), crewId, seasonId);
-    await expect(ctx.reopen(asClaims("bo"), crewId, seasonId)).rejects.toMatchObject({ code: "not-organizer" });
+    await expect(ctx.updateSeason(asClaims("bo"), crewId, seasonId, { name: "Nope" })).rejects.toMatchObject({ code: "not-organizer" });
   });
 
-  it("a non-member is rejected on both verbs — not-a-member", async () => {
+  it("a non-member is rejected — not-a-member", async () => {
     const ctx = setup();
     const { crewId, seasonId } = await crewWithSeason(ctx);
     await seedGolfer(ctx, "stranger", "Stranger");
 
-    await expect(ctx.close(asClaims("stranger"), crewId, seasonId)).rejects.toMatchObject({ code: "not-a-member" });
-    await expect(ctx.reopen(asClaims("stranger"), crewId, seasonId)).rejects.toMatchObject({ code: "not-a-member" });
+    await expect(ctx.updateSeason(asClaims("stranger"), crewId, seasonId, { name: "Nope" })).rejects.toMatchObject({ code: "not-a-member" });
   });
 
-  it("an unknown seasonId is rejected on both verbs — season-not-found", async () => {
+  it("an unknown seasonId is rejected — season-not-found", async () => {
     const ctx = setup();
     const { crewId } = await crewWithSeason(ctx);
 
-    await expect(ctx.close(asClaims("ann"), crewId, "no-such-season")).rejects.toMatchObject({ code: "season-not-found" });
-    await expect(ctx.reopen(asClaims("ann"), crewId, "no-such-season")).rejects.toMatchObject({ code: "season-not-found" });
+    await expect(ctx.updateSeason(asClaims("ann"), crewId, "no-such-season", { name: "Nope" })).rejects.toMatchObject({ code: "season-not-found" });
   });
 
-  it("closeSeason stamps closedAtMs to the exact clock reading, on both the returned and the stored season", async () => {
-    const crewStore = createInMemoryCrewStore();
-    const golferStore = createInMemoryGolferStore();
-    const closeAt = Date.UTC(2026, 6, 1); // July 1, 2026 (fixed) — the ONE value close() should stamp
-    const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("w"), clock: createFrozenClock(Date.UTC(2026, 0, 15)) });
-    const close = closeSeason({ crewStore, golferStore, clock: createFrozenClock(closeAt) });
-    await putAndBindGolfer(golferStore, golferId("golfer-ann"), "ann", "Ann");
-    const created = await create(asClaims("ann"), { name: "Sunday Skins" });
-    const seasonId = (await crewStore.listSeasons(created.crew.crewId))[0]!.seasonId;
+  // The CANDIDATE (stored fields merged with the incoming ones) is what's validated — updating
+  // only `startsAt` past the STORED `endsAt` is caught even though neither field alone looks
+  // wrong in isolation.
+  it("updating only startsAt past the stored endsAt is rejected — invalid-season-window", async () => {
+    const ctx = setup();
+    const { crewId, seasonId } = await crewWithSeason(ctx);
+    await ctx.updateSeason(asClaims("ann"), crewId, seasonId, { endsAt: "2026-06-30" });
 
-    const closed = await close(asClaims("ann"), created.crew.crewId, seasonId);
-
-    expect(closed.season.closedAtMs).toBe(closeAt);
-    const stored = await crewStore.getSeason(created.crew.crewId, seasonId);
-    expect(stored?.closedAtMs).toBe(closeAt);
+    await expect(ctx.updateSeason(asClaims("ann"), crewId, seasonId, { startsAt: "2026-12-01" })).rejects.toMatchObject({ code: "invalid-season-window" });
   });
 
-  it("reopenSeason removes closedAtMs entirely — absent (not undefined) on both the returned and the stored season", async () => {
-    const crewStore = createInMemoryCrewStore();
-    const golferStore = createInMemoryGolferStore();
-    const create = createCrew({ crewStore, golferStore, ids: createSequentialIds("w2"), clock: createFrozenClock(Date.UTC(2026, 0, 15)) });
-    const close = closeSeason({ crewStore, golferStore, clock: createFrozenClock(Date.UTC(2026, 6, 1)) });
-    const reopen = reopenSeason({ crewStore, golferStore });
-    await putAndBindGolfer(golferStore, golferId("golfer-ann"), "ann", "Ann");
-    const created = await create(asClaims("ann"), { name: "Sunday Skins" });
-    const seasonId = (await crewStore.listSeasons(created.crew.crewId))[0]!.seasonId;
-    await close(asClaims("ann"), created.crew.crewId, seasonId);
+  it("updating to a shape-valid but unreal calendar date is rejected — invalid-season-window", async () => {
+    const ctx = setup();
+    const { crewId, seasonId } = await crewWithSeason(ctx);
 
-    const reopened = await reopen(asClaims("ann"), created.crew.crewId, seasonId);
+    await expect(ctx.updateSeason(asClaims("ann"), crewId, seasonId, { endsAt: "2026-02-30" })).rejects.toMatchObject({ code: "invalid-season-window" });
+  });
 
-    expect(reopened.season).not.toHaveProperty("closedAtMs");
-    const stored = await crewStore.getSeason(created.crew.crewId, seasonId);
-    expect(stored).not.toHaveProperty("closedAtMs");
+  it("updating to a whitespace-only name is rejected — invalid-season-name", async () => {
+    const ctx = setup();
+    const { crewId, seasonId } = await crewWithSeason(ctx);
+
+    await expect(ctx.updateSeason(asClaims("ann"), crewId, seasonId, { name: "   " })).rejects.toMatchObject({ code: "invalid-season-name" });
   });
 });

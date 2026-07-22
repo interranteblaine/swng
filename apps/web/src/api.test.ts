@@ -405,16 +405,16 @@ describe("listMyCrews", () => {
 // Architecture-realignment Task 11: crew seasons + counted rounds + standings-on-read + leave —
 // same requestJson + bearer-token idiom as every crew call above.
 describe("createSeason", () => {
-  it("POSTs { name } to /crews/{crewId}/seasons with the bearer token and parses a CreateSeasonResponse", async () => {
+  it("POSTs { name, startsAt, endsAt } to /crews/{crewId}/seasons with the bearer token and parses a CreateSeasonResponse", async () => {
     let seenUrl: string | undefined;
     let seenInit: RequestInit | undefined;
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(201, { season: { seasonId: "s-1", name: "2026", status: "open", createdAtMs: 1_700_000_000_000, startsAtMs: 1_700_000_000_000 } });
+      return fakeResponse(201, { season: { seasonId: "s-1", name: "2026", createdAtMs: 1_700_000_000_000, startsAt: "2026-01-01", endsAt: "2026-12-31" } });
     });
 
-    const input: CreateSeasonRequest = { name: "2026" };
+    const input: CreateSeasonRequest = { name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" };
     const result = await createSeason("tok-crew", crewId("crew-1"), input);
 
     expect(seenUrl).toBe(`${HTTP_URL}/crews/crew-1/seasons`);
@@ -427,7 +427,9 @@ describe("createSeason", () => {
   it("throws a coded ApiError('invalid-season-name') on a 400", async () => {
     stubFetch(async () => fakeResponse(400, { code: "invalid-season-name", message: "season name must be 1-60 characters" }));
 
-    const error: unknown = await createSeason("tok-crew", crewId("crew-1"), { name: "" }).catch((caught: unknown) => caught);
+    const error: unknown = await createSeason("tok-crew", crewId("crew-1"), { name: "", startsAt: "2026-01-01", endsAt: "2026-12-31" }).catch(
+      (caught: unknown) => caught,
+    );
 
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).code).toBe("invalid-season-name");
@@ -441,7 +443,7 @@ describe("listSeasons", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { seasons: [{ seasonId: "s-1", name: "2026", status: "open", createdAtMs: 1_700_000_000_000, startsAtMs: 1_700_000_000_000 }] });
+      return fakeResponse(200, { seasons: [{ seasonId: "s-1", name: "2026", createdAtMs: 1_700_000_000_000, startsAt: "2026-01-01", endsAt: "2026-12-31" }] });
     });
 
     const result = await listSeasons("tok-crew", crewId("crew-1"));
@@ -459,7 +461,7 @@ describe("getSeasonStandings", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { seasonId: "season-1", name: "2026", status: "open", startsAtMs: 1_700_000_000_000, scoreboard: [], rounds: [], ledger: [], headToHead: [], partners: [] });
+      return fakeResponse(200, { seasonId: "season-1", name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31", scoreboard: [], rounds: [], ledger: [], headToHead: [], partners: [] });
     });
 
     const result = await getSeasonStandings("tok-crew", crewId("crew-1"), "season-1");

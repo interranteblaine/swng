@@ -1,5 +1,14 @@
 # The crew watches — window seasons and the automatic scoreboard
 
+> **PARTIALLY SUPERSEDED (2026-07-22) by `2026-07-22-crew-seasons-are-the-record-design.md`.** The
+> core here stands — the crew watches, seasons are time windows, the scoreboard + together-records
+> are read folds. What changed: a season's window is no longer the derived `startsAtMs` + `Jan 1`
+> tiling rule; it is now two CHOSEN, required, visible dates (`startsAt`/`endsAt` strings, edited via
+> `PUT /crews/{crewId}/seasons/{seasonId}`), and a season's Live/Final state is derived from `endsAt`
+> alone with the crowning apparatus (`status`, `closedAtMs`, `stablefordTitle`, the All-time
+> `getCrewRecords` surface) deleted. Read the successor for the season model; this spec remains
+> authoritative for the scoreboard/together-records folds it introduced.
+
 > Status: **owner-approved design** (2026-07-21, "ok. let's spec and plan" on the pitched
 > model). Origin: an owner field report — crews are "lacking and clunky" — plus a Codex
 > proposal (automatic crew scoreboard) that this design adjudicates rather than adopts.

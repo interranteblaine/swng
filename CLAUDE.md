@@ -1182,6 +1182,64 @@ integral values render `+2` not `+2.0`; the UTC year-start renders locally as "S
 `createCrew`'s crew+season writes non-atomic (degrades to the pre-arc empty state);
 hyphen-vs-minus split between vsPar columns and the Δ. On local `main`, never pushed.
 
+The season is the record — chosen dates, a tracking window, no crown (2026-07-22, spec
+`docs/superpowers/specs/2026-07-22-crew-seasons-are-the-record-design.md`, plan
+`2026-07-22-crew-seasons-are-the-record.md`, 4 SDD tasks + 1 review fix, commits
+`e0f1770..b6cc906`, base `6daa187`): the owner rejected crowning ROOT AND BRANCH across two
+turns ("why crown somebody before the date range is done? ... why do we even have crowning in the
+first place?"). Controller re-derived: **crowning requires a defined competition; a crew season is
+a TRACKING WINDOW that doesn't define one** (picking Stableford off a multi-dimensional board =
+inventing a contest the crew never played) — the crown belongs to the Event pillar; the Crew
+tracks. So a crew season became **a name + two chosen, required, VISIBLE dates** (`startsAt`/
+`endsAt`, `"YYYY-MM-DD"`), and **time is its only state**: Live while today's UTC date ≤ `endsAt`,
+Final after — DERIVED on read (`isFinal = todayUtcIso() > endsAt`, a string compare), nothing
+stored. **Editing the end date IS the whole lifecycle** — once it passes, no round can enter the
+window (a round's played date is "now"), so a Final board is frozen by time, exactly what "closed"
+used to mean, making the status flag redundant. DELETED WHOLE: `closeSeason`/`reopenSeason` (verbs
++ routes), `CrewSeason.status`, `closedAtMs`, the `startsAtMs`+Jan-1 tiling rule, `stablefordTitle`
+(champion extraction — its only consumer was `getCrewRecords`), `season-already-closed`/
+`season-not-closed`, the All-time surface (`getCrewRecords` + `GET /crews/{crewId}/records` +
+`CrewRecordsResponse` + `CrewRecordsSection`), and the dead `claimed` "account" roster badge (a
+ghost/claim-era vestige — always true under accounts-only). ADDED: ONE domain conversion
+`seasonWindowOf` (a required date pair → the existing ms `SeasonWindow`, so every fold —
+`crewScoreboard`/`sharedRoundIds`/`aggregateSeason` — is BYTE-UNTOUCHED; `scoreboard.ts`/`ledger.ts`
+have zero diff across the arc, `analytics.ts` is −14/+0), `PUT /crews/{crewId}` (rename) + `PUT
+/crews/{crewId}/seasons/{seasonId}` (name+dates), visible `<h4>Standings`/`<h4>Games together`
+headings, a derived Live/**FINAL** marker, and season/crew edit affordances. Routes net 40→**39**
+HTTP / 41 total (T2 net-zero +2 PUT/−2 close-reopen, T3 −records). Two review-caught traps held:
+**I5** — both `createSeason` and `updateSeason` validate the CANDIDATE (ordinal compare +
+`seasonWindowOf`-throw → `invalid-season-window` 400) BEFORE any write, so a shape-valid-but-unreal
+`2026-02-30` can't store then 500 on read; **I4** — the adapter's `seasonOf` rebuilds field-by-field
+with a load-bearing `?? createdAtMs` fallback (a spread would ride legacy attrs into the view and an
+`undefined` required date would zod-500 on pre-`startsAtMs` rows). Legacy beta rows fold
+(`startsAtMs`→dates, `status`/`closedAtMs` ignored), no migration, beta disposable. Frozen-deck law
+INTACT (H2H 5W-5L-2H, skins 54, Stableford ledger 430/430/435/435, scoreboard +0.2/−0.2/71(−1)
+byte-identical — deleting the crown touched no asserted number; deck uses `new
+Date().getUTCFullYear()`). Each task independently reviewed (Task 3's ONE Important — the window line
+rendered the year twice, `Jan 1, 2026 – Dec 31, 2026`; spec §5 pins it ONCE — fixed in `34468c0`:
+`formatWindowRange` renders `Jan 1 – Dec 31, 2026` same-year / `Jan 1, 2020 – Dec 31, 2030`
+cross-year). Whole-branch review was **controller-run** (the session's 200-subagent budget was
+exhausted and the fable dispatch hit its usage limit) against source: READY TO DEPLOY — YES, 0
+Critical/0 Important, every invariant verified incl. the cross-task `toCrewView` async→sync ripple
+complete across all 7 callers; 7 accumulated Minors all ride-as-note. Close-out (controller-run):
+`validate` exit 0 → `deploy:beta` LAMBDA-FIRST (`swng-beta` UPDATE_COMPLETE, 39 HTTP routes
+confirmed on the deployed API — both PUTs present, close/reopen/records gone) → `publish:web:beta`
+(bundle `index-DsIIezMn.js`, CF invalidation Completed, live at beta.swng.golf) → `e2e:beta` 17/17
+(runs 1 & 3 clean; run 2's exit-1 was a vitest-teardown birpc flake, tests 17/17) → **crewSeason
+live 10/10 ×2** (frozen deck byte-identical, the new window-pin + rename beats live) → full
+`e2e:field` **66 passed / 1 documented-skip** → a controller USE pass on DEPLOYED beta.swng.golf
+(real PKCE as "Golfer 0045": crew born with its auto "2026" season; roster with NO "account" badge;
+create form prefilled `2026-01-01/2026-12-31` + "Want an all-time board? Give it wide dates."; the
+season panel's window line "Jan 1 – Dec 31, 2026" [year ONCE — the I1 fix live], no marker on the
+Live season, "Standings"/"Games together" headings, "Appears when members play a round together.",
+NO close/reopen/records anywhere; then **the whole lifecycle live** — Edit the end date to
+`2026-06-30` → window re-rendered "Jan 1 – Jun 30, 2026" AND a **"FINAL"** marker appeared [today >
+endsAt]; crew-name Edit → "Renamed Close-Out Crew"; console zero errors/warnings). NO wipe (legacy
+rows fold via I4). Riding as notes: SeasonPanel's second games-empty-state arm keeps its prior-ruling
+copy (product-copy call, deferred); crew-name-edit trusts the PUT response while season-edit
+refetches (stylistic); `crewSeason.spec` describe-title still narrates the deleted counted-round
+model (docs-sweep candidate). On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

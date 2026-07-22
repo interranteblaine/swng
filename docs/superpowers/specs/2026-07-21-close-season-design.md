@@ -1,5 +1,14 @@
 # Close a season — the organizer's verb that makes titles real
 
+> **SUPERSEDED (2026-07-22) by `2026-07-22-crew-seasons-are-the-record-design.md`.** The owner
+> rejected crowning root and branch: a crew season is a *tracking window*, not a competition that
+> anoints a champion. So this entire arc — close/reopen verbs, `CrewSeason.status`, `closedAtMs`,
+> and the Stableford `title` — is DELETED. A season now carries two chosen, required, visible dates;
+> **time is its only state** (Live while today's UTC date ≤ `endsAt`, Final after — derived on read,
+> nothing stored), and *editing the end date* is the whole lifecycle. Read the successor spec, not
+> this one, for the current model. Retained here only as the design record of the crowning path swng
+> chose not to keep.
+
 > Status: **controller-ruled design** (2026-07-21, executing the owner's standing directive
 > to carry judgment; follows directly from the analytics arc, whose Stableford titles
 > consume `CrewSeason.status: "closed"` — a field that is load-bearing on the counted-round

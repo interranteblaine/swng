@@ -1285,9 +1285,9 @@ injected auth, opened the crew page: the "Played together" row rendered **`Casa 
 22`** as the underlined whole-row link to `/rounds/:id` — screenshot read, the canonical roundLabel
 live, NOT a bare locale date; "Games together" showed the honest empty-state copy; throwaway Cognito
 users torn down, test crew left on disposable beta) → this docs sweep. NO wipe (all compute-on-read;
-additive wire only). Riding as notes: the `(typeof members)[number]["lines"][number]` inline map type
-in getSeasonStandings is dense (named-alias candidate); the USE walk didn't capture console messages
-(the e2e suites assert clean behavior; the render is visually clean). On local `main`, never pushed.
+additive wire only). No riding notes: a post-close readability fix replaced getSeasonStandings' dense
+`(typeof members)[number]["lines"][number]` map type with the named `StoredLine` (type-only, emitted
+JS byte-identical — no redeploy). On local `main`, never pushed.
 
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.

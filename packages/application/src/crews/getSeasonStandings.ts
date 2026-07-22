@@ -1,5 +1,5 @@
 import { aggregateSeason, crewContribution, crewScoreboard, partnerRecords, seasonWindowOf, sharedRoundIds } from "@swng/domain";
-import type { CrewId, CrewRoundContribution, GolferId, RoundArchive, RoundId } from "@swng/domain";
+import type { CrewId, CrewRoundContribution, GolferId, RoundArchive, RoundId, StoredLine } from "@swng/domain";
 import type { SeasonStandingsResponse } from "@swng/contracts";
 import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
@@ -81,7 +81,7 @@ export const getSeasonStandings =
     // Shared rounds newest-first by finalizedAtMs; any holder's line is authoritative for a given
     // roundId (a round finalizes once — same finalizedAt, frozen courseName, createdAt on every
     // participant's line), so the first holder found supplies the canonical designation (spec §3).
-    const lineByRound = new Map<RoundId, (typeof members)[number]["lines"][number]>();
+    const lineByRound = new Map<RoundId, StoredLine>();
     for (const { lines } of members) for (const line of lines) if (!lineByRound.has(line.roundId)) lineByRound.set(line.roundId, line);
     const rounds = shared
       .map((roundId) => {

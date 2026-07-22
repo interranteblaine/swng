@@ -73,22 +73,16 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   "read-only-token": 403,
   // Architecture-realignment Task 9 (crew seasons + standings-on-read): create-season/
   // list-seasons/standings. invalid-season-name is a bad-body 400 (like invalid-crew-name);
-  // season-not-found is an unresolvable id 404 (like unknown-crew). did-not-play and
-  // not-the-appender were the deleted counted-round use cases' own forbidden-actor codes
-  // (crew-scoreboard spec §2b) — kept here, unused, forward-bucketed as 403 like not-a-member
-  // (this Record is exhaustive over ApplicationErrorCode by construction, so an entry is
-  // required regardless of whether a route still throws it).
+  // season-not-found is an unresolvable id 404 (like unknown-crew).
   "invalid-season-name": 400,
   "season-not-found": 404,
-  "did-not-play": 403,
-  "not-the-appender": 403,
   // Close-season spec (2026-07-21): closeSeason/reopenSeason's own explicit conflicts — a 409
   // bucket like crew-conflict above, wire-distinct codes so a stale client (double-tap Close,
   // or Reopen on a season someone else already reopened) learns the truth.
   "season-already-closed": 409,
   "season-not-closed": 409,
   // Crew membership (invited in, accountable out — spec §1): removeCrewMember/transferOrganizer's
-  // organizer-only gate — a forbidden actor, same 403 bucket as not-a-member/not-the-appender
+  // organizer-only gate — a forbidden actor, same 403 bucket as not-a-member
   // above. organizer-must-transfer is leaveCrew's own guard — a failed lifecycle precondition
   // (the crew would be left with no organizer), same 409 bucket as season-already-closed above.
   "not-organizer": 403,

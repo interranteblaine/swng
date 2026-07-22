@@ -88,15 +88,9 @@ export type ApplicationErrorCode =
   // precedent), same 409 bucket as crew-conflict.
   | "season-already-closed"
   | "season-not-closed"
-  // Task 9: originally the counted-round use cases' own forbidden-actor codes (a member
-  // appending a round they didn't play / removing one they didn't append). The counting
-  // apparatus these guarded is deleted whole (crew-scoreboard spec §2b) — kept here, unused,
-  // rather than chased as a separate cleanup this task's scope didn't cover.
-  | "did-not-play"
-  | "not-the-appender"
   // Crew membership (invited in, accountable out — spec §1): removeCrewMember/transferOrganizer's
   // authorization gate — the caller passed requireCrewMember (they ARE a member) but isn't the
-  // crew's organizer. A forbidden ACTOR, same 403 bucket as not-a-member/did-not-play above.
+  // crew's organizer. A forbidden ACTOR, same 403 bucket as not-a-member above.
   | "not-organizer"
   // Crew membership (invited in, accountable out — spec §1): leaveCrew's organizer guard — the
   // organizer cannot leave (the crew would be left with none). A failed lifecycle precondition,

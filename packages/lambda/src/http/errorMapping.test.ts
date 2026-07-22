@@ -221,17 +221,15 @@ describe("toHttpError — M9 Task 3 read-only-token", () => {
   });
 });
 
-// Architecture-realignment Task 9's own crew season/standings codes — did-not-play/
-// not-the-appender were the deleted counted-round use cases' own forbidden-actor codes
-// (crew-scoreboard spec §2b) — kept in the exhaustive error map, unused, so still pinned here.
+// Architecture-realignment Task 9's own crew season/standings codes (the counted-round
+// use cases' forbidden-actor codes died with the counting apparatus — crew-scoreboard
+// spec §2b).
 describe("toHttpError — crew seasons (architecture-realignment Task 9)", () => {
   const logger = createNullLogger();
 
   const codeToStatus = [
     ["invalid-season-name", 400],
     ["season-not-found", 404],
-    ["did-not-play", 403],
-    ["not-the-appender", 403],
   ] as const;
 
   it.each(codeToStatus)("maps %s to %d", (code, status) => {

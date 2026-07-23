@@ -1289,6 +1289,35 @@ additive wire only). No riding notes: a post-close readability fix replaced getS
 `(typeof members)[number]["lines"][number]` map type with the named `StoredLine` (type-only, emitted
 JS byte-identical — no redeploy). On local `main`, never pushed.
 
+The crew page converges on the shared idioms — two owner-reported UI papercuts, fixed at the
+root (2026-07-23, spec `docs/superpowers/specs/2026-07-23-crew-page-ui-papercuts-design.md`,
+plan `2026-07-23-crew-page-ui-papercuts.md`, 2 SDD tasks, commits `31ddad0..15c918f`, base
+`8a2a69e`): an owner field report (phone screenshot) — the crew invite URL runs off the screen,
+and the `Remove…`/`Make organizer…` roster buttons are oversized boxed idioms. **Root cause,
+not symptom:** the crew page reinvented shared idioms and drifted. The invite panel hand-rolled
+its own copy-link line (two `<p>`s) instead of the shared `ui/CopiedLinkLine` — so it never got
+that component's `break-all` fix (itself the cure for the same overflow class, 2026-07-21). And
+the roster buttons reached for boxed `btnDanger`/`btnSecondary` when `btnQuiet`'s own contract
+reserves boxed buttons for section-level actions and names the text register for row-scale
+affordances (the crew-name **Edit** already wears it). A whole-`apps/web/src` sweep grounded the
+scope: exactly ONE hand-rolled copy-link holdout and exactly TWO row-scale buttons wearing a box
+— the only two drifted sites; every other `btnDanger`/`btnSecondary` is a section action or a
+confirm-dialog button, correctly boxed. Fix by **convergence**: `CopiedLinkLine` grew one optional
+`note` prop (the crew's "good for 7 days" expiry, set off before the em-dash) and the invite panel
+routes through it — all three copy-link surfaces now share one `break-all`-correct, tested copy
+(the two existing callers render byte-identical, pinned by a no-`note` test); and a `btnQuietDanger`
+sibling (oxblood text register — the destructive signal without the box) landed in `ui/classes.ts`
+for `Remove…`, with `btnQuiet` for `Make organizer…`, the register pinned by a class-assertion
+test so they can't drift back. The in-dialog Confirm/Cancel and the section-level `Leave crew`
+stay boxed by design. Presentation-only — no wire/schema/route change, no `deploy:beta`, no data
+touched (the one honest visual delta: the invite url now renders at full `text-fairway`, not the
+old `/70` dim — a convergence side effect, more legible). Each task went red→green with its own
+test and an adversarial review pass; the e2e specs were swept for any locator asserting the changed
+invite copy (none — the `crews/join` hits are the API path). Close-out (controller-run, subagent
+budget exhausted so executed inline with the same gates): `pnpm validate` green at every commit and
+at HEAD → `publish:web:beta` (bundle `index-COJ0XBUn.js`, CF invalidation) → `e2e:field` **66
+passed / 1 documented-skip FIRST RUN**. On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

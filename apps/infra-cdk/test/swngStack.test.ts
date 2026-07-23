@@ -557,6 +557,25 @@ describe("SwngStack", () => {
       });
     });
 
+    // Managed login v2, branded from @swng/brand (2026-07-23). The domain renders the managed-login
+    // pages; the pool must be on Essentials (managed login requires it); the branding style paints
+    // them swng — light mode + a FORM_LOGO wordmark, not Cognito's blue defaults.
+    it("turns the domain on to Managed Login v2 and the pool onto the Essentials plan", () => {
+      template.hasResourceProperties("AWS::Cognito::UserPoolDomain", { ManagedLoginVersion: 2 });
+      template.hasResourceProperties("AWS::Cognito::UserPool", { UserPoolTier: "ESSENTIALS" });
+    });
+
+    it("provisions one swng branding style: light mode + a FORM_LOGO svg, not Cognito defaults", () => {
+      template.resourceCountIs("AWS::Cognito::ManagedLoginBranding", 1);
+      template.hasResourceProperties("AWS::Cognito::ManagedLoginBranding", {
+        UseCognitoProvidedValues: false,
+        Settings: Match.objectLike({
+          categories: Match.objectLike({ global: Match.objectLike({ colorSchemeMode: "LIGHT" }) }),
+        }),
+        Assets: Match.arrayWith([Match.objectLike({ Category: "FORM_LOGO", Extension: "SVG" })]),
+      });
+    });
+
     // M9 Task 6: the CloudFront origin is APPENDED onto the same UserPoolClient (resourceCountIs
     // above already pins "exactly one" — this is the SAME client, not a second one from a
     // replacement), reached through the L1 escape hatch since the distribution's domain isn't

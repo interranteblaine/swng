@@ -6,7 +6,7 @@ import { AttributeType, BillingMode, Operation, ProjectionType, StreamViewType, 
 import { CfnRoute, CfnStage, CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration, WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
-import { CfnUserPoolClient, OAuthScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
+import { CfnManagedLoginBranding, CfnUserPoolClient, FeaturePlan, ManagedLoginVersion, OAuthScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
 import { Distribution, ResponseHeadersPolicy, ViewerProtocolPolicy } from "aws-cdk-lib/aws-cloudfront";
 import { S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
@@ -20,6 +20,7 @@ import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
 import { Queue } from "aws-cdk-lib/aws-sqs";
 import type { Construct } from "constructs";
+import { managedLoginAssets, managedLoginSettings } from "./managedLoginBranding.js";
 
 // The live POC stacks (deployed pre-rebuild, still holding production-shaped data) are
 // named InfraCdkStack-beta / InfraCdkStack-prod — see CLAUDE.md. Constructing a SwngStack
@@ -329,6 +330,10 @@ export class SwngStack extends Stack {
       // Holds real users the moment beta has its first signed-in golfer — never destroy this
       // out from under a stack teardown (mirrors the rounds/core/projections tables above).
       removalPolicy: RemovalPolicy.RETAIN,
+      // Managed login (below) requires the Essentials feature plan; set it explicitly
+      // (deterministic rather than relying on the AWS default). No-interruption update; prod
+      // needs it for managed login regardless.
+      featurePlan: FeaturePlan.ESSENTIALS,
     });
 
     // The web app's origins, for both OAuth callback and logout redirects — a cdk context
@@ -373,6 +378,22 @@ export class SwngStack extends Stack {
     const userPoolDomain = new UserPoolDomain(this, "UserPoolDomain", {
       userPool,
       cognitoDomain: { domainPrefix: `swng-${stage}-${this.account}` },
+      // Managed login v2 (the branding designer's experience), painted by the
+      // CfnManagedLoginBranding below — same OAuth endpoints/domain URL as v1, only the rendered
+      // sign-in pages change (so authConfig.ts and the CSP are untouched).
+      managedLoginVersion: ManagedLoginVersion.NEWER_MANAGED_LOGIN,
+    });
+
+    // The swng-branded managed login style (docs/superpowers/specs/2026-07-23-managed-login-brand-
+    // and-brand-tokens-design.md). Settings + the wordmark logo are built from @swng/brand — the
+    // login's colors ARE the same tokens the web renders. Partial Settings: Cognito merges its own
+    // defaults for everything we don't specify.
+    new CfnManagedLoginBranding(this, "ManagedLoginBranding", {
+      userPoolId: userPool.userPoolId,
+      clientId: userPoolClient.userPoolClientId,
+      useCognitoProvidedValues: false,
+      settings: managedLoginSettings,
+      assets: managedLoginAssets,
     });
 
     // --- Participant-token signing secret ---------------------------------------------

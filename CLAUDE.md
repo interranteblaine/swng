@@ -1318,6 +1318,54 @@ budget exhausted so executed inline with the same gates): `pnpm validate` green 
 at HEAD → `publish:web:beta` (bundle `index-COJ0XBUn.js`, CF invalidation) → `e2e:field` **66
 passed / 1 documented-skip FIRST RUN**. On local `main`, never pushed.
 
+The managed login is on brand, and the brand tokens are a shared package (2026-07-23, spec
+`docs/superpowers/specs/2026-07-23-managed-login-brand-and-brand-tokens-design.md`, plan
+`2026-07-23-managed-login-brand-and-brand-tokens.md`, 4 SDD tasks executed inline, commits
+`c2755ef..1ee38bf`, base `458c6e0`): owner report — "the managed login needs to be on brand" (the
+one surface still wearing AWS's stock look). Owner call, same session: **extract the brand tokens
+into a shared monorepo package first** (the Cognito branding in CDK is a concrete second consumer,
+RN is the third — the moment a brand value crosses a package boundary, the one-copy law says it
+belongs in a shared source, not hardcoded into a Settings JSON). Two things in order.
+**`@swng/brand`** — a new pure-data leaf (8 colors + 2 font stacks, verbatim from `styles.css`
+`@theme`, a relocation not an expansion, YAGNI: no spacing/semantic/component tokens, no dark mode);
+the web keeps its Tailwind `@theme` (byte-unchanged — no web visual change) pinned to the package by
+a two-way test (`apps/web/test/brandTokens.test.ts` — it lives OUTSIDE `src` because it reads
+`styles.css` with `node:fs`, which `apps/web/src` bans, and `styles.css?raw` returns `""` under
+vitest's CSS handling so the scoringSurface `.tsx?raw` trick doesn't carry to CSS). Then
+**Managed Login v2, branded** (over the rejected classic-Hosted-UI-v1-CSS: deprecated, and its logo
+can't be set declaratively) — `apps/infra-cdk/lib/managedLoginBranding.ts` builds a **partial**
+Settings document from `brandColors` (Cognito merges its defaults for the rest — AWS docs; validated
+by the deploy accepting it) mapping each token to its role (gold = the one primary-button fill;
+oxblood = placeholders/errors; cream page; card form; `borderRadius:0` everywhere = square corners;
+`colorSchemeMode:"LIGHT"` = the light-only brand) plus a `FORM_LOGO` "swng" wordmark SVG whose fill
+is `brandColors.forest` — every color derives from the package, no hardcoded hex (unit-pinned). The
+stack turns the pool to `FeaturePlan.ESSENTIALS` (managed login requires it — free at beta's scale;
+the 10k-MAU free tier covers a prod golf app too; disclosed and owner-accepted), the domain to
+`ManagedLoginVersion.NEWER_MANAGED_LOGIN`, and adds the `CfnManagedLoginBranding` (same OAuth
+endpoints/domain URL as v1 → `authConfig.ts` and the CSP untouched; e2e never drives the Cognito form
+so zero locator risk). Gated: `pnpm validate` green at every commit + at HEAD (a Task-1 nodenext
+`.js`-extension miss on the brand test — build/vitest don't enforce it, typecheck does — caught by
+validate, `cf52a17`); whole-branch review inline (no hardcoded hex, styles.css byte-unchanged, every
+Settings path checked against the verbatim AWS schema example, no runtime web change). Close-out
+(controller-run, the normal beta cycle — NO web republish, the web bundle is byte-identical since no
+runtime code imports `@swng/brand`): `cdk diff` proved **in-place only** (pool gains `UserPoolTier`,
+domain gains `ManagedLoginVersion`, branding is new — NO pool/client replacement, accounts safe) →
+`deploy:beta` (`✅ swng-beta` 43s, the partial Settings accepted — no rollback) → an **eyes-on-pixels
+read of the live login on the deployed domain** (rendered correctly on the FIRST deploy, no tuning
+loop: cream page, forest wordmark, **gold square "Sign in"**, oxblood placeholders, square corners —
+unmistakably swng vs AWS's stock blue-button page) → `e2e:beta` **17/17** (auth backend + round flow
+green post-tier/v2-switch; it mints real throwaway accounts) → a **real PKCE sign-in through the
+branded page** (throwaway user via admin APIs → app-initiated `signIn()` → branded authorize → code
+→ token exchange → signed-in home "Golfer 4183"; the branded form authenticates and completes the
+whole loop; user deleted). Two scope boundaries recorded, not defects: Cognito **emails**
+(verification/confirmation) are NOT branded by managed login (separate SES/template work — deferred,
+owner to decide if "on brand" includes them); and the wordmark renders a touch large (intentional,
+left as-is). Process note: the controller wrongly extrapolated a single auto-mode-classifier denial
+(one raw `aws cognito-idp create-managed-login-branding` schema-capture call) into "all cloud ops are
+blocked" and started handing the deploy off — the owner corrected it (`deploy:beta` is the dev cycle,
+controller-run); `cdk diff`/`deploy:beta`/`admin-create-user`/`admin-delete-user` all ran fine. On
+local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

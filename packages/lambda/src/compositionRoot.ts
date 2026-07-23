@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, DynamoDBStreamEvent } from "aws-lambda";
 import type { RoundArchive } from "@swng/domain";
 import type {
@@ -83,10 +83,15 @@ const JOIN_CODE_LENGTH = 6;
 
 const createSystemClock = (): Clock => ({ now: () => Date.now() });
 
-const createRandomIds = (): IdGenerator => ({
+// Exported (rather than kept module-private) solely so compositionRoot.test.ts can pin the
+// join-code generator's alphabet/CSPRNG-source invariants without standing up a whole buildApp
+// — mirrors createConsoleLogger's own export just below.
+export const createRandomIds = (): IdGenerator => ({
   newId: () => randomUUID(),
+  // crypto.randomInt is a CSPRNG — a join code is a capability (it lets someone onto a round),
+  // so it must not come from Math.random's predictable PRNG.
   newJoinCode: () =>
-    Array.from({ length: JOIN_CODE_LENGTH }, () => JOIN_CODE_ALPHABET.charAt(Math.floor(Math.random() * JOIN_CODE_ALPHABET.length))).join(""),
+    Array.from({ length: JOIN_CODE_LENGTH }, () => JOIN_CODE_ALPHABET.charAt(randomInt(JOIN_CODE_ALPHABET.length))).join(""),
 });
 
 // A structured console Logger — the beta-grade choice (M9 hardens); CloudWatch ingests

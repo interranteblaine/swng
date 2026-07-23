@@ -3,7 +3,28 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, DynamoD
 import { deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
 import type { RoundArchive, RoundEvent } from "@swng/domain";
 import { createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, projectArchive, putAndBindGolfer } from "@swng/application";
-import { buildApp, buildProjector, buildRebuild, createConsoleLogger, createProjectorHandler } from "./compositionRoot.js";
+import { buildApp, buildProjector, buildRebuild, createConsoleLogger, createProjectorHandler, createRandomIds } from "./compositionRoot.js";
+
+// Prod-readiness hardening Arc A, Task 2: a join code is a capability (holding one lets someone
+// onto a round and record scores), so it must come from a CSPRNG, not Math.random's predictable
+// PRNG. The wire-side alphabet regex landed in Task 1; this pins the generator's own output stays
+// inside that alphabet AND that it never touches Math.random.
+describe("createRandomIds — newJoinCode", () => {
+  it("mints a 6-char join code from the unambiguous alphabet only", () => {
+    const ids = createRandomIds();
+    for (let i = 0; i < 200; i += 1) {
+      const code = ids.newJoinCode();
+      expect(code).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/);
+    }
+  });
+
+  it("does not use Math.random for join codes", () => {
+    const spy = vi.spyOn(Math, "random");
+    createRandomIds().newJoinCode();
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
 
 // Pin for the M3-deferred fix (task-6-brief.md item 5): consoleLogger used to spread `data`
 // AFTER `message` in the logged object, so a `data.message` key silently clobbered the

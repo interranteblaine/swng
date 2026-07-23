@@ -18,6 +18,7 @@
   },
   "devDependencies": {
     "@swng/adapters-dynamodb": "workspace:*",
+    "@swng/brand": "workspace:*",
     "@swng/lambda": "workspace:*",
     "aws-cdk": "2.1033.0",
     "ts-node": "^10.9.2",

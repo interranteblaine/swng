@@ -129,6 +129,9 @@ importers:
       '@swng/adapters-dynamodb':
         specifier: workspace:*
         version: link:../../packages/adapters-dynamodb
+      '@swng/brand':
+        specifier: workspace:*
+        version: link:../../packages/brand
       '@swng/lambda':
         specifier: workspace:*
         version: link:../../packages/lambda

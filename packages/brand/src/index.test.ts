@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { brandColors, brandFonts } from "./index";
+import { brandColors, brandFonts } from "./index.js";
 
 describe("@swng/brand", () => {
   it("exposes the eight brand colors as 6-digit hex", () => {

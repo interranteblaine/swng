@@ -259,7 +259,7 @@ describe("CrewPage — invite", () => {
     await waitFor(() => expect(mockedMintCrewInvite).toHaveBeenCalledWith(idToken, crewId("crew-1")));
     const expectedUrl = `${window.location.origin}/crews/join#invite-tok-1`;
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(expectedUrl));
-    expect(await screen.findByText("Link copied — good for 7 days.")).toBeTruthy();
+    expect(await screen.findByText(/Link copied · good for 7 days/)).toBeTruthy();
     expect(screen.getByText(expectedUrl)).toBeTruthy();
   });
 
@@ -282,7 +282,7 @@ describe("CrewPage — invite", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
 
-    await waitFor(() => expect(screen.getByText("Copy this link — good for 7 days.")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Copy this link · good for 7 days/)).toBeTruthy());
     expect(screen.getByText(`${window.location.origin}/crews/join#invite-tok-2`)).toBeTruthy();
   });
 

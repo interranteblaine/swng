@@ -6,6 +6,7 @@ import type { GolferId } from "@swng/domain";
 import type { CrewSeasonView, CrewView } from "@swng/contracts";
 import { ApiError, createSeason, getCrew, leaveCrew, listSeasons, mintCrewInvite, removeCrewMember, transferOrganizer, updateCrew } from "../api";
 import { useAuth } from "../auth/useAuth";
+import { CopiedLinkLine } from "../ui/CopiedLinkLine";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnDanger, btnDangerSolid, btnPrimary, btnQuiet, btnSecondary, cardBox, inputBox } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
@@ -374,12 +375,7 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
         <button type="button" onClick={() => void mintInvite()} disabled={inviteBusy} className={`${btnPrimary} w-full disabled:opacity-50`}>
           {inviteBusy ? "Getting link…" : "Invite"}
         </button>
-        {inviteUrl && (
-          <>
-            <p className="mt-2 text-xs text-fairway">{inviteCopied ? "Link copied — good for 7 days." : "Copy this link — good for 7 days."}</p>
-            <p className="mt-1 select-all font-mono text-xs text-fairway/70">{inviteUrl}</p>
-          </>
-        )}
+        {inviteUrl && <CopiedLinkLine url={inviteUrl} copied={inviteCopied} note="good for 7 days" className="mt-2" />}
         {inviteError && (
           <p role="alert" className="mt-2 text-xs text-oxblood">
             {inviteError}

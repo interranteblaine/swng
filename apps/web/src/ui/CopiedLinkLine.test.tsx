@@ -26,4 +26,17 @@ describe("CopiedLinkLine", () => {
     expect(screen.getByText(LONG_URL).className).toContain("break-all");
     expect(screen.getByText(LONG_URL).className).toContain("select-all");
   });
+
+  it("sets an optional note off before the url's em-dash, url intact", () => {
+    render(<CopiedLinkLine url={LONG_URL} copied note="good for 7 days" />);
+    expect(screen.getByText(/Link copied · good for 7 days/)).toBeTruthy();
+    expect(screen.getByText(LONG_URL)).toBeTruthy();
+    expect(screen.getByText(LONG_URL).className).toContain("break-all");
+  });
+
+  it("omits the note entirely when none is passed — the existing callers render unchanged", () => {
+    render(<CopiedLinkLine url={LONG_URL} copied={false} />);
+    expect(screen.getByText(/Copy this link —/)).toBeTruthy();
+    expect(screen.queryByText(/·/)).toBeNull();
+  });
 });

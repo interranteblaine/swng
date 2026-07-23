@@ -46,18 +46,30 @@ first (1, 2, 3, 8), then stack (4, 5, 6, 7). Task 4 (secret) is the one with dep
 
 ---
 
-### Task 1: Usage & length bounds — contracts `.max()` + crew-size cap in the domain
+### Task 1: Usage & length bounds — contracts `.max()` at the wire ingress ONLY
 
 **Files:**
 - Modify: `packages/contracts/src/commands.ts`, `packages/contracts/src/courses.ts`,
   `packages/contracts/src/golfers.ts`, `packages/contracts/src/round.ts` (games/players arrays)
-- Modify: `packages/domain/src/crew/crew.ts` (crew-size cap), `packages/domain/src/errors.ts`
-  (new `crew-full` code), `packages/lambda/src/http/errorMapping.ts` (map `crew-full` → 409)
 - Test: co-located `*.test.ts` beside each
 
 **Interfaces:**
-- Produces: no signature changes — every field keeps its type; only its validation tightens. New
-  domain error code `crew-full` (409).
+- Produces: no signature changes — every field keeps its type; only its REQUEST-schema validation
+  tightens.
+
+**Placement rule (load-bearing — owner, 2026-07-23):** these bounds go on **request** schemas
+only (the wire ingress). They must NOT be added to response/read schemas and must NOT gate any
+fold/deserialization path — a limit that rejects *stored* data bricks a legitimate user's own
+data, which is worse than the DoS it would prevent. Input hygiene lives at ingress; reads tolerate
+whatever is already stored.
+
+**NO crew-size cap.** An earlier draft added a hard `MAX_CREW_MEMBERS` cap in the domain
+(`addMember`). It is dropped: it is a *product* limit (it would reject a legitimate large crew's
+next member) masquerading as a DoS defense, and the abuse it targeted — a giant crew — is already
+choked upstream by WAF on account creation (every member is an account accepting an invite). The
+real concern, `getSeasonStandings` issuing one query per member, is a **read-cost** matter; if a
+legitimate crew ever grows large enough to matter, bound it at the read (batch/paginate the
+standings), never by capping membership. Not in scope for this arc.
 
 **The bounds to apply** (every user-supplied string gets `.max()`; every user-supplied array gets
 `.max()` — the principle is "bound every user-controlled count and length"):
@@ -80,7 +92,9 @@ first (1, 2, 3, 8), then stack (4, 5, 6, 7). Task 4 (secret) is the one with dep
 | golfers.ts `updateMeRequestSchema` | `name` | `.min(1)` → `.min(1).max(60)` |
 
 (Crew and season names are ALREADY bounded to 60 in the domain — `crew.ts:34`,
-`createSeason.ts`/`updateSeason.ts` — leave those; they are the pattern this task extends.)
+`createSeason.ts`/`updateSeason.ts` — leave those; they are the pattern this task extends. Those
+existing domain name-validators run on WRITE only, not on the crew store's read path, so they are
+the safe kind — do not add anything analogous on a read/fold.)
 
 - [ ] **Step 1: Write failing tests** for representative rejections — e.g. in
   `packages/contracts/src/commands.test.ts`:
@@ -102,45 +116,18 @@ it("rejects a course-handicap outside [-10, 54]", () => {
   expect(() => parse(setHandicapRequestSchema, { golferId: "g", courseHandicap: 99 })).toThrow();
 });
 ```
-  And in `packages/domain/src/crew/crew.test.ts`:
-```ts
-it("rejects adding a member past the crew-size cap", () => {
-  let crew: Crew = { id: crewId("c"), name: "Crew", members: [] };
-  for (let i = 0; i < MAX_CREW_MEMBERS; i += 1) {
-    crew = addMember(crew, { golferId: golferId(`g${i}`), name: `G${i}`, role: i === 0 ? "organizer" : "member" });
-  }
-  expect(() => addMember(crew, { golferId: golferId("overflow"), name: "N", role: "member" }))
-    .toThrow(/crew-full/);
-});
-```
 
 - [ ] **Step 2: Run the tests, verify they fail.**
-  `env -u NODE_OPTIONS pnpm -F @swng/contracts vitest run src/commands.test.ts` and
-  `env -u NODE_OPTIONS pnpm -F @swng/domain vitest run src/crew/crew.test.ts`.
+  `env -u NODE_OPTIONS pnpm -F @swng/contracts vitest run src/commands.test.ts` (and the courses/
+  golfers/round schema test files for their fields).
 
-- [ ] **Step 3: Apply the bounds table** across the four contract files. Read each schema, add the
-  `.max()`/`.regex()` per the table above. For the crew cap, in `crew.ts`:
-```ts
-// A crew is a friend group / society, not an open league — a bounded roster keeps the
-// per-member read fan-out (getSeasonStandings issues one query per member) bounded too.
-const MAX_CREW_MEMBERS = 100;
-
-export const addMember = (crew: Crew, member: CrewMember): Crew => {
-  if (member.name.trim().length < MIN_MEMBER_NAME_LENGTH) { /* unchanged */ }
-  if (crew.members.length >= MAX_CREW_MEMBERS) {
-    throw new DomainError("crew-full", `crew "${crew.id}" already has the maximum ${MAX_CREW_MEMBERS} members`);
-  }
-  if (crew.members.some((existing) => existing.golferId === member.golferId)) { /* unchanged */ }
-  return { ...crew, members: [...crew.members, member] };
-};
-```
-  Add `crew-full` to the `DomainError` code union (`packages/domain/src/errors.ts`) and to
-  `DOMAIN_ERROR_STATUS` in `errorMapping.ts` (`"crew-full": 409` — a failed roster precondition,
-  same bucket as `duplicate-member`).
+- [ ] **Step 3: Apply the bounds table** across the four contract files. Read each request schema,
+  add the `.max()`/`.regex()` per the table above. Nothing in the domain or on any response/read
+  schema changes (see the placement rule — no read-path gating, no crew cap).
 
 - [ ] **Step 4: Run the tests, verify they pass**, then `pnpm validate`.
 
-- [ ] **Step 5: Commit.** `git commit -m "feat(contracts,domain): bound every user-controlled length and count (crew-size cap, string/array maxes)"`
+- [ ] **Step 5: Commit.** `git commit -m "feat(contracts): bound every user-controlled request length and count at the wire ingress"`
 
 ---
 
@@ -521,5 +508,8 @@ securityHeadersBehavior: {
   WAF→T5; edge hardening→T6/T7; deps+email→T8; join-code CSPRNG→T2).
 - Deferred by design (NOT in this plan): `USER_PASSWORD_AUTH`-off + Cognito password/MFA/threat
   protection (Arc C prod pool); alarms/p95/usage metrics (Arc B); read-fold caches beyond T3.
-- Open item for the implementer: Task 1's crew cap is forward-only; before enforcing, confirm no
-  live beta crew already exceeds 100 (a `100`-member beta crew is implausible, but check).
+- Bounds placement (Task 1): request-schema ingress ONLY — never a response/read schema, never a
+  fold/deserialization gate (a limit that rejects stored data bricks a legitimate user, worse than
+  the DoS it prevents). The crew-size cap an earlier draft carried is DROPPED (a product limit, not
+  a DoS defense; abuse is choked by WAF, and the standings fan-out is a read-cost matter to solve
+  at the read if a legitimate crew ever grows large enough).

@@ -87,10 +87,23 @@ bounded below (`min(1)`) but almost never above. Two halves:
   cap at all**, and `getSeasonStandings` fans out one `listLines` per member — so roster size is
   a direct read-amplifier.
 
-**Fix — one principle, applied systematically:** every user-controlled string has a max length
-and every user-controlled collection has a max count, enforced at the contract boundary
-(`packages/contracts`) and, where the domain is the real invariant owner (crew size), in the
-domain too. Proposed concrete values (owner may adjust on review):
+**Placement rule (load-bearing — owner, 2026-07-23):** bounds go at the **wire ingress** (request
+schemas in `packages/contracts`) ONLY. They must never be added to response/read schemas or to any
+fold/deserialization path — a limit that rejects *stored* data bricks a legitimate user's own
+data, which is worse than the DoS it would prevent. Input hygiene lives at ingress; reads tolerate
+whatever is already stored.
+
+**No crew-size cap.** An earlier draft added a hard `MAX_CREW_MEMBERS` cap in the domain. It is
+dropped: it is a *product* limit (it would reject a legitimate large crew — a real society — at
+its next member) masquerading as a DoS defense, and the abuse it targeted is already choked
+upstream by WAF on account creation (every crew member is an account accepting an invite). The
+genuine concern — `getSeasonStandings` issuing one `listLines` per member — is a **read-cost**
+matter: if a legitimate crew ever grows large enough for it to bite, bound it at the read
+(batch/paginate the standings), never by capping membership. Out of scope for this arc.
+
+**Fix — one principle, applied systematically at ingress:** every user-controlled string has a max
+length and every user-controlled collection has a max count on its request schema. Proposed
+concrete values (owner may adjust on review):
 
 | Field | Bound |
 |---|---|
@@ -101,12 +114,10 @@ domain too. Proposed concrete values (owner may adjust on review):
 | `teeSets` per card | ≤ 12 |
 | games per round | ≤ 8 |
 | players per game | ≤ 12 |
-| **crew members** | **≤ 100** (a friend group, not a league; bounds the standings fan-out) |
 | join code (wire) | exactly 6 chars from the safe alphabet (currently any 6 chars) |
 
-Crew-size cap is enforced in `addMember` (domain) so both create and join respect it, surfaced
-as a new `crew-full` (or similar) 409; the contract `.max()` values surface as the existing
-`invalid-request` 400.
+All of these surface as the existing `invalid-request` 400 at the request boundary — no new error
+code, no domain change, no read-path gating.
 
 ### 3. The index-over-time series is computed faithfully to the rule (fix the N²)
 

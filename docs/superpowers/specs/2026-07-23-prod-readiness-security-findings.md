@@ -85,8 +85,8 @@ part of cutting the ribbon.
 ### [Medium] Crew membership is uncapped → per-read fan-out amplifier (owner-surfaced 2026-07-23)
 - **Where:** `packages/domain/src/crew/crew.ts:48` — `addMember` has no roster-size cap ("a pure roster op, doesn't care"); `getSeasonStandings` (`packages/application/src/crews/getSeasonStandings.ts`) issues ONE `listLines` query per roster member.
 - **Vulnerability:** A large crew roster makes every standings read fan out to one Dynamo query per member. Reaching a huge roster requires that many accounts each accepting an invite (so it loops back to the account-creation choke), but the count directly drives read work regardless.
-- **Prod-blocker:** no, but it is the same class as the N² above — a user-controlled count driving work — and the audit under-weighted it.
-- **Fix:** Cap crew membership (a "crew" is a friend group, not a league) in `addMember`/join; a sane default (e.g. ≤100) bounds the fan-out. Part of the "bound every user-controlled count" principle in the Arc A spec.
+- **Prod-blocker:** no.
+- **Fix (owner-corrected 2026-07-23 — do NOT cap membership):** a hard crew-size cap is a *product* limit that would reject a legitimate large crew (a real society), and the abuse it targets is already choked upstream by WAF on account creation (every member is an account accepting an invite). This is a **read-cost** matter, not a membership question: if a legitimate crew ever grows large enough for the per-member fan-out to bite, bound it at the read (batch/paginate `getSeasonStandings`), never by limiting who may be in the crew. Out of scope for Arc A; noted for later only if telemetry shows a real large-crew read cost.
 
 ### [Low] aws-cdk-lib < 2.260.0 — HIGH advisory, but build-time only
 - **Where:** `pnpm audit`: `apps__infra-cdk>aws-cdk-lib` (GHSA-vcrf-j523-4mrf, OS command injection in NodejsFunction Docker bundling). Also `e2e>ws` (2 advisories) — test-only.

@@ -29,18 +29,28 @@ export const courseViewSchema: z.ZodType<CourseView> = z.object({
 // bounds are the domain's job: validateCard rejects one-of-two with `rating-slope-paired` and
 // enforces the 30..90 / 55..155 ranges. Keeping the wire purely structural (both `.optional()`,
 // no `.refine`) is what lets that single server-side rule stay the sole authority, un-mirrored here.
+// task-1 (pre-prod hardening, placement rule): these bounds are request-ingress ONLY — they
+// live on newTeeInputSchema/continuingTeeInputSchema (this file's own request-body schemas),
+// never on round.ts's teeSetSchema/holeSchema/courseCardSchema (the read-side mirrors backing
+// courseViewSchema/peekRoundResponseSchema above), so an already-stored course/card is never
+// rejected on read.
 const newTeeInputSchema = z
-  .object({ name: z.string().min(1), rating: z.number().optional(), slope: z.number().optional(), holes: z.array(holeSchema).min(1).readonly() })
+  .object({
+    name: z.string().min(1).max(40),
+    rating: z.number().optional(),
+    slope: z.number().optional(),
+    holes: z.array(holeSchema).min(1).max(18).readonly(),
+  })
   .strict();
 const continuingTeeInputSchema = newTeeInputSchema.extend({ teeId: z.string().min(1).optional() }).strict();
 
 export const createCourseRequestSchema = z
-  .object({ name: z.string().min(1), teeSets: z.array(newTeeInputSchema).min(1) })
+  .object({ name: z.string().min(1).max(80), teeSets: z.array(newTeeInputSchema).min(1).max(12) })
   .strict();
 export type CreateCourseRequest = z.infer<typeof createCourseRequestSchema>;
 
 export const supersedeCardRequestSchema = z
-  .object({ name: z.string().min(1), teeSets: z.array(continuingTeeInputSchema).min(1), supersedes: z.string().min(1) })
+  .object({ name: z.string().min(1).max(80), teeSets: z.array(continuingTeeInputSchema).min(1).max(12), supersedes: z.string().min(1) })
   .strict();
 export type SupersedeCardRequest = z.infer<typeof supersedeCardRequestSchema>;
 

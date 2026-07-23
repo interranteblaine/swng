@@ -41,6 +41,22 @@ describe("startRoundRequestSchema", () => {
     expect(() => parse(startRoundRequestSchema, request)).toThrow(ContractError);
   });
 
+  // task-1 (pre-prod hardening, wire-ingress length/count bounds): every user-supplied string
+  // gets a .max() at the request boundary.
+  it("rejects an over-long tee name", () => {
+    expect(() =>
+      parse(startRoundRequestSchema, {
+        course,
+        host: { tee: "x".repeat(41), courseHandicap: 10 },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a courseHandicap outside [-10, 54]", () => {
+    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", courseHandicap: 55 } })).toThrow(ContractError);
+    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", courseHandicap: -11 } })).toThrow(ContractError);
+  });
+
   // Course-cards spec invariant 4/5: the client can never author a card — the old `card:` shape
   // is GONE, not tolerated. A request still shaped the old way (a full card, no `course`
   // reference) is rejected as invalid, not silently accepted.
@@ -71,8 +87,10 @@ describe("startRoundRequestSchema", () => {
 
 describe("joinRoundRequestSchema", () => {
   // Accounts-only identity (spec §3): join is always as-self — only code + tee + courseHandicap.
+  // "AB2345" (not "ABC123"): task-1's regex bound excludes 0/O/1/I/L from the join-code
+  // alphabet, and "1" isn't a character the real minting alphabet ever produces.
   it("accepts a valid join-round request", () => {
-    const request = { code: "ABC123", tee: "white", courseHandicap: 2 };
+    const request = { code: "AB2345", tee: "white", courseHandicap: 2 };
     expect(parse(joinRoundRequestSchema, request)).toEqual(request);
   });
 
@@ -82,17 +100,33 @@ describe("joinRoundRequestSchema", () => {
   });
 
   it("rejects a non-integer courseHandicap", () => {
-    const request = { code: "ABC123", tee: "white", courseHandicap: 2.5 };
+    const request = { code: "AB2345", tee: "white", courseHandicap: 2.5 };
     expect(() => parse(joinRoundRequestSchema, request)).toThrow(ContractError);
+  });
+
+  // task-1 (pre-prod hardening): the join-code alphabet excludes visually-ambiguous
+  // characters (0/O/1/I/L) — see compositionRoot.ts's JOIN_CODE_ALPHABET, the real minting
+  // alphabet this regex mirrors exactly.
+  it("rejects a join code with a character outside the safe alphabet", () => {
+    expect(() => parse(joinRoundRequestSchema, { code: "ABC0O1", tee: "White", courseHandicap: 10 })).toThrow(); // 0/O/1 are excluded from the join-code alphabet
+  });
+
+  it("rejects an over-long tee name", () => {
+    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "x".repeat(41), courseHandicap: 2 })).toThrow(ContractError);
+  });
+
+  it("rejects a courseHandicap outside [-10, 54]", () => {
+    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", courseHandicap: 55 })).toThrow(ContractError);
+    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", courseHandicap: -11 })).toThrow(ContractError);
   });
 
   // NOT `.strict()`: an old client still sending name / golferId strips silently.
   it("strips the deleted name / golferId fields rather than rejecting them", () => {
-    const request = { code: "ABC123", name: "Bo", tee: "white", courseHandicap: 2, golferId: "g-1" };
+    const request = { code: "AB2345", name: "Bo", tee: "white", courseHandicap: 2, golferId: "g-1" };
     const parsed = parse(joinRoundRequestSchema, request);
     expect(parsed).not.toHaveProperty("name");
     expect(parsed).not.toHaveProperty("golferId");
-    expect(parsed).toEqual({ code: "ABC123", tee: "white", courseHandicap: 2 });
+    expect(parsed).toEqual({ code: "AB2345", tee: "white", courseHandicap: 2 });
   });
 });
 
@@ -114,12 +148,50 @@ describe("recordScoreRequestSchema", () => {
     const request = { ...base, hole: 0 };
     expect(() => parse(recordScoreRequestSchema, request)).toThrow(ContractError);
   });
+
+  // task-1 (pre-prod hardening): a round has at most 18 holes.
+  it("rejects hole 19 (above the 18-hole bound)", () => {
+    const request = { ...base, hole: 19 };
+    expect(() => parse(recordScoreRequestSchema, request)).toThrow(ContractError);
+  });
+
+  it("accepts hole 18 (the boundary)", () => {
+    const request = { ...base, hole: 18 };
+    expect(() => parse(recordScoreRequestSchema, request)).not.toThrow();
+  });
+
+  // round.ts's holeResultSchema also backs roundEventSchema's stored/fold arm (score-recorded) —
+  // this bound is applied to a request-ingress-only copy (see commands.ts), never to the shared
+  // schema, so an already-stored strokes count is never rejected on read.
+  it("rejects a strokes count above 30", () => {
+    const request = { ...base, hole: 5, result: { kind: "strokes", strokes: 31 } };
+    expect(() => parse(recordScoreRequestSchema, request)).toThrow(ContractError);
+  });
+
+  it("rejects a strokes count of 0 (must be at least 1)", () => {
+    const request = { ...base, hole: 5, result: { kind: "strokes", strokes: 0 } };
+    expect(() => parse(recordScoreRequestSchema, request)).toThrow(ContractError);
+  });
+
+  it("accepts a strokes count of exactly 30 (the boundary)", () => {
+    const request = { ...base, hole: 5, result: { kind: "strokes", strokes: 30 } };
+    expect(() => parse(recordScoreRequestSchema, request)).not.toThrow();
+  });
 });
 
 describe("setHandicapRequestSchema", () => {
   it("setHandicapRequestSchema: accepts a negative (plus) value, rejects a non-integer", () => {
     expect(setHandicapRequestSchema.parse({ golferId: "g1", courseHandicap: -2 })).toEqual({ golferId: "g1", courseHandicap: -2 });
     expect(() => setHandicapRequestSchema.parse({ golferId: "g1", courseHandicap: 12.4 })).toThrow();
+  });
+
+  // task-1 (pre-prod hardening): a legal course handicap is bounded [-10, 54].
+  it("rejects a course-handicap outside [-10, 54]", () => {
+    expect(() => parse(setHandicapRequestSchema, { golferId: "g", courseHandicap: 99 })).toThrow();
+  });
+
+  it("rejects a course-handicap below -10", () => {
+    expect(() => parse(setHandicapRequestSchema, { golferId: "g", courseHandicap: -11 })).toThrow();
   });
 });
 
@@ -138,6 +210,26 @@ describe("addGameRequestSchema", () => {
 describe("gameConfigInputSchema", () => {
   it("rejects every member if it carries an id (.strict())", () => {
     expect(() => parse(gameConfigInputSchema, { kind: "singles-match", id: "sneaky", a: "ann", b: "bo" })).toThrow(ContractError);
+  });
+
+  // task-1 (pre-prod hardening): a per-game players array is bounded to 12 at the request
+  // boundary. round.ts's gameConfigFields — the shared field-set object — is left unbounded
+  // because it also backs roundEventSchema's stored/fold arm (game-added); this bound is
+  // applied ONLY to the request-ingress copies below (see commands.ts's *ConfigInputSchema
+  // overrides), never to a schema that parses an already-stored event.
+  const players13 = Array.from({ length: 13 }, (_, index) => `p${index}`);
+  const players12 = Array.from({ length: 12 }, (_, index) => `p${index}`);
+
+  it.each([
+    ["stroke-play", { kind: "stroke-play", scoring: "gross", players: players13 }],
+    ["stableford", { kind: "stableford", players: players13 }],
+    ["skins", { kind: "skins", players: players13 }],
+  ])("rejects a %s game with more than 12 players", (_kind, config) => {
+    expect(() => parse(gameConfigInputSchema, config)).toThrow(ContractError);
+  });
+
+  it("accepts exactly 12 players (the boundary)", () => {
+    expect(() => parse(gameConfigInputSchema, { kind: "skins", players: players12 })).not.toThrow();
   });
 });
 

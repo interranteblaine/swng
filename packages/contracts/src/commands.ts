@@ -1,21 +1,32 @@
 import { z } from "zod";
 import type { GameId, GameResult, GolferId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
 import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
-import { gameConfigFields, gameResultSchema, holeResultSchema, roundEventSchema } from "./round.js";
+import { gameConfigFields, gameResultSchema, roundEventSchema } from "./round.js";
 
 // gameConfigFields' five field sets, minus `id` (they never had one — id-ness is
 // GameConfig's addition, applied in round.ts) — the server assigns the id on the
 // authoritative game-added event, so a client never gets to propose one. `.strict()`
 // on every member makes "carries an id" a rejection, not a silently-dropped extra key.
-const strokePlayConfigInputSchema = z.object({ kind: z.literal("stroke-play"), ...gameConfigFields["stroke-play"] }).strict();
+//
+// task-1 (pre-prod hardening, placement rule): the three `players` arrays below get a
+// request-ingress-only `.max(12)` bound, applied by OVERRIDING the spread field rather than
+// touching gameConfigFields itself — that shared object also builds round.ts's stored
+// `*ConfigSchema`s, which back roundEventSchema's game-added arm (a read/fold path parsing
+// already-stored events). Bounding the shared schema would reject a legitimately-large game
+// already on file; overriding only here keeps the bound on the wire ingress alone.
+const strokePlayConfigInputSchema = z
+  .object({ kind: z.literal("stroke-play"), ...gameConfigFields["stroke-play"], players: gameConfigFields["stroke-play"].players.max(12) })
+  .strict();
 
 const singlesMatchConfigInputSchema = z.object({ kind: z.literal("singles-match"), ...gameConfigFields["singles-match"] }).strict();
 
-const stablefordConfigInputSchema = z.object({ kind: z.literal("stableford"), ...gameConfigFields.stableford }).strict();
+const stablefordConfigInputSchema = z
+  .object({ kind: z.literal("stableford"), ...gameConfigFields.stableford, players: gameConfigFields.stableford.players.max(12) })
+  .strict();
 
 const fourballMatchConfigInputSchema = z.object({ kind: z.literal("fourball-match"), ...gameConfigFields["fourball-match"] }).strict();
 
-const skinsConfigInputSchema = z.object({ kind: z.literal("skins"), ...gameConfigFields.skins }).strict();
+const skinsConfigInputSchema = z.object({ kind: z.literal("skins"), ...gameConfigFields.skins, players: gameConfigFields.skins.players.max(12) }).strict();
 
 export const gameConfigInputSchema = z.discriminatedUnion("kind", [
   strokePlayConfigInputSchema,
@@ -40,8 +51,11 @@ export type GameConfigInput = z.infer<typeof gameConfigInputSchema>;
 export const startRoundRequestSchema = z.object({
   course: z.object({ courseId: courseIdSchema, cardId: cardIdSchema }),
   host: z.object({
-    tee: z.string().min(1),
-    courseHandicap: z.number().int(), // may be negative (plus handicap)
+    // task-1 (pre-prod hardening): a tee name is a short label, never a paragraph.
+    tee: z.string().min(1).max(40),
+    // task-1: -10..54 spans a realistic plus handicap through the top of the WHS course-handicap
+    // table; may be negative (plus handicap).
+    courseHandicap: z.number().int().min(-10).max(54),
   }),
 });
 export type StartRoundRequest = z.infer<typeof startRoundRequestSchema>;
@@ -51,9 +65,11 @@ export type StartRoundRequest = z.infer<typeof startRoundRequestSchema>;
 // is always the caller's own, resolved via ensureGolfer). NOT `.strict()`, so an old client
 // still sending name / golferId strips silently rather than being rejected.
 export const joinRoundRequestSchema = z.object({
-  code: z.string().length(6),
-  tee: z.string().min(1),
-  courseHandicap: z.number().int(),
+  // task-1 (pre-prod hardening): the join-code alphabet excludes visually-ambiguous characters
+  // (0/O/1/I/L) — mirrors compositionRoot.ts's JOIN_CODE_ALPHABET, the real minting alphabet.
+  code: z.string().length(6).regex(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/),
+  tee: z.string().min(1).max(40),
+  courseHandicap: z.number().int().min(-10).max(54),
 });
 export type JoinRoundRequest = z.infer<typeof joinRoundRequestSchema>;
 
@@ -62,10 +78,24 @@ export const addGameRequestSchema = z.object({
 });
 export type AddGameRequest = z.infer<typeof addGameRequestSchema>;
 
+// task-1 (pre-prod hardening, placement rule): round.ts's holeResultSchema also backs
+// roundEventSchema's stored/fold arm (the score-recorded event, parsed by EventsResponse /
+// GetRoundArchiveResponse — read paths) — bounding it there would reject an already-stored
+// strokes count. This is the request-ingress-only copy, structurally identical except for the
+// bound: 30 comfortably covers any realistic single-hole count (incl. a very bad par-3) without
+// letting a client stuff an unbounded number into the log.
+const scoreResultInputSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("strokes"), strokes: z.number().min(1).max(30) }),
+  z.object({ kind: z.literal("picked-up") }),
+  z.object({ kind: z.literal("conceded") }),
+  z.object({ kind: z.literal("cleared") }),
+]);
+
 export const recordScoreRequestSchema = z.object({
   golferId: golferIdSchema,
-  hole: z.number().int().min(1),
-  result: holeResultSchema,
+  // task-1: a round has at most 18 holes.
+  hole: z.number().int().min(1).max(18),
+  result: scoreResultInputSchema,
   opId: opIdSchema,
   hlc: hlcSchema,
 });
@@ -77,7 +107,7 @@ export type RecordScoreRequest = z.infer<typeof recordScoreRequestSchema>;
 // value may be negative (plus handicap), and the correction is retroactive by construction.
 export const setHandicapRequestSchema = z.object({
   golferId: golferIdSchema,
-  courseHandicap: z.number().int(),
+  courseHandicap: z.number().int().min(-10).max(54),
 });
 export type SetHandicapRequest = z.infer<typeof setHandicapRequestSchema>;
 

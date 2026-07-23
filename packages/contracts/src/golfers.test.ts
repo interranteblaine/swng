@@ -89,6 +89,15 @@ describe("updateMeRequestSchema", () => {
   it("rejects an empty name", () => {
     expect(() => parse(updateMeRequestSchema, { name: "" })).toThrow(ContractError);
   });
+
+  // task-1 (pre-prod hardening, wire-ingress length bound).
+  it("rejects an over-long name", () => {
+    expect(() => parse(updateMeRequestSchema, { name: "x".repeat(61) })).toThrow(ContractError);
+  });
+
+  it("accepts a name at the boundary (60 chars)", () => {
+    expect(() => parse(updateMeRequestSchema, { name: "x".repeat(60) })).not.toThrow();
+  });
 });
 
 describe("getMyRecordResponseSchema", () => {

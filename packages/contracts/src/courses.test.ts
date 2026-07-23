@@ -122,6 +122,36 @@ describe("peekRoundResponseSchema", () => {
   });
 });
 
+// task-1 (pre-prod hardening, wire-ingress length/count bounds): request-only bounds on
+// name/holes/teeSets. The read-side mirrors (round.ts's teeSetSchema/courseCardSchema, used by
+// courseViewSchema/peekRoundResponseSchema above) are a SEPARATE, untouched schema family — this
+// task never gates a stored course/card on read.
+describe("createCourseRequestSchema / supersedeCardRequestSchema — request-ingress length/count bounds", () => {
+  it("rejects an over-long tee name", () => {
+    expect(() => parse(createCourseRequestSchema, { name: "Casa Verde GC", teeSets: [{ ...inputTee, name: "x".repeat(41) }] })).toThrow(ContractError);
+  });
+
+  it("rejects a tee with more than 18 holes", () => {
+    const holes19 = Array.from({ length: 19 }, (_, index) => ({ number: index + 1, par: 4, yardage: 380, strokeIndex: index + 1 }));
+    expect(() => parse(createCourseRequestSchema, { name: "Casa Verde GC", teeSets: [{ ...inputTee, holes: holes19 }] })).toThrow(ContractError);
+  });
+
+  it("rejects an over-long course name", () => {
+    expect(() => parse(createCourseRequestSchema, { name: "x".repeat(81), teeSets: [inputTee] })).toThrow(ContractError);
+    expect(() => parse(supersedeCardRequestSchema, { name: "x".repeat(81), teeSets: [{ ...inputTee, teeId: "t-1" }], supersedes: "card-1" })).toThrow(
+      ContractError,
+    );
+  });
+
+  it("rejects more than 12 tee sets", () => {
+    const teeSets13 = Array.from({ length: 13 }, (_, index) => ({ ...inputTee, name: `tee-${index}` }));
+    expect(() => parse(createCourseRequestSchema, { name: "Casa Verde GC", teeSets: teeSets13 })).toThrow(ContractError);
+    expect(() =>
+      parse(supersedeCardRequestSchema, { name: "Casa Verde GC", teeSets: teeSets13.map((tee) => ({ ...tee, teeId: "t-1" })), supersedes: "card-1" }),
+    ).toThrow(ContractError);
+  });
+});
+
 // unrated-courses arc: the create/supersede tee input widened rating/slope to optional-as-a-pair
 // (structural only) so an unrated tee can be POSTed at all — the domain's validateCard is the sole
 // authority on the pairing + bounds, so the wire tolerates each independently by design.

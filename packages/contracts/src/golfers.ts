@@ -64,7 +64,8 @@ export const golferResponseSchema: z.ZodType<GolferResponse> = z.object({ golfer
 // number, so adopting WHS tracks WHS with no copy to go stale (spec §2).
 export const updateMeRequestSchema = z
   .object({
-    name: z.string().min(1).optional(),
+    // task-1 (pre-prod hardening): a display name, never a paragraph.
+    name: z.string().min(1).max(60).optional(),
     homeCourseId: courseIdSchema.optional(),
     indexSource: indexSourceSchema.optional(),
   })

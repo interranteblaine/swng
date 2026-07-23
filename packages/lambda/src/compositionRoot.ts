@@ -96,9 +96,8 @@ export const createRandomIds = (): IdGenerator => ({
 
 // A structured console Logger — the beta-grade choice (M9 hardens); CloudWatch ingests
 // whatever a Lambda writes to stdout/stderr, so JSON lines here are already log-queryable.
-// Exported (rather than kept module-private like createSystemClock/createRandomIds above)
-// solely so compositionRoot.test.ts can pin its message-wins ordering without standing up a
-// whole buildApp.
+// Exported (rather than kept module-private like createSystemClock above) solely so
+// compositionRoot.test.ts can pin its message-wins ordering without standing up a whole buildApp.
 // `data` spreads FIRST, `level` and `message` both LAST — a caller-supplied `data.level` or
 // `data.message` key (coincidental or otherwise) must never clobber the log entry's own
 // fields; spreading `data` in between two reserved keys, rather than before just one, is what

@@ -8,7 +8,7 @@ import { ApiError, createSeason, getCrew, leaveCrew, listSeasons, mintCrewInvite
 import { useAuth } from "../auth/useAuth";
 import { CopiedLinkLine } from "../ui/CopiedLinkLine";
 import { GolferLink } from "../ui/GolferLink";
-import { badge, btnDanger, btnDangerSolid, btnPrimary, btnQuiet, btnSecondary, cardBox, inputBox } from "../ui/classes";
+import { badge, btnDanger, btnDangerSolid, btnPrimary, btnQuiet, btnQuietDanger, btnSecondary, cardBox, inputBox } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
 import { SeasonPanel } from "./SeasonPanel";
 
@@ -442,7 +442,7 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                           setMemberAction({ type: "remove", golferId: member.golferId, name: member.name });
                           setMemberActionError(undefined);
                         }}
-                        className={btnDanger}
+                        className={btnQuietDanger}
                       >
                         Remove…
                       </button>
@@ -452,7 +452,7 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
                           setMemberAction({ type: "transfer", golferId: member.golferId, name: member.name });
                           setMemberActionError(undefined);
                         }}
-                        className={btnSecondary}
+                        className={btnQuiet}
                       >
                         Make organizer…
                       </button>

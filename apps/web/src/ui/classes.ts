@@ -26,6 +26,11 @@ export const inputCode =
 // from linkEntity (gold decoration = "opens an entity"); this is fairway decoration = "does a
 // small thing right here."
 export const btnQuiet = "text-forest underline decoration-fairway disabled:opacity-50";
+// The destructive sibling of btnQuiet — a row-scale text action that is also a careful one (a
+// roster Remove…). Oxblood carries the "careful action" signal (the brand's second ink); the text
+// register keeps it row-sized. The heavier oxblood weight (btnDanger's box, btnDangerSolid's fill)
+// stays reserved for section-level actions and the confirm step.
+export const btnQuietDanger = "text-oxblood underline decoration-oxblood/50 disabled:opacity-50";
 // A link to a golfer's own record (GolferLink.tsx) — gold as a DECORATION, not a button fill,
 // same treatment App.tsx's own header identity link already wears. The brand rule (gold once per
 // screen as the primary action) governs FILLED gold; an underline decoration marking "this text

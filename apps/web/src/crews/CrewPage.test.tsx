@@ -332,6 +332,28 @@ describe("CrewPage — organizer authority", () => {
     expect(within(items[0]!).queryByRole("button", { name: /^make organizer…$/i })).toBeNull();
   });
 
+  it("the row actions wear the quiet text register, not a boxed button (owner field report, 2026-07-23)", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetCrew.mockResolvedValue({ crew });
+    mockedListSeasons.mockResolvedValue(emptySeasons);
+
+    renderPage();
+    await waitForLoaded();
+
+    const roster = screen.getByRole("list", { name: /roster/i });
+    const items = within(roster).getAllByRole("listitem");
+    // happy-dom computes no layout, so the row register is pinned on the class that implements it
+    // (the CopiedLinkLine break-all precedent): underline text, never the boxed border/tracking idiom.
+    const remove = await within(items[1]!).findByRole("button", { name: /^remove…$/i });
+    const makeOrganizer = within(items[1]!).getByRole("button", { name: /^make organizer…$/i });
+    expect(remove.className).toContain("underline");
+    expect(remove.className).toContain("text-oxblood");
+    expect(remove.className).not.toContain("border");
+    expect(makeOrganizer.className).toContain("underline");
+    expect(makeOrganizer.className).not.toContain("border");
+  });
+
   it("a non-organizer sees neither affordance on any row", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo" } });

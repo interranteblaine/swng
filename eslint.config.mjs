@@ -81,8 +81,8 @@ export default [
     "apps/web",
     [
       {
-        group: ["@swng/*", "!@swng/domain", "!@swng/contracts", "!@swng/client"],
-        message: "the web app depends on domain, contracts, and the client SDK only — never application, adapters, or lambda directly.",
+        group: ["@swng/*", "!@swng/domain", "!@swng/contracts", "!@swng/client", "!@swng/brand"],
+        message: "the web app depends on domain, contracts, the client SDK, and the brand tokens only — never application, adapters, or lambda directly.",
       },
       NODE,
       AWS,

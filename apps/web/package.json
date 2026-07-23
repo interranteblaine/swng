@@ -11,6 +11,7 @@
     "e2e:field": "playwright test"
   },
   "dependencies": {
+    "@swng/brand": "workspace:*",
     "@swng/client": "workspace:*",
     "@swng/contracts": "workspace:*",
     "@swng/domain": "workspace:*",

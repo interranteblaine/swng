@@ -153,6 +153,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@swng/brand':
+        specifier: workspace:*
+        version: link:../../packages/brand
       '@swng/client':
         specifier: workspace:*
         version: link:../../packages/client

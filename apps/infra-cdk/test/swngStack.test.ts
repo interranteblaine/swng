@@ -47,7 +47,7 @@ describe("SwngStack", () => {
       template.resourceCountIs("AWS::DynamoDB::Table", 5);
     });
 
-    it("swng-rounds-beta: pk/sk + gsi1 on joinCode, RETAIN, stream NEW_IMAGE", () => {
+    it("swng-rounds-beta: pk/sk + gsi1 on joinCode, RETAIN, stream NEW_IMAGE, PITR, deletion protection", () => {
       template.hasResourceProperties("AWS::DynamoDB::Table", {
         TableName: "swng-rounds-beta",
         BillingMode: "PAY_PER_REQUEST",
@@ -63,6 +63,11 @@ describe("SwngStack", () => {
         GlobalSecondaryIndexes: [Match.objectLike({ IndexName: "gsi1", KeySchema: [{ AttributeName: "joinCode", KeyType: "HASH" }] })],
         // M7 Task 4: feeds ProjectorFunction (below).
         StreamSpecification: { StreamViewType: "NEW_IMAGE" },
+        // Prod-readiness hardening Task 7: the event log is the source of truth for a round in
+        // flight — PITR (non-deprecated PointInTimeRecoverySpecification form) and deletion
+        // protection are both in-place-modifiable, never a replacement.
+        PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+        DeletionProtectionEnabled: true,
       });
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-rounds-beta" }) });
     });
@@ -78,7 +83,7 @@ describe("SwngStack", () => {
       expect(tables[roundsTableLogicalId!]?.Properties.TableName).toBe("swng-rounds-beta");
     });
 
-    it("swng-core-beta: pk/sk + gsi1 on gsi1pk/gsi1sk (INCLUDE name) + gsi2 on gsi2pk/gsi2sk (ALL), RETAIN", () => {
+    it("swng-core-beta: pk/sk + gsi1 on gsi1pk/gsi1sk (INCLUDE name) + gsi2 on gsi2pk/gsi2sk (ALL), RETAIN, PITR, deletion protection", () => {
       template.hasResourceProperties("AWS::DynamoDB::Table", {
         TableName: "swng-core-beta",
         BillingMode: "PAY_PER_REQUEST",
@@ -113,6 +118,10 @@ describe("SwngStack", () => {
             Projection: { ProjectionType: "ALL" },
           }),
         ]),
+        // Prod-readiness hardening Task 7: courses + golfer identity are as irreplaceable as
+        // the round log itself.
+        PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+        DeletionProtectionEnabled: true,
       });
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-core-beta" }) });
     });
@@ -135,7 +144,7 @@ describe("SwngStack", () => {
       expect(tables[coreTableLogicalId!]?.Properties.TableName).toBe("swng-core-beta");
     });
 
-    it("swng-projections-beta: pk/sk only, RETAIN", () => {
+    it("swng-projections-beta: pk/sk only, RETAIN, deletion protection, no PITR (rebuildable from snapshots)", () => {
       template.hasResourceProperties("AWS::DynamoDB::Table", {
         TableName: "swng-projections-beta",
         BillingMode: "PAY_PER_REQUEST",
@@ -145,6 +154,12 @@ describe("SwngStack", () => {
         ],
         // Same rationale as swng-core-beta above: pins "pk/sk only" for real.
         GlobalSecondaryIndexes: Match.absent(),
+        // Prod-readiness hardening Task 7: deletion protection guards against an accidental
+        // teardown, but PITR is deliberately withheld — this table is a rebuild away from the
+        // snapshots table's own PITR-backed history (rebuildProjections), so paying for a
+        // second continuous-backup stream here would be redundant durability.
+        DeletionProtectionEnabled: true,
+        PointInTimeRecoverySpecification: Match.absent(),
       });
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-projections-beta" }) });
     });
@@ -160,7 +175,7 @@ describe("SwngStack", () => {
       });
     });
 
-    it("swng-connections-beta: pk only + gsi1 on roundId, DESTROY", () => {
+    it("swng-connections-beta: pk only + gsi1 on roundId, DESTROY, no deletion protection, no PITR (rebuildable WS state)", () => {
       template.hasResourceProperties("AWS::DynamoDB::Table", {
         TableName: "swng-connections-beta",
         BillingMode: "PAY_PER_REQUEST",
@@ -170,6 +185,11 @@ describe("SwngStack", () => {
           { AttributeName: "roundId", AttributeType: "S" },
         ]),
         GlobalSecondaryIndexes: [Match.objectLike({ IndexName: "gsi1", KeySchema: [{ AttributeName: "roundId", KeyType: "HASH" }] })],
+        // Prod-readiness hardening Task 7: pins the intentional asymmetry against the four
+        // RETAIN tables above — pure WS fan-out state, rebuildable from nothing, never gets
+        // deletion protection or PITR.
+        DeletionProtectionEnabled: Match.absent(),
+        PointInTimeRecoverySpecification: Match.absent(),
       });
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Delete", Properties: Match.objectLike({ TableName: "swng-connections-beta" }) });
     });
@@ -181,13 +201,18 @@ describe("SwngStack", () => {
     // log). The stream feeds ProjectorFunction with NO filter (asserted in "event sources"
     // below) — every item on this table IS a finished round, unlike the rounds table's stream
     // which mixed in every EVT/OPID/META record too.
-    it("swng-snapshots-beta: pk-only, stream, RETAIN, PITR", () => {
+    it("swng-snapshots-beta: pk-only, stream, RETAIN, PITR, deletion protection", () => {
       template.hasResourceProperties("AWS::DynamoDB::Table", {
         TableName: "swng-snapshots-beta",
         BillingMode: "PAY_PER_REQUEST",
         KeySchema: [{ AttributeName: "pk", KeyType: "HASH" }],
         StreamSpecification: { StreamViewType: "NEW_IMAGE" },
+        // Prod-readiness hardening Task 7: migrated from the deprecated boolean
+        // `pointInTimeRecovery: true` to this non-deprecated form — a template no-op (both
+        // render this identical CFN block; the assertion below was already green before the
+        // migration and stays green after it).
         PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+        DeletionProtectionEnabled: true,
       });
       template.hasResource("AWS::DynamoDB::Table", { DeletionPolicy: "Retain", Properties: Match.objectLike({ TableName: "swng-snapshots-beta" }) });
     });

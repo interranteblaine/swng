@@ -222,6 +222,11 @@ export class SwngStack extends Stack {
       // table's mixed item kinds (EVT#/META/OPID#) from its first deploy — and bulk-delete
       // scripts must name every stream consumer in their blast radius before running.
       stream: StreamViewType.NEW_IMAGE,
+      // Prod-readiness hardening Task 7: the event log is the source of truth for a round in
+      // flight (see the RETAIN comment above) — continuous backup and deletion protection are
+      // both in-place-modifiable DynamoDB properties (no replacement of this live table).
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      deletionProtection: true,
     });
     roundsTable.addGlobalSecondaryIndex({
       indexName: "gsi1",
@@ -245,7 +250,13 @@ export class SwngStack extends Stack {
       partitionKey: { name: "pk", type: AttributeType.STRING },
       billingMode: BillingMode.PAY_PER_REQUEST,
       removalPolicy: RemovalPolicy.RETAIN,
-      pointInTimeRecovery: true,
+      // Prod-readiness hardening Task 7: migrated off the deprecated boolean `pointInTimeRecovery`
+      // to this non-deprecated form — a template no-op (both synth to the identical
+      // `PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }` CFN block;
+      // confirmed via `cdk synth` diff). Deletion protection is new here, same in-place-only
+      // rationale as the rounds table above — a finalized round's snapshot is irreplaceable.
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      deletionProtection: true,
       stream: StreamViewType.NEW_IMAGE,
     });
 
@@ -265,6 +276,10 @@ export class SwngStack extends Stack {
       sortKey: { name: "sk", type: AttributeType.STRING },
       billingMode: BillingMode.PAY_PER_REQUEST,
       removalPolicy: RemovalPolicy.RETAIN,
+      // Prod-readiness hardening Task 7: courses + golfer identity are as irreplaceable as the
+      // round log itself — same in-place-only PITR/deletion-protection posture as roundsTable.
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      deletionProtection: true,
     });
     coreTable.addGlobalSecondaryIndex({
       indexName: "gsi1",
@@ -301,6 +316,11 @@ export class SwngStack extends Stack {
       // route read it. Golfer-record items (history lines, the index) never set `ttl`, so DynamoDB's
       // background sweep never touches them — TTL only deletes items that carry the attribute.
       timeToLiveAttribute: "ttl",
+      // Prod-readiness hardening Task 7: deletion protection guards against an accidental
+      // teardown, but PITR is deliberately withheld — this table is a paged
+      // `rebuildProjections` backfill away from the snapshots table's own PITR-backed history,
+      // so a second continuous-backup stream here would be redundant durability spend.
+      deletionProtection: true,
     });
 
     const connectionsTable = new Table(this, "ConnectionsTable", {

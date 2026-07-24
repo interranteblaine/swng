@@ -845,14 +845,22 @@ export class SwngStack extends Stack {
     // Two cheap signals for the account -> crew -> round abuse chain. (1) The WAF is actively
     // blocking a flood right now (reads the Arc A rate-rule metrics — no app code). (2) A signup
     // burst that stays under the per-IP WAF rate (reads the Signups EMF metric).
-    const wafBlocked = (webAcl: string, region: string): Metric =>
+    //
+    // VERIFIED live against deployed swng-beta (`aws cloudwatch list-metrics --namespace
+    // AWS/WAFV2`, whole-branch review 2026-07-23/24): the `WebACL` dimension value must be the
+    // ACL's actual NAME (below: `WebAclCloudfront`/`WebAclCognito` now carry an explicit `name`
+    // matching these strings — see the CfnWebACL constructs further down, where the comment
+    // explains WHY this is now deterministic rather than CFN-generated). The CLOUDFRONT-scope
+    // ACL's metric carries NO `Region` dimension at all (only `{WebACL, Rule}`); the REGIONAL
+    // Cognito ACL's metric DOES carry `Region: "us-east-1"`. `Rule: "ALL"` is the ACL-level
+    // aggregate for both. `region` is now optional and omitted entirely (not "Global") for the
+    // CloudFront leg — passing "Global" was the original bug: it doesn't match any real
+    // dimension WAFv2 emits, so that leg's metric could never return data.
+    const wafBlocked = (webAcl: string, region?: string): Metric =>
       new Metric({
         namespace: "AWS/WAFV2",
         metricName: "BlockedRequests",
-        // Region is "Global" for the CLOUDFRONT-scope ACL, "us-east-1" for the REGIONAL one;
-        // Rule "ALL" is the ACL-level aggregate. VERIFY at close-out (WAF metric dimensions are a
-        // known gotcha) — if the widget/alarm shows no data under a real block, correct Region.
-        dimensionsMap: { WebACL: webAcl, Region: region, Rule: "ALL" },
+        dimensionsMap: { WebACL: webAcl, Rule: "ALL", ...(region ? { Region: region } : {}) },
         period: FIVE_MINUTES,
         statistic: "Sum",
       });
@@ -862,7 +870,7 @@ export class SwngStack extends Stack {
         metric: new MathExpression({
           expression: "cf + cognito",
           usingMetrics: {
-            cf: wafBlocked(`swng-waf-cf-${stage}`, "Global"),
+            cf: wafBlocked(`swng-waf-cf-${stage}`),
             cognito: wafBlocked(`swng-waf-cognito-${stage}`, "us-east-1"),
           },
           period: FIVE_MINUTES,
@@ -931,18 +939,26 @@ export class SwngStack extends Stack {
       }),
       new GraphWidget({
         title: "WAF (blocked requests)",
-        left: [wafBlocked(`swng-waf-cf-${stage}`, "Global"), wafBlocked(`swng-waf-cognito-${stage}`, "us-east-1")],
+        left: [wafBlocked(`swng-waf-cf-${stage}`), wafBlocked(`swng-waf-cognito-${stage}`, "us-east-1")],
+        width: 12,
+      }),
+      // Split from a single combined widget (whole-branch review, 2026-07-23/24): the original
+      // query grouped `count_distinct(sub) as activeGolfers` BY route alongside `count(*) as
+      // requests`, so `activeGolfers` was actually per-route active golfers, double-counting
+      // anyone active on more than one route — not a real daily-active figure. Two widgets, two
+      // honest queries: one true DAU-shaped count (no route grouping), one requests-by-route
+      // breakdown (no activeGolfers claim).
+      new LogQueryWidget({
+        title: "Unique active golfers (by day)",
+        logGroupNames: [httpFn.logGroup.logGroupName],
+        queryLines: ['filter message = "request"', "stats count_distinct(sub) as activeGolfers by bin(1d)"],
         width: 12,
       }),
       new LogQueryWidget({
-        title: "Unique active golfers (24h) + requests by route",
+        title: "Requests by route",
         logGroupNames: [httpFn.logGroup.logGroupName],
-        queryLines: [
-          'filter message = "request"',
-          "stats count_distinct(sub) as activeGolfers, count(*) as requests by route",
-          "sort requests desc",
-        ],
-        width: 24,
+        queryLines: ['filter message = "request"', "stats count(*) as requests by route", "sort requests desc"],
+        width: 12,
       }),
     );
 
@@ -974,7 +990,19 @@ export class SwngStack extends Stack {
       visibilityConfig: { cloudWatchMetricsEnabled: true, metricName, sampledRequestsEnabled: true },
     });
 
+    // `name` is explicit on both ACLs below (whole-branch review, 2026-07-23/24, verified live
+    // against deployed swng-beta via `aws cloudwatch list-metrics --namespace AWS/WAFV2`): left
+    // unset, WAFv2 mints a CFN-generated name (e.g. `WebAclCloudfront-krOJ9wnLG35T`), and the
+    // CloudWatch metric's `WebACL` dimension carries THAT generated name, not the
+    // `visibilityConfig.metricName` string (which WAFv2 surfaces as the `Rule` dimension
+    // instead) — so `wafBlocked` above could never have matched real data no matter what it
+    // passed. Pinning `name` here makes the ACL's real name equal to the metric-name strings
+    // `wafBlocked`'s call sites already use, closing the gap. NOTE: `Name` is a REPLACEMENT
+    // property on AWS::WAFv2::WebACL — this deploy replaces both ACLs. Benign on beta:
+    // CloudFront reattaches via `webAclId` and Cognito via its `CfnWebACLAssociation`, both
+    // already re-resolved from the (new) ACL's ARN on every synth.
     const cloudfrontWebAcl = new CfnWebACL(this, "WebAclCloudfront", {
+      name: `swng-waf-cf-${stage}`,
       scope: "CLOUDFRONT",
       defaultAction: { allow: {} },
       visibilityConfig: { cloudWatchMetricsEnabled: true, metricName: `swng-waf-cf-${stage}`, sampledRequestsEnabled: true },
@@ -982,6 +1010,7 @@ export class SwngStack extends Stack {
     });
 
     const cognitoWebAcl = new CfnWebACL(this, "WebAclCognito", {
+      name: `swng-waf-cognito-${stage}`,
       scope: "REGIONAL",
       defaultAction: { allow: {} },
       visibilityConfig: { cloudWatchMetricsEnabled: true, metricName: `swng-waf-cognito-${stage}`, sampledRequestsEnabled: true },

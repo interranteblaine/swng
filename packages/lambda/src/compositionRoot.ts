@@ -10,6 +10,7 @@ import type {
   GolferStore,
   IdGenerator,
   Logger,
+  Metrics,
   ProjectionStore,
   SnapshotStore,
   TokenIssuer,
@@ -108,6 +109,26 @@ export const createConsoleLogger = (): Logger => ({
   info: (message, data) => console.log(JSON.stringify({ ...data, level: "info", message })),
   warn: (message, data) => console.warn(JSON.stringify({ ...data, level: "warn", message })),
   error: (message, data) => console.error(JSON.stringify({ ...data, level: "error", message })),
+});
+
+// EMF (CloudWatch Embedded Metric Format): a specially-shaped JSON line on stdout that
+// CloudWatch auto-extracts into a metric — no PutMetricData call, no IAM, no async flush. The
+// house-style hand-rolled analogue of createConsoleLogger. Fire-and-forget: a serialization
+// failure must never bubble into the use case, so keep the payload to primitives (name is a
+// literal, value is 1, Stage is a string). One `Stage` dimension keeps beta/prod metrics apart.
+export const createEmfMetrics = (stage: string): Metrics => ({
+  count: (name: string) => {
+    console.log(
+      JSON.stringify({
+        _aws: {
+          Timestamp: Date.now(),
+          CloudWatchMetrics: [{ Namespace: "swng", Dimensions: [["Stage"]], Metrics: [{ Name: name, Unit: "Count" }] }],
+        },
+        Stage: stage,
+        [name]: 1,
+      }),
+    );
+  },
 });
 
 const requireEnv = (env: NodeJS.ProcessEnv, key: string): string => {
@@ -223,7 +244,10 @@ export interface App {
 // used to ride here directly), plus TABLE_CORE (M6 Task 4), USER_POOL_ID/USER_POOL_CLIENT_ID,
 // and TABLE_PROJECTIONS (M7 Task 4/5), all OPTIONAL here — only httpFn's environment carries
 // them (see unavailableCardStore/unavailableVerifier/unavailableGolferStore/
-// unavailableProjectionStore above / swngStack.ts).
+// unavailableProjectionStore above / swngStack.ts). STAGE (prod-readiness Arc B Task 2) is
+// OPTIONAL too, `?? "beta"` — it only labels the EMF metrics' Stage dimension, never gates a
+// store's availability, so every entry (and every pre-existing test fixture without it) still
+// builds.
 //
 // Async since Task 4: the token-signing secret is now a runtime Secrets Manager fetch, not a
 // plaintext env var — `deps.readSecret` is an injectable seam (default = the real SDK fetch,
@@ -243,6 +267,8 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
   const clock = createSystemClock();
   const ids = createRandomIds();
   const logger = createConsoleLogger();
+  const stage = env.STAGE ?? "beta";
+  const metrics = createEmfMetrics(stage);
 
   // Resolved once per cold start (this function itself runs at most once — each entry caches
   // its buildApp Promise), fetched AFTER every other requireEnv check above so a missing
@@ -287,11 +313,15 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
     // use case in this table does. cardStore (course-cards spec §4): StartRound resolves
     // `command.course` by reference and freezes the CURRENT card itself — the SAME cardStore
     // instance createCourse/supersedeCard/getCourse/searchCourses already share below.
-    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
+    // metrics (prod-readiness Arc B Task 2): the SAME EMF sink startRound/finalizeRound below
+    // both share, emitting RoundsCreated/RoundsFinalized on their own business-success branch —
+    // deliberately NOT threaded into joinRound/getMyGolfer/updateMyGolfer's own internal
+    // ensureGolfer calls (Signups stays scoped to the two use cases Task 1 wired).
+    startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore, metrics }),
     joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
-    finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
+    finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids, metrics }),
     // projectionStore/logger (task-15): abandon clears each participant's LIVE presence pointer
     // itself — no snapshot is written, so the projector never runs the finalize-time deleteLive
     // loop for a scrapped round. Same projectionStore/logger instances startRound/joinRound share.

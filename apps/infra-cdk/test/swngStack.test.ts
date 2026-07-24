@@ -9,8 +9,9 @@ import { ANON_THROTTLED_ROUTES, HTTP_ROUTES, SwngStack } from "../lib/swngStack.
 const template = Template.fromStack(new SwngStack(new App(), "swng-beta", { stage: "beta" }));
 
 // Task 4: TOKEN_SECRET_ARN, not TOKEN_SECRET — the secret's ARN rides in the env now, never
-// its plaintext value.
-const ENV_KEYS = ["TABLE_ROUNDS", "TABLE_CONNECTIONS", "TOKEN_SECRET_ARN", "WS_ENDPOINT"];
+// its plaintext value. Prod-readiness Arc B Task 2: STAGE joins the shared set — it labels the
+// EMF metrics' Stage dimension for the same three sharedEnv consumers.
+const ENV_KEYS = ["TABLE_ROUNDS", "TABLE_CONNECTIONS", "TOKEN_SECRET_ARN", "WS_ENDPOINT", "STAGE"];
 
 // Resolves a resource's logical id dynamically (never hardcode one of CDK's own hashed ids,
 // same idiom as the core/rounds-table logical-id pins above) — shared by the identity and
@@ -258,7 +259,7 @@ describe("SwngStack", () => {
       }
     });
 
-    it("http/wsConnect/wsDisconnect each carry the four required env keys", () => {
+    it("http/wsConnect/wsDisconnect each carry the five required env keys", () => {
       const entries = originalFunctions();
       expect(entries.length).toBe(3);
       for (const [, fn] of entries) {

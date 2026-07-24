@@ -459,6 +459,9 @@ export class SwngStack extends Stack {
       // Task 4: the ARN only — never the value (compositionRoot.ts's buildApp fetches it at
       // runtime via @swng/adapters-secretsmanager, cached once per cold start).
       TOKEN_SECRET_ARN: tokenSecret.secretArn,
+      // Prod-readiness Arc B Task 2: labels the EMF metrics' Stage dimension (compositionRoot.ts's
+      // buildApp reads it, `?? "beta"` if absent) — beta/prod metrics stay apart in CloudWatch.
+      STAGE: stage,
     };
 
     const makeFunction = (name: string, entryName: string): NodejsFunction =>

@@ -3,7 +3,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, DynamoD
 import { deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
 import type { RoundArchive, RoundEvent } from "@swng/domain";
 import { createFixedClock, createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, projectArchive, putAndBindGolfer } from "@swng/application";
-import { buildApp, buildProjector, buildRebuild, createConsoleLogger, createProjectorHandler, createRandomIds } from "./compositionRoot.js";
+import { buildApp, buildProjector, buildRebuild, createConsoleLogger, createEmfMetrics, createProjectorHandler, createRandomIds } from "./compositionRoot.js";
 import { createHmacTokenIssuer } from "./auth/hmacTokenIssuer.js";
 
 // Every buildApp call in this file injects this fake in place of the real Secrets Manager
@@ -85,6 +85,34 @@ describe("createConsoleLogger", () => {
 
     const logged = JSON.parse(errorSpy.mock.calls[0]![0] as string);
     expect(logged).toEqual({ level: "error", message: "the real error message" });
+  });
+});
+
+// EMF (CloudWatch Embedded Metric Format): the house-style hand-rolled analogue of
+// createConsoleLogger above — a specially-shaped JSON stdout line CloudWatch auto-extracts
+// into a metric, no PutMetricData/IAM/async flush involved.
+describe("createEmfMetrics", () => {
+  it("createEmfMetrics writes a valid EMF envelope to stdout (namespace swng, Stage dimension, Count 1)", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      createEmfMetrics("beta").count("RoundsCreated");
+      expect(spy).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(spy.mock.calls[0]![0] as string);
+      expect(payload._aws.CloudWatchMetrics[0]).toEqual({
+        Namespace: "swng",
+        Dimensions: [["Stage"]],
+        Metrics: [{ Name: "RoundsCreated", Unit: "Count" }],
+      });
+      expect(typeof payload._aws.Timestamp).toBe("number");
+      expect(payload.Stage).toBe("beta");
+      expect(payload.RoundsCreated).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("createEmfMetrics never throws", () => {
+    expect(() => createEmfMetrics("beta").count("Signups")).not.toThrow();
   });
 });
 

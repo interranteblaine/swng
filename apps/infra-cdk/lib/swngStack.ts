@@ -19,6 +19,7 @@ import { BlockPublicAccess, Bucket } from "aws-cdk-lib/aws-s3";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
 import { Queue } from "aws-cdk-lib/aws-sqs";
+import { CfnWebACL, CfnWebACLAssociation } from "aws-cdk-lib/aws-wafv2";
 import type { Construct } from "constructs";
 import { managedLoginAssets, managedLoginSettings } from "./managedLoginBranding.js";
 
@@ -831,6 +832,52 @@ export class SwngStack extends Stack {
       );
     }
 
+    // --- WAF rate-limiting (Prod-readiness hardening Arc A, Task 5) -----------------------
+    //
+    // Chokes the head of the abuse chain — accounts (Cognito) -> crews -> rounds. A per-route
+    // API Gateway throttle (above) already bounds request RATE once a client has a token; this
+    // adds a per-IP ceiling in front of the two places an attacker can act with NO token at
+    // all: minting Cognito accounts, and hitting the CloudFront-fronted web app itself.
+    //
+    // TWO WebACLs, not one — CloudFront and Cognito are different WAF SCOPES and attach
+    // differently: a CLOUDFRONT-scope ACL is wired via the Distribution's own `webAclId` prop
+    // (never an association — CloudFront doesn't support WebACLAssociation), and a REGIONAL-scope
+    // ACL is wired via a real CfnWebACLAssociation onto the user pool's ARN (a user pool is a
+    // REGIONAL WAF resource; a CLOUDFRONT-scope ACL cannot be associated to it). Distinct logical
+    // ids, distinct `metricName`s (CloudWatch metric names must be unique per ACL), and distinct
+    // rule metric names below — these four names are also the exact strings a future abuse-shape
+    // alarm (Arc B) will read off CloudWatch.
+    //
+    // A CLOUDFRONT-scope WebACL must be created in us-east-1 — this stack IS us-east-1
+    // (bin/infra-cdk.ts), so no separate region-pinned stack is needed.
+    const RATE_LIMIT_PER_5MIN = 2000; // generous vs a real crew (~1 rps); tune down if telemetry shows floods
+
+    const rateLimitRule = (metricName: string): CfnWebACL.RuleProperty => ({
+      name: "RateLimit",
+      priority: 0,
+      action: { block: {} },
+      statement: { rateBasedStatement: { aggregateKeyType: "IP", limit: RATE_LIMIT_PER_5MIN } },
+      visibilityConfig: { cloudWatchMetricsEnabled: true, metricName, sampledRequestsEnabled: true },
+    });
+
+    const cloudfrontWebAcl = new CfnWebACL(this, "WebAclCloudfront", {
+      scope: "CLOUDFRONT",
+      defaultAction: { allow: {} },
+      visibilityConfig: { cloudWatchMetricsEnabled: true, metricName: `swng-waf-cf-${stage}`, sampledRequestsEnabled: true },
+      rules: [rateLimitRule(`swng-waf-cf-rate-${stage}`)],
+    });
+
+    const cognitoWebAcl = new CfnWebACL(this, "WebAclCognito", {
+      scope: "REGIONAL",
+      defaultAction: { allow: {} },
+      visibilityConfig: { cloudWatchMetricsEnabled: true, metricName: `swng-waf-cognito-${stage}`, sampledRequestsEnabled: true },
+      rules: [rateLimitRule(`swng-waf-cognito-rate-${stage}`)],
+    });
+    new CfnWebACLAssociation(this, "CognitoWebAclAssociation", {
+      resourceArn: userPool.userPoolArn,
+      webAclArn: cognitoWebAcl.attrArn,
+    });
+
     // --- Hosted web (M9 Task 6): S3 + CloudFront, so the app is reachable from a phone -----
     //
     // The bucket holds only re-publishable Vite build output (apps/web/dist, synced by
@@ -896,6 +943,9 @@ export class SwngStack extends Stack {
 
     const distribution = new Distribution(this, "WebDistribution", {
       defaultRootObject: "index.html",
+      // Task 5: the CLOUDFRONT-scope WebACL built above — `webAclId` accepts the ACL's ARN
+      // despite its name (the L2 Distribution prop's own documented contract).
+      webAclId: cloudfrontWebAcl.attrArn,
       defaultBehavior: {
         // S3BucketOrigin.withOriginAccessControl creates a real Origin Access Control (the
         // modern replacement for the legacy Origin Access Identity) AND wires the bucket

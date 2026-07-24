@@ -1073,6 +1073,82 @@ describe("SwngStack", () => {
     });
   });
 
+  // Prod-readiness hardening Arc A, Task 5: AWS WAF rate-limiting on the head of the abuse
+  // chain — account creation (Cognito) and the web edge (CloudFront). TWO DISTINCT WebACLs are
+  // required, not one: CloudFront is a CLOUDFRONT-scope resource wired via the Distribution's own
+  // `webAclId` prop (a CloudFront ACL is never attached via an association); a Cognito user pool
+  // is a REGIONAL WAF resource, wired via a real AWS::WAFv2::WebACLAssociation — a CLOUDFRONT-scope
+  // ACL cannot associate to a user pool, and a REGIONAL-scope ACL cannot be a distribution's
+  // webAclId. Both carry the same IP rate-based rule (RATE_LIMIT_PER_5MIN in swngStack.ts — a
+  // generous, adjustable ceiling vs. a real crew's ~1 rps).
+  describe("WAF rate-limiting (Task 5, prod-readiness hardening Arc A)", () => {
+    it("has exactly two WebACLs: one CLOUDFRONT-scope, one REGIONAL-scope, each with an IP rate-based rule limiting to 2000 per 5 min", () => {
+      template.resourceCountIs("AWS::WAFv2::WebACL", 2);
+
+      for (const scope of ["CLOUDFRONT", "REGIONAL"]) {
+        template.hasResourceProperties("AWS::WAFv2::WebACL", {
+          Scope: scope,
+          DefaultAction: { Allow: {} },
+          Rules: Match.arrayWith([
+            Match.objectLike({
+              Name: "RateLimit",
+              Priority: 0,
+              Action: { Block: {} },
+              Statement: Match.objectLike({
+                RateBasedStatement: Match.objectLike({ AggregateKeyType: "IP", Limit: 2000 }),
+              }),
+            }),
+          ]),
+        });
+      }
+    });
+
+    // CloudWatch metric names must be unique per ACL — a collision would silently merge two
+    // ACLs' metrics into one CloudWatch series. These are also the exact names the next arc
+    // (Arc B's abuse-shape alarm) reads.
+    it("the two WebACLs (and their rate rules) carry distinct, stage-suffixed metric names", () => {
+      const acls = template.findResources("AWS::WAFv2::WebACL");
+      const entries = Object.values(acls);
+      expect(entries).toHaveLength(2);
+
+      const aclMetricNames = entries.map((acl) => (acl.Properties.VisibilityConfig as { MetricName: string }).MetricName);
+      expect(new Set(aclMetricNames).size).toBe(2);
+      expect(aclMetricNames.sort()).toEqual(["swng-waf-cf-beta", "swng-waf-cognito-beta"]);
+
+      const ruleMetricNames = entries.map((acl) => {
+        const rules = acl.Properties.Rules as Array<{ VisibilityConfig: { MetricName: string } }>;
+        expect(rules).toHaveLength(1);
+        return rules[0]!.VisibilityConfig.MetricName;
+      });
+      expect(new Set(ruleMetricNames).size).toBe(2);
+      expect(ruleMetricNames.sort()).toEqual(["swng-waf-cf-rate-beta", "swng-waf-cognito-rate-beta"]);
+    });
+
+    it("the CloudFront WebACL is wired onto the distribution via WebACLId (never a WebACLAssociation)", () => {
+      const acls = template.findResources("AWS::WAFv2::WebACL");
+      const cfAclLogicalId = Object.entries(acls).find(([, acl]) => acl.Properties.Scope === "CLOUDFRONT")?.[0];
+      expect(cfAclLogicalId).toBeDefined();
+
+      template.hasResourceProperties("AWS::CloudFront::Distribution", {
+        DistributionConfig: Match.objectLike({ WebACLId: { "Fn::GetAtt": [cfAclLogicalId, "Arn"] } }),
+      });
+    });
+
+    it("the REGIONAL WebACL is associated with the Cognito user pool via a real WebACLAssociation", () => {
+      const acls = template.findResources("AWS::WAFv2::WebACL");
+      const regionalAclLogicalId = Object.entries(acls).find(([, acl]) => acl.Properties.Scope === "REGIONAL")?.[0];
+      expect(regionalAclLogicalId).toBeDefined();
+
+      const userPoolLogicalId = findLogicalId("AWS::Cognito::UserPool");
+
+      template.resourceCountIs("AWS::WAFv2::WebACLAssociation", 1);
+      template.hasResourceProperties("AWS::WAFv2::WebACLAssociation", {
+        ResourceArn: { "Fn::GetAtt": [userPoolLogicalId, "Arn"] },
+        WebACLArn: { "Fn::GetAtt": [regionalAclLogicalId, "Arn"] },
+      });
+    });
+  });
+
   describe("outputs", () => {
     it("outputs HttpApiUrl and WsApiUrl", () => {
       template.hasOutput("HttpApiUrl", {});

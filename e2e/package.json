@@ -12,7 +12,7 @@
     "@swng/client": "workspace:*",
     "@swng/contracts": "workspace:*",
     "@swng/domain": "workspace:*",
-    "ws": "^8.18.0",
+    "ws": "^8.21.1",
     "zod": "catalog:"
   },
   "devDependencies": {

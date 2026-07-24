@@ -13,18 +13,18 @@
     "deploy:beta": "cdk deploy swng-beta --profile swng --require-approval never --outputs-file cdk-outputs.json"
   },
   "dependencies": {
-    "aws-cdk-lib": "2.229.1",
+    "aws-cdk-lib": "2.262.0",
     "constructs": "^10.0.0"
   },
   "devDependencies": {
     "@swng/adapters-dynamodb": "workspace:*",
     "@swng/brand": "workspace:*",
     "@swng/lambda": "workspace:*",
-    "aws-cdk": "2.1033.0",
+    "@types/node": "catalog:",
+    "aws-cdk": "2.1133.0",
+    "esbuild": "^0.21.5",
     "ts-node": "^10.9.2",
     "typescript": "catalog:",
-    "@types/node": "catalog:",
-    "esbuild": "^0.21.5",
     "vitest": "catalog:"
   }
 }

@@ -19,7 +19,7 @@ describe("ensureGolfer", () => {
   it("mints a golfer with the deterministic placeholder name f(sub) and namePlaceholder: true when the sub has none", async () => {
     const { golferStore, ensure } = setup();
 
-    const golfer = await ensure({ sub: "sub-1", email: "ann@example.com" });
+    const golfer = await ensure({ sub: "sub-1" });
 
     expect(golfer.name).toBe(placeholderName("sub-1"));
     expect(golfer.namePlaceholder).toBe(true);
@@ -39,13 +39,5 @@ describe("ensureGolfer", () => {
     expect(second.namePlaceholder).toBe(true);
     // The second call read the existing row, it didn't mint a second one.
     expect((await golferStore.getBySub("sub-1"))?.golfer.id).toBe(first.id);
-  });
-
-  it("reads ONLY the sub from the claims — an email present or absent yields the identical f(sub) name", async () => {
-    const withEmail = await setup().ensure({ sub: "sub-x", email: "someone@example.com" });
-    const withoutEmail = await setup().ensure({ sub: "sub-x" });
-
-    expect(withEmail.name).toBe(placeholderName("sub-x"));
-    expect(withoutEmail.name).toBe(placeholderName("sub-x"));
   });
 });

@@ -687,7 +687,7 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
 // (`describe("createDispatcher — golfer + terminate routes (M7 Task 5)")`).
 describe("createDispatcher — golfer auth tier (M7 Task 4)", () => {
   const VALID_TOKEN = "valid-golfer-token";
-  const account: AccountClaims = { sub: "cognito-sub-123", email: "ann@example.com" };
+  const account: AccountClaims = { sub: "cognito-sub-123" };
 
   const stubVerifier: AccountVerifier = {
     verify: async (bearer: string) => {
@@ -701,7 +701,7 @@ describe("createDispatcher — golfer auth tier (M7 Task 4)", () => {
     path: "/me",
     auth: "golfer" as const,
     successStatus: 200 as const,
-    handler: async (ctx: { account?: AccountClaims }) => ({ sub: ctx.account?.sub, email: ctx.account?.email }),
+    handler: async (ctx: { account?: AccountClaims }) => ({ sub: ctx.account?.sub }),
   };
 
   const setupGolferTier = () => {
@@ -723,11 +723,11 @@ describe("createDispatcher — golfer auth tier (M7 Task 4)", () => {
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
 
-  it("hands {sub, email} to the handler for a token the verifier accepts", async () => {
+  it("hands {sub} to the handler for a token the verifier accepts — sub only, no email", async () => {
     const dispatcher = setupGolferTier();
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: VALID_TOKEN })));
     expect(resp.statusCode).toBe(200);
-    expect(JSON.parse(resp.body!)).toEqual({ sub: account.sub, email: account.email });
+    expect(JSON.parse(resp.body!)).toEqual({ sub: account.sub });
   });
 });
 
@@ -739,9 +739,9 @@ describe("createDispatcher — golfer auth tier (M7 Task 4)", () => {
 // every verifier failure to invalid-token) — the REAL error code, not an invented one (M6
 // lesson).
 describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
-  const ann: AccountClaims = { sub: "cognito-sub-ann", email: "ann@example.com" };
-  const bo: AccountClaims = { sub: "cognito-sub-bo", email: "bo@example.com" };
-  const cal: AccountClaims = { sub: "cognito-sub-cal", email: "cal@example.com" };
+  const ann: AccountClaims = { sub: "cognito-sub-ann" };
+  const bo: AccountClaims = { sub: "cognito-sub-bo" };
+  const cal: AccountClaims = { sub: "cognito-sub-cal" };
   const golferBearer = (account: AccountClaims): string => `golfer-token-${account.sub}`;
 
   const stubVerifier: AccountVerifier = {
@@ -922,8 +922,8 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
 // token 401s, and a VALID token seats the caller's OWN account golfer (as-self, resolved via
 // ensureGolfer) — asserted against the RESPONSE golferId.
 describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only identity spec §3)", () => {
-  const ann: AccountClaims = { sub: "cognito-sub-ann-og", email: "ann-og@example.com" };
-  const bo: AccountClaims = { sub: "cognito-sub-bo-og", email: "bo-og@example.com" };
+  const ann: AccountClaims = { sub: "cognito-sub-ann-og" };
+  const bo: AccountClaims = { sub: "cognito-sub-bo-og" };
   const golferBearer = (account: AccountClaims): string => `golfer-token-${account.sub}`;
   const stubVerifier: AccountVerifier = {
     verify: async (bearer: string) => {
@@ -1028,9 +1028,9 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
 // block per this file's existing "one block per milestone's route additions" convention (M6
 // courses, M7 golfer/terminate).
 describe("createDispatcher — crew routes (M8 Task 4)", () => {
-  const ann: AccountClaims = { sub: "cognito-sub-ann-crew", email: "ann-crew@example.com" };
-  const bo: AccountClaims = { sub: "cognito-sub-bo-crew", email: "bo-crew@example.com" };
-  const cal: AccountClaims = { sub: "cognito-sub-cal-crew", email: "cal-crew@example.com" };
+  const ann: AccountClaims = { sub: "cognito-sub-ann-crew" };
+  const bo: AccountClaims = { sub: "cognito-sub-bo-crew" };
+  const cal: AccountClaims = { sub: "cognito-sub-cal-crew" };
   const golferBearer = (account: AccountClaims): string => `golfer-token-${account.sub}`;
 
   const stubVerifier: AccountVerifier = {
@@ -1840,8 +1840,8 @@ describe("createDispatcher — a crew-invite token never opens a round (crew mem
 // routes-table pin the brief's own Step 1 asks for. Mirrors the M7 golfer-routes suite's own
 // ann/bo + golferBearer/stubVerifier idiom.
 describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{roundId}/archive (projection-realignment Task 6)", () => {
-  const ann: AccountClaims = { sub: "cognito-sub-ann-archive", email: "ann-archive@example.com" };
-  const bo: AccountClaims = { sub: "cognito-sub-bo-archive", email: "bo-archive@example.com" };
+  const ann: AccountClaims = { sub: "cognito-sub-ann-archive" };
+  const bo: AccountClaims = { sub: "cognito-sub-bo-archive" };
   const golferBearer = (account: AccountClaims): string => `golfer-token-${account.sub}`;
 
   const stubVerifier: AccountVerifier = {
@@ -2045,8 +2045,8 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
 // application/src/rounds/mintParticipantToken.test.ts). Same ann/bo/golferBearer/stubVerifier
 // idiom as the snapshot-routes suite above, self-contained rather than sharing its closure.
 describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participant token re-mint)", () => {
-  const ann: AccountClaims = { sub: "cognito-sub-ann-token", email: "ann-token@example.com" };
-  const bo: AccountClaims = { sub: "cognito-sub-bo-token", email: "bo-token@example.com" };
+  const ann: AccountClaims = { sub: "cognito-sub-ann-token" };
+  const bo: AccountClaims = { sub: "cognito-sub-bo-token" };
   const golferBearer = (account: AccountClaims): string => `golfer-token-${account.sub}`;
 
   const stubVerifier: AccountVerifier = {

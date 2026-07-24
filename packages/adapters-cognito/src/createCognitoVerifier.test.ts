@@ -45,7 +45,11 @@ const primedVerifier = (): ReturnType<typeof CognitoJwtVerifier.create> => {
 };
 
 describe("createCognitoVerifierFrom / createCognitoVerifier", () => {
-  it("resolves {sub, email} for a valid, freshly-signed ID token", async () => {
+  // Accounts-only identity: "Cognito is a pure authenticator (sub only — nothing reads
+  // `claims.email` into a golfer)" — pinned at the one place email is actually available: even
+  // when the raw ID token DOES carry an email claim, this adapter's AccountClaims carries sub
+  // only — no email key at all, not even `email: undefined`.
+  it("resolves {sub} only — an email claim on the raw ID token is dropped, never surfaced", async () => {
     const token = signJwt({
       sub: "user-123",
       email: "ann@example.com",
@@ -57,14 +61,16 @@ describe("createCognitoVerifierFrom / createCognitoVerifier", () => {
     });
     const verifier = createCognitoVerifierFrom(primedVerifier());
 
-    await expect(verifier.verify(token)).resolves.toEqual({ sub: "user-123", email: "ann@example.com" });
+    const claims = await verifier.verify(token);
+    expect(claims).toStrictEqual({ sub: "user-123" });
+    expect(Object.keys(claims)).toEqual(["sub"]);
   });
 
-  it("resolves with email undefined when the token carries no email claim", async () => {
+  it("resolves {sub} when the token carries no email claim at all", async () => {
     const token = signJwt({ sub: "user-456", token_use: "id", iss: ISSUER, aud: CLIENT_ID, iat: nowSec(), exp: nowSec() + 3600 });
     const verifier = createCognitoVerifierFrom(primedVerifier());
 
-    await expect(verifier.verify(token)).resolves.toEqual({ sub: "user-456", email: undefined });
+    await expect(verifier.verify(token)).resolves.toStrictEqual({ sub: "user-456" });
   });
 
   it("rejects an expired token", async () => {

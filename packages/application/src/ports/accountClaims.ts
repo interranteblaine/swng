@@ -5,5 +5,4 @@
 // its own GolferId via GolferStore.getBySub(sub) rather than trusting one on the claims.
 export interface AccountClaims {
   readonly sub: string;
-  readonly email?: string;
 }

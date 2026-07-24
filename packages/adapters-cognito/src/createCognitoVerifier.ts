@@ -5,7 +5,7 @@ import type { AccountClaims, AccountVerifier } from "@swng/application";
 // CognitoJwtVerifier (createCognitoVerifier below) and, in tests, a CognitoJwtVerifier primed
 // with `cacheJwks` so verification never hits the network (createCognitoVerifier.test.ts).
 interface RawVerifier {
-  verify(jwt: string): Promise<{ sub: string; email?: unknown }>;
+  verify(jwt: string): Promise<{ sub: string }>;
 }
 
 // Adapts anything shaped like aws-jwt-verify's verifier into this package's AccountVerifier
@@ -18,7 +18,7 @@ interface RawVerifier {
 export const createCognitoVerifierFrom = (verifier: RawVerifier): AccountVerifier => ({
   verify: async (bearer: string): Promise<AccountClaims> => {
     const payload = await verifier.verify(bearer);
-    return { sub: payload.sub, email: typeof payload.email === "string" ? payload.email : undefined };
+    return { sub: payload.sub };
   },
 });
 

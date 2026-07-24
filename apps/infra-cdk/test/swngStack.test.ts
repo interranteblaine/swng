@@ -411,15 +411,16 @@ describe("SwngStack", () => {
       expect(projectionsTableLogicalId).toBeDefined();
 
       // Unlike the core table (which has GSIs, so grantReadWriteData's Resource is an array
-      // of [tableArn, indexArns]), the projections table has none — CDK's Resource here is a
-      // single Fn::GetAtt, not wrapped in an array, so this can't reuse the core table test's
-      // `Match.arrayWith` shape for Resource.
+      // of [tableArn, indexArns]), the projections table has none — CDK still wraps the lone
+      // Fn::GetAtt in a single-element array (aws-cdk-lib >=2.260: Resource is always an
+      // array, GSIs or not), so this asserts a one-element `Match.arrayWith` rather than a
+      // bare object.
       template.hasResourceProperties("AWS::IAM::Policy", {
         PolicyDocument: Match.objectLike({
           Statement: Match.arrayWith([
             Match.objectLike({
               Action: Match.arrayWith(["dynamodb:GetItem", "dynamodb:PutItem"]),
-              Resource: Match.objectLike({ "Fn::GetAtt": [projectionsTableLogicalId, "Arn"] }),
+              Resource: Match.arrayWith([Match.objectLike({ "Fn::GetAtt": [projectionsTableLogicalId, "Arn"] })]),
             }),
           ]),
         }),
@@ -428,8 +429,9 @@ describe("SwngStack", () => {
 
     // Snapshot realignment Task 1: the rebuild reads the snapshots table now, not the rounds
     // table — same read-only shape as before (no write actions), new table. No GSIs on this
-    // table, so Resource is a single Fn::GetAtt (the projections-table test's shape above),
-    // not the core table's array-of-[tableArn, indexArns].
+    // table, so Resource is a single Fn::GetAtt wrapped in a one-element array (aws-cdk-lib
+    // >=2.260: Resource is always an array, GSIs or not) — the projections-table test's shape
+    // above, not the core table's array-of-[tableArn, indexArns].
     it("rebuildFn's role has a read-only policy statement covering the snapshots table (no write actions)", () => {
       const tables = template.findResources("AWS::DynamoDB::Table");
       const snapshotsTableLogicalId = Object.entries(tables).find(([, table]) => table.Properties.TableName === "swng-snapshots-beta")?.[0];
@@ -447,7 +449,13 @@ describe("SwngStack", () => {
       const rebuildPolicies = Object.values(policies).filter((policy) => JSON.stringify(policy.Properties.Roles).includes(roleLogicalId));
       expect(rebuildPolicies.length).toBeGreaterThan(0);
 
-      // Find the statement that covers the snapshots table and assert it's read-only
+      // Find the statement(s) that cover the snapshots table and assert read-only. aws-cdk-lib
+      // >=2.260 splits a table grant's stream-read actions (GetRecords/GetShardIterator) into
+      // their OWN statement, separate from the CRUD-read statement (GetItem/Query/Scan/...) —
+      // same total permissions as before, just laid out across two statements instead of one.
+      // So: assert no write action on ANY statement covering this table (stronger — covers
+      // both statements), but only require GetItem on the CRUD statement, not the stream-only
+      // one.
       let foundStatement = false;
       for (const policy of rebuildPolicies) {
         const statements = (policy.Properties.PolicyDocument.Statement ?? []) as Array<{
@@ -457,19 +465,19 @@ describe("SwngStack", () => {
         for (const statement of statements) {
           const stmtResourceStr = JSON.stringify(statement.Resource);
           if (stmtResourceStr.includes(snapshotsTableLogicalId!)) {
-            foundStatement = true;
             const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
-            // Assert GetItem is present
-            expect(actions).toContain("dynamodb:GetItem");
-            // Assert no write actions
+            // Assert no write actions on any statement touching this table.
             const writeActions = ["dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:BatchWriteItem"];
             for (const writeAction of writeActions) {
               expect(actions).not.toContain(writeAction);
             }
+            // The CRUD-read statement (not the stream-only one) is the one that must carry
+            // GetItem — that's the statement this test is actually pinning.
+            if (actions.includes("dynamodb:GetItem")) foundStatement = true;
           }
         }
       }
-      expect(foundStatement, "snapshots table statement not found in rebuildFn's policies").toBe(true);
+      expect(foundStatement, "snapshots table CRUD-read statement not found in rebuildFn's policies").toBe(true);
     });
 
     // httpFn's finalize transaction writes the snapshot (a later task) — read+write, same
@@ -484,7 +492,7 @@ describe("SwngStack", () => {
           Statement: Match.arrayWith([
             Match.objectLike({
               Action: Match.arrayWith(["dynamodb:GetItem", "dynamodb:PutItem"]),
-              Resource: Match.objectLike({ "Fn::GetAtt": [snapshotsTableLogicalId, "Arn"] }),
+              Resource: Match.arrayWith([Match.objectLike({ "Fn::GetAtt": [snapshotsTableLogicalId, "Arn"] })]),
             }),
           ]),
         }),

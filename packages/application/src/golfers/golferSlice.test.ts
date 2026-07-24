@@ -42,14 +42,14 @@ const setup = (golferStore: GolferStore = createInMemoryGolferStore()) => {
 describe("getMyGolfer — get-or-creates", () => {
   it("a fresh sub MINTS a golfer named f(sub) with namePlaceholder: true, and a second GET returns the SAME golfer", async () => {
     const ctx = setup();
-    const first = await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
+    const first = await ctx.getMe({ sub: "sub-1" });
     expect(first.golfer).not.toBeNull();
     expect(first.golfer?.name).toBe(placeholderName("sub-1"));
     expect(first.golfer?.namePlaceholder).toBe(true);
     // Cognito is a pure authenticator — the name is f(sub), never the email localpart.
     expect(first.golfer?.name).not.toBe("ann");
 
-    const second = await ctx.getMe({ sub: "sub-1", email: "ann@example.com" });
+    const second = await ctx.getMe({ sub: "sub-1" });
     expect(second.golfer?.golferId).toBe(first.golfer?.golferId);
     // Exactly one row, bound to the sub — the second GET read it, never minted a second.
     expect((await ctx.golferStore.getBySub("sub-1"))?.golfer.id).toBe(first.golfer?.golferId);
@@ -57,7 +57,7 @@ describe("getMyGolfer — get-or-creates", () => {
 
   it("PUT /me then GET /me returns the same golferId", async () => {
     const ctx = setup();
-    const created = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const created = await ctx.updateMe({ sub: "sub-1" }, {});
 
     const found = await ctx.getMe({ sub: "sub-1" });
 
@@ -97,7 +97,7 @@ describe("updateMyGolfer", () => {
     // First PUT (empty patch) get-or-creates via ensureGolfer: the create name is the sub-derived
     // placeholder (Cognito is a pure authenticator — never the email localpart), flag preserved by
     // the declared-only patch.
-    await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    await ctx.updateMe({ sub: "sub-1" }, {});
 
     const updated = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "declared", value: 14.2 } });
     expect(updated.golfer.name).toBe(placeholderName("sub-1")); // untouched — still the placeholder, never "ann"
@@ -110,13 +110,13 @@ describe("updateMyGolfer", () => {
 
   it("get-or-creates on the first PUT /me — one shared ensureGolfer path (GET /me get-or-creates too)", async () => {
     const ctx = setup();
-    const updated = await ctx.updateMe({ sub: "sub-1", email: "bo@example.com" }, { indexSource: { kind: "declared", value: 9.1 } });
+    const updated = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "declared", value: 9.1 } });
     expect(updated.golfer.indexSource).toEqual({ kind: "declared", value: 9.1 });
   });
 
   it("creates with the sub-derived placeholder name, NEVER the email localpart (Cognito is a pure authenticator), on the default swng source", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     expect(golfer.name).toBe(placeholderName("sub-1"));
     expect(golfer.name).not.toBe("ann");
     expect(golfer.namePlaceholder).toBe(true);
@@ -126,7 +126,7 @@ describe("updateMyGolfer", () => {
 
   it("carries indexSource on the wire as the sole handicap field — no declared/computed/effective/official (index-source model spec §3); adopting a computed source stores the SOURCE, not a value", async () => {
     const ctx = setup();
-    await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    await ctx.updateMe({ sub: "sub-1" }, {});
     const declaredOnly = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "declared", value: 14.2 } });
     expect(declaredOnly.golfer.indexSource).toEqual({ kind: "declared", value: 14.2 });
     expect(declaredOnly.golfer).not.toHaveProperty("declared");
@@ -154,7 +154,7 @@ describe("getMyRecord", () => {
 
   it("bootstrap not met: history present, whsIndex absent below 3 differentials", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
@@ -178,7 +178,7 @@ describe("getMyRecord", () => {
   // whsIndex (Rule 5.2a needs rated differentials, which unrated rounds never carry).
   it("a wholly-unrated history yields metrics.swngIndex but no metrics.whsIndex", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     const unrated = [
       { roundId: roundId("r1"), ags: 96, finalizedAtMs: 1_000 },
       { roundId: roundId("r2"), ags: 101, finalizedAtMs: 2_000 },
@@ -213,7 +213,7 @@ describe("getMyRecord", () => {
   // always equals the stored finalizedAtMs; createdAt carries only when the line has createdAtMs.
   it("carries courseId/finalizedAt/createdAt on a history line when the stored line has them, omitting courseId/createdAt for a line without", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
@@ -254,7 +254,7 @@ describe("getMyRecord", () => {
   // could mistake for a real (if unlikely) index value.
   it("below the 3-differential bootstrap the whsIndex is ABSENT, not zero", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "bo@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
@@ -293,7 +293,7 @@ describe("getMyRecord", () => {
   // clock rather than a live wall-clock read.
   it("computes the index at read time from the history lines — no stored snapshot is consulted", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     const seededCompleteLines = [
       { roundId: roundId("r1"), ags: 90, differential: 9.0, finalizedAtMs: 1_000 },
       { roundId: roundId("r2"), ags: 95, differential: 14.0, finalizedAtMs: 2_000 },
@@ -386,7 +386,7 @@ describe("getMyRecord", () => {
   // raw `sorted` lines.
   it("typicalEighteen + indexHistory on the wire equal golferMetrics(sorted); the headline index is computed from RAW differentials even though the wire differential is posted to 0.1", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     const line = (id: string, ms: number, extra: { ags?: number; differential?: number }) => ({
       roundId: roundId(id),
       courseName: "Casa Verde GC",
@@ -448,7 +448,7 @@ describe("getMyCourseRecord", () => {
 
   it("round-trips a two-course line set: filters to just the requested course, ignoring the other course's lines entirely", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     // fullyHoledOut (analytics.ts) requires 18 strokes-kind holeResults summing to `gross` — the
     // par-4-every-hole shape with the "over" strokes loaded onto the first N holes is arbitrary
     // but sums correctly; courseRecord's best/scoringAverage only consume the sum + line par.
@@ -490,7 +490,7 @@ describe("getMyCourseRecord", () => {
 
   it("a sub with a real golfer but zero lines at the requested course returns rounds: 0, not a throw", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Pebble Municipal",
@@ -519,7 +519,7 @@ describe("getMyRounds", () => {
 
   it("lists every finalized round newest-first, each line carrying finalizedAt (the wire name for the store's finalizedAtMs)", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
@@ -556,7 +556,7 @@ describe("getMyRounds", () => {
   // line has it, omitted for legacy lines written before the field existed (tolerated, no migration).
   it("carries createdAt (the round-created wall time) when the line has it, omitting it for a legacy line", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
@@ -590,7 +590,7 @@ describe("getMyRounds", () => {
   // as getMyRecord's history above — never an explicit undefined key on the wire.
   it("carries courseId when the stored line has it, omitting it for a pre-scrap line without", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
@@ -624,7 +624,7 @@ describe("getMyRounds", () => {
   // silently disagree on "what order is my history in" (both go through sortLines).
   it("orders identically to GET /me/record's own history for the same golfer", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
@@ -669,13 +669,13 @@ describe("getMyLiveRounds", () => {
 
   it("returns an empty list for a real golfer with no live rounds", async () => {
     const ctx = setup();
-    await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    await ctx.updateMe({ sub: "sub-1" }, {});
     expect(await ctx.myLiveRounds({ sub: "sub-1" })).toEqual({ rounds: [] });
   });
 
   it("lists live rounds newest-joined first, each carrying courseName + joinedAt (the wire name for joinedAtMs)", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
     await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r2"), courseName: "Pebble Municipal", joinedAtMs: 2_000, expiresAtSec: 9_999_999_999 });
 
@@ -693,7 +693,7 @@ describe("getMyLiveRounds", () => {
   // backstop outliving a vanished round).
   it("carries createdAt derived from the round's genesis, omitting it for a stale pointer with no round behind it", async () => {
     const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1", email: "ann@example.com" }, {});
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     // A real live round's genesis on the journal (wall time 7_777).
     await ctx.journal.append(roundId("r1"), [
       { kind: "round-created", roundId: roundId("r1"), card: fixtureLinks, opId: opId("g1"), hlc: { wallMs: 7_777, counter: 0, deviceId: deviceId("test") }, authorId: golferId("author") },

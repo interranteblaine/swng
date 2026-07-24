@@ -17,6 +17,7 @@ export type { AccountVerifier } from "./ports/accountVerifier.js";
 export type { Clock } from "./ports/clock.js";
 export type { IdGenerator } from "./ports/idGenerator.js";
 export type { Logger } from "./ports/logger.js";
+export type { Metrics } from "./ports/metrics.js";
 export type { ConnectionRegistry } from "./ports/connectionRegistry.js";
 
 export { ApplicationError } from "./errors.js";
@@ -101,9 +102,11 @@ export {
   createInMemoryRoundStore,
   createInMemorySnapshotStore,
   createNullLogger,
+  createNullMetrics,
+  createCapturingMetrics,
   createSequentialIds,
   createTestTokenIssuer,
   putAndBindGolfer,
   seedCard,
 } from "./testing/fakes.js";
-export type { CapturingBroadcast, CapturingLogger, InMemorySnapshotStore } from "./testing/fakes.js";
+export type { CapturingBroadcast, CapturingLogger, CapturingMetrics, InMemorySnapshotStore } from "./testing/fakes.js";

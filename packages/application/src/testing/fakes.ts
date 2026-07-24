@@ -9,6 +9,7 @@ import type { CrewSeason, CrewStore } from "../ports/crewStore.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
+import type { Metrics } from "../ports/metrics.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { SnapshotStore } from "../ports/snapshotStore.js";
@@ -479,5 +480,24 @@ export const createCapturingLogger = (): CapturingLogger => {
       warnings.push({ message, data });
     },
     error: () => {},
+  };
+};
+
+export const createNullMetrics = (): Metrics => ({ count: () => {} });
+
+// Records every count() call by metric name — the Metrics analogue of CapturingLogger, for the
+// ONE assertion createNullMetrics can't make: that a use case actually emitted (and, on the
+// replay/race-loser branches, did NOT).
+export interface CapturingMetrics extends Metrics {
+  readonly calls: readonly string[];
+}
+
+export const createCapturingMetrics = (): CapturingMetrics => {
+  const calls: string[] = [];
+  return {
+    calls,
+    count: (name) => {
+      calls.push(name);
+    },
   };
 };

@@ -7,6 +7,7 @@ import type { SnapshotStore } from "../ports/snapshotStore.js";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
+  createCapturingMetrics,
   createFixedClock,
   createInMemoryCardStore,
   createInMemoryGolferStore,
@@ -69,17 +70,19 @@ const setup = async (overrides?: { journal?: EventJournal; store?: RoundStore; s
   const cardStore = createInMemoryCardStore();
   const cardRecord = await seedCard(cardStore, courseId("course-1"), cardId("card-1"), fixtureLinks);
   const course = { courseId: cardRecord.courseId, cardId: cardRecord.cardId };
+  const metrics = createCapturingMetrics();
 
   return {
     journal,
     snapshots,
     broadcast,
     course,
+    metrics,
     start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
     record: recordScore({ journal, broadcast }),
-    finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
+    finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids, metrics }),
     events: readEvents({ journal }),
   };
 };
@@ -274,6 +277,18 @@ describe("finalizeRound — carry 1: settle-before-append", () => {
     expect(afterSuccess.events.filter((event) => event.kind === "round-finalized")).toHaveLength(1);
     expect(reduceRound(afterSuccess.events).status).toBe("final");
     expect(await round.snapshots.get(round.host.roundId)).toBeDefined();
+  });
+});
+
+describe("finalizeRound — metrics", () => {
+  it("emits RoundsFinalized once on a genuine finalize, and not again on replay", async () => {
+    const round = await freshLiveRoundWithGame();
+    await scoreAll(round, createClientOps("ann-phone"), createClientOps("bo-phone"));
+
+    await round.finalize(round.hostClaims); // genuine
+    await round.finalize(round.hostClaims); // idempotent replay
+
+    expect(round.metrics.calls).toEqual(["RoundsFinalized"]); // exactly one — replay does not re-emit
   });
 });
 

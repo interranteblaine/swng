@@ -5,6 +5,7 @@ import type { Broadcast } from "../ports/broadcast.js";
 import type { Clock } from "../ports/clock.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
+import type { Metrics } from "../ports/metrics.js";
 import type { SnapshotStore } from "../ports/snapshotStore.js";
 import type { ParticipantClaims } from "../ports/tokenIssuer.js";
 import { requireParticipant } from "../scoringPolicy.js";
@@ -44,7 +45,7 @@ const MAX_FINALIZE_ATTEMPTS = 5;
 // the prior version did is gone: the head-seq condition guarantees the committed log is exactly
 // the candidate log this attempt settled, so the archive is exact, not racy.
 export const finalizeRound =
-  (deps: { journal: EventJournal; snapshots: SnapshotStore; broadcast: Broadcast; clock: Clock; ids: IdGenerator }) =>
+  (deps: { journal: EventJournal; snapshots: SnapshotStore; broadcast: Broadcast; clock: Clock; ids: IdGenerator; metrics?: Metrics }) =>
   async (claims: ParticipantClaims): Promise<FinalizeRoundResponse> => {
     for (let attempt = 0; attempt < MAX_FINALIZE_ATTEMPTS; attempt += 1) {
       const { events, state } = await loadRoundState(deps.journal, claims.roundId);
@@ -85,6 +86,7 @@ export const finalizeRound =
       }
 
       await deps.broadcast.publish(claims.roundId, result.appended);
+      deps.metrics?.count("RoundsFinalized");
       return { results: archive.results, handicapping: archive.handicapping };
     }
 

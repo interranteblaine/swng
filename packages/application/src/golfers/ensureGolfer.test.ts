@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { placeholderName } from "@swng/domain";
-import { createInMemoryGolferStore, createSequentialIds } from "../testing/fakes.js";
+import { createCapturingMetrics, createInMemoryGolferStore, createSequentialIds } from "../testing/fakes.js";
 import { ensureGolfer } from "./ensureGolfer.js";
 
 // Get-or-create on first touch (accounts-only identity spec §2): the first authenticated request
@@ -13,6 +13,15 @@ const setup = () => {
   const golferStore = createInMemoryGolferStore();
   const idGenerator = createSequentialIds("g");
   return { golferStore, ensure: ensureGolfer({ golferStore, idGenerator }) };
+};
+
+// Metrics port (prod-readiness Arc B task 1): a capturing sink threaded alongside the same
+// golferStore/idGenerator pair, so these cases can assert exactly which branch emitted.
+const setupMetrics = () => {
+  const golferStore = createInMemoryGolferStore();
+  const idGenerator = createSequentialIds("g");
+  const metrics = createCapturingMetrics();
+  return { golferStore, idGenerator, metrics, ensure: ensureGolfer({ golferStore, idGenerator, metrics }) };
 };
 
 describe("ensureGolfer", () => {
@@ -39,5 +48,22 @@ describe("ensureGolfer", () => {
     expect(second.namePlaceholder).toBe(true);
     // The second call read the existing row, it didn't mint a second one.
     expect((await golferStore.getBySub("sub-1"))?.golfer.id).toBe(first.id);
+  });
+
+  it("emits Signups once on a genuine first-touch create", async () => {
+    const { ensure, metrics } = setupMetrics();
+
+    await ensure({ sub: "sub-new" });
+
+    expect(metrics.calls).toEqual(["Signups"]);
+  });
+
+  it("does NOT emit Signups when the golfer already exists", async () => {
+    const { ensure, metrics } = setupMetrics();
+
+    await ensure({ sub: "sub-a" }); // create
+    await ensure({ sub: "sub-a" }); // second touch — existing branch
+
+    expect(metrics.calls).toEqual(["Signups"]); // still one, from the first create
   });
 });

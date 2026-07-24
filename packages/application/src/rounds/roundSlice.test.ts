@@ -7,6 +7,7 @@ import type { ProjectionStore } from "../ports/projectionStore.js";
 import {
   createCapturingBroadcast,
   createCapturingLogger,
+  createCapturingMetrics,
   createFixedClock,
   createFrozenClock,
   createInMemoryCardStore,
@@ -561,5 +562,29 @@ describe("StartRound/JoinRound — presence (Task 13)", () => {
     // 2 warnings: the creator's own StartRound presence write, then Bo's JoinRound one.
     expect(logger.warnings).toHaveLength(2);
     expect(logger.warnings.every((entry) => entry.message === "presence-write-failed")).toBe(true);
+  });
+});
+
+describe("StartRound — metrics", () => {
+  it("emits RoundsCreated once on a successful start", async () => {
+    const journal = createInMemoryJournal();
+    const store = createInMemoryRoundStore();
+    const broadcast = createCapturingBroadcast();
+    const tokens = createTestTokenIssuer();
+    const clock = createFixedClock(1_000);
+    const ids = createSequentialIds("t");
+    const golferStore = createInMemoryGolferStore();
+    await putAndBindGolfer(golferStore, ANN.id, ANN.sub, ANN.name);
+    const projectionStore = createInMemoryProjectionStore();
+    const logger = createNullLogger();
+    const cardStore = createInMemoryCardStore();
+    const course = await seedCard(cardStore, CARD_REF.courseId, CARD_REF.cardId, fixtureLinks);
+    const metrics = createCapturingMetrics();
+    const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore, metrics });
+
+    const host = await start({ course: { courseId: course.courseId, cardId: course.cardId }, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+
+    expect(host.roundId).toBeDefined();
+    expect(metrics.calls).toEqual(["RoundsCreated"]);
   });
 });

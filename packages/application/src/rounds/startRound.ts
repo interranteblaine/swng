@@ -9,6 +9,7 @@ import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
+import type { Metrics } from "../ports/metrics.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { TokenIssuer } from "../ports/tokenIssuer.js";
@@ -39,6 +40,7 @@ export const startRound =
     projectionStore: ProjectionStore;
     logger: Logger;
     cardStore: CardStore;
+    metrics?: Metrics;
   }) =>
   // claims is REQUIRED: POST /rounds is the "golfer" auth tier now (accounts-only identity spec
   // §3) — every person who appears in a round is a signed-in account, so there is no anonymous
@@ -96,5 +98,6 @@ export const startRound =
 
     const token = deps.tokens.issue({ scope: "participant", roundId: id, golferId: host });
 
+    deps.metrics?.count("RoundsCreated");
     return { roundId: id, joinCode, token, golferId: host };
   };

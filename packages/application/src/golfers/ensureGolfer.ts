@@ -4,6 +4,7 @@ import { ApplicationError } from "../errors.js";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
+import type { Metrics } from "../ports/metrics.js";
 
 // Get-or-create on first touch (accounts-only identity spec §2): the first authenticated request
 // that needs the caller's golfer mints it. Returns the caller's Golfer, always — minting only when
@@ -23,7 +24,7 @@ import type { IdGenerator } from "../ports/idGenerator.js";
 // — both requests converge on the SAME identity. (The loser's freshly-put row is left orphaned and
 // unbound, unreachable by sub — an accepted outcome: nothing keys on a row no sub points at.)
 export const ensureGolfer =
-  (deps: { golferStore: GolferStore; idGenerator: IdGenerator }) =>
+  (deps: { golferStore: GolferStore; idGenerator: IdGenerator; metrics?: Metrics }) =>
   async (claims: AccountClaims): Promise<Golfer> => {
     const existing = await deps.golferStore.getBySub(claims.sub);
     if (existing) return existing.golfer;
@@ -35,6 +36,7 @@ export const ensureGolfer =
 
     try {
       await deps.golferStore.bindSub(golfer.id, claims.sub);
+      deps.metrics?.count("Signups");
     } catch (error) {
       if (error instanceof ApplicationError && error.code === "golfer-already-claimed") {
         const winner = await deps.golferStore.getBySub(claims.sub);

@@ -132,6 +132,38 @@ export const courseHandicapFor = (index: number, teeSet: TeeSet): number => {
 // roundHalfUp) rather than the Rules' own roundHalfUp used elsewhere in this file.
 export const unratedCourseHandicap = (index: number, holeCount: number): number => (holeCount === 9 ? Math.round(index / 2) : Math.round(index));
 
+// The 9-hole pairing state (rule text below): `combined` is the running list of 18-hole-
+// equivalent differentials in chronological order; `pendingNine` is at most one unpaired 9,
+// carried forward across however many rounds until its partner posts. Mutable and exported so a
+// STREAMING caller (golfer/metrics.ts's per-round "index over time" forward pass — an O(N²)→O(N)
+// perf fix) can feed one entry at a time in O(1) amortized time and read `.combined` after each
+// feed, instead of re-folding the whole prefix from scratch per round.
+export interface NineHoleCombineState {
+  readonly combined: number[];
+  pendingNine?: number;
+}
+
+export const createNineHoleCombineState = (): NineHoleCombineState => ({ combined: [] });
+
+// One step of the pairing rule, mutating `state` in place — the ONE place the rule is written.
+// combineNineHoleDifferentials (below) is a from-scratch fold over this; a streaming caller gets
+// the SAME rule, provably, by calling this directly instead of re-deriving it. Rule text: an 18
+// always stands alone; two 9s pair in the order they were posted (oldest waits for its partner)
+// and sum into ONE 18-hole-equivalent differential; an unpaired 9 contributes nothing until a
+// later round supplies its partner — see combineNineHoleDifferentials's own comment for the source.
+export const feedNineHoleCombine = (state: NineHoleCombineState, entry: { readonly differential: number; readonly holes: 9 | 18 }): void => {
+  if (entry.holes === 18) {
+    state.combined.push(entry.differential);
+    return;
+  }
+  if (state.pendingNine === undefined) {
+    state.pendingNine = entry.differential;
+    return;
+  }
+  state.combined.push(state.pendingNine + entry.differential);
+  state.pendingNine = undefined;
+};
+
 // 2020 published 9-hole combining rule (see the file-level comment: the 2024
 // expected-differential ingestion has no published formula, so swng combines raw
 // 9-hole differentials at the index projection instead of ingesting them directly).
@@ -142,19 +174,7 @@ export const unratedCourseHandicap = (index: number, holeCount: number): number 
 // where the combined value lands. A 9 left without a partner (record ends mid-pair)
 // contributes nothing; it stays pending until a later round supplies its partner.
 export const combineNineHoleDifferentials = (entries: readonly { readonly differential: number; readonly holes: 9 | 18 }[]): readonly number[] => {
-  const combined: number[] = [];
-  let pendingNine: number | undefined;
-  for (const entry of entries) {
-    if (entry.holes === 18) {
-      combined.push(entry.differential);
-      continue;
-    }
-    if (pendingNine === undefined) {
-      pendingNine = entry.differential;
-      continue;
-    }
-    combined.push(pendingNine + entry.differential);
-    pendingNine = undefined;
-  }
-  return combined;
+  const state = createNineHoleCombineState();
+  for (const entry of entries) feedNineHoleCombine(state, entry);
+  return state.combined;
 };

@@ -11,6 +11,8 @@ import {
   computeIndexDetail,
   courseHandicapFor,
   courseHandicapFromRatingSlopePar,
+  createNineHoleCombineState,
+  feedNineHoleCombine,
   postedDifferential,
   scoreDifferential,
   swngIndex,
@@ -306,6 +308,25 @@ describe("combineNineHoleDifferentials — 2020 published combining rule", () =>
 
   it("returns an empty sequence for no entries", () => {
     expect(combineNineHoleDifferentials([])).toEqual([]);
+  });
+
+  // golfer/metrics.ts's indexHistory forward pass (perf spec §3, O(N²)→O(N)) streams entries one
+  // at a time via feedNineHoleCombine/createNineHoleCombineState instead of folding a whole prefix
+  // from scratch each round — this pins that the streamed path is PROVABLY the same rule as the
+  // from-scratch fold above (one copy, not two): feeding the exact same mixed sequence one entry
+  // at a time yields the identical combined list, including the hand-pinned result.
+  it("feedNineHoleCombine, fed one entry at a time, yields the exact same combined list as the from-scratch fold — one shared rule, not two copies", () => {
+    const entries = [
+      { differential: 10.0, holes: 18 as const },
+      { differential: 4.1, holes: 9 as const },
+      { differential: 12.3, holes: 18 as const },
+      { differential: 5.2, holes: 9 as const },
+      { differential: 6.0, holes: 9 as const },
+    ];
+    const state = createNineHoleCombineState();
+    for (const entry of entries) feedNineHoleCombine(state, entry);
+    expect(state.combined).toEqual(combineNineHoleDifferentials(entries));
+    expect(state.combined).toEqual([10.0, 12.3, 9.3]); // same hand-pinned result as the fold test above
   });
 });
 

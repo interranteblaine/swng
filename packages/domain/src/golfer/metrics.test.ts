@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { IndexComputation } from "../handicap/whs.js";
 import { combineNineHoleDifferentials, computeIndexDetail, swngIndex } from "../handicap/whs.js";
 import { roundId } from "../ids.js";
 import { roundHalfUp } from "../scoring/strokes.js";
@@ -197,6 +198,90 @@ describe("golferMetrics — indexHistory (the rolling swng + WHS index, recomput
 
   it("an empty history yields an empty indexHistory", () => {
     expect(golferMetrics([]).indexHistory).toEqual([]);
+  });
+});
+
+// Perf spec §3: indexHistory used to re-fold the WHOLE career prefix for every round
+// (O(N²) on GET /me/record / GET /golfers/{id}) — now a single O(N) forward pass over two
+// running combined-differential streams (golfer/metrics.ts's indexHistoryOf). This is a
+// BEHAVIOR-PRESERVING refactor, so it's checked against an INDEPENDENT reimplementation of the
+// pre-refactor whole-prefix computation (detailsOfForTest below — not a call into
+// golferMetrics/detailsOf, which is private to metrics.ts anyway, so a broken refactor can't
+// accidentally agree with itself) over a fixture built to actually EXERCISE the reason a naive
+// "last N lines" window would be wrong.
+describe("golferMetrics — indexHistory is O(N): equals an independent per-prefix oracle over a cross-window 9-hole fixture", () => {
+  // The pre-refactor whole-prefix computation, reproduced independently here as ground truth —
+  // byte-identical to metrics.ts's own (private) detailsOf, but written fresh in the test file.
+  const detailsOfForTest = (prefix: readonly GolferRoundLine[]): { whs?: IndexComputation; swng?: IndexComputation } => {
+    const rated = prefix.filter((l) => l.differential !== undefined);
+    const whs = computeIndexDetail(combineNineHoleDifferentials(rated.map((l) => ({ differential: l.differential!, holes: l.holes }))));
+    const swng = swngIndex(prefix);
+    return { ...(whs !== undefined ? { whs } : {}), ...(swng !== undefined ? { swng } : {}) };
+  };
+
+  // 27 lines, oldest → newest (well over the ≥25 bar):
+  //  pos 0  — an unpaired RATED 9. Its WHS partner doesn't arrive until pos 24, twenty-four
+  //           positions later — well past any naive line-count window a broken "optimization"
+  //           might use, so the pending state MUST be carried unbounded, not windowed by line count.
+  //  pos 1  — an UNRATED 9. No differential, so it never touches the WHS stream — but it DOES
+  //           complete pos 0's pairing on the SWNG stream immediately (differential ?? ags−par
+  //           both read pos 0's pending value). The WHS and swng streams pair pos 0's 9 on
+  //           DIFFERENT rounds (pos 24 vs. pos 1) — proof the two streams are genuinely
+  //           independent, not one fold shared by accident.
+  //  pos 2..23 — 22 RATED 18s: bulk career play, pushing both streams' combined lists well past
+  //           the 20-differential WHS window before pos 0's pairing ever resolves.
+  //  pos 24 — a RATED 9: completes pos 0's WHS pairing (24 rounds later); starts a NEW pending 9
+  //           on the swng stream (which has none — pos 1 already cleared it).
+  //  pos 25 — an UNRATED 9: completes pos 24's pairing on the swng stream; WHS untouched.
+  //  pos 26 — one more RATED 18, for good measure.
+  const crossWindowLines: GolferRoundLine[] = [
+    line({ roundId: roundId("cw0"), holes: 9, par: 36, ags: 40, differential: 10.0 }),
+    line({ roundId: roundId("cw1"), holes: 9, par: 36, ags: 42 }),
+    ...Array.from({ length: 22 }, (_, i) => line({ roundId: roundId(`cw${i + 2}`), holes: 18, par: 72, ags: 90, differential: 9.0 + i * 0.3 })),
+    line({ roundId: roundId("cw24"), holes: 9, par: 36, ags: 44, differential: 7.5 }),
+    line({ roundId: roundId("cw25"), holes: 9, par: 36, ags: 41 }),
+    line({ roundId: roundId("cw26"), holes: 18, par: 72, ags: 90, differential: 16.0 }),
+  ];
+
+  it("fixture sanity: at least 25 lines, mixing 9s/18s and rated/unrated", () => {
+    expect(crossWindowLines.length).toBeGreaterThanOrEqual(25);
+    expect(crossWindowLines.some((l) => l.holes === 9 && l.differential === undefined)).toBe(true);
+    expect(crossWindowLines.some((l) => l.holes === 9 && l.differential !== undefined)).toBe(true);
+  });
+
+  it("the WHS and swng streams pair pos-0's unpaired 9 on DIFFERENT rounds — proof the two streams run independently", () => {
+    const history = golferMetrics(crossWindowLines).indexHistory;
+    // swng's combined list is [pair(cw0,cw1)=16.0, cw2's 9.0, cw3's 9.3] — 3 entries first exist
+    // at position 3, bootstrapping swngIndex there (positions 0-2 are all below the 3-entry floor).
+    expect(history[0]!.swngIndex).toBeUndefined();
+    expect(history[1]!.swngIndex).toBeUndefined();
+    expect(history[2]!.swngIndex).toBeUndefined();
+    expect(history[3]!.swngIndex).toBeDefined();
+    // WHS never sees cw0's 9 paired until cw24 — before that, WHS's combined list is only the 22
+    // rated 18s at positions 2..23 (cw0 stays pending the entire time).
+    expect(history[23]!.whsIndex).toBeDefined(); // bootstrapped from the rated-18 run alone
+    const beforePairing = history[23]!.whsIndex;
+    expect(history[24]!.whsIndex).not.toEqual(beforePairing); // cw0's pairing landed HERE, 24 rounds later
+  });
+
+  it("indexHistory matches the independent per-prefix oracle exactly, round by round", () => {
+    const viaPass = golferMetrics(crossWindowLines).indexHistory;
+    const viaPrefix = crossWindowLines.map((l, k) => {
+      const d = detailsOfForTest(crossWindowLines.slice(0, k + 1));
+      return {
+        roundId: l.roundId,
+        ...(d.swng !== undefined ? { swngIndex: d.swng.value } : {}),
+        ...(d.whs !== undefined ? { whsIndex: d.whs.value } : {}),
+      };
+    });
+    expect(viaPass).toEqual(viaPrefix);
+  });
+
+  it("the headline whsIndex/swngIndex equals indexHistory's own last point", () => {
+    const m = golferMetrics(crossWindowLines);
+    const last = m.indexHistory.at(-1);
+    expect(m.swngIndex?.value).toBe(last?.swngIndex);
+    expect(m.whsIndex?.value).toBe(last?.whsIndex);
   });
 });
 

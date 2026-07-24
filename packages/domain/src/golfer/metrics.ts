@@ -1,5 +1,5 @@
 import type { IndexComputation } from "../handicap/whs.js";
-import { combineNineHoleDifferentials, computeIndexDetail, swngIndex } from "../handicap/whs.js";
+import { combineNineHoleDifferentials, computeIndexDetail, createNineHoleCombineState, feedNineHoleCombine, swngIndex } from "../handicap/whs.js";
 import type { RoundId } from "../ids.js";
 import { roundHalfUp } from "../scoring/strokes.js";
 import type { GolferBests, Milestone } from "./analytics.js";
@@ -97,21 +97,43 @@ const typicalEighteenOf = (lines: readonly GolferRoundLine[]): ScoringShape => {
   };
 };
 
-export const golferMetrics = (lines: readonly GolferRoundLine[]): GolferMetrics => {
-  const { whs, swng } = detailsOf(lines);
-  const indexHistory: readonly IndexPoint[] = lines.map((line, k) => {
-    const d = detailsOf(lines.slice(0, k + 1));
+// "Your index over time": one point per round, oldest → newest, each the index recomputed from
+// every line up to and including it — a SINGLE FORWARD PASS, not detailsOf's whole-prefix fold
+// re-run per round (that was O(N²) on GET /me/record and GET /golfers/{id}; perf spec §3). The
+// index only ever depends on the last 20 COMBINED differentials (WHS Rule 5.2a — computeIndexDetail
+// already slices to `.slice(-20)`), so it's enough to keep a running combined-differential list per
+// stream and read computeIndexDetail off it at each round — O(N) total, and correct across 9-hole
+// pairing (a pending unpaired 9 rides the stream state forward however many rounds it takes to find
+// its partner; a naive "last N lines" window would be wrong here — see whs.ts's own comment on why).
+// Two INDEPENDENT streams, mirroring detailsOf's two filters exactly: the WHS stream is fed only
+// rated lines (differential !== undefined); the swng stream is fed every ags-bearing line
+// (differential ?? ags − par) — so the two streams can and do pair 9s differently (an unrated 9 can
+// complete a swng pair on a round where the WHS stream's own pending 9 is untouched). Both streams
+// run feedNineHoleCombine (whs.ts) — the SAME pairing rule combineNineHoleDifferentials itself
+// folds — never a re-derived or approximated copy of it.
+const indexHistoryOf = (lines: readonly GolferRoundLine[]): readonly IndexPoint[] => {
+  const whsStream = createNineHoleCombineState();
+  const swngStream = createNineHoleCombineState();
+  return lines.map((line) => {
+    if (line.differential !== undefined) feedNineHoleCombine(whsStream, { differential: line.differential, holes: line.holes });
+    if (line.ags !== undefined) feedNineHoleCombine(swngStream, { differential: line.differential ?? line.ags - line.par, holes: line.holes });
+    const whs = computeIndexDetail(whsStream.combined);
+    const swng = computeIndexDetail(swngStream.combined);
     return {
       roundId: line.roundId,
-      ...(d.swng !== undefined ? { swngIndex: d.swng.value } : {}),
-      ...(d.whs !== undefined ? { whsIndex: d.whs.value } : {}),
+      ...(swng !== undefined ? { swngIndex: swng.value } : {}),
+      ...(whs !== undefined ? { whsIndex: whs.value } : {}),
     };
   });
+};
+
+export const golferMetrics = (lines: readonly GolferRoundLine[]): GolferMetrics => {
+  const { whs, swng } = detailsOf(lines);
   return {
     ...(whs !== undefined ? { whsIndex: { value: whs.value, differentialsUsed: whs.differentialsUsed } } : {}),
     ...(swng !== undefined ? { swngIndex: { value: swng.value, differentialsUsed: swng.differentialsUsed } } : {}),
     typicalEighteen: typicalEighteenOf(lines),
-    indexHistory,
+    indexHistory: indexHistoryOf(lines),
     bests: bestsOf(lines),
     milestones: milestonesOf(lines),
   };

@@ -1,8 +1,10 @@
 import type { APIGatewayProxyResultV2, APIGatewayProxyWebsocketEventV2 } from "aws-lambda";
 import { buildApp } from "../compositionRoot.js";
+import type { App } from "../compositionRoot.js";
 
-// Composition happens ONCE at module scope (cold start) — see entries/http.ts.
-const app = buildApp(process.env);
+// Composition happens ONCE per cold start — see entries/http.ts's own doc comment (buildApp
+// is async since Task 4; a cached Promise replaces the old synchronous module-scope call).
+let appPromise: Promise<App> | undefined;
 
 // $connect: the WS handshake carries a round token as a query param (`?token=`), not a
 // header — API Gateway's WebSocket protocol has no room for one at connect time. Either
@@ -20,6 +22,9 @@ const app = buildApp(process.env);
 // connection's write-rejection is therefore structural (no code path exists), not a runtime
 // check this handler performs.
 export const handler = async (event: APIGatewayProxyWebsocketEventV2): Promise<APIGatewayProxyResultV2> => {
+  appPromise ??= buildApp(process.env);
+  const app = await appPromise;
+
   const token = event.queryStringParameters?.["token"];
   const claims = token ? app.tokens.verify(token) : undefined;
   // Crew membership (invited in, accountable out): a crew-invite token verifies fine — it's a

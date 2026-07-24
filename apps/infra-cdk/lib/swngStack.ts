@@ -398,13 +398,15 @@ export class SwngStack extends Stack {
 
     // --- Participant-token signing secret ---------------------------------------------
 
-    // Beta-grade: a CDK-generated secret whose plaintext is read at synth time via
-    // `secretValue.unsafeUnwrap()` and baked directly into the Lambdas' environment. That
-    // trades secret rotation (a redeploy is required to change it) for zero runtime
-    // Secrets Manager calls / IAM plumbing — acceptable for a beta stack with no real
-    // participant data at stake. M9 hardens this into a runtime lookup (SDK call or Lambda
-    // extension) so the plaintext never lands in a CloudFormation template or Lambda
-    // console view.
+    // Prod-readiness hardening Arc A, Task 4: this used to be a CDK-generated secret whose
+    // plaintext was read at SYNTH TIME via `secretValue.unsafeUnwrap()` and baked directly
+    // into the Lambdas' environment — readable by anyone with only
+    // lambda:GetFunctionConfiguration, with no audit trail and no rotation without a
+    // redeploy. The secret VALUE and its generation are UNCHANGED (same
+    // `swng-token-secret-<stage>` secret, same live tokens keep verifying); only DELIVERY
+    // changes — the ARN rides in the env now, and each app-building function fetches the
+    // value itself at runtime (below, `grantRead`), narrowing the read population to an
+    // audited secretsmanager:GetSecretValue grant and enabling rotation with no redeploy.
     const tokenSecret = new Secret(this, "TokenSecret", {
       secretName: `swng-token-secret-${stage}`,
       generateSecretString: { passwordLength: 40, excludePunctuation: true },
@@ -422,7 +424,9 @@ export class SwngStack extends Stack {
     const sharedEnv = {
       TABLE_ROUNDS: roundsTable.tableName,
       TABLE_CONNECTIONS: connectionsTable.tableName,
-      TOKEN_SECRET: tokenSecret.secretValue.unsafeUnwrap(),
+      // Task 4: the ARN only — never the value (compositionRoot.ts's buildApp fetches it at
+      // runtime via @swng/adapters-secretsmanager, cached once per cold start).
+      TOKEN_SECRET_ARN: tokenSecret.secretArn,
     };
 
     const makeFunction = (name: string, entryName: string): NodejsFunction =>
@@ -465,9 +469,10 @@ export class SwngStack extends Stack {
     // ProjectorFunction (the snapshots table's stream, unfiltered — snapshot realignment Task
     // 1) and RebuildFunction (manual invoke only — no event source) are their own minimal
     // NodejsFunctions, not built via makeFunction above: neither needs TABLE_CONNECTIONS,
-    // TOKEN_SECRET, or WS_ENDPOINT (they never broadcast or touch a participant token), so
-    // giving them `sharedEnv` would leak table names/secrets into a Lambda console that has
-    // no reason to see them.
+    // TOKEN_SECRET_ARN, or WS_ENDPOINT (they never broadcast or touch a participant token), so
+    // giving them `sharedEnv` would leak table names/the secret's ARN into a Lambda console
+    // that has no reason to see them (and, per Task 4's grants below, neither role can read
+    // the secret's value even if it did).
     const projectorFn = new NodejsFunction(this, "ProjectorFunction", {
       entry: entryPath("projector"),
       handler: "handler",
@@ -646,6 +651,13 @@ export class SwngStack extends Stack {
     // Only `http` broadcasts (adapters-apigateway's createApiGatewayBroadcast, wired in
     // compositionRoot.ts) — wsConnect/wsDisconnect never call PostToConnection.
     webSocketApi.grantManageConnections(httpFn);
+    // Task 4: every function that builds the whole app (buildApp, compositionRoot.ts) needs
+    // secretsmanager:GetSecretValue on this ONE secret — httpFn/wsConnectFn/wsDisconnectFn,
+    // the same three functions makeFunction constructed above (never projectorFn/rebuildFn,
+    // which don't call buildApp and never carry TOKEN_SECRET_ARN in their env at all).
+    for (const fn of [httpFn, wsConnectFn, wsDisconnectFn]) {
+      tokenSecret.grantRead(fn);
+    }
 
     // M7 Task 4: the projections table's readers/writers. projectorFn's stream READ access
     // (GetRecords/DescribeStream/etc. on the snapshots table's stream, snapshot realignment

@@ -14,6 +14,10 @@ catalog:
   "@aws-sdk/lib-dynamodb": ^3.700.0
   "@aws-sdk/client-apigatewaymanagementapi": ^3.700.0
   "@aws-sdk/util-dynamodb": ^3.700.0
+  # Prod-readiness hardening Arc A, Task 4: the token-signing secret's runtime Secrets
+  # Manager fetch (@swng/adapters-secretsmanager) — same version line as the other AWS SDK v3
+  # clients above.
+  "@aws-sdk/client-secrets-manager": ^3.700.0
   "aws-jwt-verify": ^5.2.1
   # M7 Task 8: apps/web/e2e-only (never in a src/ layer — eslint's AWS-in-adapters-only rule
   # doesn't even reach apps/web/e2e/**) — throwaway-user JWT minting (identityRecord.spec.ts)

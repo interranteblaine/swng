@@ -2,8 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, DynamoDBStreamEvent } from "aws-lambda";
 import { deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
 import type { RoundArchive, RoundEvent } from "@swng/domain";
-import { createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, projectArchive, putAndBindGolfer } from "@swng/application";
+import { createFixedClock, createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, projectArchive, putAndBindGolfer } from "@swng/application";
 import { buildApp, buildProjector, buildRebuild, createConsoleLogger, createProjectorHandler, createRandomIds } from "./compositionRoot.js";
+import { createHmacTokenIssuer } from "./auth/hmacTokenIssuer.js";
+
+// Every buildApp call in this file injects this fake in place of the real Secrets Manager
+// fetch (Task 4: buildApp now resolves TOKEN_SECRET_ARN via an injectable readSecret seam) —
+// no test here needs AWS credentials or a network call. "resolved-secret" is deliberately
+// NOT the string "test-secret" a stray TOKEN_SECRET-reading regression would produce, so a
+// test asserting on signed-token behavior can tell the two paths apart.
+const fakeReadSecret = async (_arn: string): Promise<string> => "resolved-secret";
 
 // Prod-readiness hardening Arc A, Task 2: a join code is a capability (holding one lets someone
 // onto a round and record scores), so it must come from a CSPRNG, not Math.random's predictable
@@ -89,20 +97,20 @@ describe("buildApp — TABLE_CORE is optional (wsConnect/wsDisconnect never set 
   const baseEnv = {
     TABLE_ROUNDS: "rounds-table",
     TABLE_CONNECTIONS: "connections-table",
-    TOKEN_SECRET: "test-secret",
+    TOKEN_SECRET_ARN: "arn:aws:secretsmanager:us-east-1:111122223333:secret:swng-token-secret-test",
     WS_ENDPOINT: "https://example.execute-api.us-east-1.amazonaws.com/beta",
   };
 
-  it("does not throw when TABLE_CORE is absent — wsConnect/wsDisconnect's real env shape", () => {
-    expect(() => buildApp(baseEnv)).not.toThrow();
+  it("does not throw when TABLE_CORE is absent — wsConnect/wsDisconnect's real env shape", async () => {
+    await expect(buildApp(baseEnv, { readSecret: fakeReadSecret })).resolves.toBeDefined();
   });
 
-  it("does not throw when TABLE_CORE IS present — httpFn's real env shape", () => {
-    expect(() => buildApp({ ...baseEnv, TABLE_CORE: "core-table" })).not.toThrow();
+  it("does not throw when TABLE_CORE IS present — httpFn's real env shape", async () => {
+    await expect(buildApp({ ...baseEnv, TABLE_CORE: "core-table" }, { readSecret: fakeReadSecret })).resolves.toBeDefined();
   });
 
   it("a dispatched course route 500s gracefully (not a process crash) when TABLE_CORE was absent at cold start", async () => {
-    const app = buildApp(baseEnv);
+    const app = await buildApp(baseEnv, { readSecret: fakeReadSecret });
     // GET /courses/{courseId} is auth "none" (course-cards spec §4), so it reaches the handler
     // — and the unavailable card store — with no Cognito config required; the write routes are
     // "golfer"-gated now and would 401 before the store, which wouldn't exercise this path.
@@ -141,16 +149,18 @@ describe("buildApp — USER_POOL_ID/USER_POOL_CLIENT_ID are optional (wsConnect/
   const baseEnv = {
     TABLE_ROUNDS: "rounds-table",
     TABLE_CONNECTIONS: "connections-table",
-    TOKEN_SECRET: "test-secret",
+    TOKEN_SECRET_ARN: "arn:aws:secretsmanager:us-east-1:111122223333:secret:swng-token-secret-test",
     WS_ENDPOINT: "https://example.execute-api.us-east-1.amazonaws.com/beta",
   };
 
-  it("does not throw when USER_POOL_ID/USER_POOL_CLIENT_ID are absent — wsConnect/wsDisconnect's real env shape", () => {
-    expect(() => buildApp(baseEnv)).not.toThrow();
+  it("does not throw when USER_POOL_ID/USER_POOL_CLIENT_ID are absent — wsConnect/wsDisconnect's real env shape", async () => {
+    await expect(buildApp(baseEnv, { readSecret: fakeReadSecret })).resolves.toBeDefined();
   });
 
-  it("does not throw when USER_POOL_ID/USER_POOL_CLIENT_ID ARE present — httpFn's real env shape", () => {
-    expect(() => buildApp({ ...baseEnv, USER_POOL_ID: "us-east-1_Test123", USER_POOL_CLIENT_ID: "test-client-id" })).not.toThrow();
+  it("does not throw when USER_POOL_ID/USER_POOL_CLIENT_ID ARE present — httpFn's real env shape", async () => {
+    await expect(
+      buildApp({ ...baseEnv, USER_POOL_ID: "us-east-1_Test123", USER_POOL_CLIENT_ID: "test-client-id" }, { readSecret: fakeReadSecret }),
+    ).resolves.toBeDefined();
   });
 });
 
@@ -163,16 +173,16 @@ describe("buildApp — TABLE_PROJECTIONS is optional (wsConnect/wsDisconnect nev
   const baseEnv = {
     TABLE_ROUNDS: "rounds-table",
     TABLE_CONNECTIONS: "connections-table",
-    TOKEN_SECRET: "test-secret",
+    TOKEN_SECRET_ARN: "arn:aws:secretsmanager:us-east-1:111122223333:secret:swng-token-secret-test",
     WS_ENDPOINT: "https://example.execute-api.us-east-1.amazonaws.com/beta",
   };
 
-  it("does not throw when TABLE_PROJECTIONS is absent — wsConnect/wsDisconnect's real env shape", () => {
-    expect(() => buildApp(baseEnv)).not.toThrow();
+  it("does not throw when TABLE_PROJECTIONS is absent — wsConnect/wsDisconnect's real env shape", async () => {
+    await expect(buildApp(baseEnv, { readSecret: fakeReadSecret })).resolves.toBeDefined();
   });
 
-  it("does not throw when TABLE_PROJECTIONS IS present — httpFn's real env shape", () => {
-    expect(() => buildApp({ ...baseEnv, TABLE_PROJECTIONS: "projections-table" })).not.toThrow();
+  it("does not throw when TABLE_PROJECTIONS IS present — httpFn's real env shape", async () => {
+    await expect(buildApp({ ...baseEnv, TABLE_PROJECTIONS: "projections-table" }, { readSecret: fakeReadSecret })).resolves.toBeDefined();
   });
 });
 
@@ -185,16 +195,69 @@ describe("buildApp — TABLE_SNAPSHOTS is optional (wsConnect/wsDisconnect never
   const baseEnv = {
     TABLE_ROUNDS: "rounds-table",
     TABLE_CONNECTIONS: "connections-table",
-    TOKEN_SECRET: "test-secret",
+    TOKEN_SECRET_ARN: "arn:aws:secretsmanager:us-east-1:111122223333:secret:swng-token-secret-test",
     WS_ENDPOINT: "https://example.execute-api.us-east-1.amazonaws.com/beta",
   };
 
-  it("does not throw when TABLE_SNAPSHOTS is absent — wsConnect/wsDisconnect's real env shape", () => {
-    expect(() => buildApp(baseEnv)).not.toThrow();
+  it("does not throw when TABLE_SNAPSHOTS is absent — wsConnect/wsDisconnect's real env shape", async () => {
+    await expect(buildApp(baseEnv, { readSecret: fakeReadSecret })).resolves.toBeDefined();
   });
 
-  it("does not throw when TABLE_SNAPSHOTS IS present — httpFn's real env shape", () => {
-    expect(() => buildApp({ ...baseEnv, TABLE_SNAPSHOTS: "snapshots-table" })).not.toThrow();
+  it("does not throw when TABLE_SNAPSHOTS IS present — httpFn's real env shape", async () => {
+    await expect(buildApp({ ...baseEnv, TABLE_SNAPSHOTS: "snapshots-table" }, { readSecret: fakeReadSecret })).resolves.toBeDefined();
+  });
+});
+
+// Prod-readiness hardening Arc A, Task 4: the token-signing secret moves from a plaintext
+// TOKEN_SECRET env var to a runtime Secrets Manager fetch by ARN — buildApp reads
+// TOKEN_SECRET_ARN (never TOKEN_SECRET again) and resolves it through an injectable
+// `readSecret` seam (default = @swng/adapters-secretsmanager's real SDK fetch) so this suite
+// never touches AWS.
+describe("buildApp — resolves TOKEN_SECRET_ARN via the injected readSecret seam (Task 4)", () => {
+  const baseEnv = {
+    TABLE_ROUNDS: "rounds-table",
+    TABLE_CONNECTIONS: "connections-table",
+    WS_ENDPOINT: "https://example.execute-api.us-east-1.amazonaws.com/beta",
+  };
+  const secretArn = "arn:aws:secretsmanager:us-east-1:111122223333:secret:swng-token-secret-beta";
+
+  it("builds the token issuer from the resolved secret, not a plaintext env var", async () => {
+    const readSecret = vi.fn(async (arn: string): Promise<string> => {
+      expect(arn).toBe(secretArn);
+      return "resolved-secret";
+    });
+
+    const app = await buildApp({ ...baseEnv, TOKEN_SECRET_ARN: secretArn }, { readSecret });
+
+    // The injected reader was actually called, exactly once, with the ARN — not skipped, not
+    // called with something else.
+    expect(readSecret).toHaveBeenCalledOnce();
+    expect(readSecret).toHaveBeenCalledWith(secretArn);
+
+    // Prove the RESOLVED value is what actually signs (not some other secret, and not
+    // TOKEN_SECRET, which was never even in the env passed above): a token minted by
+    // app.tokens verifies under a standalone issuer keyed by "resolved-secret" — the same
+    // "build a second issuer off the same secret" idiom wsConnect.test.ts already uses.
+    const claims = { scope: "participant" as const, roundId: roundId("r-1"), golferId: golferId("g-1") };
+    const token = app.tokens.issue(claims);
+    const standaloneIssuer = createHmacTokenIssuer({ secret: "resolved-secret", clock: createFixedClock(0) });
+    expect(standaloneIssuer.verify(token)).toEqual(claims);
+
+    // And it must NOT verify under any other secret — proving the resolved value, not some
+    // fixed/default string, is what actually signed it.
+    const wrongIssuer = createHmacTokenIssuer({ secret: "some-other-secret", clock: createFixedClock(0) });
+    expect(wrongIssuer.verify(token)).toBeUndefined();
+  });
+
+  it("throws a clear error when TOKEN_SECRET_ARN is missing", async () => {
+    await expect(buildApp(baseEnv, { readSecret: fakeReadSecret })).rejects.toThrow(/TOKEN_SECRET_ARN/);
+  });
+
+  // The plaintext delivery path is GONE, not just deprioritized: a legacy TOKEN_SECRET env
+  // var (with no ARN) must not silently satisfy buildApp — it has to fail the same way an
+  // env missing the var entirely does.
+  it("a TOKEN_SECRET env var alone (no ARN) no longer satisfies buildApp — the plaintext path is gone", async () => {
+    await expect(buildApp({ ...baseEnv, TOKEN_SECRET: "plaintext-secret" }, { readSecret: fakeReadSecret })).rejects.toThrow(/TOKEN_SECRET_ARN/);
   });
 });
 

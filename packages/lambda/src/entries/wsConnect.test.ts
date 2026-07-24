@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { APIGatewayProxyStructuredResultV2, APIGatewayProxyWebsocketEventV2 } from "aws-lambda";
 import { crewId, golferId } from "@swng/domain";
 import { createFixedClock } from "@swng/application";
@@ -11,29 +11,39 @@ import { createHmacTokenIssuer } from "../auth/hmacTokenIssuer.js";
 // through to `claims.roundId` (which the crew-invite variant doesn't even have — a TS
 // compile-time guarantee this test proves holds at runtime too).
 //
-// wsConnect.ts builds its whole `app` (compositionRoot's buildApp) ONCE at module scope (its
-// own doc comment: "Composition happens ONCE at module scope (cold start)") — env vars must be
-// set BEFORE the dynamic import below runs. buildApp never makes a network call at construction
-// time (compositionRoot.test.ts's own "TABLE_CORE/TABLE_PROJECTIONS/... are optional" suites
-// prove this directly, calling buildApp with a plain env object and asserting it doesn't throw)
-// — only an ACTUAL registry write would, and this suite never reaches one: every case here is
-// a REJECTION, returned before `app.registry.register` is ever called.
-const TOKEN_SECRET = "ws-connect-test-secret";
+// wsConnect.ts builds its whole `app` (compositionRoot's buildApp) lazily, on the handler's
+// FIRST invocation, cached for the module's lifetime (its own doc comment) — env vars must be
+// set BEFORE the dynamic import below runs, same as before Task 4. Task 4 made buildApp async:
+// it now awaits the token-signing secret from Secrets Manager, so this suite mocks
+// @swng/adapters-secretsmanager's createSecretsManagerReader (below) rather than letting
+// wsConnect's own default reader make a real AWS call — every case here is still a REJECTION,
+// returned before `app.registry.register` (the one call that would need a real DynamoDB) is
+// ever reached.
+const TOKEN_SECRET = vi.hoisted(() => "ws-connect-test-secret");
+
+// Hoisted (vi.mock factories run before this file's own top-level code, Vitest's own
+// documented ordering) — wsConnect.ts's lazy buildApp() call uses the REAL default reader
+// (no injected seam at the entry level, by design: entries/http.ts's own doc comment), so the
+// module it comes from is mocked here instead, the same "swap the technology, not the port"
+// idea @swng/adapters-secretsmanager itself exists for.
+vi.mock("@swng/adapters-secretsmanager", () => ({
+  createSecretsManagerReader: () => async (_arn: string): Promise<string> => TOKEN_SECRET,
+}));
 
 let handler: (event: APIGatewayProxyWebsocketEventV2) => Promise<APIGatewayProxyStructuredResultV2>;
 
 beforeAll(async () => {
   process.env["TABLE_ROUNDS"] = "rounds-table";
   process.env["TABLE_CONNECTIONS"] = "connections-table";
-  process.env["TOKEN_SECRET"] = TOKEN_SECRET;
+  process.env["TOKEN_SECRET_ARN"] = "arn:aws:secretsmanager:us-east-1:111122223333:secret:swng-token-secret-test";
   process.env["WS_ENDPOINT"] = "https://example.execute-api.us-east-1.amazonaws.com/test";
   const mod = await import("./wsConnect.js");
   handler = mod.handler as typeof handler;
 });
 
 // The SAME HMAC mechanism wsConnect's own app.tokens uses (createHmacTokenIssuer, keyed by the
-// SAME TOKEN_SECRET) — a standalone instance, since wsConnect.ts exports no seam to reach its
-// own app.tokens directly.
+// SAME TOKEN_SECRET the mocked reader above resolves) — a standalone instance, since
+// wsConnect.ts exports no seam to reach its own app.tokens directly.
 const tokens = createHmacTokenIssuer({ secret: TOKEN_SECRET, clock: createFixedClock(1_000) });
 
 const makeEvent = (token?: string): APIGatewayProxyWebsocketEventV2 =>

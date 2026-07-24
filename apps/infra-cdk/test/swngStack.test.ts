@@ -8,7 +8,9 @@ import { ANON_THROTTLED_ROUTES, HTTP_ROUTES, SwngStack } from "../lib/swngStack.
 // blocks keeps the run fast without weakening any single assertion.
 const template = Template.fromStack(new SwngStack(new App(), "swng-beta", { stage: "beta" }));
 
-const ENV_KEYS = ["TABLE_ROUNDS", "TABLE_CONNECTIONS", "TOKEN_SECRET", "WS_ENDPOINT"];
+// Task 4: TOKEN_SECRET_ARN, not TOKEN_SECRET — the secret's ARN rides in the env now, never
+// its plaintext value.
+const ENV_KEYS = ["TABLE_ROUNDS", "TABLE_CONNECTIONS", "TOKEN_SECRET_ARN", "WS_ENDPOINT"];
 
 // Resolves a resource's logical id dynamically (never hardcode one of CDK's own hashed ids,
 // same idiom as the core/rounds-table logical-id pins above) — shared by the identity and
@@ -239,6 +241,29 @@ describe("SwngStack", () => {
         for (const key of ENV_KEYS) {
           expect(Object.keys(variables)).toContain(key);
         }
+      }
+    });
+
+    // Task 4: the plaintext delivery path is GONE from the template, not just deprioritized —
+    // TOKEN_SECRET_ARN is a plain CloudFormation Ref to the Secret resource (resolved at
+    // deploy time to the secret's ARN string, never its value), and no function's env carries
+    // a "TOKEN_SECRET" key — plaintext OR a `{{resolve:secretsmanager:...}}` dynamic
+    // reference — anywhere in the synthesized template at all.
+    it("http/wsConnect/wsDisconnect's TOKEN_SECRET_ARN is a Ref to the secret, never a plaintext value or a dynamic reference; TOKEN_SECRET (the value key) is gone", () => {
+      const secrets = template.findResources("AWS::SecretsManager::Secret");
+      const secretLogicalId = Object.keys(secrets).find((id) => id.startsWith("TokenSecret"));
+      expect(secretLogicalId).toBeDefined();
+
+      const entries = originalFunctions();
+      expect(entries.length).toBe(3);
+      for (const [, fn] of entries) {
+        const variables = fn.Properties.Environment.Variables as Record<string, unknown>;
+        expect(variables).not.toHaveProperty("TOKEN_SECRET");
+        expect(variables["TOKEN_SECRET_ARN"]).toEqual({ Ref: secretLogicalId });
+        // A dynamic reference (the OTHER way CDK can resolve a secret into a string) never
+        // appears anywhere in this key's value — Ref is a template-time pointer, not the
+        // secret's value baked in at synth.
+        expect(JSON.stringify(variables["TOKEN_SECRET_ARN"])).not.toContain("resolve:secretsmanager");
       }
     });
 
@@ -519,6 +544,59 @@ describe("SwngStack", () => {
       expect(rebuildPolicies.length).toBeGreaterThan(0);
       for (const policy of rebuildPolicies) {
         expect(JSON.stringify(policy.Properties.PolicyDocument)).not.toContain(roundsTableLogicalId);
+      }
+    });
+
+    // Task 4: httpFn/wsConnectFn/wsDisconnectFn are the only three functions that call
+    // buildApp (compositionRoot.ts) — grantRead(fn) narrows secretsmanager:GetSecretValue to
+    // exactly their roles, same resolve-the-real-logical-id idiom as the table tests above.
+    it("httpFn/wsConnectFn/wsDisconnectFn each have a secretsmanager:GetSecretValue policy statement on the token secret", () => {
+      const secrets = template.findResources("AWS::SecretsManager::Secret");
+      const secretLogicalId = Object.keys(secrets).find((id) => id.startsWith("TokenSecret"));
+      expect(secretLogicalId).toBeDefined();
+
+      const functions = template.findResources("AWS::Lambda::Function");
+      for (const prefix of ["HttpFunction", "WsConnectFunction", "WsDisconnectFunction"]) {
+        const fnId = Object.keys(functions).find((id) => id.startsWith(prefix));
+        expect(fnId, `${prefix} not found`).toBeDefined();
+        const roleRef = functions[fnId!]!.Properties.Role as { "Fn::GetAtt": [string, string] };
+        const roleLogicalId = roleRef["Fn::GetAtt"][0];
+
+        const policies = template.findResources("AWS::IAM::Policy");
+        const rolePolicies = Object.values(policies).filter((policy) => JSON.stringify(policy.Properties.Roles).includes(roleLogicalId));
+        expect(rolePolicies.length, `${prefix} has no policies at all`).toBeGreaterThan(0);
+
+        let found = false;
+        for (const policy of rolePolicies) {
+          const statements = (policy.Properties.PolicyDocument.Statement ?? []) as Array<{ Action?: string | string[]; Resource?: unknown }>;
+          for (const statement of statements) {
+            const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+            if (actions.includes("secretsmanager:GetSecretValue") && JSON.stringify(statement.Resource).includes(secretLogicalId!)) {
+              found = true;
+            }
+          }
+        }
+        expect(found, `${prefix}'s role has no secretsmanager:GetSecretValue statement on the token secret`).toBe(true);
+      }
+    });
+
+    // projectorFn/rebuildFn never call buildApp and never carry TOKEN_SECRET_ARN in their env
+    // (swngStack.ts's own comment on their minimal NodejsFunctions above) — this asserts the
+    // grant is absent too, not just unread, the same "the grant is gone, not just the env var"
+    // shape as the rounds-table test just above.
+    it("projectorFn/rebuildFn carry no secretsmanager:GetSecretValue policy at all", () => {
+      const functions = template.findResources("AWS::Lambda::Function");
+      for (const prefix of ["ProjectorFunction", "RebuildFunction"]) {
+        const fnId = Object.keys(functions).find((id) => id.startsWith(prefix));
+        expect(fnId, `${prefix} not found`).toBeDefined();
+        const roleRef = functions[fnId!]!.Properties.Role as { "Fn::GetAtt": [string, string] };
+        const roleLogicalId = roleRef["Fn::GetAtt"][0];
+
+        const policies = template.findResources("AWS::IAM::Policy");
+        const rolePolicies = Object.values(policies).filter((policy) => JSON.stringify(policy.Properties.Roles).includes(roleLogicalId));
+        for (const policy of rolePolicies) {
+          expect(JSON.stringify(policy.Properties.PolicyDocument)).not.toContain("secretsmanager:GetSecretValue");
+        }
       }
     });
   });

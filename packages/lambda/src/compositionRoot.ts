@@ -71,6 +71,7 @@ import {
   createDynamoSnapshotStore,
   parseSnapshotStreamImage,
 } from "@swng/adapters-dynamodb";
+import { createSecretsManagerReader } from "@swng/adapters-secretsmanager";
 import { createHmacTokenIssuer } from "./auth/hmacTokenIssuer.js";
 import { createDispatcher } from "./http/dispatch.js";
 import { buildRoutes } from "./http/routes.js";
@@ -214,14 +215,21 @@ export interface App {
   readonly tokens: TokenIssuer;
 }
 
-// Built ONCE at module scope by each entry (cold start), never re-instantiated per
-// invocation (conventions §3) — every dependency this Lambda deployment needs, wired from
-// env: TABLE_ROUNDS, TABLE_CONNECTIONS, TOKEN_SECRET, WS_ENDPOINT (apps/infra-cdk, M3 Task 5),
-// plus TABLE_CORE (M6 Task 4), USER_POOL_ID/USER_POOL_CLIENT_ID, and TABLE_PROJECTIONS (M7
-// Task 4/5), all OPTIONAL here — only httpFn's environment carries them (see
-// unavailableCardStore/unavailableVerifier/unavailableGolferStore/
+// Built ONCE per cold start by each entry (each entry's own lazily-initialized, cached
+// Promise — entries/http.ts's own doc comment), never re-instantiated per invocation
+// (conventions §3) — every dependency this Lambda deployment needs, wired from env:
+// TABLE_ROUNDS, TABLE_CONNECTIONS, TOKEN_SECRET_ARN, WS_ENDPOINT (apps/infra-cdk, M3 Task 5;
+// TOKEN_SECRET_ARN since prod-readiness hardening Arc A Task 4 — the plaintext secret value
+// used to ride here directly), plus TABLE_CORE (M6 Task 4), USER_POOL_ID/USER_POOL_CLIENT_ID,
+// and TABLE_PROJECTIONS (M7 Task 4/5), all OPTIONAL here — only httpFn's environment carries
+// them (see unavailableCardStore/unavailableVerifier/unavailableGolferStore/
 // unavailableProjectionStore above / swngStack.ts).
-export const buildApp = (env: NodeJS.ProcessEnv): App => {
+//
+// Async since Task 4: the token-signing secret is now a runtime Secrets Manager fetch, not a
+// plaintext env var — `deps.readSecret` is an injectable seam (default = the real SDK fetch,
+// @swng/adapters-secretsmanager's createSecretsManagerReader) so compositionRoot.test.ts can
+// drive this with a fake, no AWS calls or credentials required.
+export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn: string) => Promise<string> } = {}): Promise<App> => {
   const tableRounds = requireEnv(env, "TABLE_ROUNDS");
   const tableConnections = requireEnv(env, "TABLE_CONNECTIONS");
   const tableCore = env.TABLE_CORE; // optional — see unavailableCardStore above
@@ -229,12 +237,17 @@ export const buildApp = (env: NodeJS.ProcessEnv): App => {
   const tableSnapshots = env.TABLE_SNAPSHOTS; // optional — see unavailableSnapshotStore above
   const userPoolId = env.USER_POOL_ID; // optional — see unavailableVerifier above
   const userPoolClientId = env.USER_POOL_CLIENT_ID; // optional, same reason
-  const tokenSecret = requireEnv(env, "TOKEN_SECRET");
+  const tokenSecretArn = requireEnv(env, "TOKEN_SECRET_ARN");
   const wsEndpoint = requireEnv(env, "WS_ENDPOINT");
 
   const clock = createSystemClock();
   const ids = createRandomIds();
   const logger = createConsoleLogger();
+
+  // Resolved once per cold start (this function itself runs at most once — each entry caches
+  // its buildApp Promise), fetched AFTER every other requireEnv check above so a missing
+  // table/endpoint var still fails fast, synchronously, without ever touching the network.
+  const tokenSecret = await (deps.readSecret ?? createSecretsManagerReader())(tokenSecretArn);
 
   const documentClient = createDocumentClient();
   // snapshotsTableName lets finalizeRound's append commit round-finalized + the settled snapshot

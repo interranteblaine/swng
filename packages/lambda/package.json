@@ -25,6 +25,7 @@
     "@swng/adapters-apigateway": "workspace:*",
     "@swng/adapters-cognito": "workspace:*",
     "@swng/adapters-powertools": "workspace:*",
+    "@swng/adapters-secretsmanager": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

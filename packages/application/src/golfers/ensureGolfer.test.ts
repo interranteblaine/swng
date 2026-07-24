@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { placeholderName } from "@swng/domain";
+import type { Golfer } from "@swng/domain";
+import { golferId, placeholderName } from "@swng/domain";
+import { ApplicationError } from "../errors.js";
+import type { GolferStore } from "../ports/golferStore.js";
 import { createCapturingMetrics, createInMemoryGolferStore, createSequentialIds } from "../testing/fakes.js";
 import { ensureGolfer } from "./ensureGolfer.js";
 
@@ -65,5 +68,38 @@ describe("ensureGolfer", () => {
     await ensure({ sub: "sub-a" }); // second touch — existing branch
 
     expect(metrics.calls).toEqual(["Signups"]); // still one, from the first create
+  });
+
+  it("does NOT emit Signups on the race-loser path — bindSub throws golfer-already-claimed and the loser re-reads the winner", async () => {
+    // The concurrent-first-request race (ensureGolfer.ts's own doc comment): getBySub misses
+    // (nobody's minted yet), so this request `put`s a fresh row and calls bindSub — but another
+    // request won the bind first, so bindSub throws golfer-already-claimed. The metric emit sits
+    // between bindSub and its own catch (production code, unchanged here), so the loser must NOT
+    // emit — only the winner's original bindSub call did that, on a different ensureGolfer
+    // invocation entirely. This double stands in for that winner's already-bound row: the first
+    // getBySub call (this request's own initial check) misses, the second (the loser's re-read
+    // inside the catch) returns it.
+    const winner: Golfer = { id: golferId("winner-1"), name: placeholderName("sub-race"), handicap: { indexSource: { kind: "swng" } }, namePlaceholder: true };
+    let getBySubCalls = 0;
+    const golferStore: GolferStore = {
+      getBySub: async () => {
+        getBySubCalls += 1;
+        return getBySubCalls === 1 ? undefined : { golfer: winner, sub: "sub-race", revision: 1 };
+      },
+      put: async () => {},
+      get: async () => undefined,
+      getMany: async () => [],
+      bindSub: async () => {
+        throw new ApplicationError("golfer-already-claimed");
+      },
+    };
+    const idGenerator = createSequentialIds("g");
+    const metrics = createCapturingMetrics();
+    const ensure = ensureGolfer({ golferStore, idGenerator, metrics });
+
+    const golfer = await ensure({ sub: "sub-race" });
+
+    expect(golfer.id).toBe(winner.id);
+    expect(metrics.calls).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, fixtureLinks, golferId, golferMetrics, opId, placeholderName, postedDifferential, roundId, swngIndex } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
-import { createFrozenClock, createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
+import { createCapturingMetrics, createFrozenClock, createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
 import { getMyCourseRecord } from "./getMyCourseRecord.js";
 import { getMyGolfer } from "./getMyGolfer.js";
 import { getMyLiveRounds } from "./getMyLiveRounds.js";
@@ -62,6 +62,25 @@ describe("getMyGolfer — get-or-creates", () => {
     const found = await ctx.getMe({ sub: "sub-1" });
 
     expect(found.golfer?.golferId).toBe(created.golfer.golferId);
+  });
+});
+
+// Reachability pin (fix: thread metrics to ensureGolfer): getMyGolfer forwards its whole `deps`
+// (including an optional `metrics`) straight to ensureGolfer, so a metrics sink threaded in here
+// must reach ensureGolfer's own mint branch — proving the wiring actually connects an outer use
+// case to the Signups emit, not just that ensureGolfer.test.ts's own direct construction does.
+describe("getMyGolfer — metrics threading reaches ensureGolfer", () => {
+  it("emits Signups on a genuine first-touch create, and does NOT re-emit on a second GET for the same sub", async () => {
+    const golferStore = createInMemoryGolferStore();
+    const idGenerator = createSequentialIds("g");
+    const metrics = createCapturingMetrics();
+    const getMe = getMyGolfer({ golferStore, idGenerator, metrics });
+
+    await getMe({ sub: "sub-new" });
+    expect(metrics.calls).toEqual(["Signups"]);
+
+    await getMe({ sub: "sub-new" });
+    expect(metrics.calls).toEqual(["Signups"]); // still one — the existing golfer is found, no re-emit
   });
 });
 

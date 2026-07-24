@@ -6,15 +6,16 @@ import type { Clock } from "../ports/clock.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
+import type { Metrics } from "../ports/metrics.js";
 import { ensureGolfer } from "../golfers/ensureGolfer.js";
 import { toCourseView } from "./courseView.js";
 
 export const createCourse =
-  (deps: { cardStore: CardStore; golferStore: GolferStore; idGenerator: IdGenerator; clock: Clock; logger: Logger }) =>
+  (deps: { cardStore: CardStore; golferStore: GolferStore; idGenerator: IdGenerator; clock: Clock; logger: Logger; metrics?: Metrics }) =>
   async (claims: AccountClaims, command: CreateCourseRequest): Promise<CreateCourseResponse> => {
     // enteredBy derives from the account, never the wire (spec invariant 7) — the same
     // get-or-create startRound uses, frozen into the record at write time.
-    const author = await ensureGolfer({ golferStore: deps.golferStore, idGenerator: deps.idGenerator })(claims);
+    const author = await ensureGolfer({ golferStore: deps.golferStore, idGenerator: deps.idGenerator, metrics: deps.metrics })(claims);
     const record = buildCardRecord({
       cardId: toCardId(deps.idGenerator.newId()),
       courseId: toCourseId(deps.idGenerator.newId()),

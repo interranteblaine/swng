@@ -9,6 +9,7 @@ import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
+import type { Metrics } from "../ports/metrics.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import type { RoundStore } from "../ports/roundStore.js";
 import type { TokenIssuer } from "../ports/tokenIssuer.js";
@@ -33,6 +34,7 @@ export const joinRound =
     golferStore: GolferStore;
     projectionStore: ProjectionStore;
     logger: Logger;
+    metrics?: Metrics;
   }) =>
   // claims is REQUIRED: POST /rounds/join is the "golfer" auth tier now (accounts-only identity
   // spec §3) — there is no anonymous join. The dispatcher guarantees a verified AccountClaims.
@@ -46,7 +48,7 @@ export const joinRound =
 
     // As-self, the ONLY identity path: get-or-create the caller's account golfer. The seat's
     // golferId and its frozen participant name both come straight from that record.
-    const golferRecord = await ensureGolfer({ golferStore: deps.golferStore, idGenerator: deps.ids })(claims);
+    const golferRecord = await ensureGolfer({ golferStore: deps.golferStore, idGenerator: deps.ids, metrics: deps.metrics })(claims);
     const golfer: GolferId = golferRecord.id;
 
     // UX guard: re-tapping join while STILL SEATED is a surprising no-op (the fold's

@@ -56,7 +56,7 @@ export const startRound =
 
     // As-self, the ONLY identity path: get-or-create the caller's account golfer. The seat's
     // golferId and its frozen participant name both come straight from that record.
-    const creator = await ensureGolfer({ golferStore: deps.golferStore, idGenerator: deps.ids })(claims);
+    const creator = await ensureGolfer({ golferStore: deps.golferStore, idGenerator: deps.ids, metrics: deps.metrics })(claims);
     const host: GolferId = creator.id;
 
     const id = roundId(deps.ids.newId());

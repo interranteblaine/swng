@@ -314,11 +314,12 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
     // `command.course` by reference and freezes the CURRENT card itself — the SAME cardStore
     // instance createCourse/supersedeCard/getCourse/searchCourses already share below.
     // metrics (prod-readiness Arc B Task 2): the SAME EMF sink startRound/finalizeRound below
-    // both share, emitting RoundsCreated/RoundsFinalized on their own business-success branch —
-    // deliberately NOT threaded into joinRound/getMyGolfer/updateMyGolfer's own internal
-    // ensureGolfer calls (Signups stays scoped to the two use cases Task 1 wired).
+    // both share, emitting RoundsCreated/RoundsFinalized on their own business-success branch.
+    // Also threaded into every other use case below that constructs its own internal
+    // ensureGolfer (joinRound/getMyGolfer/updateMyGolfer/createCourse/supersedeCard) so
+    // Signups fires from EVERY first-touch mint path, not just the two Task 1 wired.
     startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore, metrics }),
-    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
+    joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, metrics }),
     addGame: addGame({ journal, broadcast, clock, ids }),
     recordScore: recordScore({ journal, broadcast }),
     finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids, metrics }),
@@ -348,16 +349,16 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
     // Course-cards spec §4: createCourse/supersedeCard derive enteredBy from the account
     // (golferStore's own get-or-create), so they take the SAME golferStore startRound/joinRound
     // share; the two reads take only the cardStore.
-    createCourse: createCourse({ cardStore, golferStore, idGenerator: ids, clock, logger }),
-    supersedeCard: supersedeCard({ cardStore, golferStore, idGenerator: ids, clock, logger }),
+    createCourse: createCourse({ cardStore, golferStore, idGenerator: ids, clock, logger, metrics }),
+    supersedeCard: supersedeCard({ cardStore, golferStore, idGenerator: ids, clock, logger, metrics }),
     getCourse: getCourse({ cardStore }),
     searchCourses: searchCourses({ cardStore }),
     terminateGame: terminateGame({ journal, broadcast, clock, ids }),
     // idGenerator (accounts-only identity spec §2): GET /me now get-or-creates (ensureGolfer),
     // which mints a fresh golferId when the sub has none — the same `ids` every other minting use
     // case above shares.
-    getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids }),
-    updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
+    getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids, metrics }),
+    updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids, metrics }),
     // clock (pre-prod hardening D4a): the handicap index is computed HERE, at read time, from
     // the SAME lines the response already carries — never a stored snapshot. The SAME system
     // clock every other use case above shares.

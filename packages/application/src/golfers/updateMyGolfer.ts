@@ -3,6 +3,7 @@ import type { GolferResponse, UpdateMeRequest } from "@swng/contracts";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
+import type { Metrics } from "../ports/metrics.js";
 import { ensureGolfer } from "./ensureGolfer.js";
 import { toGolferView } from "./golferView.js";
 
@@ -22,7 +23,7 @@ import { toGolferView } from "./golferView.js";
 // collision is rare enough that surfacing "golfer-conflict" for the caller to retry the
 // whole request is simpler than a bounded loop, and self-heals on the next attempt.
 export const updateMyGolfer =
-  (deps: { golferStore: GolferStore; idGenerator: IdGenerator }) =>
+  (deps: { golferStore: GolferStore; idGenerator: IdGenerator; metrics?: Metrics }) =>
   async (claims: AccountClaims, command: UpdateMeRequest): Promise<GolferResponse> => {
     // Ensure the caller's golfer exists (get-or-create), then re-read it by sub for its current
     // revision — ensureGolfer just guaranteed a bound row, so this read is non-null.

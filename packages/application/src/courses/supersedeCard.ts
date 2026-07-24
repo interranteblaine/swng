@@ -7,6 +7,7 @@ import type { Clock } from "../ports/clock.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { IdGenerator } from "../ports/idGenerator.js";
 import type { Logger } from "../ports/logger.js";
+import type { Metrics } from "../ports/metrics.js";
 import { ApplicationError } from "../errors.js";
 import { ensureGolfer } from "../golfers/ensureGolfer.js";
 import { toCourseView } from "./courseView.js";
@@ -16,7 +17,7 @@ import { toCourseView } from "./courseView.js";
 // common case reports before any work), and the store's transact condition (the true arbiter
 // under a race — spec §6's one rule).
 export const supersedeCard =
-  (deps: { cardStore: CardStore; golferStore: GolferStore; idGenerator: IdGenerator; clock: Clock; logger: Logger }) =>
+  (deps: { cardStore: CardStore; golferStore: GolferStore; idGenerator: IdGenerator; clock: Clock; logger: Logger; metrics?: Metrics }) =>
   async (claims: AccountClaims, id: CourseId, command: SupersedeCardRequest): Promise<SupersedeCardResponse> => {
     const current = await deps.cardStore.getCurrent(id);
     if (!current) throw new ApplicationError("course-not-found");
@@ -27,7 +28,7 @@ export const supersedeCard =
     const inputTees = command.teeSets.map((tee) => ({ ...tee, teeId: tee.teeId as TeeId | undefined }));
     validateTeeContinuity(current.card, inputTees); // unknown-tee-id / duplicate-tee-id (DomainError) propagate
 
-    const author = await ensureGolfer({ golferStore: deps.golferStore, idGenerator: deps.idGenerator })(claims);
+    const author = await ensureGolfer({ golferStore: deps.golferStore, idGenerator: deps.idGenerator, metrics: deps.metrics })(claims);
     const record = buildCardRecord({
       cardId: toCardId(deps.idGenerator.newId()),
       courseId: id,

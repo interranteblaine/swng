@@ -10,7 +10,8 @@
     "test": "vitest run",
     "cdk": "cdk",
     "synth": "cdk synth --profile swng",
-    "deploy:beta": "cdk deploy swng-beta --profile swng --require-approval never --outputs-file cdk-outputs.json"
+    "deploy:beta": "cdk deploy swng-beta --profile swng --require-approval never --outputs-file cdk-outputs.json",
+    "deploy:prod": "STAGE=prod cdk deploy swng-prod --profile swng --require-approval never --outputs-file cdk-outputs.prod.json"
   },
   "dependencies": {
     "aws-cdk-lib": "2.262.0",

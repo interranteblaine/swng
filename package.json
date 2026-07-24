@@ -16,11 +16,13 @@
     "cdk:synth": "pnpm -F @swng/infra-cdk cdk synth",
     "cdk:diff": "pnpm -F @swng/infra-cdk cdk diff",
     "deploy:beta": "pnpm -F @swng/infra-cdk deploy:beta",
+    "deploy:prod": "pnpm -F @swng/infra-cdk deploy:prod",
     "typecheck": "pnpm -r typecheck",
     "test:contract": "pnpm -F @swng/adapters-dynamodb test:contract",
     "e2e:beta": "pnpm -F @swng/e2e test:e2e",
     "e2e:field": "pnpm -F @swng/web e2e:field",
-    "publish:web:beta": "node scripts/publishWeb.mjs"
+    "publish:web:beta": "node scripts/publishWeb.mjs",
+    "publish:web:prod": "node scripts/publishWeb.mjs prod"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

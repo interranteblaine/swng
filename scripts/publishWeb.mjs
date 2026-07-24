@@ -19,8 +19,14 @@ import { generateEnvFile } from "../apps/web/scripts/webEnv.mjs";
 
 const dryRun = process.argv.includes("--dry-run");
 
+// Optional first positional arg selects the stage (default beta). Each stage's `deploy:<stage>`
+// writes its OWN outputs file (cdk-outputs.json for beta, cdk-outputs.<stage>.json otherwise), so
+// the single-stack `Object.values(outputs)[0]` read below is correct per-file.
+const stage = process.argv.slice(2).find((a) => !a.startsWith("--")) ?? "beta";
+const outputsFile = stage === "beta" ? "cdk-outputs.json" : `cdk-outputs.${stage}.json`;
+
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const outputsPath = fileURLToPath(new URL("../apps/infra-cdk/cdk-outputs.json", import.meta.url));
+const outputsPath = fileURLToPath(new URL(`../apps/infra-cdk/${outputsFile}`, import.meta.url));
 const envPath = fileURLToPath(new URL("../apps/web/.env.local", import.meta.url));
 const distDir = fileURLToPath(new URL("../apps/web/dist", import.meta.url));
 

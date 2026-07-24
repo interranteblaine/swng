@@ -52,6 +52,17 @@ export interface SwngStackProps extends StackProps {
   /** CORS-only extra origins (beta's own cloudfront.net literal, hardcoded because CORS is computed
    *  before the distribution exists — the Arc A cycle note). Prod: []. Default = beta's cloudfront.net. */
   readonly extraCorsOrigins?: string[];
+  /** Explicit Cognito password policy. Prod sets a strong one; beta omits it (Cognito default) so
+   *  beta's admin-created e2e users with fixed passwords aren't rejected. Default undefined. */
+  readonly passwordPolicy?: {
+    readonly minLength: number;
+    readonly requireLowercase: boolean;
+    readonly requireUppercase: boolean;
+    readonly requireDigits: boolean;
+    readonly requireSymbols: boolean;
+  };
+  /** Pool-level deletion protection (prod: real accounts). Default false (beta). */
+  readonly poolDeletionProtection?: boolean;
 }
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
@@ -364,6 +375,26 @@ export class SwngStack extends Stack {
       // (deterministic rather than relying on the AWS default). No-interruption update; prod
       // needs it for managed login regardless.
       featurePlan: FeaturePlan.ESSENTIALS,
+      // Prod-readiness Arc C Task 2: an explicit strong policy for prod; beta omits this entirely
+      // (Cognito's own default) so beta's admin-created e2e users with fixed test passwords keep
+      // working unchanged. Conditional spread, not an always-present property with defaulted
+      // fields, so an absent passwordPolicy prop leaves beta's synth byte-identical.
+      ...(props.passwordPolicy
+        ? {
+            passwordPolicy: {
+              minLength: props.passwordPolicy.minLength,
+              requireLowercase: props.passwordPolicy.requireLowercase,
+              requireUppercase: props.passwordPolicy.requireUppercase,
+              requireDigits: props.passwordPolicy.requireDigits,
+              requireSymbols: props.passwordPolicy.requireSymbols,
+            },
+          }
+        : {}),
+      // Real accounts in prod must never be deletable via a routine stack update/teardown.
+      // `false` is CDK's own UserPool default, so this renders identically to before this prop
+      // existed when poolDeletionProtection is unset (beta) — verified against the shared beta
+      // template in swngStack.test.ts.
+      deletionProtection: props.poolDeletionProtection ?? false,
     });
 
     // The web app's origins, for both OAuth callback and logout redirects (and, Task 6 below,
@@ -404,7 +435,14 @@ export class SwngStack extends Stack {
         // (apps/web/src/auth/authConfig.ts's redirectUri) always sends
         // `${origin}/auth/callback`, never the bare origin, so the bare origins alone here
         // would make every real Hosted-UI sign-in fail with redirect_mismatch.
-        callbackUrls: webOrigins.map((origin) => `${origin}/auth/callback`),
+        callbackUrls: [
+          ...webOrigins.map((origin) => `${origin}/auth/callback`),
+          // Seed the custom-domain callback so a stage with empty extraWebOrigins (prod) still has a
+          // non-empty callback list at CONSTRUCTION — CDK throws CallbackUrlEmptyCodeGrant on an empty
+          // array for a code-grant client. The unconditional L1 override below (~:1171) replaces this
+          // whole array in the final template, so every stage (beta included) synthesizes byte-identical.
+          ...(webDomain ? [`https://${webDomain.domainName}/auth/callback`] : []),
+        ],
         // Papercut 6 (M9 hardening): the app's signOut (apps/web/src/auth/useAuth.ts) now
         // redirects through Cognito's /logout endpoint to actually end the Hosted UI's own
         // session (clearing local tokens alone left it alive, so the next signIn() silently
@@ -412,7 +450,10 @@ export class SwngStack extends Stack {
         // same "Cognito requires an exact match" rule as callbackUrls above. authConfig.ts's
         // buildLogoutUrl always sends `${origin}/` (trailing slash, no path), not the bare
         // origin callbackUrls' own `/auth/callback` needs.
-        logoutUrls: webOrigins.map((origin) => `${origin}/`),
+        logoutUrls: [
+          ...webOrigins.map((origin) => `${origin}/`),
+          ...(webDomain ? [`https://${webDomain.domainName}/`] : []),
+        ],
       },
     });
 

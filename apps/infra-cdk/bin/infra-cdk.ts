@@ -7,21 +7,34 @@ import { SwngStack, type SwngStackProps } from "../lib/swngStack.js";
 // swng-beta` targets by name — see package.json's deploy:beta script.
 const stage = process.env.STAGE ?? "beta";
 
-// Task D-T1: the first real per-stage config table — D5's shape, starting here. Every other
+// Task D-T1 / Prod-readiness Arc C Task 2: the per-stage config table — D5's shape. Every other
 // per-stage difference so far lives inside SwngStack itself (stage-suffixed resource names via
-// the `stage` prop alone), but a custom domain needs data a stage NAME can't derive on its own
-// (a domain string, an already-provisioned hosted zone id) — so that data lives in a table at
-// the entry point, and swngStack.ts stays free of any `stage === "prod"`-shaped branch. Adding
-// prod later is one more entry here, not new stack code.
-const STAGE_WEB: Record<string, SwngStackProps["web"]> = {
-  beta: { domainName: "beta.swng.golf", hostedZoneId: "Z00936512AJC1HGD9M7B7", zoneName: "swng.golf" },
-  // prod: { domainName: "swng.golf", hostedZoneId: "Z00936512AJC1HGD9M7B7", zoneName: "swng.golf" }
-  // — lands with the prod-stack task (D5); same hosted zone, apex instead of the beta subdomain.
+// the `stage` prop alone), but a custom domain — and now prod's hardening knobs — need data a
+// stage NAME can't derive on its own, so that data lives in a table at the entry point, and
+// swngStack.ts stays free of any `stage === "prod"`-shaped branch. `beta` carries ONLY `web`;
+// everything else uses the stack's own beta-shaped defaults (keeps beta byte-identical to before
+// this table existed). `prod` carries the full hardening set.
+type StageConfig = Omit<SwngStackProps, "stage" | "env">;
+
+const STAGE_CONFIG: Record<string, StageConfig> = {
+  beta: {
+    web: { domainName: "beta.swng.golf", hostedZoneId: "Z00936512AJC1HGD9M7B7", zoneName: "swng.golf" },
+    // userPasswordAuth / extraWebOrigins / extraCorsOrigins / passwordPolicy / poolDeletionProtection
+    // all use the stack's beta-shaped defaults (keeps beta byte-identical to before this table).
+  },
+  prod: {
+    web: { domainName: "swng.golf", hostedZoneId: "Z00936512AJC1HGD9M7B7", zoneName: "swng.golf" },
+    userPasswordAuth: false,
+    extraWebOrigins: [],
+    extraCorsOrigins: [],
+    passwordPolicy: { minLength: 8, requireLowercase: true, requireUppercase: true, requireDigits: true, requireSymbols: false },
+    poolDeletionProtection: true,
+  },
 };
 
 const app = new App();
 new SwngStack(app, `swng-${stage}`, {
   stage,
-  web: STAGE_WEB[stage],
+  ...STAGE_CONFIG[stage],
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION ?? "us-east-1" },
 });

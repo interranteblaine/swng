@@ -1432,3 +1432,33 @@ describe("stage config knobs (Arc C — prod hardening)", () => {
     expect(callbacks).not.toContain("d5qqgppnyb7y1");
   });
 });
+
+describe("SwngStack prod config (Arc C)", () => {
+  const prod = Template.fromStack(
+    new SwngStack(new App({ context: { "@aws-cdk/aws-lambda:useCdkManagedLogGroup": true } }), "swng-prod", {
+      stage: "prod",
+      web: { domainName: "swng.golf", hostedZoneId: "Z00936512AJC1HGD9M7B7", zoneName: "swng.golf" },
+      userPasswordAuth: false,
+      extraWebOrigins: [],
+      extraCorsOrigins: [],
+      passwordPolicy: { minLength: 8, requireLowercase: true, requireUppercase: true, requireDigits: true, requireSymbols: false },
+      poolDeletionProtection: true,
+    }),
+  );
+  it("app client has no ALLOW_USER_PASSWORD_AUTH", () => {
+    const flows = Object.values(prod.findResources("AWS::Cognito::UserPoolClient"))[0]!.Properties.ExplicitAuthFlows as string[];
+    expect(flows).not.toContain("ALLOW_USER_PASSWORD_AUTH");
+  });
+  it("pool has an explicit password policy (minLength 8) and deletion protection", () => {
+    prod.hasResourceProperties("AWS::Cognito::UserPool", {
+      Policies: { PasswordPolicy: Match.objectLike({ MinimumLength: 8, RequireNumbers: true, RequireSymbols: false }) },
+      DeletionProtection: "ACTIVE",
+    });
+  });
+  it("callback URLs include swng.golf and exclude localhost + beta cloudfront", () => {
+    const callbacks = JSON.stringify(Object.values(prod.findResources("AWS::Cognito::UserPoolClient"))[0]!.Properties.CallbackURLs);
+    expect(callbacks).toContain("https://swng.golf/auth/callback");
+    expect(callbacks).not.toContain("localhost");
+    expect(callbacks).not.toContain("d5qqgppnyb7y1");
+  });
+});

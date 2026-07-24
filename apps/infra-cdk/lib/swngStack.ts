@@ -7,7 +7,7 @@ import { CfnRoute, CfnStage, CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, 
 import { HttpLambdaIntegration, WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
 import { CfnManagedLoginBranding, CfnUserPoolClient, FeaturePlan, ManagedLoginVersion, OAuthScope, UserPool, UserPoolClient, UserPoolDomain } from "aws-cdk-lib/aws-cognito";
-import { Distribution, ResponseHeadersPolicy, ViewerProtocolPolicy } from "aws-cdk-lib/aws-cloudfront";
+import { Distribution, HeadersFrameOption, HeadersReferrerPolicy, ResponseHeadersPolicy, ViewerProtocolPolicy } from "aws-cdk-lib/aws-cloudfront";
 import { S3BucketOrigin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { Runtime, StartingPosition } from "aws-cdk-lib/aws-lambda";
 import { DynamoEventSource, SqsDlq } from "aws-cdk-lib/aws-lambda-event-sources";
@@ -337,11 +337,22 @@ export class SwngStack extends Stack {
       featurePlan: FeaturePlan.ESSENTIALS,
     });
 
-    // The web app's origins, for both OAuth callback and logout redirects — a cdk context
-    // list (`-c WEB_ORIGINS='["https://..."]'` or cdk.json) so a real deployed web app URL can
-    // be added without a code change; defaults to just the local dev server so `cdk synth`
-    // and this stack's own tests never depend on that context being set.
-    const webOrigins = (this.node.tryGetContext("WEB_ORIGINS") as string[] | undefined) ?? ["http://localhost:5173"];
+    // The web app's origins, for both OAuth callback and logout redirects (and, Task 6 below,
+    // the HTTP API's own CORS allow-list) — a cdk context list (`-c
+    // WEB_ORIGINS='["https://..."]'` or cdk.json) so a real deployed web app URL can be added
+    // without a code change; defaults to the local dev server AND the Playwright field-test's
+    // preview port. DO NOT "clean up" http://localhost:4173: `pnpm e2e:field` (a close-out
+    // gate) serves the built web app via `vite preview` on exactly this port
+    // (apps/web/playwright.config.ts) and calls the deployed beta API cross-origin — dropping
+    // it here breaks that gate on CORS. `cdk synth` and this stack's own tests never depend on
+    // WEB_ORIGINS context being set.
+    const webOrigins = (this.node.tryGetContext("WEB_ORIGINS") as string[] | undefined) ?? ["http://localhost:5173", "http://localhost:4173"];
+
+    // Task D-T1's custom-domain config — resolved here (not down in the custom-domain section
+    // below) because Task 6's CORS scoping (below, at the HTTP API) needs it too; it's a plain
+    // `props.web` read with no construct dependency, so hoisting it costs nothing and keeps it
+    // a single declaration referenced by both.
+    const webDomain = props?.web;
 
     const userPoolClient = new UserPoolClient(this, "UserPoolClient", {
       userPool,
@@ -555,10 +566,29 @@ export class SwngStack extends Stack {
 
     // --- HTTP API ------------------------------------------------------------------------
 
+    // Prod-readiness hardening Arc A, Task 6: CORS scoped off "*" to the real web origins.
+    // TRAP avoided deliberately: this list must NEVER reference
+    // `distribution.distributionDomainName` — the distribution (built later, below) embeds a
+    // CSP built from httpApi.apiEndpoint via its own responseHeadersPolicy, so the distribution
+    // already depends on httpApi; folding the distribution's domain token back into httpApi's
+    // OWN CORS config would be a genuine circular dependency (distribution -> CSP -> httpApi ->
+    // distribution) that fails `cdk synth`. The raw cloudfront.net origin below is a hand-known
+    // literal instead (the stable URL M9 Task 6 first stood up, still live) — a plain string,
+    // not a token read off the distribution construct, so it carries no dependency at all.
+    const CLOUDFRONT_NET_ORIGIN = "https://d5qqgppnyb7y1.cloudfront.net";
+    const corsAllowOrigins = [
+      ...webOrigins,
+      CLOUDFRONT_NET_ORIGIN,
+      // Cycle-free: webDomain is `props.web`, a plain string supplied at synth time by
+      // bin/infra-cdk.ts's STAGE_WEB table — never a token derived from another construct in
+      // this stack (unlike the forbidden distribution-domain reference above).
+      ...(webDomain ? [`https://${webDomain.domainName}`] : []),
+    ];
+
     const httpApi = new HttpApi(this, "HttpApi", {
       apiName: `swng-http-${stage}`,
       corsPreflight: {
-        allowOrigins: ["*"],
+        allowOrigins: corsAllowOrigins,
         // Every method HTTP_ROUTES uses must be allowed here too — a route whose method is
         // missing still answers curl, but a browser's preflight gets a 204 with NO
         // access-control-allow-* headers and the actual request is blocked (verified live
@@ -912,23 +942,36 @@ export class SwngStack extends Stack {
       // renders unstyled.
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
+      // Task 6: no OTHER site may frame this app (clickjacking defense-in-depth alongside the
+      // FrameOptions header below), and no injected <base> tag can retarget this app's
+      // relative URLs at an attacker's origin.
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
     ].join("; ");
 
+    // Task 6 (edge hardening): the CSP above was the only security header this policy carried —
+    // HSTS/nosniff/referrer/frame-options were simply absent from every response CloudFront
+    // served. `override: true` on each (matching the CSP's own existing choice) means this
+    // policy's value always wins over anything the origin (S3) might send, rather than merging.
     const webResponseHeadersPolicy = new ResponseHeadersPolicy(this, "WebResponseHeadersPolicy", {
       responseHeadersPolicyName: `swng-web-csp-${stage}`,
       securityHeadersBehavior: {
         contentSecurityPolicy: { contentSecurityPolicy, override: true },
+        strictTransportSecurity: { accessControlMaxAge: Duration.days(365), includeSubdomains: true, override: true },
+        contentTypeOptions: { override: true },
+        referrerPolicy: { referrerPolicy: HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN, override: true },
+        frameOptions: { frameOption: HeadersFrameOption.DENY, override: true },
       },
     });
 
     // --- Custom domain (Task D-T1): cert + hosted zone, only when a domain is configured ---
     //
-    // webDomain comes from the per-stage config table in bin/infra-cdk.ts (D5's shape,
-    // starting here) — nothing in this stack branches on the stage NAME itself. hostedZone is
-    // IMPORTED, not created: swng.golf's zone already exists (and, until D-T2's controller-run
-    // handover, still holds the POC's own beta.swng.golf A record — Global Constraints) — this
-    // stack only ever appends its own alias records into it below, never claims ownership.
-    const webDomain = props?.web;
+    // webDomain (resolved earlier, above the HTTP API's CORS scoping — Task 6) comes from the
+    // per-stage config table in bin/infra-cdk.ts (D5's shape, starting here) — nothing in this
+    // stack branches on the stage NAME itself. hostedZone is IMPORTED, not created: swng.golf's
+    // zone already exists (and, until D-T2's controller-run handover, still holds the POC's own
+    // beta.swng.golf A record — Global Constraints) — this stack only ever appends its own
+    // alias records into it below, never claims ownership.
     const hostedZone = webDomain
       ? HostedZone.fromHostedZoneAttributes(this, "WebZone", { hostedZoneId: webDomain.hostedZoneId, zoneName: webDomain.zoneName })
       : undefined;

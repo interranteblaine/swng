@@ -797,6 +797,22 @@ describe("SwngStack", () => {
         expect(allowMethods).toContain(method);
       }
     });
+
+    // Prod-readiness hardening Arc A, Task 6: CORS scoped off "*" to the real web origins.
+    // localhost:4173 is GATE-CRITICAL — `pnpm e2e:field` (a close-out gate) serves the built web
+    // app from `vite preview` on this exact port (apps/web/playwright.config.ts) and calls the
+    // deployed beta API cross-origin; omitting it here fails that gate on CORS. The raw
+    // cloudfront.net URL (the legacy direct-access origin, M9 Task 6) must also survive scoping.
+    it("the HTTP API's CORS allowOrigins is the scoped web-origin set — dev, the e2e:field preview port, and cloudfront.net — never '*'", () => {
+      const apis = template.findResources("AWS::ApiGatewayV2::Api");
+      const httpApi = Object.values(apis).find((api) => api.Properties.ProtocolType === "HTTP");
+      expect(httpApi).toBeDefined();
+      const allowOrigins = httpApi!.Properties.CorsConfiguration.AllowOrigins as string[];
+      expect(allowOrigins).not.toContain("*");
+      expect(allowOrigins).toContain("http://localhost:5173");
+      expect(allowOrigins).toContain("http://localhost:4173");
+      expect(allowOrigins).toContain("https://d5qqgppnyb7y1.cloudfront.net");
+    });
   });
 
   // M9 Task 5: HTTP API stage throttling — a stage-wide default plus a tighter per-route
@@ -1071,6 +1087,44 @@ describe("SwngStack", () => {
       expect(rendered).toContain(".auth.");
       expect(rendered).toContain("amazoncognito.com; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:");
     });
+
+    // Task 6: the CSP grows two directives beyond what M9 Task 6 shipped — clickjacking
+    // defense-in-depth (frame-ancestors, redundant with the FrameOptions header below by
+    // design — belt and suspenders) and a base-uri lockdown against injected <base> retargeting.
+    it("the CSP includes frame-ancestors 'none' and base-uri 'self'", () => {
+      const policies = template.findResources("AWS::CloudFront::ResponseHeadersPolicy");
+      const policyEntries = Object.values(policies);
+      expect(policyEntries).toHaveLength(1);
+      const securityHeaders = policyEntries[0]!.Properties.ResponseHeadersPolicyConfig.SecurityHeadersConfig;
+      const rendered = JSON.stringify(securityHeaders.ContentSecurityPolicy.ContentSecurityPolicy);
+      expect(rendered).toContain("frame-ancestors 'none'");
+      expect(rendered).toContain("base-uri 'self'");
+    });
+
+    // Task 6: before this, the response headers policy carried ONLY the CSP — HSTS, nosniff,
+    // a referrer policy, and frame-options were simply absent from every response CloudFront
+    // served. Each new header's exact rendered CFN shape is pinned (not just "is present"), the
+    // same discipline the rest of this suite applies to every other CDK prop mapping.
+    it("the response headers policy carries HSTS, X-Content-Type-Options nosniff, a referrer policy, and frameOptions DENY", () => {
+      const policies = template.findResources("AWS::CloudFront::ResponseHeadersPolicy");
+      const policyEntries = Object.values(policies);
+      expect(policyEntries).toHaveLength(1);
+      const securityHeaders = policyEntries[0]!.Properties.ResponseHeadersPolicyConfig.SecurityHeadersConfig;
+
+      // 365 days in seconds — CloudFront's StrictTransportSecurity.AccessControlMaxAgeSec is a
+      // raw number, not a Duration token, once synthesized.
+      expect(securityHeaders.StrictTransportSecurity).toMatchObject({
+        AccessControlMaxAgeSec: 365 * 24 * 60 * 60,
+        IncludeSubdomains: true,
+        Override: true,
+      });
+      expect(securityHeaders.ContentTypeOptions).toEqual({ Override: true });
+      expect(securityHeaders.ReferrerPolicy).toEqual({
+        ReferrerPolicy: "strict-origin-when-cross-origin",
+        Override: true,
+      });
+      expect(securityHeaders.FrameOptions).toEqual({ FrameOption: "DENY", Override: true });
+    });
   });
 
   // Prod-readiness hardening Arc A, Task 5: AWS WAF rate-limiting on the head of the abuse
@@ -1258,5 +1312,21 @@ describe("SwngStack with a configured web domain (Task D-T1: beta.swng.golf)", (
 
   it("outputs WebDomainUrl when a web domain is configured", () => {
     webTemplate.hasOutput("WebDomainUrl", { Value: "https://beta.swng.golf/" });
+  });
+
+  // Task 6: the custom domain's own origin joins the HTTP API's CORS allow-list too — cycle-free,
+  // since it's built from `props.web.domainName` (a plain string), never
+  // `distribution.distributionDomainName` (see swngStack.ts's own comment on why that reference
+  // would be a real circular dependency). Dev and cloudfront.net stay present alongside it.
+  it("the HTTP API's CORS allowOrigins also includes https://beta.swng.golf when a web domain is configured", () => {
+    const apis = webTemplate.findResources("AWS::ApiGatewayV2::Api");
+    const httpApi = Object.values(apis).find((api) => api.Properties.ProtocolType === "HTTP");
+    expect(httpApi).toBeDefined();
+    const allowOrigins = httpApi!.Properties.CorsConfiguration.AllowOrigins as string[];
+    expect(allowOrigins).not.toContain("*");
+    expect(allowOrigins).toContain("https://beta.swng.golf");
+    expect(allowOrigins).toContain("http://localhost:5173");
+    expect(allowOrigins).toContain("http://localhost:4173");
+    expect(allowOrigins).toContain("https://d5qqgppnyb7y1.cloudfront.net");
   });
 });

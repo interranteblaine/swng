@@ -22,7 +22,13 @@ let appPromise: Promise<App> | undefined;
 // connection's write-rejection is therefore structural (no code path exists), not a runtime
 // check this handler performs.
 export const handler = async (event: APIGatewayProxyWebsocketEventV2): Promise<APIGatewayProxyResultV2> => {
-  appPromise ??= buildApp(process.env);
+  // See entries/http.ts's own doc comment: a rejected cold-start secret fetch must not poison
+  // the warm container — clearing appPromise back to undefined before rethrowing makes the next
+  // invocation retry buildApp from scratch instead of replaying the same rejection forever.
+  appPromise ??= buildApp(process.env).catch((e) => {
+    appPromise = undefined;
+    throw e;
+  });
   const app = await appPromise;
 
   const token = event.queryStringParameters?.["token"];

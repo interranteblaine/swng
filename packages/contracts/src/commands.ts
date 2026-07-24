@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { GameId, GameResult, GolferId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import type { GameId, GameResult, GolferId, HoleResult, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
 import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
 import { gameConfigFields, gameResultSchema, roundEventSchema } from "./round.js";
 
@@ -53,9 +53,14 @@ export const startRoundRequestSchema = z.object({
   host: z.object({
     // task-1 (pre-prod hardening): a tee name is a short label, never a paragraph.
     tee: z.string().min(1).max(40),
-    // task-1: -10..54 spans a realistic plus handicap through the top of the WHS course-handicap
-    // table; may be negative (plus handicap).
-    courseHandicap: z.number().int().min(-10).max(54),
+    // Widened from the original [-10, 54] (pre-prod hardening fix wave, post-review): that range
+    // rejected LEGITIMATE WHS values. Course Handicap = round(Index × Slope/113 + (Rating − Par))
+    // [WHS Rule 6.1a] — a max index (54.0) on a max slope (155) alone computes ≈74 before the
+    // rating term, and a hard/long course's (Rating − Par) can push a max-handicap player's course
+    // handicap toward 100; symmetrically, an extreme plus player (index ≈ −9, the best humans) can
+    // compute below −10. [-20, 100] is a plausibility bound with margin on both ends, not a WHS
+    // hard limit — it exists only to reject nonsense input, never a real player.
+    courseHandicap: z.number().int().min(-20).max(100),
   }),
 });
 export type StartRoundRequest = z.infer<typeof startRoundRequestSchema>;
@@ -69,7 +74,8 @@ export const joinRoundRequestSchema = z.object({
   // (0/O/1/I/L) — mirrors compositionRoot.ts's JOIN_CODE_ALPHABET, the real minting alphabet.
   code: z.string().length(6).regex(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/),
   tee: z.string().min(1).max(40),
-  courseHandicap: z.number().int().min(-10).max(54),
+  // [-20, 100] — see startRoundRequestSchema's own comment above for the WHS 6.1a derivation.
+  courseHandicap: z.number().int().min(-20).max(100),
 });
 export type JoinRoundRequest = z.infer<typeof joinRoundRequestSchema>;
 
@@ -84,7 +90,11 @@ export type AddGameRequest = z.infer<typeof addGameRequestSchema>;
 // strokes count. This is the request-ingress-only copy, structurally identical except for the
 // bound: 30 comfortably covers any realistic single-hole count (incl. a very bad par-3) without
 // letting a client stuff an unbounded number into the log.
-const scoreResultInputSchema = z.discriminatedUnion("kind", [
+// Fix wave (post-review): anchored to the domain HoleResult union (z.ZodType<HoleResult>,
+// mirroring round.ts's own holeResultSchema) so a future 5th HoleResult kind fails to typecheck
+// HERE rather than silently being rejected at ingress — a compile-time forcing function to keep
+// this request-ingress mirror in sync with the domain type it bounds.
+const scoreResultInputSchema: z.ZodType<HoleResult> = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("strokes"), strokes: z.number().min(1).max(30) }),
   z.object({ kind: z.literal("picked-up") }),
   z.object({ kind: z.literal("conceded") }),
@@ -107,7 +117,8 @@ export type RecordScoreRequest = z.infer<typeof recordScoreRequestSchema>;
 // value may be negative (plus handicap), and the correction is retroactive by construction.
 export const setHandicapRequestSchema = z.object({
   golferId: golferIdSchema,
-  courseHandicap: z.number().int().min(-10).max(54),
+  // [-20, 100] — see startRoundRequestSchema's own comment above for the WHS 6.1a derivation.
+  courseHandicap: z.number().int().min(-20).max(100),
 });
 export type SetHandicapRequest = z.infer<typeof setHandicapRequestSchema>;
 

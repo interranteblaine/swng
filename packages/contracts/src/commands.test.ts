@@ -52,9 +52,18 @@ describe("startRoundRequestSchema", () => {
     ).toThrow();
   });
 
-  it("rejects a courseHandicap outside [-10, 54]", () => {
-    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", courseHandicap: 55 } })).toThrow(ContractError);
-    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", courseHandicap: -11 } })).toThrow(ContractError);
+  // Widened from the original [-10, 54] (fix wave, post-review): WHS Rule 6.1a's own formula
+  // (Index × Slope/113 + (Rating − Par)) puts a legitimate max-index (54.0) player on a
+  // max-slope (155) course's course handicap near 74 before the rating term — [-10, 54]
+  // rejected real players. [-20, 100] is the new plausibility bound.
+  it("rejects a courseHandicap outside [-20, 100]", () => {
+    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", courseHandicap: 101 } })).toThrow(ContractError);
+    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", courseHandicap: -21 } })).toThrow(ContractError);
+  });
+
+  it("accepts a courseHandicap at the [-20, 100] boundary", () => {
+    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", courseHandicap: 100 } })).not.toThrow();
+    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", courseHandicap: -20 } })).not.toThrow();
   });
 
   // Course-cards spec invariant 4/5: the client can never author a card — the old `card:` shape
@@ -115,9 +124,16 @@ describe("joinRoundRequestSchema", () => {
     expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "x".repeat(41), courseHandicap: 2 })).toThrow(ContractError);
   });
 
-  it("rejects a courseHandicap outside [-10, 54]", () => {
-    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", courseHandicap: 55 })).toThrow(ContractError);
-    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", courseHandicap: -11 })).toThrow(ContractError);
+  // Widened from the original [-10, 54] — see startRoundRequestSchema's own comment above for
+  // the WHS 6.1a derivation of [-20, 100].
+  it("rejects a courseHandicap outside [-20, 100]", () => {
+    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", courseHandicap: 101 })).toThrow(ContractError);
+    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", courseHandicap: -21 })).toThrow(ContractError);
+  });
+
+  it("accepts a courseHandicap at the [-20, 100] boundary", () => {
+    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", courseHandicap: 100 })).not.toThrow();
+    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", courseHandicap: -20 })).not.toThrow();
   });
 
   // NOT `.strict()`: an old client still sending name / golferId strips silently.
@@ -185,13 +201,19 @@ describe("setHandicapRequestSchema", () => {
     expect(() => setHandicapRequestSchema.parse({ golferId: "g1", courseHandicap: 12.4 })).toThrow();
   });
 
-  // task-1 (pre-prod hardening): a legal course handicap is bounded [-10, 54].
-  it("rejects a course-handicap outside [-10, 54]", () => {
-    expect(() => parse(setHandicapRequestSchema, { golferId: "g", courseHandicap: 99 })).toThrow();
+  // Widened from the original [-10, 54] — see startRoundRequestSchema's own comment (commands.ts)
+  // for the WHS 6.1a derivation of [-20, 100].
+  it("rejects a course-handicap outside [-20, 100]", () => {
+    expect(() => parse(setHandicapRequestSchema, { golferId: "g", courseHandicap: 101 })).toThrow();
   });
 
-  it("rejects a course-handicap below -10", () => {
-    expect(() => parse(setHandicapRequestSchema, { golferId: "g", courseHandicap: -11 })).toThrow();
+  it("rejects a course-handicap below -20", () => {
+    expect(() => parse(setHandicapRequestSchema, { golferId: "g", courseHandicap: -21 })).toThrow();
+  });
+
+  it("accepts a course-handicap at the [-20, 100] boundary", () => {
+    expect(() => parse(setHandicapRequestSchema, { golferId: "g", courseHandicap: 100 })).not.toThrow();
+    expect(() => parse(setHandicapRequestSchema, { golferId: "g", courseHandicap: -20 })).not.toThrow();
   });
 });
 

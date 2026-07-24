@@ -1427,6 +1427,68 @@ both WAF ACLs live (the REGIONAL ACL's resources include the user pool ARN; the 
 Arc C (the prod pool); the alarms rework + p95 + usage/abuse metrics are Arc B. On local `main`, never
 pushed.
 
+Prod-readiness Arc B — observability is real (2026-07-24, spec
+`docs/superpowers/specs/2026-07-24-prod-hardening-arc-b-design.md`, plan
+`.../plans/2026-07-24-prod-hardening-arc-b.md`, 5 SDD tasks + a whole-branch WAF fix, commits
+`7b50d83..46b9515`): the SECOND prod-readiness arc — alarms that page on real trouble, not blips, plus
+the usage/latency signal a launch needs. **Alarm rework:** the 10 blip-pagers (5 function-error + 5
+table-throttle) DELETED; the 5xx alarm reshaped to a non-transient M-of-N (≥10 over 2-of-3 + OK action);
++p95>3000ms (2-of-3 + OK), +WAF-blocked (math-sum threshold 100), +SignupSpike (≥50). **Usage metrics
+via EMF** (stdout JSON, no PutMetricData): a fire-and-forget `Metrics` port (`count(name)`), an
+`createEmfMetrics(stage)` sink (namespace `swng`, `Stage` dimension), emit points RoundsCreated
+(startRound) / RoundsFinalized (finalizeRound, NOT on replay) / Signups (ensureGolfer, only after a real
+`bindSub` — a controller-caught plan gap threaded `metrics` through all 6 inline `ensureGolfer` call
+sites so Signups is production-reachable). **One structured access-log line per request**
+(route/status/sub/latencyMs, a hoisted `finally` in the dispatcher). **`swng-ops-${stage}` dashboard**
+(business/latency/errors/projector/WAF + a DAU Logs-Insights split). The whole-branch review (opus)
+caught the ONE cross-task defect no scoped review owned — the WAF alarm+widget were mis-dimensioned
+(the `WebACL` dim carried the visibilityConfig metricName, which is really the Rule dim; CloudFront
+metrics carry NO Region) — proven inert against LIVE CloudWatch and fixed (`46b9515`: explicit ACL
+`Name`s → deterministic `WebACL` dim, `wafBlocked` region-optional, DAU query split). Code-complete on
+`main` but HELD from beta through the owner's live round (frozen-surface call); landed on beta as the
+FIRST step of the Arc C launch close-out (below).
+
+Prod-readiness Arc C — production launch is real: swng runs at **https://swng.golf** (2026-07-24, spec
+`docs/superpowers/specs/2026-07-24-prod-launch-arc-c-design.md`, plan
+`.../plans/2026-07-24-prod-launch-arc-c.md`, 3 SDD tasks + 2 review-caught fixes + a whole-branch fix,
+commits `70282b5..04d23c6`, base `4af8026`): the THIRD and final prod-readiness arc — a hardened
+`swng-prod` CDK stack on the `swng.golf` apex for a real, high-visibility launch. **No new stack
+code, no stage-name branching:** the last hardcoded per-stage knobs became typed `SwngStackProps` fields
+with beta-shaped defaults (T1 `userPasswordAuth`/`extraWebOrigins`/`extraCorsOrigins`; T2
+`passwordPolicy`/`poolDeletionProtection` + a `STAGE_CONFIG` table in `bin/infra-cdk.ts` with the `prod`
+entry) so **beta synthesizes byte-identical** (proven by a base-vs-HEAD `cdk synth swng-beta` template
+diff = identical) while prod turns them off: `USER_PASSWORD_AUTH` off, minLength-8 password policy
+(symbols not required), pool deletion-protection, `preventUserExistenceErrors` ENABLED, origins scoped
+to `swng.golf` only (no localhost/no beta cloudfront), and the FULL Arc A/B abuse+observability+durability
+layer inherited (2 WAF ACLs@2000, 7 alarms, `swng-ops-prod` dashboard, `swng-token-secret-prod`,
+managed-login branding, CSP+5 headers, PITR/deletion-protection tables). T3 added `deploy:prod` +
+`publish:web:prod` (per-stage outputs file). **Three review-caught fixes landed in-arc:** the initial
+`UserPoolClient` construction was seeding-fixed so prod's empty `extraWebOrigins` doesn't hit CDK's
+`CallbackUrlEmptyCodeGrant` (the unconditional L1 override wins the final template → beta byte-identical);
+`deletionProtection` was gated behind a conditional spread (an explicit `?? false` leaked a
+`DeletionProtection:"INACTIVE"` line into beta's synth — no assertion broke, but it violated
+byte-identity); and `preventUserExistenceErrors` was pinned prod-only (spec Decision 5 — the CDK
+"default" is not actually rendered). Whole-branch review (opus): **READY TO DEPLOY — YES**, every
+launch-critical invariant verified by execution; its one Important is an owner-ratified residual (Cognito
+default-email ~50/day is the sole signup-blocking risk at high reach; SES prod-access is the pre-armed
+lever, ~24h lead). Close-out (controller-run): `validate` 0 + `test:contract` 90 → **Arc B landed on
+beta** (`deploy:beta` UPDATE_COMPLETE 108s — the `cdk diff` was exactly the predicted Arc B delta, 2 WAF
+ACLs replaced via the `Name` change, zero data-bearing resource touched; publish:web:beta SKIPPED — no
+web/wire delta; **e2e:beta 17/17 ×2**) → apex confirmed free (only NS+SOA) → **`deploy:prod`**: the
+local `cdk` client was KILLED mid-run at 55/101, but CloudFormation continued server-side to
+**CREATE_COMPLETE** (`aws cloudformation wait` exit 0; a re-run `deploy:prod` = "✅ no changes" proved
+ZERO drift and wrote the outputs) → `publish:web:prod` (bundle `index-BV78OC-a.js`, dist `E114PRK9O0LZJO`
+invalidated) → `curl -I https://swng.golf` = 200 + all 5 headers + CSP pointing at PROD backends only →
+a **browser smoke walk on deployed swng.golf** (throwaway CONFIRMED user via admin APIs; branded managed
+login rendered cream/forest/gold on the FIRST prod deploy; PKCE sign-in at the apex; get-or-create minted
+"Golfer 8545" on prod; `/create` + course-search-on-prod ("No courses found", correct-for-empty);
+console 0 errors/0 warnings; sign-out via Cognito `/logout`). **Deliberately created no round/course in
+prod** (sealed/unremovable — no permanent test pollution in the launch env; the full round/finalize wire
+is byte-identical, proven by e2e:beta 17/17 incl. finalize golden numbers + e2e:field). Prod
+`us-east-1_KA9e6VVBT`, HTTP `jmdpm562u0`, WS `s4wrzayf42`, dist `E114PRK9O0LZJO`, acct `971662606146`.
+Owner actions outstanding: **confirm the `swng-alarms-prod` SNS email** (PendingConfirmation) and — the
+recommendation — **request SES production access before announcing**. On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

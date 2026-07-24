@@ -43,6 +43,15 @@ export interface SwngStackProps extends StackProps {
   // this stack synthesizes byte-identical to before this prop existed — pinned by the existing
   // test suite's shared prop-less template continuing to pass unmodified.
   readonly web?: { readonly domainName: string; readonly hostedZoneId: string; readonly zoneName: string };
+  /** Direct USER_PASSWORD_AUTH on the app client. Beta: true (e2e mints tokens via InitiateAuth).
+   *  Prod: false — no direct password auth exposed to brute-forcing. Default true (beta). */
+  readonly userPasswordAuth?: boolean;
+  /** Non-domain origins added to BOTH the Cognito callback/logout lists and CORS (the dev/preview
+   *  localhost origins). Beta: the two localhost ports. Prod: []. Default = beta's localhost pair. */
+  readonly extraWebOrigins?: string[];
+  /** CORS-only extra origins (beta's own cloudfront.net literal, hardcoded because CORS is computed
+   *  before the distribution exists — the Arc A cycle note). Prod: []. Default = beta's cloudfront.net. */
+  readonly extraCorsOrigins?: string[];
 }
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
@@ -366,7 +375,7 @@ export class SwngStack extends Stack {
     // (apps/web/playwright.config.ts) and calls the deployed beta API cross-origin — dropping
     // it here breaks that gate on CORS. `cdk synth` and this stack's own tests never depend on
     // WEB_ORIGINS context being set.
-    const webOrigins = (this.node.tryGetContext("WEB_ORIGINS") as string[] | undefined) ?? ["http://localhost:5173", "http://localhost:4173"];
+    const webOrigins = props.extraWebOrigins ?? (this.node.tryGetContext("WEB_ORIGINS") as string[] | undefined) ?? ["http://localhost:5173", "http://localhost:4173"];
 
     // Task D-T1's custom-domain config — resolved here (not down in the custom-domain section
     // below) because Task 6's CORS scoping (below, at the HTTP API) needs it too; it's a plain
@@ -384,7 +393,7 @@ export class SwngStack extends Stack {
         // USER_PASSWORD_AUTH exists solely so `pnpm e2e:beta` can mint a real ID token via
         // InitiateAuth without driving a browser through the hosted UI. M9 hardening item:
         // narrow or remove this once the e2e gate has another way to authenticate.
-        userPassword: true,
+        userPassword: props.userPasswordAuth ?? true,
       },
       oAuth: {
         // PKCE is implicit for a public client (no secret) using the authorization-code grant
@@ -598,10 +607,13 @@ export class SwngStack extends Stack {
     // distribution) that fails `cdk synth`. The raw cloudfront.net origin below is a hand-known
     // literal instead (the stable URL M9 Task 6 first stood up, still live) — a plain string,
     // not a token read off the distribution construct, so it carries no dependency at all.
-    const CLOUDFRONT_NET_ORIGIN = "https://d5qqgppnyb7y1.cloudfront.net";
+    // Beta's own cloudfront.net is hardcoded here (not read off the distribution) because CORS is
+    // computed before the distribution exists — a token here would cycle (Arc A note). Per-stage
+    // via extraCorsOrigins: prod passes [] (prod users reach it at swng.golf, not the raw CDN name).
+    const extraCorsOrigins = props.extraCorsOrigins ?? ["https://d5qqgppnyb7y1.cloudfront.net"];
     const corsAllowOrigins = [
       ...webOrigins,
-      CLOUDFRONT_NET_ORIGIN,
+      ...extraCorsOrigins,
       // Cycle-free: webDomain is `props.web`, a plain string supplied at synth time by
       // bin/infra-cdk.ts's STAGE_WEB table — never a token derived from another construct in
       // this stack (unlike the forbidden distribution-domain reference above).

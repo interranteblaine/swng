@@ -1403,3 +1403,32 @@ describe("SwngStack with a configured web domain (Task D-T1: beta.swng.golf)", (
     expect(allowOrigins).toContain("https://d5qqgppnyb7y1.cloudfront.net");
   });
 });
+
+describe("stage config knobs (Arc C — prod hardening)", () => {
+  // extraWebOrigins can't be [] here: the app client's OAuth flows are always on, and
+  // callbackUrls comes straight from webOrigins.map(...) at UserPoolClient construction — CDK's
+  // own UserPoolClient constructor rejects an empty callbackUrls list for a codeGrant client
+  // (CallbackUrlEmptyCodeGrant) before synth even runs. A real prod deploy would supply its own
+  // real origin(s) here (or lean on `web`'s domain, which lands on the SAME construct later via
+  // an L1 patch, too late to satisfy this constructor-time check) — never an empty list with no
+  // domain at all. A placeholder prod-shaped origin exercises the knob without hitting that.
+  const hardened = Template.fromStack(
+    new SwngStack(new App({ context: { "@aws-cdk/aws-lambda:useCdkManagedLogGroup": true } }), "swng-hardened", {
+      stage: "hardened",
+      userPasswordAuth: false,
+      extraWebOrigins: ["https://hardened.example.com"],
+      extraCorsOrigins: [],
+    }),
+  );
+  it("drops ALLOW_USER_PASSWORD_AUTH from the app client when userPasswordAuth is false", () => {
+    const clients = hardened.findResources("AWS::Cognito::UserPoolClient");
+    const flows = Object.values(clients)[0]!.Properties.ExplicitAuthFlows as string[];
+    expect(flows).not.toContain("ALLOW_USER_PASSWORD_AUTH");
+  });
+  it("carries no localhost or beta-cloudfront origin in the app client callback URLs", () => {
+    const clients = hardened.findResources("AWS::Cognito::UserPoolClient");
+    const callbacks = JSON.stringify(Object.values(clients)[0]!.Properties.CallbackURLs);
+    expect(callbacks).not.toContain("localhost");
+    expect(callbacks).not.toContain("d5qqgppnyb7y1");
+  });
+});

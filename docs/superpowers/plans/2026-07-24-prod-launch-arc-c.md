@@ -8,6 +8,29 @@
 
 **Tech Stack:** AWS CDK (aws-cdk-lib 2.262), Cognito, CloudFront, ACM, Route53, DynamoDB, Node scripts, Vitest (CDK assertions).
 
+## Execution scope (read first — the deploy IS part of this arc)
+
+Executing this plan means **building Tasks 1–3 AND running the launch close-out below** — the
+`swng-prod` deploy, the web publish, and the smoke walk are the deliverable, not a follow-up. **Do
+not defer the deploy.** The full sequence is: build Tasks 1–3 (subagent-driven, each reviewed) →
+whole-branch review → land the held Arc B on beta → deploy `swng-prod` → publish the prod web →
+run the smoke walk on `swng.golf`. Everything through the smoke walk is **controller-run**. The
+only steps that are the owner's: **clicking the `swng-alarms-prod` SNS confirmation email** (a
+human action; flag it, but it does not block the deploy) and **the public announcement** (they
+post only after the smoke walk is green). Deploy details: AWS profile `swng`, `STAGE=prod` for the
+prod deploy, region `us-east-1`. `swng.golf` apex is confirmed free (owner, 2026-07-24).
+
+## Current state at plan time (for a post-compaction executor)
+
+- **Arc A** (app hardening): deployed to `swng-beta`, on `main`.
+- **Arc B** (observability): CODE-COMPLETE on `main`, `validate`-green, whole-branch-reviewed,
+  the WAF-dimension fix landed (commit `46b9515`) — but **held from beta** (it was deliberately not
+  deployed during the owner's live round). Close-out step 3 below deploys it to beta first.
+- **Arc C** (this plan): spec (`2026-07-24-prod-launch-arc-c-design.md`) + this plan committed
+  (`62835c6`, `84e814b`). Branch base for the whole-branch review = the commit this plan sits on
+  (`git merge-base` is unnecessary — the arc is linear on `main`; use the pre-Task-1 HEAD recorded
+  in `.superpowers/sdd/progress.md`). Nothing pushed; all on local `main`.
+
 ## Global Constraints
 
 - `pnpm validate` MUST be green at every commit and at HEAD.

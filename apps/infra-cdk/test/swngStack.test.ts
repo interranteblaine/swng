@@ -891,11 +891,12 @@ describe("SwngStack", () => {
 
   // M9 Task 5: every alarm routes into the SAME SNS topic (the owner's one inbox), so this
   // suite checks the count once and the topic-wiring once across every alarm found, rather than
-  // repeating the same AlarmActions assertion by hand for all 14. D4b (pre-prod hardening spec)
-  // adds the 14th: the projector DLQ depth alarm.
-  describe("alarms (M9 Task 5, D4b)", () => {
-    it("has exactly 14 CloudWatch alarms (5 function errors + 1 HTTP 5xx + 1 IteratorAge + 1 Rebuild Duration + 5 table throttled-requests + 1 ProjectorDlq depth)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 14);
+  // repeating the same AlarmActions assertion by hand for all of them. Prod-readiness Arc B
+  // Task 4 reworked the set (3 retained: IteratorAge + DLQ depth + Rebuild duration; reshaped:
+  // HTTP 5xx; added: HTTP p95 latency + WAF blocked + signup spike).
+  describe("alarms (M9 Task 5, D4b, Arc B Task 4)", () => {
+    it("has exactly 7 CloudWatch alarms (3 retained: IteratorAge + DLQ depth + Rebuild duration; reshaped: HTTP 5xx; added: HTTP p95 latency + WAF blocked + signup spike)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 7);
     });
 
     it("every alarm's AlarmActions targets the one AlarmsTopic (no alarm silently rings nowhere)", () => {
@@ -905,31 +906,53 @@ describe("SwngStack", () => {
 
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const alarmEntries = Object.entries(alarms);
-      expect(alarmEntries.length).toBe(14);
+      expect(alarmEntries.length).toBe(7);
       for (const [, alarm] of alarmEntries) {
         expect(alarm.Properties.AlarmActions).toEqual([{ Ref: topicLogicalId }]);
       }
     });
 
-    it("every one of the 5 functions has its own Errors >= 1 (5 min) alarm", () => {
-      const alarms = template.findResources("AWS::CloudWatch::Alarm");
-      const errorAlarms = Object.values(alarms).filter((alarm) => alarm.Properties.MetricName === "Errors" && alarm.Properties.Namespace === "AWS/Lambda");
-      expect(errorAlarms).toHaveLength(5);
-      for (const alarm of errorAlarms) {
-        expect(alarm.Properties.Threshold).toBe(1);
-        expect(alarm.Properties.Period).toBe(300);
-        expect(alarm.Properties.Statistic).toBe("Sum");
-        expect(alarm.Properties.ComparisonOperator).toBe("GreaterThanOrEqualToThreshold");
-      }
-    });
-
-    it("the HTTP API 5xx alarm: AWS/ApiGateway 5xx, threshold 5, 5-minute period", () => {
+    it("the HTTP API 5xx alarm: AWS/ApiGateway 5xx, threshold 10, 2 of 3 five-minute windows", () => {
       template.hasResourceProperties("AWS::CloudWatch::Alarm", {
         Namespace: "AWS/ApiGateway",
         MetricName: "5xx",
         Statistic: "Sum",
         Period: 300,
-        Threshold: 5,
+        Threshold: 10,
+        EvaluationPeriods: 3,
+        DatapointsToAlarm: 2,
+        ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      });
+    });
+
+    it("the HTTP API p95-latency alarm: AWS/ApiGateway Latency, p95, > 3000ms, 2 of 3", () => {
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        Namespace: "AWS/ApiGateway",
+        MetricName: "Latency",
+        ExtendedStatistic: "p95",
+        Threshold: 3000,
+        EvaluationPeriods: 3,
+        DatapointsToAlarm: 2,
+        ComparisonOperator: "GreaterThanThreshold",
+      });
+    });
+
+    it("the WAF blocked-requests alarm: a math expression over AWS/WAFV2 BlockedRequests, threshold 100", () => {
+      const alarms = template.findResources("AWS::CloudWatch::Alarm");
+      const waf = Object.values(alarms).filter((a) =>
+        (a.Properties.AlarmDescription as string | undefined)?.includes("blocked"),
+      );
+      expect(waf).toHaveLength(1);
+      expect(waf[0]!.Properties.Threshold).toBe(100);
+      expect(Array.isArray(waf[0]!.Properties.Metrics)).toBe(true); // math expression → Metrics[]
+    });
+
+    it("the signup-spike alarm: swng namespace Signups, threshold 50", () => {
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        Namespace: "swng",
+        MetricName: "Signups",
+        Statistic: "Sum",
+        Threshold: 50,
         ComparisonOperator: "GreaterThanOrEqualToThreshold",
       });
     });
@@ -952,21 +975,6 @@ describe("SwngStack", () => {
         Threshold: 240_000,
         ComparisonOperator: "GreaterThanThreshold",
       });
-    });
-
-    it("all 5 tables get a throttled-requests math-expression alarm (threshold 1, summed across the real operations adapters-dynamodb issues)", () => {
-      const alarms = template.findResources("AWS::CloudWatch::Alarm");
-      const throttleAlarms = Object.values(alarms).filter((alarm) =>
-        (alarm.Properties.AlarmDescription as string | undefined)?.includes("throttled request"),
-      );
-      expect(throttleAlarms).toHaveLength(5);
-      for (const alarm of throttleAlarms) {
-        expect(alarm.Properties.Threshold).toBe(1);
-        expect(alarm.Properties.ComparisonOperator).toBe("GreaterThanOrEqualToThreshold");
-        // A math-expression alarm carries `Metrics`, not a bare `MetricName` — pinning this
-        // rules out a future edit accidentally swapping in a single-metric (non-summed) alarm.
-        expect(Array.isArray(alarm.Properties.Metrics)).toBe(true);
-      }
     });
 
     // D4b: a non-empty DLQ means a poisoned snapshots-stream record needs a human — page on

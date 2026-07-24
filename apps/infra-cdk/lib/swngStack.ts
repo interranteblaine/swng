@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
-import { Alarm, ComparisonOperator, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
+import { Alarm, ComparisonOperator, MathExpression, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
-import { AttributeType, BillingMode, Operation, ProjectionType, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
+import { AttributeType, BillingMode, ProjectionType, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
 import { CfnRoute, CfnStage, CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration, WebSocketLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { Certificate, CertificateValidation } from "aws-cdk-lib/aws-certificatemanager";
@@ -747,41 +747,41 @@ export class SwngStack extends Stack {
       return alarm;
     };
 
+    // Like paged(), but also notifies on return-to-OK — for the sustained HTTP alarms where
+    // "it recovered on its own" is information the owner wants (not so for DLQ/IteratorAge, which
+    // need a human-run rebuild/redrive and stay alarm-only).
+    const pagedWithRecovery = (alarm: Alarm): Alarm => {
+      alarm.addAlarmAction(new SnsAction(alarmsTopic));
+      alarm.addOkAction(new SnsAction(alarmsTopic));
+      return alarm;
+    };
+
     const FIVE_MINUTES = Duration.minutes(5);
 
-    // Per-function Errors >= 1 over 5 minutes, for every one of the 5 functions — the first
-    // signal of "something threw," before a human would otherwise notice via a support message
-    // or a stalled projection.
-    const alarmedFunctions: ReadonlyArray<readonly [string, NodejsFunction]> = [
-      ["Http", httpFn],
-      ["WsConnect", wsConnectFn],
-      ["WsDisconnect", wsDisconnectFn],
-      ["Projector", projectorFn],
-      ["Rebuild", rebuildFn],
-    ];
-    for (const [name, fn] of alarmedFunctions) {
-      paged(
-        new Alarm(this, `${name}ErrorsAlarm`, {
-          alarmDescription: `${name}Function: at least 1 error in 5 minutes`,
-          metric: fn.metricErrors({ period: FIVE_MINUTES, statistic: "Sum" }),
-          threshold: 1,
-          evaluationPeriods: 1,
-          comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-          treatMissingData: TreatMissingData.NOT_BREACHING,
-        }),
-      );
-    }
-
-    // HTTP API 5xx >= 5 over 5 minutes — httpApi.metricServerError() aggregates the documented
-    // AWS/ApiGateway "5xx" metric (dimensioned by ApiId only, no Stage dimension) across every
-    // stage of this API; there is exactly one (the default stage above), so this is unambiguous.
-    paged(
+    // Non-transient 5xx: sustained server errors, not a single deploy blip. 2 of the last 3
+    // five-minute windows each at >= 10 5xx. OK-notifying so the owner learns when it recovers.
+    pagedWithRecovery(
       new Alarm(this, "HttpApi5xxAlarm", {
-        alarmDescription: "HTTP API: at least 5 5xx responses in 5 minutes",
+        alarmDescription: "HTTP API: >= 10 5xx responses in 2 of the last 3 five-minute windows (sustained server errors)",
         metric: httpApi.metricServerError({ period: FIVE_MINUTES, statistic: "Sum" }),
-        threshold: 5,
-        evaluationPeriods: 1,
+        threshold: 10,
+        evaluationPeriods: 3,
+        datapointsToAlarm: 2,
         comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: TreatMissingData.NOT_BREACHING,
+      }),
+    );
+
+    // p95 latency > 3s, 2 of 3 windows. API Gateway emits Latency for free; no latency alarm
+    // existed before Arc B. OK-notifying, same rationale as the 5xx alarm.
+    pagedWithRecovery(
+      new Alarm(this, "HttpApiP95LatencyAlarm", {
+        alarmDescription: "HTTP API: p95 latency over 3000ms in 2 of the last 3 five-minute windows",
+        metric: httpApi.metricLatency({ period: FIVE_MINUTES, statistic: "p95" }),
+        threshold: 3000,
+        evaluationPeriods: 3,
+        datapointsToAlarm: 2,
+        comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
         treatMissingData: TreatMissingData.NOT_BREACHING,
       }),
     );
@@ -840,50 +840,55 @@ export class SwngStack extends Stack {
       }),
     );
 
-    // DynamoDB throttled-requests >= 1 over 5 minutes, on all 4 tables — PAY_PER_REQUEST tables
-    // throttle far more rarely than provisioned ones, but a hot partition (e.g. one very active
-    // round or a course-search spike on the shared gsi1 partition, core table's own doc comment
-    // above) can still throttle; this is the earliest signal a golfer's own tap silently failed
-    // to persist. metricThrottledRequestsForOperations builds ONE math expression summing a
-    // per-operation metric each — CloudWatch caps a math-expression alarm at 10 individual
-    // metrics, and the default `operations` (every Operation the enum knows, 14) blows past
-    // that (confirmed against a real `cdk synth`: "Alarms on math expressions cannot contain
-    // more than 10 individual metrics"). `THROTTLEABLE_OPERATIONS` below is the real, narrower
-    // set adapters-dynamodb actually issues (grepped across packages/adapters-dynamodb/src's own
-    // *Command construction — CreateTable/ListTables are admin/test-only, never a live runtime
-    // path, so they're deliberately excluded), 8 operations, safely under the cap, shared
-    // identically across all four tables below (a table that never issues one of these ops
-    // simply reports 0 for that leg of the sum — harmless, and one shared list is simpler than
-    // four hand-curated ones).
-    const THROTTLEABLE_OPERATIONS: Operation[] = [
-      Operation.GET_ITEM,
-      Operation.PUT_ITEM,
-      Operation.UPDATE_ITEM,
-      Operation.DELETE_ITEM,
-      Operation.QUERY,
-      Operation.SCAN,
-      Operation.BATCH_GET_ITEM,
-      Operation.TRANSACT_WRITE_ITEMS,
-    ];
-    const alarmedTables: ReadonlyArray<readonly [string, Table]> = [
-      ["Rounds", roundsTable],
-      ["Core", coreTable],
-      ["Snapshots", snapshotsTable],
-      ["Projections", projectionsTable],
-      ["Connections", connectionsTable],
-    ];
-    for (const [name, table] of alarmedTables) {
-      paged(
-        new Alarm(this, `${name}TableThrottledRequestsAlarm`, {
-          alarmDescription: `${name}Table: at least 1 throttled request in 5 minutes`,
-          metric: table.metricThrottledRequestsForOperations({ period: FIVE_MINUTES, operations: THROTTLEABLE_OPERATIONS }),
-          threshold: 1,
-          evaluationPeriods: 1,
-          comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-          treatMissingData: TreatMissingData.NOT_BREACHING,
+    // --- Abuse-shape alarms (Arc B) -------------------------------------------------------
+    //
+    // Two cheap signals for the account -> crew -> round abuse chain. (1) The WAF is actively
+    // blocking a flood right now (reads the Arc A rate-rule metrics — no app code). (2) A signup
+    // burst that stays under the per-IP WAF rate (reads the Signups EMF metric).
+    const wafBlocked = (webAcl: string, region: string): Metric =>
+      new Metric({
+        namespace: "AWS/WAFV2",
+        metricName: "BlockedRequests",
+        // Region is "Global" for the CLOUDFRONT-scope ACL, "us-east-1" for the REGIONAL one;
+        // Rule "ALL" is the ACL-level aggregate. VERIFY at close-out (WAF metric dimensions are a
+        // known gotcha) — if the widget/alarm shows no data under a real block, correct Region.
+        dimensionsMap: { WebACL: webAcl, Region: region, Rule: "ALL" },
+        period: FIVE_MINUTES,
+        statistic: "Sum",
+      });
+    paged(
+      new Alarm(this, "WafBlockedRequestsAlarm", {
+        alarmDescription: "WAF: over 100 requests blocked by the rate rules in 5 minutes — a flood is in progress",
+        metric: new MathExpression({
+          expression: "cf + cognito",
+          usingMetrics: {
+            cf: wafBlocked(`swng-waf-cf-${stage}`, "Global"),
+            cognito: wafBlocked(`swng-waf-cognito-${stage}`, "us-east-1"),
+          },
+          period: FIVE_MINUTES,
         }),
-      );
-    }
+        threshold: 100,
+        evaluationPeriods: 1,
+        comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+        treatMissingData: TreatMissingData.NOT_BREACHING,
+      }),
+    );
+    paged(
+      new Alarm(this, "SignupSpikeAlarm", {
+        alarmDescription: "Signups: 50 or more new golfer accounts in 5 minutes — a possible account-creation abuse spike",
+        metric: new Metric({
+          namespace: "swng",
+          metricName: "Signups",
+          dimensionsMap: { Stage: stage },
+          period: FIVE_MINUTES,
+          statistic: "Sum",
+        }),
+        threshold: 50,
+        evaluationPeriods: 1,
+        comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: TreatMissingData.NOT_BREACHING,
+      }),
+    );
 
     // --- WAF rate-limiting (Prod-readiness hardening Arc A, Task 5) -----------------------
     //

@@ -1366,6 +1366,67 @@ blocked" and started handing the deploy off — the owner corrected it (`deploy:
 controller-run); `cdk diff`/`deploy:beta`/`admin-create-user`/`admin-delete-user` all ran fine. On
 local `main`, never pushed.
 
+Prod-readiness Arc A — app hardening is real (2026-07-23, findings
+`docs/superpowers/specs/2026-07-23-prod-readiness-security-findings.md`, design
+`.../2026-07-23-prod-hardening-arc-a-design.md`, plan
+`.../plans/2026-07-23-prod-hardening-arc-a.md`, handoff
+`.../handoffs/2026-07-23-prod-hardening-arc-a-handoff.md`, 8 SDD tasks + a whole-branch fix wave,
+commits `375512d..ac71edc`, base `05c80ff`): the FIRST of three sequential prod-readiness arcs
+(A app-hardening — this — then B observability, then C the `swng-prod` stack; owner drives which
+comes next). Everything provable on `swng-beta`, no prod stack, no new stack. **Eight closures.**
+(1) **Bounds at the wire ingress ONLY** — every user-controlled request string/array/count gets a
+`.max()` (names 40/60/80, holes 18, teeSets 12, players 12, strokes 30, join code an
+alphabet `.regex()`); the load-bearing rule is **request schemas only, never a response/read/fold
+path** (a bound that rejects STORED data bricks a legitimate user, worse than the DoS) — `strokes`
+and game `players` were SHARED with `roundEventSchema`'s stored fold, so request-only copies/
+overrides landed in `commands.ts` and `round.ts` stayed byte-untouched. NO crew-size cap (a product
+limit masquerading as DoS defense; abuse is WAF-choked upstream). (2) **CSPRNG join codes**
+(`crypto.randomInt`, not `Math.random` — a join code is a capability). (3) **index-over-time is O(N)**
+— `golferMetrics.indexHistory` was O(N²) (re-folding the whole career prefix per round on
+`GET /me/record`+`GET /golfers/{id}`); rewritten as one forward pass over a rolling last-20 combined-
+differential window, the 9-hole pairing rule extracted to whs.ts `feedNineHoleCombine` (ONE copy;
+`combineNineHoleDifferentials` is now a fold over it), byte-identical values (independent per-prefix
+oracle over a cross-window-9-hole fixture). (4) **the unused Cognito `email` claim is deleted**
+(`AccountClaims` and `createCognitoVerifier` read `sub` only — the accounts-only wall) alongside
+`aws-cdk-lib` 2.229→2.262 + `ws`→8.21 bumps (audit --prod 3high/1mod→0). (5) **TOKEN_SECRET moves
+out of the Lambda env to a runtime Secrets Manager fetch** — `buildApp` async, the env carries the
+ARN not the value, `GetSecretValue` scoped to the three app-building functions
+(http/wsConnect/wsDisconnect; projector/rebuild excluded), a new minimal `@swng/adapters-secretsmanager`
+(the SDK-in-adapters fence forbids the plan's literal `@aws-sdk` import in `compositionRoot`); the
+secret VALUE is unchanged so in-flight tokens keep verifying across ONE atomic deploy. (6) **AWS WAF**
+— two rate-based (2000/5min/IP) WebACLs: CLOUDFRONT-scope on the distribution (`webAclId`) and
+REGIONAL on the Cognito pool (`CfnWebACLAssociation`), choking account-creation floods at the head of
+the chain (metric names `swng-waf-{cf,cognito}-rate-beta` are Arc B's abuse-alarm input). (7)
+**security headers + CORS scoping** — HSTS(365d)/nosniff/referrer/frame-DENY + CSP `frame-ancestors
+'none'`/`base-uri 'self'`; CORS off `["*"]` to the real origins, sourced CYCLE-FREE (the distribution
+depends on the HTTP API via CSP→apiEndpoint, so a distribution-token in CORS would cycle) — with
+`http://localhost:4173` gate-critical-and-commented (the Playwright field-test origin). (8) **data
+durability** — PITR on rounds+core, deletionProtection on the four RETAIN tables (non-deprecated
+`pointInTimeRecoverySpecification`, all in-place property adds, no live-data-table replacement). Each
+task independently reviewed; the whole-branch review (opus) READY-WITH-FIXES drove a one-wave fix:
+**the self-heal** (`appPromise ??= buildApp(process.env).catch(e => { appPromise = undefined; throw e })`
+in all three entries — a rejected cold-start secret fetch must not poison a warm container's auth, the
+arc's most availability-sensitive path, also covering the deploy's IAM-propagation window), **the
+courseHandicap widen** (`[-10,54]→[-20,100]` — the disclosed deviation from the plan's literal value:
+`[-10,54]` rejects a legitimate max-index-on-hard-course CH per WHS 6.1a and a legitimate extreme-plus
+CH, exactly the anti-pattern the arc's OWN placement rule forbids; the design delegated bound values
+"owner may adjust on review"), and **a real HoleResult exhaustiveness guard** (a `z.ZodType<HoleResult>`
+annotation alone does NOT catch a missing arm — a one-tuple `[A] extends [B]` non-distributive check
+does, proven RED-when-an-arm-is-removed). Close-out (controller-run, NO data wipe — all additive/in-
+place): `pnpm validate` exit 0 + `test:contract` 90 → `cdk diff` proved in-place/additive ONLY (no
+table/pool/secret replacement or removal; TokenSecret resource unchanged) → `deploy:beta` **✅ swng-beta
+UPDATE_COMPLETE 103s** (CognitoWebAclAssociation CREATE_COMPLETE, one atomic update carrying the secret
+switch+grant/WAF/headers/CORS/PITR) → `publish:web:beta` (bundle `index-BPj5XVrp.js`, CF invalidation)
+→ `e2e:beta` **17/17 ×2** (real-token mint+verify live — the secret switch preserved verification) →
+`e2e:field` **66 passed / 1 documented-skip** (proves CORS allows localhost:4173 + the index-history
+refactor didn't regress the field oracles) → an adversarial USE pass on the DEPLOYED surface: a forged
+HMAC token → **401**, `curl -I beta.swng.golf` shows all five headers + both CSP directives, an over-cap
+`PUT /me` name(61) → **400** with a valid name → **200** (throwaway Cognito user minted+deleted), and
+both WAF ACLs live (the REGIONAL ACL's resources include the user pool ARN; the distribution's
+`WebACLId` is the CLOUDFRONT ACL). `USER_PASSWORD_AUTH`-off + Cognito password/MFA/threat-protection are
+Arc C (the prod pool); the alarms rework + p95 + usage/abuse metrics are Arc B. On local `main`, never
+pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

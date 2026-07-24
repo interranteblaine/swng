@@ -64,8 +64,15 @@ const readJsonBody = (event: APIGatewayProxyEventV2): unknown => {
 export const createDispatcher =
   (routes: readonly Route[], tokens: TokenIssuer, verifier: AccountVerifier, logger: Logger) =>
   async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
+    const startedAt = Date.now();
     const method = event.requestContext.http.method.toUpperCase();
     const path = event.rawPath;
+
+    // Hoisted above the try so the finally's one access-log line names the matched route and the
+    // authenticated subject on EVERY exit (404 / success / mapped-error). Observability (Arc B).
+    let route: Route | undefined;
+    let account: AccountClaims | undefined;
+    let status = 500;
 
     try {
       // Route matching (including decodePathSegments, which can throw on a malformed
@@ -73,7 +80,6 @@ export const createDispatcher =
       // out mapped, never as an unhandled Lambda crash.
       const pathSegments = decodePathSegments(path);
 
-      let route: Route | undefined;
       let pathParams: Record<string, string> | undefined;
       for (const candidate of routes) {
         if (candidate.method !== method) continue;
@@ -88,8 +94,9 @@ export const createDispatcher =
         // Routed through errorMapping's jsonResponse rather than hand-built here — one
         // error-shaping site, even though "no route matched" never becomes a thrown error
         // (there's nothing to throw against; `route` is just undefined).
-        const { statusCode, body } = jsonResponse(404, { code: "not-found", message: `no route for ${method} ${path}` });
-        return { statusCode, headers: { "content-type": "application/json" }, body };
+        const notFound = jsonResponse(404, { code: "not-found", message: `no route for ${method} ${path}` });
+        status = notFound.statusCode;
+        return { statusCode: notFound.statusCode, headers: { "content-type": "application/json" }, body: notFound.body };
       }
 
       let claims: ParticipantClaims | undefined;
@@ -128,7 +135,6 @@ export const createDispatcher =
         if (verified.roundId !== pathParams.roundId) throw new ApplicationError("token-round-mismatch");
       }
 
-      let account: AccountClaims | undefined;
       if (route.auth === "golfer") {
         // "golfer" REQUIRES a token — missing is a 401, same as "participant" above. Accounts-only
         // identity (spec §3): StartRound/JoinRound are "golfer" now too, so an anonymous start or
@@ -152,9 +158,22 @@ export const createDispatcher =
       const ctx: RouteContext = { claims, account, pathParams, query };
 
       const result = await route.handler(ctx, body);
+      status = route.successStatus;
       return { statusCode: route.successStatus, headers: { "content-type": "application/json" }, body: JSON.stringify(result) };
     } catch (error) {
-      const { statusCode, body } = toHttpError(error, logger);
-      return { statusCode, headers: { "content-type": "application/json" }, body };
+      const mapped = toHttpError(error, logger);
+      status = mapped.statusCode;
+      return { statusCode: mapped.statusCode, headers: { "content-type": "application/json" }, body: mapped.body };
+    } finally {
+      // One structured line per request → CloudWatch Logs Insights: DAU (count_distinct sub),
+      // requests-by-route, 4xx/5xx-by-route. `sub` is the Cognito subject on golfer routes only
+      // (opaque UUID, no PII); omitted elsewhere. Runs on all three exits; never throws into the
+      // request path (logger.info is a plain console write).
+      logger.info("request", {
+        route: route ? `${route.method} ${route.path}` : "not-found",
+        status,
+        sub: account?.sub,
+        latencyMs: Date.now() - startedAt,
+      });
     }
   };

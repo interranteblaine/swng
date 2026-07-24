@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { cardId, courseId, crewId, deviceId, fixtureLinks, fixtureWhite, golferId, opId, placeholderName } from "@swng/domain";
-import type { AccountClaims, AccountVerifier } from "@swng/application";
+import type { AccountClaims, AccountVerifier, Logger } from "@swng/application";
 import {
   abandonRound,
   addGame,
@@ -153,7 +153,7 @@ const subVerifier: AccountVerifier = {
 // back so every `/rounds` POST body below just passes it through instead of authoring a card.
 const DEFAULT_COURSE = { courseId: courseId("default-course"), cardId: cardId("default-card") };
 
-const setup = async (verifier: AccountVerifier = subVerifier) => {
+const setup = async (verifier: AccountVerifier = subVerifier, logger: Logger = createNullLogger()) => {
   const snapshots = createInMemorySnapshotStore();
   const journal = createInMemoryJournal(snapshots);
   const store = createInMemoryRoundStore();
@@ -165,7 +165,6 @@ const setup = async (verifier: AccountVerifier = subVerifier) => {
   const clock = createFixedClock(1_000);
   const ids = createSequentialIds("id");
   const tokens = createHmacTokenIssuer({ secret: "dispatch-test-secret", clock });
-  const logger = createNullLogger();
   const cardRecord = await seedCard(cardStore, DEFAULT_COURSE.courseId, DEFAULT_COURSE.cardId, fixtureLinks);
   const course = { courseId: cardRecord.courseId, cardId: cardRecord.cardId };
 
@@ -2151,5 +2150,48 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
     const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token` })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
+  });
+});
+
+// Prod-readiness Arc B Task 3: one structured access-log line per request. The existing suites
+// above all use createNullLogger() (which swallows info()), so none of them can see this line —
+// these two tests build their OWN capturing logger, reusing setup()'s real route table/tokens/
+// verifier (setup() now takes an optional logger, defaulting to createNullLogger() as before).
+describe("createDispatcher — access log (prod-readiness Arc B Task 3)", () => {
+  it("logs one structured access line per request with route, status, sub, latencyMs", async () => {
+    const infos: { message: string; data?: Record<string, unknown> }[] = [];
+    const logger: Logger = { info: (m, d) => infos.push({ message: m, data: d }), warn: () => {}, error: () => {} };
+    // subVerifier (setup()'s default) maps any bearer string to a sub of the same value — a
+    // golfer-tier request with token "sub-123" is verified as sub "sub-123".
+    const { dispatcher } = await setup(subVerifier, logger);
+
+    const res = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: "sub-123" })));
+    expect(res.statusCode).toBe(200);
+
+    const line = infos.find((l) => l.message === "request");
+    expect(line).toBeDefined();
+    expect(line!.data).toMatchObject({ route: expect.stringMatching(/^[A-Z]+ \//), status: Number(res.statusCode) });
+    expect(line!.data!.sub).toBe("sub-123");
+    expect(typeof line!.data!.latencyMs).toBe("number");
+  });
+
+  it("omits sub on an auth:none route and logs route 'not-found' for an unmatched path", async () => {
+    const infos: { message: string; data?: Record<string, unknown> }[] = [];
+    const logger: Logger = { info: (m, d) => infos.push({ message: m, data: d }), warn: () => {}, error: () => {} };
+    const { dispatcher } = await setup(subVerifier, logger);
+
+    // GET /courses is `auth: "none"` — no bearer token is presented, and none is required.
+    await dispatcher(makeEvent({ method: "GET", path: "/courses", query: { query: "anything" } }));
+    // Never matches any route — the dispatcher's own 404, distinct from a matched route that
+    // itself happens to 404 (e.g. course-not-found).
+    await dispatcher(makeEvent({ method: "GET", path: "/no/such/route" }));
+
+    const noneLine = infos.find((l) => l.message === "request" && l.data!.route !== "not-found");
+    expect(noneLine).toBeDefined();
+    expect(noneLine!.data!.sub).toBeUndefined();
+
+    const missLine = infos.find((l) => l.message === "request" && l.data!.route === "not-found");
+    expect(missLine).toBeDefined();
+    expect(missLine!.data!.status).toBe(404);
   });
 });

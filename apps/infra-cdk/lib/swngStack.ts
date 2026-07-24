@@ -391,10 +391,10 @@ export class SwngStack extends Stack {
           }
         : {}),
       // Real accounts in prod must never be deletable via a routine stack update/teardown.
-      // `false` is CDK's own UserPool default, so this renders identically to before this prop
-      // existed when poolDeletionProtection is unset (beta) — verified against the shared beta
-      // template in swngStack.test.ts.
-      deletionProtection: props.poolDeletionProtection ?? false,
+      // Conditional spread, not an always-present property with a defaulted `false`, so beta
+      // (poolDeletionProtection unset) emits NO DeletionProtection line at all — keeping beta's
+      // synth byte-identical. Prod (`true`) renders DeletionProtection: "ACTIVE".
+      ...(props.poolDeletionProtection ? { deletionProtection: true } : {}),
     });
 
     // The web app's origins, for both OAuth callback and logout redirects (and, Task 6 below,

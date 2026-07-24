@@ -6,7 +6,9 @@ import { ANON_THROTTLED_ROUTES, HTTP_ROUTES, SwngStack } from "../lib/swngStack.
 // One stack, synthesized once, asserted against many times — synthesis (which bundles all
 // three Lambdas with esbuild) is the expensive part of this suite; sharing it across `it`
 // blocks keeps the run fast without weakening any single assertion.
-const template = Template.fromStack(new SwngStack(new App(), "swng-beta", { stage: "beta" }));
+const template = Template.fromStack(
+  new SwngStack(new App({ context: { "@aws-cdk/aws-lambda:useCdkManagedLogGroup": true } }), "swng-beta", { stage: "beta" }),
+);
 
 // Task 4: TOKEN_SECRET_ARN, not TOKEN_SECRET — the secret's ARN rides in the env now, never
 // its plaintext value. Prod-readiness Arc B Task 2: STAGE joins the shared set — it labels the
@@ -247,22 +249,16 @@ describe("SwngStack", () => {
       expect(appFunctions()).toHaveLength(5);
     });
 
-    // Arc B Task 5: the ops dashboard's Logs Insights widget reads `httpFn.logGroup` — the
-    // FIRST access of any function's `.logGroup` getter anywhere in this suite. In a REAL `cdk
-    // synth`/`cdk deploy` (which loads cdk.json's context, including
-    // `@aws-cdk/aws-lambda:useCdkManagedLogGroup: true`), every application function already
-    // gets its own CDK-managed `AWS::Logs::LogGroup` at CONSTRUCTION time regardless of whether
-    // anything ever reads `.logGroup` — confirmed via `cdk synth --quiet`: the real template
-    // carries 5 `AWS::Logs::LogGroup` resources (one per app function) and still exactly 6
-    // `AWS::Lambda::Function`s, so this change adds ZERO new resources to what actually deploys.
-    // This test's own template, though, is built via a bare `new App()` (no cdk.json context),
-    // so the feature flag is OFF here — `.logGroup`'s getter falls back to the legacy
-    // `Custom::LogRetention` mechanism (aws-cdk-lib's `Function#logGroup`), which lazily
-    // provisions its own singleton backing Lambda the first time ANY function's `.logGroup` is
-    // read. That singleton is additive and harmless (a testing-harness artifact, not a stack
-    // change) but does bump this template's own Lambda::Function count from 6 to 7.
-    it("has exactly 7 Lambda functions total (5 application functions + the CDK-managed WebBucket auto-delete-objects custom resource provider, M9 Task 6 + the LogRetention singleton the ops dashboard's httpFn.logGroup reference provisions in this no-context test template, Arc B Task 5)", () => {
-      template.resourceCountIs("AWS::Lambda::Function", 7);
+    // M9 Task 6: WebBucket's autoDeleteObjects adds a 6th, CDK-MANAGED Lambda — the singleton
+    // Custom::S3AutoDeleteObjects provider — which is not one of our 5 application entry points.
+    // Arc B Task 5: the ops dashboard's Logs Insights widget reads `httpFn.logGroup`. This
+    // template is built with the `@aws-cdk/aws-lambda:useCdkManagedLogGroup` context flag on
+    // (matching cdk.json, which a real `cdk synth`/`cdk deploy` always loads), so every
+    // application function already gets its own CDK-managed `AWS::Logs::LogGroup` at
+    // construction time and `.logGroup` never falls back to the legacy `Custom::LogRetention`
+    // mechanism — the count here matches the real deployed stack exactly.
+    it("has exactly 6 Lambda functions total (5 application functions + the CDK-managed WebBucket auto-delete-objects custom resource provider, M9 Task 6)", () => {
+      template.resourceCountIs("AWS::Lambda::Function", 6);
     });
 
     it("every application function is Node 20 (the CDK-managed auto-delete-objects provider's runtime is CDK's own choice, not this stack's)", () => {
@@ -1309,7 +1305,9 @@ describe("SwngStack", () => {
 // byte-identical synth" pin the plan calls for.
 describe("SwngStack with a configured web domain (Task D-T1: beta.swng.golf)", () => {
   const WEB_BETA = { domainName: "beta.swng.golf", hostedZoneId: "Z00936512AJC1HGD9M7B7", zoneName: "swng.golf" };
-  const webTemplate = Template.fromStack(new SwngStack(new App(), "swng-beta", { stage: "beta", web: WEB_BETA }));
+  const webTemplate = Template.fromStack(
+    new SwngStack(new App({ context: { "@aws-cdk/aws-lambda:useCdkManagedLogGroup": true } }), "swng-beta", { stage: "beta", web: WEB_BETA }),
+  );
 
   // Same resolve-the-real-logical-id idiom as `findLogicalId` above, generalized over which
   // template it queries (that helper is closed over the shared prop-less `template`).

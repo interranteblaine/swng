@@ -29,6 +29,7 @@ const STAGE_CONFIG: Record<string, StageConfig> = {
     extraCorsOrigins: [],
     passwordPolicy: { minLength: 8, requireLowercase: true, requireUppercase: true, requireDigits: true, requireSymbols: false },
     poolDeletionProtection: true,
+    preventUserExistenceErrors: true,
   },
 };
 

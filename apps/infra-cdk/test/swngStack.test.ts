@@ -1443,6 +1443,7 @@ describe("SwngStack prod config (Arc C)", () => {
       extraCorsOrigins: [],
       passwordPolicy: { minLength: 8, requireLowercase: true, requireUppercase: true, requireDigits: true, requireSymbols: false },
       poolDeletionProtection: true,
+      preventUserExistenceErrors: true,
     }),
   );
   it("app client has no ALLOW_USER_PASSWORD_AUTH", () => {
@@ -1460,5 +1461,9 @@ describe("SwngStack prod config (Arc C)", () => {
     expect(callbacks).toContain("https://swng.golf/auth/callback");
     expect(callbacks).not.toContain("localhost");
     expect(callbacks).not.toContain("d5qqgppnyb7y1");
+  });
+  it("pins PreventUserExistenceErrors to ENABLED on the app client", () => {
+    const client = Object.values(prod.findResources("AWS::Cognito::UserPoolClient"))[0]!;
+    expect(client.Properties.PreventUserExistenceErrors).toBe("ENABLED");
   });
 });

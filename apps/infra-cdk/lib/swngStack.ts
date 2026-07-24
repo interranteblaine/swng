@@ -63,6 +63,9 @@ export interface SwngStackProps extends StackProps {
   };
   /** Pool-level deletion protection (prod: real accounts). Default false (beta). */
   readonly poolDeletionProtection?: boolean;
+  /** Pin Cognito's PreventUserExistenceErrors to ENABLED (stops user-enumeration on sign-in/reset).
+   *  Prod: true. Beta omits it (byte-identical — CDK renders no line when absent). Default undefined. */
+  readonly preventUserExistenceErrors?: boolean;
 }
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
@@ -455,6 +458,9 @@ export class SwngStack extends Stack {
           ...(webDomain ? [`https://${webDomain.domainName}/`] : []),
         ],
       },
+      // Prod-only (conditional spread → beta's synth is byte-identical): CDK omits the property
+      // entirely when absent, so beta relies on Cognito's server-side default while prod pins ENABLED.
+      ...(props.preventUserExistenceErrors ? { preventUserExistenceErrors: true } : {}),
     });
 
     const userPoolDomain = new UserPoolDomain(this, "UserPoolDomain", {

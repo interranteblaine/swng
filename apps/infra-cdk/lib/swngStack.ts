@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from "aws-cdk-lib";
-import { Alarm, ComparisonOperator, MathExpression, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
+import { Alarm, ComparisonOperator, Dashboard, GraphWidget, LogQueryWidget, MathExpression, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
 import { AttributeType, BillingMode, ProjectionType, StreamViewType, Table } from "aws-cdk-lib/aws-dynamodb";
 import { CfnRoute, CfnStage, CorsHttpMethod, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from "aws-cdk-lib/aws-apigatewayv2";
@@ -887,6 +887,62 @@ export class SwngStack extends Stack {
         evaluationPeriods: 1,
         comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
         treatMissingData: TreatMissingData.NOT_BREACHING,
+      }),
+    );
+
+    // --- Ops dashboard (Arc B) ------------------------------------------------------------
+    //
+    // One pane: "how's swng doing." Business volumes (EMF), HTTP latency/errors, projector
+    // health, WAF, and a Logs Insights widget over the http access log for DAU + per-route.
+    const swngCount = (name: string): Metric =>
+      new Metric({ namespace: "swng", metricName: name, dimensionsMap: { Stage: stage }, period: Duration.days(1), statistic: "Sum" });
+
+    const dashboard = new Dashboard(this, "OpsDashboard", { dashboardName: `swng-ops-${stage}` });
+    dashboard.addWidgets(
+      new GraphWidget({
+        title: "Business — rounds & signups (daily)",
+        left: [swngCount("RoundsCreated"), swngCount("RoundsFinalized"), swngCount("Signups")],
+        width: 12,
+      }),
+      new GraphWidget({
+        title: "HTTP latency (p50/p95/p99)",
+        left: [
+          httpApi.metricLatency({ period: FIVE_MINUTES, statistic: "p50" }),
+          httpApi.metricLatency({ period: FIVE_MINUTES, statistic: "p95" }),
+          httpApi.metricLatency({ period: FIVE_MINUTES, statistic: "p99" }),
+        ],
+        width: 12,
+      }),
+      new GraphWidget({
+        title: "HTTP errors (4xx / 5xx)",
+        left: [
+          httpApi.metricClientError({ period: FIVE_MINUTES, statistic: "Sum" }),
+          httpApi.metricServerError({ period: FIVE_MINUTES, statistic: "Sum" }),
+        ],
+        width: 12,
+      }),
+      new GraphWidget({
+        title: "Projector health",
+        left: [
+          new Metric({ namespace: "AWS/Lambda", metricName: "IteratorAge", dimensionsMap: { FunctionName: projectorFn.functionName }, period: FIVE_MINUTES, statistic: "Maximum" }),
+        ],
+        right: [projectorDlq.metricApproximateNumberOfMessagesVisible({ period: FIVE_MINUTES, statistic: "Maximum" })],
+        width: 12,
+      }),
+      new GraphWidget({
+        title: "WAF (blocked requests)",
+        left: [wafBlocked(`swng-waf-cf-${stage}`, "Global"), wafBlocked(`swng-waf-cognito-${stage}`, "us-east-1")],
+        width: 12,
+      }),
+      new LogQueryWidget({
+        title: "Unique active golfers (24h) + requests by route",
+        logGroupNames: [httpFn.logGroup.logGroupName],
+        queryLines: [
+          'filter message = "request"',
+          "stats count_distinct(sub) as activeGolfers, count(*) as requests by route",
+          "sort requests desc",
+        ],
+        width: 24,
       }),
     );
 

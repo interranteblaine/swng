@@ -247,8 +247,22 @@ describe("SwngStack", () => {
       expect(appFunctions()).toHaveLength(5);
     });
 
-    it("has exactly 6 Lambda functions total (the 5 application functions + the CDK-managed WebBucket auto-delete-objects custom resource provider, M9 Task 6)", () => {
-      template.resourceCountIs("AWS::Lambda::Function", 6);
+    // Arc B Task 5: the ops dashboard's Logs Insights widget reads `httpFn.logGroup` — the
+    // FIRST access of any function's `.logGroup` getter anywhere in this suite. In a REAL `cdk
+    // synth`/`cdk deploy` (which loads cdk.json's context, including
+    // `@aws-cdk/aws-lambda:useCdkManagedLogGroup: true`), every application function already
+    // gets its own CDK-managed `AWS::Logs::LogGroup` at CONSTRUCTION time regardless of whether
+    // anything ever reads `.logGroup` — confirmed via `cdk synth --quiet`: the real template
+    // carries 5 `AWS::Logs::LogGroup` resources (one per app function) and still exactly 6
+    // `AWS::Lambda::Function`s, so this change adds ZERO new resources to what actually deploys.
+    // This test's own template, though, is built via a bare `new App()` (no cdk.json context),
+    // so the feature flag is OFF here — `.logGroup`'s getter falls back to the legacy
+    // `Custom::LogRetention` mechanism (aws-cdk-lib's `Function#logGroup`), which lazily
+    // provisions its own singleton backing Lambda the first time ANY function's `.logGroup` is
+    // read. That singleton is additive and harmless (a testing-harness artifact, not a stack
+    // change) but does bump this template's own Lambda::Function count from 6 to 7.
+    it("has exactly 7 Lambda functions total (5 application functions + the CDK-managed WebBucket auto-delete-objects custom resource provider, M9 Task 6 + the LogRetention singleton the ops dashboard's httpFn.logGroup reference provisions in this no-context test template, Arc B Task 5)", () => {
+      template.resourceCountIs("AWS::Lambda::Function", 7);
     });
 
     it("every application function is Node 20 (the CDK-managed auto-delete-objects provider's runtime is CDK's own choice, not this stack's)", () => {
@@ -1234,6 +1248,33 @@ describe("SwngStack", () => {
         ResourceArn: { "Fn::GetAtt": [userPoolLogicalId, "Arn"] },
         WebACLArn: { "Fn::GetAtt": [regionalAclLogicalId, "Arn"] },
       });
+    });
+  });
+
+  describe("ops dashboard (Arc B)", () => {
+    it("creates exactly one dashboard named swng-ops-<stage>", () => {
+      template.resourceCountIs("AWS::CloudWatch::Dashboard", 1);
+      template.hasResourceProperties("AWS::CloudWatch::Dashboard", {
+        DashboardName: Match.stringLikeRegexp("swng-ops-beta"),
+      });
+    });
+
+    // DashboardBody does NOT synthesize as a plain string here: several widgets reference real
+    // constructs (httpApi's ApiId, projectorFn's FunctionName, projectorDlq's QueueName,
+    // httpFn.logGroup's LogGroupName) — genuine unresolved CloudFormation tokens at synth time
+    // — so CDK renders the whole property as `{ "Fn::Join": ["", [...]] }`, splitting literal
+    // JSON fragments around each `Ref`/`Fn::GetAtt`. `Match.stringLikeRegexp` only accepts a
+    // literal string actual value (verified against aws-cdk-lib's StringLikeRegexpMatch, which
+    // records a type-mismatch failure and never coerces an object), so it can't be pointed at
+    // DashboardBody directly the way the business-only widgets (no token references) could.
+    // Stringifying the whole (structurally real) synthesized value and asserting the literal
+    // metric name / query text still appears preserves the same intent — the dashboard really
+    // does carry these — without asserting a shape the correct implementation can't produce.
+    it("the dashboard body references the business metrics and the DAU query", () => {
+      const dashboards = template.findResources("AWS::CloudWatch::Dashboard");
+      const body = JSON.stringify(Object.values(dashboards)[0]!.Properties.DashboardBody);
+      expect(body).toMatch(/RoundsCreated/);
+      expect(body).toMatch(/activeGolfers/);
     });
   });
 

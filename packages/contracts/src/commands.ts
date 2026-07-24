@@ -90,16 +90,34 @@ export type AddGameRequest = z.infer<typeof addGameRequestSchema>;
 // strokes count. This is the request-ingress-only copy, structurally identical except for the
 // bound: 30 comfortably covers any realistic single-hole count (incl. a very bad par-3) without
 // letting a client stuff an unbounded number into the log.
-// Fix wave (post-review): anchored to the domain HoleResult union (z.ZodType<HoleResult>,
-// mirroring round.ts's own holeResultSchema) so a future 5th HoleResult kind fails to typecheck
-// HERE rather than silently being rejected at ingress — a compile-time forcing function to keep
-// this request-ingress mirror in sync with the domain type it bounds.
-const scoreResultInputSchema: z.ZodType<HoleResult> = z.discriminatedUnion("kind", [
+// Fix wave (post-review): anchored to the domain HoleResult union so a wrong-shaped or extra arm
+// fails to typecheck HERE rather than silently drifting from the domain type it bounds. Built as
+// an UNANNOTATED literal first (`scoreResultInputArms`) — annotating this declaration directly as
+// `z.ZodType<HoleResult>` would make `typeof` resolve to that wider annotated type everywhere it's
+// referenced, which erases the narrower literal-kind union the exhaustiveness check below needs
+// (verified empirically, TS 5.9.3 + zod 4.4.3: with the annotation inline, z.infer<typeof
+// scoreResultInputSchema>["kind"] is always the full HoleResult["kind"], even with an arm missing
+// — the check would be vacuous). `scoreResultInputSchema` below re-applies the annotation on a
+// separate binding, so callers still get the z.ZodType<HoleResult> field-shape/extra-arm guarantee.
+const scoreResultInputArms = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("strokes"), strokes: z.number().min(1).max(30) }),
   z.object({ kind: z.literal("picked-up") }),
   z.object({ kind: z.literal("conceded") }),
   z.object({ kind: z.literal("cleared") }),
 ]);
+
+// Compile-time exhaustiveness: every HoleResult kind must have a request arm above. If the domain
+// HoleResult union grows a kind (or an arm is dropped here), this fails to typecheck until the arms
+// match — the request schema can't silently fall behind the domain type. Wrapped in one-tuples
+// ([...] extends [...]) to force a non-distributive check: a naked `A extends B` distributes over
+// a union A, so a single missing member's `never` branch just vanishes from the resulting union
+// instead of poisoning the whole check (verified empirically — the naked form let a missing arm
+// through silently; caught only by then testing the RED case, not by reading the type alone).
+type _RequestCoversEveryHoleResultKind =
+  [HoleResult["kind"]] extends [z.infer<typeof scoreResultInputArms>["kind"]] ? true : never;
+export const _scoreResultExhaustive: _RequestCoversEveryHoleResultKind = true;
+
+const scoreResultInputSchema: z.ZodType<HoleResult> = scoreResultInputArms;
 
 export const recordScoreRequestSchema = z.object({
   golferId: golferIdSchema,

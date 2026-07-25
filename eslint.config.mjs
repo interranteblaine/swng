@@ -209,13 +209,14 @@ export default [
     },
   },
   {
-    // apps/web/scripts/webEnv.mjs and the root scripts/publishWeb.mjs (M9 Task 6) are plain
-    // Node scripts (run via `node <path>`, never bundled) — the only places in the repo that
-    // are actually plain JS instead of TS, so they need the Node globals TS's own lib/types
-    // normally supply implicitly elsewhere.
-    files: ["apps/web/scripts/**/*.mjs", "scripts/**/*.mjs"],
+    // Plain Node scripts (run via `node <path>`, never bundled) — the only places in the repo
+    // that are plain JS instead of TS, so they need the Node globals TS's own lib/types supply
+    // implicitly elsewhere: apps/web/scripts/webEnv.mjs + root scripts/*.mjs (M9 Task 6), and
+    // the .claude/skills/**/*.mjs tooling scripts (e.g. seeding-courses/seed-course.mjs), which
+    // `eslint .` also traverses. `fetch` is a Node 20+ global the skill scripts use.
+    files: ["apps/web/scripts/**/*.mjs", "scripts/**/*.mjs", ".claude/skills/**/*.mjs"],
     languageOptions: {
-      globals: { process: "readonly", console: "readonly", URL: "readonly" },
+      globals: { process: "readonly", console: "readonly", URL: "readonly", fetch: "readonly" },
     },
   },
 ];

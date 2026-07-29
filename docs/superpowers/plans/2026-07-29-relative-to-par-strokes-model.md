@@ -18,7 +18,8 @@
 - **Beta only.** No `deploy:prod`, no `publish:web:prod`, no change to `STAGE_CONFIG`'s `prod` entry.
 - **No migration, no tolerate-old-data machinery.** Beta round data is wiped in Task 9.
 - **Language, verbatim:** the join question is `What do you normally shoot, relative to par?`; the measured value is **average**. Never "index", "handicap", "your number", "your usual", "form", or "adjusted score" in user-facing copy.
-- **Two sign conventions, never mixed** (spec §4). Handicap numbers render through `formatCourseHandicap`/`strokeGrant` (negative = plus, shown `+2`). Vs-par numbers render through the new `formatOverPar` (positive = over par, shown `+26`, `E`, `−2`). `formatHandicapIndex` is deleted with the index.
+- **One sign convention, and no special notation** (spec §4). Every signed number on screen is vs-par and renders through `formatOverPar` in `scoring/present.ts`: `+26` over, `E` level, `−2` under. Golf's plus-handicap convention is deleted with the index that required it.
+- **`strokes` can never be negative** (spec §2a). Bounded at `min(0)` at the request ingress, and `resolveStrokes` cannot produce one. This is what makes `packages/domain/src/handicap/` — `strokeGrant`, `formatCourseHandicap`, `formatHandicapIndex`, `indexSourcePhrase` — and `allocateStrokes`' negative branch dead code rather than a judgement call. **The word "handicap" leaves the vocabulary too:** `participant-basis-set`, `setBasis.ts`, `POST /rounds/{roundId}/basis`, `basisCorrection.spec.ts`.
 - **The compute fence stays enforced.** New domain compute goes in the ESLint banlist in `eslint.config.mjs` and is re-exported through `@swng/client` for web use.
 - **Frozen decks** keep their hand-designed **scores** byte-identical. Only expected results are re-derived, by hand, with the derivation in the commit message.
 
@@ -489,12 +490,18 @@ In `contracts/commands.ts`, define once and use for `JoinRoundRequest`, `StartRo
 
 ```ts
 export const strokeBasisSchema = z.discriminatedUnion("kind", [
+  // Signed: a golfer who shoots two under par states -2.
   z.object({ kind: z.literal("normally-shoots"), overPar: z.number().int().min(-20).max(100) }),
-  z.object({ kind: z.literal("strokes"), strokes: z.number().int().min(-20).max(100) }),
+  // NOT signed. Under a relative model the anchor is the best player at 0 and nobody gives
+  // strokes back — giving A two is the same round as taking two from B, which is what the rule
+  // already produces. min(0) makes the plus-handicap case unrepresentable (spec §2a).
+  z.object({ kind: z.literal("strokes"), strokes: z.number().int().min(0).max(100) }),
 ]);
 ```
 
-Bounds match Arc A's widened range and its placement rule: **request schemas only**. `contracts/round.ts:171`'s stored-event arm takes an **unbounded** twin.
+Bounds follow Arc A's placement rule: **request schemas only**. `contracts/round.ts:171`'s stored-event arm takes an **unbounded** twin.
+
+Rename in the same commit: the event `participant-handicap-set` → `participant-basis-set`, `packages/application/src/rounds/setHandicap.ts` → `setBasis.ts`, and `routes.ts:329`'s `/rounds/{roundId}/handicap` → `/rounds/{roundId}/basis` (with its comment at `:94`).
 
 - [ ] **Step 7: Change the join and roster surfaces**
 
@@ -581,7 +588,7 @@ In `ResultsView.tsx`, delete `deriveHandicapping`, the `handicappingFor` import,
 </ul>
 ```
 
-`strokesLabel` uses `strokeGrant` (`handicap/present.ts`) — `receives` → `−20`, `gives` → `+2`, `none` → `0`. **Do NOT call `formatCourseHandicap(-p.strokes)`**: that function renders a negative as `+N`, so a 20-stroke receiver would render `"+20"`, which in golf means a plus-20 who *gives* 20 — exactly backwards.
+Strokes are non-negative by construction (spec §2a), so the column is `−${p.strokes}` for a receiver and `0` otherwise — no formatter, no grant branch, no plus convention. **Do NOT reach for `formatCourseHandicap`**: it renders a negative as `+N`, so a 20-stroke receiver would come out `"+20"` — in golf, a plus-20 who *gives* 20. It is deleted in Task 5 for exactly this reason.
 
 Add a why-comment: no fourth column, because net already ranks players against their own stated level (spec §4).
 
@@ -755,19 +762,21 @@ export const averageHistory = (lines: readonly GolferRoundLine[]): readonly Aver
 };
 ```
 
-- [ ] **Step 5: Add `formatOverPar` and delete `formatHandicapIndex`**
+- [ ] **Step 5: Add `formatOverPar`; delete `packages/domain/src/handicap/` entirely**
 
-In `handicap/present.ts` (absorbing `apps/web/src/ui/vsPar.ts`, which is deleted):
+In `scoring/present.ts`, beside `underPar` — its own family, not a handicap module:
 
 ```ts
-// A VS-PAR number: positive is over par. The OPPOSITE convention from formatCourseHandicap
-// above, which renders a negative as "+N" because a negative handicap is a PLUS handicap.
-// Never hand a vs-par number to formatCourseHandicap or a handicap to this — each inverts the
-// other's sign (spec §4). Absorbs the web's own vsPar.ts so there is one copy.
+// A vs-par number: positive is over par, E is level, minus is under. The ONE signed-number
+// convention left in the product (spec §4). Golf's "+2 means better than scratch" notation
+// existed only because a handicap index is a number where lower is better; a vs-par score has
+// no such problem. Absorbs apps/web/src/ui/vsPar.ts so there is one copy.
 export const formatOverPar = (value: number): string => (value === 0 ? "E" : value > 0 ? `+${value}` : `${value}`);
 ```
 
-Delete `formatHandicapIndex` (its last consumer dies with the index) and `indexSourcePhrase` (it takes an `IndexSource["kind"]`), plus their tests. Add `formatOverPar` to the plus-handicap grep gate's sanctioned renderers.
+Then `rm -r packages/domain/src/handicap/` — `present.ts`, `present.test.ts` and the already-deleted `whs.*`. That removes `formatHandicapIndex`, `formatCourseHandicap`, `strokeGrant` and `indexSourcePhrase` together, which is correct: every one of them exists to render a NEGATIVE stroke count, and `strokes` is bounded at zero (Task 3 Step 6).
+
+Delete `apps/web/src/ui/vsPar.ts`. Delete `allocateStrokes`' negative branch (`strokes.ts:12-22`) and the plus-handicap cases that tested it — `allocation.test.ts:106` and `SetupPanel.test.tsx:261-274`. Simplify `ScorecardGrid.tsx:92-100` to `"●".repeat(dots)` (the hollow `○` give-back glyph has no reachable state) and `dots.ts:27`'s `strokesSummary` to drop its grant branch.
 
 - [ ] **Step 6: Delete WHS and reshape the metrics**
 
@@ -803,7 +812,9 @@ export interface ScoreboardLine {
 - `adapters-dynamodb/src/golferStore.ts`: drop the `indexSource` attribute and its legacy fold; update the contract tests.
 - `ProfilePage.tsx`: delete the whole "Your index" section — source picker, `Use this`, override box, the `applyGolfer` index path. Name and home course only.
 - `GolferPage.tsx:4,80,87`: drop `resolveIndex`/`indexSourcePhrase`/`formatHandicapIndex`.
-- `RecordSections.tsx`: headline `What you shoot` rendering `metrics.average` through **`formatOverPar`**, subtitle `your last 10 finished rounds, score minus par`. The chart plots `averageHistory` as ONE line — delete the WHS series, its legend marker and the two-line caption; keep the 20-point window, nice-bounds/min-span-4 axis, endpoint emphasis and date anchors. Axis tick labels also use `formatOverPar`.
+- `CreateRoundPage.tsx:6,130-133` and `JoinRoundPage.tsx:5,130-133`: delete the `strokeGrant` "You give N" branch — the lead is just the number.
+- `SetupPanel.tsx:2,157`: `— CH {formatCourseHandicap(...)}` becomes `— gets {p.strokes}`.
+- `RecordSections.tsx:4,19,158,165`: headline `What you shoot` rendering `metrics.average` through **`formatOverPar`**, subtitle `your last 10 finished rounds, score minus par`. The chart plots `averageHistory` as ONE line — delete the WHS series, its legend marker and the two-line caption; keep the 20-point window, nice-bounds/min-span-4 axis, endpoint emphasis and date anchors. Axis tick labels move from `formatCourseHandicap` to `formatOverPar` — note this **flips their sign rendering**, which is the point: a tick at −2 on an average chart means two under par, not a plus-2 handicap.
 - `SeasonPanel.tsx` + `contracts/crews.ts`: headers `Rounds · Average · Spread · Best`; `average` through `formatOverPar`, `spread` as `±N.N`, `—` where absent.
 - `JoinRoundPage.tsx`: wire the pre-fill to `record.metrics.average` (removing Task 3's `// Task 5` comment); blank when absent — no floor, no fallback.
 - E2E: `identityRecord.spec.ts`'s `differential`/`index` assertions become `average`/`spread` computed by hand from the seeded rounds; `crewSeason.spec.ts:160,341,362` and `crewSeasonDeck.ts:252-259` drop `netPer18`/`index` and assert `average`/`spread`. **The deck's CHs are all 0, so no scoring number moves — only the removed columns.**
@@ -911,9 +922,9 @@ Compile errors were fixed inside Tasks 1, 3 and 5. **This task is behavioural on
 
 Read the components, not this plan. Changed copy: the join label, `gameTreatment`'s five lines, `strokesNote`, the add-game form's gross/net radios, the profile headline and subtitle, `Final totals`, the card's `OUT`/`IN`/`TOT` rows, and the crew board headers.
 
-- [ ] **Step 3: `handicapCorrection.spec.ts` corrects a basis**
+- [ ] **Step 3: Rename `handicapCorrection.spec.ts` → `basisCorrection.spec.ts` and rework it**
 
-Assert both that the game chip moves and that the roster shows the new stated number. Add a beat that uses `Give strokes directly` so both constructors are covered live.
+`git mv` it, then assert both that the game chip moves and that the roster shows the new stated number. Add a beat that uses `Give strokes directly` so both constructors are covered live.
 
 - [ ] **Step 4: `unratedCourse.spec.ts`**
 
@@ -946,7 +957,7 @@ git commit -m "test(e2e): re-derive the oracles and reconcile the locators"
 3. Add net skins and gross skins as two games; read each panel's treatment line — the gross one must show no strokes summary at all.
 4. Score a hole, concede a hole, pick up a hole; check all three pad states and the `5c` glyph.
 5. Read the totals row: `OUT` / `IN` / `TOT`, gross over net, par totalled, the conceded hole counted.
-6. Finalize; read gross · strokes · net with no "adjusted score" anywhere and the strokes shown as `−20`, not `+20`.
+6. Finalize; read gross · strokes · net with no "adjusted score" anywhere and the strokes shown as `−20`, not `+20`. Grep the deployed bundle for the word "handicap" — it must not appear in any user-facing string.
 7. Profile: `What you shoot`, the ten rows, one chart line, no index picker.
 8. Crew board: `Rounds · Average · Spread · Best` and the "If you played tomorrow" line.
 
@@ -960,7 +971,7 @@ Console clean. Delete both throwaway Cognito users.
 
 **Spec coverage.** §1 → T7. §2a/§2b → T1, T3. §2c → T3, T5. §2d → T2, T5. §3 → T1. §4 → T4 (+ the sign constraint, global). §5 → T5. §6 → T5 (board), T6 (head-to-head). §7 → T1, T5. §8 → T2, T3, T5, T9. §9 → T1, T3, T5, T7. §10 → the beta-only constraint and T9. §11 is the revision record and needs no task.
 
-**Type consistency.** `StrokeBasis` (T1) → `Participant.basis` (T3) → `GolferRoundLine.normallyShoots` (T5). `resolveStrokes` (T1) → `reduceRound` (T3) → `gameStrokeAllocation` (T1). `hasCompleteScore`/`scoreOf` → `scoredOverPar`/`averageOfValues`/`spreadOfValues` → `averageOf`/`spreadOf` (all T5) → `crewScoreboard` (T5 Step 7, using the `*Values` pair so the rolling 10 is not applied on top of the season window). `roundStrokeAllocation` is the renamed `courseHandicapAllocation`, used under that one name from T3 onward. `formatOverPar` (T5) is the only vs-par renderer; `formatCourseHandicap`/`strokeGrant` remain the only handicap renderers.
+**Type consistency.** `StrokeBasis` (T1) → `Participant.basis` (T3) → `GolferRoundLine.normallyShoots` (T5). `resolveStrokes` (T1) → `reduceRound` (T3) → `gameStrokeAllocation` (T1). `hasCompleteScore`/`scoreOf` → `scoredOverPar`/`averageOfValues`/`spreadOfValues` → `averageOf`/`spreadOf` (all T5) → `crewScoreboard` (T5 Step 7, using the `*Values` pair so the rolling 10 is not applied on top of the season window). `roundStrokeAllocation` is the renamed `courseHandicapAllocation`, used under that one name from T3 onward. `formatOverPar` (T5, in `scoring/present.ts`) is the ONLY signed-number renderer left; nothing survives in `handicap/` because nothing survives that renders a negative stroke count.
 
 **Declared shims, both deleted at a named step:** T1 Step 7's `basisOf` (deleted T3 Step 5); T3 Step 7's unwired join pre-fill (wired T5 Step 8).
 

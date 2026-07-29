@@ -53,6 +53,12 @@ statement, not a fudge of the first — so nobody ever has to distort a true fac
 to get the strokes they want. This is the shape that dissolves the false choice between "edit
 your +30" and "edit your 20".
 
+`overPar` is signed — a golfer who shoots two under par states `−2`. **`strokes` is not: it is
+bounded at zero and cannot be negative.** Under a relative model the best player is the anchor
+and plays off scratch; nobody gives strokes back, because giving A two strokes is the same round
+as taking two from B, and the second is what the rule already produces. Making it unrepresentable
+is what deletes the entire plus-handicap layer (§7).
+
 ### 2b. Strokes are derived, never asserted
 
 Strokes fall out of the fold across the roster, the way scores fold into standings. One rule:
@@ -184,18 +190,14 @@ strokes are `stated − anchor`, so `net = gross − stated + anchor`, and par a
 constants within a round — ranking by net is identically ranking by how far each player beat
 their own stated number. A "vs your number" column would repeat it.
 
-**Sign conventions do not mix.** Two live in the product and they are opposites:
+**There is now exactly one sign convention, and it needs no special notation.** A vs-par number
+renders through one domain function, `formatOverPar`: positive is over par (`+26`), `E` at zero,
+`−2` under. Minus means under par. That is all.
 
-- A **handicap** number renders through `handicap/present.ts` — negative means *plus*, better
-  than scratch, shown `+2`. This governs the strokes column and the scorecard's dots.
-- A **vs-par** number renders through a new domain `formatOverPar` — positive means over par,
-  shown `+26`; `E` at zero; `−2` under. This governs the average, history rows, and the crew
-  board.
-
-`formatCourseHandicap` must never be handed a vs-par number and `formatOverPar` must never be
-handed a handicap: each would invert the other's sign. `formatOverPar` replaces the web's own
-`apps/web/src/ui/vsPar.ts` so there is one copy, in the domain, and the plus-handicap grep gate
-gains it as a sanctioned renderer.
+Golf's "plus handicap" convention — where `+2` means *better* than scratch — existed only because
+a handicap index is a number where lower is better, so negatives needed a notation that didn't
+read as an insult. A vs-par score has no such problem: lower is better and negative is simply
+negative. **The convention evaporates with the index that required it** (§7).
 
 **The ScorePad** posts a plain score in two taps, unchanged (`product.md` §9). Conceding is a
 deliberate, rarer act and costs three: cell → `Conceded` → the number you would have made. Stated
@@ -283,27 +285,40 @@ Whole, not demoted, with no dormant fields:
 - `GolferRoundLine.ags` and `.differential`; the "Posted to handicaps" section.
 - `metrics.ts`'s `whsIndex`, `swngIndex`, `IndexPoint`'s two-line shape, `indexHistory`'s two
   streams.
-- `apps/web/src/ui/vsPar.ts`, absorbed by the domain's `formatOverPar`.
 - Rating and slope from every calculation. They stay recorded on the course card — they are
   printed on the real scorecard — and nothing computes from them.
 - `product.md` §5's "The swng Index" pillar and §6's "Crew handicaps" bullet, rewritten.
 
-**`handicap/present.ts` survives in part.** `formatCourseHandicap` and `strokeGrant` still apply
-— a player can shoot under par, and the whole-tree grep gate forbidding a bare signed render
-still holds. `formatHandicapIndex` (a one-decimal index formatter) loses its last consumer with
-the index itself and is deleted; `formatOverPar` is added in its place, with the opposite sign
-convention (§4).
+- **`packages/domain/src/handicap/` in its entirety**, including `present.ts` —
+  `formatHandicapIndex`, `formatCourseHandicap`, `strokeGrant`, `indexSourcePhrase` — and every
+  consumer of the plus-handicap convention: the scorecard's hollow `○` given-strokes glyph,
+  `SetupPanel`'s `CH +2`, Create/Join's *"You give N"*, `dots.ts`'s give-back branch in
+  `strokesSummary`, `SetupPanel.test.tsx`'s plus-handicap render gate, and `allocateStrokes`'
+  negative branch (`strokes.ts:12-22`), which becomes unreachable once `strokes` is bounded at
+  zero. **The word "handicap" leaves the product's vocabulary**: `participant-handicap-set`
+  becomes `participant-basis-set`, `setHandicap.ts` becomes `setBasis.ts`, and
+  `POST /rounds/{roundId}/handicap` becomes `POST /rounds/{roundId}/basis`.
+- `apps/web/src/ui/vsPar.ts`, absorbed by `formatOverPar` — which lives in
+  `scoring/present.ts` beside `underPar`, its own family, not in a handicap module.
+
+The first draft of this spec kept `handicap/present.ts` on the reasoning that "a player can shoot
+under par." That conflated two different numbers: a vs-par score, where minus plainly means under
+par, and a handicap index, where lower is better and golf therefore invented `+2` to mean better
+than scratch. Only the first survives this arc, and it needs no convention at all (§4).
 
 ## 8. Wire, storage, and beta
 
 - `Participant.courseHandicap: number` → `Participant.basis: StrokeBasis`, plus a
   fold-derived `strokes: number` on `RosterEntry`. Every reader that used `courseHandicap` reads
   `strokes`.
-- `participant-handicap-set` carries a `StrokeBasis` instead of an integer. Fold rule unchanged:
-  a set applies iff HLC-later than that golfer's latest join.
+- `participant-handicap-set` → **`participant-basis-set`**, carrying a `StrokeBasis` instead of
+  an integer. Fold rule unchanged: a set applies iff HLC-later than that golfer's latest join.
+- `POST /rounds/{roundId}/handicap` → **`POST /rounds/{roundId}/basis`**; `setHandicap.ts` →
+  `setBasis.ts`; `handicapCorrection.spec.ts` → `basisCorrection.spec.ts`.
 - `JoinRoundRequest.courseHandicap` → `basis`, and the same on `StartRoundRequest`'s host and the
-  set-handicap body. Request schemas bound the value; the stored event arm does not (Arc A's
-  placement rule: a bound that rejects stored data bricks a legitimate user).
+  set-basis body. Request schemas bound the value — `overPar` signed, **`strokes` at `min(0)`**
+  (§2a) — and the stored event arm does not (Arc A's placement rule: a bound that rejects stored
+  data bricks a legitimate user).
 - `HoleResult`'s `conceded` arm gains required `strokes`, bounded at the request ingress
   alongside the existing `strokes` arm.
 - `GolferRoundLine`: `courseHandicap` → `strokes`; add `normallyShoots?: number` (absent when the
@@ -353,3 +368,12 @@ Also added: the departed-anchor rule (§2b), the conceded-holes-count-in-totals 
 `gameTreatment` replacement for `allowancePhrase` (§3), and precise wording on what is stored
 (§2b) — the first draft's "stored nowhere" was wrong, since the sealed archive freezes the
 derived value by design.
+
+**Owner correction, same day — "why do we still have this notion of handicap?"** The first two
+drafts kept `handicap/present.ts` and the plus-handicap convention. Wrong: under a relative model
+`strokes` can never be negative, because the anchor is the best player at 0 and giving A two
+strokes is the same round as taking two from B. Every consumer of `strokeGrant`/
+`formatCourseHandicap` existed solely to render a negative. `strokes` is now bounded at zero
+(§2a), the whole `handicap/` directory and its convention are deleted (§7), `formatOverPar` moves
+to `scoring/present.ts`, and the word leaves the event log, the route table and the file names
+(§8).

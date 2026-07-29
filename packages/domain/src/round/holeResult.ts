@@ -18,3 +18,12 @@ export type HoleResult =
 // cell a reader actually receives is never "cleared". The narrowed alias exists so extracts
 // built through cellAt (golfer/record.ts's holeResults) carry the truth in their type.
 export type DecidedHoleResult = Exclude<HoleResult, { kind: "cleared" }>;
+
+// The ONE accessor for "does this result carry a number, and what is it" (task-2, spec §2d): a
+// conceded hole is a scored hole everywhere, so it answers exactly like `strokes`; picked-up
+// (no number) and cleared (never reached through cellAt) answer undefined. This is a pure
+// structural accessor over the cell's own shape, not a golf computation — the same footing as
+// `cellAt` itself — so every engine (and the card) routes through it instead of hand-rolling
+// `kind === "strokes" || kind === "conceded"` (or its De Morgan negation) at each call site.
+export const scoredStrokes = (result: HoleResult): number | undefined =>
+  result.kind === "strokes" || result.kind === "conceded" ? result.strokes : undefined;

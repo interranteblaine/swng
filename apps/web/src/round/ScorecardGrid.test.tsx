@@ -92,6 +92,36 @@ describe("ScorecardGrid — two-tap entry", () => {
   });
 });
 
+// Regression (task-2 fix round 1, Important 1): the sheet is `fixed inset-x-0 bottom-0` with no
+// scrim, so the grid cells above it stay tappable while it's open — a mis-tap onto a DIFFERENT
+// cell mid-Conceded-disclosure must not carry that disclosure's local state onto the newly
+// selected player's pad. `ScorePad` had no `key`, so React reused the same component instance
+// across the `selection` change and its `conceding` useState (ScorePad.tsx) survived — the next
+// number tap posted a CONCEDED score for whoever's cell was now underneath, not a plain one.
+describe("ScorecardGrid — Conceded disclosure does not leak across a mid-sheet cell switch", () => {
+  it("tapping a different cell while Conceded is open resets to the plain strokes grid for the newly selected player", () => {
+    const recordScore = vi.fn<(golferId: GolferId, hole: number, result: HoleResult) => void>();
+    render(<ScorecardGrid state={twoPlayerState()} recordScore={recordScore} />);
+
+    fireEvent.click(cellButton("Ann", 5)); // tap 1: open the pad for Ann's hole 5
+    fireEvent.click(screen.getByRole("button", { name: "Conceded" })); // reveal Ann's number row
+    expect(recordScore).not.toHaveBeenCalled();
+    expect(screen.getByText("Conceded — what would you have made?")).toBeTruthy();
+
+    // A mis-tap onto Bo's hole-5 cell while the sheet is still open — no scrim blocks it.
+    fireEvent.click(cellButton("Bo", 5));
+    expect(screen.getByRole("dialog", { name: "Score for Bo, hole 5" })).toBeTruthy();
+    // Without the fix, the reused ScorePad instance's `conceding` state would still read true
+    // here, so this tap would hit the CONCEDED number row and post a concession Bo never asked
+    // for. A fresh instance per (golfer, hole) resets to the plain strokes grid.
+    expect(screen.queryByText("Conceded — what would you have made?")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "6" }));
+
+    expect(recordScore).toHaveBeenCalledTimes(1);
+    expect(recordScore).toHaveBeenCalledWith(BO, 5, { kind: "strokes", strokes: 6 });
+  });
+});
+
 // The standard card (spec 2026-07-19 §2a: the card never changes): dots are ALWAYS each
 // player's own full course handicap allocated by stroke index — no game, no
 // chip selection. `ScorecardGridProps` carries no game-typed prop at all; every test below
@@ -237,6 +267,32 @@ describe("ScorecardGrid — picked-up / conceded glyphs", () => {
 
     expect(within(cellButton("Ann", 1)).getByText("PU")).toBeTruthy();
     expect(within(cellButton("Bo", 1)).getByText("5c")).toBeTruthy();
+  });
+
+  // A conceded hole is a scored hole everywhere but its glyph (task-2 fix round 1, Important 2):
+  // the `c` suffix is the ONLY thing that should distinguish it — net and the under-par ink must
+  // both apply, exactly as they do for a `strokes` cell. Without this, the card would print "3c"
+  // while silently treating the 3 as though it doesn't exist (no net line, no oxblood ink) —
+  // failing the "only the glyph distinguishes it" rule on the very surface that rule names.
+  it("a conceded score renders its net sub-line and under-par ink exactly like a strokes cell", () => {
+    // Ann (CH8) against Bo (CH0, the anchor, 0 dots): the 8-stroke difference halves to 4 dots on
+    // fixtureWhite's SI 1..4 (holes 2, 4, 7, 8) — hole 2 is SI1, so Ann carries 1 dot there.
+    const ann8 = participant(ANN, "Ann", "white", 8);
+    const bo0 = participant(BO, "Bo", "white", 0);
+    // Hole 2 is par 4 (fixtureWhite) — a conceded 3 is a birdie gross AND nets to 2 (3 − 1 dot),
+    // also under par, so both inks are exercised, not just the number.
+    const state = twoPlayerState({
+      participants: [ann8, bo0],
+      cells: { [cellKey(ANN, 2)]: scoreCell({ kind: "conceded", strokes: 3 }, ANN) },
+    });
+    render(<ScorecardGrid state={state} recordScore={vi.fn()} />);
+
+    const cell = cellButton("Ann", 2);
+    const grossGlyph = within(cell).getByText("3c");
+    expect(grossGlyph.className).toMatch(/text-oxblood/); // gross 3 is under par 4
+    expect(within(cell).getByText("2")).toBeTruthy(); // net = 3 − 1 dot
+    const netLine = within(cell).getByText("2");
+    expect(netLine.className).toMatch(/text-oxblood/); // net 2 is also under par 4
   });
 });
 

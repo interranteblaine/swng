@@ -49,9 +49,12 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
   const teeSet = findTeeSet(archive.card, participant.tee);
   const handicapping = archive.handicapping.find((h) => h.golferId === golferId);
 
-  // Par-relative buckets over DECIDED stroke cells only — a picked-up/conceded hole never
-  // holed out (no stroke count to compare against par) and an unscored hole is silence,
-  // not a zero; both count nowhere, per the hand-pinned distribution this mirrors.
+  // Par-relative buckets over DECIDED stroke cells only — a picked-up hole has no stroke count
+  // to compare against par at all, and an unscored hole is silence, not a zero. A conceded hole
+  // DOES carry a stroke count (spec §2d — a conceded hole is a scored hole everywhere), but this
+  // fold doesn't count it yet either: reworking the distribution to include it is a later task's
+  // job, alongside the record's own average. All three read as "not in the distribution" today,
+  // per the hand-pinned buckets this mirrors.
   const distribution = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
   const holeResults: GolferHoleLine[] = [];
   for (const hole of teeSet.holes) {

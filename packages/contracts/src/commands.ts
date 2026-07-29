@@ -111,7 +111,9 @@ export type AddGameRequest = z.infer<typeof addGameRequestSchema>;
 // — the check would be vacuous). `scoreResultInputSchema` below re-applies the annotation on a
 // separate binding, so callers still get the z.ZodType<HoleResult> field-shape/extra-arm guarantee.
 const scoreResultInputArms = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("strokes"), strokes: z.number().min(1).max(30) }),
+  // .int(): a fractional stroke count is nonsense on a scorecard (task-2 fix round 1 — added
+  // alongside the `conceded` arm below, which always had it; the asymmetry read as an oversight).
+  z.object({ kind: z.literal("strokes"), strokes: z.number().int().min(1).max(30) }),
   z.object({ kind: z.literal("picked-up") }),
   // Bounded like the `strokes` arm above (task-2, spec §2d): a conceded hole now carries the
   // score the group says out loud, so a client proposing one must say a plausible number — the

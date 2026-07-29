@@ -109,9 +109,15 @@ describe("adjustedGrossScore — fixture golden card", () => {
 
   it("counts a conceded hole at net double bogey too, regardless of the number it claims", () => {
     // h4 (par 5, 1 dot, cap 8): Ann concedes a 5 here — a plausible "you'd have made it" claim,
-    // well under the cap — but AGS still counts the cap, not the claim (Rule 3.1b: a hole the
-    // player never holed out posts at net double bogey no matter what number the group names;
-    // this is unchanged by task-2's engine-facing rule, which only governs live game scoring).
+    // well under the cap — but AGS still counts the cap, not the claim. This behaviour is
+    // UNCHANGED by task-2 (the subject was already pinned before that arc; this test's own fix
+    // round 1 only replaced this comment's justification, not its assertion). No affirmative WHS
+    // rule is claimed here on purpose — how Rule 3.1b treats a conceded (as opposed to a truly
+    // unplayed) hole is contestable, and it directly conflicts with this arc's own spec §2d ("a
+    // conceded hole is a scored hole everywhere"). The honest reason this divergence is safe to
+    // leave as-is: `adjustedGrossScore` and the rest of `whs.ts` are DELETED WHOLE later in this
+    // arc, so the gap between "what a game scores" and "what AGS posts" for a conceded hole is
+    // terminal, not a standing rule to defend.
     const conceded = annCard.map((score, index): number | "picked-up" | HoleResult => (index === 3 ? { kind: "conceded", strokes: 5 } : score));
     expect(adjustedGrossScore(fixtureWhite, 8, card(conceded))).toBe(47);
   });

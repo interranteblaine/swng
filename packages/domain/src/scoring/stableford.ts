@@ -1,3 +1,4 @@
+import { scoredStrokes } from "../round/holeResult.js";
 import type { RoundState } from "../round/state.js";
 import { cellAt } from "../round/state.js";
 import { gameStrokeAllocation } from "./allocation.js";
@@ -23,12 +24,13 @@ export const scoreStableford = (config: StablefordConfig, state: RoundState): Ga
       if (!cell) continue;
       thru += 1;
 
-      // A conceded hole scores its points off the number it carries (spec §2d), same as
-      // `strokes` — a conceded par is worth its points, not zero. Picked-up is the only kind
-      // left that scores zero points outright: still a decided hole (counted in thru), just one
-      // worth nothing, unlike stroke play's net double bogey resolution which never applies here.
-      if (cell.result.kind === "strokes" || cell.result.kind === "conceded") {
-        const net = cell.result.strokes - (dots.get(hole.number) ?? 0);
+      // A conceded hole scores its points off the number scoredStrokes gives back (spec §2d),
+      // same as `strokes` — a conceded par is worth its points, not zero. Picked-up is the only
+      // kind left that scores zero points outright: still a decided hole (counted in thru), just
+      // one worth nothing, unlike stroke play's net double bogey resolution which never applies here.
+      const strokes = scoredStrokes(cell.result);
+      if (strokes !== undefined) {
+        const net = strokes - (dots.get(hole.number) ?? 0);
         points += Math.max(0, 2 + hole.par - net);
       }
     }

@@ -1,4 +1,5 @@
 import type { GolferId } from "../ids.js";
+import { scoredStrokes } from "../round/holeResult.js";
 import type { RoundState } from "../round/state.js";
 import { cellAt } from "../round/state.js";
 import { gameStrokeAllocation } from "./allocation.js";
@@ -24,10 +25,11 @@ export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundStat
 
   const netFor = (golferId: GolferId, holeNumber: number): number | undefined => {
     const cell = cellAt(state.cells, golferId, holeNumber);
-    // A conceded score nets exactly like `strokes` (spec §2d — the number it carries is the
-    // score); picked-up is the only kind with no number, so it's the only one truly out of the hole.
-    if (!cell || (cell.result.kind !== "strokes" && cell.result.kind !== "conceded")) return undefined; // absent/picked-up
-    return cell.result.strokes - (allocation.get(golferId)?.get(holeNumber) ?? 0);
+    // A conceded score nets exactly like `strokes` (spec §2d — scoredStrokes answers both the
+    // same way); picked-up is the only kind with no number, so it's the only one truly out of the hole.
+    const strokes = cell && scoredStrokes(cell.result);
+    if (strokes === undefined) return undefined; // absent/picked-up
+    return strokes - (allocation.get(golferId)?.get(holeNumber) ?? 0);
   };
 
   // A side's ball for the hole is the best (lowest) net among its players still in the hole;

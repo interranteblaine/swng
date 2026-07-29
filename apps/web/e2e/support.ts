@@ -742,13 +742,19 @@ export const golferKeyFor = (name: string): GolferId => {
   return found.golferId;
 };
 
-export const scoreFor = (name: string, hole: number): number | "picked-up" | "conceded" => {
+// "conceded" dropped from this signature (task-2 fix round 1, fold-in): fieldDeck18 has no
+// conceded cell and no e2e spec anywhere calls enterScore/scoreFor with one — the branch was
+// unreachable and, after task-2, stale (conceded's button no longer posts on one tap, and its
+// glyph is no longer "CN"). Dropped rather than reworked to the new two-tap-disclosure protocol
+// since nothing exercises it; a future task adding e2e coverage of a conceded score builds that
+// path fresh against the real ScorePad disclosure rather than resurrecting this one.
+export const scoreFor = (name: string, hole: number): number | "picked-up" => {
   const value = fieldDeck18.scores[golferKeyFor(name)]?.[hole - 1];
   if (value === undefined || value === null) throw new Error(`fieldDeck18 has no hole ${hole} score for ${name}`);
   return value;
 };
 
-export const correctedScore = (golferName: string, hole: number): number | "picked-up" | "conceded" => {
+export const correctedScore = (golferName: string, hole: number): number | "picked-up" => {
   const found = corrections.find((c) => c.golfer === golferKeyFor(golferName) && c.hole === hole);
   if (!found) throw new Error(`no fieldDeck18 correction for ${golferName} hole ${hole}`);
   return found.score;
@@ -758,8 +764,7 @@ export const PLAYER_NAMES = ["Ann", "Bo", "Cal", "Dee"] as const;
 
 // --- UI interaction: the two-tap contract, everywhere -------------------------------------
 
-const scoreButtonText = (score: number | "picked-up" | "conceded"): string =>
-  score === "picked-up" ? "Picked up" : score === "conceded" ? "Conceded" : String(score);
+const scoreButtonText = (score: number | "picked-up"): string => (score === "picked-up" ? "Picked up" : String(score));
 
 // The two-tap contract (product.md §9), literally: exactly two `.click()` calls take the grid
 // from idle to a posted score, and the pad closes on the second one — no separate confirm
@@ -768,7 +773,7 @@ const scoreButtonText = (score: number | "picked-up" | "conceded"): string =>
 // just the one the spec calls out explicitly. (The between-holes digest overlay this helper
 // once had to dismiss before every entry is deleted outright — accounts-only identity spec §6
 // — so nothing can sit above the grid between taps anymore.)
-export const enterScore = async (page: Page, golferName: string, hole: number, score: number | "picked-up" | "conceded"): Promise<void> => {
+export const enterScore = async (page: Page, golferName: string, hole: number, score: number | "picked-up"): Promise<void> => {
   // exact: true throughout — "hole 1" is a substring of "hole 10".."hole 18" (and the dialog's
   // "hole 1" likewise), so a non-exact name match would resolve to every one of them at once.
   const cell = page.getByRole("button", { name: `${golferName} hole ${hole}`, exact: true });
@@ -787,7 +792,6 @@ export const enterScore = async (page: Page, golferName: string, hole: number, s
   // (e.g. posting 7 with 2 dots renders net 5, so a bare `toContainText("5")` would wrongly
   // pass even though 5 was never the posted score — but net can never be the FIRST digit).
   if (score === "picked-up") await expect(cell).toContainText("PU");
-  else if (score === "conceded") await expect(cell).toContainText("CN");
   else await expect(cell).toHaveText(new RegExp(`^\\D*${score}`));
 };
 

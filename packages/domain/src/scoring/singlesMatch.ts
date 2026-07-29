@@ -1,4 +1,5 @@
 import type { GolferId } from "../ids.js";
+import { scoredStrokes } from "../round/holeResult.js";
 import type { RoundState, ScoreCell } from "../round/state.js";
 import { cellAt } from "../round/state.js";
 import { gameStrokeAllocation } from "./allocation.js";
@@ -20,10 +21,11 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
   const allocation = gameStrokeAllocation(config, state.participants, state.card);
 
   const netFor = (golferId: GolferId, cell: ScoreCell | undefined, holeNumber: number): number | undefined => {
-    // A conceded score nets exactly like `strokes` (spec §2d — the number it carries is the
-    // score); picked-up is the only kind with no number, hence the only one that's truly absent.
-    if (!cell || (cell.result.kind !== "strokes" && cell.result.kind !== "conceded")) return undefined; // absent/picked-up
-    return cell.result.strokes - (allocation.get(golferId)?.get(holeNumber) ?? 0);
+    // A conceded score nets exactly like `strokes` (spec §2d — scoredStrokes answers both the
+    // same way); picked-up is the only kind with no number, hence the only one that's truly absent.
+    const strokes = cell && scoredStrokes(cell.result);
+    if (strokes === undefined) return undefined; // absent/picked-up
+    return strokes - (allocation.get(golferId)?.get(holeNumber) ?? 0);
   };
 
   const holeCount = cardTeeSet.holes.length;

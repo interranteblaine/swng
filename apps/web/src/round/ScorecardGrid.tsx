@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { courseHandicapAllocation, netStrokes } from "@swng/client";
-import { cellAt, findTeeSet, strokeGrant, underPar } from "@swng/domain";
+import { cellAt, findTeeSet, scoredStrokes, strokeGrant, underPar } from "@swng/domain";
 import type { CourseCard, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { cardBox } from "../ui/classes";
 import { ScorePad } from "./ScorePad";
@@ -79,7 +79,9 @@ interface CellProps {
 // any column width — min-w alone shrink-wraps and hugs the column's left edge (owner field
 // report, 2026-07-20).
 function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
-  const gross = cell?.result.kind === "strokes" ? cell.result.strokes : undefined;
+  // A conceded hole is a scored hole everywhere but its glyph (spec §2d) — scoredStrokes reads
+  // its number exactly like a `strokes` cell, so net and the under-par ink below apply to it too.
+  const gross = cell ? scoredStrokes(cell.result) : undefined;
   const net = gross !== undefined && dots !== 0 ? netStrokes(gross, dots) : undefined;
 
   return (
@@ -195,7 +197,13 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
       </div>
 
       {selection && selectedParticipant && selectedHole && (
+        // key forces a fresh ScorePad instance per (golfer, hole): without one, React reuses the
+        // same instance across a `selection` change (the sheet has no scrim and cells above stay
+        // tappable), so ScorePad's own `conceding` state (useState, ScorePad.tsx) would survive a
+        // tap onto a DIFFERENT cell — posting a conceded score for the wrong player. The key
+        // fences off any future pad-local state the same way, not just this one bug.
         <ScorePad
+          key={`${selection.golferId}-${selection.hole}`}
           golfer={selectedParticipant}
           hole={selectedHole}
           current={selectedCell?.result}

@@ -335,8 +335,8 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
       expect.objectContaining({
         kind: "stableford",
         points: [
-          { golferId: started.golferId, points: 15 },
-          { golferId: joined.golferId, points: 19 },
+          { golferId: started.golferId, points: 10 },
+          { golferId: joined.golferId, points: 17 },
         ],
       }),
     ]);

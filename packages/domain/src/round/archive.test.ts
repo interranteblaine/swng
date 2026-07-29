@@ -11,10 +11,9 @@ import { cellKey, reduceRound } from "./state.js";
 import type { RoundEvent } from "./events.js";
 import type { RoundState, ScoreCell } from "./state.js";
 
-// The milestone's headline concurrency deck (scoring/concurrent.test.ts): one log, two
-// games with different handicap allowances over the same cells, one correction that
-// recomputes both. Settlement is the log's terminal read — this is the deck that has to
-// survive it, corrections included.
+// The milestone's headline concurrency deck (scoring/concurrent.test.ts): one log, two games
+// scoring the same cells by different rules, one correction that recomputes both. Settlement is
+// the log's terminal read — this is the deck that has to survive it, corrections included.
 const A = golferId("ann");
 const B = golferId("bo");
 const C = golferId("cal");
@@ -23,7 +22,7 @@ const players3 = [
   { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
   { golferId: C, name: "Cal", tee: "white", courseHandicap: 12 },
 ];
-const skins = { kind: "skins", id: gameId("k9"), players: [A, B, C] } as const;
+const skins = { kind: "skins", id: gameId("k9"), scoring: "net", players: [A, B, C] } as const;
 const stableford = { kind: "stableford", id: gameId("s9"), players: [A, B, C] } as const;
 const cards = {
   [A]: [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"],
@@ -50,21 +49,22 @@ describe("settleRound — concurrency deck", () => {
     const skinsResult = archive.results.find((r) => r.kind === "skins");
     const stablefordResult = archive.results.find((r) => r.kind === "stableford");
 
+    // The settled figures are concurrent.test.ts's own post-correction values, hand-derived there.
     expect(skinsResult).toMatchObject({
       kind: "skins",
-      carriedOut: 0,
+      carriedOut: 1,
       won: [
-        { golferId: A, skins: 8 },
-        { golferId: B, skins: 1 },
+        { golferId: A, skins: 2 },
+        { golferId: B, skins: 6 },
         { golferId: C, skins: 0 },
       ],
     });
     expect(stablefordResult).toMatchObject({
       kind: "stableford",
       points: [
-        { golferId: A, points: 18 },
-        { golferId: B, points: 17 },
-        { golferId: C, points: 10 },
+        { golferId: A, points: 13 },
+        { golferId: B, points: 15 },
+        { golferId: C, points: 4 },
       ],
     });
   });
@@ -353,13 +353,14 @@ describe("settleRound — incomplete handicapping", () => {
     const D = golferId("dee");
     const E = golferId("eve");
     const twoPlayers = [
-      { golferId: D, name: "Dee", tee: "white", courseHandicap: 8 },
+      { golferId: D, name: "Dee", tee: "white", courseHandicap: 14 },
       { golferId: E, name: "Eve", tee: "white", courseHandicap: 2 },
     ];
     const match = { kind: "singles-match", id: gameId("m2"), a: D, b: E } as const;
-    // Same shape as singlesMatch.test.ts's "full-difference strokes close it out 3&2"
-    // deck (Dee/Eve standing in for that test's Ann/Bo, same course handicaps): Dee
-    // (higher, ch 8) gets 6 dots on SI 1..6 (holes 1,2,4,7,8,9). h1 halve(4/4),
+    // Same shape as singlesMatch.test.ts's "the difference between the two closes it out 3&2"
+    // deck (Dee/Eve standing in for that test's Ann/Bo, same course handicaps): Dee's 14 against
+    // Eve's 2 is a difference of 12, halved on a nine-hole card, so Dee
+    // gets 6 dots on SI 1..6 (holes 1,2,4,7,8,9). h1 halve(4/4),
     // h2 Dee(4/5), h3 Dee(3/4), h4 halve(5/5), h5 Dee(4/5), h6 Eve(4/3), h7 Dee(4/5)
     // -> Dee 3 up thru 7, 2 remaining -> closes out 3&2. Holes 8-9 are never recorded
     // for either golfer, so the round finalizes with the game resolved but both
@@ -511,7 +512,7 @@ describe("unresolvedGames — finalize readiness", () => {
     opId: opId(`op-unresolved-${(opCounter += 1)}`),
   });
   const stablefordConfig: GameConfig = { kind: "stableford", id: gameId("g-stableford"), players: [ANN, PAT] };
-  const skinsConfig: GameConfig = { kind: "skins", id: gameId("g-skins"), players: [ANN, PAT] };
+  const skinsConfig: GameConfig = { kind: "skins", id: gameId("g-skins"), scoring: "net", players: [ANN, PAT] };
   const holes = fixtureLinks18.teeSets[0]!.holes;
 
   // Ann's fully scored (holes 1-18); Pat only played hole 1 — holes 2-18 unscored for Pat.

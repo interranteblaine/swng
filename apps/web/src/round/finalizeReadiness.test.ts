@@ -19,7 +19,7 @@ const cell = (result: ScoreCell["result"], recordedBy: typeof ANN): ScoreCell =>
 });
 
 const stablefordConfig: GameConfig = { kind: "stableford", id: gameId("g-stableford"), players: [ANN, PAT] };
-const skinsConfig: GameConfig = { kind: "skins", id: gameId("g-skins"), players: [ANN, PAT] };
+const skinsConfig: GameConfig = { kind: "skins", id: gameId("g-skins"), scoring: "net", players: [ANN, PAT] };
 
 // Ann's fully scored (holes 1-18); Pat only played hole 1 — holes 2-18 unscored for Pat, in
 // BOTH games. `fixtureLinks18` is the 18-hole fixture (packages/domain's own fixture).

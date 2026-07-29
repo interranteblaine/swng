@@ -1,38 +1,31 @@
 import type { GolferId } from "../ids.js";
 import type { RoundState } from "../round/state.js";
 import { cellAt } from "../round/state.js";
-import { defaultAllowance, playingHandicap } from "./allowances.js";
+import { gameStrokeAllocation } from "./allocation.js";
 import type { GameConfig, GameState } from "./game.js";
 import type { HoleWinner } from "./matchLadder.js";
 import { matchLadder } from "./matchLadder.js";
 import { playerTeeSet } from "./players.js";
-import { dotsByHole } from "./strokes.js";
 
 type FourballMatchConfig = Extract<GameConfig, { kind: "fourball-match" }>;
 
 export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundState): GameState => {
-  const allowance = config.allowance ?? defaultAllowance("fourball-match");
   const golfers: readonly GolferId[] = [...config.a, ...config.b];
 
-  // Playing handicap per player, then the whole foursome plays relative to the
-  // lowest of the four — singles match's higher/lower relief generalized to four.
-  const infos = golfers.map((golferId) => {
-    const { participant, teeSet } = playerTeeSet(state, golferId);
-    return { golferId, teeSet, playingHcp: playingHandicap(participant.courseHandicap, allowance) };
-  });
-  const lowHcp = Math.min(...infos.map((info) => info.playingHcp));
-  // One allocation per player for the whole card, not one per hole (see dotsByHole's doc comment).
-  const dotsByGolfer = new Map(infos.map((info) => [info.golferId, dotsByHole(info.playingHcp - lowHcp, info.teeSet)]));
+  // The game's own field, off the ONE rule (spec §3): all four play off the lowest of the four —
+  // the four-ball 90% discount is deleted with the rest of the allowance table, so this is now
+  // the full difference. The per-player playing-handicap-then-subtract-the-low walk this replaced
+  // was that same relative arithmetic, spelled a second time.
+  const allocation = gameStrokeAllocation(config, state.participants, state.card);
 
   // Course card order is shared; hole numbers, not tee choice, drive it.
-  const cardTeeSet = infos[0]!.teeSet;
+  const { teeSet: cardTeeSet } = playerTeeSet(state, golfers[0]!);
   const holeCount = cardTeeSet.holes.length;
 
   const netFor = (golferId: GolferId, holeNumber: number): number | undefined => {
     const cell = cellAt(state.cells, golferId, holeNumber);
     if (!cell || cell.result.kind !== "strokes") return undefined; // absent/picked-up/conceded: that player is out of the hole
-    const dots = dotsByGolfer.get(golferId)?.get(holeNumber) ?? 0;
-    return cell.result.strokes - dots;
+    return cell.result.strokes - (allocation.get(golferId)?.get(holeNumber) ?? 0);
   };
 
   // A side's ball for the hole is the best (lowest) net among its players still

@@ -56,5 +56,4 @@ export {
   courseHandicapFromRatingSlopePar,
   unratedCourseHandicap,
   handicappingFor,
-  defaultAllowance,
 } from "@swng/domain";

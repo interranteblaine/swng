@@ -130,7 +130,7 @@ describe("createRoundSession", () => {
     expect(cell).toMatchObject({ result: { kind: "strokes", strokes: 5 }, recordedBy: ANN_ID });
   });
 
-  it("drives the M2 stableford golden card through recordScore and scores 15/19 once the game is ingested", async () => {
+  it("drives the M2 stableford golden card through recordScore and scores 10/17 once the game is ingested", async () => {
     const transport = createScriptedTransport(buildServerLog());
     const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
     await session.sync();
@@ -145,8 +145,8 @@ describe("createRoundSession", () => {
     const stableford = session.games().find((game) => game.kind === "stableford");
     expect(stableford).toMatchObject({
       lines: expect.arrayContaining([
-        expect.objectContaining({ golferId: ANN_ID, points: 15 }),
-        expect.objectContaining({ golferId: BO_ID, points: 19 }),
+        expect.objectContaining({ golferId: ANN_ID, points: 10 }),
+        expect.objectContaining({ golferId: BO_ID, points: 17 }),
       ]),
     });
   });

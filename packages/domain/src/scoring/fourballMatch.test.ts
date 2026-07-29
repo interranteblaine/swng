@@ -5,17 +5,22 @@ import { fixtureLinks } from "./golden/fixtureCourse.js";
 
 const A = golferId("ann"); const B = golferId("bo");
 const C = golferId("cal"); const D = golferId("dee");
+// Four-ball strokes were ALWAYS relative to the lowest of the four, so the ONE rule (spec §3)
+// produces the same allocation this file's hand-verified cards were built on — restated in the new
+// model's own terms, and without the 90% discount, which is deleted with the rest of the allowance
+// table. Differences from Bo's 2 are 10/0/18/6, halved on a nine-hole card: Ann 5, Bo 0, Cal 9,
+// Dee 3 dots. Drop the halving or the relative rule and every net below moves.
 const players = [
-  { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 },
+  { golferId: A, name: "Ann", tee: "white", courseHandicap: 12 },
   { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
-  { golferId: C, name: "Cal", tee: "white", courseHandicap: 12 },
-  { golferId: D, name: "Dee", tee: "white", courseHandicap: 5 },
+  { golferId: C, name: "Cal", tee: "white", courseHandicap: 20 },
+  { golferId: D, name: "Dee", tee: "white", courseHandicap: 8 },
 ];
 const game = { kind: "fourball-match", id: gameId("f1"), a: [A, B], b: [C, D] } as const;
 
 describe("fourball match — golden cards", () => {
-  it("90% relative strokes, best ball per side, pickup drops one ball: side A wins 3&1", () => {
-    // Relative playing hcps: Ann 5, Bo 0, Cal 9, Dee 3.
+  it("everyone off the lowest of the four, best ball per side, pickup drops one ball: side A wins 3&1", () => {
+    // Relative strokes: Ann 5, Bo 0, Cal 9, Dee 3.
     // h1–h4 halved (best nets 4/4, 4/4, 3/3, 5/5); h5 A (4 vs 5); h6 halved (3/3);
     // h7 A (4 vs 5); h8: Dee picks up, Cal's net 6 vs A's best 5 → A, 3 up with 1 to play → 3&1.
     const [state] = playGoldenRound(fixtureLinks, players, [game], {

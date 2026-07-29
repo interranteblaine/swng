@@ -49,7 +49,7 @@ describe("roundEventSchema", () => {
     { kind: "singles-match", id: gameId("g2"), a: golferId("a"), b: golferId("b") },
     { kind: "stableford", id: gameId("g3"), players: [golferId("a"), golferId("b")] },
     { kind: "fourball-match", id: gameId("g4"), a: [golferId("a"), golferId("b")], b: [golferId("c"), golferId("d")] },
-    { kind: "skins", id: gameId("g5"), players: [golferId("a"), golferId("b")] },
+    { kind: "skins", id: gameId("g5"), scoring: "net", players: [golferId("a"), golferId("b")] },
   ];
 
   it.each(gameConfigs)("parses a game-added event carrying a $kind config", (config) => {

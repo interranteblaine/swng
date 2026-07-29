@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { defaultAllowance } from "@swng/client";
-import { allowancePhrase, gameId, gameKindBlurb, gameKindFits, gameKindLabel, golferId, strokePlayTreatment, strokesNote } from "@swng/domain";
+import { gameId, gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, golferId, strokesNote } from "@swng/domain";
 import type { CourseCard, GameConfig, GolferId, Participant } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";
@@ -31,15 +30,13 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
   const [fbA2, setFbA2] = useState<GolferId | undefined>(undefined);
   const [fbB1, setFbB1] = useState<GolferId | undefined>(undefined);
   const [fbB2, setFbB2] = useState<GolferId | undefined>(undefined);
-  const [allowance, setAllowance] = useState<number>(defaultAllowance("stableford"));
-  const [adjusting, setAdjusting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
   const changeKind = (next: Kind) => {
     setKind(next);
-    setAllowance(defaultAllowance(next)); // re-anchor to the new kind's default; still adjustable
-    setAdjusting(false);
+    // Net is the default on both kinds that offer the choice — a group that wants gross says so.
+    setScoring("net");
     setPlayers([]);
     setSingleA(undefined);
     setSingleB(undefined);
@@ -57,19 +54,19 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
   const buildConfig = (): GameConfigInput | undefined => {
     switch (kind) {
       case "stroke-play":
-        return players.length > 0 ? { kind, scoring, players: [...players], allowance } : undefined;
+        return players.length > 0 ? { kind, scoring, players: [...players] } : undefined;
       case "stableford":
-        return players.length > 0 ? { kind, players: [...players], allowance } : undefined;
+        return players.length > 0 ? { kind, players: [...players] } : undefined;
       case "skins":
         // A skins pot needs at least two players contesting it — guarded here, not the wire.
-        return players.length >= 2 ? { kind, players: [...players], allowance } : undefined;
+        return players.length >= 2 ? { kind, scoring, players: [...players] } : undefined;
       case "singles-match":
-        return singleA && singleB && singleA !== singleB ? { kind, a: singleA, b: singleB, allowance } : undefined;
+        return singleA && singleB && singleA !== singleB ? { kind, a: singleA, b: singleB } : undefined;
       case "fourball-match": {
         const ids = [fbA1, fbA2, fbB1, fbB2];
         if (ids.some((id) => !id)) return undefined;
         if (new Set(ids).size !== 4) return undefined; // four distinct players required
-        return { kind, a: [fbA1!, fbA2!], b: [fbB1!, fbB2!], allowance };
+        return { kind, a: [fbA1!, fbA2!], b: [fbB1!, fbB2!] };
       }
     }
   };
@@ -77,11 +74,11 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
   const config = buildConfig();
   // GameConfigInput is GameConfig minus the server-assigned id — the placeholder restores it
   // purely so the preview can reuse the exact allocation the card's dots render.
-  const preview = config ? strokesSummary({ ...config, id: PREVIEW_ID } as GameConfig, participants, card) : undefined;
-  // Live-walk finding (2026-07-19): gross stroke play has no allowance by definition — the
-  // shared `strokePlayTreatment` (also used by GamePanel's live standings) renders the gross line
-  // in place of a meaningless "95% handicap" phrase and an all-zero strokesSummary line.
-  const isGrossStrokePlay = kind === "stroke-play" && scoring === "gross";
+  const previewConfig = config ? ({ ...config, id: PREVIEW_ID } as GameConfig) : undefined;
+  // Both read the config, so a gross game (either kind that offers the choice) renders its own
+  // "no strokes" treatment line and no strokes preview at all — the one place that decision lives.
+  const preview = previewConfig && strokesSummary(previewConfig, participants, card);
+  const note = previewConfig && strokesNote(previewConfig);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -136,11 +133,11 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
         ))}
       </fieldset>
 
-      {kind === "stroke-play" && (
+      {(kind === "stroke-play" || kind === "skins") && (
         <label className="flex flex-col gap-1">
           Scoring
           <select value={scoring} onChange={(event) => setScoring(event.target.value as "gross" | "net")} className={inputBox}>
-            <option value="net">Net — with handicap strokes</option>
+            <option value="net">Net — with strokes</option>
             <option value="gross">Gross — raw scores</option>
           </select>
         </label>
@@ -181,39 +178,12 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
         </>
       )}
 
-      {config && (
+      {previewConfig && (
         <div className={`${cardBox} flex flex-col gap-1 p-3`}>
-          <span className="flex items-center justify-between">
-            <span className="font-semibold text-forest">Strokes</span>
-            {!isGrossStrokePlay && (
-              <button type="button" onClick={() => setAdjusting((current) => !current)} className="text-sm text-forest underline decoration-fairway decoration-2">
-                Adjust
-              </button>
-            )}
-          </span>
-          {isGrossStrokePlay ? (
-            <span className="text-sm text-fairway">{strokePlayTreatment("gross")}</span>
-          ) : (
-            <>
-              <span className="text-sm text-fairway">{allowancePhrase(kind, allowance)}</span>
-              {preview && <span className="text-sm text-forest">{preview}</span>}
-              {strokesNote(kind) && <span className="text-sm text-fairway">{strokesNote(kind)}</span>}
-            </>
-          )}
-          {!isGrossStrokePlay && adjusting && (
-            <label className="flex flex-col gap-1 text-sm text-forest">
-              Handicap %
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step="any"
-                value={Math.round(allowance * 1000) / 10}
-                onChange={(event) => setAllowance(Number(event.target.value) / 100)}
-                className={inputBox}
-              />
-            </label>
-          )}
+          <span className="font-semibold text-forest">Strokes</span>
+          <span className="text-sm text-fairway">{gameTreatment(previewConfig)}</span>
+          {preview && <span className="text-sm text-forest">{preview}</span>}
+          {note && <span className="text-sm text-fairway">{note}</span>}
         </div>
       )}
 

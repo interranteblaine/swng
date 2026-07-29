@@ -1,18 +1,20 @@
 import type { RoundState } from "../round/state.js";
 import { cellAt } from "../round/state.js";
-import { defaultAllowance, playingHandicap } from "./allowances.js";
+import { gameStrokeAllocation } from "./allocation.js";
 import type { GameConfig, GameState, SkinsHole } from "./game.js";
 import { allPlayersComplete, playerTeeSet } from "./players.js";
-import { dotsByHole } from "./strokes.js";
 
 type SkinsConfig = Extract<GameConfig, { kind: "skins" }>;
 
 export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState => {
+  // The game's own field, off the ONE rule (spec §3) — computed once for the whole game, not per
+  // player and not per hole (see dotsByHole's doc comment). A GROSS pot's allocation is EMPTY, so
+  // `dots` below comes out undefined and every net reads the raw score: the gross rule is decided
+  // in one place (gameStrokeAllocation) rather than re-tested here.
+  const allocation = gameStrokeAllocation(config, state.participants, state.card);
   const players = config.players.map((golferId) => {
-    const { participant, teeSet } = playerTeeSet(state, golferId);
-    // One allocation for the whole card, not one per hole (see dotsByHole's doc comment).
-    const playingHcp = playingHandicap(participant.courseHandicap, config.allowance ?? defaultAllowance("skins"));
-    return { golferId, teeSet, dots: dotsByHole(playingHcp, teeSet) };
+    const { teeSet } = playerTeeSet(state, golferId);
+    return { golferId, teeSet, dots: allocation.get(golferId) };
   });
 
   // Course card order is shared; hole numbers, not tee choice, drive it — so any
@@ -35,7 +37,7 @@ export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState =>
     const pot = 1 + carrying;
     // Picked-up/conceded players are out of the hole; everyone else competes on net.
     const nets = cells.flatMap(({ player, cell }) =>
-      cell!.result.kind === "strokes" ? [{ golferId: player.golferId, net: cell!.result.strokes - (player.dots.get(hole.number) ?? 0) }] : [],
+      cell!.result.kind === "strokes" ? [{ golferId: player.golferId, net: cell!.result.strokes - (player.dots?.get(hole.number) ?? 0) }] : [],
     );
 
     const lowest = Math.min(...nets.map(({ net }) => net));
@@ -57,6 +59,7 @@ export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState =>
   return {
     kind: "skins",
     id: config.id,
+    scoring: config.scoring,
     lines: config.players.map((golferId) => ({ golferId, skins: skinsWon.get(golferId)! })),
     // Once the round is complete there is no next hole for the pot to ride into —
     // whatever is still carrying is stranded and reported as carriedOut instead.

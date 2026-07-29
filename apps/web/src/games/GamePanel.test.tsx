@@ -251,10 +251,11 @@ describe("GamePanel", () => {
       { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
       { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
     ];
-    const config: GameConfig = { kind: "skins", id: gameId("s1"), players: [PAT, ALEX] };
+    const config: GameConfig = { kind: "skins", id: gameId("s1"), scoring: "net", players: [PAT, ALEX] };
     const game: GameState = {
       kind: "skins",
       id: config.id,
+      scoring: "net",
       lines: [
         { golferId: PAT, skins: 3 },
         { golferId: ALEX, skins: 0 },
@@ -357,10 +358,11 @@ describe("GamePanel — the link sweep (every visible name links to /golfers/:go
       { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
       { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
     ];
-    const config: GameConfig = { kind: "skins", id: gameId("s-link"), players: [PAT, ALEX] };
+    const config: GameConfig = { kind: "skins", id: gameId("s-link"), scoring: "net", players: [PAT, ALEX] };
     const game: GameState = {
       kind: "skins",
       id: config.id,
+      scoring: "net",
       lines: [
         { golferId: PAT, skins: 3 },
         { golferId: ALEX, skins: 0 },
@@ -425,9 +427,9 @@ describe("GamePanel — header (spec §2c)", () => {
     const region = screen.getByRole("region", { name: "Match play standings" });
     const text = region.textContent ?? "";
     const titleAt = text.indexOf("Match play");
-    const treatmentAt = text.indexOf("Full handicap (standard)");
+    const treatmentAt = text.indexOf("Strokes are the difference between you two");
     const strokesAt = text.indexOf("No strokes — everyone plays off 0.");
-    const noteAt = text.indexOf("Match play uses the difference — only the higher handicap gets strokes.");
+    const noteAt = text.indexOf("Only the higher number gets strokes — the lower plays off scratch.");
 
     expect(titleAt).toBeGreaterThanOrEqual(0);
     expect(treatmentAt).toBeGreaterThan(titleAt);
@@ -438,7 +440,7 @@ describe("GamePanel — header (spec §2c)", () => {
     expect(screen.queryByText(gameKindBlurb("singles-match"))).toBeNull();
   });
 
-  it("stroke-play NET states the treatment as 'Net — {allowance}'", () => {
+  it("stroke-play NET states the treatment as the strokes on the card", () => {
     const participants: readonly Participant[] = [{ golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 }];
     const config: GameConfig = { kind: "stroke-play", id: gameId("sp-net"), scoring: "net", players: [PAT] };
     const game: GameState = { kind: "stroke-play", id: config.id, scoring: "net", complete: false, leaders: [], lines: [] };
@@ -446,7 +448,7 @@ describe("GamePanel — header (spec §2c)", () => {
 
     render(<GamePanel game={game} state={state} />);
 
-    expect(screen.getByText("Net — 95% handicap (standard)")).toBeTruthy();
+    expect(screen.getByText("Net — uses the strokes on the card")).toBeTruthy();
   });
 
   it("stroke-play GROSS states 'Gross — raw scores, no strokes' and renders NO strokes line at all", () => {
@@ -463,24 +465,42 @@ describe("GamePanel — header (spec §2c)", () => {
   });
 
   it("stableford and skins both render a strokes line", () => {
-    const participants: readonly Participant[] = [{ golferId: PAT, name: "Pat", tee: "white", courseHandicap: 5 }];
-    const stableford: GameConfig = { kind: "stableford", id: gameId("sf-strokes"), players: [PAT] };
+    // Two players, not one: strokes are relative, so a lone player anchors his own field and gets
+    // nothing. Pat's 5 against Alex's 0, halved on this nine-hole card, is 3 dots.
+    const participants: readonly Participant[] = [
+      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 5 },
+      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 0 },
+    ];
+    const stableford: GameConfig = { kind: "stableford", id: gameId("sf-strokes"), players: [PAT, ALEX] };
     const stablefordState: GameState = { kind: "stableford", id: stableford.id, complete: false, leaders: [], lines: [] };
-    const skins: GameConfig = { kind: "skins", id: gameId("sk-strokes"), players: [PAT] };
-    const skinsState: GameState = { kind: "skins", id: skins.id, lines: [], carrying: 0, carriedOut: 0, complete: false, holesDecided: 0, holes: [] };
+    const skins: GameConfig = { kind: "skins", id: gameId("sk-strokes"), scoring: "net", players: [PAT, ALEX] };
+    const skinsState: GameState = { kind: "skins", id: skins.id, scoring: "net", lines: [], carrying: 0, carriedOut: 0, complete: false, holesDecided: 0, holes: [] };
 
     const { unmount } = render(<GamePanel game={stablefordState} state={baseState([stableford], participants)} />);
-    expect(screen.getByText(/Pat 5 dots/)).toBeTruthy();
+    expect(screen.getByText(/Pat 3 dots/)).toBeTruthy();
     unmount();
 
     render(<GamePanel game={skinsState} state={baseState([skins], participants)} />);
-    expect(screen.getByText(/Pat 5 dots/)).toBeTruthy();
+    expect(screen.getByText(/Pat 3 dots/)).toBeTruthy();
   });
 
   it("the singles note reads verbatim", () => {
     const { game, state } = singlesFixture();
     render(<GamePanel game={game} state={state} />);
-    expect(screen.getByText("Match play uses the difference — only the higher handicap gets strokes.")).toBeTruthy();
+    expect(screen.getByText("Only the higher number gets strokes — the lower plays off scratch.")).toBeTruthy();
+  });
+
+  // Skins now offers the same gross/net choice stroke play has (spec §3), so the panel must state
+  // it — and a gross pot allocates nothing, exactly like gross stroke play.
+  it("skins GROSS states 'Gross — raw scores, no strokes' and renders NO strokes line at all", () => {
+    const participants: readonly Participant[] = [{ golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 }];
+    const config: GameConfig = { kind: "skins", id: gameId("sk-gross"), scoring: "gross", players: [PAT] };
+    const game: GameState = { kind: "skins", id: config.id, scoring: "gross", lines: [], carrying: 0, carriedOut: 0, complete: false, holesDecided: 0, holes: [] };
+
+    render(<GamePanel game={game} state={baseState([config], participants)} />);
+
+    expect(screen.getByText("Gross — raw scores, no strokes")).toBeTruthy();
+    expect(screen.queryByText(/dots|gives|No strokes/)).toBeNull();
   });
 });
 

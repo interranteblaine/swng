@@ -1,4 +1,3 @@
-import { defaultAllowance } from "./allowances.js";
 import type { GameConfig } from "./game.js";
 
 // The games' human meaning as domain truth — names, one-line rules, who a game fits, and
@@ -52,38 +51,38 @@ export const gameKindFits = (kind: GameKind): string => {
   }
 };
 
-// "Full handicap (standard)" / "95% handicap (standard)" / "85% handicap (adjusted)" —
-// standard means it matches the kind's WHS default; 100% always reads "Full handicap".
-export const allowancePhrase = (kind: GameKind, allowance?: number): string => {
-  const resolved = allowance ?? defaultAllowance(kind);
-  const pct = Math.round(resolved * 100);
-  const name = pct === 100 ? "Full handicap" : `${pct}% handicap`;
-  return `${name}${resolved === defaultAllowance(kind) ? " (standard)" : " (adjusted)"}`;
+// One treatment line for every kind, gross included — the ONE copy every panel and the
+// add-game preview render through. Replaces allowancePhrase + strokePlayTreatment, whose split
+// left the non-stroke-play kinds rendering a percentage that no longer exists.
+export const gameTreatment = (config: GameConfig): string => {
+  if ("scoring" in config && config.scoring === "gross") return "Gross — raw scores, no strokes";
+  switch (config.kind) {
+    case "stroke-play":
+    case "skins":
+    case "stableford":
+      return "Net — uses the strokes on the card";
+    case "singles-match":
+      return "Strokes are the difference between you two";
+    case "fourball-match":
+      return "Everyone plays off the lowest of the four";
+  }
 };
 
-// The stroke-play treatment line, one tested copy — net prefixes the usual allowance phrase;
-// gross has NO allowance at all, by definition, so the allowance argument is ignored outright
-// rather than surfacing a meaningless percent. Every surface that states a stroke-play game's
-// handicap treatment (the live standings panel, the add-game preview) renders through this —
-// two independent literals of "Gross — raw scores, no strokes" is the exact bug this closes.
-export const strokePlayTreatment = (scoring: "gross" | "net", allowance?: number): string =>
-  scoring === "net" ? `Net — ${allowancePhrase("stroke-play", allowance)}` : "Gross — raw scores, no strokes";
-
-// A per-kind note on the strokes CONVENTION itself — distinct from allowancePhrase's
-// percent-of-handicap line — for the two kinds whose strokes are computed relative to another
-// player rather than each golfer's own handicap outright (singles-match: the difference between
-// the two; fourball-match: everyone relative to the low playing handicap on the four). The other
-// three kinds need no extra explanation beyond the allowance phrase itself.
-export const strokesNote = (kind: GameKind): string | undefined => {
-  switch (kind) {
+// A note on WHOSE strokes a game's field is measured against — the sentence under the treatment
+// line. Every kind now applies the same rule (the difference from the lowest in its own field),
+// so what differs per kind is only who "the field" is; the percentages this once explained are
+// gone. Undefined for a gross game: it allocates nothing, so there is no field to describe.
+export const strokesNote = (config: GameConfig): string | undefined => {
+  if ("scoring" in config && config.scoring === "gross") return undefined;
+  switch (config.kind) {
     case "singles-match":
-      return "Match play uses the difference — only the higher handicap gets strokes.";
+      return "Only the higher number gets strokes — the lower plays off scratch.";
     case "fourball-match":
-      return "Four-ball plays everyone off the lowest handicap.";
+      return "All four play off the lowest of the four.";
     case "stroke-play":
     case "stableford":
     case "skins":
-      return undefined;
+      return "Everyone in this game plays off the lowest in it.";
   }
 };
 

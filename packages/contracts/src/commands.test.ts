@@ -245,13 +245,13 @@ describe("gameConfigInputSchema", () => {
   it.each([
     ["stroke-play", { kind: "stroke-play", scoring: "gross", players: players13 }],
     ["stableford", { kind: "stableford", players: players13 }],
-    ["skins", { kind: "skins", players: players13 }],
+    ["skins", { kind: "skins", scoring: "net", players: players13 }],
   ])("rejects a %s game with more than 12 players", (_kind, config) => {
     expect(() => parse(gameConfigInputSchema, config)).toThrow(ContractError);
   });
 
   it("accepts exactly 12 players (the boundary)", () => {
-    expect(() => parse(gameConfigInputSchema, { kind: "skins", players: players12 })).not.toThrow();
+    expect(() => parse(gameConfigInputSchema, { kind: "skins", scoring: "net", players: players12 })).not.toThrow();
   });
 });
 

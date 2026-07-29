@@ -1,20 +1,21 @@
 import type { RoundState } from "../round/state.js";
 import { cellAt } from "../round/state.js";
-import { defaultAllowance, playingHandicap } from "./allowances.js";
+import { gameStrokeAllocation } from "./allocation.js";
 import type { GameConfig, GameState, RunningTotal } from "./game.js";
 import { allPlayersComplete, playerTeeSet } from "./players.js";
-import { dotsByHole, netDoubleBogey } from "./strokes.js";
+import { netDoubleBogey } from "./strokes.js";
 
 type StrokePlayConfig = Extract<GameConfig, { kind: "stroke-play" }>;
 
 export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): GameState => {
+  // The game's own field, off the ONE rule (spec §3) — computed once for the whole game, not per
+  // player and not per hole (see dotsByHole's doc comment). A gross game's allocation is EMPTY, so
+  // `dots` below comes out undefined and no net is accumulated: the gross rule is decided in one
+  // place (gameStrokeAllocation) rather than re-tested here.
+  const allocation = gameStrokeAllocation(config, state.participants, state.card);
   const lines = config.players.map((golferId) => {
-    const { participant, teeSet } = playerTeeSet(state, golferId);
-    // Net needs a playing handicap even when nobody has picked up yet; computed
-    // once per player rather than per hole.
-    const playingHcp = config.scoring === "net" ? playingHandicap(participant.courseHandicap, config.allowance ?? defaultAllowance("stroke-play")) : 0;
-    // One allocation for the whole card, not one per hole (see dotsByHole's doc comment).
-    const dots = config.scoring === "net" ? dotsByHole(playingHcp, teeSet) : undefined;
+    const { teeSet } = playerTeeSet(state, golferId);
+    const dots = allocation.get(golferId);
 
     let grossTotal = 0;
     let grossPickups = 0;

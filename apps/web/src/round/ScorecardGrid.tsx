@@ -130,8 +130,8 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
   const current = currentHoleNumber(holes, state.participants, state.cells);
 
   // The STANDARD CARD's dots: each player's own course handicap, allocated by stroke index —
-  // no allowance, no game, computed once per render (spec 2026-07-19 §2a). Any concurrent
-  // game's own strokes (a different allowance, a relative allocation) live in that game's own
+  // no game, computed once per render (spec 2026-07-19 §2a). Any concurrent
+  // game's own strokes (resolved off that game's own field) live in that game's own
   // panel — this grid never re-derives them.
   const dotsByGolfer = courseHandicapAllocation(state.participants, state.card);
 

@@ -9,18 +9,18 @@ import type { GameResult, GameState, GolferId, HoleResult, RoundId } from "@swng
 import { apiUrl, ensureCourse, loadEndpoints, mintAccountGolfer, post, waitUntil } from "./support/client.js";
 
 // The M2 golden stableford deck for two golfers — reproduced verbatim from
-// packages/domain/src/scoring/stableford.test.ts. The card and its 15/19 lines are pinned by the domain golden fixture
+// packages/domain/src/scoring/stableford.test.ts. The card and its 10/17 lines are pinned by the domain golden fixture
 // (`packages/domain/src/scoring/stableford.test.ts`) and exercised in-memory by
 // `application/src/rounds/roundSlice.test.ts` and `packages/client/src/session.test.ts`;
 // THIS suite is what first proves them over the wire, offline queueing included. Ann (courseHandicap 8) and Bo (courseHandicap 2),
 // white tees, one stableford game referencing both. Ann's h4 is a pickup. This suite's whole
-// point is proving that the SAME Ann 15 / Bo 19 numbers survive a real offline outbox drained
+// point is proving that the SAME Ann 10 / Bo 17 numbers survive a real offline outbox drained
 // over the real deployed stack — not deriving them fresh.
 const ANN_CARD: readonly (number | "picked-up")[] = [5, 6, 3, "picked-up", 5, 4, 5, 6, 5];
 const BO_CARD: readonly number[] = [4, 4, 3, 5, 5, 3, 4, 5, 4];
 const GOLDEN_LINES = [
-  { thru: 9, points: 15 }, // Ann
-  { thru: 9, points: 19 }, // Bo
+  { thru: 9, points: 10 }, // Ann
+  { thru: 9, points: 17 }, // Bo
 ];
 
 const toHoleResult = (score: number | "picked-up"): HoleResult => (score === "picked-up" ? { kind: "picked-up" } : { kind: "strokes", strokes: score });
@@ -162,7 +162,7 @@ describe("kill-network sync gate: two real createRoundSessions over the deployed
     }
 
     expect(sessionB.pending()).toBe(9);
-    expect(stablefordStateOf(sessionB.games()).lines).toContainEqual({ golferId: boId, thru: 9, points: 19 });
+    expect(stablefordStateOf(sessionB.games()).lines).toContainEqual({ golferId: boId, thru: 9, points: 17 });
   });
 
   // Step 5: while B is dark, A keeps scoring — Ann's remaining card including the h4 pickup.
@@ -174,7 +174,7 @@ describe("kill-network sync gate: two real createRoundSessions over the deployed
     }
     await sessionA.sync();
 
-    expect(stablefordStateOf(sessionA.games()).lines).toContainEqual({ golferId: annId, thru: 9, points: 15 });
+    expect(stablefordStateOf(sessionA.games()).lines).toContainEqual({ golferId: annId, thru: 9, points: 10 });
   });
 
   // Step 6: restore B's network, connect() + sync() — the offline burst drains (pending 0,
@@ -203,8 +203,8 @@ describe("kill-network sync gate: two real createRoundSessions over the deployed
     const stablefordA = stablefordStateOf(sessionA.games());
     const stablefordB = stablefordStateOf(sessionB.games());
     expect(stablefordA.lines).toEqual([
-      { golferId: annId, thru: 9, points: 15 },
-      { golferId: boId, thru: 9, points: 19 },
+      { golferId: annId, thru: 9, points: 10 },
+      { golferId: boId, thru: 9, points: 17 },
     ]);
     expect(stablefordB.lines).toEqual(stablefordA.lines);
     expect(stablefordA.complete).toBe(true);

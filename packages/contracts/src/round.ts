@@ -58,29 +58,29 @@ export const participantSchema: z.ZodType<Participant> = z.object({
 // fields in `.readonly()` (frozen, matching the domain type's shape at game-added
 // time); GameConfigInput reuses these same field schemas unwrapped — mutable, as a
 // client request body should be — then adds `.strict()` on top.
+// No `allowance` on any arm: the handicap-allowance table is deleted (spec §3) — every kind takes
+// the difference from the lowest in its own field, so there is no percentage left to send or store.
 export const gameConfigFields = {
   "stroke-play": {
     scoring: z.enum(["gross", "net"]),
     players: z.array(golferIdSchema),
-    allowance: z.number().optional(),
   },
   "singles-match": {
     a: golferIdSchema,
     b: golferIdSchema,
-    allowance: z.number().optional(),
   },
   stableford: {
     players: z.array(golferIdSchema),
-    allowance: z.number().optional(),
   },
   "fourball-match": {
     a: z.tuple([golferIdSchema, golferIdSchema]),
     b: z.tuple([golferIdSchema, golferIdSchema]),
-    allowance: z.number().optional(),
   },
   skins: {
+    // Skins earns the gross/net choice stroke play already had (spec §3): gross skins is the
+    // most-played casual variant, and a group routinely runs both pots over one card.
+    scoring: z.enum(["gross", "net"]),
     players: z.array(golferIdSchema),
-    allowance: z.number().optional(),
   },
 } as const;
 

@@ -12,19 +12,22 @@ const players = [
 const game = { kind: "stableford", id: gameId("s1"), players: [A, B] } as const;
 
 describe("stableford — golden cards", () => {
-  it("standard points with a pickup scoring zero: Ann 15, Bo 19", () => {
-    // Ann (8 dots, all but SI9/h3): nets 4,5,3,PU,4,3,4,5,4 → pts 2,1,2,0,2,2,2,2,2 = 15
-    // Bo (dots h2,h7): nets 4,3,3,5,5,3,3,5,4 → pts 2,3,2,2,1,2,3,2,2 = 19
+  it("standard points with a pickup scoring zero: Ann 10, Bo 17", () => {
+    // Strokes are the difference from the lowest in the field (spec §2b): Bo at 2 is the lowest, so
+    // he plays off scratch — 0 dots, net === gross — and Ann's 8 − 2 = 6, halved on a nine-hole
+    // card, gives her 3 dots on SI 1..3 (holes 2, 4, 7).
+    // Ann: nets 5,5,3,PU,5,4,4,6,5 → pts 1,1,2,0,1,1,2,1,1 = 10
+    // Bo: nets 4,4,3,5,5,3,4,5,4 → pts 2,2,2,2,1,2,2,2,2 = 17
     const [state] = playGoldenRound(fixtureLinks, players, [game], {
       [A]: [5, 6, 3, "picked-up", 5, 4, 5, 6, 5],
       [B]: [4, 4, 3, 5, 5, 3, 4, 5, 4],
     });
-    // Bo's higher points total (19 > 15) leads outright.
+    // Bo's higher points total (17 > 10) leads outright.
     expect(state).toMatchObject({
       kind: "stableford", complete: true,
       lines: [
-        { golferId: A, thru: 9, points: 15 },
-        { golferId: B, thru: 9, points: 19 },
+        { golferId: A, thru: 9, points: 10 },
+        { golferId: B, thru: 9, points: 17 },
       ],
       leaders: [B],
     });
@@ -32,11 +35,13 @@ describe("stableford — golden cards", () => {
 
   it("mid-round points run over decided holes only", () => {
     const [state] = playGoldenRound(fixtureLinks, players, [game], { [A]: [5, 6], [B]: [4] });
-    // Ann's higher points (3 > 2) leads mid-round.
+    // Ann: h1 net 5 (h1 is SI 5 — no dot) → 1 pt; h2 net 5 (one dot) → 1 pt. Bo: h1 net 4 → 2 pts.
+    // The two are level on points at DIFFERENT thru counts, which states the leader rule plainly:
+    // leaders come from points alone, never from how far anyone has played.
     expect(state).toMatchObject({
       complete: false,
-      lines: [{ golferId: A, thru: 2, points: 3 }, { golferId: B, thru: 1, points: 2 }],
-      leaders: [A],
+      lines: [{ golferId: A, thru: 2, points: 2 }, { golferId: B, thru: 1, points: 2 }],
+      leaders: [A, B],
     });
   });
 
@@ -62,48 +67,46 @@ describe("stableford — golden cards", () => {
     // hole wherever its cell exists — scoreStableford's loop `continue`s past a
     // missing cell instead of breaking, so a gap doesn't stop later holes counting.
     const soloGame = { kind: "stableford", id: gameId("s2"), players: [A] } as const;
-    // Ann (ch 8, 0.95 default allowance -> playingHcp roundHalfUp(8*0.95)=8, dots on
-    // every hole except h3/SI9) plays h1 and h3 but leaves h2 with no cell at all.
-    // h1: par4, dot -> net 5-1=4, pts 2+4-4=2
+    // Ann is the only player in THIS game, so she is her own field's anchor and receives nothing
+    // (spec §2b: strokes cannot be allocated when only one person's level is known — correct, not
+    // degenerate). She plays h1 and h3 but leaves h2 with no cell at all.
+    // h1: par4, no dot -> net 5, pts max(0, 2+4-5) = 1
     // h2: no cell recorded — not counted in thru or points
-    // h3: par3, SI9, no dot -> net 3-0=3, pts 2+3-3=2
-    // thru = 2 (both decided holes, despite the gap at h2); points = 2+2 = 4
+    // h3: par3, no dot -> net 3, pts 2+3-3 = 2
+    // thru = 2 (both decided holes, despite the gap at h2); points = 1+2 = 3
     const [state] = playGoldenRound(fixtureLinks, players, [soloGame], { [A]: [5, null, 3] });
     expect(state).toMatchObject({
       kind: "stableford", complete: false,
-      lines: [{ golferId: A, thru: 2, points: 4 }],
+      lines: [{ golferId: A, thru: 2, points: 3 }],
     });
   });
 
-  it("a non-default allowance override changes the playing handicap and thus the dots: allowance 1 gives Cal (ch 12) an extra dot on h4 that the 0.95 default doesn't", () => {
+  it("a difference wide enough to lap the card gives two dots on the hardest holes", () => {
     const C = golferId("cal");
-    const fullAllowanceGame = { kind: "stableford", id: gameId("s3"), players: [C], allowance: 1 } as const;
-    // Cal ch12 @ allowance 1.0 -> playingHcp roundHalfUp(12*1)=12. dots = allocateStrokes(12, teeSet):
-    // base=floor(12/9)=1 on every hole, extra=12%9=3 on strokeIndex<=3 (h2 SI1, h7 SI2, h4 SI3)
-    // -> those three holes get 2 dots, the rest get 1 (12 total dots).
-    // (At the 0.95 default used elsewhere in this file/archive.test.ts, playingHcp would
-    // instead be roundHalfUp(12*0.95)=11: base 1 everywhere + extra only on h2,h7 = 11 total
-    // dots — the second dot on h4 exists ONLY at allowance 1.0.)
-    // Card (pars [4,4,3,5,4,3,4,5,4]), gross [6,7,4,8,6,5,6,7,6]:
+    const wideGame = { kind: "stableford", id: gameId("s3"), players: [B, C] } as const;
+    // Cal at 26 against Bo's 2 is a difference of 24, halved on a nine-hole card = 12 strokes over
+    // 9 holes: base floor(12/9) = 1 dot on every hole, plus extra 12%9 = 3 on SI<=3 (h2 SI1,
+    // h7 SI2, h4 SI3), which get 2. Bo, the field's lowest, plays off scratch.
+    // Card (pars [4,4,3,5,4,3,4,5,4]), Cal's gross [6,7,4,8,6,5,6,7,6]:
     // h1 par4 dot1 gross6 net5 pts 2+4-5=1
     // h2 par4 dot2 gross7 net5 pts 2+4-5=1
     // h3 par3 dot1 gross4 net3 pts 2+3-3=2
-    // h4 par5 dot2 gross8 net6 pts 2+5-6=1   <- the extra dot this test pins
+    // h4 par5 dot2 gross8 net6 pts 2+5-6=1   <- the lapped second dot this test pins
     // h5 par4 dot1 gross6 net5 pts 2+4-5=1
     // h6 par3 dot1 gross5 net4 pts 2+3-4=1
     // h7 par4 dot2 gross6 net4 pts 2+4-4=2
     // h8 par5 dot1 gross7 net6 pts 2+5-6=1
     // h9 par4 dot1 gross6 net5 pts 2+4-5=1
-    // total points = 1+1+2+1+1+1+2+1+1 = 11 (at the 0.95 default, h4 nets 8-1=7 -> pts
-    // max(0,2+5-7)=0, one point lower, totaling 10 — the value archive.test.ts's
-    // concurrency deck pins for this same Cal card at the default allowance).
-    const rosterWithCal = [...players, { golferId: C, name: "Cal", tee: "white", courseHandicap: 12 }];
-    const [state] = playGoldenRound(fixtureLinks, rosterWithCal, [fullAllowanceGame], {
+    // total points = 1+1+2+1+1+1+2+1+1 = 11 (one dot fewer on h4 would net 7 there and score
+    // max(0, 2+5-7) = 0, so the lapped dot is worth exactly the point this pins).
+    const rosterWithCal = [...players, { golferId: C, name: "Cal", tee: "white", courseHandicap: 26 }];
+    const [state] = playGoldenRound(fixtureLinks, rosterWithCal, [wideGame], {
+      [B]: [4, 4, 3, 5, 5, 3, 4, 5, 4],
       [C]: [6, 7, 4, 8, 6, 5, 6, 7, 6],
     });
     expect(state).toMatchObject({
       kind: "stableford", complete: true,
-      lines: [{ golferId: C, thru: 9, points: 11 }],
+      lines: [{ golferId: B, thru: 9, points: 17 }, { golferId: C, thru: 9, points: 11 }],
     });
   });
 });

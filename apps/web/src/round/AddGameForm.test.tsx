@@ -22,10 +22,10 @@ const participant = (id: ReturnType<typeof golferId>, name: string, tee: string,
 });
 
 // Four participants on the shared fixture card (fixtureLinks — the same 9-hole "white" tee
-// SetupPanel.test.tsx uses): Pat ch 5, Alex ch 2, Sam ch 0, Dana ch 8. Chosen so a skins game
-// (full handicap, allowance 1) gives Pat's own playingHandicap(5, 1) = 5 dots spread by stroke
-// index — total 5, matching the "Pat 5 dots" pin — while Sam's playingHandicap(0, 1) = 0 dots,
-// omitted from the line per strokesSummary's own rule.
+// SetupPanel.test.tsx uses): Pat ch 5, Alex ch 2, Sam ch 0, Dana ch 8. Chosen so a game between
+// Pat and Sam gives Pat the difference 5 − 0, halved on a nine-hole card = 3 dots spread by
+// stroke index (the "Pat 3 dots" pin), while Sam — the lowest in that field — plays off scratch
+// and is omitted from the line per strokesSummary's own rule.
 const participants: readonly Participant[] = [
   participant(PAT, "Pat", "white", 5),
   participant(ALEX, "Alex", "white", 2),
@@ -69,27 +69,17 @@ describe("who's in", () => {
 });
 
 describe("strokes preview", () => {
-  it("shows the allowance in words and the dots outcome before adding", async () => {
+  it("states the treatment in words and the dots outcome before adding", async () => {
     const user = userEvent.setup();
     render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
     await user.click(screen.getByRole("radio", { name: "Skins" }));
     await user.click(screen.getByRole("checkbox", { name: "Pat" }));
     await user.click(screen.getByRole("checkbox", { name: "Sam" }));
-    expect(screen.getByText("Full handicap (standard)")).toBeTruthy();
-    // Pat ch 5 at full handicap → "Pat 5 dots"; Sam ch 0 → omitted from the line.
-    expect(screen.getByText(/Pat 5 dots/)).toBeTruthy();
-  });
-
-  it("Adjust reveals a percent input — never a bare decimal — and the phrase flips to adjusted", async () => {
-    const user = userEvent.setup();
-    render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
-    await user.click(screen.getByRole("checkbox", { name: "Pat" })); // default kind stableford
-    await user.click(screen.getByRole("button", { name: "Adjust" }));
-    const pct = screen.getByRole("spinbutton", { name: "Handicap %" }) as HTMLInputElement;
-    expect(pct.value).toBe("95");
-    await user.clear(pct);
-    await user.type(pct, "85");
-    expect(screen.getByText("85% handicap (adjusted)")).toBeTruthy();
+    expect(screen.getByText("Net — uses the strokes on the card")).toBeTruthy();
+    // Pat's 5 against Sam's 0, halved on a nine-hole card → "Pat 3 dots"; Sam is the lowest in
+    // the field, so he plays off scratch and is omitted from the line.
+    expect(screen.getByText(/Pat 3 dots/)).toBeTruthy();
+    expect(screen.getByText("Everyone in this game plays off the lowest in it.")).toBeTruthy();
   });
 
   it("match play explains the difference rule", async () => {
@@ -98,14 +88,15 @@ describe("strokes preview", () => {
     await user.click(screen.getByRole("radio", { name: "Match play" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Player 1" }), "Pat");
     await user.selectOptions(screen.getByRole("combobox", { name: "Player 2" }), "Alex");
-    expect(screen.getByText("Match play uses the difference — only the higher handicap gets strokes.")).toBeTruthy();
+    expect(screen.getByText("Strokes are the difference between you two")).toBeTruthy();
+    expect(screen.getByText("Only the higher number gets strokes — the lower plays off scratch.")).toBeTruthy();
   });
 
-  // Live-walk finding (2026-07-19): with Gross picked, the preview must match GamePanel's own
-  // gross treatment line (packages/scoring/present + the panel's inline literal) — no allowance
-  // phrase, no strokesSummary "everyone plays off 0" line, and no Adjust affordance, since an
-  // allowance is meaningless for gross. Switching back to net restores everything.
-  it("gross stroke play states its own treatment — no allowance phrase, no strokes line, no Adjust", async () => {
+  // Live-walk finding (2026-07-19), carried forward: with Gross picked, the preview must state the
+  // gross treatment and show no strokes at all — not the all-zero "everyone plays off 0" line,
+  // which is false for a game that has no strokes by definition. Switching back to net restores it.
+  // There is no allowance percentage left to adjust, so no Adjust affordance exists at all.
+  it("gross stroke play states its own treatment — no strokes line, no percentage anywhere", async () => {
     const user = userEvent.setup();
     render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
     await user.click(screen.getByRole("radio", { name: "Stroke play" }));
@@ -113,21 +104,31 @@ describe("strokes preview", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "gross");
 
     expect(screen.getByText("Gross — raw scores, no strokes")).toBeTruthy();
-    expect(screen.queryByText("95% handicap (standard)")).toBeNull();
     expect(screen.queryByText("No strokes — everyone plays off 0.")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Adjust" })).toBeNull();
-    expect(screen.queryByRole("spinbutton", { name: "Handicap %" })).toBeNull();
+    expect(screen.queryByText(/dots/)).toBeNull();
+    expect(document.body.textContent).not.toMatch(/handicap|%/);
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "net");
-    expect(screen.getByText("95% handicap (standard)")).toBeTruthy();
+    expect(screen.getByText("Net — uses the strokes on the card")).toBeTruthy();
     expect(screen.queryByText("Gross — raw scores, no strokes")).toBeNull();
-    expect(screen.getByRole("button", { name: "Adjust" })).toBeTruthy();
   });
 
-  // strokesNote (packages/domain/src/scoring/present.ts) is the one shared source for both
-  // notes now — singles' string above is unchanged, but it comes from that shared function
-  // rather than a literal hard-coded in this form; fourball gains its own note here too.
-  it("fourball explains its lowest-handicap convention", async () => {
+  // Skins earns the same gross/net choice stroke play has (spec §3) — the pot a group actually
+  // plays. Gross skins allocates nothing, exactly like gross stroke play.
+  it("skins offers the gross/net choice, and gross drops the strokes line", async () => {
+    const user = userEvent.setup();
+    render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
+    await user.click(screen.getByRole("radio", { name: "Skins" }));
+    await user.click(screen.getByRole("checkbox", { name: "Pat" }));
+    await user.click(screen.getByRole("checkbox", { name: "Sam" }));
+    expect(screen.getByText(/Pat 3 dots/)).toBeTruthy();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "gross");
+    expect(screen.getByText("Gross — raw scores, no strokes")).toBeTruthy();
+    expect(screen.queryByText(/dots/)).toBeNull();
+  });
+
+  it("fourball explains that all four play off the lowest of the four", async () => {
     const user = userEvent.setup();
     render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
     await user.click(screen.getByRole("radio", { name: "Four-ball" }));
@@ -137,12 +138,13 @@ describe("strokes preview", () => {
     await user.selectOptions(within(team1).getByRole("combobox", { name: "Second player" }), "Alex");
     await user.selectOptions(within(team2).getByRole("combobox", { name: "First player" }), "Sam");
     await user.selectOptions(within(team2).getByRole("combobox", { name: "Second player" }), "Dana");
-    expect(screen.getByText("Four-ball plays everyone off the lowest handicap.")).toBeTruthy();
+    expect(screen.getByText("Everyone plays off the lowest of the four")).toBeTruthy();
+    expect(screen.getByText("All four play off the lowest of the four.")).toBeTruthy();
   });
 });
 
 // Moved from SetupPanel.test.tsx (the old in-file AddGameForm's own behavior tests) and adapted
-// to the new radio-card / Who's-in-checkbox / Team 1 & 2 / Adjust-percent UI — the underlying
+// to the new radio-card / Who's-in-checkbox / Team 1 & 2 UI — the underlying
 // config-building and error-handling logic is unchanged, only the interactions that drive it.
 describe("submitting", () => {
   it("adds a fourball-match game with the exact {kind, a, b} shape (ids from participants) and no id field", async () => {
@@ -165,24 +167,35 @@ describe("submitting", () => {
     expect(sent).not.toHaveProperty("id");
   });
 
-  it("sends the Adjust-ed percent as the submitted allowance (not the per-kind default)", async () => {
+  it("sends skins with the gross/net choice that was picked, and no allowance field at all", async () => {
     const user = userEvent.setup();
     const onAddGame = vi.fn().mockResolvedValue(undefined);
     render(<AddGameForm participants={participants} card={card} onAddGame={onAddGame} />);
 
-    await user.click(screen.getByRole("checkbox", { name: "Pat" })); // default kind stableford
-    await user.click(screen.getByRole("button", { name: "Adjust" }));
-    const pct = screen.getByRole("spinbutton", { name: "Handicap %" });
-    // 50 isn't stableford's default allowance percent (95) — picking a value that differs from
-    // the default is the point: this guards the percent input's step="any" (a stricter step
-    // would silently block this exact submit).
-    await user.clear(pct);
-    await user.type(pct, "50");
+    await user.click(screen.getByRole("radio", { name: "Skins" }));
+    await user.click(screen.getByRole("checkbox", { name: "Pat" }));
+    await user.click(screen.getByRole("checkbox", { name: "Sam" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "gross");
     await user.click(screen.getByRole("button", { name: "Add game" }));
 
     expect(onAddGame).toHaveBeenCalledTimes(1);
     const sent = onAddGame.mock.calls[0]![0];
-    expect(sent).toMatchObject({ kind: "stableford", players: [PAT], allowance: 0.5 });
+    expect(sent).toMatchObject({ kind: "skins", scoring: "gross", players: [PAT, SAM] });
+    expect(sent).not.toHaveProperty("allowance");
+  });
+
+  it("re-anchors the gross/net choice back to net when the kind changes", async () => {
+    const user = userEvent.setup();
+    const onAddGame = vi.fn().mockResolvedValue(undefined);
+    render(<AddGameForm participants={participants} card={card} onAddGame={onAddGame} />);
+
+    await user.click(screen.getByRole("radio", { name: "Skins" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "gross");
+    await user.click(screen.getByRole("radio", { name: "Stroke play" }));
+    await user.click(screen.getByRole("checkbox", { name: "Pat" }));
+    await user.click(screen.getByRole("button", { name: "Add game" }));
+
+    expect(onAddGame).toHaveBeenCalledWith(expect.objectContaining({ kind: "stroke-play", scoring: "net" }));
   });
 
   // Papercut 12 (M9 hardening, the never-raw-caught.message sweep): a failed Add game must never

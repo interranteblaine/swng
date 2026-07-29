@@ -10,12 +10,17 @@ import { scoreStrokePlay } from "./strokePlay.js";
 // The framework every game format plugs into: a GameConfig (frozen at game-added
 // time, replayed from the event log) scores against the folded RoundState to
 // produce a GameState — the thing views render and settlement consumes.
+// No `allowance` on any arm: the 95/90/100 table is deleted (spec §3). Every kind now applies
+// the ONE rule — strokes are the difference from the lowest in that game's own field — so there
+// is no percentage left to carry. `scoring` appears on the two kinds where gross/net is a real
+// choice a group makes: stroke play, and skins (gross skins is the most-played casual variant,
+// and a group routinely runs gross and net skins as two pots over the same card).
 export type GameConfig =
-  | { readonly kind: "stroke-play"; readonly id: GameId; readonly scoring: "gross" | "net"; readonly players: readonly GolferId[]; readonly allowance?: number }
-  | { readonly kind: "singles-match"; readonly id: GameId; readonly a: GolferId; readonly b: GolferId; readonly allowance?: number }
-  | { readonly kind: "stableford"; readonly id: GameId; readonly players: readonly GolferId[]; readonly allowance?: number }
-  | { readonly kind: "fourball-match"; readonly id: GameId; readonly a: readonly [GolferId, GolferId]; readonly b: readonly [GolferId, GolferId]; readonly allowance?: number }
-  | { readonly kind: "skins"; readonly id: GameId; readonly players: readonly GolferId[]; readonly allowance?: number };
+  | { readonly kind: "stroke-play"; readonly id: GameId; readonly scoring: "gross" | "net"; readonly players: readonly GolferId[] }
+  | { readonly kind: "singles-match"; readonly id: GameId; readonly a: GolferId; readonly b: GolferId }
+  | { readonly kind: "stableford"; readonly id: GameId; readonly players: readonly GolferId[] }
+  | { readonly kind: "fourball-match"; readonly id: GameId; readonly a: readonly [GolferId, GolferId]; readonly b: readonly [GolferId, GolferId] }
+  | { readonly kind: "skins"; readonly id: GameId; readonly scoring: "gross" | "net"; readonly players: readonly GolferId[] };
 
 // A game as configured before the server assigns its GameId — what a client sends when
 // adding a game to a round. Distributive
@@ -129,6 +134,10 @@ export type GameState =
   | {
       readonly kind: "skins";
       readonly id: GameId;
+      // Carried through from the config so a panel can state the treatment in words without a
+      // second config lookup — the same reason stroke-play's own `scoring` rides its GameState.
+      // resultOf builds the settled skins result from named fields, so this never reaches the wire.
+      readonly scoring: "gross" | "net";
       readonly lines: readonly SkinsLine[];
       readonly carrying: number; // pot riding into the next undecided hole
       readonly carriedOut: number; // pot stranded after the last hole (complete only)

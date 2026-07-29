@@ -69,8 +69,8 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   it("the response's per-game results field-for-field match local games() for the same games", () => {
     const fourballResult = response.results.find((r) => r.id === fourball.id);
     const fourballLocal = localGames.find((g) => g.id === fourball.id);
-    expect(fourballResult).toMatchObject({ kind: "fourball-match", outcome: { winner: "a", closing: "2&1" } });
-    expect(fourballLocal).toMatchObject({ outcome: { winner: "a", closing: "2&1" } });
+    expect(fourballResult).toMatchObject({ kind: "fourball-match", outcome: { winner: "a", closing: "1 up" } });
+    expect(fourballLocal).toMatchObject({ outcome: { winner: "a", closing: "1 up" } });
     expect(fourballResult?.kind === "fourball-match" && fourballLocal?.kind === "fourball-match" && fourballLocal.outcome).toEqual(
       fourballResult?.kind === "fourball-match" ? fourballResult.outcome : undefined,
     );
@@ -91,8 +91,8 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
       expect(screen.getByText(line)).toBeTruthy();
     }
     // Matches the brief's own literal target strings for this exact fixture.
-    expect(screen.getByText("Ann & Bo win 2&1")).toBeTruthy();
-    expect(screen.getByText("Bo 7 · Dee 8 · 3 carried out")).toBeTruthy();
+    expect(screen.getByText("Ann & Bo win 1 up")).toBeTruthy();
+    expect(screen.getByText("Bo 5 · Dee 10 · 3 carried out")).toBeTruthy();
   });
 
   it("handicapping rows render the server's response verbatim — no local recomputation when a response exists", () => {
@@ -200,7 +200,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
 
     render(<ResultsView state={state} games={localGames} response={undefined} />);
 
-    expect(screen.getByText("Ann & Bo win 2&1")).toBeTruthy();
+    expect(screen.getByText("Ann & Bo win 1 up")).toBeTruthy();
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole 1` });
     expect(cell.hasAttribute("disabled")).toBe(true);
   });

@@ -93,7 +93,7 @@ describe("ScorecardGrid — two-tap entry", () => {
 });
 
 // The standard card (spec 2026-07-19 §2a: the card never changes): dots are ALWAYS each
-// player's own full course handicap allocated by stroke index — no allowance, no game, no
+// player's own full course handicap allocated by stroke index — no game, no
 // chip selection. `ScorecardGridProps` carries no game-typed prop at all; every test below
 // passes only `{ state, recordScore }`.
 describe("ScorecardGrid — course-handicap dots (the standard card)", () => {
@@ -141,7 +141,7 @@ describe("ScorecardGrid — course-handicap dots (the standard card)", () => {
     const bo0 = participant(BO, "Bo", "white", 0);
     const cells = { [cellKey(ANN, 2)]: scoreCell({ kind: "strokes", strokes: 5 }, ANN) };
     const singles: GameConfig = { kind: "singles-match", id: gameId("g1"), a: ANN, b: BO };
-    const skins: GameConfig = { kind: "skins", id: gameId("g2"), players: [ANN, BO] };
+    const skins: GameConfig = { kind: "skins", id: gameId("g2"), scoring: "net", players: [ANN, BO] };
 
     const { container: containerA } = render(<ScorecardGrid state={twoPlayerState({ participants: [ann5, bo0], games: [singles], cells })} recordScore={vi.fn()} />);
     const textA = containerA.textContent;

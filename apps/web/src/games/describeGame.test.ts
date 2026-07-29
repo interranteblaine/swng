@@ -63,14 +63,14 @@ describe("describeGame — stroke-play", () => {
   });
 
   it("net scoring uses the net running total (and its own vs-par), not gross", () => {
-    // strokePlay.test.ts's golden net card: Ann net 39 (pickup resolved at net double bogey),
-    // Bo net 35 — Bo's net total is lower, so Bo leads under net scoring even though Ann's
-    // gross (39) beats Bo's gross (37).
+    // strokePlay.test.ts's golden net card: Ann net 44 (pickup resolved at net double bogey),
+    // Bo net 37 — Bo is the lowest in the field, so he plays off scratch and his net IS his
+    // gross, which is also the lower total, so he leads under net scoring.
     const { round, states } = playRound(fixtureLinks, twoPlayers, [netGame], {
       [A]: [5, 6, 3, "picked-up", 5, 4, 5, 6, 5],
       [B]: [4, 4, 3, 5, 5, 3, 4, 5, 4],
     });
-    expect(describeGame(states[0]!, round)).toEqual({ title: "Stroke play (net)", line: "Bo 35 (-1)" });
+    expect(describeGame(states[0]!, round)).toEqual({ title: "Stroke play (net)", line: "Bo 37 (+1)" });
   });
 
   it("a tie for the lead lists every tied leader, joined by ' · '", () => {
@@ -86,35 +86,42 @@ describe("describeGame — stroke-play", () => {
 describe("describeGame — stableford", () => {
   const game: GameConfig = { kind: "stableford", id: gameId("s1"), players: [A, B] };
 
-  it("in-progress: leader is the higher points total, shown thru N", () => {
-    // stableford.test.ts's golden mid-round card: Ann 3pts thru 2, Bo 2pts thru 1.
+  it("in-progress: every leader is shown, each thru its own N", () => {
+    // stableford.test.ts's golden mid-round card: Ann 2pts thru 2, Bo 2pts thru 1 — level on
+    // points at different thru counts, so both are leaders.
     const { round, states } = playRound(fixtureLinks, twoPlayers, [game], { [A]: [5, 6], [B]: [4] });
-    expect(describeGame(states[0]!, round)).toEqual({ title: "Stableford", line: "Ann 3 pts thru 2" });
+    expect(describeGame(states[0]!, round)).toEqual({ title: "Stableford", line: "Ann 2 pts thru 2 · Bo 2 pts thru 1" });
   });
 
   it("decided: leader line omits thru", () => {
-    // stableford.test.ts's golden complete card: Ann 15, Bo 19 — Bo leads.
+    // stableford.test.ts's golden complete card: Ann 10, Bo 17 — Bo leads.
     const { round, states } = playRound(fixtureLinks, twoPlayers, [game], {
       [A]: [5, 6, 3, "picked-up", 5, 4, 5, 6, 5],
       [B]: [4, 4, 3, 5, 5, 3, 4, 5, 4],
     });
-    expect(describeGame(states[0]!, round)).toEqual({ title: "Stableford", line: "Bo 19 pts" });
+    expect(describeGame(states[0]!, round)).toEqual({ title: "Stableford", line: "Bo 17 pts" });
   });
 });
 
 describe("describeGame — singles-match", () => {
   const match: GameConfig = { kind: "singles-match", id: gameId("m1"), a: A, b: B };
+  // singlesMatch.test.ts's own roster for these cards: Ann 14 against Bo 2 is a difference of 12,
+  // halved on a nine-hole card, so Ann carries the 6 dots those hole-by-hole narratives assume.
+  const matchPlayers: readonly Participant[] = [
+    { golferId: A, name: "Ann", tee: "white", courseHandicap: 14 },
+    { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
+  ];
 
   it("all square, in-progress: no leader named", () => {
     // h1 halves under singlesMatch.test.ts's golden dots (Ann net 4, Bo net 4).
-    const { round, states } = playRound(fixtureLinks, twoPlayers, [match], { [A]: [5], [B]: [4] });
+    const { round, states } = playRound(fixtureLinks, matchPlayers, [match], { [A]: [5], [B]: [4] });
     expect(describeGame(states[0]!, round)).toEqual({ title: "Match play", line: "All square thru 1" });
   });
 
   it("in-progress with a leader and dormie: the chip line names the leader plainly, no ' · dormie' suffix", () => {
     // singlesMatch.test.ts's golden dormie card: Ann 2 up thru 7, dormie. The dormie GLOSS
     // ("Pat is 2 UP with 2 to play — dormie: ...") lives in GamePanel now, not the chip line.
-    const { round, states } = playRound(fixtureLinks, twoPlayers, [match], {
+    const { round, states } = playRound(fixtureLinks, matchPlayers, [match], {
       [A]: [5, 5, 3, 6, 4, 4, 5],
       [B]: [4, 5, 4, 5, 5, 3, 4],
     });
@@ -123,7 +130,7 @@ describe("describeGame — singles-match", () => {
 
   it("decided by a wide margin renders 'wins N&M', matching the brief's exact target string", () => {
     // singlesMatch.test.ts's golden 3&2 card.
-    const { round, states } = playRound(fixtureLinks, twoPlayers, [match], {
+    const { round, states } = playRound(fixtureLinks, matchPlayers, [match], {
       [A]: [5, 5, 3, 6, 4, 4, 5],
       [B]: [4, 5, 4, 5, 5, 3, 5],
     });
@@ -131,7 +138,7 @@ describe("describeGame — singles-match", () => {
   });
 
   it("a match that ends all square renders 'Match halved'", () => {
-    const { round, states } = playRound(fixtureLinks, twoPlayers, [match], {
+    const { round, states } = playRound(fixtureLinks, matchPlayers, [match], {
       [A]: [5, 5, 4, 6, 4, 4, 5, 6, "conceded"],
       [B]: [4, 6, 3, 6, 4, 4, 4, 5, 5],
     });
@@ -142,20 +149,20 @@ describe("describeGame — singles-match", () => {
 describe("describeGame — fourball-match", () => {
   const { players, fourball } = fieldDeck18;
 
-  it("in-progress with dormie: the chip line names the leader plainly, no ' · dormie' suffix", () => {
+  it("in-progress with a leader: the chip line names the side plainly", () => {
     // Truncate to thru 16 the same way fieldDeck18.test.ts's own `thru` helper does.
     const thru16 = Object.fromEntries(Object.entries(fieldDeck18.scores).map(([g, holes]) => [g, holes.slice(0, 16)]));
     const events16 = playGoldenRoundLog(fixtureLinks18, players, [fourball], thru16, fieldDeck18.corrections, false);
     const round = reduceRound(events16);
     const state = scoreGame(fourball, round);
-    expect(describeGame(state, round)).toEqual({ title: "Four-ball", line: "Ann & Bo 2 UP thru 16" });
+    expect(describeGame(state, round)).toEqual({ title: "Four-ball", line: "Ann & Bo 1 UP thru 16" });
   });
 
   it("decided, matches the brief's exact target string", () => {
     const events = playGoldenRoundLog(fixtureLinks18, players, [fourball], fieldDeck18.scores, fieldDeck18.corrections, false);
     const round = reduceRound(events);
     const state = scoreGame(fourball, round);
-    expect(describeGame(state, round)).toEqual({ title: "Four-ball", line: "Ann & Bo win 2&1" });
+    expect(describeGame(state, round)).toEqual({ title: "Four-ball", line: "Ann & Bo win 1 up" });
   });
 });
 
@@ -167,14 +174,14 @@ describe("describeGame — skins", () => {
     const events = playGoldenRoundLog(fixtureLinks18, players, [skins], thru16, fieldDeck18.corrections, false);
     const round = reduceRound(events);
     const state = scoreGame(skins, round);
-    expect(describeGame(state, round)).toEqual({ title: "Skins", line: "Bo 7 · Dee 8 · carrying 1 into 17" });
+    expect(describeGame(state, round)).toEqual({ title: "Skins", line: "Bo 5 · Dee 10 · carrying 1 into 17" });
   });
 
   it("decided: reports the stranded pot as 'carried out', not 'carrying'", () => {
     const events = playGoldenRoundLog(fixtureLinks18, players, [skins], fieldDeck18.scores, fieldDeck18.corrections, false);
     const round = reduceRound(events);
     const state = scoreGame(skins, round);
-    expect(describeGame(state, round)).toEqual({ title: "Skins", line: "Bo 7 · Dee 8 · 3 carried out" });
+    expect(describeGame(state, round)).toEqual({ title: "Skins", line: "Bo 5 · Dee 10 · 3 carried out" });
   });
 
   it("no skins won yet and nothing carrying renders a plain no-op line", () => {

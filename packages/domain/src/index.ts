@@ -9,7 +9,9 @@ export * from "./round/events.js";
 export * from "./round/state.js";
 export * from "./round/archive.js";
 export * from "./scoring/strokes.js";
-export * from "./scoring/allowances.js";
+// scoring/allowances.js is deleted: the 95/90/100 handicap-allowance table it held is replaced by
+// the ONE rule in strokeBasis.js — strokes are the difference from the lowest in the field.
+export * from "./scoring/strokeBasis.js";
 export * from "./scoring/allocation.js";
 export * from "./scoring/strokePlay.js";
 export * from "./scoring/matchLadder.js";

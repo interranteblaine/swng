@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { allowancePhrase, gameKindLabel, strokePlayTreatment, strokesNote } from "@swng/domain";
+import { gameKindLabel, gameTreatment, strokesNote } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 import { strokesSummary } from "../round/dots";
 import { GolferLink } from "../ui/GolferLink";
@@ -57,18 +57,17 @@ export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanel
   const title = game.kind === "stroke-play" ? `${gameKindLabel(game.kind)} (${game.scoring})` : gameKindLabel(game.kind);
   const terminated = state.terminatedGameIds.has(game.id);
 
-  // spec 2026-07-19 §2c: the treatment line states the handicap convention in force, up front —
-  // stroke-play splits gross (no strokes at all, by definition) from net (the usual allowance
-  // phrase) via the one shared `strokePlayTreatment` (also used by AddGameForm's preview, closing
-  // the two-literal duplication a review caught); every other kind just reads its own
-  // allowancePhrase, as before.
-  const treatment = game.kind === "stroke-play" ? strokePlayTreatment(game.scoring, config?.allowance) : config && allowancePhrase(config.kind, config.allowance);
+  // spec 2026-07-19 §2c: the treatment line states the strokes convention in force, up front. ONE
+  // function covers every kind now, gross included (this arc's spec §3) — the old
+  // allowancePhrase/strokePlayTreatment split existed only to keep the percentage off the gross
+  // line, and there is no percentage left.
+  const treatment = config && gameTreatment(config);
 
-  // The strokes line for every kind except gross stroke play (which has none by definition —
-  // gross never allocates a single dot, so there is nothing to summarize).
-  const strokes = game.kind === "stroke-play" && game.scoring === "gross" ? undefined : config && strokesSummary(config, state.participants, state.card);
+  // strokesSummary renders nothing for a gross game (dots.ts) — gross never allocates a single
+  // dot, so there is nothing to summarize.
+  const strokes = config && strokesSummary(config, state.participants, state.card);
 
-  const note = strokesNote(game.kind);
+  const note = config && strokesNote(config);
 
   return (
     <section role="region" aria-label={`${title} standings`} className={`${cardBox} flex flex-col gap-3 p-4 text-forest`}>

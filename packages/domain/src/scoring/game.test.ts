@@ -25,7 +25,7 @@ describe("gameMembers", () => {
   });
 
   it("skins: config.players, in order", () => {
-    const config: GameConfig = { kind: "skins", id: gameId("g"), players: [CAL, DEE] };
+    const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [CAL, DEE] };
     expect(gameMembers(config)).toEqual([CAL, DEE]);
   });
 

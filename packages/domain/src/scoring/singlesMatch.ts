@@ -1,38 +1,29 @@
+import type { GolferId } from "../ids.js";
 import type { RoundState, ScoreCell } from "../round/state.js";
 import { cellAt } from "../round/state.js";
-import { defaultAllowance, playingHandicap } from "./allowances.js";
+import { gameStrokeAllocation } from "./allocation.js";
 import type { GameConfig, GameState } from "./game.js";
 import type { HoleWinner } from "./matchLadder.js";
 import { matchLadder } from "./matchLadder.js";
 import { playerTeeSet } from "./players.js";
-import { dotsByHole } from "./strokes.js";
 
 type SinglesMatchConfig = Extract<GameConfig, { kind: "singles-match" }>;
 
 export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState): GameState => {
-  const { participant: participantA, teeSet: teeSetA } = playerTeeSet(state, config.a);
-  const { participant: participantB, teeSet: teeSetB } = playerTeeSet(state, config.b);
+  // Course card order is shared; hole numbers, not tee choice, drive it — so either player's
+  // tee set supplies the sequence the ladder walks.
+  const { teeSet: cardTeeSet } = playerTeeSet(state, config.a);
 
-  // Match strokes are relative, not each player's own course handicap: only the
-  // higher-handicap player receives dots (chHigh - chLow), the lower plays scratch.
-  const allowance = config.allowance ?? defaultAllowance("singles-match");
-  const higherIsA = participantA.courseHandicap >= participantB.courseHandicap;
-  const higher = higherIsA ? participantA : participantB;
-  const lower = higherIsA ? participantB : participantA;
-  const higherTeeSet = higherIsA ? teeSetA : teeSetB;
-  const diff = playingHandicap(higher.courseHandicap - lower.courseHandicap, allowance);
-  // One allocation for the whole card, not one per hole (see dotsByHole's doc comment).
-  const higherDots = dotsByHole(diff, higherTeeSet);
+  // The game's own field, off the ONE rule (spec §3) — the difference between the two, which for
+  // a two-player field means only the higher number receives dots and the lower plays off
+  // scratch. The higher/lower branch this replaced was that same arithmetic, spelled a second time.
+  const allocation = gameStrokeAllocation(config, state.participants, state.card);
 
-  // Net for the higher player subtracts their dots on the hole; the lower player
-  // always plays scratch (0 dots).
-  const netFor = (isHigher: boolean, cell: ScoreCell | undefined, holeNumber: number): number | undefined => {
+  const netFor = (golferId: GolferId, cell: ScoreCell | undefined, holeNumber: number): number | undefined => {
     if (!cell || cell.result.kind !== "strokes") return undefined; // absent/picked-up/conceded
-    const dots = isHigher ? (higherDots.get(holeNumber) ?? 0) : 0;
-    return cell.result.strokes - dots;
+    return cell.result.strokes - (allocation.get(golferId)?.get(holeNumber) ?? 0);
   };
 
-  const cardTeeSet = teeSetA; // course card order is shared; hole numbers, not tee choice, drive it
   const holeCount = cardTeeSet.holes.length;
 
   // Per-hole winner in the ladder's "a"/"b" vocabulary (config.a is always "a"
@@ -42,8 +33,8 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
     const cellB = cellAt(state.cells, config.b, hole.number);
     if (!cellA || !cellB) return undefined;
 
-    const netA = netFor(higherIsA, cellA, hole.number);
-    const netB = netFor(!higherIsA, cellB, hole.number);
+    const netA = netFor(config.a, cellA, hole.number);
+    const netB = netFor(config.b, cellB, hole.number);
 
     // picked-up/conceded (net undefined) loses the hole outright; both → halve.
     if (netA !== undefined && (netB === undefined || netA < netB)) return "a";

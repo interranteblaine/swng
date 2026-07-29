@@ -5,8 +5,8 @@ import type { GameConfig } from "../game.js";
 import type { FixtureCorrection, FixtureScores } from "./deck.js";
 
 // The M5 field deck: the golden data AND the expected results for one 18-hole
-// round on fixtureLinks18 — a fourball match (Ann+Bo vs Cal+Dee, default 90%
-// allowance) and skins (all four, default full allowance) over the same log.
+// round on fixtureLinks18 — a fourball match (Ann+Bo vs Cal+Dee) and net skins
+// (all four) over the same log.
 // It lives in the domain package so the golden test (fieldDeck18.test.ts) and
 // the M5 Playwright UI gate consume one source instead of each hand-copying a
 // scorecard; every expected number was hand-verified in the implementation plan
@@ -33,6 +33,7 @@ const fourball: Extract<GameConfig, { kind: "fourball-match" }> = {
 const skins: Extract<GameConfig, { kind: "skins" }> = {
   kind: "skins",
   id: gameId("field-skins"),
+  scoring: "net",
   players: [ann, bo, cal, dee],
 };
 
@@ -54,42 +55,40 @@ const corrections: readonly FixtureCorrection[] = [{ golfer: cal, hole: 9, score
 // both snapshots.
 const finalSkinsLines = [
   { golferId: ann, skins: 0 },
-  { golferId: bo, skins: 7 },
+  { golferId: bo, skins: 5 },
   { golferId: cal, skins: 0 },
-  { golferId: dee, skins: 8 },
+  { golferId: dee, skins: 10 },
 ] as const;
 
 const expected = {
-  // Fourball playing handicaps roundHalfUp(ch×0.9): dots relative to Bo's low
-  // put Ann on SI 1–5, Cal on SI 1–12, Dee on SI 1–3. Skins plays full
-  // handicap, so its dots follow the course handicaps directly.
-  playingHandicaps: {
-    fourball: { [ann]: 7, [bo]: 2, [cal]: 14, [dee]: 5 } as Readonly<Record<GolferId, number>>,
-    skins: { [ann]: 8, [bo]: 2, [cal]: 15, [dee]: 5 } as Readonly<Record<GolferId, number>>,
-  },
+  // One rule for both games (spec §3): each takes the difference from the lowest in its own field,
+  // and both fields here are all four players, so both allocate identically off Bo's 2 — Ann on
+  // SI 1–6, Cal on SI 1–13, Dee on SI 1–3, Bo off scratch. No allowance percentage, no per-kind
+  // convention: the fourball's old 90% discount and skins' old full-handicap-of-your-own are gone.
+  strokes: { [ann]: 6, [bo]: 0, [cal]: 13, [dee]: 3 } as Readonly<Record<GolferId, number>>,
   fourballFinal: {
     kind: "fourball-match",
     id: fourball.id,
-    up: 2,
+    up: 1,
     leader: "a",
-    thru: 17,
-    remaining: 1,
+    thru: 18,
+    remaining: 0,
     dormie: false,
-    outcome: { winner: "a", closing: "2&1" },
+    outcome: { winner: "a", closing: "1 up" },
   },
-  fourballThru16: { kind: "fourball-match", id: fourball.id, up: 2, leader: "a", thru: 16, remaining: 2, dormie: true },
+  fourballThru16: { kind: "fourball-match", id: fourball.id, up: 1, leader: "a", thru: 16, remaining: 2, dormie: false },
   skinsFinal: { kind: "skins", id: skins.id, lines: finalSkinsLines, carrying: 0, carriedOut: 3, complete: true },
   skinsThru16: { kind: "skins", id: skins.id, lines: finalSkinsLines, carrying: 1, carriedOut: 0, complete: false },
-  // With the correction withheld, Cal's net 3 at h9 takes the pot that h5–h8
+  // With the correction withheld, Cal's net 3 at h9 takes the pot that h1–h8
   // carried — the transient standing the h9 correction later hands to Dee at h10.
   skinsPreCorrectionThru9: {
     kind: "skins",
     id: skins.id,
     lines: [
       { golferId: ann, skins: 0 },
-      { golferId: bo, skins: 2 },
-      { golferId: cal, skins: 5 },
-      { golferId: dee, skins: 2 },
+      { golferId: bo, skins: 0 },
+      { golferId: cal, skins: 9 },
+      { golferId: dee, skins: 0 },
     ],
     carrying: 0,
     carriedOut: 0,

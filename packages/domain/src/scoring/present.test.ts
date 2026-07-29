@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { allowancePhrase, gameKindBlurb, gameKindFits, gameKindLabel, strokePlayTreatment, strokesNote, underPar } from "./present.js";
+import { gameId, golferId } from "../ids.js";
+import type { GameConfig } from "./game.js";
+import { gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, strokesNote, underPar } from "./present.js";
+
+const A = golferId("a");
+const B = golferId("b");
+const C = golferId("c");
+const D = golferId("d");
+// One config per kind — gameTreatment/strokesNote read a whole config now, not a bare kind,
+// because whether a game allocates at all is the config's own `scoring` choice.
+const strokePlay = (scoring: "gross" | "net"): GameConfig => ({ kind: "stroke-play", id: gameId("sp"), scoring, players: [A, B] });
+const skins = (scoring: "gross" | "net"): GameConfig => ({ kind: "skins", id: gameId("sk"), scoring, players: [A, B] });
+const stableford: GameConfig = { kind: "stableford", id: gameId("st"), players: [A, B] };
+const singles: GameConfig = { kind: "singles-match", id: gameId("sm"), a: A, b: B };
+const fourball: GameConfig = { kind: "fourball-match", id: gameId("fb"), a: [A, B], b: [C, D] };
 
 describe("gameKindLabel", () => {
   it("names every kind in golf's own plainest terms", () => {
@@ -31,42 +45,33 @@ describe("gameKindFits", () => {
   });
 });
 
-describe("allowancePhrase", () => {
-  it("reads the default as standard, in percent words", () => {
-    expect(allowancePhrase("skins")).toBe("Full handicap (standard)");
-    expect(allowancePhrase("singles-match", undefined)).toBe("Full handicap (standard)");
-    expect(allowancePhrase("stableford")).toBe("95% handicap (standard)");
-    expect(allowancePhrase("fourball-match")).toBe("90% handicap (standard)");
+describe("gameTreatment", () => {
+  it("states the net treatment without a percentage — there is no allowance table left", () => {
+    expect(gameTreatment(strokePlay("net"))).toBe("Net — uses the strokes on the card");
+    expect(gameTreatment(skins("net"))).toBe("Net — uses the strokes on the card");
+    expect(gameTreatment(stableford)).toBe("Net — uses the strokes on the card");
   });
-  it("an explicit allowance equal to the default is still standard", () => {
-    expect(allowancePhrase("stableford", 0.95)).toBe("95% handicap (standard)");
+  it("names the field for the two kinds whose field is not simply everyone in the game", () => {
+    expect(gameTreatment(singles)).toBe("Strokes are the difference between you two");
+    expect(gameTreatment(fourball)).toBe("Everyone plays off the lowest of the four");
   });
-  it("a changed allowance reads adjusted — including full handicap where full isn't the default", () => {
-    expect(allowancePhrase("stableford", 0.85)).toBe("85% handicap (adjusted)");
-    expect(allowancePhrase("stroke-play", 1)).toBe("Full handicap (adjusted)");
-  });
-});
-
-describe("strokePlayTreatment", () => {
-  it("net reads the allowance phrase, prefixed", () => {
-    expect(strokePlayTreatment("net")).toBe("Net — 95% handicap (standard)");
-    expect(strokePlayTreatment("net", 0.85)).toBe("Net — 85% handicap (adjusted)");
-  });
-  it("gross has no allowance at all, by definition", () => {
-    expect(strokePlayTreatment("gross")).toBe("Gross — raw scores, no strokes");
-    expect(strokePlayTreatment("gross", 0.85)).toBe("Gross — raw scores, no strokes");
+  it("gross has no strokes at all, by definition — on either kind that offers the choice", () => {
+    expect(gameTreatment(strokePlay("gross"))).toBe("Gross — raw scores, no strokes");
+    expect(gameTreatment(skins("gross"))).toBe("Gross — raw scores, no strokes");
   });
 });
 
 describe("strokesNote", () => {
-  it("explains the two kinds whose strokes are relative to another player, not just your own handicap", () => {
-    expect(strokesNote("singles-match")).toBe("Match play uses the difference — only the higher handicap gets strokes.");
-    expect(strokesNote("fourball-match")).toBe("Four-ball plays everyone off the lowest handicap.");
+  it("names WHOSE strokes each net game's field is measured against", () => {
+    expect(strokesNote(strokePlay("net"))).toBe("Everyone in this game plays off the lowest in it.");
+    expect(strokesNote(stableford)).toBe("Everyone in this game plays off the lowest in it.");
+    expect(strokesNote(skins("net"))).toBe("Everyone in this game plays off the lowest in it.");
+    expect(strokesNote(singles)).toBe("Only the higher number gets strokes — the lower plays off scratch.");
+    expect(strokesNote(fourball)).toBe("All four play off the lowest of the four.");
   });
-  it("stays undefined for the three kinds whose strokes need no extra explanation", () => {
-    expect(strokesNote("stroke-play")).toBeUndefined();
-    expect(strokesNote("stableford")).toBeUndefined();
-    expect(strokesNote("skins")).toBeUndefined();
+  it("stays undefined for a gross game — it allocates nothing, so there is no field to describe", () => {
+    expect(strokesNote(strokePlay("gross"))).toBeUndefined();
+    expect(strokesNote(skins("gross"))).toBeUndefined();
   });
 });
 

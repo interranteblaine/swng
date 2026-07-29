@@ -198,8 +198,8 @@ describe("round use cases — golden path over in-memory ports", () => {
       expect.objectContaining({
         kind: "stableford",
         points: [
-          { golferId: host.golferId, points: 15 },
-          { golferId: bo.golferId, points: 19 },
+          { golferId: host.golferId, points: 10 },
+          { golferId: bo.golferId, points: 17 },
         ],
       }),
     ]);

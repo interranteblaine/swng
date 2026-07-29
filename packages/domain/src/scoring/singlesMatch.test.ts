@@ -3,16 +3,21 @@ import { gameId, golferId } from "../ids.js";
 import { playGoldenRound } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
 
-const A = golferId("ann"); // courseHandicap 8
-const B = golferId("bo");  // courseHandicap 2 → Ann gets 6 dots on SI 1..6 (holes 1,2,4,7,8,9)
+// Match strokes were ALWAYS the difference between the two, so the ONE rule (spec §3) produces
+// the same allocation this file's hand-verified cards were built on — restated in the new model's
+// own terms: Ann 14 vs Bo 2 is a difference of 12, halved on a nine-hole card, so Ann gets 6 dots
+// on SI 1..6 (holes 1,2,4,7,8,9) and Bo, the lowest in the field, plays off scratch. Drop the
+// halving or the relative rule and every net below moves, so these cards pin both.
+const A = golferId("ann");
+const B = golferId("bo");
 const players = [
-  { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 },
+  { golferId: A, name: "Ann", tee: "white", courseHandicap: 14 },
   { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
 ];
 const match = { kind: "singles-match", id: gameId("m1"), a: A, b: B } as const;
 
 describe("singles match — golden cards", () => {
-  it("full-difference strokes close it out 3&2", () => {
+  it("the difference between the two closes it out 3&2", () => {
     // h1 halve(net4/4) h2 A(4/5) h3 A(3/4) h4 halve(5/5) h5 A(4/5) h6 B(4/3) h7 A(4/5) → A 3 up thru 7, 2 to play
     const [state] = playGoldenRound(fixtureLinks, players, [match], {
       [A]: [5, 5, 3, 6, 4, 4, 5],

@@ -36,7 +36,7 @@ const buildArchive = (input: {
 
 describe("crewContribution — hand-pin (brief's exact fixture)", () => {
   const singlesConfig = { kind: "singles-match", id: gameId("singles-1"), a: A, b: B } as const;
-  const skinsConfig = { kind: "skins", id: gameId("skins-1"), players: [A, B, C, D] } as const;
+  const skinsConfig = { kind: "skins", id: gameId("skins-1"), scoring: "net", players: [A, B, C, D] } as const;
   const stablefordConfig = { kind: "stableford", id: gameId("stableford-1"), players: [A, B, C, D] } as const;
 
   const archive = buildArchive({

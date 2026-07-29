@@ -1,18 +1,19 @@
 import type { RoundState } from "../round/state.js";
 import { cellAt } from "../round/state.js";
-import { defaultAllowance, playingHandicap } from "./allowances.js";
+import { gameStrokeAllocation } from "./allocation.js";
 import type { GameConfig, GameState } from "./game.js";
 import { allPlayersComplete, playerTeeSet } from "./players.js";
-import { dotsByHole } from "./strokes.js";
 
 type StablefordConfig = Extract<GameConfig, { kind: "stableford" }>;
 
 export const scoreStableford = (config: StablefordConfig, state: RoundState): GameState => {
+  // The game's own field, off the ONE rule (spec §3) — computed once for the whole game, not per
+  // player and not per hole (see dotsByHole's doc comment). Stableford is always net: it is a
+  // handicap format by construction, so it has no gross arm to choose.
+  const allocation = gameStrokeAllocation(config, state.participants, state.card);
   const lines = config.players.map((golferId) => {
-    const { participant, teeSet } = playerTeeSet(state, golferId);
-    // One allocation for the whole card, not one per hole (see dotsByHole's doc comment).
-    const playingHcp = playingHandicap(participant.courseHandicap, config.allowance ?? defaultAllowance("stableford"));
-    const dots = dotsByHole(playingHcp, teeSet);
+    const { teeSet } = playerTeeSet(state, golferId);
+    const dots = allocation.get(golferId)!;
 
     let points = 0;
     let thru = 0;

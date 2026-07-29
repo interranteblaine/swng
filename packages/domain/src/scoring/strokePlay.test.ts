@@ -36,21 +36,23 @@ describe("stroke play — golden cards", () => {
     });
   });
 
-  it("net with dots and a pickup: Ann nets 39 via net double bogey, Bo nets 35", () => {
-    // Playing handicaps at 95%: Ann 8 → 8 dots (every hole but SI 9), Bo 2 → dots on SI 1,2.
+  it("net with dots and a pickup: Ann nets 44 via net double bogey, Bo nets his gross 37", () => {
+    // Strokes are the difference from the lowest in the game's field (spec §2b): Bo at 2 is the
+    // lowest, so he plays off scratch — 0 dots, net === gross — and Ann's 8 − 2 = 6, halved on a
+    // nine-hole card, gives her 3 dots on SI 1..3 (holes 2, 4, 7).
     // Ann picks up on hole 4 (par 5, 1 dot): counts par+2 = 7 net.
     const [state] = playGoldenRound(fixtureLinks, players, [netGame], {
       [A]: [5, 6, 3, "picked-up", 5, 4, 5, 6, 5],
       [B]: [4, 4, 3, 5, 5, 3, 4, 5, 4],
     });
     // Net scoring: relativeToPar and the leader are both computed off NET totals (par 36).
-    // Ann nets 39 → +3, Bo nets 35 → -1: Bo's lower net total leads, even though Ann's
-    // gross (39) beats Bo's gross (37).
+    // Ann's nets are 5,5,3,7(pickup),5,4,4,6,5 = 44 → +8; Bo nets his gross 37 → +1, so Bo's
+    // lower net total leads — as it also does on gross (37 vs Ann's 39).
     expect(state).toMatchObject({
       kind: "stroke-play", complete: true,
       lines: [
-        { golferId: A, thru: 9, gross: { total: 39, pickups: 1 }, net: { total: 39, pickups: 0 }, relativeToPar: 3 },
-        { golferId: B, thru: 9, gross: { total: 37, pickups: 0 }, net: { total: 35, pickups: 0 }, relativeToPar: -1 },
+        { golferId: A, thru: 9, gross: { total: 39, pickups: 1 }, net: { total: 44, pickups: 0 }, relativeToPar: 8 },
+        { golferId: B, thru: 9, gross: { total: 37, pickups: 0 }, net: { total: 37, pickups: 0 }, relativeToPar: 1 },
       ],
       leaders: [B],
     });
@@ -98,18 +100,26 @@ describe("stroke play — golden cards", () => {
 });
 
 describe("stroke play — properties", () => {
-  it("net never exceeds gross for non-negative handicaps with full cards", () => {
+  // Two players, not one: strokes are relative now, so a lone player is the field's own anchor and
+  // receives nothing — the property would hold vacuously (net === gross) and prove nothing about
+  // dots. Q at 0 is the anchor, so P's dots are roundHalfUp(courseHandicap / 2) ≥ 0 and P's net
+  // can only run at or below P's gross.
+  it("net never exceeds gross for a player receiving strokes off the field's anchor, with full cards", () => {
     fc.assert(
       fc.property(
         fc.array(fc.integer({ min: 1, max: 9 }), { minLength: 9, maxLength: 9 }),
         fc.integer({ min: 0, max: 18 }),
         (strokes, courseHandicap) => {
           const P = golferId("p");
+          const Q = golferId("q");
           const [state] = playGoldenRound(
             fixtureLinks,
-            [{ golferId: P, name: "P", tee: "white", courseHandicap }],
-            [{ kind: "stroke-play", id: gameId("g"), scoring: "net", players: [P] }],
-            { [P]: strokes },
+            [
+              { golferId: P, name: "P", tee: "white", courseHandicap },
+              { golferId: Q, name: "Q", tee: "white", courseHandicap: 0 },
+            ],
+            [{ kind: "stroke-play", id: gameId("g"), scoring: "net", players: [P, Q] }],
+            { [P]: strokes, [Q]: strokes },
           );
           const line = (state as GameState & { kind: "stroke-play" }).lines[0]!;
           expect(line.net!.total).toBeLessThanOrEqual(line.gross.total);

@@ -14,11 +14,10 @@ import type { FixtureScores } from "./golden/deck.js";
 import { courseHandicapAllocation, gameStrokeAllocation, handicappingFor, totalDots } from "./allocation.js";
 import type { GameConfig } from "./game.js";
 
-// The M5 field deck: fourball 90%-allowance playing handicaps 7/2/14/5 give relative
-// dots 5/0/12/3 (ann/bo/cal/dee, relative to Bo's 2); skins plays full handicap, so its
-// dots are the playing handicaps themselves (8/2/15/5). Hand-verified in the
-// implementation plan and already pinned by fieldDeck18.test.ts against the match/skins
-// engines — reused here as the orchestration oracle for gameStrokeAllocation.
+// The M5 field deck: course handicaps 8/2/15/5 (ann/bo/cal/dee) give relative dots 6/0/13/3 off
+// Bo's low 2 — the SAME dots in BOTH games, because there is one rule and both fields are all four
+// players. Hand-derived in the deck itself and pinned by fieldDeck18.test.ts against the
+// match/skins engines — reused here as the orchestration oracle for gameStrokeAllocation.
 const { players, fourball, skins } = fieldDeck18;
 // Cast to a fixed-length tuple: fieldDeck18.players is a plain array as far as TS is
 // concerned, so a bare destructure would otherwise type each element `GolferId |
@@ -27,26 +26,51 @@ const { players, fourball, skins } = fieldDeck18;
 const [ann, bo, cal, dee] = players.map((p) => p.golferId) as unknown as readonly [GolferId, GolferId, GolferId, GolferId];
 const whiteTeeSet = findTeeSet(fixtureLinks18, "white");
 
+// A roster entry for the field-scoping tests below. Keeps `courseHandicap` for now — Task 3
+// replaces it with a StrokeBasis, at which point this builder states a basis instead.
+const p = (id: string, courseHandicap: number): Participant => ({ golferId: id as GolferId, name: id, tee: "white", courseHandicap });
+
 describe("gameStrokeAllocation", () => {
-  it("fourball: dots relative to the lowest playing handicap (Bo) — 5/0/12/3 by SI", () => {
+  const roster = [p("ann", 0), p("bo", 20), p("cy", 25), p("dee", 40)];
+
+  it("allocates off the lowest in that game's OWN field, not the round's", () => {
+    const allocation = gameStrokeAllocation(
+      { kind: "stroke-play", id: gameId("g1"), scoring: "net", players: [golferId("bo"), golferId("cy")] },
+      roster,
+      fixtureLinks18,
+    );
+    expect(totalDots(allocation.get(golferId("bo"))!)).toBe(0);
+    expect(totalDots(allocation.get(golferId("cy"))!)).toBe(5);
+  });
+
+  it("allocates nothing for a gross game", () => {
+    const allocation = gameStrokeAllocation(
+      { kind: "skins", id: gameId("g2"), scoring: "gross", players: [golferId("bo"), golferId("cy")] },
+      roster,
+      fixtureLinks18,
+    );
+    expect(allocation.size).toBe(0);
+  });
+
+  it("fourball: dots relative to the lowest in the field (Bo) — 6/0/13/3 by SI", () => {
     const allocation = gameStrokeAllocation(fourball, players, fixtureLinks18);
-    const expectedRelative: Readonly<Record<string, number>> = { [ann]: 5, [bo]: 0, [cal]: 12, [dee]: 3 };
+    const expectedRelative: Readonly<Record<string, number>> = { [ann]: 6, [bo]: 0, [cal]: 13, [dee]: 3 };
     for (const [id, relative] of Object.entries(expectedRelative)) {
       expect(allocation.get(golferId(id))).toEqual(dotsByHole(relative, whiteTeeSet));
     }
   });
 
-  it("skins: dots follow each player's own full playing handicap — 8/2/15/5", () => {
+  it("skins: the SAME allocation as the fourball — one rule, one field, no per-kind convention", () => {
     const allocation = gameStrokeAllocation(skins, players, fixtureLinks18);
-    const expectedPlayingHandicap: Readonly<Record<string, number>> = { [ann]: 8, [bo]: 2, [cal]: 15, [dee]: 5 };
-    for (const [id, ch] of Object.entries(expectedPlayingHandicap)) {
-      expect(allocation.get(golferId(id))).toEqual(dotsByHole(ch, whiteTeeSet));
+    const expectedRelative: Readonly<Record<string, number>> = { [ann]: 6, [bo]: 0, [cal]: 13, [dee]: 3 };
+    for (const [id, relative] of Object.entries(expectedRelative)) {
+      expect(allocation.get(golferId(id))).toEqual(dotsByHole(relative, whiteTeeSet));
     }
   });
 
   it("a >=19 relative allocation wraps past a full lap: SI 1 gets 2 dots", () => {
-    // 90% allowance: ch 0 -> playing handicap 0; ch 22 -> roundHalfUp(19.8) = 20.
-    // Relative diff 20 over 18 holes = 1 dot everywhere + 2 extra on SI 1-2 (hole 2, hole 10).
+    // ch 22 against a low of 0 is a difference of 22 — over 18 holes that's 1 dot everywhere
+    // plus 4 extra on SI 1-4 (holes 2, 10, 7, 13).
     const low = golferId("low");
     const high = golferId("high");
     const other = golferId("other-a");
@@ -65,13 +89,13 @@ describe("gameStrokeAllocation", () => {
     };
     const allocation = gameStrokeAllocation(wideFourball, fourParticipants, fixtureLinks18);
     expect(allocation.get(low)).toEqual(dotsByHole(0, whiteTeeSet));
-    expect(allocation.get(high)).toEqual(dotsByHole(20, whiteTeeSet));
+    expect(allocation.get(high)).toEqual(dotsByHole(22, whiteTeeSet));
     // Hole 2 carries strokeIndex 1 on fixtureWhite18 — the >=19 wrap must land a
     // second dot there, not just one.
     expect(allocation.get(high)?.get(2)).toBe(2);
   });
 
-  it("gross stroke-play carries no allowance: the whole allocation is empty", () => {
+  it("gross stroke-play allocates nothing: the whole allocation is empty", () => {
     const grossStrokePlay: Extract<GameConfig, { kind: "stroke-play" }> = {
       kind: "stroke-play",
       id: gameId("gross"),
@@ -85,8 +109,8 @@ describe("gameStrokeAllocation", () => {
 
 describe("courseHandicapAllocation", () => {
   // The standard card's own dots: each player's FULL course handicap allocated by stroke
-  // index — no allowance, no game. Unlike gameStrokeAllocation (relative/allowance-adjusted
-  // per game), this is just dotsByHole(participant.courseHandicap, theirTeeSet) per player.
+  // index — no game. Unlike gameStrokeAllocation (relative to a game's own field), this is just
+  // dotsByHole(participant.courseHandicap, theirTeeSet) per player.
   it("a CH-8 player gets 8 dots on their tee's 8 hardest SI holes", () => {
     const golfer = golferId("ch8");
     const participants: readonly Participant[] = [{ golferId: golfer, name: "Eight", tee: "white", courseHandicap: 8 }];
@@ -136,9 +160,9 @@ describe("totalDots", () => {
     const perHole = dotsByHole(-4, whiteTeeSet);
     expect(totalDots(perHole)).toBe(-4);
   });
-  it("agrees with gameStrokeAllocation's own per-golfer allocation on the fourball fixture (5/0/12/3)", () => {
+  it("agrees with gameStrokeAllocation's own per-golfer allocation on the fourball fixture (6/0/13/3)", () => {
     const allocation = gameStrokeAllocation(fourball, players, fixtureLinks18);
-    const expectedRelative: Readonly<Record<string, number>> = { [ann]: 5, [bo]: 0, [cal]: 12, [dee]: 3 };
+    const expectedRelative: Readonly<Record<string, number>> = { [ann]: 6, [bo]: 0, [cal]: 13, [dee]: 3 };
     for (const [id, relative] of Object.entries(expectedRelative)) {
       expect(totalDots(allocation.get(golferId(id))!)).toBe(relative);
     }
@@ -154,7 +178,7 @@ describe("handicappingFor — agreement with settleRound's own consumption", () 
     { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
     { golferId: C, name: "Cal", tee: "white", courseHandicap: 12 },
   ];
-  const skinsGame = { kind: "skins", id: gameId("k9"), players: [A, B, C] } as const;
+  const skinsGame = { kind: "skins", id: gameId("k9"), scoring: "net", players: [A, B, C] } as const;
   const stableford = { kind: "stableford", id: gameId("s9"), players: [A, B, C] } as const;
   const cards = {
     [A]: [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"],

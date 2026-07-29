@@ -140,9 +140,11 @@ export default [
                 "netDoubleBogey",
                 "netStrokes",
                 "roundHalfUp",
-                // handicap allowances
-                "defaultAllowance",
-                "playingHandicap",
+                // the ONE stroke-resolution rule — strokes are the difference from the lowest in
+                // the field (spec 2026-07-29 §2b). Replaces the deleted allowance table
+                // (defaultAllowance/playingHandicap), which was banned here for the same reason.
+                "resolveStrokes",
+                "anchorOf",
                 // WHS / handicap-index math + course handicaps
                 "adjustedGrossScore",
                 "scoreDifferential",

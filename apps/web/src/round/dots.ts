@@ -18,7 +18,12 @@ export { totalDots };
 // "Pat 5 dots · Alex 1 dot · Sam gives 1" — a game's strokes as one plain line, from the
 // same allocation the card's dots render. Members with no strokes are omitted; a game
 // where nobody gets any reads as scratch golf outright.
-export const strokesSummary = (config: GameConfig, participants: readonly Participant[], card: CourseCard): string => {
+//
+// Undefined for a GROSS game (spec §9): it allocates nothing by definition, so the all-zero
+// "No strokes — everyone plays off 0." line below would be a false statement about a game that
+// never had strokes to begin with — the treatment line already says so in words.
+export const strokesSummary = (config: GameConfig, participants: readonly Participant[], card: CourseCard): string | undefined => {
+  if ("scoring" in config && config.scoring === "gross") return undefined;
   const dots = gameDots(config, participants, card);
   const nameOf = (id: GolferId): string => participants.find((p) => p.golferId === id)?.name ?? id;
   const parts = gameMembers(config).flatMap((id) => {

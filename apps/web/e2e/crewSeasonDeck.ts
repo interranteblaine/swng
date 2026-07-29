@@ -7,7 +7,7 @@
 // to match a live run (BLOCKED-don't-fudge, task-7-brief.md's own verbatim law).
 //
 // Course: 18 holes, all par 4 (par 72), one flat tee. Every player's course handicap is 0 for
-// the whole season (brief) — playingHandicap(0, *) is 0 strokes on every hole regardless of
+// the whole season (brief) — a field where everyone states 0 allocates 0 strokes, regardless of
 // stroke index, so net === gross everywhere and stableford points collapse to
 // max(0, 2 + par - net) = max(0, 6 - gross). Same "flat tee keeps arithmetic hand-verifiable"
 // reasoning as identityRecord.spec.ts's own buildIdentityCourseCard.
@@ -144,22 +144,22 @@ export const roundScoresByGolfer = (ids: SeasonGolferIds, roundNumber: number): 
 };
 
 // The three season games, wire shape (id-less — POST /rounds/{roundId}/games's own
-// GameConfigInput) — singles
-// Al-Bo at allowance 1 (inconsequential here: both course handicaps are 0 all season, so the
-// match-strokes diff is 0 regardless of allowance), 4-way skins (carryover is NOT a config
-// knob — scoreSkins always carries a tied/undecided hole's pot forward, packages/domain/src/
-// scoring/skins.ts), 4-way stableford.
+// GameConfigInput) — singles Al-Bo, net 4-way skins (carryover is NOT a config knob — scoreSkins
+// always carries a tied/undecided hole's pot forward, packages/domain/src/scoring/skins.ts), 4-way
+// stableford. Every course handicap is 0 all season, so every game's strokes resolve to 0 dots
+// (the difference from the lowest in the field is 0) and the deck's frozen numbers are untouched
+// by the stroke model — net skins here scores exactly as gross would.
 export const seasonGames = (
   ids: SeasonGolferIds,
 ): { readonly singles: GameConfigInput; readonly skins: GameConfigInput; readonly stableford: GameConfigInput } => ({
-  singles: { kind: "singles-match", a: ids.al, b: ids.bo, allowance: 1 },
-  skins: { kind: "skins", players: [ids.al, ids.bo, ids.cy, ids.dee] },
+  singles: { kind: "singles-match", a: ids.al, b: ids.bo },
+  skins: { kind: "skins", scoring: "net", players: [ids.al, ids.bo, ids.cy, ids.dee] },
   stableford: { kind: "stableford", players: [ids.al, ids.bo, ids.cy, ids.dee] },
 });
 
 const idConfigs = (ids: SeasonGolferIds): readonly GameConfig[] => [
-  { id: gameId("singles"), kind: "singles-match", a: ids.al, b: ids.bo, allowance: 1 },
-  { id: gameId("skins"), kind: "skins", players: [ids.al, ids.bo, ids.cy, ids.dee] },
+  { id: gameId("singles"), kind: "singles-match", a: ids.al, b: ids.bo },
+  { id: gameId("skins"), kind: "skins", scoring: "net", players: [ids.al, ids.bo, ids.cy, ids.dee] },
   { id: gameId("stableford"), kind: "stableford", players: [ids.al, ids.bo, ids.cy, ids.dee] },
 ];
 

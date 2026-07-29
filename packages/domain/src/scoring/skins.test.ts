@@ -9,20 +9,21 @@ import { fixtureLinks } from "./golden/fixtureCourse.js";
 const A = golferId("ann");
 const B = golferId("bo");
 const C = golferId("cal");
-// Full handicap (skins allowance 1.0): Ann ch8 → dots all holes but h3 (SI 9);
-// Bo ch2 → h2, h7; Cal ch12 → 12 dots, all nine + extras on SI≤3 (h2, h4, h7).
+// Strokes are the difference from the lowest in the game's field (spec §2b), halved on a nine-hole
+// card: Bo at 2 is the lowest and plays off scratch; Ann's 8 − 2 = 6 halves to 3 dots on SI 1..3
+// (h2, h7, h4); Cal's 12 − 2 = 10 halves to 5 dots on SI 1..5 (h2, h7, h4, h8, h1).
 const players3 = [
   { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 },
   { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
   { golferId: C, name: "Cal", tee: "white", courseHandicap: 12 },
 ];
-const game = { kind: "skins", id: gameId("k1"), players: [A, B, C] } as const;
+const game = { kind: "skins", id: gameId("k1"), scoring: "net", players: [A, B, C] } as const;
 
 describe("skins — golden cards", () => {
-  it("carryovers chain, outright net wins the pot, pickup is out: Ann 6, Bo 3", () => {
-    // nets — Ann: 4,4,4,5,4,3,4,5,PU  Bo: 4,4,3,6,4,4,3,5,4  Cal: 5,5,3,6,5,4,4,6,5
-    // h1 tie(A,B) carry→2; h2 tie(A,B) carry→3; h3 tie(B,C) carry→4; h4 Ann takes 4;
-    // h5 tie(A,B) carry→2; h6 Ann takes 2; h7 Bo takes 1; h8 tie(A,B) carry→2; h9 Bo takes 2.
+  it("carryovers chain, outright net wins the pot, pickup is out: Ann 2, Bo 7", () => {
+    // nets — Ann: 5,4,4,5,5,4,4,6,PU  Bo: 4,5,3,6,4,4,4,5,4  Cal: 5,6,4,7,6,5,5,6,6
+    // h1 Bo takes 1; h2 Ann takes 1; h3 Bo takes 1; h4 Ann takes 1; h5 Bo takes 1;
+    // h6 tie(A,B) carry→2; h7 tie(A,B) carry→3; h8 Bo takes 3; h9 Bo takes 1 (Ann is out).
     const [state] = playGoldenRound(fixtureLinks, players3, [game], {
       [A]: [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"],
       [B]: [4, 5, 3, 6, 4, 4, 4, 5, 4],
@@ -32,15 +33,40 @@ describe("skins — golden cards", () => {
     expect(state).toMatchObject({
       kind: "skins", complete: true, carrying: 0, carriedOut: 0, holesDecided: 9,
       lines: [
-        { golferId: A, skins: 6 },
-        { golferId: B, skins: 3 },
+        { golferId: A, skins: 2 },
+        { golferId: B, skins: 7 },
         { golferId: C, skins: 0 },
       ],
     });
   });
 
-  it("mid-round: a tie carries, and settlement stops at the first undecided hole", () => {
-    // h1 Ann takes 1 (net 3 vs 4/4); h2 tie(A,B at net 4) → pot 1 rides into h3.
+  it("gross skins contests raw scores: no dots at all, so the same card pays a different pot", () => {
+    // The same three players and the same card as the golden test above, run as a GROSS pot
+    // (spec §3: gross/net is a real choice on skins — a group routinely runs both over one card).
+    // Every hole Ann won on net she won off a dot, so on gross she wins nothing: h2 and h4, hers
+    // outright on net, both tie on gross and carry to Bo. Gross allocates nothing, by definition.
+    const grossGame = { kind: "skins", id: gameId("k-gross"), scoring: "gross", players: [A, B, C] } as const;
+    const [state] = playGoldenRound(fixtureLinks, players3, [grossGame], {
+      [A]: [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"],
+      [B]: [4, 5, 3, 6, 4, 4, 4, 5, 4],
+      [C]: [6, 7, 4, 8, 6, 5, 6, 7, 6],
+    });
+    // gross — Ann: 5,5,4,6,5,4,5,6,PU  Bo: 4,5,3,6,4,4,4,5,4  Cal: 6,7,4,8,6,5,6,7,6
+    // h1 Bo 1; h2 tie(A,B) carry→2; h3 Bo takes 2; h4 tie(A,B) carry→2; h5 Bo takes 2;
+    // h6 tie(A,B) carry→2; h7 Bo takes 2; h8 Bo takes 1; h9 Bo takes 1 (Ann is out).
+    expect(state).toMatchObject({
+      kind: "skins", scoring: "gross", complete: true, carrying: 0, carriedOut: 0, holesDecided: 9,
+      lines: [
+        { golferId: A, skins: 0 },
+        { golferId: B, skins: 9 },
+        { golferId: C, skins: 0 },
+      ],
+    });
+  });
+
+  it("mid-round: a tie carries into the next hole, and settlement stops at the first undecided one", () => {
+    // h1 tie(A,B at net 4, Cal 5) → pot 1 carries; h2 Ann's SI-1 dot nets her 4 against Bo's 5
+    // and Cal's 6, so she takes the doubled pot — the h1 carry, paid.
     // Ann has no h3 cell, so h3 is undecided and nothing after it settles — Bo's
     // would-be outright h3 win (net 3 vs Cal's 4) must NOT be paid out.
     const [state] = playGoldenRound(fixtureLinks, players3, [game], {
@@ -48,11 +74,11 @@ describe("skins — golden cards", () => {
       [B]: [4, 5, 3],
       [C]: [6, 7, 5],
     });
-    // Only h1 and h2 have every player's cell — the carry rides into h3 (holesDecided + 1).
+    // Only h1 and h2 have every player's cell, so holesDecided stops at 2.
     expect(state).toMatchObject({
-      kind: "skins", complete: false, carrying: 1, carriedOut: 0, holesDecided: 2,
+      kind: "skins", complete: false, carrying: 0, carriedOut: 0, holesDecided: 2,
       lines: [
-        { golferId: A, skins: 1 },
+        { golferId: A, skins: 2 },
         { golferId: B, skins: 0 },
         { golferId: C, skins: 0 },
       ],
@@ -60,7 +86,7 @@ describe("skins — golden cards", () => {
   });
 
   it("a cleared cell re-opens the hole: settlement stops there like a gap", () => {
-    // Same mid-round fixture as above (h1 Ann takes 1, h2 tie(A,B) carries into h3), then
+    // Same mid-round fixture as above (h1 tie(A,B) carries, Ann takes the doubled pot on h2), then
     // Ann's h2 is cleared at a later hlc — the deck's own FixtureCorrection vocabulary has
     // no "cleared" arm (it only rewrites to a strokes/picked-up/conceded score), so the
     // clear is appended as a raw score-recorded event directly onto the deck's log.
@@ -75,12 +101,13 @@ describe("skins — golden cards", () => {
     };
     const state = reduceRound([...log, clearAnnH2]);
     const [skinsState] = state.games.map((config) => scoreGame(config, state));
-    // h2 is unscored again (Ann's cell reads as absent via cellAt) — only h1 (Ann's outright
-    // win, no carry) is decided; the chain stops there exactly like the original gap at h3.
+    // h2 is unscored again (Ann's cell reads as absent via cellAt) — only h1 is decided, and its
+    // tie is still riding; the chain stops there exactly like the original gap at h3, so the pot
+    // Ann took on h2 is unpaid again.
     expect(skinsState).toMatchObject({
-      kind: "skins", holesDecided: 1, carrying: 0, carriedOut: 0,
+      kind: "skins", holesDecided: 1, carrying: 1, carriedOut: 0,
       lines: [
-        { golferId: A, skins: 1 },
+        { golferId: A, skins: 0 },
         { golferId: B, skins: 0 },
         { golferId: C, skins: 0 },
       ],
@@ -106,8 +133,8 @@ describe("skins — golden cards", () => {
   });
 
   it("exposes the hole-by-hole story: pots, winners, carries", () => {
-    // Same card as the golden test: carries on 1–3 build the pot to 4, Ann takes it on 4;
-    // fresh skin carries on 5, Ann takes 2 on 6; Bo takes 1 on 7; carry on 8, Bo takes 2 on 9.
+    // Same card as the golden test: Bo takes 1 on h1, Ann 1 on h2, Bo 1 on h3, Ann 1 on h4,
+    // Bo 1 on h5; carries on h6–h7 build the pot to 3, which Bo takes on h8; Bo takes h9 too.
     const [state] = playGoldenRound(fixtureLinks, players3, [game], {
       [A]: [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"],
       [B]: [4, 5, 3, 6, 4, 4, 4, 5, 4],
@@ -115,37 +142,40 @@ describe("skins — golden cards", () => {
     });
     expect(state).toMatchObject({
       holes: [
-        { hole: 1, pot: 1 },
-        { hole: 2, pot: 2 },
-        { hole: 3, pot: 3 },
-        { hole: 4, winner: A, pot: 4 },
-        { hole: 5, pot: 1 },
-        { hole: 6, winner: A, pot: 2 },
-        { hole: 7, winner: B, pot: 1 },
-        { hole: 8, pot: 1 },
-        { hole: 9, winner: B, pot: 2 },
+        { hole: 1, winner: B, pot: 1 },
+        { hole: 2, winner: A, pot: 1 },
+        { hole: 3, winner: B, pot: 1 },
+        { hole: 4, winner: A, pot: 1 },
+        { hole: 5, winner: B, pot: 1 },
+        { hole: 6, pot: 1 },
+        { hole: 7, pot: 2 },
+        { hole: 8, winner: B, pot: 3 },
+        { hole: 9, winner: B, pot: 1 },
       ],
     });
-    // Carried entries have no winner at all (absent key, not undefined-valued).
+    // Carried entries have no winner at all (absent key, not undefined-valued) — h6 is the
+    // first carry on this card.
     const trail = (state as Extract<typeof state, { kind: "skins" }>).holes;
-    expect(Object.keys(trail[0]!)).not.toContain("winner");
+    expect(Object.keys(trail[5]!)).not.toContain("winner");
     expect(trail).toHaveLength(9);
   });
 
   it("a tie on the last hole strands the pot as carriedOut", () => {
-    // Same card as the golden test except Bo's h9 gross is 5: h9 is tie(B,C at
-    // net 5) with Ann picked up, so the h8 carry plus h9's own skin strands.
+    // Same card as the golden test except Bo's AND Cal's h9 gross are both 5: h9 is tie(B,C at
+    // net 5 — Cal's dots are h1/h2/h4/h7/h8, so h9 is scratch for him) with Ann picked up, so
+    // h9's own skin strands with nobody to pay it to. (Bo's h9 alone is not enough under the
+    // relative rule: Cal used to carry a dot on every hole at full handicap and no longer does.)
     const [state] = playGoldenRound(fixtureLinks, players3, [game], {
       [A]: [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"],
       [B]: [4, 5, 3, 6, 4, 4, 4, 5, 5],
-      [C]: [6, 7, 4, 8, 6, 5, 6, 7, 6],
+      [C]: [6, 7, 4, 8, 6, 5, 6, 7, 5],
     });
     // Complete: every hole (incl. the strand-out tie on h9) is decided.
     expect(state).toMatchObject({
-      kind: "skins", complete: true, carrying: 0, carriedOut: 2, holesDecided: 9,
+      kind: "skins", complete: true, carrying: 0, carriedOut: 1, holesDecided: 9,
       lines: [
-        { golferId: A, skins: 6 },
-        { golferId: B, skins: 1 },
+        { golferId: A, skins: 2 },
+        { golferId: B, skins: 6 },
         { golferId: C, skins: 0 },
       ],
     });

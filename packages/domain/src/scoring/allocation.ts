@@ -4,74 +4,58 @@ import { DomainError } from "../errors.js";
 import { adjustedGrossScore, scoreDifferential } from "../handicap/whs.js";
 import type { GolferId } from "../ids.js";
 import type { HoleResult } from "../round/holeResult.js";
-import type { Participant } from "../round/participant.js";
+import type { Participant, RosterEntry } from "../round/participant.js";
 import type { ScoreCell } from "../round/state.js";
 import { cellAt } from "../round/state.js";
-import { defaultAllowance, playingHandicap } from "./allowances.js";
 import type { GameConfig } from "./game.js";
+// game.js → the five engines → back here: the engines all read their dots from
+// gameStrokeAllocation below, so this is a module cycle, and a deliberate one. It is safe because
+// every use on both sides sits inside a function body — nothing here runs at module-evaluation
+// time — and the alternative (a second copy of the rule, or a shallow module holding nothing but
+// gameMembers) costs more than it buys. The engines must go through this function: it is the ONE
+// place the per-game field rule lives.
+import { gameMembers } from "./game.js";
+import type { StrokeBasis } from "./strokeBasis.js";
+import { anchorOf, resolveStrokes } from "./strokeBasis.js";
 import { dotsByHole } from "./strokes.js";
 
-const participantFor = (participants: readonly Participant[], id: GolferId): Participant => {
+// Generic in the entry type so a lookup preserves what the caller passed: `gameStrokeAllocation`
+// reads `.departed` off the result, which only exists on a RosterEntry.
+const participantFor = <T extends Participant>(participants: readonly T[], id: GolferId): T => {
   const found = participants.find((p) => p.golferId === id);
   if (!found) throw new DomainError("unknown-participant", `no participant "${id}" joined this round`);
   return found;
 };
 
-// Consolidates the per-GAME stroke-allocation orchestration every scoring engine's own
-// SI-based dots already encode internally (fourballMatch.ts, singlesMatch.ts,
-// skins/stableford/strokePlay's own playingHandicap use) — this is the one place that
-// re-derives "how many dots does each player get" from a GameConfig alone, pre-round,
-// without re-running a full engine over a card. Kept byte-identical to what apps/web's
-// dots.ts used to compute independently (M5 carry); web now delegates here (Task 5).
+// TEMPORARY (deleted in Task 3, when Participant.basis replaces courseHandicap): today's stored
+// integer is read as an absolute "normally shoots" figure, which is what the rule expects.
+const basisOf = (participant: Participant): StrokeBasis => ({ kind: "normally-shoots", overPar: participant.courseHandicap });
+
+// ONE rule for every kind (spec §3): the game's field is its own members, strokes are the
+// difference from the lowest among them, allocated by stroke index. The switch this replaced
+// encoded five conventions and a hidden allowance percentage; there is nothing per-kind left.
 export const gameStrokeAllocation = (
   config: GameConfig,
-  participants: readonly Participant[],
+  participants: readonly RosterEntry[],
   card: CourseCard,
 ): ReadonlyMap<GolferId, ReadonlyMap<number, number>> => {
-  const teeSetOf = (id: GolferId) => findTeeSet(card, participantFor(participants, id).tee);
-  const chOf = (id: GolferId) => participantFor(participants, id).courseHandicap;
-
-  switch (config.kind) {
-    case "stroke-play": {
-      // Gross play carries no handicap allowance at all — there is nothing to allocate.
-      if (config.scoring === "gross") return new Map();
-      const allowance = config.allowance ?? defaultAllowance("stroke-play");
-      return new Map(config.players.map((id) => [id, dotsByHole(playingHandicap(chOf(id), allowance), teeSetOf(id))]));
-    }
-    case "stableford":
-    case "skins": {
-      const allowance = config.allowance ?? defaultAllowance(config.kind);
-      return new Map(config.players.map((id) => [id, dotsByHole(playingHandicap(chOf(id), allowance), teeSetOf(id))]));
-    }
-    case "singles-match": {
-      // Relative, not each player's own course handicap: only the higher-handicap
-      // player receives dots (chHigh - chLow), the lower plays scratch.
-      const allowance = config.allowance ?? defaultAllowance("singles-match");
-      const chA = chOf(config.a);
-      const chB = chOf(config.b);
-      const higherIsA = chA >= chB;
-      const higher = higherIsA ? config.a : config.b;
-      const lower = higherIsA ? config.b : config.a;
-      const diff = playingHandicap(Math.abs(chA - chB), allowance);
-      return new Map([
-        [higher, dotsByHole(diff, teeSetOf(higher))],
-        [lower, dotsByHole(0, teeSetOf(lower))],
-      ]);
-    }
-    case "fourball-match": {
-      // Relative to the lowest playing handicap among the foursome.
-      const allowance = config.allowance ?? defaultAllowance("fourball-match");
-      const golfers = [...config.a, ...config.b];
-      const playingHcps = new Map(golfers.map((id) => [id, playingHandicap(chOf(id), allowance)]));
-      const lowHcp = Math.min(...playingHcps.values());
-      return new Map(golfers.map((id) => [id, dotsByHole(playingHcps.get(id)! - lowHcp, teeSetOf(id))]));
-    }
-  }
+  if ("scoring" in config && config.scoring === "gross") return new Map();
+  const members = gameMembers(config);
+  const holeCount = card.teeSets[0]?.holes.length ?? 18;
+  const bases = members.map((id) => ({ golferId: id, basis: basisOf(participantFor(participants, id)) }));
+  // A game's frozen players[] never drops a member who leaves, so the game's field excludes
+  // departed players from its ANCHOR exactly as the card's does (spec §2b) — otherwise a
+  // wrong-round joiner still anchors whichever game he was added to before leaving.
+  const present = bases.filter(({ golferId }) => participantFor(participants, golferId).departed !== true);
+  const strokes = resolveStrokes(bases, holeCount, anchorOf(present));
+  return new Map(
+    members.map((id) => [id, dotsByHole(strokes.get(id)!, findTeeSet(card, participantFor(participants, id).tee))]),
+  );
 };
 
-// The STANDARD CARD's dots: each player's own course handicap allocated by stroke index —
-// no allowance, no game (spec 2026-07-19 §2a: the card never changes; games apply their
-// allowances internally and state them in words in their panels).
+// The STANDARD CARD's dots: each player's own course handicap allocated by stroke index — no
+// game at all (spec 2026-07-19 §2a: the card never changes; a game's own strokes, resolved off
+// its own field, live in that game's panel and are stated there in words).
 export const courseHandicapAllocation = (
   participants: readonly Participant[],
   card: CourseCard,

@@ -24,20 +24,23 @@ export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundStat
 
   const netFor = (golferId: GolferId, holeNumber: number): number | undefined => {
     const cell = cellAt(state.cells, golferId, holeNumber);
-    if (!cell || cell.result.kind !== "strokes") return undefined; // absent/picked-up/conceded: that player is out of the hole
+    // A conceded score nets exactly like `strokes` (spec §2d — the number it carries is the
+    // score); picked-up is the only kind with no number, so it's the only one truly out of the hole.
+    if (!cell || (cell.result.kind !== "strokes" && cell.result.kind !== "conceded")) return undefined; // absent/picked-up
     return cell.result.strokes - (allocation.get(golferId)?.get(holeNumber) ?? 0);
   };
 
-  // A side's ball for the hole is the best (lowest) net among its players still
-  // in the hole; undefined only when both partners are out (picked up/conceded).
+  // A side's ball for the hole is the best (lowest) net among its players still in the hole;
+  // undefined only when both partners are out (picked up — a conceded partner still has a ball).
   const sideBest = (side: readonly [GolferId, GolferId], holeNumber: number): number | undefined => {
     const nets = side.map((golferId) => netFor(golferId, holeNumber)).filter((net): net is number => net !== undefined);
     return nets.length > 0 ? Math.min(...nets) : undefined;
   };
 
   const winners: (HoleWinner | undefined)[] = cardTeeSet.holes.map((hole): HoleWinner | undefined => {
-    // A hole is decided once all four players have a recorded cell — picked-up/conceded
-    // still counts as recorded (it drops that player's ball, not the hole itself).
+    // A hole is decided once all four players have a recorded cell — picked-up still counts as
+    // recorded (it drops that player's ball, not the hole itself); a conceded cell is recorded
+    // AND keeps its ball (it nets like `strokes`, spec §2d).
     const allFourRecorded = golfers.every((golferId) => cellAt(state.cells, golferId, hole.number) !== undefined);
     if (!allFourRecorded) return undefined;
 

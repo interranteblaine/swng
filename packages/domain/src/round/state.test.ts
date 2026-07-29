@@ -91,10 +91,10 @@ describe("reduceRound", () => {
 
   it("records picked-up and conceded as first-class results", () => {
     const pu: RoundEvent = { ...base(11), kind: "score-recorded", golferId: A, hole: 1, result: { kind: "picked-up" } };
-    const cc: RoundEvent = { ...base(12), kind: "score-recorded", golferId: B, hole: 1, result: { kind: "conceded" } };
+    const cc: RoundEvent = { ...base(12), kind: "score-recorded", golferId: B, hole: 1, result: { kind: "conceded", strokes: 4 } };
     const state = reduceRound([genesis, joinA, started, pu, cc]);
     expect(state.cells[cellKey(A, 1)]?.result.kind).toBe("picked-up");
-    expect(state.cells[cellKey(B, 1)]?.result.kind).toBe("conceded");
+    expect(state.cells[cellKey(B, 1)]?.result).toEqual({ kind: "conceded", strokes: 4 });
   });
 
   it("audits recordedBy as the WRITE AUTHOR, not the score's subject (score-for-anyone means they differ)", () => {

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { gameId, golferId } from "../ids.js";
-import { playGoldenRound } from "./golden/deck.js";
+import { deviceId, gameId, golferId, opId } from "../ids.js";
+import type { RoundEvent } from "../round/events.js";
+import { reduceRound } from "../round/state.js";
+import { scoreGame } from "./game.js";
+import { playGoldenRound, playGoldenRoundLog } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
 
 const A = golferId("ann"); const B = golferId("bo");
@@ -35,21 +38,44 @@ describe("fourball match — golden cards", () => {
     });
   });
 
-  it("a hole where all four are out (picked-up/conceded) halves outright: up unchanged, thru advances through it", () => {
-    // Plan rule: a side with no ball halves the hole if the other side has none
-    // either. All four cells recorded on h1 (so the hole IS decided), none of them
-    // "strokes" — sideBest returns undefined for both a and b, which the winners
-    // reducer resolves to "halved" rather than crediting either side. One cell uses
-    // "conceded" instead of "picked-up" so that kind also gets its first exercise
-    // here (fourballMatch's netFor guards on `kind !== "strokes"`, treating both
-    // the same way).
+  // Behaviour-flipped (task-2, spec §2d): this test used to put a bare "conceded" on Bo's cell
+  // to exercise that kind alongside three genuine pickups, on the premise that concede (like
+  // pickup) drops a player's ball entirely — "all four are out, so it halves." That premise is
+  // now false: a conceded score nets exactly like `strokes` (fourballMatch.ts's netFor), so a
+  // side with ONE conceded player still has a ball. No number for Bo's cell could preserve the
+  // ORIGINAL subject (a side with no ball at all) while keeping him "conceded" instead of
+  // "picked-up" — genuinely emptying a ball now takes picked-up specifically. So this test is
+  // narrowed to all-four-picked-up (the true "nobody has a ball" case, its real subject), and a
+  // NEW test right after covers what conceded actually does here now: it keeps a side's ball alive.
+  it("a hole where all four are picked up halves outright: up unchanged, thru advances through it", () => {
+    // All four cells recorded on h1 (so the hole IS decided), all of them picked-up — sideBest
+    // returns undefined for both a and b, which the winners reducer resolves to "halved" rather
+    // than crediting either side.
     const [state] = playGoldenRound(fixtureLinks, players, [game], {
       [A]: ["picked-up"],
-      [B]: ["conceded"],
+      [B]: ["picked-up"],
       [C]: ["picked-up"],
       [D]: ["picked-up"],
     });
     expect(state).toMatchObject({ kind: "fourball-match", up: 0, thru: 1, remaining: 8, dormie: false });
+  });
+
+  it("a conceded score keeps its side's ball alive — it beats a side with nobody left in the hole", () => {
+    // Side A's Ann is genuinely picked up, but Bo's conceded number gives the side a real net
+    // (spec §2d — a conceded score is scored, not out of the hole). Side B is entirely picked
+    // up (Cal and Dee both), so it has no ball at all: side A wins the hole outright, not a
+    // halve — the "conceded" literal that used to sit in the OLD test above, restored to what
+    // it actually does now. ("conceded" needs a number, so it's no longer expressible through
+    // FixtureScores — Bo's cell is appended as a raw score-recorded event instead, the same way
+    // a "cleared" cell already has to be elsewhere in this codebase.)
+    const log = playGoldenRoundLog(fixtureLinks, players, [game], { [A]: ["picked-up"], [C]: ["picked-up"], [D]: ["picked-up"] }, [], false);
+    const concedeBoH1: RoundEvent = {
+      kind: "score-recorded", golferId: B, hole: 1, result: { kind: "conceded", strokes: 4 },
+      opId: opId("concede-bo-h1"), hlc: { wallMs: 9_999, counter: 0, deviceId: deviceId("concede-device") }, authorId: B,
+    };
+    const state = reduceRound([...log, concedeBoH1]);
+    const [gameState] = state.games.map((config) => scoreGame(config, state));
+    expect(gameState).toMatchObject({ kind: "fourball-match", up: 1, leader: "a", thru: 1, remaining: 8, dormie: false });
   });
 
   it("exposes the decided hole trail the ladder consumed — from the 3&1 card's own narrative", () => {

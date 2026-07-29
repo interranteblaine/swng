@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { gameId, golferId } from "../ids.js";
-import { playGoldenRound } from "./golden/deck.js";
+import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
+import type { HoleResult } from "../round/holeResult.js";
+import type { RoundEvent } from "../round/events.js";
+import { cellKey, reduceRound } from "../round/state.js";
+import type { RoundState } from "../round/state.js";
+import { scoreGame } from "./game.js";
+import type { GameState } from "./game.js";
+import { scoreSinglesMatch } from "./singlesMatch.js";
+import { playGoldenRound, playGoldenRoundLog } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
 
 // Match strokes were ALWAYS the difference between the two, so the ONE rule (spec §3) produces
@@ -15,6 +22,25 @@ const players = [
   { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
 ];
 const match = { kind: "singles-match", id: gameId("m1"), a: A, b: B } as const;
+
+// A minimal one-hole RoundState, isolated from this file's own 14-vs-2 handicap fixture: every
+// named golfer plays off scratch (courseHandicap 0), so the game's own stroke allocation
+// contributes nothing and the assertion is about the SCORE alone — the shape scoreSinglesMatch
+// consumes directly, without threading a card through the whole golden-deck event machinery.
+const stateWith = (results: Readonly<Record<string, HoleResult>>): RoundState => ({
+  id: roundId("r-conceded"),
+  status: "live",
+  card: fixtureLinks,
+  participants: Object.keys(results).map((name) => ({ golferId: golferId(name), name, tee: "white", courseHandicap: 0 })),
+  games: [match],
+  cells: Object.fromEntries(
+    Object.entries(results).map(([name, result], index) => [
+      cellKey(golferId(name), 1),
+      { result, recordedBy: golferId(name), hlc: { wallMs: index, counter: 0, deviceId: deviceId("stateWith") }, opId: opId(`op-${name}`) },
+    ]),
+  ),
+  terminatedGameIds: new Set(),
+});
 
 describe("singles match — golden cards", () => {
   it("the difference between the two closes it out 3&2", () => {
@@ -39,15 +65,41 @@ describe("singles match — golden cards", () => {
     expect((state as { outcome?: unknown }).outcome).toBeUndefined();
   });
 
-  it("a conceded hole is lost; a match can end all square", () => {
-    // Hole-by-hole (Ann's dots on 1,2,4,7,8,9): h1 halve (net 4/4), h2 Ann (4/6),
-    // h3 Bo (4/3), h4 Ann (5/6), h5 halve (4/4), h6 halve (4/4), h7 halve (4/4),
-    // h8 halve (5/5), h9 Ann concedes → Bo wins → level overall: +1 −1 = 0.
-    const [state] = playGoldenRound(fixtureLinks, players, [match], {
-      [A]: [5, 5, 4, 6, 4, 4, 5, 6, "conceded"],
-      [B]: [4, 6, 3, 6, 4, 4, 4, 5, 5],
-    });
-    expect(state).toMatchObject({ kind: "singles-match", up: 0, thru: 9, remaining: 0, outcome: { halved: true } });
+  // Behaviour-flipped (task-2, spec §2d): this test used to assert the OLD, reversed semantics —
+  // "a conceded hole is lost [outright, regardless of score]". That's no longer true: a conceded
+  // hole scores at the number it carries, same as `strokes` (see the new test just below). No
+  // number for Ann's old bare "conceded" literal could preserve THAT subject (auto-loss is gone),
+  // so this is rewritten, not just re-numbered — it keeps its OTHER subject, that a match can end
+  // all square, via a concession whose claimed number decides the hole on its own merits.
+  //
+  // "conceded" is no longer expressible through FixtureScores (its arm now requires a strokes
+  // number — golden/deck.ts), so Ann's h9 is appended as a raw score-recorded event after the
+  // rest of the card, the same way a "cleared" cell already has to be (see e.g. skins.test.ts's
+  // "a cleared cell re-opens the hole").
+  it("a conceded hole scores at the number it carries — and a match can still end all square", () => {
+    // Hole-by-hole (Ann's dots on 1,2,4,7,8,9): h1 halve (net 4/4), h2 Ann (4/6), h3 Bo (4/3),
+    // h4 Ann (5/6), h5 halve (4/4), h6 halve (4/4), h7 halve (4/4), h8 halve (5/5) — Ann 2 wins,
+    // Bo 1, five halves thru 8. h9: Ann concedes a 7 (dotted net 6) against Bo's actual 5 (net
+    // 5, Bo plays off scratch) — Bo's lower NUMBER wins the hole, not an automatic concession
+    // loss — bringing Bo to 2 wins too: 2-2 levels the match.
+    const log = playGoldenRoundLog(
+      fixtureLinks, players, [match],
+      { [A]: [5, 5, 4, 6, 4, 4, 5, 6], [B]: [4, 6, 3, 6, 4, 4, 4, 5, 5] },
+      [], false,
+    );
+    const concedeAnnH9: RoundEvent = {
+      kind: "score-recorded", golferId: A, hole: 9, result: { kind: "conceded", strokes: 7 },
+      opId: opId("concede-ann-h9"), hlc: { wallMs: 9_999, counter: 0, deviceId: deviceId("concede-device") }, authorId: A,
+    };
+    const state = reduceRound([...log, concedeAnnH9]);
+    const [gameState] = state.games.map((config) => scoreGame(config, state));
+    expect(gameState).toMatchObject({ kind: "singles-match", up: 0, thru: 9, remaining: 0, outcome: { halved: true } });
+  });
+
+  it("scores a conceded hole at the number it carries — you made the 4, so you win the hole", () => {
+    const state = stateWith({ ann: { kind: "strokes", strokes: 5 }, bo: { kind: "conceded", strokes: 4 } });
+    const gameState = scoreSinglesMatch(match, state) as GameState & { kind: "singles-match" };
+    expect(gameState.leader).toBe(B);
   });
 
   it("a win sealed on the final hole reads '1 up', not '1&0'", () => {

@@ -88,7 +88,7 @@ describe("archiveGolferLine", () => {
       cells: {
         [cellKey(G, 1)]: cell(1, 4), // par
         [cellKey(G, 2)]: { result: { kind: "picked-up" }, recordedBy: G, hlc: { wallMs: 2, counter: 0, deviceId: deviceId("d") }, opId: opId("op-pu") },
-        [cellKey(G, 3)]: { result: { kind: "conceded" }, recordedBy: G, hlc: { wallMs: 3, counter: 0, deviceId: deviceId("d") }, opId: opId("op-cc") },
+        [cellKey(G, 3)]: { result: { kind: "conceded", strokes: 4 }, recordedBy: G, hlc: { wallMs: 3, counter: 0, deviceId: deviceId("d") }, opId: opId("op-cc") },
         // hole 4 onward: no cell at all — unscored.
       },
     };
@@ -135,7 +135,7 @@ describe("archiveGolferLine", () => {
       cells: {
         [cellKey(G, 1)]: cell(1, 5), // strokes
         [cellKey(G, 2)]: { result: { kind: "picked-up" }, recordedBy: G, hlc: { wallMs: 2, counter: 0, deviceId: deviceId("d") }, opId: opId("op-pu") },
-        [cellKey(G, 3)]: { result: { kind: "conceded" }, recordedBy: G, hlc: { wallMs: 3, counter: 0, deviceId: deviceId("d") }, opId: opId("op-cc") },
+        [cellKey(G, 3)]: { result: { kind: "conceded", strokes: 3 }, recordedBy: G, hlc: { wallMs: 3, counter: 0, deviceId: deviceId("d") }, opId: opId("op-cc") },
         // hole 4: no cell at all — unscored.
         [cellKey(G, 5)]: { result: { kind: "cleared" }, recordedBy: G, hlc: { wallMs: 5, counter: 0, deviceId: deviceId("d") }, opId: opId("op-cl") },
       },
@@ -144,7 +144,7 @@ describe("archiveGolferLine", () => {
     expect(line.holeResults).toEqual([
       { hole: 1, par: 4, result: { kind: "strokes", strokes: 5 } },
       { hole: 2, par: 4, result: { kind: "picked-up" } },
-      { hole: 3, par: 3, result: { kind: "conceded" } },
+      { hole: 3, par: 3, result: { kind: "conceded", strokes: 3 } }, // a conceded par — holeResults passes the cell through verbatim
       // hole 4 (silence) and hole 5 (cleared) are OMITTED — cellAt's own contract.
     ]);
   });

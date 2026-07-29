@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Hole } from "@swng/domain";
 import type { HoleResult, Participant } from "@swng/domain";
 import { btnDanger, btnSecondary, cardBox } from "../ui/classes";
@@ -30,8 +31,16 @@ export interface ScorePadProps {
 // there is no separate confirm step. `Cancel` is the only button that does NOT call onSubmit —
 // it backs out without posting anything (renamed from the M5-era 'Clear selection', which read
 // as a data action beside `Clear score`).
+//
+// Conceded is the one deliberate exception (task-2, spec §2d): a conceded hole now carries the
+// score you would have made, so tapping it reveals the SAME number row instead of posting on
+// its own — a disclosure, not a one-tap post. Scoring stays two taps; conceding costs three
+// (cell → Conceded → the number). That's a deliberate deviation from product.md §9's two-tap
+// rule for a rarer, more deliberate act — you're not just recording what happened, you're
+// naming a number nobody actually played out.
 export function ScorePad({ golfer, hole, current, onSubmit, onCancel }: ScorePadProps) {
   const values = orderedStrokeValues(hole.par);
+  const [conceding, setConceding] = useState(false);
 
   const valueButtonClass = `${cardBox} flex min-h-14 min-w-14 items-center justify-center px-3 text-lg font-semibold text-forest active:bg-goldwash`;
   // Picked up / Conceded: same cardBox square, oxblood ink — a distinct action from a plain
@@ -43,24 +52,37 @@ export function ScorePad({ golfer, hole, current, onSubmit, onCancel }: ScorePad
       <p className="text-center text-sm text-fairway">
         {golfer.name} — hole {hole.number} · par {hole.par}
       </p>
-      <div className="flex flex-wrap justify-center gap-2">
-        {values.map((value) => (
-          <button key={value} type="button" className={valueButtonClass} onClick={() => onSubmit({ kind: "strokes", strokes: value })}>
-            {value}
+      {conceding ? (
+        <>
+          <p className="text-center text-sm font-semibold text-oxblood">Conceded — what would you have made?</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            {values.map((value) => (
+              <button key={value} type="button" className={valueButtonClass} onClick={() => onSubmit({ kind: "conceded", strokes: value })}>
+                {value}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="flex flex-wrap justify-center gap-2">
+          {values.map((value) => (
+            <button key={value} type="button" className={valueButtonClass} onClick={() => onSubmit({ kind: "strokes", strokes: value })}>
+              {value}
+            </button>
+          ))}
+          <button type="button" className={specialButtonClass} onClick={() => onSubmit({ kind: "picked-up" })}>
+            Picked up
           </button>
-        ))}
-        <button type="button" className={specialButtonClass} onClick={() => onSubmit({ kind: "picked-up" })}>
-          Picked up
-        </button>
-        <button type="button" className={specialButtonClass} onClick={() => onSubmit({ kind: "conceded" })}>
-          Conceded
-        </button>
-        {current !== undefined && (
-          <button type="button" className={`${btnDanger} min-h-14 min-w-20`} onClick={() => onSubmit({ kind: "cleared" })}>
-            Clear score
+          <button type="button" className={specialButtonClass} onClick={() => setConceding(true)}>
+            Conceded
           </button>
-        )}
-      </div>
+          {current !== undefined && (
+            <button type="button" className={`${btnDanger} min-h-14 min-w-20`} onClick={() => onSubmit({ kind: "cleared" })}>
+              Clear score
+            </button>
+          )}
+        </div>
+      )}
       <button type="button" className={`${btnSecondary} min-h-14`} onClick={onCancel}>
         Cancel
       </button>

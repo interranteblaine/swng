@@ -431,7 +431,10 @@ describe("settleRound — determinism", () => {
 // archive wiring, so a regression in either place fails on its own.
 describe("hand-checked AGS sanity", () => {
   it("matches Ann/Bo/Cal's post-correction AGS", () => {
-    const holesFor = (scores: ReadonlyArray<number | "picked-up" | "conceded">) =>
+    // "conceded" was never actually used by the three cards below (all-numeric) — dropped from
+    // this local helper's type along with the rest of this arc's FixtureScores narrowing
+    // (task-2, spec §2d: a bare "conceded" no longer represents a real HoleResult).
+    const holesFor = (scores: ReadonlyArray<number | "picked-up">) =>
       new Map(scores.map((score, index) => [index + 1, typeof score === "number" ? { kind: "strokes" as const, strokes: score } : { kind: score }]));
     expect(adjustedGrossScore(fixtureWhite, 8, holesFor([5, 5, 4, 6, 5, 4, 5, 6, 4]))).toBe(44);
     expect(adjustedGrossScore(fixtureWhite, 2, holesFor([4, 5, 3, 6, 4, 4, 4, 5, 4]))).toBe(39);

@@ -224,17 +224,19 @@ describe("ScorecardGrid — readOnly (the archived card, Task 6)", () => {
 });
 
 describe("ScorecardGrid — picked-up / conceded glyphs", () => {
-  it("a picked-up cell shows PU and a conceded cell shows CN, not a numeric gross", () => {
+  it("a picked-up cell shows PU and a conceded cell shows its score with a 'c' suffix, not a bare numeric gross", () => {
+    // A conceded hole carries the score you would have made (task-2, spec §2d) — the `c` suffix
+    // is the one thing left on the card marking it as conceded rather than holed out.
     const state = twoPlayerState({
       cells: {
         [cellKey(ANN, 1)]: scoreCell({ kind: "picked-up" }, ANN),
-        [cellKey(BO, 1)]: scoreCell({ kind: "conceded" }, BO),
+        [cellKey(BO, 1)]: scoreCell({ kind: "conceded", strokes: 5 }, BO),
       },
     });
     render(<ScorecardGrid state={state} recordScore={vi.fn()} />);
 
     expect(within(cellButton("Ann", 1)).getByText("PU")).toBeTruthy();
-    expect(within(cellButton("Bo", 1)).getByText("CN")).toBeTruthy();
+    expect(within(cellButton("Bo", 1)).getByText("5c")).toBeTruthy();
   });
 });
 

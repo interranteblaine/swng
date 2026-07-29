@@ -27,14 +27,17 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
       if (!cell) continue;
       thru += 1;
 
-      if (cell.result.kind === "strokes") {
+      // A conceded hole is a scored hole (spec §2d — the number the group says out loud), so it
+      // joins the `strokes` branch below exactly like an ordinary score. Picked-up is the ONLY
+      // kind left with no number to use — that's the one net double bogey (par + 2) still caps.
+      if (cell.result.kind === "strokes" || cell.result.kind === "conceded") {
         grossTotal += cell.result.strokes;
         if (dots) {
           netTotal += cell.result.strokes - (dots.get(hole.number) ?? 0);
         }
       } else {
-        // Picked-up/conceded holes have no gross number, but net still resolves
-        // them at net double bogey (par + 2) so a running net total never stalls.
+        // Picked-up: net still resolves it at net double bogey (par + 2) so a running net total
+        // never stalls; gross has no number either, so it's tracked as a partial-total count.
         grossPickups += 1;
         if (dots) {
           const holeDots = dots.get(hole.number) ?? 0;

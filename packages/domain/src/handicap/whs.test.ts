@@ -31,8 +31,16 @@ import {
 // hole-by-hole card — scoreDifferential reads nothing else from the tee set.
 const ratedTee = (rating: number, slope: number): TeeSet => ({ name: "rated", rating, slope, holes: [] });
 
-const card = (scores: ReadonlyArray<number | "picked-up" | "conceded">): ReadonlyMap<number, HoleResult> =>
-  new Map(scores.map((score, index) => [index + 1, typeof score === "number" ? { kind: "strokes", strokes: score } : { kind: score }]));
+// "conceded" is no longer a bare shorthand (task-2, spec §2d: the conceded arm now requires a
+// strokes number) — a caller that needs a conceded cell passes a real HoleResult object
+// directly instead, same as the number/"picked-up" shorthands convert to one.
+const card = (scores: ReadonlyArray<number | "picked-up" | HoleResult>): ReadonlyMap<number, HoleResult> =>
+  new Map(
+    scores.map((score, index) => [
+      index + 1,
+      typeof score === "number" ? { kind: "strokes", strokes: score } : score === "picked-up" ? { kind: score } : score,
+    ]),
+  );
 
 // Ann's stableford golden card (stableford.test.ts): course handicap 8 on
 // fixtureWhite dots every hole except h3 (SI9).
@@ -99,8 +107,12 @@ describe("adjustedGrossScore — fixture golden card", () => {
     expect(adjustedGrossScore(fixtureWhite, 8, card(annCard))).toBe(47);
   });
 
-  it("counts a conceded hole at net double bogey too", () => {
-    const conceded = annCard.map((score, index) => (index === 3 ? ("conceded" as const) : score));
+  it("counts a conceded hole at net double bogey too, regardless of the number it claims", () => {
+    // h4 (par 5, 1 dot, cap 8): Ann concedes a 5 here — a plausible "you'd have made it" claim,
+    // well under the cap — but AGS still counts the cap, not the claim (Rule 3.1b: a hole the
+    // player never holed out posts at net double bogey no matter what number the group names;
+    // this is unchanged by task-2's engine-facing rule, which only governs live game scoring).
+    const conceded = annCard.map((score, index): number | "picked-up" | HoleResult => (index === 3 ? { kind: "conceded", strokes: 5 } : score));
     expect(adjustedGrossScore(fixtureWhite, 8, card(conceded))).toBe(47);
   });
 

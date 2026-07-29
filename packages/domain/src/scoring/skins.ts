@@ -35,9 +35,12 @@ export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState =>
     holesDecided += 1;
 
     const pot = 1 + carrying;
-    // Picked-up/conceded players are out of the hole; everyone else competes on net.
+    // A conceded score competes on net just like `strokes` (spec §2d — the number it carries is
+    // the score); picked-up is the only kind that's out of the hole entirely.
     const nets = cells.flatMap(({ player, cell }) =>
-      cell!.result.kind === "strokes" ? [{ golferId: player.golferId, net: cell!.result.strokes - (player.dots?.get(hole.number) ?? 0) }] : [],
+      cell!.result.kind === "strokes" || cell!.result.kind === "conceded"
+        ? [{ golferId: player.golferId, net: cell!.result.strokes - (player.dots?.get(hole.number) ?? 0) }]
+        : [],
     );
 
     const lowest = Math.min(...nets.map(({ net }) => net));

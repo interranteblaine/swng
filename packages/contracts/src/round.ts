@@ -9,7 +9,17 @@ import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, 
 export const holeResultSchema: z.ZodType<HoleResult> = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("strokes"), strokes: z.number() }),
   z.object({ kind: z.literal("picked-up") }),
-  z.object({ kind: z.literal("conceded") }),
+  // Required and UNBOUNDED here on purpose (arc 2026-07-29 Task 2, spec §2d): this schema also
+  // backs roundEventSchema's stored/fold arm (score-recorded), a READ path the client parses on
+  // every pull (client/src/transport.ts) — the placement rule that makes skins' `scoring` field
+  // `.default("net")` a few lines below does NOT apply here, because there is no honest default.
+  // A legacy `{ kind: "conceded" }` (no number) carries no score the group ever said out loud;
+  // inventing one would fabricate a result, not preserve one. So legacy conceded events are NOT
+  // tolerated — they're wiped along with the rest of beta's round data (this arc's Task 9), not
+  // migrated. The request-ingress copy in commands.ts additionally bounds this to a plausible
+  // single-hole score (1..30); this stored copy stays unbounded, matching every other stored
+  // field's own placement rule (Arc A: never reject already-stored data at a read path).
+  z.object({ kind: z.literal("conceded"), strokes: z.number() }),
   // A mis-tap undone (task-1-brief): additive wire arm, mirroring domain's HoleResult.
   z.object({ kind: z.literal("cleared") }),
 ]);

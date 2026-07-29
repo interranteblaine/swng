@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { deviceId, gameId, golferId, opId } from "../ids.js";
+import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
 import type { RoundEvent } from "../round/events.js";
-import { reduceRound } from "../round/state.js";
+import { cellKey, reduceRound } from "../round/state.js";
+import type { RoundState } from "../round/state.js";
 import { scoreGame } from "./game.js";
+import type { GameState } from "./game.js";
+import { scoreSkins } from "./skins.js";
 import { playGoldenRound, playGoldenRoundLog } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
 
@@ -180,5 +183,28 @@ describe("skins — golden cards", () => {
         { golferId: C, skins: 0 },
       ],
     });
+  });
+
+  it("lets a conceded hole win a skin", () => {
+    // A minimal one-hole state off scratch (no dots to complicate it) — Ann's actual 5 loses the
+    // hole to Bo's conceded 4: Bo made the 4, so Bo takes the skin, not an out-of-the-hole zero.
+    const config = { kind: "skins", id: gameId("k-conceded"), scoring: "net", players: [A, B] } as const;
+    const state: RoundState = {
+      id: roundId("r-conceded"),
+      status: "live",
+      card: fixtureLinks,
+      participants: [
+        { golferId: A, name: "Ann", tee: "white", courseHandicap: 0 },
+        { golferId: B, name: "Bo", tee: "white", courseHandicap: 0 },
+      ],
+      games: [],
+      cells: {
+        [cellKey(A, 1)]: { result: { kind: "strokes", strokes: 5 }, recordedBy: A, hlc: { wallMs: 0, counter: 0, deviceId: deviceId("d") }, opId: opId("op-a") },
+        [cellKey(B, 1)]: { result: { kind: "conceded", strokes: 4 }, recordedBy: B, hlc: { wallMs: 1, counter: 0, deviceId: deviceId("d") }, opId: opId("op-b") },
+      },
+      terminatedGameIds: new Set(),
+    };
+    const gameState = scoreSkins(config, state) as GameState & { kind: "skins" };
+    expect(gameState.lines.find((l) => l.golferId === B)!.skins).toBe(1);
   });
 });

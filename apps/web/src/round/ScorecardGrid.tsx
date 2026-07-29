@@ -50,8 +50,10 @@ const glyphFor = (result: HoleResult): string => {
   switch (result.kind) {
     case "picked-up":
       return "PU";
+    // A conceded hole is a scored hole everywhere else (spec §2d) — the `c` suffix is the one
+    // place left on the card that still marks it as conceded rather than holed out.
     case "conceded":
-      return "CN";
+      return `${result.strokes}c`;
     case "strokes":
       return String(result.strokes);
     case "cleared":

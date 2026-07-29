@@ -73,15 +73,12 @@ describe("ScorePad", () => {
     expect(onSubmit).toHaveBeenCalledWith({ kind: "strokes", strokes: 6 });
   });
 
-  it("tapping Picked up / Conceded posts the matching first-class result", () => {
+  it("tapping Picked up posts the first-class result in one tap", () => {
     const onSubmit = vi.fn<(result: HoleResult) => void>();
     render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={onSubmit} onCancel={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Picked up" }));
     expect(onSubmit).toHaveBeenLastCalledWith({ kind: "picked-up" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Conceded" }));
-    expect(onSubmit).toHaveBeenLastCalledWith({ kind: "conceded" });
   });
 
   it("tapping Cancel closes without posting anything", () => {
@@ -89,6 +86,48 @@ describe("ScorePad", () => {
     const onCancel = vi.fn();
     render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={onSubmit} onCancel={onCancel} />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
+// Conceded is a disclosure, not a one-tap post (task-2, spec §2d) — a deliberate deviation from
+// product.md §9's two-tap rule for a rarer, more deliberate act: scoring stays two taps,
+// conceding costs three (cell → Conceded → the number).
+describe("ScorePad — Conceded (a disclosure, not a one-tap post)", () => {
+  it("tapping Conceded reveals the same number row asking what you would have made, without posting", () => {
+    const onSubmit = vi.fn();
+    render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Conceded" }));
+
+    expect(onSubmit).not.toHaveBeenCalled(); // a disclosure, not a post
+    expect(screen.getByText("Conceded — what would you have made?")).toBeTruthy();
+    // The same par-first number row, still one tap away.
+    for (const value of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
+      expect(screen.getByRole("button", { name: String(value) })).toBeTruthy();
+    }
+  });
+
+  it("tapping a number after Conceded posts { kind: 'conceded', strokes: N } — three taps, not two", () => {
+    const onSubmit = vi.fn<(result: HoleResult) => void>();
+    render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={onSubmit} onCancel={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Conceded" })); // tap 2 (tap 1 is the cell, one level up)
+    fireEvent.click(screen.getByRole("button", { name: "5" })); // tap 3
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith({ kind: "conceded", strokes: 5 });
+  });
+
+  it("Cancel from inside the Conceded disclosure still backs out without posting anything", () => {
+    const onSubmit = vi.fn();
+    const onCancel = vi.fn();
+    render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={onSubmit} onCancel={onCancel} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Conceded" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(onCancel).toHaveBeenCalledTimes(1);

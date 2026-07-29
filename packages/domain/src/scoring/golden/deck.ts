@@ -9,13 +9,20 @@ import type { RoundState } from "../../round/state.js";
 import { scoreGame } from "../game.js";
 import type { GameConfig, GameState } from "../game.js";
 
-// Fixtures write scores as numbers, the "picked-up"/"conceded" literals, or null —
-// the same vocabulary a scorer taps in on the wire, kept out of HoleResult's shape.
-// null means "no cell recorded for this hole": the deck emits no score-recorded event
-// for it at all, letting a card leave a gap anywhere (not just a dense unrecorded
-// suffix) — the medal-family engines (stableford, stroke play, skins) resolve a
-// decided hole wherever its cell exists, unlike match play's sequential decided-prefix.
-export type FixtureScores = Readonly<Record<string, ReadonlyArray<number | "picked-up" | "conceded" | null>>>;
+// Fixtures write scores as numbers, the "picked-up" literal, or null — the same vocabulary a
+// scorer taps in on the wire, kept out of HoleResult's shape. null means "no cell recorded for
+// this hole": the deck emits no score-recorded event for it at all, letting a card leave a gap
+// anywhere (not just a dense unrecorded suffix) — the medal-family engines (stableford, stroke
+// play, skins) resolve a decided hole wherever its cell exists, unlike match play's sequential
+// decided-prefix.
+//
+// No "conceded" shorthand (task-2, spec §2d): a conceded hole now REQUIRES a strokes number
+// (HoleResult's conceded arm), so a bare string literal can no longer stand for one — inventing
+// a number here to keep the shorthand would fabricate a score no fixture ever specified. Every
+// deck that needs a conceded cell (this file's own callers today have none — see fieldDeck18)
+// builds the raw score-recorded RoundEvent directly and appends it to the log, the same way
+// every "cleared" cell already has to (that kind was never representable here either).
+export type FixtureScores = Readonly<Record<string, ReadonlyArray<number | "picked-up" | null>>>;
 
 // A correction rewrites one already-recorded cell: the deck appends it as a raw
 // score-recorded event AFTER every initial score, so its hlc is strictly later
@@ -23,7 +30,7 @@ export type FixtureScores = Readonly<Record<string, ReadonlyArray<number | "pick
 export interface FixtureCorrection {
   readonly golfer: string;
   readonly hole: number;
-  readonly score: number | "picked-up" | "conceded";
+  readonly score: number | "picked-up";
 }
 
 // A golden deck only needs a single fictitious recorder — provenance of the
@@ -50,8 +57,8 @@ const buildGoldenLog = (
   let opCounter = 0;
   const nextHlc = (): Hlc => ({ wallMs: wallMs++, counter: 0, deviceId: DEVICE });
   const nextOpId = () => opId(`golden-${opCounter++}`);
-  const toResult = (score: number | "picked-up" | "conceded"): HoleResult =>
-    score === "picked-up" || score === "conceded" ? { kind: score } : { kind: "strokes", strokes: score };
+  const toResult = (score: number | "picked-up"): HoleResult =>
+    score === "picked-up" ? { kind: score } : { kind: "strokes", strokes: score };
 
   const events: RoundEvent[] = [
     { kind: "round-created", roundId: roundId("golden"), card, opId: nextOpId(), hlc: nextHlc(), authorId: RECORDER },

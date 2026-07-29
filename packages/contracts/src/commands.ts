@@ -113,7 +113,10 @@ export type AddGameRequest = z.infer<typeof addGameRequestSchema>;
 const scoreResultInputArms = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("strokes"), strokes: z.number().min(1).max(30) }),
   z.object({ kind: z.literal("picked-up") }),
-  z.object({ kind: z.literal("conceded") }),
+  // Bounded like the `strokes` arm above (task-2, spec §2d): a conceded hole now carries the
+  // score the group says out loud, so a client proposing one must say a plausible number — the
+  // stored/fold copy in round.ts stays unbounded (see its own comment for why no default fits).
+  z.object({ kind: z.literal("conceded"), strokes: z.number().int().min(1).max(30) }),
   z.object({ kind: z.literal("cleared") }),
 ]);
 

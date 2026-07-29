@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { deviceId, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { CourseCard, GameConfig, GameResult, RoundEvent } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
-import { gameConfigSchemaImpl, gameResultSchemaImpl, leaveRoundResponseSchema, roundEventSchema, roundEventSchemaImpl, shareLinkResponseSchema, terminateGameResponseSchema } from "./round.js";
+import { gameConfigSchemaImpl, gameResultSchemaImpl, holeResultSchema, leaveRoundResponseSchema, roundEventSchema, roundEventSchemaImpl, shareLinkResponseSchema, terminateGameResponseSchema } from "./round.js";
 
 const baseHlc = { wallMs: 1_000, counter: 0, deviceId: deviceId("device-1") };
 
@@ -16,6 +16,16 @@ const scoreRecordedEvent: RoundEvent = {
   hlc: baseHlc,
   authorId: golferId("ann"),
 };
+
+describe("holeResultSchema", () => {
+  // A conceded hole carries the score you would have made (spec §2d) — required, unbounded on
+  // the stored/fold shape (see this schema's own comment); a bare `{ kind: "conceded" }` with no
+  // number is no longer representable.
+  it("requires a score on a conceded hole", () => {
+    expect(() => holeResultSchema.parse({ kind: "conceded" })).toThrow();
+    expect(holeResultSchema.parse({ kind: "conceded", strokes: 5 })).toEqual({ kind: "conceded", strokes: 5 });
+  });
+});
 
 describe("roundEventSchema", () => {
   it("parses a valid score-recorded event and round-trips through JSON unchanged", () => {

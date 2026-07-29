@@ -47,10 +47,10 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
     }
 
     const gross: RunningTotal = { total: grossTotal, pickups: grossPickups };
-    // net.pickups is always 0, not tracked like gross.pickups: a pickup only makes
-    // the GROSS total partial. Net resolves every picked-up/conceded hole at net
-    // double bogey above, so a net total is never partial — that's the rule (WHS
-    // net double bogey exists precisely to give picked-up holes a definite net
+    // net.pickups is always 0, not tracked like gross.pickups: a pickup only makes the GROSS
+    // total partial. A conceded hole nets off its own number, same as `strokes` (spec §2d); net
+    // resolves a picked-up hole at net double bogey above — so a net total is never partial
+    // either way (WHS net double bogey exists precisely to give a picked-up hole a definite net
     // score), not a field we forgot to populate.
     const net: RunningTotal | undefined = config.scoring === "net" ? { total: netTotal, pickups: 0 } : undefined;
 

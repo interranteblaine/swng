@@ -90,9 +90,10 @@ describe("skins — golden cards", () => {
 
   it("a cleared cell re-opens the hole: settlement stops there like a gap", () => {
     // Same mid-round fixture as above (h1 tie(A,B) carries, Ann takes the doubled pot on h2), then
-    // Ann's h2 is cleared at a later hlc — the deck's own FixtureCorrection vocabulary has
-    // no "cleared" arm (it only rewrites to a strokes/picked-up/conceded score), so the
-    // clear is appended as a raw score-recorded event directly onto the deck's log.
+    // Ann's h2 is cleared at a later hlc — the deck's own FixtureCorrection vocabulary has no
+    // "cleared" arm (it only rewrites to a strokes/picked-up score — task-2 dropped "conceded"
+    // too, since that arm now needs a number FixtureCorrection can't carry), so the clear is
+    // appended as a raw score-recorded event directly onto the deck's log.
     const log = playGoldenRoundLog(
       fixtureLinks, players3, [game],
       { [A]: [4, 5], [B]: [4, 5, 3], [C]: [6, 7, 5] },

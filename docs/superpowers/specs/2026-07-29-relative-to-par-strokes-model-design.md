@@ -119,9 +119,16 @@ and the code already keeps them apart:
 
 - **Conceded** — the hole was decided but you would have finished it. A score exists; the group
   says it out loud. `HoleResult`'s `conceded` arm gains it:
-  `{ kind: "conceded"; strokes: number }`. **Scoring engines still ignore the number** (the
-  concession already decided the hole, so recording a 5 cannot change a match); the record reads
-  it, and so do the card's totals.
+  `{ kind: "conceded"; strokes: number }`, and **a conceded hole is a scored hole everywhere** —
+  every engine, the card's totals, and the average treat it exactly as a `strokes` cell. Two
+  places still distinguish it: the card renders `5c` so you can see you didn't hole out, and
+  `fullyHoledOut` — which gates `Best` and the milestones — excludes it, as it always has.
+
+  This is simpler than "engines ignore the number", and it is also the only correct rule. A
+  conceded putt for a 4 beats a 5 in the match, wins the skin, and scores its Stableford points,
+  because you made the 4. It also removes the last reason net stroke play caps a conceded hole at
+  net double bogey (`strokePlay.ts:40`) — that cap now applies to a picked-up hole only, which is
+  the only kind with no number to use.
 - **Picked up** — you stopped. There is no number and nobody pretends otherwise. A round
   containing one does not feed the average, and it cannot set a `Best` either (`fullyHoledOut`
   requires every hole be a stroke count, and always has). It still appears in your history.

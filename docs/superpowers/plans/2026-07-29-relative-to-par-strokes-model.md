@@ -330,22 +330,46 @@ Expected: FAIL — a bare `{ kind: "conceded" }` currently parses.
 
 ```ts
   // The hole was decided but the player would have finished it — the score the group says out
-  // loud. SCORING ENGINES IGNORE THIS NUMBER (the concession already decided the hole); the
-  // record and the card's totals read it, which is what keeps match rounds countable (spec §2d).
+  // loud. A CONCEDED HOLE IS A SCORED HOLE EVERYWHERE (spec §2d): every engine, the card's
+  // totals and the average treat it exactly as a `strokes` cell, because you made the 4. Only
+  // two places distinguish it — the card's `5c` glyph, and fullyHoledOut, which gates Best and
+  // the milestones and has always excluded it.
   | { readonly kind: "conceded"; readonly strokes: number }
 ```
 
 Mirror it in `contracts/round.ts`'s stored-event schema (**unbounded** — Arc A's placement rule) and in `contracts/commands.ts:104-107`'s `scoreResultInputArms` (**bounded**, `z.number().int().min(1).max(30)`, matching the existing `strokes` arm). The `[A] extends [B]` exhaustiveness guard fails the build if type and schema diverge; it does **not** catch a missing bound, so add it deliberately.
 
-- [ ] **Step 4: Prove the engines ignore the number**
+- [ ] **Step 4: Make a conceded hole score like the number it carries**
+
+A conceded hole is a scored hole in every engine (spec §2d). Each engine's `case "conceded"` branch — which today treats it as "no competitive score" — is deleted and the cell falls through to the same path a `strokes` cell takes.
 
 ```ts
-it("ignores the score on a conceded hole — the concession already decided it", () => {
-  const five = scoreSinglesMatch(config, stateWith({ ann: { kind: "strokes", strokes: 4 }, bo: { kind: "conceded", strokes: 5 } }));
-  const ninetyNine = scoreSinglesMatch(config, stateWith({ ann: { kind: "strokes", strokes: 4 }, bo: { kind: "conceded", strokes: 99 } }));
-  expect(five).toEqual(ninetyNine);
+// singlesMatch.test.ts — you made the 4, so you win the hole.
+it("scores a conceded hole at the number it carries", () => {
+  const state = stateWith({ ann: { kind: "strokes", strokes: 5 }, bo: { kind: "conceded", strokes: 4 } });
+  expect(scoreSinglesMatch(config, state).leader).toBe(golferId("bo"));
+});
+
+// stableford.test.ts — a conceded par is worth its points, not zero.
+it("scores a conceded hole's Stableford points", () => {
+  const state = stateWith({ ann: { kind: "conceded", strokes: 4 } }); // par 4, no dots
+  expect(scoreStableford(config, state).lines[0]!.points).toBe(2);
+});
+
+// skins.test.ts — a conceded low score takes the skin.
+it("lets a conceded hole win a skin", () => {
+  const state = stateWith({ ann: { kind: "strokes", strokes: 5 }, bo: { kind: "conceded", strokes: 4 } });
+  expect(scoreSkins(config, state).lines.find((l) => l.golferId === golferId("bo"))!.skins).toBe(1);
+});
+
+// strokePlay.test.ts — the net-double-bogey cap now applies to a PICKED-UP hole only.
+it("totals a conceded hole at its score and caps only a pickup", () => {
+  const state = stateWith({ ann: { kind: "conceded", strokes: 4 } });
+  expect(scoreStrokePlay(config, state).lines[0]!.gross.total).toBe(4);
 });
 ```
+
+`strokePlay.ts:40`'s `netDoubleBogey(hole.par, holeDots) - holeDots` stays, narrowed to the `picked-up` branch — the only kind with no number to use. `stableford.ts`'s "picked-up/conceded score zero points outright" comment narrows to picked-up as well.
 
 - [ ] **Step 5: Update the pad and the glyph**
 

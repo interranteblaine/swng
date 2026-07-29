@@ -381,7 +381,9 @@ describe("GamePanel — the link sweep (every visible name links to /golfers/:go
     for (const link of patLinks) expect(link.getAttribute("href")).toBe(`/golfers/${PAT}`);
     // Rendered TEXT is unchanged — checked via the region's own native textContent (which, unlike
     // RTL's getByText, recurses through the nested <a> the same way a browser reads the page).
-    const region = screen.getByRole("region", { name: "Skins standings" });
+    // "(net)" in the label, like stroke play's — two skins pots over one card must not share an
+    // accessible name.
+    const region = screen.getByRole("region", { name: "Skins (net) standings" });
     expect(region.textContent).toContain("Pat 3 · Alex 0");
     expect(region.textContent).toContain("Hole 1 — Pat takes 3");
   });
@@ -428,7 +430,7 @@ describe("GamePanel — header (spec §2c)", () => {
     const text = region.textContent ?? "";
     const titleAt = text.indexOf("Match play");
     const treatmentAt = text.indexOf("Strokes are the difference between you two");
-    const strokesAt = text.indexOf("No strokes — everyone plays off 0.");
+    const strokesAt = text.indexOf("No strokes — everyone in this game plays level.");
     const noteAt = text.indexOf("Only the higher number gets strokes — the lower plays off scratch.");
 
     expect(titleAt).toBeGreaterThanOrEqual(0);
@@ -440,7 +442,7 @@ describe("GamePanel — header (spec §2c)", () => {
     expect(screen.queryByText(gameKindBlurb("singles-match"))).toBeNull();
   });
 
-  it("stroke-play NET states the treatment as the strokes on the card", () => {
+  it("stroke-play NET states the treatment as the game's own field", () => {
     const participants: readonly Participant[] = [{ golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 }];
     const config: GameConfig = { kind: "stroke-play", id: gameId("sp-net"), scoring: "net", players: [PAT] };
     const game: GameState = { kind: "stroke-play", id: config.id, scoring: "net", complete: false, leaders: [], lines: [] };
@@ -448,7 +450,7 @@ describe("GamePanel — header (spec §2c)", () => {
 
     render(<GamePanel game={game} state={state} />);
 
-    expect(screen.getByText("Net — uses the strokes on the card")).toBeTruthy();
+    expect(screen.getByText("Net — everyone plays off the lowest in this game")).toBeTruthy();
   });
 
   it("stroke-play GROSS states 'Gross — raw scores, no strokes' and renders NO strokes line at all", () => {

@@ -54,13 +54,18 @@ export const gameKindFits = (kind: GameKind): string => {
 // One treatment line for every kind, gross included — the ONE copy every panel and the
 // add-game preview render through. Replaces allowancePhrase + strokePlayTreatment, whose split
 // left the non-stroke-play kinds rendering a percentage that no longer exists.
+//
+// The net line does NOT say "uses the strokes on the card" (spec §3's first wording, corrected in
+// §11): the card renders each player's FULL number, a game renders the difference from its own
+// field's lowest, so the two genuinely disagree for any game played by a subset of the roster. This
+// wording is true in every case, and it is the fourball line's own vocabulary.
 export const gameTreatment = (config: GameConfig): string => {
   if ("scoring" in config && config.scoring === "gross") return "Gross — raw scores, no strokes";
   switch (config.kind) {
     case "stroke-play":
     case "skins":
     case "stableford":
-      return "Net — uses the strokes on the card";
+      return "Net — everyone plays off the lowest in this game";
     case "singles-match":
       return "Strokes are the difference between you two";
     case "fourball-match":
@@ -68,21 +73,20 @@ export const gameTreatment = (config: GameConfig): string => {
   }
 };
 
-// A note on WHOSE strokes a game's field is measured against — the sentence under the treatment
-// line. Every kind now applies the same rule (the difference from the lowest in its own field),
-// so what differs per kind is only who "the field" is; the percentages this once explained are
-// gone. Undefined for a gross game: it allocates nothing, so there is no field to describe.
-export const strokesNote = (config: GameConfig): string | undefined => {
-  if ("scoring" in config && config.scoring === "gross") return undefined;
-  switch (config.kind) {
+// The sentence under the treatment line, for the two kinds where WHO RECEIVES is worth saying out
+// loud: strokes are relative now, so in a match somebody plays off scratch and it is worth naming
+// which side. The other three get nothing here on purpose — gameTreatment's own net line already
+// states their field, and a note repeating it would just be the same sentence twice.
+export const strokesNote = (kind: GameKind): string | undefined => {
+  switch (kind) {
     case "singles-match":
       return "Only the higher number gets strokes — the lower plays off scratch.";
     case "fourball-match":
-      return "All four play off the lowest of the four.";
+      return "Only the three higher numbers get strokes — the lowest plays off scratch.";
     case "stroke-play":
     case "stableford":
     case "skins":
-      return "Everyone in this game plays off the lowest in it.";
+      return undefined;
   }
 };
 

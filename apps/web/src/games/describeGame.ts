@@ -29,7 +29,10 @@ export const describeGame = (game: GameState, round: RoundState): GameDescriptio
     case "fourball-match":
       return { title: gameKindLabel("fourball-match"), line: describeFourball(game, round) };
     case "skins":
-      return { title: gameKindLabel("skins"), line: describeSkins(game, round) };
+      // Suffixed like stroke play's, and for the same reason: two skins pots (one gross, one net)
+      // over the same card are a real setup, and two chips reading a bare "Skins" would be
+      // indistinguishable.
+      return { title: `${gameKindLabel("skins")} (${game.scoring})`, line: describeSkins(game, round) };
     default:
       // Exhaustive at compile time (GameState is a discriminated union); guards a runtime
       // value that bypassed it — same defensive shape as domain's own scoreGame/resultOf.

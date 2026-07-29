@@ -26,7 +26,18 @@ const stablefordConfigInputSchema = z
 
 const fourballMatchConfigInputSchema = z.object({ kind: z.literal("fourball-match"), ...gameConfigFields["fourball-match"] }).strict();
 
-const skinsConfigInputSchema = z.object({ kind: z.literal("skins"), ...gameConfigFields.skins, players: gameConfigFields.skins.players.max(12) }).strict();
+// Same override split as the `players` bounds above, for the other direction: skins' `scoring` is
+// `.default("net")` on the shared field set so a legacy STORED game-added event (written before the
+// field existed) still parses on the client's read path, and REQUIRED here so a client proposing a
+// new skins game has to say which pot it is rather than silently getting net.
+const skinsConfigInputSchema = z
+  .object({
+    kind: z.literal("skins"),
+    ...gameConfigFields.skins,
+    scoring: z.enum(["gross", "net"]),
+    players: gameConfigFields.skins.players.max(12),
+  })
+  .strict();
 
 export const gameConfigInputSchema = z.discriminatedUnion("kind", [
   strokePlayConfigInputSchema,

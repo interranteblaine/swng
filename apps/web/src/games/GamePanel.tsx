@@ -54,7 +54,11 @@ const skinsStory = (holes: readonly { hole: number; winner?: GolferId; pot: numb
 
 export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanelProps) {
   const config = state.games.find((g): g is GameConfig => g.id === game.id);
-  const title = game.kind === "stroke-play" ? `${gameKindLabel(game.kind)} (${game.scoring})` : gameKindLabel(game.kind);
+  // Suffixed for EVERY kind that carries a gross/net choice, not just stroke play: a group running
+  // gross and net skins as two pots over one card (the whole reason skins gained the choice) would
+  // otherwise get two identical titles — and two panels with the same aria-label, a duplicate
+  // accessible name on the same screen.
+  const title = "scoring" in game ? `${gameKindLabel(game.kind)} (${game.scoring})` : gameKindLabel(game.kind);
   const terminated = state.terminatedGameIds.has(game.id);
 
   // spec 2026-07-19 §2c: the treatment line states the strokes convention in force, up front. ONE
@@ -67,7 +71,7 @@ export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanel
   // dot, so there is nothing to summarize.
   const strokes = config && strokesSummary(config, state.participants, state.card);
 
-  const note = config && strokesNote(config);
+  const note = strokesNote(game.kind);
 
   return (
     <section role="region" aria-label={`${title} standings`} className={`${cardBox} flex flex-col gap-3 p-4 text-forest`}>

@@ -102,11 +102,21 @@ describe("strokesSummary", () => {
     expect(strokesSummary(config, participants, CARD)).toBe("Bo 2 dots");
   });
 
-  it("reads 'No strokes — everyone plays off 0.' when every member's total is zero", () => {
+  it("reads 'everyone in this game plays level' when every member's total is zero", () => {
     const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 0)];
     const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] };
 
-    expect(strokesSummary(config, participants, CARD)).toBe("No strokes — everyone plays off 0.");
+    expect(strokesSummary(config, participants, CARD)).toBe("No strokes — everyone in this game plays level.");
+  });
+
+  // The case the old copy ("everyone plays off 0") got WRONG, and which an all-zero fixture cannot
+  // detect: under the relative rule an all-zero allocation means the members are EQUAL, at whatever
+  // level — two golfers who both play to 12 receive nothing from each other and are not scratch.
+  it("says the same thing for two EQUAL non-zero players — nobody is off 0 here", () => {
+    const participants = [participant(ANN, "Ann", 12), participant(BO, "Bo", 12)];
+    const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] };
+
+    expect(strokesSummary(config, participants, CARD)).toBe("No strokes — everyone in this game plays level.");
   });
 
   it("renders nothing at all for a gross game — it has no strokes by definition, not zero of them", () => {

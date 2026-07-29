@@ -174,20 +174,20 @@ describe("describeGame — skins", () => {
     const events = playGoldenRoundLog(fixtureLinks18, players, [skins], thru16, fieldDeck18.corrections, false);
     const round = reduceRound(events);
     const state = scoreGame(skins, round);
-    expect(describeGame(state, round)).toEqual({ title: "Skins", line: "Bo 5 · Dee 10 · carrying 1 into 17" });
+    expect(describeGame(state, round)).toEqual({ title: "Skins (net)", line: "Bo 5 · Dee 10 · carrying 1 into 17" });
   });
 
   it("decided: reports the stranded pot as 'carried out', not 'carrying'", () => {
     const events = playGoldenRoundLog(fixtureLinks18, players, [skins], fieldDeck18.scores, fieldDeck18.corrections, false);
     const round = reduceRound(events);
     const state = scoreGame(skins, round);
-    expect(describeGame(state, round)).toEqual({ title: "Skins", line: "Bo 5 · Dee 10 · 3 carried out" });
+    expect(describeGame(state, round)).toEqual({ title: "Skins (net)", line: "Bo 5 · Dee 10 · 3 carried out" });
   });
 
   it("no skins won yet and nothing carrying renders a plain no-op line", () => {
     const events = playGoldenRoundLog(fixtureLinks18, players, [skins], {}, [], false);
     const round = reduceRound(events);
     const state = scoreGame(skins, round);
-    expect(describeGame(state, round)).toEqual({ title: "Skins", line: "No skins won yet" });
+    expect(describeGame(state, round)).toEqual({ title: "Skins (net)", line: "No skins won yet" });
   });
 });

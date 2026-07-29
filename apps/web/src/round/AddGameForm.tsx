@@ -75,10 +75,10 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
   // GameConfigInput is GameConfig minus the server-assigned id — the placeholder restores it
   // purely so the preview can reuse the exact allocation the card's dots render.
   const previewConfig = config ? ({ ...config, id: PREVIEW_ID } as GameConfig) : undefined;
-  // Both read the config, so a gross game (either kind that offers the choice) renders its own
-  // "no strokes" treatment line and no strokes preview at all — the one place that decision lives.
+  // strokesSummary reads the config, so a gross game (either kind that offers the choice) renders
+  // its own "no strokes" treatment line and no strokes preview at all — one place decides that.
   const preview = previewConfig && strokesSummary(previewConfig, participants, card);
-  const note = previewConfig && strokesNote(previewConfig);
+  const note = strokesNote(kind);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

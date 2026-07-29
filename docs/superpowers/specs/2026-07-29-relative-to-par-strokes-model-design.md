@@ -187,8 +187,8 @@ difference. Accepted for a Saturday match, and named here rather than buried.
 | config | line |
 |---|---|
 | stroke-play / skins, `gross` | `Gross — raw scores, no strokes` |
-| stroke-play / skins, `net` | `Net — uses the strokes on the card` |
-| stableford | `Net — uses the strokes on the card` |
+| stroke-play / skins, `net` | `Net — everyone plays off the lowest in this game` |
+| stableford | `Net — everyone plays off the lowest in this game` |
 | singles-match | `Strokes are the difference between you two` |
 | fourball-match | `Everyone plays off the lowest of the four` |
 
@@ -409,6 +409,12 @@ Also added: the departed-anchor rule (§2b), the conceded-holes-count-in-totals 
 `gameTreatment` replacement for `allowancePhrase` (§3), and precise wording on what is stored
 (§2b) — the first draft's "stored nowhere" was wrong, since the sealed archive freezes the
 derived value by design.
+
+**Correction, 2026-07-29 (implementation):** §3's `Net — uses the strokes on the card` was false. The
+card renders each player's full number; a game renders the difference from its own field's lowest, so
+the two disagree for any subset game — and, until the card itself went relative, for every net game.
+The line is now `Net — everyone plays off the lowest in this game`, which is true in every case and
+matches the fourball line's own vocabulary.
 
 **Owner correction, same day — "why do we still have this notion of handicap?"** The first two
 drafts kept `handicap/present.ts` and the plus-handicap convention. Wrong: under a relative model

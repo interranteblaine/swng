@@ -7,8 +7,9 @@ const A = golferId("a");
 const B = golferId("b");
 const C = golferId("c");
 const D = golferId("d");
-// One config per kind — gameTreatment/strokesNote read a whole config now, not a bare kind,
-// because whether a game allocates at all is the config's own `scoring` choice.
+// One config per kind — gameTreatment reads a whole config now, not a bare kind, because whether a
+// game allocates at all is the config's own `scoring` choice. (strokesNote still takes a kind: the
+// two kinds it speaks for have no gross arm.)
 const strokePlay = (scoring: "gross" | "net"): GameConfig => ({ kind: "stroke-play", id: gameId("sp"), scoring, players: [A, B] });
 const skins = (scoring: "gross" | "net"): GameConfig => ({ kind: "skins", id: gameId("sk"), scoring, players: [A, B] });
 const stableford: GameConfig = { kind: "stableford", id: gameId("st"), players: [A, B] };
@@ -46,10 +47,13 @@ describe("gameKindFits", () => {
 });
 
 describe("gameTreatment", () => {
-  it("states the net treatment without a percentage — there is no allowance table left", () => {
-    expect(gameTreatment(strokePlay("net"))).toBe("Net — uses the strokes on the card");
-    expect(gameTreatment(skins("net"))).toBe("Net — uses the strokes on the card");
-    expect(gameTreatment(stableford)).toBe("Net — uses the strokes on the card");
+  // NOT "uses the strokes on the card" (spec §3's first wording, corrected in §11): the card shows
+  // each player's FULL number and a game shows the difference from its own field's lowest, so that
+  // line was false for any game played by a subset of the roster.
+  it("states the net treatment as the game's own field, with no percentage and no card claim", () => {
+    expect(gameTreatment(strokePlay("net"))).toBe("Net — everyone plays off the lowest in this game");
+    expect(gameTreatment(skins("net"))).toBe("Net — everyone plays off the lowest in this game");
+    expect(gameTreatment(stableford)).toBe("Net — everyone plays off the lowest in this game");
   });
   it("names the field for the two kinds whose field is not simply everyone in the game", () => {
     expect(gameTreatment(singles)).toBe("Strokes are the difference between you two");
@@ -62,16 +66,16 @@ describe("gameTreatment", () => {
 });
 
 describe("strokesNote", () => {
-  it("names WHOSE strokes each net game's field is measured against", () => {
-    expect(strokesNote(strokePlay("net"))).toBe("Everyone in this game plays off the lowest in it.");
-    expect(strokesNote(stableford)).toBe("Everyone in this game plays off the lowest in it.");
-    expect(strokesNote(skins("net"))).toBe("Everyone in this game plays off the lowest in it.");
-    expect(strokesNote(singles)).toBe("Only the higher number gets strokes — the lower plays off scratch.");
-    expect(strokesNote(fourball)).toBe("All four play off the lowest of the four.");
+  it("names WHO RECEIVES for the two match kinds — the fact their treatment line doesn't carry", () => {
+    expect(strokesNote("singles-match")).toBe("Only the higher number gets strokes — the lower plays off scratch.");
+    expect(strokesNote("fourball-match")).toBe("Only the three higher numbers get strokes — the lowest plays off scratch.");
   });
-  it("stays undefined for a gross game — it allocates nothing, so there is no field to describe", () => {
-    expect(strokesNote(strokePlay("gross"))).toBeUndefined();
-    expect(strokesNote(skins("gross"))).toBeUndefined();
+  it("stays undefined for the three kinds whose treatment line already states their field", () => {
+    // The net treatment line IS "everyone plays off the lowest in this game" — a note repeating it
+    // would render the same sentence twice under the same heading.
+    expect(strokesNote("stroke-play")).toBeUndefined();
+    expect(strokesNote("stableford")).toBeUndefined();
+    expect(strokesNote("skins")).toBeUndefined();
   });
 });
 

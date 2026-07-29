@@ -41,6 +41,12 @@ export const gameStrokeAllocation = (
 ): ReadonlyMap<GolferId, ReadonlyMap<number, number>> => {
   if ("scoring" in config && config.scoring === "gross") return new Map();
   const members = gameMembers(config);
+  // Any tee set answers "how many holes is this card", because every tee set on one card has the
+  // same hole count — the whole-card supersession rule that made the card the stored unit pins it
+  // (course-cards spec 2026-07-15: no hole-count change on an existing card, asserted structurally).
+  // That is what lets the halving decision read teeSets[0] while the dots below are allocated
+  // against each player's OWN tee set; a card with mismatched tee lengths would make the two
+  // disagree, and none can exist.
   const holeCount = card.teeSets[0]?.holes.length ?? 18;
   const bases = members.map((id) => ({ golferId: id, basis: basisOf(participantFor(participants, id)) }));
   // A game's frozen players[] never drops a member who leaves, so the game's field excludes

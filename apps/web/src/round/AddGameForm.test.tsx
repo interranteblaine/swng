@@ -75,11 +75,13 @@ describe("strokes preview", () => {
     await user.click(screen.getByRole("radio", { name: "Skins" }));
     await user.click(screen.getByRole("checkbox", { name: "Pat" }));
     await user.click(screen.getByRole("checkbox", { name: "Sam" }));
-    expect(screen.getByText("Net — uses the strokes on the card")).toBeTruthy();
+    expect(screen.getByText("Net — everyone plays off the lowest in this game")).toBeTruthy();
     // Pat's 5 against Sam's 0, halved on a nine-hole card → "Pat 3 dots"; Sam is the lowest in
     // the field, so he plays off scratch and is omitted from the line.
     expect(screen.getByText(/Pat 3 dots/)).toBeTruthy();
-    expect(screen.getByText("Everyone in this game plays off the lowest in it.")).toBeTruthy();
+    // No note under it: the treatment line already states this game's field, so a note would
+    // render the same sentence twice.
+    expect(screen.queryByText(/plays off scratch/)).toBeNull();
   });
 
   it("match play explains the difference rule", async () => {
@@ -93,7 +95,7 @@ describe("strokes preview", () => {
   });
 
   // Live-walk finding (2026-07-19), carried forward: with Gross picked, the preview must state the
-  // gross treatment and show no strokes at all — not the all-zero "everyone plays off 0" line,
+  // gross treatment and show no strokes at all — not the all-zero "everyone plays level" line,
   // which is false for a game that has no strokes by definition. Switching back to net restores it.
   // There is no allowance percentage left to adjust, so no Adjust affordance exists at all.
   it("gross stroke play states its own treatment — no strokes line, no percentage anywhere", async () => {
@@ -104,12 +106,12 @@ describe("strokes preview", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "gross");
 
     expect(screen.getByText("Gross — raw scores, no strokes")).toBeTruthy();
-    expect(screen.queryByText("No strokes — everyone plays off 0.")).toBeNull();
+    expect(screen.queryByText("No strokes — everyone in this game plays level.")).toBeNull();
     expect(screen.queryByText(/dots/)).toBeNull();
     expect(document.body.textContent).not.toMatch(/handicap|%/);
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "net");
-    expect(screen.getByText("Net — uses the strokes on the card")).toBeTruthy();
+    expect(screen.getByText("Net — everyone plays off the lowest in this game")).toBeTruthy();
     expect(screen.queryByText("Gross — raw scores, no strokes")).toBeNull();
   });
 
@@ -139,7 +141,7 @@ describe("strokes preview", () => {
     await user.selectOptions(within(team2).getByRole("combobox", { name: "First player" }), "Sam");
     await user.selectOptions(within(team2).getByRole("combobox", { name: "Second player" }), "Dana");
     expect(screen.getByText("Everyone plays off the lowest of the four")).toBeTruthy();
-    expect(screen.getByText("All four play off the lowest of the four.")).toBeTruthy();
+    expect(screen.getByText("Only the three higher numbers get strokes — the lowest plays off scratch.")).toBeTruthy();
   });
 });
 

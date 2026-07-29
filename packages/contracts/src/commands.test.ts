@@ -253,6 +253,15 @@ describe("gameConfigInputSchema", () => {
   it("accepts exactly 12 players (the boundary)", () => {
     expect(() => parse(gameConfigInputSchema, { kind: "skins", scoring: "net", players: players12 })).not.toThrow();
   });
+
+  // The other direction of the same split: skins' `scoring` is `.default("net")` on the shared field
+  // set so a legacy STORED game-added event still parses (round.test.ts pins that), and REQUIRED
+  // here so a client proposing a NEW skins game has to say which pot it is rather than silently
+  // getting net. A default on the request path would make the choice unaskable.
+  it("rejects a skins game submitted with no scoring — the request must name the pot", () => {
+    expect(() => parse(gameConfigInputSchema, { kind: "skins", players: ["a", "b"] })).toThrow(ContractError);
+    expect(() => parse(gameConfigInputSchema, { kind: "skins", scoring: "gross", players: ["a", "b"] })).not.toThrow();
+  });
 });
 
 describe("finalizeRoundResponseSchema", () => {

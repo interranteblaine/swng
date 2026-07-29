@@ -9,7 +9,7 @@ import {
   setHandicapResponseSchema,
   startRoundResponseSchema,
 } from "@swng/contracts";
-import type { FinalizeRoundResponse, RecordScoreRequest, SetHandicapRequest } from "@swng/contracts";
+import type { AddGameRequest, FinalizeRoundResponse, RecordScoreRequest, SetHandicapRequest } from "@swng/contracts";
 import { fixtureLinks, reduceRound, resultOf, scoreGame } from "@swng/domain";
 import type { GameResult, GolferId, HoleResult, RoundEvent, RoundId } from "@swng/domain";
 import { apiUrl, connectWs, createClientOps, ensureCourse, get, loadEndpoints, mintAccountGolfer, post, waitUntil } from "./support/client.js";
@@ -115,20 +115,15 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
     boPhone = createClientOps("bo-phone");
   });
 
-  // Step 3: client 1 adds both games over the now-3-participant roster.
+  // Step 3: client 1 adds both games over the now-3-participant roster. Both bodies are typed
+  // AddGameRequest deliberately: `post` takes an `unknown` body, so an untyped literal here would
+  // hide a newly-required game field from typecheck and only surface as a 400 on the first live
+  // run (which is exactly how skins' own `scoring` was missed once).
   it("3: client 1 adds skins and stableford", async () => {
-    const skinsAdded = await post(
-      rounds(`/${roundId}/games`),
-      { game: { kind: "skins", players: [annId, boId, calId] } },
-      addGameResponseSchema,
-      token1,
-    );
-    const stablefordAdded = await post(
-      rounds(`/${roundId}/games`),
-      { game: { kind: "stableford", players: [annId, boId, calId] } },
-      addGameResponseSchema,
-      token1,
-    );
+    const skinsBody: AddGameRequest = { game: { kind: "skins", scoring: "net", players: [annId, boId, calId] } };
+    const stablefordBody: AddGameRequest = { game: { kind: "stableford", players: [annId, boId, calId] } };
+    const skinsAdded = await post(rounds(`/${roundId}/games`), skinsBody, addGameResponseSchema, token1);
+    const stablefordAdded = await post(rounds(`/${roundId}/games`), stablefordBody, addGameResponseSchema, token1);
     expect(skinsAdded.gameId).not.toBe(stablefordAdded.gameId);
   });
 
@@ -204,17 +199,19 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
   });
 
   // Step 8: finalize reproduces the M2 post-correction golden numbers over deployed
-  // infrastructure — skins ann 8 / bo 1 / cal 0, carriedOut 0; stableford ann 18 / bo 17 /
-  // cal 10; all three golfers' handicapping is complete.
+  // infrastructure — skins ann 2 / bo 6 / cal 0, carriedOut 1; stableford ann 13 / bo 15 /
+  // cal 4; all three golfers' handicapping is complete. Both games' strokes are the difference
+  // from the lowest in the field (Bo's 2), halved on this nine-hole card: Ann 3 dots, Bo 0, Cal 5
+  // — the same numbers concurrent.test.ts and archive.test.ts hand-derive for this deck.
   it("8: finalize reproduces the M2 post-correction golden numbers", async () => {
     finalize1 = await post(rounds(`/${roundId}/finalize`), undefined, finalizeRoundResponseSchema, token1);
 
     const skins = skinsResultOf(finalize1.results);
-    expect(skins.carriedOut).toBe(0);
+    expect(skins.carriedOut).toBe(1);
     expect(skins.won).toEqual(
       expect.arrayContaining([
-        { golferId: annId, skins: 8 },
-        { golferId: boId, skins: 1 },
+        { golferId: annId, skins: 2 },
+        { golferId: boId, skins: 6 },
         { golferId: calId, skins: 0 },
       ]),
     );
@@ -222,9 +219,9 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
     const stableford = stablefordResultOf(finalize1.results);
     expect(stableford.points).toEqual(
       expect.arrayContaining([
-        { golferId: annId, points: 18 },
-        { golferId: boId, points: 17 },
-        { golferId: calId, points: 10 },
+        { golferId: annId, points: 13 },
+        { golferId: boId, points: 15 },
+        { golferId: calId, points: 4 },
       ]),
     );
 

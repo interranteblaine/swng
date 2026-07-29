@@ -109,6 +109,24 @@ describe("roundEventSchema", () => {
     expect(parsed).toMatchObject({ kind: "round-created", roundId: roundId("r1") });
   });
 
+  // Skins' `scoring` arrived AFTER rounds were already on file, and this schema is a READ/FOLD path
+  // — the client parses every pulled event through it from seq 0 (client/src/transport.ts), and the
+  // WS envelope does too. A stored game-added event written before the field existed carries no
+  // `scoring` key, so the shared field set defaults it rather than requiring it: a legacy skins
+  // round stays readable, and reads as the net pot it always was. Requiring it here would have left
+  // the server finalizing fine while no client could read the round at all.
+  it("parses an OLD skins game-added event with no scoring key and reads it as net", () => {
+    const legacy = {
+      kind: "game-added",
+      config: { kind: "skins", id: gameId("g-legacy"), players: [golferId("a"), golferId("b")] },
+      opId: opId("op-legacy-skins"),
+      hlc: baseHlc,
+      authorId: golferId("author"),
+    };
+    const parsed = parse(roundEventSchema, legacy);
+    expect(parsed).toMatchObject({ kind: "game-added", config: { kind: "skins", scoring: "net" } });
+  });
+
   it("roundEventSchema, gameConfigSchema, and gameResultSchema type-parity holds in both directions (compile-time check)", () => {
     // Deliberately checked against the *Impl consts (round.ts), not the exported
     // roundEventSchema / gameConfigSchema / gameResultSchema aliases: those aliases carry

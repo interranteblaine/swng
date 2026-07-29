@@ -115,7 +115,8 @@ describe("skins — golden cards", () => {
   });
 
   it("every player out of the hole carries the pot", () => {
-    // h1 all picked up → the skin carries; h2 Ann takes the doubled pot (net 3 vs 4/4).
+    // h1 all picked up → the skin carries; h2 Ann takes the doubled pot (net 3 vs 5/5 — h2 is SI 1,
+    // so Ann's gross 4 and Cal's 6 each take a dot and Bo, off scratch, keeps his 5).
     const [state] = playGoldenRound(fixtureLinks, players3, [game], {
       [A]: ["picked-up", 4],
       [B]: ["picked-up", 5],

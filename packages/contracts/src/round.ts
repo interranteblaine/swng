@@ -79,7 +79,18 @@ export const gameConfigFields = {
   skins: {
     // Skins earns the gross/net choice stroke play already had (spec §3): gross skins is the
     // most-played casual variant, and a group routinely runs both pots over one card.
-    scoring: z.enum(["gross", "net"]),
+    //
+    // `.default("net")` and NOT required, for the same placement rule the `players` bounds follow
+    // (see commands.ts): this shared field set also builds the stored `skinsConfigSchema` behind
+    // roundEventSchema's game-added arm, which is a READ/FOLD path — the client parses every pulled
+    // event through it from seq 0 (client/src/transport.ts), and the WS envelope does too. A
+    // skins game-added event written before this field existed carries no `scoring` key, so
+    // requiring it here would make those rounds unreadable on the client while the server (which
+    // casts rather than parses) kept working. The default reads a legacy config as net, which is
+    // exactly what it was, and the domain agrees by construction (`"scoring" in config` is false).
+    // The request copies in commands.ts override this back to REQUIRED — a client proposing a new
+    // skins game must say which pot it is.
+    scoring: z.enum(["gross", "net"]).default("net"),
     players: z.array(golferIdSchema),
   },
 } as const;

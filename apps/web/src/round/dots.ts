@@ -19,9 +19,9 @@ export { totalDots };
 // same allocation the card's dots render. Members with no strokes are omitted; a game
 // where nobody gets any reads as scratch golf outright.
 //
-// Undefined for a GROSS game (spec §9): it allocates nothing by definition, so the all-zero
-// "No strokes — everyone plays off 0." line below would be a false statement about a game that
-// never had strokes to begin with — the treatment line already says so in words.
+// Undefined for a GROSS game (spec §9): it allocates nothing by definition, so the all-zero line
+// below would be a false statement about a game that never had strokes to begin with — the
+// treatment line already says so in words.
 export const strokesSummary = (config: GameConfig, participants: readonly Participant[], card: CourseCard): string | undefined => {
   if ("scoring" in config && config.scoring === "gross") return undefined;
   const dots = gameDots(config, participants, card);
@@ -34,5 +34,9 @@ export const strokesSummary = (config: GameConfig, participants: readonly Partic
     if (total === 0) return [];
     return [`${nameOf(id)} ${total} ${total === 1 ? "dot" : "dots"}`];
   });
-  return parts.length > 0 ? parts.join(" · ") : "No strokes — everyone plays off 0.";
+  // "everyone plays off 0" was true under the old absolute allocation, where zero dots for
+  // everyone meant every member really was a scratch player. Under the ONE rule zero dots means
+  // the members are EQUAL — at any level — so two golfers who both normally shoot +20 would have
+  // been told they were scratch. What is true in both cases is that nobody is receiving.
+  return parts.length > 0 ? parts.join(" · ") : "No strokes — everyone in this game plays level.";
 };

@@ -76,12 +76,22 @@ stated once. This is what makes §2a's bound true for *derived* strokes and not 
 ones, and it is load-bearing: after the plus-handicap layer is deleted (§7) the scorecard renders
 dots as `"●".repeat(dots)`, and `repeat` throws `RangeError` on a negative.
 
-**A departed player is not in the field.** `reduceRound` keeps departed seats on the roster
-(their scored holes still settle), but they are excluded from the anchor. Without this, someone
-who joins the wrong round at `+2` and leaves permanently anchors everyone else's card. A departed
-player's own strokes resolve against the surviving anchor and clamp at zero — which is correct:
-if they were better than everyone still present, they were the anchor while they were there and
-never received a stroke.
+**A departed player is not in the field — in a game as well as on the card.** `reduceRound` keeps
+departed seats on the roster (their scored holes still settle), but they are excluded from the
+anchor. Without this, someone who joins the wrong round at `+2` and leaves permanently anchors
+everyone else's card. A departed player's own strokes resolve against the surviving anchor and
+clamp at zero — which is correct: if they were better than everyone still present, they were the
+anchor while they were there and never received a stroke.
+
+A game's frozen `players[]` never drops a member who leaves, so **the same exclusion applies when
+a game resolves its own field**. One rule in both places, or the wrong-round joiner still anchors
+whichever game he was added to before leaving.
+
+**The anchor is always computed by the caller, from a field it has explicitly scoped.**
+`resolveStrokes` takes the anchor as a required argument and has no fallback of its own. A
+fallback would silently re-admit a departed player whenever nobody still present had stated a
+normal score — computing the anchor over the full list it was handed rather than the field the
+caller meant.
 
 **Nine holes: halve the difference, once, at the end.** Blaine `+30`, his mate `+10`, difference
 20, so on nine holes Blaine gets 10. Never halve each player's number first — that rounds twice

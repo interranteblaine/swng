@@ -65,49 +65,51 @@ Create `packages/domain/src/scoring/strokeBasis.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { resolveStrokes } from "./strokeBasis.js";
+import { anchorOf, resolveStrokes } from "./strokeBasis.js";
 import type { GolferId } from "../ids.js";
 
 const g = (s: string) => s as GolferId;
 const shoots = (id: string, overPar: number) => ({ golferId: g(id), basis: { kind: "normally-shoots" as const, overPar } });
 const takes = (id: string, strokes: number) => ({ golferId: g(id), basis: { kind: "strokes" as const, strokes } });
+// Every call passes an explicit anchor — resolveStrokes has no fallback (spec §2b).
+const resolve = (bases: Parameters<typeof resolveStrokes>[0], holes: number) => resolveStrokes(bases, holes, anchorOf(bases));
 
 describe("resolveStrokes", () => {
   it("takes the difference from the lowest stated normal score", () => {
-    const s = resolveStrokes([shoots("blaine", 30), shoots("ravi", 10)], 18);
+    const s = resolve([shoots("blaine", 30), shoots("ravi", 10)], 18);
     expect(s.get(g("blaine"))).toBe(20);
     expect(s.get(g("ravi"))).toBe(0);
   });
 
   it("gives a player who stated strokes exactly what they said", () => {
-    const s = resolveStrokes([takes("blaine", 18), shoots("ravi", 10)], 18);
+    const s = resolve([takes("blaine", 18), shoots("ravi", 10)], 18);
     expect(s.get(g("blaine"))).toBe(18);
     expect(s.get(g("ravi"))).toBe(0);
   });
 
   it("allocates nothing when only one player's level is known", () => {
     // Spec §2b: strokes cannot be allocated against an unknown level. Correct, not a failure.
-    const s = resolveStrokes([shoots("blaine", 30), takes("ravi", 0)], 18);
+    const s = resolve([shoots("blaine", 30), takes("ravi", 0)], 18);
     expect(s.get(g("blaine"))).toBe(0);
     expect(s.get(g("ravi"))).toBe(0);
   });
 
   it("anchors a lone player against himself", () => {
-    expect(resolveStrokes([shoots("blaine", 30)], 18).get(g("blaine"))).toBe(0);
+    expect(resolve([shoots("blaine", 30)], 18).get(g("blaine"))).toBe(0);
   });
 
   it("halves the difference once, at the end, on a nine-hole card", () => {
-    const s = resolveStrokes([shoots("blaine", 30), shoots("ravi", 10)], 9);
+    const s = resolve([shoots("blaine", 30), shoots("ravi", 10)], 9);
     expect(s.get(g("blaine"))).toBe(10);
   });
 
   it("rounds a halved odd difference half-up", () => {
-    const s = resolveStrokes([shoots("blaine", 25), shoots("ravi", 10)], 9);
+    const s = resolve([shoots("blaine", 25), shoots("ravi", 10)], 9);
     expect(s.get(g("blaine"))).toBe(8); // 15 / 2 = 7.5 → 8
   });
 
   it("never halves a literal strokes assertion", () => {
-    expect(resolveStrokes([takes("blaine", 9)], 9).get(g("blaine"))).toBe(9);
+    expect(resolve([takes("blaine", 9)], 9).get(g("blaine"))).toBe(9);
   });
 
   it("clamps a below-zero difference to zero", () => {
@@ -115,7 +117,7 @@ describe("resolveStrokes", () => {
     // departed player better than everyone still there would otherwise resolve negative. After
     // Task 5 the card renders "●".repeat(dots) and repeat() throws RangeError on a negative, so
     // this clamp is the thing standing between that path and a crash on the live card.
-    const s = resolveStrokes([shoots("early", 2)], 18, 10);
+    const s = resolveStrokes([shoots("early", 2)], 18, 10); // anchor from the surviving field
     expect(s.get(g("early"))).toBe(0);
   });
 });
@@ -153,15 +155,22 @@ export type StrokeBasis =
 //
 // Callers pass only the PRESENT field — reduceRound filters departed seats before calling
 // (spec §2b), because a wrong-round joiner who left must not anchor everyone's card.
-// `anchorOverride` lets a caller resolve players who are NOT part of the anchor field against an
-// anchor computed elsewhere — the departed path (spec §2b). Absent, the anchor comes from `bases`.
+// The anchor for a field: the lowest stated `normally-shoots` among its members, or undefined
+// when nobody stated one. Exported so every caller scopes its OWN field and passes the result.
+export const anchorOf = (bases: readonly { readonly basis: StrokeBasis }[]): number | undefined => {
+  const stated = bases.flatMap(({ basis }) => (basis.kind === "normally-shoots" ? [basis.overPar] : []));
+  return stated.length > 0 ? Math.min(...stated) : undefined;
+};
+
+// `anchor` is REQUIRED and this function has NO fallback of its own — deliberately. A fallback
+// that computed the anchor from `bases` would silently re-admit a departed player whenever nobody
+// still present had stated a normal score, since callers pass the full roster (departed included)
+// as `bases` and scope only the ANCHOR to the present field (spec §2b).
 export const resolveStrokes = (
   bases: readonly { readonly golferId: GolferId; readonly basis: StrokeBasis }[],
   holeCount: number,
-  anchorOverride?: number,
+  anchor: number | undefined,
 ): ReadonlyMap<GolferId, number> => {
-  const stated = bases.flatMap(({ basis }) => (basis.kind === "normally-shoots" ? [basis.overPar] : []));
-  const anchor = anchorOverride ?? (stated.length > 0 ? Math.min(...stated) : undefined);
   return new Map(
     bases.map(({ golferId, basis }) => {
       if (basis.kind === "strokes") return [golferId, basis.strokes];
@@ -182,7 +191,12 @@ Expected: PASS, 8 tests
 
 - [ ] **Step 5: Write the failing allocation test**
 
-Add to `packages/domain/src/scoring/allocation.test.ts`, using the file's existing `card`/`golferId`/`gameId` helpers (keep the participant helper's `courseHandicap` field for now — it is renamed in Task 3):
+Add to `packages/domain/src/scoring/allocation.test.ts`. **The file has no participant-builder helper and no `card` constant** — participants are inline object literals and the card in scope is `fixtureLinks18` (imported at `:11`). Add a local builder and use that card. Keep `courseHandicap` for now; Task 3 renames it.
+
+```ts
+const p = (id: string, courseHandicap: number): Participant =>
+  ({ golferId: id as GolferId, name: id, tee: "white", courseHandicap });
+```
 
 ```ts
 describe("gameStrokeAllocation", () => {
@@ -192,7 +206,7 @@ describe("gameStrokeAllocation", () => {
     const allocation = gameStrokeAllocation(
       { kind: "stroke-play", id: gameId("g1"), scoring: "net", players: [golferId("bo"), golferId("cy")] },
       roster,
-      card,
+      fixtureLinks18,
     );
     expect(totalDots(allocation.get(golferId("bo"))!)).toBe(0);
     expect(totalDots(allocation.get(golferId("cy"))!)).toBe(5);
@@ -202,7 +216,7 @@ describe("gameStrokeAllocation", () => {
     const allocation = gameStrokeAllocation(
       { kind: "skins", id: gameId("g2"), scoring: "gross", players: [golferId("bo"), golferId("cy")] },
       roster,
-      card,
+      fixtureLinks18,
     );
     expect(allocation.size).toBe(0);
   });
@@ -224,16 +238,18 @@ In `allocation.ts`, delete the five-arm `switch` and replace with:
 // encoded five conventions and a hidden allowance percentage; there is nothing per-kind left.
 export const gameStrokeAllocation = (
   config: GameConfig,
-  participants: readonly Participant[],
+  participants: readonly RosterEntry[],
   card: CourseCard,
 ): ReadonlyMap<GolferId, ReadonlyMap<number, number>> => {
   if ("scoring" in config && config.scoring === "gross") return new Map();
   const members = gameMembers(config);
   const holeCount = card.teeSets[0]?.holes.length ?? 18;
-  const strokes = resolveStrokes(
-    members.map((id) => ({ golferId: id, basis: basisOf(participantFor(participants, id)) })),
-    holeCount,
-  );
+  const bases = members.map((id) => ({ golferId: id, basis: basisOf(participantFor(participants, id)) }));
+  // A game's frozen players[] never drops a member who leaves, so the game's field excludes
+  // departed players from its ANCHOR exactly as the card's does (spec §2b) — otherwise a
+  // wrong-round joiner still anchors whichever game he was added to before leaving.
+  const present = bases.filter(({ golferId }) => participantFor(participants, golferId).departed !== true);
+  const strokes = resolveStrokes(bases, holeCount, anchorOf(present));
   return new Map(
     members.map((id) => [id, dotsByHole(strokes.get(id)!, findTeeSet(card, participantFor(participants, id).tee))]),
   );
@@ -355,7 +371,7 @@ Mirror it in `contracts/round.ts`'s stored-event schema (**unbounded** — Arc A
 
 - [ ] **Step 4: Make a conceded hole score like the number it carries**
 
-A conceded hole is a scored hole in every engine (spec §2d). Each engine's `case "conceded"` branch — which today treats it as "no competitive score" — is deleted and the cell falls through to the same path a `strokes` cell takes.
+A conceded hole is a scored hole in every engine (spec §2d). **No engine has a `case "conceded"` arm** — each gates on `cell.result.kind === "strokes"` (`skins.ts:38`, `strokePlay.ts:29`, `stableford.ts:28`, and the equivalent in `singlesMatch.ts`/`fourballMatch.ts`) and treats everything else as "no competitive score". The change is to broaden each guard to accept `"conceded"` too and read `.strokes` off whichever arm matched.
 
 ```ts
 // singlesMatch.test.ts — you made the 4, so you win the hole.
@@ -497,11 +513,10 @@ In `state.ts`, `participant-handicap-set` carries `basis: StrokeBasis` (mirror i
 // resolveStrokes — they were the anchor while they were there).
 const holeCount = card.teeSets[0]?.holes.length ?? 18;
 const present = roster.filter((entry) => entry.departed !== true);
-const anchor = present.flatMap(({ basis }) => (basis.kind === "normally-shoots" ? [basis.overPar] : []));
 const strokes = resolveStrokes(
   roster.map(({ golferId, basis }) => ({ golferId, basis })),
   holeCount,
-  anchor.length > 0 ? Math.min(...anchor) : undefined,
+  anchorOf(present), // the anchor is scoped to the PRESENT field; resolveStrokes has no fallback
 );
 const participants = roster.map((entry) => ({ ...entry, strokes: strokes.get(entry.golferId)! }));
 ```
@@ -653,7 +668,8 @@ git commit -m "feat(web): scorecard totals row; the finished round shows gross, 
 **Files:**
 - Create: `packages/domain/src/golfer/average.ts` + test
 - Delete: `packages/domain/src/handicap/whs.ts` + its two tests, `apps/web/src/ui/vsPar.ts`
-- Modify: `packages/domain/src/golfer/{golfer,record,metrics,analytics}.ts`, `packages/domain/src/handicap/present.ts` (+test), `packages/domain/src/scoring/allocation.ts`, `packages/domain/src/round/archive.ts`, `packages/domain/src/crew/scoreboard.ts` (+test), `packages/domain/src/index.ts`, `packages/client/src/scoring.ts`, `packages/contracts/src/{golfers,commands,crews}.ts`, `packages/application/src/rounds/finalizeRound.ts`, `packages/application/src/golfers/{recordOf,getMyRecord,getMyRounds,getGolfer,getMyGolfer,golferView,updateMyGolfer,ensureGolfer}.ts`, `packages/application/src/crews/getSeasonStandings.ts`, `packages/application/src/testing/fakes.ts`, `packages/adapters-dynamodb/src/golferStore.ts`, `apps/web/src/routes/ProfilePage.tsx`, `apps/web/src/golfers/{GolferPage,RecordSections}.tsx`, `apps/web/src/crews/SeasonPanel.tsx`, `apps/web/src/routes/JoinRoundPage.tsx`, `eslint.config.mjs`
+- Modify: `packages/domain/src/golfer/{golfer,record,metrics,analytics}.ts`, `packages/domain/src/handicap/present.ts` (+test), `packages/domain/src/scoring/allocation.ts`, `packages/domain/src/round/archive.ts`, `packages/domain/src/crew/scoreboard.ts` (+test), `packages/domain/src/index.ts`, `packages/client/src/scoring.ts`, `packages/contracts/src/{golfers,commands,crews}.ts`, `packages/application/src/rounds/finalizeRound.ts`, `packages/application/src/golfers/{recordOf,getMyRecord,getMyRounds,getGolfer,getMyGolfer,golferView,updateMyGolfer,ensureGolfer}.ts`, `packages/application/src/crews/getSeasonStandings.ts`, `packages/application/src/testing/fakes.ts`, `packages/adapters-dynamodb/src/createDynamoGolferStore.ts`, `apps/web/src/routes/ProfilePage.tsx`, `apps/web/src/golfers/{GolferPage,RecordSections}.tsx`, `apps/web/src/crews/SeasonPanel.tsx`, `apps/web/src/routes/JoinRoundPage.tsx`, `eslint.config.mjs`
+- **Compile-forced, same commit:** every `*.test.ts` carrying a `handicapping:` fixture — `domain/src/crew/{analytics,ledger}.test.ts`, `application/src/crews/seasonSlice.test.ts`, `application/src/projections/{projectionSlice,rebuildProjections}.test.ts`, `application/src/rounds/getRoundArchive.test.ts`, `lambda/src/compositionRoot.test.ts`, `adapters-dynamodb/src/contract/{journal,snapshotStore}.contract.test.ts`, `adapters-dynamodb/src/parseSnapshotStreamImage.test.ts` (the last three also carry `courseHandicap:` literals for Task 3)
 - E2E (same commit): `identityRecord.spec.ts`, `crewSeason.spec.ts:160,341,362`, `crewSeasonDeck.ts:252-259`
 
 - [ ] **Step 1: Write the failing average test**
@@ -853,7 +869,7 @@ export interface ScoreboardLine {
 - `finalizeRound.ts:61,90` stop returning `handicapping`; `contracts/commands.ts:173,213-222` drop `handicappingEntrySchema` and the response field.
 - `recordOf.ts`/`getMyRecord.ts`/`getGolfer.ts`: serve the new metrics; `toWireLine` maps `strokes`/`normallyShoots`, drops `ags`/`differential`.
 - `golferView.ts`/`updateMyGolfer.ts`/`ensureGolfer.ts:34`/`testing/fakes.ts:247`: drop `indexSource` from the view, the PUT body and every mint.
-- `adapters-dynamodb/src/golferStore.ts`: drop the `indexSource` attribute and its legacy fold; update the contract tests.
+- `adapters-dynamodb/src/createDynamoGolferStore.ts` (`:15,29,51,57-61,106`): drop the `indexSource` attribute and its legacy fold; update the contract tests.
 - `ProfilePage.tsx`: delete the whole "Your index" section — source picker, `Use this`, override box, the `applyGolfer` index path. Name and home course only.
 - `GolferPage.tsx:4,80,87`: drop `resolveIndex`/`indexSourcePhrase`/`formatHandicapIndex`.
 - `CreateRoundPage.tsx:6,130-133` and `JoinRoundPage.tsx:5,130-133`: delete the `strokeGrant` "You give N" branch — the lead is just the number.
@@ -938,6 +954,7 @@ git commit -m "feat(crew): name the strokes between two members who never played
 - §1: "most golfers' handicaps are unofficial, stale, or vibes" now resolves by *asking for the vibe in plain words and replacing it with real scores*, not by computing a WHS-faithful index.
 - §4: "Handicaps are already known, so strokes are computed" → "Everyone states what they normally shoot; swng takes the difference."
 - §6: **Crew handicaps** → **The crew board** — rounds, average, spread, best, and the head-to-head strokes line.
+- §10 (`product.md:118`): "**Official handicap-network integration.** The swng Index is deliberately honest-unofficial" — the pillar it names no longer exists. Reword to keep the non-goal (no official posting) without referencing a deleted index.
 
 - [ ] **Step 3: `architecture.md` and `CLAUDE.md`**
 

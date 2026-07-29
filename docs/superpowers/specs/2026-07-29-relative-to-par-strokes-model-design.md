@@ -71,10 +71,17 @@ Strokes fall out of the fold across the roster, the way scores fold into standin
 **The field is whatever you are looking at.** The card's field is the round's present roster; a
 game's field is that game's players. Same rule, no exceptions, no percentages.
 
+**Strokes are never negative.** A difference below zero is zero — one clamp, in `resolveStrokes`,
+stated once. This is what makes §2a's bound true for *derived* strokes and not merely for asserted
+ones, and it is load-bearing: after the plus-handicap layer is deleted (§7) the scorecard renders
+dots as `"●".repeat(dots)`, and `repeat` throws `RangeError` on a negative.
+
 **A departed player is not in the field.** `reduceRound` keeps departed seats on the roster
 (their scored holes still settle), but they are excluded from the anchor. Without this, someone
-who joins the wrong round at `+2` and leaves permanently anchors everyone else's card. Their own
-strokes still resolve against the surviving anchor, so their played holes stay netted.
+who joins the wrong round at `+2` and leaves permanently anchors everyone else's card. A departed
+player's own strokes resolve against the surviving anchor and clamp at zero — which is correct:
+if they were better than everyone still present, they were the anchor while they were there and
+never received a stroke.
 
 **Nine holes: halve the difference, once, at the end.** Blaine `+30`, his mate `+10`, difference
 20, so on nine holes Blaine gets 10. Never halve each player's number first — that rounds twice
@@ -89,6 +96,7 @@ The cases this must produce:
 | Blaine flips to `strokes: 18` | **18 and 0**; his `+30` is untouched and still true |
 | `+30` and `strokes: 0` | no stated normal score to anchor against but his own → **0 and 0**. Correct, not a failure: strokes cannot be allocated when only one person's level is known, and the fix is visible on screen |
 | `+30`, `+10`, and `+2` who has departed | anchor 10 → **20 and 0**; the departed player is not in the field |
+| the departed `+2`'s own strokes, against a surviving anchor of `+10` | `2 − 10 = −8`, clamped to **0** — he was the anchor while he was there |
 
 A fifth player joining just re-runs the fold. No correction event, no stale number.
 
@@ -129,6 +137,13 @@ and the code already keeps them apart:
   because you made the 4. It also removes the last reason net stroke play caps a conceded hole at
   net double bogey (`strokePlay.ts:40`) — that cap now applies to a picked-up hole only, which is
   the only kind with no number to use.
+
+  **"Everywhere" is literal, and two existing folds currently violate it.**
+  `archiveGolferLine`'s par-relative buckets (`record.ts:52-56`) and `courseRecord.ts:35`'s
+  per-hole insights both count `strokes` cells only. Both now count conceded cells too, at their
+  recorded score — otherwise a conceded par would win the skin and lift the average but vanish
+  from "your typical 18" and your record at that course, which is the same number disagreeing
+  with itself on two screens.
 - **Picked up** — you stopped. There is no number and nobody pretends otherwise. A round
   containing one does not feed the average, and it cannot set a `Best` either (`fullyHoledOut`
   requires every hole be a stroke count, and always has). It still appears in your history.
@@ -329,15 +344,24 @@ than scratch. Only the first survives this arc, and it needs no convention at al
 - `HoleResult`'s `conceded` arm gains required `strokes`, bounded at the request ingress
   alongside the existing `strokes` arm.
 - `GolferRoundLine`: `courseHandicap` → `strokes`; add `normallyShoots?: number` (absent when the
-  player stated raw strokes); drop `ags`/`differential`.
+  player stated raw strokes); add `score?: number` — the whole-round total from `scoreOf`, present
+  iff `hasCompleteScore`; drop `ags`/`differential`. **`score` is load-bearing, not tidiness:**
+  `holeResults` never rides the wire, so deleting `ags` would leave §5's history rows (`100 +28`)
+  with no number to render at all.
 - `GolferMetrics`: `{ average?, spread?, typicalEighteen, averageHistory, bests, milestones }`.
 - `GameConfig.skins` gains `scoring: "gross" | "net"`.
 
-**Beta data is wiped** (rounds, snapshots, projections; golfers and crews kept), per the
+**Beta round data is wiped** (rounds, snapshots, projections; golfers and crews kept), per the
 2026-07-16 precedent. Every stored round's `courseHandicap` is semantically ambiguous under the
 new model — some are absolute, some are differences — so there is nothing honest to migrate. No
-tolerate-old-data machinery, no migration script beyond the existing
-`scrapCourseAndRoundData.mjs`. **No prod deploy in this arc.**
+tolerate-old-data machinery, no new migration script.
+
+**Courses are NOT wiped.** This arc does not touch the course model, and the hand-seeded real
+cards (Casa Verde GC, Sandy Hollow Nine) are the field-test fixtures. `scrapCourseAndRoundData.mjs`
+deletes every `COURSE#` item and strips `homeCourseId` from every golfer as its first pass — that
+pass must be **skipped**, not run. Use the script's rounds/snapshots/projections passes only.
+
+**No prod deploy in this arc.**
 
 ## 9. Language
 

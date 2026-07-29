@@ -10,6 +10,20 @@
 
 **Tech Stack:** TypeScript (ESM, nodenext), pnpm workspaces, Vitest, Zod (contracts), React 19 + Tailwind 4 (web), AWS CDK (infra), Playwright (field e2e).
 
+## Status — read this first (2026-07-29)
+
+**Nothing is implemented.** This arc is docs-only so far: the spec and this plan. No file under
+`packages/` or `apps/` has been touched. Start at Task 1.
+
+**The review gate is met — do not re-run it.** Three reviews ran against these documents: two
+scoped passes, then one **open** review (no checklist, reviewer's own judgment) which returned
+*ready to implement*. Every Critical and Important from all three is fixed, each recorded in the
+commit message that fixed it — `c51e333`, `2e78dbc`, `5a80bc7`. The spec's §11 carries the
+design-level revision record.
+
+**Execution mode:** subagent-driven, a fresh agent per task with a review between tasks. This is
+the repo default and not a question to re-ask.
+
 ## Global Constraints
 
 - **Spec:** `docs/superpowers/specs/2026-07-29-relative-to-par-strokes-model-design.md`. Every decision is there; this plan implements it and adds nothing.
@@ -300,7 +314,7 @@ Run `pnpm build` and fix in order:
 - `apps/web/src/games/GamePanel.tsx:65` renders `gameTreatment(config)` instead of `allowancePhrase`; `describeGame.ts` follows.
 - `apps/web/src/round/dots.ts` — `strokesSummary` returns nothing for a gross game (its all-zero copy "No strokes — everyone plays off 0" is false for a game with no strokes by definition).
 - `AddGameForm.tsx` — delete the allowance percent input and the "Adjust" disclosure; add a gross/net radio to the skins branch mirroring stroke play's.
-- `eslint.config.mjs` — banlist gains `resolveStrokes`, loses `defaultAllowance`.
+- `eslint.config.mjs` — banlist gains `resolveStrokes` and `anchorOf`, loses `defaultAllowance`.
 - Any e2e spec that adds a game with an allowance.
 
 - [ ] **Step 10: Re-derive the golden deck expectations by hand**

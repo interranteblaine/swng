@@ -1,75 +1,62 @@
 # Relative-to-Par Strokes Model — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **Revised 2026-07-29** after an adversarial review of the first draft. The task boundaries moved: see "Why the boundaries are where they are" below before reordering anything.
 
 **Goal:** Replace the WHS/swng index pipeline with one number a golfer states in plain golf terms — what they normally shoot relative to par — from which strokes are derived by the fold as the difference from the lowest in the field.
 
-**Architecture:** What a player asserts becomes a `StrokeBasis` object (`normally-shoots` or `strokes`), stored on the participant. Strokes stop being stored: `reduceRound` derives them across the roster and every reader consumes the derived value, exactly as scores fold into standings. Rating, slope, allowances, differentials and adjusted gross score are deleted whole; a golfer's record becomes a distribution over `score − par`.
+**Architecture:** What a player asserts becomes a `StrokeBasis` object (`normally-shoots` or `strokes`) on the participant. Strokes stop being asserted: `reduceRound` derives them across the present roster and every reader consumes the derived value. Rating, slope, allowances, differentials and adjusted gross score are deleted whole; a golfer's record becomes a distribution over `score − par`.
 
 **Tech Stack:** TypeScript (ESM, nodenext), pnpm workspaces, Vitest, Zod (contracts), React 19 + Tailwind 4 (web), AWS CDK (infra), Playwright (field e2e).
 
 ## Global Constraints
 
 - **Spec:** `docs/superpowers/specs/2026-07-29-relative-to-par-strokes-model-design.md`. Every decision is there; this plan implements it and adds nothing.
-- **`pnpm validate` must exit 0 at every commit.** Lint + typecheck + build + test. A task that would leave the tree red must land as one atomic commit across layers — several below do, and say so.
-- **Beta only.** No `deploy:prod`, no `publish:web:prod`, no changes to `STAGE_CONFIG`'s `prod` entry.
-- **No migration, no tolerate-old-data machinery.** Beta round data is wiped in Task 9. Stored `courseHandicap` is semantically ambiguous under the new model (some values are absolute, some are already differences), so there is nothing honest to migrate.
-- **Language, verbatim:** the join question is `What do you normally shoot, relative to par?`; the measured value is called **average**. Never "index", "handicap", "your number", "your usual", "form", or "adjusted score" in user-facing copy.
-- **`handicap/present.ts` survives untouched** — `formatHandicapIndex`, `formatCourseHandicap`, `strokeGrant`, and the whole-tree grep gate that forbids a bare signed render. A player can shoot under par; golf's plus convention stays.
-- **The compute fence stays enforced.** `apps/web/src` may not import golf compute from `@swng/domain`; new compute goes in the domain and is re-exported through `@swng/client`. Any new domain compute function must be added to the ESLint banlist in `eslint.config.mjs`.
-- **Frozen decks:** `packages/domain/src/scoring/golden/fieldDeck18.ts` and `apps/web/e2e/crewSeasonDeck.ts` keep their hand-designed **scores** byte-identical. Only *expected results* are re-derived, and only in Task 1, by hand, with the derivation shown in the commit message.
+- **`pnpm validate` must exit 0 at every commit.**
+- **`validate` typechecks the e2e suites.** `package.json:14` → `pnpm -r typecheck`; `e2e/package.json:8` has its own; `apps/web/tsconfig.json:19` includes `"e2e"`. **Every task that changes a wire or domain type must fix the e2e call sites in the SAME commit.** Task 8 is oracle re-derivation and locator reconciliation only — it cannot be where the compile errors get fixed.
+- **Beta only.** No `deploy:prod`, no `publish:web:prod`, no change to `STAGE_CONFIG`'s `prod` entry.
+- **No migration, no tolerate-old-data machinery.** Beta round data is wiped in Task 9.
+- **Language, verbatim:** the join question is `What do you normally shoot, relative to par?`; the measured value is **average**. Never "index", "handicap", "your number", "your usual", "form", or "adjusted score" in user-facing copy.
+- **Two sign conventions, never mixed** (spec §4). Handicap numbers render through `formatCourseHandicap`/`strokeGrant` (negative = plus, shown `+2`). Vs-par numbers render through the new `formatOverPar` (positive = over par, shown `+26`, `E`, `−2`). `formatHandicapIndex` is deleted with the index.
+- **The compute fence stays enforced.** New domain compute goes in the ESLint banlist in `eslint.config.mjs` and is re-exported through `@swng/client` for web use.
+- **Frozen decks** keep their hand-designed **scores** byte-identical. Only expected results are re-derived, by hand, with the derivation in the commit message.
+
+### Why the boundaries are where they are
+
+Three constraints fix the order and cannot be relaxed:
+
+1. `Participant` and `GolferMetrics` are imported by every layer, so Tasks 3 and 5 are **single atomic commits** across domain → contracts → application → adapters → web → e2e.
+2. `packages/client/src/scoring.ts:49-60` re-exports `defaultAllowance`, `handicappingFor`, `courseHandicapFor`, `courseHandicapFromRatingSlopePar` and `unratedCourseHandicap`. Deleting any of them breaks that file and its web consumers in the same commit.
+3. **Task 4 exists to make Task 5 possible.** `ResultsView.tsx` imports `handicappingFor`; if Task 5 deleted that function while ResultsView still used it, Task 5 would swallow the whole results rewrite. Task 4 rewrites ResultsView to stop *using* it first, while the function still exists. Same trick is unavailable for `crew/scoreboard.ts` (its `netPer18` reads `line.ags`, and the replacement needs `averageOf`), so the scoreboard swap lives inside Task 5.
 
 ---
 
 ## File Structure
 
-**New files**
+**New**
 
 | File | Responsibility |
 |---|---|
-| `packages/domain/src/scoring/strokeBasis.ts` | The `StrokeBasis` type and `resolveStrokes` — the ONE resolution rule |
-| `packages/domain/src/golfer/average.ts` | `averageOf`, `spreadOf`, `averageHistory` over round lines |
+| `packages/domain/src/scoring/strokeBasis.ts` | `StrokeBasis` and `resolveStrokes` — the ONE resolution rule |
+| `packages/domain/src/golfer/average.ts` | `averageOf`, `spreadOf`, `averageHistory` |
 
-**Deleted files**
+**Deleted**
 
-| File | Why |
-|---|---|
-| `packages/domain/src/scoring/allowances.ts` (+ test) | The allowance table is deleted |
-| `packages/domain/src/handicap/whs.ts` (+ `whs.test.ts`, `whs.properties.test.ts`) | The whole WHS pipeline |
-
-**Heavily modified**
-
-| File | Change |
-|---|---|
-| `packages/domain/src/round/participant.ts` | `courseHandicap: number` → `basis: StrokeBasis`; `RosterEntry.strokes: number` (fold-derived) |
-| `packages/domain/src/round/state.ts` | `reduceRound` derives `strokes` via `resolveStrokes` |
-| `packages/domain/src/round/events.ts` | `participant-handicap-set` carries a `StrokeBasis` |
-| `packages/domain/src/round/holeResult.ts` | `conceded` carries `strokes` |
-| `packages/domain/src/scoring/allocation.ts` | One allocation rule for all five kinds; `handicappingFor` → `cardTotalFor` |
-| `packages/domain/src/scoring/game.ts` | `allowance` deleted from all arms; `skins` gains `scoring` |
-| `packages/domain/src/scoring/present.ts` | `allowancePhrase` deleted; treatment/notes rewritten |
-| `packages/domain/src/golfer/{record,metrics,analytics}.ts` | Line shape, metrics shape, `hasCompleteScore` |
-| `packages/domain/src/golfer/golfer.ts` | `HandicapProfile`/`IndexSource` deleted |
-| `packages/domain/src/crew/scoreboard.ts` | `Average · Spread · Best` |
-| `packages/contracts/src/{round,commands,golfers,crews}.ts` | Wire shapes |
-| `packages/application/src/{rounds,golfers,crews,projections}/*` | Use cases and the projector |
-| `apps/web/src/**` | Join, roster, card, results, profile, chart, crew board, add-game form |
+`packages/domain/src/scoring/allowances.ts` (+test) · `packages/domain/src/handicap/whs.ts` (+`whs.test.ts`, `whs.properties.test.ts`) · `apps/web/src/ui/vsPar.ts`
 
 ---
 
 ## Task 1: One stroke rule for every game; delete allowances
 
-Games stop re-deriving strokes from a hidden percentage. Every game applies one rule to its own field. Skins gains a gross/net choice.
-
 **Files:**
-- Create: `packages/domain/src/scoring/strokeBasis.ts`, `packages/domain/src/scoring/strokeBasis.test.ts`
-- Delete: `packages/domain/src/scoring/allowances.ts`, `packages/domain/src/scoring/allowances.test.ts`
-- Modify: `packages/domain/src/scoring/allocation.ts`, `packages/domain/src/scoring/game.ts`, `packages/domain/src/scoring/present.ts`, `packages/domain/src/scoring/{strokePlay,stableford,skins,singlesMatch,fourballMatch}.ts`, `packages/domain/src/index.ts`, `packages/contracts/src/round.ts`, `packages/contracts/src/commands.ts`, `apps/web/src/round/AddGameForm.tsx`, `apps/web/src/games/describeGame.ts`, `eslint.config.mjs`
-- Re-derive: `packages/domain/src/scoring/golden/fieldDeck18.ts` expectations, `packages/domain/src/scoring/fieldDeck18.test.ts`, every engine test's expected values
+- Create: `packages/domain/src/scoring/strokeBasis.ts` + test
+- Delete: `packages/domain/src/scoring/allowances.ts` + test
+- Modify: `packages/domain/src/scoring/{allocation,game,present}.ts`, the five engines, `packages/domain/src/index.ts`, `packages/client/src/scoring.ts`, `packages/contracts/src/{round,commands}.ts`, `apps/web/src/round/AddGameForm.tsx`, `apps/web/src/round/dots.ts`, `apps/web/src/games/GamePanel.tsx`, `apps/web/src/games/describeGame.ts`, `eslint.config.mjs`
+- Re-derive: `packages/domain/src/scoring/golden/fieldDeck18.ts` expectations + the five engine tests
 
 **Interfaces:**
-- Produces: `StrokeBasis`, `resolveStrokes(bases, holeCount): ReadonlyMap<GolferId, number>` — consumed by Tasks 3 and 6.
-- Produces: `gameStrokeAllocation(config, participants, card)` with the same signature as today but one implementation for all kinds.
+- Produces: `StrokeBasis`, `resolveStrokes(bases, holeCount): ReadonlyMap<GolferId, number>` (Tasks 3, 5), `gameTreatment(config): string` (Task 4).
 
 - [ ] **Step 1: Write the failing test for `resolveStrokes`**
 
@@ -81,83 +68,50 @@ import { resolveStrokes } from "./strokeBasis.js";
 import type { GolferId } from "../ids.js";
 
 const g = (s: string) => s as GolferId;
+const shoots = (id: string, overPar: number) => ({ golferId: g(id), basis: { kind: "normally-shoots" as const, overPar } });
+const takes = (id: string, strokes: number) => ({ golferId: g(id), basis: { kind: "strokes" as const, strokes } });
 
 describe("resolveStrokes", () => {
   it("takes the difference from the lowest stated normal score", () => {
-    const strokes = resolveStrokes(
-      [
-        { golferId: g("blaine"), basis: { kind: "normally-shoots", overPar: 30 } },
-        { golferId: g("ravi"), basis: { kind: "normally-shoots", overPar: 10 } },
-      ],
-      18,
-    );
-    expect(strokes.get(g("blaine"))).toBe(20);
-    expect(strokes.get(g("ravi"))).toBe(0);
+    const s = resolveStrokes([shoots("blaine", 30), shoots("ravi", 10)], 18);
+    expect(s.get(g("blaine"))).toBe(20);
+    expect(s.get(g("ravi"))).toBe(0);
   });
 
   it("gives a player who stated strokes exactly what they said", () => {
-    const strokes = resolveStrokes(
-      [
-        { golferId: g("blaine"), basis: { kind: "strokes", strokes: 18 } },
-        { golferId: g("ravi"), basis: { kind: "normally-shoots", overPar: 10 } },
-      ],
-      18,
-    );
-    expect(strokes.get(g("blaine"))).toBe(18);
-    expect(strokes.get(g("ravi"))).toBe(0);
+    const s = resolveStrokes([takes("blaine", 18), shoots("ravi", 10)], 18);
+    expect(s.get(g("blaine"))).toBe(18);
+    expect(s.get(g("ravi"))).toBe(0);
   });
 
   it("allocates nothing when only one player's level is known", () => {
-    // Spec §2b: strokes cannot be allocated against an unknown level. This is the
-    // correct answer, not a failure — the fix is visible on screen.
-    const strokes = resolveStrokes(
-      [
-        { golferId: g("blaine"), basis: { kind: "normally-shoots", overPar: 30 } },
-        { golferId: g("ravi"), basis: { kind: "strokes", strokes: 0 } },
-      ],
-      18,
-    );
-    expect(strokes.get(g("blaine"))).toBe(0);
-    expect(strokes.get(g("ravi"))).toBe(0);
+    // Spec §2b: strokes cannot be allocated against an unknown level. Correct, not a failure.
+    const s = resolveStrokes([shoots("blaine", 30), takes("ravi", 0)], 18);
+    expect(s.get(g("blaine"))).toBe(0);
+    expect(s.get(g("ravi"))).toBe(0);
+  });
+
+  it("anchors a lone player against himself", () => {
+    expect(resolveStrokes([shoots("blaine", 30)], 18).get(g("blaine"))).toBe(0);
   });
 
   it("halves the difference once, at the end, on a nine-hole card", () => {
-    const strokes = resolveStrokes(
-      [
-        { golferId: g("blaine"), basis: { kind: "normally-shoots", overPar: 30 } },
-        { golferId: g("ravi"), basis: { kind: "normally-shoots", overPar: 10 } },
-      ],
-      9,
-    );
-    expect(strokes.get(g("blaine"))).toBe(10);
-    expect(strokes.get(g("ravi"))).toBe(0);
+    const s = resolveStrokes([shoots("blaine", 30), shoots("ravi", 10)], 9);
+    expect(s.get(g("blaine"))).toBe(10);
   });
 
   it("rounds a halved odd difference half-up", () => {
-    const strokes = resolveStrokes(
-      [
-        { golferId: g("blaine"), basis: { kind: "normally-shoots", overPar: 25 } },
-        { golferId: g("ravi"), basis: { kind: "normally-shoots", overPar: 10 } },
-      ],
-      9,
-    );
-    expect(strokes.get(g("blaine"))).toBe(8); // 15 / 2 = 7.5 → 8
+    const s = resolveStrokes([shoots("blaine", 25), shoots("ravi", 10)], 9);
+    expect(s.get(g("blaine"))).toBe(8); // 15 / 2 = 7.5 → 8
   });
 
   it("never halves a literal strokes assertion", () => {
-    const strokes = resolveStrokes([{ golferId: g("blaine"), basis: { kind: "strokes", strokes: 9 } }], 9);
-    expect(strokes.get(g("blaine"))).toBe(9);
+    expect(resolveStrokes([takes("blaine", 9)], 9).get(g("blaine"))).toBe(9);
   });
 
-  it("keeps a plus player's give-back negative", () => {
-    const strokes = resolveStrokes(
-      [
-        { golferId: g("pro"), basis: { kind: "strokes", strokes: -2 } },
-        { golferId: g("ravi"), basis: { kind: "normally-shoots", overPar: 10 } },
-      ],
-      18,
-    );
-    expect(strokes.get(g("pro"))).toBe(-2);
+  it("preserves a plus player's give-back", () => {
+    const s = resolveStrokes([takes("pro", -2), shoots("ravi", 10)], 18);
+    expect(s.get(g("pro"))).toBe(-2);
   });
 });
 ```
@@ -169,30 +123,31 @@ Expected: FAIL — `Cannot find module './strokeBasis.js'`
 
 - [ ] **Step 3: Implement `strokeBasis.ts`**
 
-Create `packages/domain/src/scoring/strokeBasis.ts`:
-
 ```ts
 import type { GolferId } from "../ids.js";
 import { roundHalfUp } from "./strokes.js";
 
-// What a player asserts about their game (spec §2a) — an object, not an integer. A group
-// saying "just give him 18" is the SECOND constructor, not a fudge of the first, so nobody
-// ever distorts a true fact about themselves to get the strokes they want.
+// What a player asserts about their game (spec §2a) — an object, not an integer. A group saying
+// "just give him 18" is the SECOND constructor, not a fudge of the first, so nobody ever
+// distorts a true fact about themselves to get the strokes they want.
 export type StrokeBasis =
   | { readonly kind: "normally-shoots"; readonly overPar: number }
   | { readonly kind: "strokes"; readonly strokes: number };
 
-// The ONE resolution rule (spec §2b): strokes are the difference from the lowest in the
-// field. The anchor is the lowest stated `normally-shoots` on the roster; a player who
-// stated strokes gets exactly what they said and never enters the anchor.
+// The ONE resolution rule (spec §2b): strokes are the difference from the lowest in the field.
+// The anchor is the lowest stated `normally-shoots`; a player who stated strokes gets exactly
+// what they said and never enters the anchor.
 //
-// `holeCount` halves the DIFFERENCE once, at the end — never each player's number first,
-// which would round twice for no reason. A literal strokes assertion is never halved: it is
-// already a statement about this round.
+// `holeCount` halves the DIFFERENCE once, at the end — never each player's number first, which
+// would round twice. A literal strokes assertion is never halved: it is already a statement
+// about this round.
 //
-// With no stated normal score there is no anchor and nothing to be relative to, so every
-// normal-score player gets 0. That is the correct answer, not a degenerate case: strokes
-// cannot be allocated when only one person's level is known.
+// With no stated normal score there is no anchor and nothing to be relative to, so a normal-
+// score player gets 0. Correct, not degenerate: strokes cannot be allocated when only one
+// person's level is known.
+//
+// Callers pass only the PRESENT field — reduceRound filters departed seats before calling
+// (spec §2b), because a wrong-round joiner who left must not anchor everyone's card.
 export const resolveStrokes = (
   bases: readonly { readonly golferId: GolferId; readonly basis: StrokeBasis }[],
   holeCount: number,
@@ -212,62 +167,50 @@ export const resolveStrokes = (
 - [ ] **Step 4: Run it and watch it pass**
 
 Run: `pnpm -F @swng/domain vitest run src/scoring/strokeBasis.test.ts`
-Expected: PASS, 7 tests
+Expected: PASS, 8 tests
 
-- [ ] **Step 5: Commit the new rule**
+- [ ] **Step 5: Write the failing allocation test**
 
-```bash
-git add packages/domain/src/scoring/strokeBasis.ts packages/domain/src/scoring/strokeBasis.test.ts
-git commit -m "feat(domain): StrokeBasis and the one stroke-resolution rule"
-```
-
-- [ ] **Step 6: Write the failing test for the unified game allocation**
-
-Add to `packages/domain/src/scoring/allocation.test.ts` (keep every existing test; they will be updated in step 8):
+Add to `packages/domain/src/scoring/allocation.test.ts`, using the file's existing `card`/`golferId`/`gameId` helpers (keep the participant helper's `courseHandicap` field for now — it is renamed in Task 3):
 
 ```ts
-it("allocates every game kind off the lowest in that game's own field", () => {
-  // Four players in the round; a two-man stroke-play game between the middle two.
-  // The game's anchor is the lower of THOSE TWO (spec §2b: the field is what you're
-  // looking at), not the round's best player.
-  const participants = [
-    p("ann", 0), p("bo", 20), p("cy", 25), p("dee", 40),
-  ];
-  const allocation = gameStrokeAllocation(
-    { kind: "stroke-play", id: gameId("g1"), scoring: "net", players: [golferId("bo"), golferId("cy")] },
-    participants,
-    card,
-  );
-  expect(totalDots(allocation.get(golferId("bo"))!)).toBe(0);
-  expect(totalDots(allocation.get(golferId("cy"))!)).toBe(5);
-});
+describe("gameStrokeAllocation", () => {
+  const roster = [p("ann", 0), p("bo", 20), p("cy", 25), p("dee", 40)];
 
-it("allocates nothing for a gross game", () => {
-  const allocation = gameStrokeAllocation(
-    { kind: "skins", id: gameId("g2"), scoring: "gross", players: [golferId("bo"), golferId("cy")] },
-    participants,
-    card,
-  );
-  expect(allocation.size).toBe(0);
+  it("allocates off the lowest in that game's OWN field, not the round's", () => {
+    const allocation = gameStrokeAllocation(
+      { kind: "stroke-play", id: gameId("g1"), scoring: "net", players: [golferId("bo"), golferId("cy")] },
+      roster,
+      card,
+    );
+    expect(totalDots(allocation.get(golferId("bo"))!)).toBe(0);
+    expect(totalDots(allocation.get(golferId("cy"))!)).toBe(5);
+  });
+
+  it("allocates nothing for a gross game", () => {
+    const allocation = gameStrokeAllocation(
+      { kind: "skins", id: gameId("g2"), scoring: "gross", players: [golferId("bo"), golferId("cy")] },
+      roster,
+      card,
+    );
+    expect(allocation.size).toBe(0);
+  });
 });
 ```
 
-Use the file's existing `p`/`card`/`golferId`/`gameId` helpers; if `p` currently builds a participant with `courseHandicap`, keep it as-is for this task — the field is renamed in Task 3.
-
-- [ ] **Step 7: Run it and watch it fail**
+- [ ] **Step 6: Run it and watch it fail**
 
 Run: `pnpm -F @swng/domain vitest run src/scoring/allocation.test.ts`
-Expected: FAIL — stroke-play currently allocates each player's own 95%-adjusted handicap, so `bo` gets 19 dots, not 0.
+Expected: FAIL — stroke-play currently allocates each player's own 95%-adjusted handicap, so `bo` gets 19.
 
-- [ ] **Step 8: Replace `gameStrokeAllocation` with one implementation**
+- [ ] **Step 7: Replace `gameStrokeAllocation` with one implementation**
 
-In `packages/domain/src/scoring/allocation.ts`, delete the five-arm `switch` entirely and replace with:
+In `allocation.ts`, delete the five-arm `switch` and replace with:
 
 ```ts
 // ONE rule for every kind (spec §3): the game's field is its own members, strokes are the
-// difference from the lowest among them, allocated by stroke index. The per-kind switch this
-// replaced encoded five different conventions and a hidden allowance percentage; there is now
-// nothing per-kind left to encode. A gross game allocates nothing at all, by definition.
+// difference from the lowest among them, allocated by stroke index. The switch this replaced
+// encoded five conventions and a hidden allowance percentage; there is nothing per-kind left.
 export const gameStrokeAllocation = (
   config: GameConfig,
   participants: readonly Participant[],
@@ -286,73 +229,77 @@ export const gameStrokeAllocation = (
 };
 ```
 
-Add a temporary shim at the top of the file so this task compiles before Task 3 renames the field:
+Add the temporary shim, deleted in Task 3 Step 5:
 
 ```ts
-// TEMPORARY (deleted in Task 3, when `Participant.basis` replaces `courseHandicap`): today's
-// stored integer is read as an absolute "normally shoots" figure, which is what the resolution
-// rule expects.
+// TEMPORARY (deleted in Task 3, when Participant.basis replaces courseHandicap): today's stored
+// integer is read as an absolute "normally shoots" figure, which is what the rule expects.
 const basisOf = (participant: Participant): StrokeBasis => ({ kind: "normally-shoots", overPar: participant.courseHandicap });
 ```
 
-Delete `packages/domain/src/scoring/allowances.ts` and its test. Remove the `allowance` field from all five `GameConfig` arms in `game.ts`, add `readonly scoring: "gross" | "net"` to the `skins` arm and to the `skins` variant of `GameState`, and delete `allowancePhrase` from `present.ts`.
+Delete `allowances.ts` + test. Remove `allowance` from all five `GameConfig` arms; add `readonly scoring: "gross" | "net"` to the `skins` arm of both `GameConfig` and `GameState`.
 
-Rewrite the two surviving copy functions in `present.ts`:
+- [ ] **Step 8: Replace `allowancePhrase` with `gameTreatment`**
+
+In `scoring/present.ts`, delete `allowancePhrase` and `strokePlayTreatment`; add the one function that covers every kind including gross (spec §3):
 
 ```ts
-export const strokePlayTreatment = (scoring: "gross" | "net"): string =>
-  scoring === "net" ? "Net — uses the strokes on the card" : "Gross — raw scores, no strokes";
-
-export const strokesNote = (kind: GameKind): string | undefined => {
-  switch (kind) {
-    case "singles-match":
-      return "Strokes are the difference between you two.";
-    case "fourball-match":
-      return "Everyone plays off the lowest of the four.";
+// One treatment line for every kind, gross included — the ONE copy every panel and the
+// add-game preview render through. Replaces allowancePhrase + strokePlayTreatment, whose split
+// left the non-stroke-play kinds rendering a percentage that no longer exists.
+export const gameTreatment = (config: GameConfig): string => {
+  if ("scoring" in config && config.scoring === "gross") return "Gross — raw scores, no strokes";
+  switch (config.kind) {
     case "stroke-play":
-    case "stableford":
     case "skins":
-      return "Strokes are the difference from the lowest player in this game.";
+    case "stableford":
+      return "Net — uses the strokes on the card";
+    case "singles-match":
+      return "Strokes are the difference between you two";
+    case "fourball-match":
+      return "Everyone plays off the lowest of the four";
   }
 };
 ```
 
-- [ ] **Step 9: Follow the compiler through the engines and the wire**
+Rewrite `strokesNote` to name the field rather than a percentage, and return `undefined` for a gross game.
 
-Run `pnpm -F @swng/domain build` and fix every error. Expect: the five engines each drop their `playingHandicap`/`defaultAllowance` import and read dots from `gameStrokeAllocation`; `skins.ts` gains the gross branch (skip the dots lookup entirely when `scoring === "gross"`).
+- [ ] **Step 9: Follow the compiler out to the web**
 
-Then `pnpm -F @swng/contracts build`: drop `allowance` from every game schema in `round.ts` and `commands.ts`, and add `scoring: z.enum(["gross", "net"])` to the skins schema.
+Run `pnpm build` and fix in order:
+- The five engines drop `playingHandicap`/`defaultAllowance`; `skins.ts` gains the gross branch (skip the dots lookup entirely).
+- `packages/client/src/scoring.ts:49-60` drops `defaultAllowance` from its re-export list.
+- `contracts/{round,commands}.ts` drop `allowance` from every game schema; the skins schema gains `scoring: z.enum(["gross", "net"])`.
+- `apps/web/src/games/GamePanel.tsx:65` renders `gameTreatment(config)` instead of `allowancePhrase`; `describeGame.ts` follows.
+- `apps/web/src/round/dots.ts` — `strokesSummary` returns nothing for a gross game (its all-zero copy "No strokes — everyone plays off 0" is false for a game with no strokes by definition).
+- `AddGameForm.tsx` — delete the allowance percent input and the "Adjust" disclosure; add a gross/net radio to the skins branch mirroring stroke play's.
+- `eslint.config.mjs` — banlist gains `resolveStrokes`, loses `defaultAllowance`.
+- Any e2e spec that adds a game with an allowance.
 
 - [ ] **Step 10: Re-derive the golden deck expectations by hand**
 
-`packages/domain/src/scoring/golden/fieldDeck18.ts` keeps its hole-by-hole scores **byte-identical**. Its expected standings change because stroke play and stableford no longer apply 95% and skins no longer plays each golfer off their own full handicap.
+`golden/fieldDeck18.ts` keeps its hole-by-hole scores byte-identical; its expected standings change. Per kind:
 
-For each game in the deck: compute each member's strokes as `theirs − min(field)`, run `dotsByHole` over the fixture course's stroke index, and hand-compute the result. Write the derivation into the commit message so a reviewer can check it without re-running the engine.
+- **stroke-play, stableford, skins** — change: each player was allocated their own handicap (×0.95 for the first two), now the difference from the game's lowest.
+- **fourball-match** — changes: same relative allocation, but the 90% is gone. Deck CHs 8/2/15/5 gave dots 5/0/12/3; they now give 6/0/13/3.
+- **singles-match** — **unchanged**: `allocation.ts:46-59` already allocated the 100% difference off the lower player.
 
-Do the same for the per-engine tests (`strokePlay.test.ts`, `stableford.test.ts`, `skins.test.ts`, `singlesMatch.test.ts`, `fourballMatch.test.ts`) — singles-match and four-ball expectations should be **unchanged**, since those two already allocated off the field's lowest at 100% and 90% respectively; only four-ball's 90% removal moves its numbers.
+Compute each by hand, run `dotsByHole` over the fixture course's stroke index, and put the derivation in the commit message.
 
-- [ ] **Step 11: Update the add-game form and the fence**
+- [ ] **Step 11: Gate and commit**
 
-In `apps/web/src/round/AddGameForm.tsx`, delete the allowance percent input and the "Adjust" disclosure entirely. Add a gross/net radio to the skins branch, matching the existing stroke-play one.
-
-In `eslint.config.mjs`, add `resolveStrokes` to the `apps/web/src` compute banlist.
-
-- [ ] **Step 12: Run the full gate**
-
-Run: `pnpm validate`
-Expected: exit 0.
-
-- [ ] **Step 13: Commit**
+Run: `pnpm validate` → exit 0.
 
 ```bash
 git add -A
 git commit -m "feat(scoring): one stroke rule for every game; delete the allowance table
 
 Every game allocates off the lowest in its OWN field, by stroke index. The
-five-arm per-kind switch and the 95/90/100 allowance table are deleted. Skins
-gains a gross/net choice.
+five-arm per-kind switch and the 95/90/100 allowance table are deleted; skins
+gains a gross/net choice; allowancePhrase becomes gameTreatment, which covers
+every kind including gross.
 
-Golden deck scores are byte-identical; expectations re-derived by hand:
+Golden deck scores byte-identical; expectations re-derived by hand:
 <paste the derivation>"
 ```
 
@@ -361,15 +308,10 @@ Golden deck scores are byte-identical; expectations re-derived by hand:
 ## Task 2: A conceded hole carries its score
 
 **Files:**
-- Modify: `packages/domain/src/round/holeResult.ts`, `packages/domain/src/round/state.ts`, `packages/contracts/src/round.ts`, `apps/web/src/round/ScorePad.tsx`, `apps/web/src/round/ScorecardGrid.tsx`
-- Test: `packages/domain/src/round/state.test.ts`, `apps/web/src/round/ScorePad.test.tsx`, `packages/contracts/src/round.test.ts`
-
-**Interfaces:**
-- Produces: `HoleResult`'s `conceded` arm as `{ kind: "conceded"; strokes: number }` — consumed by Task 4's `hasCompleteScore`.
+- Modify: `packages/domain/src/round/holeResult.ts`, `packages/contracts/src/{round,commands}.ts`, `apps/web/src/round/{ScorePad,ScorecardGrid}.tsx`
+- Test: `packages/contracts/src/round.test.ts`, `packages/domain/src/scoring/singlesMatch.test.ts`, `apps/web/src/round/ScorePad.test.tsx`
 
 - [ ] **Step 1: Write the failing contract test**
-
-Add to `packages/contracts/src/round.test.ts`:
 
 ```ts
 it("requires a score on a conceded hole", () => {
@@ -385,46 +327,34 @@ Expected: FAIL — a bare `{ kind: "conceded" }` currently parses.
 
 - [ ] **Step 3: Add the field**
 
-In `packages/domain/src/round/holeResult.ts`:
-
 ```ts
-export type HoleResult =
-  | { readonly kind: "strokes"; readonly strokes: number }
-  | { readonly kind: "picked-up" }
   // The hole was decided but the player would have finished it — the score the group says out
-  // loud ("he gave me the second putt, put me down for 5"). SCORING ENGINES IGNORE THIS NUMBER:
-  // the concession already decided the hole, so recording a 5 cannot change a match. The
-  // golfer's record reads it, which is what keeps match-play rounds countable (spec §2d).
+  // loud. SCORING ENGINES IGNORE THIS NUMBER (the concession already decided the hole); the
+  // record and the card's totals read it, which is what keeps match rounds countable (spec §2d).
   | { readonly kind: "conceded"; readonly strokes: number }
-  | { readonly kind: "cleared" };
 ```
 
-Mirror it in the contracts schema. The domain's `[A] extends [B]` exhaustiveness guard on `holeResultSchema` (Arc A) will fail the build if the schema and the type diverge — that is the intended safety net.
+Mirror it in `contracts/round.ts`'s stored-event schema (**unbounded** — Arc A's placement rule) and in `contracts/commands.ts:104-107`'s `scoreResultInputArms` (**bounded**, `z.number().int().min(1).max(30)`, matching the existing `strokes` arm). The `[A] extends [B]` exhaustiveness guard fails the build if type and schema diverge; it does **not** catch a missing bound, so add it deliberately.
 
-- [ ] **Step 4: Prove the engines still ignore the number**
-
-Add to `packages/domain/src/scoring/singlesMatch.test.ts`:
+- [ ] **Step 4: Prove the engines ignore the number**
 
 ```ts
 it("ignores the score on a conceded hole — the concession already decided it", () => {
-  const conceded = scoreSinglesMatch(config, stateWith({ ann: { kind: "strokes", strokes: 4 }, bo: { kind: "conceded", strokes: 5 } }));
-  const conceded99 = scoreSinglesMatch(config, stateWith({ ann: { kind: "strokes", strokes: 4 }, bo: { kind: "conceded", strokes: 99 } }));
-  expect(conceded).toEqual(conceded99);
+  const five = scoreSinglesMatch(config, stateWith({ ann: { kind: "strokes", strokes: 4 }, bo: { kind: "conceded", strokes: 5 } }));
+  const ninetyNine = scoreSinglesMatch(config, stateWith({ ann: { kind: "strokes", strokes: 4 }, bo: { kind: "conceded", strokes: 99 } }));
+  expect(five).toEqual(ninetyNine);
 });
 ```
 
-Follow the compiler: every `case "conceded":` in the engines already treats it as "not a competitive score" and needs no change beyond the type widening.
+- [ ] **Step 5: Update the pad and the glyph**
 
-- [ ] **Step 5: Update the ScorePad**
+`ScorePad.tsx`: `Conceded` becomes a disclosure revealing the same number row, labelled `Conceded — what would you have made?`. Scoring stays two taps; conceding costs three. Comment it as a deliberate deviation from `product.md` §9 for a rarer, deliberate act.
 
-In `apps/web/src/round/ScorePad.tsx`, `Conceded` becomes a disclosure that reveals the same number row, labelled `Conceded — what would you have made?`. Scoring stays two taps (cell → number); conceding costs three (cell → `Conceded` → number). Add a comment naming this as a deliberate deviation from `product.md` §9's two-tap rule for a rarer, deliberate act.
+`ScorecardGrid.tsx`'s `glyphFor`: render a conceded hole as `` `${result.strokes}c` ``.
 
-In `ScorecardGrid.tsx`'s `glyphFor`, render a conceded hole as its number with a marker: `` `${result.strokes}c` ``.
+- [ ] **Step 6: Gate and commit**
 
-- [ ] **Step 6: Run the gate and commit**
-
-Run: `pnpm validate`
-Expected: exit 0.
+Run: `pnpm validate` → exit 0.
 
 ```bash
 git add -A
@@ -435,59 +365,70 @@ git commit -m "feat(round): a conceded hole carries the score you would have mad
 
 ## Task 3: `StrokeBasis` replaces `courseHandicap`; the fold derives strokes
 
-**One atomic commit** — `Participant` is imported by every layer, so an intermediate state does not compile.
+**One atomic commit across every layer including e2e.**
 
 **Files:**
-- Modify: `packages/domain/src/round/{participant,state,events,archive}.ts`, `packages/domain/src/scoring/allocation.ts`, `packages/domain/src/golfer/record.ts`, `packages/contracts/src/{round,commands}.ts`, `packages/application/src/rounds/{startRound,joinRound,setHandicap}.ts`, `packages/client/src/scoring.ts`, `apps/web/src/routes/JoinRoundPage.tsx`, `apps/web/src/round/SetupPanel.tsx`, `apps/web/src/routes/CreateRoundPage.tsx`
-- Test: every `*.test.ts` in the `courseHandicap` grep list
+- Modify: `packages/domain/src/round/{participant,state,events}.ts`, `packages/domain/src/scoring/allocation.ts`, `packages/domain/src/golfer/record.ts`, `packages/contracts/src/{round,commands}.ts`, `packages/application/src/rounds/{startRound,joinRound,setHandicap}.ts`, `packages/client/src/scoring.ts`, `apps/web/src/routes/{JoinRoundPage,CreateRoundPage,RoundPage}.tsx`, `apps/web/src/round/SetupPanel.tsx`
+- E2E (same commit): `apps/web/e2e/support.ts`, every spec calling its join helper, `e2e/roundSlice.e2e.test.ts`, `e2e/syncSession.e2e.test.ts`, `apps/web/e2e/crewSeasonDeck.ts:174-177`
+- Test: every `*.test.ts` carrying a `courseHandicap:` fixture
 
 **Interfaces:**
-- Consumes: `resolveStrokes` from Task 1.
-- Produces: `Participant.basis: StrokeBasis`, `RosterEntry.strokes: number` — consumed by Tasks 4, 5, 6.
+- Consumes: `resolveStrokes` (Task 1).
+- Produces: `Participant.basis: StrokeBasis`, `RosterEntry.strokes: number` (Tasks 4, 5).
 
-- [ ] **Step 1: Write the failing fold test**
+- [ ] **Step 1: Write the failing fold tests**
 
 Add to `packages/domain/src/round/state.test.ts`:
 
 ```ts
 it("derives strokes across the roster — a later, better joiner re-runs the fold", () => {
   const one = reduceRound([created(card), joined("blaine", { kind: "normally-shoots", overPar: 30 })]);
-  expect(one.participants.find((p) => p.golferId === golferId("blaine"))!.strokes).toBe(0);
+  expect(strokesOf(one, "blaine")).toBe(0);
 
   const two = reduceRound([
     created(card),
     joined("blaine", { kind: "normally-shoots", overPar: 30 }),
     joined("ravi", { kind: "normally-shoots", overPar: 10 }),
   ]);
-  expect(two.participants.find((p) => p.golferId === golferId("blaine"))!.strokes).toBe(20);
-  expect(two.participants.find((p) => p.golferId === golferId("ravi"))!.strokes).toBe(0);
+  expect(strokesOf(two, "blaine")).toBe(20);
+  expect(strokesOf(two, "ravi")).toBe(0);
 });
 
-it("applies a handicap-set basis that is HLC-later than the join", () => {
+it("excludes a departed player from the anchor", () => {
+  // Spec §2b: a wrong-round joiner who leaves must not permanently anchor everyone's card.
+  const state = reduceRound([
+    created(card),
+    joined("blaine", { kind: "normally-shoots", overPar: 30 }, hlc(1)),
+    joined("ravi", { kind: "normally-shoots", overPar: 10 }, hlc(2)),
+    joined("stray", { kind: "normally-shoots", overPar: 2 }, hlc(3)),
+    left("stray", hlc(4)),
+  ]);
+  expect(strokesOf(state, "blaine")).toBe(20);
+  expect(strokesOf(state, "ravi")).toBe(0);
+});
+
+it("applies a handicap-set basis HLC-later than the join", () => {
   const state = reduceRound([
     created(card),
     joined("blaine", { kind: "normally-shoots", overPar: 30 }, hlc(1)),
     joined("ravi", { kind: "normally-shoots", overPar: 10 }, hlc(2)),
     handicapSet("blaine", { kind: "strokes", strokes: 18 }, hlc(3)),
   ]);
-  expect(state.participants.find((p) => p.golferId === golferId("blaine"))!.strokes).toBe(18);
-  // The stated normal score is replaced by the new assertion, not fudged.
-  expect(state.participants.find((p) => p.golferId === golferId("blaine"))!.basis).toEqual({ kind: "strokes", strokes: 18 });
+  expect(strokesOf(state, "blaine")).toBe(18);
+  // The stated normal score is REPLACED by the new assertion, not fudged.
+  expect(basisOf(state, "blaine")).toEqual({ kind: "strokes", strokes: 18 });
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [ ] **Step 2: Run them and watch them fail**
 
 Run: `pnpm -F @swng/domain vitest run src/round/state.test.ts`
 Expected: FAIL — `strokes` does not exist on the roster entry.
 
-- [ ] **Step 3: Change the participant and the fold**
-
-`packages/domain/src/round/participant.ts`:
+- [ ] **Step 3: Change the participant**
 
 ```ts
 import type { StrokeBasis } from "../scoring/strokeBasis.js";
-import type { GolferId } from "../ids.js";
 
 export interface Participant {
   readonly golferId: GolferId;
@@ -498,32 +439,41 @@ export interface Participant {
 
 export interface RosterEntry extends Participant {
   readonly departed?: boolean;
-  // DERIVED by reduceRound across the whole roster (spec §2b), stored nowhere. A fifth player
-  // joining just re-runs the fold — there is no correction event and no stale number.
+  // DERIVED by reduceRound across the PRESENT roster (spec §2b). No client asserts it and no
+  // request body accepts it; the sealed archive freezes it because a snapshot must be
+  // self-contained.
   readonly strokes: number;
 }
 ```
 
-In `packages/domain/src/round/state.ts`, `participant-handicap-set` carries `basis: StrokeBasis` instead of `courseHandicap: number` (mirror in `events.ts`). Keep the HLC rule byte-identical: a set applies iff strictly later than that golfer's latest join. After the roster map is built, add the derivation:
+- [ ] **Step 4: Derive strokes in the fold**
+
+In `state.ts`, `participant-handicap-set` carries `basis: StrokeBasis` (mirror in `events.ts`); keep the HLC rule byte-identical. After the roster map is built:
 
 ```ts
-// Strokes are the fold's output, not a stored field (spec §2b). The card's first tee set gives
-// the hole count — real courses share hole counts across tees, the canonicalHoles precedent.
-const strokes = resolveStrokes(
-  roster.map((entry) => ({ golferId: entry.golferId, basis: entry.basis })),
-  card.teeSets[0]?.holes.length ?? 18,
+// Strokes are the fold's output (spec §2b). Departed seats stay on the roster — their scored
+// holes still settle — but are excluded from the ANCHOR: a wrong-round joiner who left must not
+// set everyone else's dots. Their own strokes still resolve against the surviving anchor.
+const present = roster.filter((entry) => entry.departed !== true);
+const holeCount = card.teeSets[0]?.holes.length ?? 18;
+const anchored = resolveStrokes(present.map(({ golferId, basis }) => ({ golferId, basis })), holeCount);
+const departedStrokes = resolveStrokes(
+  roster.filter((e) => e.departed === true).map(({ golferId, basis }) => ({ golferId, basis })),
+  holeCount,
 );
-const participants = roster.map((entry) => ({ ...entry, strokes: strokes.get(entry.golferId)! }));
+const participants = roster.map((entry) => ({
+  ...entry,
+  strokes: anchored.get(entry.golferId) ?? departedStrokes.get(entry.golferId)!,
+}));
 ```
 
-- [ ] **Step 4: Delete the Task 1 shim and follow the compiler**
+If the two-pass shape reads awkwardly, an equivalent single pass that computes the anchor from `present` and applies it to all of `roster` is preferred — write whichever is clearer, but the *rule* is: anchor from present, apply to everyone.
 
-Remove `basisOf` from `allocation.ts` and read `participant.basis` directly. Rename `courseHandicapAllocation` → `roundStrokeAllocation`, reading the fold-derived value:
+- [ ] **Step 5: Delete the Task 1 shim; rename the card allocator**
+
+Remove `basisOf` from `allocation.ts`; read `participant.basis`. Rename `courseHandicapAllocation` → `roundStrokeAllocation` reading the derived value:
 
 ```ts
-// The STANDARD CARD's dots: each player's derived strokes for THIS round, allocated by stroke
-// index. The card never changes with the chip selection (spec 2026-07-19 §2a); a game's own
-// field may resolve differently, and that game's panel states its own line.
 export const roundStrokeAllocation = (
   participants: readonly RosterEntry[],
   card: CourseCard,
@@ -531,11 +481,11 @@ export const roundStrokeAllocation = (
   new Map(participants.map((p) => [p.golferId, dotsByHole(p.strokes, findTeeSet(card, p.tee))]));
 ```
 
-Update the ESLint banlist and the `@swng/client` re-export to the new name.
+Update `client/scoring.ts`'s re-export and the ESLint banlist to the new name.
 
-- [ ] **Step 5: Change the wire**
+- [ ] **Step 6: Change the wire**
 
-`packages/contracts/src/commands.ts`: `JoinRoundRequest.courseHandicap: number` → `basis: strokeBasisSchema`. Same for `StartRoundRequest`'s host and the set-handicap request body. Define once:
+In `contracts/commands.ts`, define once and use for `JoinRoundRequest`, `StartRoundRequest`'s host, and the set-handicap body:
 
 ```ts
 export const strokeBasisSchema = z.discriminatedUnion("kind", [
@@ -544,290 +494,79 @@ export const strokeBasisSchema = z.discriminatedUnion("kind", [
 ]);
 ```
 
-Bounds match Arc A's widened `courseHandicap` range and its placement rule: request schemas only, never a stored-fold path.
+Bounds match Arc A's widened range and its placement rule: **request schemas only**. `contracts/round.ts:171`'s stored-event arm takes an **unbounded** twin.
 
-`packages/contracts/src/round.ts`: the participant schema carries `basis`; `RosterEntry`'s `strokes` is response-only.
+- [ ] **Step 7: Change the join and roster surfaces**
 
-- [ ] **Step 6: Change the join surface**
+`JoinRoundPage.tsx` — replace the strokes field with one number input labelled **`What do you normally shoot, relative to par?`**. Delete `resolveIndex`, `courseHandicapFromRatingSlopePar`, `unratedCourseHandicap`, `formatHandicapIndex` and the whole `suggestion` block. Leave the pre-fill unwired with a `// Task 5: seed from record.metrics.average` comment. Submit `{ code, tee, basis: { kind: "normally-shoots", overPar: parsed } }`.
 
-`apps/web/src/routes/JoinRoundPage.tsx`:
-- Replace the `Strokes you get here` field with a single number input labelled **`What do you normally shoot, relative to par?`**.
-- Delete `resolveIndex`, `courseHandicapFromRatingSlopePar`, `unratedCourseHandicap`, the `formatHandicapIndex` derivation note, and the whole `suggestion` block. The pre-fill comes from `record.metrics.average` (added in Task 4 — until then, seed from the last stated value only and leave a `// Task 4` comment).
-- Submit `{ code, tee, basis: { kind: "normally-shoots", overPar: parsed } }`.
+`SetupPanel.tsx` — the roster row reads `name — tee — normally +30 · gets 20`, EDIT edits the **basis**, and a second control `Give strokes directly` writes `{ kind: "strokes", strokes }`. Keep the mutual-exclusion test and add a plus-handicap fixture.
 
-`apps/web/src/round/SetupPanel.tsx`: the roster row shows `name — tee — normally +30 · gets 20`, and EDIT edits the **basis**. Add a second control, `Give strokes directly`, which writes `{ kind: "strokes", strokes }` — the two constructors, not two ways to edit one number. Keep the existing mutual-exclusion test (static span vs input) and add a plus-handicap fixture.
+`RoundPage.tsx:279,337-340` — the set-handicap call sends a basis.
 
-- [ ] **Step 7: Run the gate**
+- [ ] **Step 8: Sweep the e2e call sites in this commit**
 
-Run: `pnpm validate`
-Expected: exit 0. Expect a long compiler-driven sweep across the test files in the grep list; every `courseHandicap: N` fixture becomes `basis: { kind: "normally-shoots", overPar: N }`.
+`apps/web/e2e/support.ts:196-201`'s join helper sends `basis`. Every browser spec filling the join form targets the new label — read `JoinRoundPage.tsx`'s JSX for the accessible name, do not take it from this plan. `crewSeasonDeck.ts:174-177`'s four `courseHandicap: 0` participants become `basis: { kind: "normally-shoots", overPar: 0 }` — **all four are 0, so no deck expectation moves.**
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Gate and commit**
+
+Run: `pnpm validate` → exit 0 (this is the long compiler-driven sweep).
 
 ```bash
 git add -A
 git commit -m "feat(round): StrokeBasis replaces courseHandicap; the fold derives strokes
 
 What a player asserts is an object, not an integer. Strokes are no longer
-stored — reduceRound resolves them across the roster as the difference from
-the lowest in the field, so a fifth player joining just re-runs the fold."
+asserted — reduceRound resolves them across the PRESENT roster as the
+difference from the lowest in the field, so a fifth player joining re-runs the
+fold and a departed wrong-round joiner cannot anchor anyone."
 ```
 
 ---
 
-## Task 4: Delete WHS; the average replaces the index
+## Task 4: The card reads like a scorecard; the finished round stops speaking WHS
 
-**One atomic commit** — `GolferMetrics` and `GolferRoundLine` are imported by every layer.
-
-**Files:**
-- Create: `packages/domain/src/golfer/average.ts` + test
-- Delete: `packages/domain/src/handicap/whs.ts`, `whs.test.ts`, `whs.properties.test.ts`
-- Modify: `packages/domain/src/golfer/{golfer,record,metrics,analytics}.ts`, `packages/domain/src/scoring/allocation.ts`, `packages/contracts/src/golfers.ts`, `packages/application/src/golfers/{recordOf,getMyRecord,getMyRounds,golferView,updateMyGolfer}.ts`, `packages/application/src/projections/projectArchive.ts`, `packages/adapters-dynamodb/src/golferStore.ts`, `apps/web/src/routes/ProfilePage.tsx`, `apps/web/src/golfers/RecordSections.tsx`, `apps/web/src/courses/CourseRecordSection.tsx`
-
-**Interfaces:**
-- Produces: `averageOf(lines): number | undefined`, `spreadOf(lines): number | undefined`, `averageHistory(lines): readonly AveragePoint[]`, `hasCompleteScore(line): boolean` — consumed by Task 6.
-
-- [ ] **Step 1: Write the failing test for the average**
-
-Create `packages/domain/src/golfer/average.test.ts`:
-
-```ts
-import { describe, expect, it } from "vitest";
-import { averageOf, spreadOf } from "./average.js";
-import type { GolferRoundLine } from "./record.js";
-
-const line = (holes: 9 | 18, par: number, scores: number[]): GolferRoundLine => ({
-  roundId: `r${scores.join("")}` as GolferRoundLine["roundId"],
-  courseName: "Test", tee: "white", holes, par, strokes: 0,
-  distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
-  holeResults: scores.map((s, i) => ({ hole: i + 1, par: par / holes, result: { kind: "strokes" as const, strokes: s } })),
-});
-
-// par 72 over 18 holes of par 4
-const eighteen = (gross: number) => line(18, 72, Array.from({ length: 18 }, () => gross / 18));
-
-describe("averageOf", () => {
-  it("averages score minus par over finished rounds", () => {
-    expect(averageOf([eighteen(90), eighteen(94), eighteen(98)])).toBe(22); // +18, +22, +26
-  });
-
-  it("counts a nine-hole round doubled", () => {
-    // 9 holes of par 4 = par 36; a 52 is +16 and contributes +32.
-    const nine = line(9, 36, Array.from({ length: 9 }, () => 52 / 9));
-    expect(averageOf([nine])).toBe(32);
-  });
-
-  it("counts a round containing a conceded hole", () => {
-    const withConcession = { ...eighteen(90), holeResults: eighteen(90).holeResults!.map((h, i) => (i === 0 ? { ...h, result: { kind: "conceded" as const, strokes: 5 } } : h)) };
-    expect(averageOf([withConcession])).toBeDefined();
-  });
-
-  it("skips a round containing a pickup — there is no score", () => {
-    const withPickup = { ...eighteen(90), holeResults: eighteen(90).holeResults!.slice(1) };
-    expect(averageOf([withPickup])).toBeUndefined();
-  });
-
-  it("uses only the last 10 finished rounds", () => {
-    const lines = [...Array.from({ length: 10 }, () => eighteen(108)), ...Array.from({ length: 10 }, () => eighteen(90))];
-    expect(averageOf(lines)).toBe(18); // the older +36 rounds fall out of the window
-  });
-
-  it("is undefined with no finished rounds", () => {
-    expect(averageOf([])).toBeUndefined();
-  });
-});
-
-describe("spreadOf", () => {
-  it("is undefined below five finished rounds", () => {
-    expect(spreadOf([eighteen(90), eighteen(90), eighteen(90), eighteen(90)])).toBeUndefined();
-  });
-
-  it("is zero for five identical rounds", () => {
-    expect(spreadOf(Array.from({ length: 5 }, () => eighteen(90)))).toBe(0);
-  });
-
-  it("reports the standard deviation to one decimal", () => {
-    // +14, +18, +18, +18, +22 → mean 18, population variance 6.4, sd 2.529… → 2.5
-    expect(spreadOf([eighteen(86), eighteen(90), eighteen(90), eighteen(90), eighteen(94)])).toBe(2.5);
-  });
-});
-```
-
-- [ ] **Step 2: Run it and watch it fail**
-
-Run: `pnpm -F @swng/domain vitest run src/golfer/average.test.ts`
-Expected: FAIL — `Cannot find module './average.js'`
-
-- [ ] **Step 3: Implement `average.ts` and `hasCompleteScore`**
-
-Add to `packages/domain/src/golfer/analytics.ts`:
-
-```ts
-// Every hole has a NUMBER — a stroke count or a conceded score (spec §2d). Distinct from
-// fullyHoledOut, which is stricter (a conceded putt means you did not hole out) and still gates
-// Best and the milestones. This one gates the average, which is why match-play rounds count.
-export const hasCompleteScore = (line: GolferRoundLine): boolean =>
-  line.holeResults !== undefined &&
-  line.holeResults.length === line.holes &&
-  line.holeResults.every((h) => h.result.kind === "strokes" || h.result.kind === "conceded");
-
-// Sum over a line with a complete score — call only when hasCompleteScore(line).
-export const scoreOf = (line: GolferRoundLine): number =>
-  line.holeResults!.reduce((sum, h) => sum + (h.result.kind === "strokes" || h.result.kind === "conceded" ? h.result.strokes : 0), 0);
-```
-
-Create `packages/domain/src/golfer/average.ts`:
-
-```ts
-import type { RoundId } from "../ids.js";
-import { roundHalfUp } from "../scoring/strokes.js";
-import { hasCompleteScore, scoreOf } from "./analytics.js";
-import type { GolferRoundLine } from "./record.js";
-
-// What you normally shoot relative to par, per 18 holes (spec §2c). One number, one unit, and
-// a golfer can check it by adding up the rounds on their own profile — which is the whole point.
-// A nine-hole round contributes its figure DOUBLED: imperfect (nines differ, fatigue is not
-// linear) and accepted, because product.md §2 names the nine-hole league as a target audience.
-const WINDOW = 10;
-const SPREAD_MIN_ROUNDS = 5;
-
-const overPar = (line: GolferRoundLine): number => {
-  const raw = scoreOf(line) - line.par;
-  return line.holes === 9 ? raw * 2 : raw;
-};
-
-// Only rounds with a score. A pickup means there is no score, so no number is invented for it.
-const scored = (lines: readonly GolferRoundLine[]): readonly number[] =>
-  lines.filter(hasCompleteScore).map(overPar);
-
-const meanOf = (values: readonly number[]): number =>
-  values.reduce((sum, v) => sum + v, 0) / values.length;
-
-export const averageOf = (lines: readonly GolferRoundLine[]): number | undefined => {
-  const window = scored(lines).slice(-WINDOW);
-  return window.length === 0 ? undefined : roundHalfUp(meanOf(window));
-};
-
-// Standard deviation over the same window — the most useful competitive fact about an opponent
-// (spec §6). Gated at five rounds: below that it describes noise, the refusing-to-draw-noise
-// discipline the index chart's own 8-round gate established.
-export const spreadOf = (lines: readonly GolferRoundLine[]): number | undefined => {
-  const window = scored(lines).slice(-WINDOW);
-  if (window.length < SPREAD_MIN_ROUNDS) return undefined;
-  const mean = meanOf(window);
-  const variance = meanOf(window.map((v) => (v - mean) ** 2));
-  return roundHalfUp(Math.sqrt(variance) * 10) / 10;
-};
-
-// One point on "your average over time": the average AS OF this round. Only rounds that
-// contribute get a point — a round with a pickup is not a point on the line, because it is not
-// a data point at all.
-export interface AveragePoint {
-  readonly roundId: RoundId;
-  readonly average: number;
-}
-
-export const averageHistory = (lines: readonly GolferRoundLine[]): readonly AveragePoint[] => {
-  const window: number[] = [];
-  const points: AveragePoint[] = [];
-  for (const line of lines) {
-    if (!hasCompleteScore(line)) continue;
-    window.push(overPar(line));
-    if (window.length > WINDOW) window.shift();
-    points.push({ roundId: line.roundId, average: roundHalfUp(meanOf(window)) });
-  }
-  return points;
-};
-```
-
-- [ ] **Step 4: Run it and watch it pass**
-
-Run: `pnpm -F @swng/domain vitest run src/golfer/average.test.ts`
-Expected: PASS, 9 tests.
-
-- [ ] **Step 5: Delete WHS and reshape the metrics**
-
-- `rm packages/domain/src/handicap/whs.ts packages/domain/src/handicap/whs.test.ts packages/domain/src/handicap/whs.properties.test.ts`
-- `packages/domain/src/golfer/golfer.ts`: delete `IndexSource`, `HandicapProfile`, and `Golfer.handicap`.
-- `packages/domain/src/golfer/metrics.ts`: delete `IndexMetric`, `IndexPoint`, `detailsOf`, `indexHistoryOf`, `resolveIndex`, `ResolvedIndex`. `GolferMetrics` becomes:
-
-```ts
-export interface GolferMetrics {
-  readonly average?: number;                              // absent until one round has a score
-  readonly spread?: number;                               // absent below five
-  readonly typicalEighteen: ScoringShape;                 // unchanged
-  readonly averageHistory: readonly AveragePoint[];       // oldest → newest
-  readonly bests: GolferBests;
-  readonly milestones: readonly Milestone[];
-}
-```
-
-- `packages/domain/src/golfer/record.ts`: `courseHandicap` → `strokes`; add `normallyShoots?: number` (absent when the player stated raw strokes); delete `ags` and `differential`. `archiveGolferLine` reads `participant.strokes` and `participant.basis`.
-- `packages/domain/src/scoring/allocation.ts`: delete `handicappingFor` outright. `RoundArchive.handicapping` and its wire schema go with it — the results view computes totals from the cells it already renders, and `archiveGolferLine` computes from `holeResults`.
-- `packages/domain/src/index.ts`: drop every deleted export, add `averageOf`/`spreadOf`/`averageHistory`/`hasCompleteScore`/`scoreOf`.
-- `eslint.config.mjs`: banlist gains the four new compute names, loses the deleted ones.
-
-- [ ] **Step 6: Follow the compiler through application, adapters and web**
-
-- `recordOf.ts` / `getMyRecord.ts` / `getGolfer.ts`: serve the new metrics; `toWireLine` maps `strokes`/`normallyShoots`, drops `ags`/`differential`.
-- `golferView.ts` / `updateMyGolfer.ts`: drop `indexSource` from the golfer view and the PUT body.
-- `adapters-dynamodb/src/golferStore.ts`: drop the `indexSource` attribute and its legacy fold. Contract tests updated.
-- `ProfilePage.tsx`: delete the whole "Your index" section — the source picker, `Use this`, the override box, `applyGolfer`'s `indexSource` path. The page keeps name and home course only.
-- `RecordSections.tsx`: headline becomes `What you shoot` with `metrics.average` rendered through `formatHandicapIndex`, subtitle `your last 10 finished rounds, score minus par`. The chart plots `averageHistory` as ONE line; delete the WHS series, its legend marker, and the two-line caption. Keep the 20-round window, the nice-bounds/min-span-4 axis, the endpoint emphasis, and the date anchors.
-
-- [ ] **Step 7: Run the gate and commit**
-
-Run: `pnpm validate` → exit 0. Then `pnpm test:contract` → all green.
-
-```bash
-git add -A
-git commit -m "feat(golfer): delete the WHS/swng index; the average replaces it
-
-One number, computed from the last 10 finished rounds as score minus par, a
-nine-hole round counting doubled. A round containing a pickup has no score and
-does not contribute; a conceded hole carries one, so match rounds count.
-Rating, slope, differentials, adjusted gross score and the index-source model
-are deleted whole."
-```
-
----
-
-## Task 5: The card reads like a scorecard; the finished round stops speaking WHS
+Web-only and additive. **It exists to get `ResultsView` off `handicappingFor` before Task 5 deletes that function** — otherwise the results rewrite would be swallowed into Task 5's already-atomic commit.
 
 **Files:**
-- Modify: `apps/web/src/round/ScorecardGrid.tsx`, `apps/web/src/round/ResultsView.tsx`
-- Test: `apps/web/src/round/ScorecardGrid.test.tsx`, `apps/web/src/round/ResultsView.test.tsx`
+- Modify: `apps/web/src/round/{ScorecardGrid,ResultsView}.tsx` + tests
 
-- [ ] **Step 1: Write the failing totals-row test**
-
-Add to `apps/web/src/round/ScorecardGrid.test.tsx`:
+- [ ] **Step 1: Write the failing totals test**
 
 ```tsx
 it("totals the card like a scorecard — OUT, IN and TOT, gross and net", () => {
   render(<ScorecardGrid state={stateWithFullCard} recordScore={() => {}} />);
-  const out = screen.getByRole("row", { name: /out/i });
-  expect(within(out).getByText("36")).toBeTruthy();  // par out
   const tot = screen.getByRole("row", { name: /tot/i });
-  expect(within(tot).getByText("72")).toBeTruthy();  // par total
+  expect(within(tot).getByText("72")).toBeTruthy();  // par
   expect(within(tot).getByText("96")).toBeTruthy();  // Blaine gross
   expect(within(tot).getByText("76")).toBeTruthy();  // Blaine net
 });
+
+it("counts a conceded hole in the totals at its recorded score", () => {
+  // Spec §4: any other rule makes the finalized card disagree with the same round's line in
+  // the golfer's record, which reads conceded strokes.
+  render(<ScorecardGrid state={stateWithOneConcededFive} recordScore={() => {}} />);
+  expect(within(screen.getByRole("row", { name: /tot/i })).getByText("96")).toBeTruthy();
+});
+
+it("dashes a segment containing a pickup", () => {
+  render(<ScorecardGrid state={stateWithOnePickup} recordScore={() => {}} />);
+  expect(within(screen.getByRole("row", { name: /out/i })).getByText("–")).toBeTruthy();
+});
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [ ] **Step 2: Run and watch fail**
 
 Run: `pnpm -F @swng/web vitest run src/round/ScorecardGrid.test.tsx`
-Expected: FAIL — no row named OUT exists.
+Expected: FAIL — no row named TOT exists.
 
 - [ ] **Step 3: Add the totals rows**
 
-In `ScorecardGrid.tsx`, add a `<tfoot>` after `</tbody>` with `OUT` (holes 1–9), `IN` (10–18, omitted on a 9-hole card) and `TOT`. The hole column carries the par sum; each player column carries gross over net, using the same `netStrokes(gross, dots)` the cells use. A player with an unscored or picked-up hole shows `–` for that segment rather than a partial total.
-
-Add a `subtotal` helper alongside `currentHoleNumber`, and keep the section's `readOnly` behaviour untouched.
+Add a `<tfoot>` after `</tbody>` with `OUT` (holes 1–9), `IN` (10–18, omitted on a 9-hole card) and `TOT`. The hole column carries the par sum; each player column carries gross over net via the same `netStrokes(gross, dots)` the cells use. A segment total counts `strokes` and `conceded` cells; any `picked-up` or missing cell in the segment renders `–`.
 
 - [ ] **Step 4: Rewrite the finished round**
 
-In `ResultsView.tsx`, delete `deriveHandicapping`, the `handicappingFor` import, the `response.handicapping` prop path, and the whole "Posted to handicaps" section. Replace with a totals list above the card:
+In `ResultsView.tsx`, delete `deriveHandicapping`, the `handicappingFor` import, the `response.handicapping` prop path, and the "Posted to handicaps" section. Replace with:
 
 ```tsx
 <h2>Final totals</h2>
@@ -836,15 +575,17 @@ In `ResultsView.tsx`, delete `deriveHandicapping`, the `handicappingFor` import,
   {state.participants.map((p) => (
     <li key={p.golferId}>
       <GolferLink golferId={p.golferId} name={p.name} />
-      {` — ${gross(p)} gross · ${formatCourseHandicap(-p.strokes)} · ${gross(p) - p.strokes} net`}
+      {` — ${grossOf(p)} gross · ${strokesLabel(p.strokes)} · ${grossOf(p) - p.strokes} net`}
     </li>
   ))}
 </ul>
 ```
 
-No fourth column. Net already ranks players against their own stated level (spec §4) — add that as a why-comment so a future reader does not "helpfully" add one back.
+`strokesLabel` uses `strokeGrant` (`handicap/present.ts`) — `receives` → `−20`, `gives` → `+2`, `none` → `0`. **Do NOT call `formatCourseHandicap(-p.strokes)`**: that function renders a negative as `+N`, so a 20-stroke receiver would render `"+20"`, which in golf means a plus-20 who *gives* 20 — exactly backwards.
 
-- [ ] **Step 5: Run the gate and commit**
+Add a why-comment: no fourth column, because net already ranks players against their own stated level (spec §4).
+
+- [ ] **Step 5: Gate and commit**
 
 Run: `pnpm validate` → exit 0.
 
@@ -855,37 +596,192 @@ git commit -m "feat(web): scorecard totals row; the finished round shows gross, 
 
 ---
 
-## Task 6: The crew board describes the distribution
+## Task 5: Delete WHS; the average replaces the index
+
+**One atomic commit across every layer including e2e.** Everything here is forced by one deletion set and cannot be split — see "Why the boundaries are where they are".
 
 **Files:**
-- Modify: `packages/domain/src/crew/scoreboard.ts` + test, `packages/contracts/src/crews.ts`, `packages/application/src/crews/getSeasonStandings.ts`, `apps/web/src/crews/SeasonPanel.tsx` + test
+- Create: `packages/domain/src/golfer/average.ts` + test
+- Delete: `packages/domain/src/handicap/whs.ts` + its two tests, `apps/web/src/ui/vsPar.ts`
+- Modify: `packages/domain/src/golfer/{golfer,record,metrics,analytics}.ts`, `packages/domain/src/handicap/present.ts` (+test), `packages/domain/src/scoring/allocation.ts`, `packages/domain/src/round/archive.ts`, `packages/domain/src/crew/scoreboard.ts` (+test), `packages/domain/src/index.ts`, `packages/client/src/scoring.ts`, `packages/contracts/src/{golfers,commands,crews}.ts`, `packages/application/src/rounds/finalizeRound.ts`, `packages/application/src/golfers/{recordOf,getMyRecord,getMyRounds,golferView,updateMyGolfer,ensureGolfer}.ts`, `packages/application/src/crews/getSeasonStandings.ts`, `packages/application/src/testing/fakes.ts`, `packages/adapters-dynamodb/src/golferStore.ts`, `apps/web/src/routes/ProfilePage.tsx`, `apps/web/src/golfers/{GolferPage,RecordSections}.tsx`, `apps/web/src/crews/SeasonPanel.tsx`, `apps/web/src/routes/JoinRoundPage.tsx`, `eslint.config.mjs`
+- E2E (same commit): `identityRecord.spec.ts`, `crewSeason.spec.ts:160,341,362`, `crewSeasonDeck.ts:252-259`
 
-**Interfaces:**
-- Consumes: `averageOf`, `spreadOf` from Task 4.
+- [ ] **Step 1: Write the failing average test**
 
-- [ ] **Step 1: Write the failing scoreboard test**
-
-Replace the `netPer18`/`index`/`indexDelta` assertions in `packages/domain/src/crew/scoreboard.test.ts` with:
+Create `packages/domain/src/golfer/average.test.ts`. Build fixtures from **integer per-hole scores** so the arithmetic is exact:
 
 ```ts
-it("describes each member's distribution over the window", () => {
-  const board = crewScoreboard([{ golferId: g("blaine"), lines: twelveLines }], window);
-  expect(board[0]).toMatchObject({ rounds: 12, average: 26, spread: 4.2, best18: { gross: 88, toPar: 16 } });
+import { describe, expect, it } from "vitest";
+import { averageOf, spreadOf } from "./average.js";
+import type { GolferRoundLine } from "./record.js";
+
+// n holes of par 4; `perHole` is each hole's gross. 18 × 4 = par 72.
+const line = (id: string, holes: 9 | 18, perHole: number): GolferRoundLine => ({
+  roundId: id as GolferRoundLine["roundId"],
+  courseName: "Test", tee: "white", holes, par: holes * 4, strokes: 0,
+  distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+  holeResults: Array.from({ length: holes }, (_, i) => ({ hole: i + 1, par: 4, result: { kind: "strokes" as const, strokes: perHole } })),
 });
 
-it("omits spread below five scored rounds and still reports the average", () => {
-  const board = crewScoreboard([{ golferId: g("ravi"), lines: threeLines }], window);
-  expect(board[0]!.average).toBeDefined();
-  expect(board[0]!.spread).toBeUndefined();
+describe("averageOf", () => {
+  it("averages score minus par over finished rounds", () => {
+    // 5/hole → 90 (+18); 6/hole → 108 (+36). Mean 27.
+    expect(averageOf([line("a", 18, 5), line("b", 18, 6)])).toBe(27);
+  });
+
+  it("counts a nine-hole round doubled", () => {
+    // 9 × 6 = 54 on par 36 → +18, contributes +36.
+    expect(averageOf([line("a", 9, 6)])).toBe(36);
+  });
+
+  it("counts a round containing a conceded hole", () => {
+    const base = line("a", 18, 5);
+    const conceded = { ...base, holeResults: base.holeResults!.map((h, i) => (i === 0 ? { ...h, result: { kind: "conceded" as const, strokes: 5 } } : h)) };
+    expect(averageOf([conceded])).toBe(18);
+  });
+
+  it("skips a round containing a pickup — there is no score", () => {
+    const base = line("a", 18, 5);
+    const pickedUp = { ...base, holeResults: base.holeResults!.map((h, i) => (i === 0 ? { ...h, result: { kind: "picked-up" as const } } : h)) };
+    expect(averageOf([pickedUp])).toBeUndefined();
+  });
+
+  it("skips a round whose card has a gap", () => {
+    const base = line("a", 18, 5);
+    expect(averageOf([{ ...base, holeResults: base.holeResults!.slice(1) }])).toBeUndefined();
+  });
+
+  it("uses only the last 10 finished rounds", () => {
+    const lines = [...Array.from({ length: 10 }, (_, i) => line(`old${i}`, 18, 6)), ...Array.from({ length: 10 }, (_, i) => line(`new${i}`, 18, 5))];
+    expect(averageOf(lines)).toBe(18); // the older +36 rounds fall out of the window
+  });
+
+  it("is undefined with no finished rounds", () => {
+    expect(averageOf([])).toBeUndefined();
+  });
+});
+
+describe("spreadOf", () => {
+  it("is undefined below five finished rounds", () => {
+    expect(spreadOf(Array.from({ length: 4 }, (_, i) => line(`r${i}`, 18, 5)))).toBeUndefined();
+  });
+
+  it("is zero for five identical rounds", () => {
+    expect(spreadOf(Array.from({ length: 5 }, (_, i) => line(`r${i}`, 18, 5)))).toBe(0);
+  });
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [ ] **Step 2: Run and watch fail**
 
-Run: `pnpm -F @swng/domain vitest run src/crew/scoreboard.test.ts`
-Expected: FAIL — `average` is not on `ScoreboardLine`.
+Run: `pnpm -F @swng/domain vitest run src/golfer/average.test.ts`
+Expected: FAIL — `Cannot find module './average.js'`
 
-- [ ] **Step 3: Reshape `ScoreboardLine`**
+- [ ] **Step 3: Add the two predicates to `analytics.ts`**
+
+```ts
+// Every hole has a NUMBER — a stroke count or a conceded score (spec §2d). Distinct from
+// fullyHoledOut, which is stricter (a conceded putt means you did not hole out) and still gates
+// Best and the milestones. This one gates the average, which is why match rounds count.
+export const hasCompleteScore = (line: GolferRoundLine): boolean =>
+  line.holeResults !== undefined &&
+  line.holeResults.length === line.holes &&
+  line.holeResults.every((h) => h.result.kind === "strokes" || h.result.kind === "conceded");
+
+// Sum over a line with a complete score — call only when hasCompleteScore(line).
+export const scoreOf = (line: GolferRoundLine): number =>
+  line.holeResults!.reduce((sum, h) => sum + (h.result.kind === "strokes" || h.result.kind === "conceded" ? h.result.strokes : 0), 0);
+```
+
+- [ ] **Step 4: Implement `average.ts`**
+
+```ts
+import type { RoundId } from "../ids.js";
+import { roundHalfUp } from "../scoring/strokes.js";
+import { hasCompleteScore, scoreOf } from "./analytics.js";
+import type { GolferRoundLine } from "./record.js";
+
+// What you normally shoot relative to par, per 18 holes (spec §2c). A golfer can check it by
+// adding up the rounds on their own profile — which is the whole point. A nine-hole round
+// contributes its figure DOUBLED: imperfect and accepted (spec §2d).
+export const AVERAGE_WINDOW = 10;
+const SPREAD_MIN_ROUNDS = 5;
+
+export const overPar = (line: GolferRoundLine): number => {
+  const raw = scoreOf(line) - line.par;
+  return line.holes === 9 ? raw * 2 : raw;
+};
+
+// Only rounds with a score. A pickup means there is no score, so no number is invented for it.
+export const scoredOverPar = (lines: readonly GolferRoundLine[]): readonly number[] =>
+  lines.filter(hasCompleteScore).map(overPar);
+
+const meanOf = (values: readonly number[]): number => values.reduce((s, v) => s + v, 0) / values.length;
+
+// Exported so the crew board can average its OWN set (every finished round in the season
+// window) without re-deriving the arithmetic — the board must not silently apply this file's
+// rolling 10 on top of the season window (spec §6).
+export const averageOfValues = (values: readonly number[]): number | undefined =>
+  values.length === 0 ? undefined : roundHalfUp(meanOf(values));
+
+export const spreadOfValues = (values: readonly number[]): number | undefined => {
+  if (values.length < SPREAD_MIN_ROUNDS) return undefined;
+  const mean = meanOf(values);
+  return roundHalfUp(Math.sqrt(meanOf(values.map((v) => (v - mean) ** 2))) * 10) / 10;
+};
+
+export const averageOf = (lines: readonly GolferRoundLine[]): number | undefined =>
+  averageOfValues(scoredOverPar(lines).slice(-AVERAGE_WINDOW));
+
+export const spreadOf = (lines: readonly GolferRoundLine[]): number | undefined =>
+  spreadOfValues(scoredOverPar(lines).slice(-AVERAGE_WINDOW));
+
+export interface AveragePoint {
+  readonly roundId: RoundId;
+  readonly average: number;
+}
+
+// One point per CONTRIBUTING round — a round with a pickup is not a data point.
+export const averageHistory = (lines: readonly GolferRoundLine[]): readonly AveragePoint[] => {
+  const window: number[] = [];
+  const points: AveragePoint[] = [];
+  for (const line of lines) {
+    if (!hasCompleteScore(line)) continue;
+    window.push(overPar(line));
+    if (window.length > AVERAGE_WINDOW) window.shift();
+    points.push({ roundId: line.roundId, average: averageOfValues(window)! });
+  }
+  return points;
+};
+```
+
+- [ ] **Step 5: Add `formatOverPar` and delete `formatHandicapIndex`**
+
+In `handicap/present.ts` (absorbing `apps/web/src/ui/vsPar.ts`, which is deleted):
+
+```ts
+// A VS-PAR number: positive is over par. The OPPOSITE convention from formatCourseHandicap
+// above, which renders a negative as "+N" because a negative handicap is a PLUS handicap.
+// Never hand a vs-par number to formatCourseHandicap or a handicap to this — each inverts the
+// other's sign (spec §4). Absorbs the web's own vsPar.ts so there is one copy.
+export const formatOverPar = (value: number): string => (value === 0 ? "E" : value > 0 ? `+${value}` : `${value}`);
+```
+
+Delete `formatHandicapIndex` (its last consumer dies with the index) and `indexSourcePhrase` (it takes an `IndexSource["kind"]`), plus their tests. Add `formatOverPar` to the plus-handicap grep gate's sanctioned renderers.
+
+- [ ] **Step 6: Delete WHS and reshape the metrics**
+
+- `rm packages/domain/src/handicap/whs.ts packages/domain/src/handicap/whs.test.ts packages/domain/src/handicap/whs.properties.test.ts`
+- `golfer/golfer.ts`: delete `IndexSource`, `HandicapProfile`, `Golfer.handicap`.
+- `golfer/metrics.ts`: delete `IndexMetric`, `IndexPoint`, `detailsOf`, `indexHistoryOf`, `resolveIndex`, `ResolvedIndex`. `GolferMetrics` becomes `{ average?, spread?, typicalEighteen, averageHistory, bests, milestones }`.
+- `golfer/record.ts`: `courseHandicap` → `strokes`; add `normallyShoots?: number` (from `participant.basis` when it is a `normally-shoots`); delete `ags`/`differential`.
+- `scoring/allocation.ts`: delete `handicappingFor`. `round/archive.ts`: delete `RoundArchive.handicapping`.
+- `client/scoring.ts:49-60`: drop `handicappingFor`, `courseHandicapFor`, `courseHandicapFromRatingSlopePar`, `unratedCourseHandicap`; add `averageOf`, `spreadOf`, `formatOverPar`.
+- `domain/index.ts` and `eslint.config.mjs`: exports and banlist follow.
+
+- [ ] **Step 7: Swap the crew scoreboard in the same commit**
+
+`crew/scoreboard.ts`'s `netPer18` reads `line.ags`, which no longer exists. Replace:
 
 ```ts
 export interface ScoreboardLine {
@@ -897,41 +793,81 @@ export interface ScoreboardLine {
 }
 ```
 
-`average`/`spread` fold `averageOf`/`spreadOf` over the **windowed** lines (not the whole career — the board describes the season). Delete `netPer18`, `NET_PER_18_MIN_ROUNDS`, `index`, `indexDelta`, and the `golferMetrics` import. The total order becomes: `average` ascending with absent LAST, then `rounds` descending, then `golferId` ascending — same shape as today's comparator, one field swapped.
+`average`/`spread` fold `averageOfValues`/`spreadOfValues` over `scoredOverPar(windowed)` — **every** finished round in the window, with **no `.slice(-10)`** (spec §6: `Rounds 12` beside an average of 10 of them would be a lie on the same row). Delete `netPer18`, `NET_PER_18_MIN_ROUNDS`, `index`, `indexDelta` and the `golferMetrics` import. Total order: `average` ascending with absent LAST, then `rounds` descending, then `golferId`.
 
-- [ ] **Step 4: Add the head-to-head strokes line**
+- [ ] **Step 8: Follow the compiler through application, adapters, web and e2e**
 
-In `SeasonPanel.tsx`, under the board, render for each pair of members who both have an average:
+- `finalizeRound.ts:61,90` stop returning `handicapping`; `contracts/commands.ts:173,213-222` drop `handicappingEntrySchema` and the response field.
+- `recordOf.ts`/`getMyRecord.ts`/`getGolfer.ts`: serve the new metrics; `toWireLine` maps `strokes`/`normallyShoots`, drops `ags`/`differential`.
+- `golferView.ts`/`updateMyGolfer.ts`/`ensureGolfer.ts:34`/`testing/fakes.ts:247`: drop `indexSource` from the view, the PUT body and every mint.
+- `adapters-dynamodb/src/golferStore.ts`: drop the `indexSource` attribute and its legacy fold; update the contract tests.
+- `ProfilePage.tsx`: delete the whole "Your index" section — source picker, `Use this`, override box, the `applyGolfer` index path. Name and home course only.
+- `GolferPage.tsx:4,80,87`: drop `resolveIndex`/`indexSourcePhrase`/`formatHandicapIndex`.
+- `RecordSections.tsx`: headline `What you shoot` rendering `metrics.average` through **`formatOverPar`**, subtitle `your last 10 finished rounds, score minus par`. The chart plots `averageHistory` as ONE line — delete the WHS series, its legend marker and the two-line caption; keep the 20-point window, nice-bounds/min-span-4 axis, endpoint emphasis and date anchors. Axis tick labels also use `formatOverPar`.
+- `SeasonPanel.tsx` + `contracts/crews.ts`: headers `Rounds · Average · Spread · Best`; `average` through `formatOverPar`, `spread` as `±N.N`, `—` where absent.
+- `JoinRoundPage.tsx`: wire the pre-fill to `record.metrics.average` (removing Task 3's `// Task 5` comment); blank when absent — no floor, no fallback.
+- E2E: `identityRecord.spec.ts`'s `differential`/`index` assertions become `average`/`spread` computed by hand from the seeded rounds; `crewSeason.spec.ts:160,341,362` and `crewSeasonDeck.ts:252-259` drop `netPer18`/`index` and assert `average`/`spread`. **The deck's CHs are all 0, so no scoring number moves — only the removed columns.**
 
+- [ ] **Step 9: Gate and commit**
+
+Run: `pnpm validate` → exit 0. Then `pnpm test:contract` → green.
+
+```bash
+git add -A
+git commit -m "feat(golfer): delete the WHS/swng index; the average replaces it
+
+One number from the last 10 finished rounds, score minus par, a nine-hole round
+counting doubled. A round containing a pickup has no score and does not
+contribute; a conceded hole carries one, so match rounds count. Rating, slope,
+differentials, adjusted gross score, the index-source model and
+RoundArchive.handicapping are deleted whole. formatOverPar absorbs the web's
+vsPar.ts as the one vs-par renderer."
 ```
-If you played tomorrow, Blaine gets 16.
+
+---
+
+## Task 6: The crew board's head-to-head line
+
+Additive on top of Task 5's board.
+
+**Files:** `apps/web/src/crews/SeasonPanel.tsx` + test
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+it("names the strokes between two members who have both played", () => {
+  render(<SeasonPanel standings={twoMembersAt26And10} />);
+  expect(screen.getByText("If you played tomorrow, Blaine gets 16.")).toBeTruthy();
+});
+
+it("says nothing about a pair where either has no average", () => {
+  render(<SeasonPanel standings={oneMemberWithNoRounds} />);
+  expect(screen.queryByText(/If you played tomorrow/)).toBeNull();
+});
 ```
 
-The difference of two averages **is** the strokes between them — the same subtraction the round does at join. Compute it inline from the two served `average` values (a subtraction of two served numbers is not a golf result; the compute fence does not apply, and the round's own `resolveStrokes` is not reachable from `apps/web/src`).
+- [ ] **Step 2: Run and watch fail, then implement**
 
-- [ ] **Step 5: Follow the wire and the panel**
+Run: `pnpm -F @swng/web vitest run src/crews/SeasonPanel.test.tsx` → FAIL.
 
-`packages/contracts/src/crews.ts`: the standings response's scoreboard line schema swaps its fields. `SeasonPanel.tsx`'s table headers become `Rounds · Average · Spread · Best`; render `average`/`spread` through `formatHandicapIndex`/a plain `±` prefix, and `—` where absent.
+Render, for each pair of members who both have an `average`, `If you played tomorrow, {higher} gets {difference}.` A subtraction of two served numbers is not a golf result, so the compute fence does not apply. Add a why-comment recording spec §6: this applies the same *rule* the round applies, over the board's season numbers — it is not a promise about what the round will produce, which is why the copy says "if you played tomorrow".
 
-- [ ] **Step 6: Run the gate and commit**
+- [ ] **Step 3: Gate and commit**
 
 Run: `pnpm validate` → exit 0.
 
 ```bash
 git add -A
-git commit -m "feat(crew): the board describes the distribution — average, spread, best"
+git commit -m "feat(crew): name the strokes between two members who never played together"
 ```
 
 ---
 
 ## Task 7: The docs say what the product now is
 
-**Files:**
-- Modify: `docs/product.md`, `docs/architecture.md`, `CLAUDE.md`
+**Files:** `docs/product.md`, `docs/architecture.md`, `CLAUDE.md`
 
-- [ ] **Step 1: Rewrite `product.md` §5's index pillar**
-
-Replace **The swng Index** with:
+- [ ] **Step 1: Replace `product.md` §5's index pillar**
 
 ```markdown
 - **What you shoot.** One number: what you normally shoot relative to par, averaged from
@@ -944,19 +880,15 @@ Replace **The swng Index** with:
 
 - [ ] **Step 2: Amend §1, §4 and §6**
 
-- §1: the "most golfers' handicaps are unofficial, stale, or vibes" paragraph now resolves by *asking for the vibe in plain words and then replacing it with real scores*, rather than by computing a WHS-faithful index.
+- §1: "most golfers' handicaps are unofficial, stale, or vibes" now resolves by *asking for the vibe in plain words and replacing it with real scores*, not by computing a WHS-faithful index.
 - §4: "Handicaps are already known, so strokes are computed" → "Everyone states what they normally shoot; swng takes the difference."
-- §6: **Crew handicaps** becomes **The crew board** — rounds, average, spread, best; and the line that the difference between two members' averages is the strokes between them.
+- §6: **Crew handicaps** → **The crew board** — rounds, average, spread, best, and the head-to-head strokes line.
 
-- [ ] **Step 3: Update `architecture.md`'s "Where golf logic lives"**
+- [ ] **Step 3: `architecture.md` and `CLAUDE.md`**
 
-Add `scoring/strokeBasis.ts` and `golfer/average.ts` to the domain inventory; delete `handicap/whs.ts` and `scoring/allowances.ts`.
+Add `scoring/strokeBasis.ts` and `golfer/average.ts` to "Where golf logic lives"; delete `handicap/whs.ts` and `scoring/allowances.ts`. Add the arc paragraph to `CLAUDE.md` in the existing convention: what changed, what was deleted whole, the gates, beta-only, never pushed.
 
-- [ ] **Step 4: Add the arc paragraph to `CLAUDE.md`**
-
-Follow the existing convention: what changed, what was deleted whole, what the gates were, beta-only, never pushed.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add -A
@@ -965,96 +897,71 @@ git commit -m "docs: the product is what you shoot relative to par, not an index
 
 ---
 
-## Task 8: E2E reconciliation
+## Task 8: E2E oracles and locators
 
-Every spec that types a handicap, reads "adjusted score", or asserts an index must be reconciled against the real JSX and the real wire — the string-breakage lesson.
+Compile errors were fixed inside Tasks 1, 3 and 5. **This task is behavioural only**: oracles that are now wrong, and locators that broke on changed copy.
 
-**Files:**
-- Modify: `apps/web/e2e/support.ts`, `courseEntry.spec.ts`, `fieldTest.spec.ts`, `crewSeason.spec.ts`, `crewSeasonDeck.ts`, `identityRecord.spec.ts`, `unratedCourse.spec.ts`, `handicapCorrection.spec.ts`, `shareLink.spec.ts`, `killNetwork.spec.ts`, `primaryPath.spec.ts`, `e2e/roundSlice.e2e.test.ts`, `e2e/syncSession.e2e.test.ts`
+**Files:** `apps/web/e2e/{courseEntry,fieldTest,crewSeason,identityRecord,unratedCourse,handicapCorrection,shareLink,killNetwork,primaryPath}.spec.ts`
 
-- [ ] **Step 1: Sweep the join helpers**
+- [ ] **Step 1: Re-derive `fieldDeck18`-driven browser oracles**
 
-`support.ts`'s join helper sends `basis` instead of `courseHandicap`. Every browser spec that fills the join form targets the new label — verify the accessible name against `JoinRoundPage.tsx` **by reading the JSX**, not from this plan.
+`fieldTest.spec.ts` asserts live standings from the deck. Task 1 moved stroke-play, stableford, skins and four-ball results; re-derive each asserted figure by hand and record the derivation in the commit message.
 
-- [ ] **Step 2: Re-derive `crewSeasonDeck.ts`'s expectations**
+- [ ] **Step 2: Reconcile every changed locator against the JSX**
 
-Scores stay byte-identical. Standings change because stroke play and stableford lost their 95%. Re-derive by hand and record the derivation in the commit message; the deck's own local-fold-vs-frozen backstop must still agree.
+Read the components, not this plan. Changed copy: the join label, `gameTreatment`'s five lines, `strokesNote`, the add-game form's gross/net radios, the profile headline and subtitle, `Final totals`, the card's `OUT`/`IN`/`TOT` rows, and the crew board headers.
 
-- [ ] **Step 3: Rewrite `identityRecord.spec.ts`'s record assertions**
+- [ ] **Step 3: `handicapCorrection.spec.ts` corrects a basis**
 
-Replace every `differential`/`index` assertion with `average`/`spread` computed by hand from the seeded rounds. `handicapCorrection.spec.ts` corrects a **basis** now — assert both that the chip moves and that the roster shows the new stated number.
+Assert both that the game chip moves and that the roster shows the new stated number. Add a beat that uses `Give strokes directly` so both constructors are covered live.
 
-- [ ] **Step 4: Fix `unratedCourse.spec.ts`**
+- [ ] **Step 4: `unratedCourse.spec.ts`**
 
-Rated and unrated are no longer different code paths — nothing computes from rating or slope. The spec keeps its value as proof that a blank-rating card enters, plays and finalizes; delete its index-bootstrap assertions.
+Rated and unrated are no longer different code paths — nothing computes from rating or slope. Keep the spec as proof that a blank-rating card enters, plays and finalizes; delete its index-bootstrap assertions.
 
 - [ ] **Step 5: Typecheck and commit**
 
-Run: `pnpm -F @swng/web exec tsc --noEmit -p tsconfig.e2e.json` (or the repo's existing e2e typecheck target) → clean.
+Run: `pnpm validate` → exit 0.
 
 ```bash
 git add -A
-git commit -m "test(e2e): reconcile every spec to the strokes model"
+git commit -m "test(e2e): re-derive the oracles and reconcile the locators"
 ```
 
 ---
 
 ## Task 9: Beta close-out
 
-**Controller-run. Beta only — no prod deploy, no `publish:web:prod`.**
+**Controller-run. Beta only.**
 
-- [ ] **Step 1: Full gate at HEAD**
-
-Run: `pnpm validate` → exit 0. Run: `pnpm test:contract` → all green.
-
-- [ ] **Step 2: Deploy lambda first**
-
-Run: `pnpm deploy:beta`
-Lambda-first is required: `JoinRoundRequest.basis` and the reshaped metrics are new required wire fields, so an old bundle against a new lambda fails only on submit, while a new bundle against an old lambda fails on load.
-Expected: `UPDATE_COMPLETE`.
-
-- [ ] **Step 3: Wipe beta round data**
-
-Run: `node scripts/scrapCourseAndRoundData.mjs` (rounds, snapshots, projections; golfers and crews kept).
-Every stored `courseHandicap` is semantically ambiguous under the new model, so there is nothing honest to migrate. Record the deleted counts.
-
-- [ ] **Step 4: Publish the web bundle**
-
-Run: `pnpm publish:web:beta`. Record the bundle hash and confirm the CloudFront invalidation completed.
-
-- [ ] **Step 5: Run the gates**
-
-Run: `pnpm e2e:beta` ×2 → all green both runs.
-Run: `pnpm e2e:field` → all specs green.
-
-- [ ] **Step 6: Adversarial USE pass on deployed `beta.swng.golf`**
-
-Two throwaway accounts, phone viewport, real PKCE. Reproduce the owner's own field report end to end:
+- [ ] **Step 1:** `pnpm validate` → exit 0; `pnpm test:contract` → green.
+- [ ] **Step 2:** `pnpm deploy:beta` → `UPDATE_COMPLETE`. **Lambda first** — `basis` and the reshaped metrics are new required wire fields, so an old bundle against a new lambda fails only on submit while a new bundle against an old lambda fails on load.
+- [ ] **Step 3:** `node scripts/scrapCourseAndRoundData.mjs` — rounds, snapshots, projections; golfers and crews kept. Record the deleted counts.
+- [ ] **Step 4:** `pnpm publish:web:beta` — record the bundle hash, confirm the CloudFront invalidation completed.
+- [ ] **Step 5:** `pnpm e2e:beta` ×2 → green both runs. `pnpm e2e:field` → all specs green.
+- [ ] **Step 6: Adversarial USE pass on deployed `beta.swng.golf`.** Two throwaway accounts, phone viewport, real PKCE. Reproduce the owner's own field report:
 
 1. Join stating `+30`; second account joins stating `+10`.
-2. Assert the card shows 20 dots on the 20 hardest holes for the first and none for the second.
-3. Add net skins and gross skins as two games; check each panel's strokes line.
-4. Score a hole, concede a hole, pick up a hole; check the pad's three states.
-5. Read the totals row: `OUT` / `IN` / `TOT`, gross over net, par totalled.
-6. Finalize; read gross · strokes · net with no "adjusted score" anywhere.
-7. Open the profile: `What you shoot`, the ten rows, one chart line, no index picker.
-8. Open the crew board: `Rounds · Average · Spread · Best` and the *"If you played tomorrow"* line.
+2. Card shows 20 dots on the 20 hardest holes for the first, none for the second.
+3. Add net skins and gross skins as two games; read each panel's treatment line — the gross one must show no strokes summary at all.
+4. Score a hole, concede a hole, pick up a hole; check all three pad states and the `5c` glyph.
+5. Read the totals row: `OUT` / `IN` / `TOT`, gross over net, par totalled, the conceded hole counted.
+6. Finalize; read gross · strokes · net with no "adjusted score" anywhere and the strokes shown as `−20`, not `+20`.
+7. Profile: `What you shoot`, the ten rows, one chart line, no index picker.
+8. Crew board: `Rounds · Average · Spread · Best` and the "If you played tomorrow" line.
 
-Console must be clean. Delete both throwaway Cognito users.
+Console clean. Delete both throwaway Cognito users.
 
-- [ ] **Step 7: Final commit**
-
-```bash
-git add -A
-git commit -m "chore: close out the relative-to-par strokes arc on beta"
-```
+- [ ] **Step 7:** Final commit.
 
 ---
 
 ## Self-Review
 
-**Spec coverage.** §1 → Task 7. §2a/§2b → Tasks 1, 3. §2c → Tasks 3, 4. §2d → Tasks 2, 4. §3 → Task 1. §4 → Task 5. §5 → Task 4. §6 → Task 6. §7 → Tasks 1, 4 (the `handicap/present.ts` survival note is a Global Constraint). §8 → Tasks 3, 4, 9. §9 → Tasks 1, 3, 4, 7. §10 → the beta-only Global Constraint and Task 9.
+**Spec coverage.** §1 → T7. §2a/§2b → T1, T3. §2c → T3, T5. §2d → T2, T5. §3 → T1. §4 → T4 (+ the sign constraint, global). §5 → T5. §6 → T5 (board), T6 (head-to-head). §7 → T1, T5. §8 → T2, T3, T5, T9. §9 → T1, T3, T5, T7. §10 → the beta-only constraint and T9. §11 is the revision record and needs no task.
 
-**Type consistency.** `StrokeBasis` (T1) → `Participant.basis` (T3) → `archiveGolferLine`'s `normallyShoots` (T4). `resolveStrokes` (T1) → `reduceRound` (T3) → `gameStrokeAllocation` (T1). `hasCompleteScore`/`scoreOf` (T4) → `averageOf`/`spreadOf` (T4) → `crewScoreboard` (T6). `roundStrokeAllocation` is the renamed `courseHandicapAllocation` and is used under that one name in T3 and T5.
+**Type consistency.** `StrokeBasis` (T1) → `Participant.basis` (T3) → `GolferRoundLine.normallyShoots` (T5). `resolveStrokes` (T1) → `reduceRound` (T3) → `gameStrokeAllocation` (T1). `hasCompleteScore`/`scoreOf` → `scoredOverPar`/`averageOfValues`/`spreadOfValues` → `averageOf`/`spreadOf` (all T5) → `crewScoreboard` (T5 Step 7, using the `*Values` pair so the rolling 10 is not applied on top of the season window). `roundStrokeAllocation` is the renamed `courseHandicapAllocation`, used under that one name from T3 onward. `formatOverPar` (T5) is the only vs-par renderer; `formatCourseHandicap`/`strokeGrant` remain the only handicap renderers.
 
-**Known sequencing wrinkle, deliberate:** Task 1 introduces a `basisOf` shim so it can land before the participant field is renamed; Task 3 Step 4 deletes it. Task 3 Step 6 leaves the join pre-fill unwired with a `// Task 4` comment, which Task 4 Step 6 completes. Both are called out at the point of use so a task reviewer sees them as planned rather than as an omission.
+**Declared shims, both deleted at a named step:** T1 Step 7's `basisOf` (deleted T3 Step 5); T3 Step 7's unwired join pre-fill (wired T5 Step 8).
+
+**Revision record.** The first draft was reviewed adversarially and failed on four counts, all fixed here: (1) e2e compiles inside `validate`, so the sweep moved into Tasks 1/3/5 and Task 8 became behavioural-only; (2) Task 4's old deletion set broke files owned by other tasks — the boundaries were redrawn so the results rewrite lands *before* `handicappingFor` dies and the scoreboard swap lands *inside* the WHS deletion; (3) `formatCourseHandicap(-strokes)` and `formatHandicapIndex(average)` both inverted their numbers' signs — `formatOverPar` and an explicit global constraint replace them; (4) the crew board would have applied a rolling-10 window on top of the season window — it now uses the `*Values` helpers over the whole windowed set.

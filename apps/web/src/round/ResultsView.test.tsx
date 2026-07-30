@@ -43,25 +43,33 @@ const render = (ui: ReactElement) =>
 // for asserting rendered text that spans a link, e.g. SetupPanel's roster-row assertions).
 const finalTotalsTexts = (): readonly (string | null)[] => within(screen.getByRole("list", { name: "Final totals" })).getAllByRole("listitem").map((li) => li.textContent);
 
-// Independent of ResultsView's own grossOf: walks a golden deck's raw scores + corrections
-// arrays directly (never cellAt/scoredStrokes) — a mismatch against what ResultsView renders is a
-// real bug in the component, not a restatement of its own arithmetic. A "picked-up" or never-
-// recorded (null) hole contributes nothing, same as ResultsView's own rule.
+// Independent of ResultsView's own grossForHoles: walks a golden deck's raw scores + corrections
+// arrays directly (never cellAt/scoredStrokes/grossForHoles) — a mismatch against what ResultsView
+// renders is a real bug in the component, not a restatement of its own arithmetic. Mirrors spec
+// §2d exactly: a "picked-up" or never-recorded (null) hole makes the WHOLE round's gross
+// undefined, never a silent zero-fill (task-4 fix round 1 — the deck's own Ann/h17 pickup is what
+// exercises this for real, not a hand-built corner case).
 const expectedGrossOf = (
   scores: Readonly<Record<string, ReadonlyArray<number | "picked-up" | null>>>,
   corrections: readonly { readonly golfer: string; readonly hole: number; readonly score: number | "picked-up" }[],
   golferId: string,
-): number => {
+): number | undefined => {
   const raw = [...scores[golferId]!];
   for (const correction of corrections) if (correction.golfer === golferId) raw[correction.hole - 1] = correction.score;
-  return raw.reduce<number>((sum, entry) => sum + (typeof entry === "number" ? entry : 0), 0);
+  if (raw.some((entry) => typeof entry !== "number")) return undefined;
+  return (raw as number[]).reduce((sum, entry) => sum + entry, 0);
 };
 
-// strokes is non-negative by construction (spec §2a) — the exact rendering rule ResultsView's
-// own strokesLabel applies, restated here only to build an expected STRING, not to re-derive the
-// number itself (gross/strokes both come from independent oracles above/below).
-const expectedFinalTotalsLine = (name: string, gross: number, strokes: number): string =>
-  `${name} — ${gross} gross · ${strokes > 0 ? `−${strokes}` : "0"} · ${gross - strokes} net`;
+// U+2212 restated as its own tiny oracle (not a call into ResultsView's own signedNumber) — this
+// codebase's glyph for a negative number, same as SeasonPanel's index delta.
+const signedNumber = (n: number): string => (n < 0 ? `−${-n}` : String(n));
+
+// strokes is non-negative by construction (spec §2a) — the exact rendering rule ResultsView's own
+// strokesLabel applies, restated here only to build an expected STRING, not to re-derive the
+// number itself (gross/strokes both come from independent oracles above/below). An undefined
+// gross dashes the whole line — grossForHoles's own "no partial number" rule, not a fallback.
+const expectedFinalTotalsLine = (name: string, gross: number | undefined, strokes: number): string =>
+  gross === undefined ? `${name} — –` : `${name} — ${gross} gross · ${strokes === 0 ? "0" : `−${strokes}`} · ${signedNumber(gross - strokes)} net`;
 
 afterEach(() => cleanup());
 
@@ -103,7 +111,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   });
 
   it("ResultsView renders exactly what describeGame(games()...) renders locally — the brief's literal check", () => {
-    render(<ResultsView state={state} games={localGames} response={response} />);
+    render(<ResultsView state={state} games={localGames} />);
 
     for (const game of localGames) {
       const { line } = describeGame(game, state);
@@ -115,7 +123,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   });
 
   it("the Final totals list totals each player's whole round — gross, the deck's own strokes, and net", () => {
-    render(<ResultsView state={state} games={localGames} response={response} />);
+    render(<ResultsView state={state} games={localGames} />);
     const texts = finalTotalsTexts();
     for (const p of players) {
       const gross = expectedGrossOf(scores, corrections, p.golferId);
@@ -127,7 +135,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   // The link sweep (navigation spec, task 6): every rendered noun's name is its address — both
   // the roster and the Final-totals list's own names link to /golfers/:golferId.
   it("the link sweep: roster and Final-totals-row names link to /golfers/:golferId", () => {
-    render(<ResultsView state={state} games={localGames} response={response} />);
+    render(<ResultsView state={state} games={localGames} />);
 
     const ann = players[0]!;
     const rosterList = screen.getByRole("list", { name: "Roster" });
@@ -140,7 +148,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   });
 
   it("the archived card reuses ScorecardGrid, read-only — a cell tap is inert", () => {
-    render(<ResultsView state={state} games={localGames} response={response} />);
+    render(<ResultsView state={state} games={localGames} />);
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole 1` });
     expect(cell.hasAttribute("disabled")).toBe(true);
   });
@@ -156,7 +164,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
     const hole = [...chDots.keys()].find((h) => (chDots.get(h) ?? 0) > 0);
     expect(hole).toBeDefined();
 
-    render(<ResultsView state={state} games={localGames} response={response} />);
+    render(<ResultsView state={state} games={localGames} />);
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole ${hole}` });
     const beforeTap = cell.querySelector('span[aria-hidden]')?.textContent;
     expect(beforeTap).toBe("●".repeat(chDots.get(hole!)!));
@@ -180,24 +188,29 @@ describe("ResultsView — share affordance (M9 Task 3)", () => {
   const localGames = state.games.map((config) => scoreGame(config, state));
 
   it("renders no 'Share round' button when shareToken is omitted (the WatchPage/spectator shape)", () => {
-    render(<ResultsView state={state} games={localGames} response={undefined} />);
+    render(<ResultsView state={state} games={localGames} />);
     expect(screen.queryByRole("button", { name: "Share round" })).toBeNull();
   });
 
   it("renders 'Share round' when shareToken is provided (RoundPage's own archived-card shape)", () => {
-    render(<ResultsView state={state} games={localGames} response={undefined} shareToken="participant-token" />);
+    render(<ResultsView state={state} games={localGames} shareToken="participant-token" />);
     expect(screen.getByRole("button", { name: "Share round" })).toBeTruthy();
   });
 });
 
-describe("ResultsView — no response (WS-pushed final, brief's other tab)", () => {
-  it("renders the identical Final totals with no response at all — the section never depended on one", () => {
+// The ResultsViewProps.response field this describe block was originally named for is deleted
+// (review fix, task-4 fix round 1: it was unused dead weight in the interface, kept alive by
+// nothing but a comment) — every render here already IS the WS-pushed-final scenario the title
+// described, since ResultsView now computes everything off `state` alone regardless of which tab
+// called finalizeRound.
+describe("ResultsView — WS-pushed final (this tab never called finalizeRound itself)", () => {
+  it("renders the Final totals list correctly from state alone", () => {
     const { players, fourball, skins, scores, corrections, expected } = fieldDeck18;
     const events = playGoldenRoundLog(fixtureLinks18, players, [fourball, skins], scores, corrections, true);
     const state = reduceRound(events);
     const localGames = state.games.map((config) => scoreGame(config, state));
 
-    render(<ResultsView state={state} games={localGames} response={undefined} />);
+    render(<ResultsView state={state} games={localGames} />);
 
     const texts = finalTotalsTexts();
     for (const p of players) {
@@ -213,7 +226,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     const state = reduceRound(events);
     const localGames = state.games.map((config) => scoreGame(config, state));
 
-    render(<ResultsView state={state} games={localGames} response={undefined} />);
+    render(<ResultsView state={state} games={localGames} />);
 
     expect(screen.getByText("Ann & Bo win 1 up")).toBeTruthy();
     const cell = screen.getByRole("button", { name: `${players[0]!.name} hole 1` });
@@ -242,7 +255,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     };
     const games = [scoreGame(terminatedConfig, state), scoreGame(resolvedConfig, state)];
 
-    render(<ResultsView state={state} games={games} response={undefined} />);
+    render(<ResultsView state={state} games={games} />);
 
     const stablefordChip = screen.getByRole("button", { name: /Stableford/ });
     const matchChip = screen.getByRole("button", { name: /Match play/ });
@@ -252,12 +265,12 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     expect(screen.queryByRole("region")).toBeNull(); // nothing expanded by default
   });
 
-  it("an undecided card (one hole recorded, the rest never played) still renders a Final totals line — no crash, no completeness gate", () => {
-    // A tiny hand-built round: one participant, one hole recorded, never finished — the round
-    // is marked final anyway (mirrors the WS-push scenario: this tab just observes status).
-    // Unlike the deleted WHS-model incomplete/unrated kinds, Final totals is pure arithmetic: an
-    // unrecorded hole just contributes nothing to gross (spec: "the finished round stops
-    // speaking WHS" — there is no completeness gate left to fail).
+  // Review fix (task-4 fix round 1): this test used to pin "Ann — 5 gross · −8 · −3 net" for a
+  // card with only 1 of 18 holes recorded — a fabricated partial gross and a nonsensical negative
+  // net, the exact invented-number dishonesty this arc exists to delete. grossForHoles now
+  // correctly reports undefined for any undecided hole, so the whole line dashes instead — no
+  // crash, no completeness-gate special case, just spec §2d's own rule applied honestly.
+  it("an undecided card (one hole recorded, the rest never played) dashes — no fabricated gross", () => {
     const ann = golferId("ann");
     const cellValue: ScoreCell = { result: { kind: "strokes", strokes: 5 }, recordedBy: ann, hlc: { wallMs: 1, counter: 0, deviceId: deviceId("d") }, opId: opId("op-1") };
     const state: RoundState = {
@@ -270,8 +283,36 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
       terminatedGameIds: new Set(),
     };
 
-    render(<ResultsView state={state} games={[]} response={undefined} />);
-    expect(finalTotalsTexts()).toContain(expectedFinalTotalsLine("Ann", 5, 8)); // "Ann — 5 gross · −8 · −3 net"
+    render(<ResultsView state={state} games={[]} />);
+    expect(finalTotalsTexts()).toContain(expectedFinalTotalsLine("Ann", undefined, 8)); // "Ann — –"
+  });
+
+  // The positive case beside the dash above: once every hole IS decided, the line renders real
+  // numbers, not a dash — the two tests together pin both arms of grossForHoles' own rule.
+  it("a fully-decided card renders real gross/strokes/net", () => {
+    const ann = golferId("ann");
+    const cells: Record<string, ScoreCell> = {};
+    for (const hole of fixtureLinks18.teeSets[0]!.holes) {
+      cells[cellKey(ann, hole.number)] = {
+        result: { kind: "strokes", strokes: hole.par + 1 }, // a bogey every hole
+        recordedBy: ann,
+        hlc: { wallMs: hole.number, counter: 0, deviceId: deviceId("d") },
+        opId: opId(`op-${hole.number}`),
+      };
+    }
+    const state: RoundState = {
+      id: roundId("r-full"),
+      status: "final",
+      card: fixtureLinks18,
+      participants: [{ golferId: ann, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 9 }, strokes: 9 }],
+      games: [],
+      cells,
+      terminatedGameIds: new Set(),
+    };
+
+    render(<ResultsView state={state} games={[]} />);
+    // par 72 + 18 (a bogey on every hole) = 90 gross; strokes 9 → net 81.
+    expect(finalTotalsTexts()).toContain(expectedFinalTotalsLine("Ann", 90, 9)); // "Ann — 90 gross · −9 · 81 net"
   });
 });
 
@@ -315,7 +356,7 @@ describe("ResultsView — no claim affordance (accounts-only)", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("not signed in: the finalized roster renders names, with no claim affordance", () => {
-    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
+    render(<ResultsView state={finalState()} games={[]} />);
 
     const rows = screen.getAllByRole("listitem");
     expect(rows.find((li) => /Ann/.test(li.textContent ?? ""))).toBeTruthy();
@@ -328,7 +369,7 @@ describe("ResultsView — no claim affordance (accounts-only)", () => {
     const fetchMock = vi.fn(async () => fakeResponse(200, { golfer: null }));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<ResultsView state={finalState()} games={[]} response={undefined} />);
+    render(<ResultsView state={finalState()} games={[]} />);
 
     // Let the AuthProvider's GET /me settle so a claim button, if any survived, would have shown.
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());

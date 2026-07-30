@@ -133,6 +133,7 @@ export default [
                 "gameStrokeAllocation",
                 "roundStrokeAllocation",
                 "totalDots",
+                "grossForHoles",
                 "handicappingFor",
                 "allocateStrokes",
                 "dotsByHole",

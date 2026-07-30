@@ -51,6 +51,7 @@ export {
   roundStrokeAllocation,
   netStrokes,
   totalDots,
+  grossForHoles,
   unresolvedGames,
   courseHandicapFor,
   courseHandicapFromRatingSlopePar,

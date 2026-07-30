@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
-import type { FinalizeRoundResponse, GameConfigInput } from "@swng/contracts";
+import type { GameConfigInput } from "@swng/contracts";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { GameId, GameState, GolferId, HoleResult, RoundId, RoundState, StrokeBasis } from "@swng/domain";
 import { abandonRound, addGame, finalizeRound, leaveRound, setBasis, terminateGame } from "../api";
@@ -308,10 +308,6 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
   function RoundPageContent({ roundId, credential }: { roundId: RoundId; credential: RoundCredential }) {
     const session = useRoundSession(roundId);
     const navigate = useNavigate();
-    // Present only once THIS tab has called finalize itself — a tab that only observes the
-    // status flip via WS/pull (another participant finalized) never sets this, and
-    // ResultsView must render fully either way (its own contract; see its doc comment).
-    const [finalizeResponse, setFinalizeResponse] = useState<FinalizeRoundResponse | undefined>(undefined);
 
     // Destructured so useCallback's deps list a stable function reference (sync's own
     // useCallback([]) in useRoundSession.ts) rather than the whole `session` object, which is
@@ -345,11 +341,10 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     );
 
     const onFinalize = useCallback(async () => {
-      const response = await finalizeRound(roundId, credential.token);
-      setFinalizeResponse(response);
-      // The response is already in hand, but session.state.status hasn't necessarily folded
-      // the resulting round-finalized event yet (it arrives via this tab's own pull/WS, same
-      // as any other event) — sync() pulls it now instead of waiting for the next natural
+      await finalizeRound(roundId, credential.token);
+      // The call has already landed server-side, but session.state.status hasn't necessarily
+      // folded the resulting round-finalized event yet (it arrives via this tab's own pull/WS,
+      // same as any other event) — sync() pulls it now instead of waiting for the next natural
       // tick, so the live→ResultsView swap below follows almost immediately.
       await sync();
     }, [roundId, credential.token, sync]);
@@ -438,7 +433,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
           onReconnect={reconnect}
         />
         {isFinal ? (
-          <ResultsView state={session.state} games={session.games} response={finalizeResponse} shareToken={credential.token} />
+          <ResultsView state={session.state} games={session.games} shareToken={credential.token} />
         ) : (
           <LiveRound
             state={session.state}

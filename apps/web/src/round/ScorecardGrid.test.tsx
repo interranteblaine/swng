@@ -396,12 +396,26 @@ describe("ScorecardGrid — totals (OUT/IN/TOT)", () => {
     terminatedGameIds: new Set(),
   };
 
-  it("totals the card like a scorecard — OUT, IN and TOT, gross and net", () => {
+  it("totals the card like a scorecard — OUT, IN and TOT each carry their own par/gross/net", () => {
     render(<ScorecardGrid state={stateWithFullCard} recordScore={() => {}} />);
-    const tot = screen.getByRole("row", { name: /tot/i });
-    expect(within(tot).getByText("72")).toBeTruthy(); // par
-    expect(within(tot).getByText("96")).toBeTruthy(); // Blaine gross
-    expect(within(tot).getByText("76")).toBeTruthy(); // Blaine net
+
+    // strokes: 20 on an 18-hole card → base 1 dot/hole + the remainder (2) to the two hardest SI
+    // holes (fixtureWhite18's SI1 is hole 2, front nine; SI2 is hole 10, back nine) — one extra
+    // dot lands in EACH segment, so OUT and IN each carry 10 of the 20 total dots.
+    const out = within(screen.getByRole("row", { name: "OUT" }));
+    expect(out.getByText("Par 36")).toBeTruthy();
+    expect(out.getByText("51")).toBeTruthy(); // Blaine gross, front nine
+    expect(out.getByText("41")).toBeTruthy(); // net = 51 − 10 dots
+
+    const inRow = within(screen.getByRole("row", { name: "IN" }));
+    expect(inRow.getByText("Par 36")).toBeTruthy();
+    expect(inRow.getByText("45")).toBeTruthy(); // Blaine gross, back nine
+    expect(inRow.getByText("35")).toBeTruthy(); // net = 45 − 10 dots
+
+    const tot = within(screen.getByRole("row", { name: "TOT" }));
+    expect(tot.getByText("Par 72")).toBeTruthy();
+    expect(tot.getByText("96")).toBeTruthy(); // Blaine gross
+    expect(tot.getByText("76")).toBeTruthy(); // Blaine net
   });
 
   it("counts a conceded hole in the totals at its recorded score", () => {
@@ -413,17 +427,47 @@ describe("ScorecardGrid — totals (OUT/IN/TOT)", () => {
       cells: { ...fullCardCells, [cellKey(BLAINE, 3)]: scoreCell({ kind: "conceded", strokes: 5 }, BLAINE) },
     };
     render(<ScorecardGrid state={stateWithOneConcededFive} recordScore={() => {}} />);
-    expect(within(screen.getByRole("row", { name: /tot/i })).getByText("96")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: "TOT" })).getByText("96")).toBeTruthy();
   });
 
-  it("dashes a segment containing a pickup", () => {
-    // One picked-up hole is enough to prove it — no full card needed.
-    const stateWithOnePickup = twoPlayerState({
-      participants: [participant(ANN, "Ann", "white", 0)],
-      cells: { [cellKey(ANN, 1)]: scoreCell({ kind: "picked-up" }, ANN) },
-    });
-    render(<ScorecardGrid state={stateWithOnePickup} recordScore={() => {}} />);
-    expect(within(screen.getByRole("row", { name: /out/i })).getByText("–")).toBeTruthy();
+  // Review fix (task-4 fix round 1): a picked-up (or otherwise undecided) hole must dash ONLY the
+  // segment(s) that actually contain it — a sibling segment with a fully decided card still
+  // totals normally. Hole 3 sits in OUT, so OUT (containing it) and TOT (containing everything)
+  // both dash, while IN — fully scored, untouched by the pickup — still shows real numbers. No
+  // information is lost for IN; nothing is fabricated for OUT/TOT.
+  it("a picked-up hole dashes its own segment and TOT, but a fully-scored sibling segment still totals", () => {
+    const ann2: RosterEntry = { golferId: ANN, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 2 }, strokes: 2 };
+    const parOf = (holeNumber: number): number => fixtureWhite18.holes.find((h) => h.number === holeNumber)!.par;
+    const cells: Record<string, ScoreCell> = {};
+    for (const hole of fixtureWhite18.holes) {
+      cells[cellKey(ANN, hole.number)] = hole.number === 3 ? scoreCell({ kind: "picked-up" }, ANN) : scoreCell({ kind: "strokes", strokes: parOf(hole.number) }, ANN);
+    }
+    const state: RoundState = { id: roundId("round-scoped-dash"), status: "live", card: fixtureLinks18, participants: [ann2], games: [], cells, terminatedGameIds: new Set() };
+
+    render(<ScorecardGrid state={state} recordScore={() => {}} />);
+
+    expect(within(screen.getByRole("row", { name: "OUT" })).getByText("–")).toBeTruthy();
+    expect(within(screen.getByRole("row", { name: "TOT" })).getByText("–")).toBeTruthy();
+
+    // strokes: 2 → the two hardest SI holes get a dot (SI1 = hole 2, front; SI2 = hole 10, back);
+    // IN carries exactly one of them (hole 10), so IN's own net differs from its gross by 1.
+    const inRow = within(screen.getByRole("row", { name: "IN" }));
+    expect(inRow.getByText("Par 36")).toBeTruthy();
+    expect(inRow.getByText("36")).toBeTruthy(); // gross: every back-nine hole scored at its own par
+    expect(inRow.getByText("35")).toBeTruthy(); // net = 36 − 1 dot (hole 10)
+  });
+
+  // Review fix (task-4 fix round 1): the brief's own OUT/IN/TOT split, applied literally to a
+  // 9-hole card, printed OUT and TOT as byte-identical rows (both cover the same 9 holes) — a
+  // confusing duplicate, not a real front/back split. OUT (and IN) only mean something once a card
+  // actually has a back nine to split from; TOT alone unambiguously means the whole round.
+  it("a 9-hole card has no OUT/IN split — only TOT", () => {
+    const state = twoPlayerState({ participants: [participant(ANN, "Ann", "white", 0)], cells: {} });
+    render(<ScorecardGrid state={state} recordScore={() => {}} />);
+
+    expect(screen.queryByRole("row", { name: "OUT" })).toBeNull();
+    expect(screen.queryByRole("row", { name: "IN" })).toBeNull();
+    expect(screen.getByRole("row", { name: "TOT" })).toBeTruthy();
   });
 });
 

@@ -1,10 +1,11 @@
 import type { GameId, GolferId, OpId, RoundId } from "../ids.js";
-import type { CourseCard } from "../course/card.js";
+import type { CourseCard, Hole } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import type { StrokeBasis } from "../scoring/strokeBasis.js";
 import { anchorOf, resolveStrokes } from "../scoring/strokeBasis.js";
 import { compareHlc, type Hlc } from "./hlc.js";
 import type { HoleResult } from "./holeResult.js";
+import { scoredStrokes } from "./holeResult.js";
 import type { Participant, RosterEntry } from "./participant.js";
 import type { GameConfig, RoundEvent } from "./events.js";
 
@@ -43,6 +44,25 @@ export const cellKey = (golfer: GolferId, hole: number): string => `${golfer}#${
 export const cellAt = (cells: Readonly<Record<string, ScoreCell>>, golferId: GolferId, hole: number): ScoreCell | undefined => {
   const cell = cells[cellKey(golferId, hole)];
   return cell && cell.result.kind !== "cleared" ? cell : undefined;
+};
+
+// One rule, one place, for "what did this golfer shoot over this set of holes" (spec §2d
+// extended from one cell to many): a set's gross is the sum of scoredStrokes over EVERY hole in
+// it, or undefined the instant any one of them lacks a decided, scored cell (missing, picked-up,
+// or cleared). There is no honest partial sum for a card that isn't fully decided — a hole with
+// no number contributes nothing to know, not a silent zero. Both the standard card's OUT/IN/TOT
+// segments (ScorecardGrid.tsx, via roundStrokeAllocation's own per-player field) and the finished
+// round's whole-card headline (ResultsView.tsx) call this SAME function, through @swng/client, so
+// the two can never disagree about the same round the way two hand-maintained copies would.
+export const grossForHoles = (cells: Readonly<Record<string, ScoreCell>>, golferId: GolferId, holes: readonly Hole[]): number | undefined => {
+  let gross = 0;
+  for (const hole of holes) {
+    const cell = cellAt(cells, golferId, hole.number);
+    const strokes = cell && scoredStrokes(cell.result);
+    if (strokes === undefined) return undefined;
+    gross += strokes;
+  }
+  return gross;
 };
 
 const LIFECYCLE_STATUS: Record<"round-created" | "round-started" | "round-finalized" | "round-reopened" | "round-abandoned", RoundStatus> = {

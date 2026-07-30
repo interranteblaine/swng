@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { netStrokes, roundStrokeAllocation } from "@swng/client";
+import { grossForHoles, netStrokes, roundStrokeAllocation } from "@swng/client";
 import { cellAt, findTeeSet, scoredStrokes, strokeGrant, underPar } from "@swng/domain";
 import type { CourseCard, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { cardBox } from "../ui/classes";
@@ -66,13 +66,12 @@ const glyphFor = (result: HoleResult): string => {
   }
 };
 
-// A segment total (OUT/IN/TOT, the same three rows any paper card carries): the hole's own gross
-// over net, via the SAME netStrokes(gross, dots) every cell above already uses. scoredStrokes
-// reads a conceded hole exactly like a strokes cell (spec §4: any other rule would make this card
-// disagree with the same round's own line in the golfer's record, which reads conceded strokes
-// too), so a concession counts here at its recorded score. A picked-up or missing cell ANYWHERE
-// in the segment makes the whole segment unknown — there's no honest partial number for "some of
-// the front nine," so it dashes exactly the way a single missing hole would.
+// A segment total (OUT/IN/TOT, the same three rows any paper card carries): gross over net, via
+// grossForHoles (@swng/client — the ONE place spec §2d's "a card either has a score or it
+// doesn't" rule lives, extended from one cell to a whole set of holes) and the same
+// netStrokes(gross, dots) every cell above already uses. ResultsView's own "Final totals" line
+// calls the SAME grossForHoles, so the two sections can never disagree about the same round the
+// way two hand-maintained copies would (review fix, task-4 fix round 1).
 interface SegmentTotal {
   readonly gross: number;
   readonly net: number;
@@ -84,15 +83,9 @@ const segmentTotalFor = (
   cells: RoundState["cells"],
   dots: ReadonlyMap<number, number> | undefined,
 ): SegmentTotal | undefined => {
-  let gross = 0;
-  let dotsSum = 0;
-  for (const hole of segmentHoles) {
-    const cell = cellAt(cells, golferId, hole.number);
-    const strokes = cell && scoredStrokes(cell.result);
-    if (strokes === undefined) return undefined;
-    gross += strokes;
-    dotsSum += dots?.get(hole.number) ?? 0;
-  }
+  const gross = grossForHoles(cells, golferId, segmentHoles);
+  if (gross === undefined) return undefined;
+  const dotsSum = segmentHoles.reduce((sum, hole) => sum + (dots?.get(hole.number) ?? 0), 0);
   return { gross, net: netStrokes(gross, dotsSum) };
 };
 
@@ -171,16 +164,16 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
   // own field) live in that game's own panel — this grid never re-derives them.
   const dotsByGolfer = roundStrokeAllocation(state.participants, state.card);
 
-  // OUT (front nine) / IN (back nine, omitted on a 9-hole card) / TOT — the same three rows
-  // any paper card totals, keyed off hole NUMBER rather than array position (every card in this
-  // codebase numbers holes 1..N, but this doesn't need to assume it).
+  // OUT (front nine) / IN (back nine) / TOT — the same rows any paper card totals, keyed off
+  // hole NUMBER rather than array position (every card in this codebase numbers holes 1..N, but
+  // this doesn't need to assume it). OUT/IN only mean anything once a card actually HAS a back
+  // nine to split from — on a 9-hole card, "OUT" would cover the exact same holes as "TOT" (a
+  // confusing duplicate row, review fix task-4 fix round 1), so both are omitted and only the
+  // unambiguous whole-round TOT renders.
   const outHoles = holes.filter((h) => h.number <= 9);
   const inHoles = holes.filter((h) => h.number > 9);
-  const segments: readonly { readonly label: string; readonly holes: readonly Hole[] }[] = [
-    { label: "OUT", holes: outHoles },
-    ...(inHoles.length > 0 ? [{ label: "IN", holes: inHoles }] : []),
-    { label: "TOT", holes },
-  ];
+  const segments: readonly { readonly label: string; readonly holes: readonly Hole[] }[] =
+    inHoles.length > 0 ? [{ label: "OUT", holes: outHoles }, { label: "IN", holes: inHoles }, { label: "TOT", holes }] : [{ label: "TOT", holes }];
 
   const selectedParticipant = selection && state.participants.find((p) => p.golferId === selection.golferId);
   const selectedHole = selection && holes.find((h) => h.number === selection.hole);
@@ -241,13 +234,10 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
               <tr key={segment.label} aria-label={segment.label}>
                 <th scope="row" className="sticky left-0 z-10 bg-inherit px-2 text-left font-mono text-xs text-fairway">
                   <div className="font-semibold">{segment.label}</div>
-                  {/* The par number lives in its OWN element, not concatenated into "Par 72" as
-                      one text run — the same isolation every rendered gross/net number below
-                      gets, so a test (or a screen reader stepping element-by-element) can find
-                      "72" on its own rather than only "Par 72". */}
-                  <div>
-                    Par <span>{segment.holes.reduce((sum, hole) => sum + hole.par, 0)}</span>
-                  </div>
+                  {/* Same "Par N" shape as an ordinary hole row's own header cell above — one
+                      composite string, not a number wrapped in its own element for a test's
+                      sake (review fix, task-4 fix round 1). */}
+                  <div>Par {segment.holes.reduce((sum, hole) => sum + hole.par, 0)}</div>
                 </th>
                 {state.participants.map((p) => {
                   const total = segmentTotalFor(p.golferId, segment.holes, state.cells, dotsByGolfer.get(p.golferId));

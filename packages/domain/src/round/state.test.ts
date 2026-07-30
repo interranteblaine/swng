@@ -4,8 +4,10 @@ import type { GolferId } from "../ids.js";
 import type { CourseCard } from "../course/card.js";
 import type { StrokeBasis } from "../scoring/strokeBasis.js";
 import type { Hlc } from "./hlc.js";
+import type { HoleResult } from "./holeResult.js";
 import type { RoundEvent } from "./events.js";
-import { cellAt, cellKey, reduceRound } from "./state.js";
+import { cellAt, cellKey, grossForHoles, reduceRound } from "./state.js";
+import type { ScoreCell } from "./state.js";
 
 const card: CourseCard = {
   courseName: "Fixture Links",
@@ -465,5 +467,62 @@ describe("participant-basis-set", () => {
     const setB: RoundEvent = { ...base(10), kind: "participant-basis-set", golferId: B, basis: shoots(5) };
     const state = reduceRound([genesis, joinA, started, setB]);
     expect(state.participants.map((p) => p.golferId)).toEqual([A]);
+  });
+});
+
+// Spec §2d extended from one cell to many (task-4 review fix): a set of holes has a gross iff
+// EVERY hole in it has a decided, scored cell. Built with hand-made cells, independent of
+// reduceRound — the fold isn't under test here, only the "sum, or undefined" rule itself.
+describe("grossForHoles", () => {
+  const holes = card.teeSets[0]!.holes; // 3 holes: par 4, par 4, par 3
+  const cell = (result: HoleResult): ScoreCell => ({ result, recordedBy: A, hlc: at(1), opId: opId(`op-${op++}`) });
+
+  it("sums scoredStrokes across every hole when all three are decided — a conceded hole counts at its recorded score", () => {
+    const cells: Record<string, ScoreCell> = {
+      [cellKey(A, 1)]: cell({ kind: "strokes", strokes: 5 }),
+      [cellKey(A, 2)]: cell({ kind: "strokes", strokes: 4 }),
+      [cellKey(A, 3)]: cell({ kind: "conceded", strokes: 3 }),
+    };
+    expect(grossForHoles(cells, A, holes)).toBe(12);
+  });
+
+  it("is undefined when any hole in the set has a picked-up cell — never a silent zero for it", () => {
+    const cells: Record<string, ScoreCell> = {
+      [cellKey(A, 1)]: cell({ kind: "strokes", strokes: 5 }),
+      [cellKey(A, 2)]: cell({ kind: "picked-up" }),
+      [cellKey(A, 3)]: cell({ kind: "strokes", strokes: 3 }),
+    };
+    expect(grossForHoles(cells, A, holes)).toBeUndefined();
+  });
+
+  it("is undefined when a hole was never recorded at all", () => {
+    const cells: Record<string, ScoreCell> = {
+      [cellKey(A, 1)]: cell({ kind: "strokes", strokes: 5 }),
+      [cellKey(A, 2)]: cell({ kind: "strokes", strokes: 4 }),
+      // hole 3: no cell — the card just never reached it.
+    };
+    expect(grossForHoles(cells, A, holes)).toBeUndefined();
+  });
+
+  it("is undefined when a hole's cell was cleared — cellAt hides it exactly like unscored", () => {
+    const cells: Record<string, ScoreCell> = {
+      [cellKey(A, 1)]: cell({ kind: "strokes", strokes: 5 }),
+      [cellKey(A, 2)]: cell({ kind: "cleared" }),
+      [cellKey(A, 3)]: cell({ kind: "strokes", strokes: 3 }),
+    };
+    expect(grossForHoles(cells, A, holes)).toBeUndefined();
+  });
+
+  it("reads only the requested golfer's cells — another golfer's complete card doesn't leak in", () => {
+    const cells: Record<string, ScoreCell> = {
+      [cellKey(B, 1)]: cell({ kind: "strokes", strokes: 5 }),
+      [cellKey(B, 2)]: cell({ kind: "strokes", strokes: 4 }),
+      [cellKey(B, 3)]: cell({ kind: "strokes", strokes: 3 }),
+    };
+    expect(grossForHoles(cells, A, holes)).toBeUndefined();
+  });
+
+  it("an empty hole list has a gross of zero — vacuously true, matching a fold's own empty identity", () => {
+    expect(grossForHoles({}, A, [])).toBe(0);
   });
 });

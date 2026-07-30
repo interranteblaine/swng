@@ -168,7 +168,7 @@ export function RoundRecordPage() {
       {/* No shareToken: this page's viewer holds only their own golfer Bearer — never a
           round-scoped participant token to mint a NEW share link with (same reasoning as
           WatchPage's own reuse of ResultsView, WatchPage.tsx's doc comment). */}
-      <ResultsView state={view.state} games={view.games} response={undefined} />
+      <ResultsView state={view.state} games={view.games} />
     </main>
   );
 }

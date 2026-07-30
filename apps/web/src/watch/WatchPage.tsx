@@ -117,7 +117,7 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
           {/* No shareToken: a spectator holds no participant token to mint a NEW share link with —
               ResultsView.tsx's own doc comment explains why shareToken is optional and omitted
               here. */}
-          {isFinal ? <ResultsView state={view.state} games={view.games} response={undefined} /> : <LiveWatch view={view} />}
+          {isFinal ? <ResultsView state={view.state} games={view.games} /> : <LiveWatch view={view} />}
         </main>
       </PlainNamesContext.Provider>
     );

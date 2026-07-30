@@ -224,7 +224,7 @@ describe("WatchPage", () => {
     const courseLink = screen.getByRole("link", { name: "Fixture Links" });
     expect(courseLink.getAttribute("href")).toBe(`/courses/${WATCH_COURSE_ID}`);
 
-    // ResultsView's roster + handicapping rows both name Ann — neither renders as a link here.
+    // ResultsView's roster + Final-totals rows both name Ann — neither renders as a link here.
     expect(screen.getAllByText("Ann").length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "Ann" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Bo" })).toBeNull();

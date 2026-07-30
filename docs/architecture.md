@@ -65,10 +65,12 @@ interface Golfer {
 Index pipeline is deleted whole, `docs/superpowers/specs/2026-07-29-relative-to-par-strokes-
 model-design.md`). What a golfer shoots is `metrics.average`, computed on read from their own
 finished rounds — a plain integer over/under par (score minus par, last 10 finished rounds with
-every hole scored), no index, no slope, no best-8-of-20. What a golfer plays off in any given
-round is the `StrokeBasis` they state when they join it (the Round section below); nothing
-about it lives on the profile between rounds beyond that it pre-fills the next join's field.
-Old stored rounds still contain ghost golferIds that never had and never will have accounts —
+every hole scored), no index, no slope, no best-8-of-20. **Nothing on the profile feeds a round**
+(2026-07-30, `docs/superpowers/specs/2026-07-30-strokes-are-typed-design.md`): what a golfer
+plays off is one integer someone types on that round's roster (the Round section below), and the
+average is read-only in both directions — it is computed from rounds and never asserted, and no
+round reads it, pre-fills from it, or floors anything by it. Its whole job is to tell a human
+what to ask for on the first tee. Old stored rounds still contain ghost golferIds that never had and never will have accounts —
 they fold and render exactly as written (the sealed leaf is the identity of record for its own
 participants); only account-bound golfers are projected forward into records and presence.
 
@@ -78,28 +80,42 @@ participants); only account-bound golfers are projected forward into records and
 Course ─ TeeSet[] ─ rating, slope (18- and 9-hole) ─ Hole[] { par, yardage, strokeIndex }
 ```
 
-Tee sets are **versioned and immutable** — corrections create a new version; verification
-(`verifiedBy`) and provenance (community-entered | imported) are per-version metadata.
-**Rounds freeze a `CourseCard` snapshot at start**, so history never rewrites regardless.
+The stored unit is the frozen unit (2026-07-15, `docs/superpowers/specs/2026-07-15-course-cards-
+design.md`): a `CardRecord` wraps the exact `CourseCard` value a round freezes, cards are
+**write-once**, and a course is a lineage's CURRENT pointer over them. Every maintenance act —
+add a tee, fix a number, rename — is one whole-card supersession under one concurrency rule: the
+pointer must still name the card the caller reviewed, else `card-superseded`. `TeeId` is
+server-minted and recorded at write time, never inferred. Attribution (`enteredBy`, frozen at
+write) and provenance (community-entered | imported) are per-card. **There is no verification
+step**: the trust model is *transcription, not authority* — a card claims only to be what is
+printed on the paper card, and a wrong number is corrected by superseding the card, not attested
+away. **Rounds freeze a `CourseCard` snapshot at start**, so history never rewrites regardless.
 The licensing buy-vs-build stays open (roadmap); the entity models either source.
 
 ### Round — the only event-sourced aggregate
 
-A `Round` is: a frozen `CourseCard`, participants (with tee and stated `StrokeBasis` frozen at
-join, correctable mid-round by a dedicated `participant-basis-set` event — you play at the
-number you started with, until someone corrects it), attached games, and its event log.
+A `Round` is: a frozen `CourseCard`, participants (each with a tee and an **asserted** integer
+`strokes`, 0 until someone types one, set and re-set by a dedicated `participant-strokes-set`
+event that any participant may send about any participant — the score-for-anyone trust model),
+attached games, and its event log.
 Lifecycle is an explicit enum: `setup → live → final`, plus `abandoned` — a real terminal
 reached via `round-abandoned`, mirroring `round-finalized`'s fold semantics but producing **no
 archive**: an abandoned round aggregates nowhere and is excluded from every downstream view
-(presence, projections, crew season counting). No null states.
+(presence, projections, a crew season's window). No null states.
 
 ```ts
 type RoundEvent =
-  | RoundCreated | ParticipantJoined | GameAdded
-  | ScoreRecorded      // { golferId, hole, result: strokes | 'picked-up' | 'conceded', recordedBy, opId, hlc }
-  | PressOpened | ConcessionGiven | PartnerPicked   // game decisions live in the same log
-  | RoundFinalized | RoundReopened | RoundAbandoned
+  | RoundCreated | ParticipantJoined | ParticipantLeft | ParticipantStrokesSet | GameAdded
+  | ScoreRecorded      // { golferId, hole, result: strokes | 'picked-up' | 'cleared', recordedBy, opId, hlc }
+  | PressOpened | PartnerPicked                     // game decisions live in the same log
+  | GameTerminated | RoundFinalized | RoundReopened | RoundAbandoned
 ```
+
+A hole result has exactly one numeric arm. **A gimme is a score** (2026-07-30 §7): conceding
+the next stroke leaves the total in no doubt, so the player taps it and there is nothing to
+ask them — the old `conceded` arm behaved identically to a `strokes` cell in every engine and
+was deleted as the duplicate it was. `picked-up` is the only state meaning *there is no
+number*, and it is the only thing that keeps a round out of a golfer's average.
 
 - Two clocks, two jobs. **`seq`** is server-assigned and gapless — the canonical log order
   and every client's catch-up cursor. **`hlc`** (a hybrid logical clock stamped at authoring)
@@ -118,8 +134,8 @@ type RoundEvent =
   as an idempotent upsert by `roundId` and recompute.
 - Finalization writes the **`RoundArchive`**: one immutable record holding the setup and
   course snapshot, the final grid, the full event log, per-game results, and each
-  participant's frozen strokes (derived at fold time from what they stated, never a WHS
-  differential). Completeness rule: **the archive captures everything a projection that
+  participant's strokes as the roster last held them (an asserted integer, never computed at
+  fold time and never a WHS differential). Completeness rule: **the archive captures everything a projection that
   doesn't exist yet could need** — it is the replay source for all of them, and it is never
   mutated. Settlement is deterministic: re-settling the same log yields a byte-identical
   archive (enforced by test).
@@ -131,54 +147,79 @@ maintained snapshot item exists purely as a read optimization, never as truth.
 
 `GameConfig` is a discriminated union; each format contributes a config type, a `GameState`
 type, and a reducer. **No format re-derives strokes from a percentage** (the old allowance
-table is deleted, 2026-07-29): every format applies the ONE stroke-resolution rule below to its
-own field of players — a game's own anchor, never the whole card's. Formats that involve
-in-round decisions (presses, concessions, Wolf picks) consume their decision events from the
-round log.
+table is deleted, 2026-07-29): a format reads the roster's asserted numbers through
+`gameStrokeAllocation`, which has exactly two behaviours and no third (below). Formats that
+involve in-round decisions (presses, Wolf picks) consume their decision events from the round
+log.
 
 v1 members: `strokePlay` (gross/net), `stableford`, `singlesMatch`, `fourballMatch`, `skins`
 (gross/net). Growing the menu — Nassau, quota, foursomes, scramble, shamble, Wolf, Vegas, Sixes
 — adds union members and reducers. Nothing else in the system knows format internals; a
 `GameState` renders and a `GameResult` settles.
 
-### Strokes and the average (in `domain/scoring/strokeBasis.ts`, `domain/golfer/average.ts`)
+### Strokes and the average (in `domain/scoring/allocation.ts`, `domain/golfer/average.ts`)
 
 No WHS math anywhere in the system (deleted whole, 2026-07-29 — `docs/superpowers/specs/2026-
-07-29-relative-to-par-strokes-model-design.md`). A golfer states a `StrokeBasis` when they join
-a round — either what they normally shoot relative to par (`{kind: "normally-shoots", overPar}`)
-or a flat number of strokes (`{kind: "strokes", strokes}`, bounded at zero: nobody gives strokes
-back under a relative model). **One rule derives strokes for everybody**: `resolveStrokes`
-takes the difference from the lowest stated normal score among a field's *present* members (the
-anchor, `anchorOf`), clamped at zero, halved once on a nine — a departed player is excluded from
-the anchor but still resolves their own strokes against it. The same rule scopes to the round's
-whole roster (the card's dots) and to each game's own frozen field (a match, a skins pot),
-independently. Rating and slope stay recorded on the course card — they're printed on the real
-scorecard — but feed no calculation anywhere. A golfer's **average** (`golfer/average.ts`) is
-`score − par` over their last 10 finished rounds with every hole scored (a round containing a
-picked-up hole contributes nothing; a nine counts doubled) — a read-time fold over
-`GolferRoundLine`s, never stored or asserted, that pre-fills (never floors) the basis field the
-next time they join a round.
+07-29-relative-to-par-strokes-model-design.md`), and since 2026-07-30 **nothing derives strokes
+at all** (`docs/superpowers/specs/2026-07-30-strokes-are-typed-design.md`). `Participant.strokes`
+is one asserted integer, default 0, and the only thing that changes it is a human sending
+`participant-strokes-set`. There is no basis type, no field, no anchor, no nine-hole halving and
+no clamp, because there is no derivation left for them to parameterise — the group does the
+subtraction on the first tee and types the answer, which is what they already did.
+
+**Allocating those strokes across holes has exactly two behaviours** (spec §3), because a golfer
+says two different sentences:
+
+- `roundStrokeAllocation` — the standard card — gives every player their own number, allocated by
+  stroke index. Stroke play, Stableford and skins do the same, so a medal game always agrees with
+  the card.
+- Match kinds are **relative**: `gameStrokeAllocation`'s singles/four-ball arm subtracts the
+  lowest number in that game's own field, so the shots land from the hardest hole down. *"You get
+  ten off me"* puts ten dots on stroke index 1–10, where subtracting two absolute allocations
+  would have put the same ten shots on SI 1, 2 and 11–18. The count is identical either way and
+  the holes are the point, so no test that counts dots can tell them apart — the hole placement
+  is pinned explicitly, and a reviewer proposing to collapse the two arms is proposing the error
+  this design corrects.
+
+Allowances (95% / 90% / 100%) stay deleted and are not coming back: they are invisible
+percentages nobody can verify. Rating and slope stay recorded on the course card — they are
+printed on the real scorecard — but feed no calculation anywhere.
+
+A golfer's **average** (`golfer/average.ts`) is `score − par` over their last 10 finished rounds
+with every hole scored (a round containing a picked-up hole contributes nothing; a nine counts
+doubled, `nineHoleContribution`) — a read-time fold over `GolferRoundLine`s, never stored, never
+asserted, and **never an input**: no round reads it and no control anywhere writes it.
 
 ### Where golf logic lives
 
-Golf logic — the fold, the five scoring engines, stroke allocation, the ONE stroke-resolution
-rule, the average, the metrics projection — is **one tested copy in `@swng/domain`**, and
+Golf logic — the fold, the five scoring engines, stroke allocation, the average, the metrics
+projection, and every leaderboard's ranking order — is **one tested copy in `@swng/domain`**, and
 nothing re-derives it. The server runs it behind the API for reads and finalize; the web runs it
 **on-device** for the offline round (scoring must work with no signal), but only through
 **`@swng/client`**, the one sanctioned client-side compute seam. `@swng/client` exposes
 `foldAndScore` (the read-only cousin of `RoundSession`'s live `reduceRound → scoreGame` fold,
 used by the spectator watch page and the archived-round page) and re-exports the round-compute
 the web needs (`gameStrokeAllocation`, `roundStrokeAllocation`, `netStrokes`, `totalDots`,
-`grossForHoles`, `unresolvedGames`). The average is deliberately NOT re-exported: it is
-server-computed and served on the golfer record, so an on-device copy would be fence-legal and
-boundary-wrong — nothing converts an index into strokes anymore, because a player states the
-number directly. An ESLint fence (`@typescript-eslint/no-restricted-imports` on `apps/web/src`)
-forbids the web importing those compute values straight from `@swng/domain`, so a future
-hand-rolled golf computation in the web fails `pnpm lint`. Presentation formatters
-(`formatOverPar`, `underPar`, `gameTreatment`, `gameKindLabel`/`gameKindBlurb`/`gameKindFits`,
-`strokesNote`), id constructors, pure structural accessors (`cellKey`, `findTeeSet`,
-`gameMembers`), and all `import type`s stay importable from `@swng/domain` directly — they
-compute no golf result.
+`dotsForHoles`, `grossForHoles`, `parForHoles`, `unresolvedGames`, `nineHoleContribution`,
+`sortedStrokePlayLines`/`sortedStablefordLines`/`sortedSkinsLines`). The average is deliberately
+NOT re-exported: it is server-computed and served on the golfer record, so an on-device copy
+would be fence-legal and boundary-wrong.
+
+**The fence has two halves, because there are two ways to put golf logic in a view** (2026-07-30
+§10). Importing it is one: `@typescript-eslint/no-restricted-imports` on `apps/web/src` fails
+`pnpm lint` on any domain-compute import. *Re-deriving it inline* is the other, and for two
+milestones nothing noticed — which is how the crew page's difference rule and a history row's
+nine-hole doubling ended up outside the core. A `no-restricted-syntax` AST rule now bans
+arithmetic over a golf quantity in the web at all, and it is **generated from its axes** (the
+property names, the operators, the AST wrappers a read can hide under, and the file glob) rather
+than hand-enumerated — four consecutive hand-written branch lists each shipped a hole on
+whichever axis its author had not just been burned on. `scripts/checkGolfArithmeticFence.mjs`
+runs in `pnpm lint` and keeps that evidence: it walks the real tree asserting every real web file
+resolves a config containing the rule, then lints a ~90-spelling fixture against the real rule
+with per-line FIRE/SILENT expectations. Presentation formatters (`formatOverPar`, `underPar`,
+`gameTreatment`, `gameKindLabel`/`gameKindBlurb`/`gameKindFits`, `strokesNote`), id constructors,
+pure structural accessors (`cellKey`, `findTeeSet`, `gameMembers`), and all `import type`s stay
+importable from `@swng/domain` directly — they compute no golf result.
 
 ### Crew — plain entity, no event sourcing
 
@@ -236,13 +277,21 @@ DynamoDB:  rounds │ snapshots │ core │ projections │ connections
 - **Commands** validate against current state and append events; **queries** read the live
   round cache, the `snapshots` table, and projections. Contracts are Zod schemas in
   `@swng/contracts`, parsed once by the dispatcher table (conventions §3).
+- **Stored data is parsed on the way out, not asserted** (2026-07-30 §10). The round-event and
+  archive read paths — the journal's `read`, the snapshot store's `get`/`getMany`/`page`, and
+  the projector's stream image — run the same Zod schemas the wire does and throw a named
+  `stored-event-invalid` / `stored-archive-invalid` rather than casting a DynamoDB item into a
+  domain type. A type must not assert what the read path cannot guarantee: under a cast, a
+  stored shape from a deleted model does not fail, it is silently read as the nearest surviving
+  arm — a stored `conceded 5` read as `picked-up`, which is five shots off a total and a round
+  quietly disqualified from its golfer's average.
 - **Realtime:** an append broadcasts to the round's channel. Finalize commits the
   `round-finalized` event and the round's archive together in **one cross-table transaction**
   (rounds + snapshots) — "finalized but no archive" is unrepresentable. The `snapshots`
   table's own stream invokes the projector on every write (every stream record is a
   snapshot — no filter, no branching), which updates each participant's golfer record —
   history lines only, the average is a read-time fold over them (2026-07-14 revision; no
-  stored index) — and clears their live-round presence, then broadcasts to
+  stored number of any kind) — and clears their live-round presence, then broadcasts to
   projection channels — the trip's Cup board and the outing's banquet leaderboard (v2/v3) are
   just big-screen subscribers to a standings channel. Rebuild is a paged, cursor-resumable
   backfill over the `snapshots` table — no scan, no wipe. Spectator mode is the round channel
@@ -276,7 +325,7 @@ DynamoDB:  rounds │ snapshots │ core │ projections │ connections
 | `rounds` | `ROUND#id` / `EVT#seq`, `SNAPSHOT`, `META` | the log (conditional put on seq enforces order) and a live read-cache snapshot (never truth — see §2); a `joinCode` GSI resolves the round a code names |
 | `snapshots` | `<roundId>` (single item) | one immutable `RoundArchive` per finished round — the atom; system of record for everything downstream |
 | `core` | `GOLFER#id`, `CREW#id` (+member items, `SEASON#id` — a name plus chosen dates, no counted-round items), `COURSE#id`, `COMP#id` (+fixtures) | entities; GSIs: course-name search (gsi1), and one gsi2 shared by two lookups distinguished by partition namespace — cognito sub→golfer and golfer→crews (crews carry no join code of their own; membership is by invite token, spec 2026-07-15) |
-| `projections` | `GOLFER#id` / `ROUND#roundId` (a line), `LIVE#roundId` (presence, TTL attribute); `STANDINGS#comp` (v2/v3) | derived, rebuildable by a paged, cursor-resumable backfill over `snapshots` — keys are identities, time is an attribute, never embedded in a key; no stored index/average (2026-07-14 revision) — every number is a read-time fold over a golfer's own lines |
+| `projections` | `GOLFER#id` / `ROUND#roundId` (a line), `LIVE#roundId` (presence, TTL attribute); `STANDINGS#comp` (v2/v3) | derived, rebuildable by a paged, cursor-resumable backfill over `snapshots` — keys are identities, time is an attribute, never embedded in a key; no stored average and no stored standings (2026-07-14 revision) — every number is a read-time fold over a golfer's own lines |
 | `connections` | `connectionId` → subscriptions | WS fan-out |
 
 Scale check: an outing is ~144 players ≈ 36 concurrent rounds ≈ a few thousand events across
@@ -337,7 +386,7 @@ layout (conventions §2c), including the client→contracts-only rule.
 | --- | --- | --- |
 | **v1** | everything above except Competition, milestones, feed, course book | — |
 | **v1.1** | Nassau+presses: a `GameConfig` + `PressOpened` (log already carries game events). Junk: configs. Card images: a render adapter. Stat tags: a new optional event type | round log schema, sync protocol, all projections |
-| **v2** | `Competition` (trip) + standings/trophy projections; team-game configs (foursomes, scramble, shamble, Wolf, Vegas, Sixes); milestones/feed/course book as new projections over the existing archive | Round aggregate, games engine core, the stroke-resolution rule, crew ledger |
+| **v2** | `Competition` (trip) + standings/trophy projections; team-game configs (foursomes, scramble, shamble, Wolf, Vegas, Sixes); milestones/feed/course book as new projections over the existing archive | Round aggregate, games engine core, the two stroke-allocation behaviours, crew ledger |
 | **v3** | league fixture generation + a scheduler entry; outing flights + banquet channel; Season in Golf as a year-end projection | everything else |
 
 Every row adds union members, projections, or entries — never a migration of the round log,

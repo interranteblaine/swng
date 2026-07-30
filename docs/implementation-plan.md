@@ -49,11 +49,14 @@ M0 clean break ─ M1 round log + scoring core ─ M2 full menu + handicap   (pu
 ```
 
 The M1/M2 labels above are HISTORY, not the current model: M2 built a WHS handicap engine that
-the 2026-07-29 relative-to-par arc later deleted whole (spec
-`2026-07-29-relative-to-par-strokes-model-design.md` §7 — strokes are now the difference from the
-lowest in the field, and rating/slope/differentials/index are gone). Likewise M3–M6's ghost-first
-identity, deleted by the accounts-only wall. Read the map as a record of the order things were
-built in; `CLAUDE.md` and `docs/product.md` are the current state.
+the 2026-07-29 relative-to-par arc deleted whole (spec
+`2026-07-29-relative-to-par-strokes-model-design.md` §7 — rating/slope/differentials/index are
+gone), and that arc's own replacement — a stated basis the fold turned into strokes — was itself
+deleted a day later (spec `2026-07-30-strokes-are-typed-design.md`). **Strokes are now one
+asserted integer per player on the round's roster, typed by a human and computed by nothing.**
+Likewise M3–M6's ghost-first identity, deleted by the accounts-only wall. Read the map as a
+record of the order things were built in; `CLAUDE.md` and `docs/product.md` are the current
+state.
 
 Each milestone ends with working, verifiable software and a gate. Order rationale: correctness
 risk (games and stroke math) dies first in pure domain; integration risk dies early via a

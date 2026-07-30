@@ -40,11 +40,12 @@ worse than no name.
   names and permits lying ones. Lint enforces the import graph; reviewers enforce names.
 - **Fields hold what their names say.** A tee-set field is `tee`, not a color; a per-hole
   difficulty ranking is `strokeIndex`, never "handicap" — the row's printed name on a paper
-  card is not its name in the model. What a player asserts about their game is a
-  `StrokeBasis`; what the fold gives them for a round is `strokes`; what their record
-  measures is their `average`. Domain vocabulary follows `architecture.md` (`Golfer` not
-  "user", `Competition` not "event"), and "handicap"/"index" are not in it at all
-  (spec 2026-07-29 §7/§9).
+  card is not its name in the model. What a human types onto a round's roster is `strokes` —
+  asserted, never derived, and named for the thing itself rather than for any basis, source or
+  input it might once have been computed from; what a golfer's record measures is their
+  `average`. Domain vocabulary follows `architecture.md` (`Golfer` not "user", `Competition`
+  not "event"), and "handicap"/"index" are not in it at all (specs 2026-07-29 §7/§9,
+  2026-07-30 §2).
 - **No state smuggled into nullable unions.** A lifecycle is an explicit enum; `| null` is
   not a state.
 
@@ -69,6 +70,12 @@ worse than no name.
 
 - **Derive, don't store.** Persist only irreducible facts; compute everything else. Less
   stored state is less state to keep consistent — the deepest simplification available.
+  **A number a human asserted is an irreducible fact, not a derivation waiting to be found**
+  (spec 2026-07-30 §1): a round's `strokes` is stored because someone typed it, and the
+  machinery that used to compute it — a two-armed input type, a rule for which players count,
+  a scoping rule, a halving rule and a clamp — was all overhead on a subtraction the group
+  had already done in their heads. Deriving something the user states is the same mistake as
+  storing something you can compute, pointed the other way.
 - **Do each cross-cutting thing once.** One declarative dispatcher (routing, parsing,
   validation, error-mapping in one place), one generic `parse(schema, input)`, one
   composition root that builds dependencies from env — never re-instantiated per handler.
@@ -81,6 +88,10 @@ worse than no name.
 
 - **Facts over inference.** Store the fact (`hostGolferId`, an explicit `ScoringPolicy`, an
   explicit `opId`); never re-derive intent from incidental structure or dedupe implicitly.
+- **A type must not assert what the read path cannot guarantee.** Data coming back out of a
+  store is parsed, not cast: casting a persisted item into a domain type makes the compiler
+  vouch for a runtime shape nobody checked, and the failure is silent — a stored arm from a
+  deleted model reads as the nearest surviving one rather than failing (spec 2026-07-30 §10).
 - **Two clocks, two jobs — and never a third.** Canonical order and sync cursors come from
   server-assigned `seq`; concurrent-write resolution comes from the authoring-time `hlc`.
   Naive wall-clock comparison (ISO-string `updatedAt` ordering and kin) appears nowhere.
@@ -89,8 +100,11 @@ worse than no name.
   Golf logic exists exactly once, in `domain`: the server runs it behind the API for reads and
   finalize, and the web runs it **on-device** for the offline round only through `@swng/client`
   (the one sanctioned client-side compute seam — `foldAndScore` plus the round-compute
-  re-exports), never re-deriving a golf result in a view. See `architecture.md`'s "Where golf
-  logic lives"; a lint fence (§6) makes it enforceable.
+  re-exports), never re-deriving a golf result in a view. **Not importing it is not the same as
+  not doing it**: an inline `(score - par) * 2` in a component is the same violation as the
+  import would have been, and for two milestones only the import was checked. See
+  `architecture.md`'s "Where golf logic lives"; a two-part lint fence (§6) makes both
+  enforceable.
 - **Typed errors, mapped once.** `DomainError`/`ApplicationError` with codes; code → HTTP
   status in one boundary module.
 - **Comment the why, never the what.** Non-obvious decisions get a short why-comment;
@@ -103,7 +117,9 @@ worse than no name.
   complexity hides.
 - **The architecture's test benches are binding**, and the list is exactly
   `architecture.md` §4's: golden cards, property tests, the multi-device convergence
-  simulation, settlement determinism (including projection-rebuild equivalence). Nothing may
+  simulation, settlement determinism (including projection-rebuild equivalence), and adapter
+  contract tests against local DynamoDB (`pnpm test:contract`, which is where a read path's
+  parse-don't-cast behaviour is provable against real stored items). Nothing may
   be declared binding here that §4 does not list — a doc-declared gate nobody can satisfy is
   worse than a stale sentence.
 - **Pure-domain tests use no mocks** — that's the payoff of a pure `domain`.
@@ -120,7 +136,15 @@ constraints at review:
    imports golf **compute** only from `@swng/client`, never `@swng/domain` directly — the
    compute fence (`@typescript-eslint/no-restricted-imports` on `apps/web/src`) fails `pnpm lint`
    on any domain-compute import; presentation formatters, id constructors, pure accessors
-   (`cellKey`/`findTeeSet`/`gameMembers`), and `import type`s stay allowed.
+   (`cellKey`/`findTeeSet`/`gameMembers`), and `import type`s stay allowed. Its other half is a
+   `no-restricted-syntax` rule banning arithmetic over a golf quantity anywhere in
+   `apps/web/src` — **re-derivation, not just import**. That rule is *generated from its axes*
+   (properties × operators × AST wrappers × file glob), because four consecutive hand-enumerated
+   branch lists each shipped a hole on whichever axis its author had last been burned on;
+   `scripts/checkGolfArithmeticFence.mjs` runs in `pnpm lint`, walks the real tree to prove
+   every web file resolves a config containing the rule, and lints a fixture of ~90 spellings
+   against the real rule with per-line expectations. `pnpm lint` runs `--max-warnings 0`, so a
+   downgraded rule cannot whisper.
 2. Review-enforced naming: thin stores are `…Store` (`Repository` only for the real
    pattern); adapters are `create<Tech><Capability>`, never `…Port`; no misleading field
    names; no `| null` state unions — explicit enums.

@@ -1,8 +1,9 @@
 # swng — v1 Scope and the Release Arc
 
-> Status: **approved** (2026-07-07; vocabulary corrected 2026-07-30 to match the stroke/average
-> model that replaced the WHS index — see `CLAUDE.md`'s own arc record for the change itself;
-> scope and sequencing below are otherwise unchanged). Scopes the first shippable slice of
+> Status: **approved** (2026-07-07; vocabulary corrected twice on 2026-07-30 — first to the
+> stroke/average model that replaced the WHS index, then to typed strokes when the derivation
+> that model shipped with was itself deleted. See `CLAUDE.md`'s arc records for the changes
+> themselves; scope and sequencing below are otherwise unchanged). Scopes the first shippable slice of
 > `product.md` and the order the rest lands. Product altitude only — see `architecture.md` for
 > the domain and backend design that carries this arc.
 
@@ -40,10 +41,14 @@ Why this slice and not another:
   games of most crews. The menu grows later; the engine does not get rebuilt later —
   **concurrent games over one set of strokes is in v1** (a four-ball match *and* individual
   skins on the same card). That capability is the product's spine and cannot be retrofitted.
-- **Stroke-aware:** strokes allocated by stroke index (dots on the card), from what each
-  player states they normally shoot relative to par — swng takes the difference.
+- **Stroke-aware:** one number per player, typed on the roster by whoever agreed it and
+  editable by anyone all round, allocated by stroke index (dots on the card). A card is
+  absolute — stroke play, Stableford and skins use each player's own number — and a match is
+  relative: a singles match and a four-ball are played off the difference, from the hardest
+  hole down.
 - **Scoring:** two taps; anyone can score for anyone (one person can keep the whole card);
-  "picked up" and "conceded" are first-class scores.
+  "picked up" is a first-class entry for a hole with no number, and a gimme is simply the
+  score you tap.
 - **Game state, always:** current standing of every game at a glance, pulled up per game from
   the card's own chips (the between-holes digest popup is deliberately gone; owner call,
   2026-07-13). *2 UP with 4 to play, Dave strokes here, three skins carrying.*
@@ -59,7 +64,9 @@ Why this slice and not another:
 - Account, profile, home course.
 - **What you shoot:** your average — score minus par over your last 10 finished rounds, a
   nine counting doubled. No bootstrap rule and no starting number to declare: your first
-  finished round already gives you one.
+  finished round already gives you one. It is read-only in both directions — computed from
+  rounds, never asserted, and never read back into one. Its job is to tell you what to ask
+  for on the first tee.
 - Round history (filter by course, crew, year), your average over time, scoring distribution
   (birdies/pars/bogeys/others).
 - **Not in v1:** the course book, milestones, per-hole stat tags, season recap.
@@ -80,8 +87,10 @@ Why this slice and not another:
 ### The Course
 
 - Course database with real scorecard data: tees, par, yardage, course rating, slope, stroke
-  index. v1 ships with a first-class **add-and-verify flow** (enter your home course once,
-  correctly; crew members can verify). Seeding from a licensed dataset is a separate
+  index. v1 ships with a first-class **course-entry flow** — transcribe your home course once
+  from its paper card, and correct the whole card in place when the club changes something
+  (owner call, 2026-07-15: the trust model is transcription, not authority, so there is no
+  verification step claiming an authority the data never had). Seeding from a licensed dataset is a separate
   buy-vs-build decision that must not block v1 — a crew that enters its two home courses is
   fully served.
 - Treated as a product surface: every dot and stroke depends on it.
@@ -92,7 +101,9 @@ v1 is done when this is true, not when the features exist:
 
 - A crew of 8 runs its standing game for a month with **zero paper and zero spreadsheet**.
 - The app earns **≤ 20 seconds per hole** and never makes the group wait.
-- Strokes are trusted enough that **the first-tee negotiation actually ends**.
+- Strokes are trusted enough that **nobody re-does them on a cart** — the number the group
+  agreed goes on the card once, the dots land on the right holes, and no one goes back to
+  check.
 - The member who'd never installed the app signs up once on the first tee (the join link is
   the funnel; owner call, 2026-07-13) and is **fully present** in every card and ledger from
   that round on.

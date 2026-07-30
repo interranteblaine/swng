@@ -1602,6 +1602,130 @@ deploy in this arc.** E2E oracle re-derivation and locator reconciliation landed
 courses-preserving wipe, `publish:web:beta`, `e2e:beta` ×2, `e2e:field`, and the adversarial USE
 pass. Close-out was CONTROLLER-RUN in the whole-branch review's CORRECTED order — **wipe before deploy**, because pre-arc projection lines carry no `strokes` and that field is required on the wire, so a deploy-then-wipe window would have returned `GET /me/record`, `/me/rounds` and `/golfers/{id}` bodies NEITHER bundle could parse: `validate` + `test:contract` 0 → the scrap's refusal path proven live (flagless and both-flags each exit 1 touching no table) → `--keep-courses --dry-run` confirming `SKIPPED the swng-core-beta course pass` → the real wipe (84,848 rounds / 857 snapshots / 2,243 projections deleted; **281 COURSE# items and 1,288 golfers untouched**, verified before AND after, including through one mid-run interruption — the script is scan-and-delete, so a partial run is just a shorter next run) → `cdk diff` showing exactly the predicted delta and nothing else (the `/handicap` route + permission destroyed, `/basis` created, five lambda code updates, the stage's DependsOn swapping one key; no table/pool/secret/WAF touched) → `deploy:beta` 56.25s with **39 HTTP routes** live-verified and `/handicap` gone → `publish:web:beta` back-to-back (bundle `index-ClAT6V07.js`, curl-confirmed as SERVED, closing the stale-bundle window that matters because every add-game request schema is `.strict()`) → `e2e:beta` **17/17 ×2** → `e2e:field` **67 passed / 1 documented skip on the FIRST run** (the OUT/IN/TOT row pins resolved live in Chromium, settling the controller's overturn of T8's decision not to pin them) → the deployed-bundle acceptance grep (the ONLY "handicap" left is the sanctioned "SI = the Handicap/HDCP row on your scorecard" physical-card label; zero adjusted-score/WHS/differential/best-8) → an adversarial USE pass on deployed `beta.swng.golf` at phone viewport replaying the owner's own +30-vs-+10 field report end to end: the stored log carrying the ASSERTION only (no `strokes`, no `courseHandicap` on any event), 20 dots derived onto exactly the right holes, all three pad states on one card (`●54` / `●5c4` / `●●PU`), hand-verified totals `TOT Par 72 | 105 85 | 72 72` with the conceded 5 counted inside them, net AND gross skins as two pots with distinct titles and the gross panel rendering no strokes summary, `Pat Walker — 105 gross · −20 · 85 net` on finalize (−20, not +20), `What you shoot +33` with no index picker anywhere, and a crew board where Pat's Average is +33 while his Best 18 dashes — the conceded round feeding the average but refused a Best, the deliberate asymmetry of §2d visible on one row. Console 0 warnings across the walk; the only errors were the injected dummy refresh token and the documented by-design archive-404 probe. Throwaway Cognito users deleted. `rebuildProjections` never run. NO prod deploy. On local `main`, never pushed.
 
+Strokes are typed, not derived — the group does the subtraction and the app writes it down
+(2026-07-30, spec `docs/superpowers/specs/2026-07-30-strokes-are-typed-design.md`, plan
+`docs/superpowers/plans/2026-07-30-strokes-are-typed.md`, 7 SDD tasks, 8 dispatched fix rounds
+across them plus three controller-direct fixes, code commits `8d9fef4..0e592ef`, base
+`54bfcb8`): the owner's own field report, read a
+second time, was the evidence against the arc that shipped the day before. A group settled
+strokes by asking each other *"for an average round, how do you shoot relative to par?"* — `+30`
+and `+10` — and then **did the subtraction in their heads and typed 20 and 0.** The conversation
+about averages is how people *arrive* at a number; it is not work the app needs to do, and
+two-integer subtraction is not the hard part of golf. For that subtraction the previous arc had
+bought a two-armed `StrokeBasis` union, an anchor rule, a present-field scoping rule, a nine-hole
+halving rule, a negative clamp, a join-form question, a pre-fill from the golfer's average, and a
+per-game re-anchoring rule that made a subset game disagree with the card — and, worse, it put a
+**golfer-level fact into a per-round input**, which is the handicap-index shape wearing new
+clothes. **The model now: a player's strokes are one integer on the roster, default 0, and anyone
+can edit them any time.** `participant-strokes-set { golferId, strokes }` (author/subject split
+like `score-recorded`) applies iff HLC-later than that golfer's latest join — the identical rule
+the correction event already used, lifted rather than rewritten — and any participant may set any
+participant's, matching the score-for-anyone trust model. Playing alone is not a special case:
+strokes default to 0 and you type one if you want one. **What the arc deliberately did NOT
+collapse** is the distinction the previous arc mistook for complexity: **a card is absolute, a
+match is relative.** Stroke play, Stableford and skins use each player's OWN roster number, so a
+medal game always agrees with the card; a singles match and a four-ball are played off the
+DIFFERENCE, allocated from the hardest hole down. Work the spec's own example — four players at
+20/10/5/0 with the 20 playing a match against the 10 — and the absolute reading puts the net shot
+on SI 1, 2 and 11–18: ten shots, the right count, on the wrong holes, where "you get ten off me"
+puts them on SI 1–10. Allocating from the hardest hole down is the entire purpose of stroke
+index, and **no test that counts dots can tell the two arms apart** — the plan named this as the
+one thing a reviewer must not "simplify," and the Task 2 review independently proved it by
+mutation: only `allocation.test.ts`'s `strokeIndex <= 10` assertion catches the count-preserving
+change. The 95%/90%/100% allowances stay deleted (invisible percentages nobody can verify);
+four-ball's old 90% discount does not come back with the relative rule. Because there are two
+behaviours there are **two panel sentences** rather than one softened to cover both — medal arms
+name the card (`Net — uses the strokes on the card`), match arms name the difference and, for
+singles, who receives — and the retired `Net — everyone plays off the lowest in this game` is
+gone; a match panel showing different dots than the card is correct, expected, and now says so.
+Task 3's implementer found `AddGameForm.tsx` missing from its own brief's file list — the only
+other `gameTreatment` call site, so the add-game preview would have contradicted the panel it
+previews. **A gimme is a score, so `conceded` is deleted** (Task 1): once the prior arc gave the
+arm a required number it behaved identically to a `strokes` cell in every engine, in the card's
+totals, in the record's distribution and in the course record — two variants that must behave
+identically everywhere are one variant — and its single surviving difference, `fullyHoledOut`,
+was itself wrong, since a 79 with two gimmes is your best round and nobody discounts it because
+the ball did not rattle in from a foot. `Best 18` becomes lowest gross over a fully-scored round;
+`picked-up` remains the only state meaning *there is no number* and the only thing that keeps a
+round out of the average; `grossOf` went with them, being behaviourally identical to `scoreOf`
+once the arm was gone (a controller resolution taken before Task 1 started rather than left as a
+second copy of one sum). The crew board's *"If you played tomorrow, X gets N"* line is deleted
+(Task 4): both averages are already on the board, so it performed a subtraction the reader can
+see, named one pair by an invisible rule, and asserted a hypothetical about a round nobody is
+playing which the round itself would override. **Task 5 was the arc's hard one, and its lesson is
+about fences, not golf.** The compute fence only ever banned *importing* golf logic into
+`apps/web/src`; it never noticed the web recomputing a rule inline, which is how `SeasonPanel`'s
+difference rule and `RecordSections`' nine-hole doubling got outside the core. The plan's own
+prescribed regex fence turned out to be **theatre** — the reviewer planted five re-derivations
+into real web files and all five passed, two of them (`(a.average ?? 0) - (b.average ?? 0)`,
+`a.average! - b.average!`) being the idioms TypeScript *forces* on a `number | undefined` wire
+field — so it was replaced with the `no-restricted-syntax` AST rule spec §10 actually asked for.
+Then the rule needed five fix rounds, and **the pattern is worth more than the fix: three
+consecutive rounds each closed the enumerated list and missed the class.** Round 4 (a fresh opus
+implementer, per the escalation rule) diagnosed why — the rule has independent AXES (property
+names × operators × AST wrappers × file glob), and each round had patched the one it had just
+been burned on — and GENERATED the selectors from the cross product (property axis 6 → 44 names;
+`line.score * 2`, the same doubling rule spelled over the other operand, had been passing clean),
+adding `scripts/checkGolfArithmeticFence.mjs` as kept evidence. Round 5 found that check pinned
+the fence at ONE invented fixture path, so a three-character glob edit disabled the rule for 53
+of 59 web files with `pnpm lint` green and the check printing its own confident line; it now
+walks the real tree, resolving config per real file, and the finest passing exclusion went from
+53 files to none. Along the way: the two `eslint-disable-next-line` exemptions covered whole
+lines, so the ORIGINAL leak could be restored verbatim on a disabled line at exit 0 — hoisted
+into a `scoring/present.ts` formatter so no disable remains — and `pnpm lint` gained
+`--max-warnings 0` on a verified-clean tree, because a downgraded rule that only whispers is a
+rule that is off. Two controller rulings: **I2's two golf ranking rules still living in
+`GamePanel.tsx`** (stroke-play vs-par-then-thru carrying an owner ruling, stableford points-desc)
+were fixed in-arc rather than deferred — spec §10 says this arc closes rather than defers,
+`CLAUDE.md` already carried the site as an outstanding boundary-sweep item, and the repo ruled
+this exact class domain-truth when `aggregateSeason` took over standings order; and the fence's
+property axis is **not** derived from contracts' numeric fields, against the implementer's own
+proposal, because that sweeps in timestamps, ratings and ids and inverts the failure mode from
+quiet-miss to false-positive — which is the mode that actually gets a fence deleted. The fix
+budget (5 rounds) was spent, so the final verification's residuals were controller-adjudicated:
+its one "reads as closed but is not" finding — the lint-invocation pin asserted a SUBSTRING, so
+flipping `&&` to `||` left the pin green with the fence off — was fixed inline so the test RUNS
+the check, and three residuals shipped documented in the test's own comment, each requiring a
+deliberate, diff-visible edit rather than a tidy-looking one. **Task 6 made the stored-data cast
+honest**: `createDynamoEventJournal` and the snapshot store asserted DynamoDB items into domain
+types without parsing, so a field the type requires could be absent at runtime — the type must
+not assert what the read path cannot guarantee. The read paths now parse through the same Zod
+schemas the wire uses and throw named `stored-event-invalid` / `stored-archive-invalid`. The
+sweep found that EVERY DynamoDB read in the repo casts; the round-event/archive family was fixed
+whole (journal `read`, snapshot `get`/`getMany`/`page`, and `parseSnapshotStreamImage` — the last
+taken beyond the brief, correctly, since leaving one of five doors casting rebuilds the
+asymmetry), and each surveyed-and-left site carries its reason. That closed Task 1's carried
+question, and the answer was larger than the question: a stored `conceded 5` read
+**byte-identically to `picked-up`** under the cast — a stroke-play total of 32 instead of 37, the
+player five shots better than reality AND the round silently disqualified from their average.
+Silent reinterpretation as the nearest surviving arm is the specific harm; refusal is the fix.
+`createDynamoCardStore.getCurrent` is left casting and recorded as next: `validateCard` is a
+strict superset of `courseCardSchema` today, so it is a latent structural gap rather than a live
+one, but the sharp form is that a card the store waves through would produce a round written
+successfully and then permanently unreadable. Wire and storage: `Participant.basis: StrokeBasis`
+→ `Participant.strokes: number`; request schemas bound it `int().min(0).max(54)` while the stored
+event arm stays unbounded (Arc A's placement rule — and a controller ruling refused to add
+`min(0)` to the stored arm to close a single-enforcement-point Minor, hardening the render
+instead, because a bound on a stored/fold schema rejects already-stored data on a read path);
+`JoinRoundRequest` becomes `{ code, tee }` and `StartRoundRequest`'s host `{ tee }`; `POST
+/rounds/{roundId}/basis` → `/strokes`, `setBasis.ts` → `setStrokes.ts`, `participant-basis-set` →
+`participant-strokes-set`. The two rename sites invisible to the typechecker — the CDK
+`HTTP_ROUTES` string literal and the web's template-string URL — were reviewer-proven to bite.
+`GolferRoundLine` keeps `strokes` and drops `normallyShoots`. The roster row is two lines and one
+`Edit` (spec §8), because there is now one thing to edit: the prior arc had two controls only
+because the *type* had two arms, which let the model's shape leak into the UI as a choice the
+user had to make. Beta round data is wiped again at close-out (rounds, snapshots, projections;
+courses, golfers and crews kept) — a stored two-armed assertion has nothing honest to translate
+into, so no migration and no tolerate-old-data machinery. **Beta only; no prod deploy in this
+arc** — and the prod-deploy precondition this arc creates is recorded under "CDK / Deployment"
+below, not buried here, because it is operational rather than narrative. This docs sweep also
+found two more "Start here" claims describing capabilities deleted milestones ago —
+`roadmap.md`'s "add-and-verify flow" and `docs/field-test.md`'s instruction to add crew members
+by hand, both dead since 2026-07-15 (verification deleted whole; `addCrewMember` replaced by
+invite links) — which is the same class the previous arc's review caught once already: **docs
+describing deleted behaviour are found by checking docs against the code, not by grepping for
+the words this arc happened to delete.**
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 
@@ -1615,6 +1739,39 @@ section as it does.
   `InfraCdkStack-prod` and are deliberately untouched. `SwngStack`'s constructor throws on
   those ids. Never create, deploy, or destroy stacks under those names — decommissioning
   them is a separate, user-confirmed act.
+
+#### Standing precondition — wipe prod round data BEFORE prod first receives the typed-strokes arc (2026-07-30)
+
+Read this before planning any `deploy:prod`, and do not treat it as satisfied until the wipe
+has actually run. It is recorded here rather than in the arc narrative above because it is an
+operational gate on an instrument, and this is the section a person planning a prod deploy
+opens.
+
+Prod holds a small number of rounds and snapshots created under the pre-2026-07-30 model. Two
+facts compound:
+
+1. **They no longer parse.** `Participant` requires `strokes`; those rounds carry a `basis`
+   object and no `strokes`, and since Task 6 the read paths parse rather than cast, so they are
+   refused with `stored-event-invalid` / `stored-archive-invalid` instead of being silently
+   misread. Refusal is correct — the alternative is a two-armed assertion reinterpreted as the
+   nearest surviving arm — but it is refusal.
+2. **`snapshotStore.page()` parses a page eagerly**, in one `.map` before returning. One
+   unparseable item therefore takes down the good items *ahead of* it in the same page, and the
+   cursor never advances past it.
+
+Together those mean **prod's `rebuildProjections` would be bricked at page 1** — not degraded,
+not slow: a cursor walk that cannot complete and cannot be resumed until the offending items are
+gone. The repair instrument is exactly the thing the bad data disables, so this must be fixed
+before the deploy, not after it. That is a far stronger reason for the wipe than "a few reads
+would 500," which is how it was first described.
+
+The remedy is the same one beta got:
+`node scripts/scrapCourseAndRoundData.mjs --stage prod --keep-courses` (the script refuses to
+run without an explicit `--keep-courses` / `--wipe-courses`; dry-run first and confirm the
+`SKIPPED the swng-core-prod course pass` line). Deploy order is **wipe, then lambda, then web** —
+a deploy-then-wipe window serves record bodies neither bundle can parse. Prod is a launched
+environment: the wipe is an owner decision, not a controller one, and the item counts should be
+read first.
 
 ## Code Authoring
 

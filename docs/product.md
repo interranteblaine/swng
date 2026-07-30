@@ -13,7 +13,7 @@
 
 Three facts about golf that no scorecard app takes seriously:
 
-**Golf is the only sport where any two players can have a fair match.** The handicap system exists so a 22 and a 6 can stand on the first tee with a genuine contest. Competition is never out of reach in golf — it is the default state of the game. And yet most golfers' handicaps are unofficial, stale, or vibes — swng resolves that by asking for the vibe in plain words and replacing it with real scores, not by computing a WHS-faithful index behind the scenes. The math of *who gets strokes, and on which holes* is still first-tee friction that usually ends in someone waving it away.
+**Golf is the only sport where any two players can have a fair match.** Strokes are why a 22 and a 6 can stand on the first tee with a genuine contest. Competition is never out of reach in golf — it is the default state of the game. Groups settle the number themselves, out loud, in about ten seconds: *"you get 20."* What they can't do standing there is remember it for four hours, put those 20 shots on the right holes, and apply them to three games at once. That part usually ends in someone waving it away.
 
 **Golf is played in persistent small groups, repeatedly, for years.** The Saturday foursome. The twelve guys on the annual trip. The Tuesday-night nine-hole league. Golfers don't accumulate rounds — they accumulate *history with people*: standing games, running rivalries, a decade of trip results, the year Danny finally broke 80. That history is the emotional core of amateur golf, and today it lives in group chats, fading memories, and one guy's spreadsheet.
 
@@ -48,9 +48,9 @@ The POC's live multi-phone scorecard survives as the innermost kernel of the Rou
 
 The live engine. Phone-first, shared, and — the key move — **format-aware and stroke-aware**.
 
-**Starting a round.** Pick the course and tees; the join code or link brings the players — it is both the invite and the sign-up funnel. Everyone on a card is a signed-in account (owner call, 2026-07-13): a player who has swng joins in one tap, a first-timer signs up on the way and lands on the card in about thirty seconds. Nobody puts anyone else on a card. Pick the game(s). Everyone states what they normally shoot; swng takes the difference, and the dots are on the card before anyone tees off. *The first-tee negotiation is over before it starts.* (A round never draws on a crew — no crew rosters, presets, or memberships at setup; owner call, 2026-07-13.)
+**Starting a round.** Pick the course and tees; the join code or link brings the players — it is both the invite and the sign-up funnel. Everyone on a card is a signed-in account (owner call, 2026-07-13): a player who has swng joins in one tap, a first-timer signs up on the way and lands on the card in about thirty seconds. Nobody puts anyone else on a card. Pick the game(s). Type the strokes the group agreed — one number per player, zero if nobody is giving any, editable by anyone all round — and the dots are on the card before anyone tees off. *Whatever got settled on the first tee is written down once, and nobody re-does the arithmetic on a cart.* (A round never draws on a crew — no crew rosters, presets, or memberships at setup; owner call, 2026-07-13.)
 
-**Scoring.** Two taps to post a score, for yourself or anyone in your group (one person can keep the whole card — that's how real groups work). "Picked up" and "conceded" are first-class scores, not errors: match play concessions, Stableford pickups, and net-double-bogey caps are all normal golf. Optional one-tap tags per hole — putts, fairway, penalty, sand save — for those who want stats; invisible for those who don't.
+**Scoring.** Two taps to post a score, for yourself or anyone in your group (one person can keep the whole card — that's how real groups work). "Picked up" is a first-class entry, not an error — a Stableford pickup or a hole nobody finished has no number, and swng never invents one (the net-double-bogey cap covers exactly that case). A gimme is different: your partner concedes the next stroke, so the score is never in doubt and you tap what you made. Optional one-tap tags per hole — putts, fairway, penalty, sand save — for those who want stats; invisible for those who don't.
 
 **Games, plural.** Any number of games run concurrently over one set of strokes:
 
@@ -59,7 +59,7 @@ The live engine. Phone-first, shared, and — the key move — **format-aware an
 - *Structures*: Nassau (front/back/overall) with presses initiated right from the card.
 - *Junk*: greenies, sandies, barkies, poleys, the snake — tallied as units alongside everything else.
 
-Strokes math is done silently and correctly: every game works out its own strokes the same way — the difference from the lowest in its own field — allocated by the course's stroke index. Nobody does arithmetic on a cart.
+Strokes land on the right holes silently, and the rule is one a golfer already says out loud: **a card is absolute, a match is relative.** Stroke play, Stableford and skins use each player's own number, so those games always agree with the card. A singles match and a four-ball are played off the difference — *"you get ten off me"* — and those ten shots land on the ten hardest holes, which is the entire purpose of stroke index. Nobody does arithmetic on a cart, and no invisible percentage is applied to anybody.
 
 **Game state, always.** The card's job is to answer, at a glance, *"where does everything stand right now?"* — *You're 2 UP with 4 to play. Dave gets a stroke here. Skins: three carrying into 14. The press is all square.* Every game's standing is one tap away on the card's own chips — pulled when wanted, never pushed as an interruption (the between-holes digest popup is deliberately gone; owner call, 2026-07-13). This is the on-course magic moment: the app is the one member of the group who always knows the state of every game.
 
@@ -71,12 +71,11 @@ Strokes math is done silently and correctly: every game works out its own stroke
 
 The permanent record of a playing life.
 
-- **What you shoot.** One number: what you normally shoot relative to par, averaged from
-  your last ten finished rounds. Not an index, not slope-adjusted, not best-8-of-20 — a
-  number you can check by adding up your own scorecards. It is also, exactly, the strokes
-  you take: state +30 against a mate's +10 and you get 20, allocated by the card's stroke
-  index. The first-tee negotiation is over before it starts, and nobody had to trust
-  arithmetic they cannot see.
+- **Strokes you agreed, written down.** Someone says "you get 20" and that is what the card
+  shows — one number per player, editable by anyone, nothing computed behind it. Your own
+  record tells you what to ask for: what you shoot, averaged from your last ten rounds. No
+  index, no allowance, no conversion. The first-tee conversation still happens; swng just
+  stops pretending it needs to have an opinion about it.
 - **History.** Every round you've ever played in swng, filterable by course, crew, year, format.
 - **The course book.** Your record at every course you play: scoring average per hole, best round there, the hole that always gets you. *You're playing your home course and swng knows you double 13 more than any hole on the card.*
 - **Stats the card already knows.** Scoring distribution (birdies/pars/bogeys/others), par-3/4/5 averages, and — if you use the tags — putts, fairways, GIR, penalties. Enough to know where the strokes go; deliberately not shot-by-shot tracking.
@@ -87,7 +86,7 @@ The permanent record of a playing life.
 The atomic social unit of golf, made first-class. A crew is a persistent named group — *The Saturday Boys* — a roster of members and a ledger. **A crew is a grouping, not a preset** (owner call, 2026-07-13): it never configures, seeds, or runs a round; it groups finished rounds into seasons and keeps what they mean. **The crew watches; members just play** (owner-approved, 2026-07-21): a season is a time window, and members' finished rounds appear in it automatically — the scoreboard compares everyone's golf even when they play separately, together-records build from rounds two-plus members shared, and nobody ever files a round with the crew.
 
 - **One tap and you're on the card** (owner call, 2026-07-13 — this replaces the ghost-profile pillar). Everyone in a round, like everyone in a crew, is a real account: swng scores games between people who exist. Ghost profiles and claim-later identity are gone — maintaining a fake party to a rivalry was the system's steadiest source of identity bugs and attack surface. The join link in the group chat is the whole onboarding: sign up once, ever, in thirty seconds; every round after is one tap. The holdout's first Saturday costs him a sign-up — until then his side bets live on cardboard, and that trade is accepted knowingly.
-- **The crew board.** Every member's rounds, average, and best over the season, plus spread — how consistent they are, not just how good — the end of the sandbagging argument, or at least the beginning of a fair fight, because it's real scores rather than a computed index. Two members who've never shared a card even get a strokes line: *if you played tomorrow, Blaine gets 16.*
+- **The crew board.** Every member's rounds, average, and best over the season, plus spread — how consistent they are, not just how good — the end of the sandbagging argument, or at least the beginning of a fair fight, because it is real scores anyone can add up rather than a number computed behind their backs. What the crew does with those numbers on the first tee is the crew's business; the board's job is to show them, not to propose a match nobody is playing.
 - **The ledger.** Records for whatever season you set the dates on, filled automatically: a per-member scoreboard (rounds, average, spread, best 18) built from every round a member finishes — together or apart — plus head-to-head match results between any two members who've shared a round (*you're 7–6 this season against Dave, and swng reminds you both on the first tee*), partner records (*you and Mike are 9–2 in four-ball*), skins won, and points totals from the rounds members actually shared. Give a season wide-enough dates and it's the crew's all-time board.
 - **The feed.** Rounds played, records broken, streaks alive and dead — the raw material of the group chat, generated automatically.
 
@@ -103,7 +102,7 @@ The occasions golf is organized around. Three shapes, one machinery: rosters, fo
 
 ## 8. The Course
 
-The quiet layer everything stands on: a course database with real scorecard data — tees, par, yardages, course rating, slope, stroke index. Community-maintainable: add or verify your home course once and every game in swng computes correctly on it forever. Strokes, dots, and formats are only as trustworthy as this layer, so it is treated as a product surface, not an import script.
+The quiet layer everything stands on: a course database with real scorecard data — tees, par, yardages, course rating, slope, stroke index. Community-maintainable: transcribe your home course once from its paper scorecard — and correct the whole card in place when the club changes something — and every game in swng computes correctly on it forever. The trust model is **transcription, not authority** (owner call, 2026-07-15): a card in swng claims only to be what is printed on the card in your bag. Strokes, dots, and formats are only as trustworthy as this layer, so it is treated as a product surface, not an import script.
 
 ## 9. How it should feel
 

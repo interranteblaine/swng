@@ -1491,9 +1491,10 @@ recommendation — **request SES production access before announcing**. On local
 
 Strokes now come from what you shoot, not an index (2026-07-29/30, spec
 `docs/superpowers/specs/2026-07-29-relative-to-par-strokes-model-design.md`, plan
-`docs/superpowers/plans/2026-07-29-relative-to-par-strokes-model.md`, 6 SDD tasks, each
-independently reviewed, seven fix-round dispatches across them (task 4 needed two), commits
-`77fb675..ba1ee29`): the owner's field report — a group
+`docs/superpowers/plans/2026-07-29-relative-to-par-strokes-model.md`, **9 planned SDD tasks — 8
+landed, the 9th is the controller-run beta close-out**, each landed task independently reviewed,
+seven fix-round dispatches across them (task 4 needed two), then a whole-branch review and its
+single fix wave, commits `77fb675..9851b44` plus this docs sweep): the owner's field report — a group
 settling strokes by asking each other "for an average round, how do you shoot relative to par?"
 and taking the difference — closed the entire WHS/swng-Index pipeline and replaced it with the
 number a first tee already speaks. **One number, stated, never converted:** a golfer's
@@ -1555,14 +1556,41 @@ confusion the crew board exists to prevent — `spreadOf` is deleted with its la
 `spreadOfValues` stays. `SeasonPanel` also gains one line naming the strokes between two members
 who've never shared a card ("If you played tomorrow, Blaine gets 16" / a level-play sentence on a
 tie), computed as the same difference rule run over the board's own already-served averages — not
-a promise about what the round will actually produce. Each task (1–6) went implementer →
+a promise about what the round will actually produce. Each task (1–8) went implementer →
 independent review → controller-verified fix round, `pnpm
-validate` green at every commit (`task-N-validate.log`); `pnpm test:contract` 90 (task 3). Beta
-round data (rounds, snapshots, projections; golfers and crews kept, courses untouched) will be
-wiped at close-out per the spec — every stored `courseHandicap` is ambiguous under the new model,
-so there is nothing honest to migrate. **Beta only — no prod deploy in this arc.** E2E oracle
-re-derivation and locator reconciliation, the deploy, the wipe, and both e2e gates are the
-milestone's own remaining tasks. On local `main`, never pushed.
+validate` green at every commit (`task-N-validate.log`); `pnpm test:contract` 90 at task 3 and
+**89 at HEAD** (task 5's index deletion took a `golferStore` `indexSource` round-trip with it).
+**The whole-branch review's one fix wave** closed a Critical, seven Importants and a set of
+Minors: the close-out's own wipe instrument could not do what the close-out requires —
+`scrapCourseAndRoundData.mjs` had four unconditional passes and only `--stage`/`--dry-run`, so
+spec §8's "courses are NOT wiped, that pass must be skipped" was unexecutable as written, and the
+documented command would have silently and permanently destroyed **Casa Verde GC and Sandy
+Hollow Nine** (a read-only dry run priced it: 281 `COURSE#` items, plus one golfer's home
+course; the field specs re-seed courses, so no gate would have caught it) — now
+**`--keep-courses`**, which no-ops that pass, LOGS that it skipped, composes with `--dry-run`,
+and is named in plan Task 9 Step 3 as the exact command to run. Then: `milestonesOf`'s
+first-birdie/first-eagle scan was a **third** fold violating §2d's "a conceded hole is a scored
+hole everywhere" (a conceded three-footer for a birdie counted in your typical 18 and your course
+record while "First birdie" never fired) — §2d had enumerated only two, so the spec carries a
+dated correction alongside the fix; two user-facing strings still said "no handicap posting";
+`PeekRoundResponse.teeSets[].par`/`.holes` were dormant with three comments asserting their
+deleted justification (dropped whole per §7 — the wave's ONE wire change, so the close-out
+deploy stays lambda-first); SetupPanel's single `isValidInt` let a negative through the
+`Give strokes directly` editor and failed opaquely against the wire's own `min(0)`; the profile
+headline promised "your last 10 finished rounds" over a set that is really the last 10 rounds
+WITH A SCORE (§5's own imprecision, spec-corrected); an 8+-round golfer with a pickup in every
+round got a blank chart instead of a reason; `courseRecord`'s conceded-counts change had zero
+test coverage; and two of `CLAUDE.md`'s four "Start here" docs still described deleted code —
+`engineering-conventions.md` declared "WHS published-example conformance" a **binding** test
+bench that no longer exists, and `docs/field-test.md`, which a human executes, carried an
+unsatisfiable "Handicap differentials post and each player's index updates" checkbox. Beta
+round data (rounds, snapshots, projections; golfers and crews kept, **courses kept — use
+`--keep-courses`**) will be wiped at close-out per the spec — every stored `courseHandicap` is
+ambiguous under the new model, so there is nothing honest to migrate. **Beta only — no prod
+deploy in this arc.** E2E oracle re-derivation and locator reconciliation landed (`16f703d`,
+`14ca82e`); what remains is only the close-out itself: `deploy:beta` lambda-first, the
+courses-preserving wipe, `publish:web:beta`, `e2e:beta` ×2, `e2e:field`, and the adversarial USE
+pass. On local `main`, never pushed.
 
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.

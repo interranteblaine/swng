@@ -308,7 +308,23 @@ From the course-cards arc's final review (2026-07-15). Comment-only: `ports/golf
 AddCoursePage's own post-add summary" (that page no longer renders the component). Sweep
 opportunistically next time each file is touched.
 
-### 16. Unrated courses are UNUSABLE — a real product gap, design session required — RATING HALF ADDRESSED (unrated-courses + handicap-model arcs, 2026-07-16; SI-less half still open)
+### 16. Unrated courses are UNUSABLE — a real product gap, design session required — RATING HALF CLOSED TWICE OVER (2026-07-16, then 2026-07-29); SI-less half still open
+
+**Update (2026-07-29) — read this BEFORE the dependency analysis below, which is now false.**
+The relative-to-par strokes arc (spec `2026-07-29-relative-to-par-strokes-model-design.md`)
+deleted the WHS/index pipeline whole. Rating and slope now feed **no calculation anywhere** —
+they stay recorded on the course card because they are printed on the real scorecard, and nothing
+reads them but the tee picker's own summary line. So the rating half of this papercut is closed a
+second time, and closed harder: there is no longer any number a missing rating could poison,
+because there is no differential, no index, and no course handicap. `validateTeeSet` takes
+rating/slope as an optional PAIR, and an unrated card enters, plays, finalizes, and contributes
+to a golfer's average exactly like a rated one. **Everything in the "Dependency facts" paragraph
+below is superseded** — it describes machinery that no longer exists, and would mislead the design
+session this entry exists to brief.
+
+**What is still open is only the SI-less half:** dots come from each player's `strokes` spread by
+the card's **stroke index**, so a card with no printed SI row still cannot allocate. That remains
+a product decision (gross-only games? allocate by agreement?), untouched by the 2026-07-29 arc.
 
 **Update (2026-07-16):** the design session happened (specs `2026-07-15-unrated-courses-
 handicap-model-design.md` + `2026-07-16-handicap-index-strokes-model-design.md`) and shipped —
@@ -339,7 +355,17 @@ it has zero contact with sealed rounds or card identity.
 Adjacent-but-different: SI-less cards would break dots allocation — that half needs a
 product decision (gross-only games?), not just optionality; explicitly out of this entry.
 
-### 17. Derived numbers must all flow through the metrics/projection layer — trend & distribution are still ad-hoc in the web
+### 17. Derived numbers must all flow through the metrics/projection layer — trend & distribution are still ad-hoc in the web — CLOSED (domain-boundary arc, 2026-07-18)
+
+**Update (2026-07-18/29): closed, and then the numbers themselves were replaced.** The
+restore-domain-boundary arc (spec `2026-07-18-restore-domain-boundary-design.md`, Task 1) folded
+both hand-rolled views into `golferMetrics` and served them on `GET /me/record`, and an ESLint
+compute fence now fails `pnpm lint` on any new golf compute inside `apps/web/src` — the
+discipline this entry asked for is enforced by construction, not by review. The specific members
+named below are gone: the relative-to-par arc (2026-07-29) deleted `whsIndex`/`suggestedIndex`
+and replaced `trend`/`distribution` with `averageHistory`/`typicalEighteen`. Kept for the record
+of the discipline, not as an open item.
+
 
 Owner-raised (2026-07-16, reviewing the unrated-courses/metrics arc). The intended discipline
 is: **every derived number is computed in the domain/application projection (metrics) layer

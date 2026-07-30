@@ -39,9 +39,12 @@ worse than no name.
   is a judgment about the code behind it; lint can only match strings, which bans honest
   names and permits lying ones. Lint enforces the import graph; reviewers enforce names.
 - **Fields hold what their names say.** A tee-set field is `tee`, not a color; a per-hole
-  difficulty ranking is `strokeIndex` — "handicap index" is a golfer's rating and may only
-  ever mean that. Domain vocabulary follows `architecture.md` (`Golfer` not "user",
-  `Competition` not "event").
+  difficulty ranking is `strokeIndex`, never "handicap" — the row's printed name on a paper
+  card is not its name in the model. What a player asserts about their game is a
+  `StrokeBasis`; what the fold gives them for a round is `strokes`; what their record
+  measures is their `average`. Domain vocabulary follows `architecture.md` (`Golfer` not
+  "user", `Competition` not "event"), and "handicap"/"index" are not in it at all
+  (spec 2026-07-29 §7/§9).
 - **No state smuggled into nullable unions.** A lifecycle is an explicit enum; `| null` is
   not a state.
 
@@ -51,7 +54,7 @@ worse than no name.
   never size or tidiness. Default to a folder in an existing package. Shallow packages
   (interface and build-graph cost, no isolation payoff) don't ship.
 - **Flat `src/`** — no `src/<pkgname>/` double-nesting.
-- **Group by concept, not technical kind** — `scoring/`, `handicap/`, `sync/`; never a
+- **Group by concept, not technical kind** — `scoring/`, `golfer/`, `sync/`; never a
   `types/` or `utils/` dumping ground.
 - **One public barrel per package** (`src/index.ts`) is the package's interface. Consumers
   import `@swng/domain`, never a deep path; internal files use relative imports.
@@ -95,11 +98,14 @@ worse than no name.
 
 ## 5. Testing
 
-- **Weight tests toward the deep modules** — the scoring and handicap engines and the merge
-  logic, not another router happy-path. Test where the complexity hides.
-- **The architecture's test benches are binding**: golden scorecards, WHS published-example
-  conformance, property tests, the multi-device convergence simulation, settlement
-  determinism, projection-rebuild equivalence (`architecture.md` §4).
+- **Weight tests toward the deep modules** — the scoring engines, the stroke rule, the
+  golfer's own folds, and the merge logic, not another router happy-path. Test where the
+  complexity hides.
+- **The architecture's test benches are binding**, and the list is exactly
+  `architecture.md` §4's: golden cards, property tests, the multi-device convergence
+  simulation, settlement determinism (including projection-rebuild equivalence). Nothing may
+  be declared binding here that §4 does not list — a doc-declared gate nobody can satisfy is
+  worse than a stale sentence.
 - **Pure-domain tests use no mocks** — that's the payoff of a pure `domain`.
 - **Every fixed bug gets a test that fails without the fix.** Scoring bugs become golden
   cards.

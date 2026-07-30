@@ -11,7 +11,8 @@
 > architecture in `architecture.md`, written to `engineering-conventions.md`.
 
 **Goal:** Ship v1 — The Saturday Game: a crew runs its standing game weekly in swng with
-format-aware, handicap-aware live scoring, and every round counts forever.
+format-aware live scoring where the strokes come from what each player shoots relative to par,
+and every round counts forever.
 
 **Architecture:** Round as event log + games as pure reducers; finalized rounds as source of
 truth + rebuildable projections; one pure domain running in browser and Lambda
@@ -47,8 +48,15 @@ M0 clean break ─ M1 round log + scoring core ─ M2 full menu + handicap   (pu
             └─ M6 courses ─ M7 identity + golfer record ─ M8 crews + ledger ─ M9 finish line
 ```
 
+The M1/M2 labels above are HISTORY, not the current model: M2 built a WHS handicap engine that
+the 2026-07-29 relative-to-par arc later deleted whole (spec
+`2026-07-29-relative-to-par-strokes-model-design.md` §7 — strokes are now the difference from the
+lowest in the field, and rating/slope/differentials/index are gone). Likewise M3–M6's ghost-first
+identity, deleted by the accounts-only wall. Read the map as a record of the order things were
+built in; `CLAUDE.md` and `docs/product.md` are the current state.
+
 Each milestone ends with working, verifiable software and a gate. Order rationale: correctness
-risk (games/handicap math) dies first in pure domain; integration risk dies early via a
+risk (games and stroke math) dies first in pure domain; integration risk dies early via a
 deployed vertical slice; identity comes late because the system is **ghost-first** — join
 codes and ghost golfers carry M3–M6, and accounts are just an upgrade (`architecture.md` §2).
 
@@ -685,8 +693,9 @@ says the app has stopped being a toy — it is never entered by default.
 2. Remaining security hardening judged prod-blocking at that time (token-storage redesign,
    share-link revocation, whatever the M9 re-acceptance records say).
 3. **Field test against the v1 bar:** a real crew, real course, a real Saturday — zero paper,
-   ≤20s/hole, handicaps trusted, the never-installed member signed up on the first tee (via
-   the join link) and fully present from that round on. Fix list burned down; bar re-run.
+   ≤20s/hole, strokes trusted (`roadmap.md`'s own wording), the never-installed member signed
+   up on the first tee (via the join link) and fully present from that round on. Fix list
+   burned down; bar re-run.
 
 **Gate:** the four v1-bar bullets verified in the field, not in test.
 

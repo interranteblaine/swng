@@ -48,7 +48,8 @@ Print it, or pull it up on a phone before you leave the house — either works.
 - [ ] Course found by search (or added + verified from the paper card — note the time it took)
 - [ ] Crew exists with the right roster (accounts only — the holdout signs up on the first tee)
 - [ ] Games are set up fresh at the card without a fight (there is no "play the usual" preset)
-- [ ] Every player has a tee and a course handicap assigned before the first tee shot
+- [ ] Every player has a tee, and has stated what they normally shoot relative to par (or been
+      given strokes directly), before the first tee shot
 - [ ] Dots are visible on the card before anyone swings — the first-tee negotiation should
       already be over
 
@@ -78,7 +79,9 @@ for 18 holes with a group standing around, not whether they work once in a demo.
       terminates cleanly with an honest reason shown, not a raw error
 - [ ] The archived card reads like a scorecard — dots, results, and standings all correct
       against what actually happened
-- [ ] Handicap differentials post and each player's index updates
+- [ ] Each player's round shows up on their own record — the score, its figure vs par, and the
+      average on their profile moving to include it (a round with a pickup has no score and
+      correctly moves nothing)
 - [ ] The crew's season ledger (standings, head-to-head) updates correctly for this round
 - [ ] **Share link:** copy it and send it to someone who was NOT in the round, on a device
       that has never signed in — confirm they can watch (or, after finalize, see the archived
@@ -92,7 +95,7 @@ bar is met:
 
 1. **A crew of 8 runs its standing game for a month with zero paper and zero spreadsheet.**
 2. **The app earns ≤ 20 seconds per hole and never makes the group wait.**
-3. **Handicaps are trusted enough that the first-tee negotiation actually ends.**
+3. **Strokes are trusted enough that the first-tee negotiation actually ends.**
 4. **The member who'd never installed the app signs up once on the first tee and is fully present in every card and ledger from that round on.**
 
 If a Saturday (or a month of them) doesn't clear these, that's the finding — not a reason to

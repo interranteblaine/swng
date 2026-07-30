@@ -23,7 +23,7 @@ A scorecard prints men's AND women's course ratings, and often two different han
 - **A tee that prints one gender's rating → ONE tee set** (plain name is fine).
 - **The stroke-index row follows the rating's gender**: a men's-rated tee uses the men's HCP row; a women's-rated tee uses the women's HCP row.
 
-Do NOT collapse a dual-rated tee to one rating "to keep the list clean." That silently gives one gender the wrong course handicap **and dots on the wrong holes** — un-overridable per hole. Names must be unique within a card, which is why the `(M)`/`(W)` suffix is required.
+Do NOT collapse a dual-rated tee to one rating "to keep the list clean." That silently puts **dots on the wrong holes** — un-overridable per hole — because the stroke-index row is what allocates them. (It does NOT distort anyone's strokes: since the 2026-07-29 relative-to-par arc, rating and slope feed no calculation at all and are recorded only because the paper card prints them. The dots half is the whole reason the split is required.) Names must be unique within a card, which is why the `(M)`/`(W)` suffix is required.
 
 Enter only the tees the requester asked for — skip tees they'll never play.
 

@@ -156,7 +156,7 @@ const playUnratedNine = async (
   label: string,
   scores: readonly number[],
 ): Promise<void> => {
-  const started = await startRoundDirect(httpUrl, account, { course, tee: "white", courseHandicap: AGS_HTTP_CH });
+  const started = await startRoundDirect(httpUrl, account, { course, tee: "white", basis: { kind: "normally-shoots", overPar: AGS_HTTP_CH } });
   const ops = createScoreOps(`unrated-${label}`);
   for (const [i, strokes] of scores.entries()) {
     await recordScoreDirect(httpUrl, started.roundId, started.token, { golferId: account.golfer.golferId, hole: i + 1, strokes }, ops);
@@ -253,7 +253,7 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     // Vic joins as HIMSELF over a direct HTTP self-join (score-for-anyone makes his own browser
     // unnecessary — the same precedent as courseEntry.spec.ts's Quinn), on the same unrated tee (ch 2).
     const { httpUrl } = loadWebEnv();
-    await joinRoundDirect(httpUrl, vic, { code: joinCode, tee: "white", courseHandicap: VIC_CH });
+    await joinRoundDirect(httpUrl, vic, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: VIC_CH } });
     await waitForParticipant(page, "Vic");
 
     // Add the singles match (Uma vs Vic) via SetupPanel — default 100% allowance, exactly the

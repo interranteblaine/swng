@@ -333,7 +333,7 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-cream p-6">
       <div className="flex flex-col gap-2">
         {/* Spec 2026-07-22 §2: the crew name is editable — organizer-only, the roster-row edit
-            idiom (SetupPanel.tsx's mid-round handicap correction). */}
+            idiom (SetupPanel.tsx's mid-round basis correction). */}
         {editingName ? (
           <span className="flex items-center gap-2">
             <input

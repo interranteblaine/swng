@@ -48,6 +48,26 @@ export const gameConfigInputSchema = z.discriminatedUnion("kind", [
 ]);
 export type GameConfigInput = z.infer<typeof gameConfigInputSchema>;
 
+// What a player asserts about their game (spec 2026-07-29 §2a), at the REQUEST ingress: defined
+// once here and used by every command that takes one (start's host, join, set-basis). This is the
+// bounded copy — round.ts's `strokeBasisSchema` is the unbounded stored twin, per Arc A's
+// placement rule (a bound that rejects already-stored data bricks a legitimate user), the same
+// input/stored split `gameConfigInputSchema` and `scoreResultInputSchema` already follow.
+//
+// The bounds themselves are plausibility limits with margin, not golf rules — they exist only to
+// reject nonsense, never a real player. A century over par on 18 holes is already absurd; 20 under
+// is well past the best round ever played.
+export const strokeBasisInputSchema = z.discriminatedUnion("kind", [
+  // SIGNED: a golfer who shoots two under par states -2 (spec §2a).
+  z.object({ kind: z.literal("normally-shoots"), overPar: z.number().int().min(-20).max(100) }),
+  // NOT signed. Under a relative model the anchor is the best player at 0 and nobody gives strokes
+  // back — giving A two is the same round as taking two from B, which is what the rule already
+  // produces. min(0) makes the plus-handicap case unrepresentable at the wire (spec §2a); the
+  // model's own clamp (domain's resolveStrokes) is what makes the invariant hold for the stored
+  // path too, which this schema deliberately does not bound.
+  z.object({ kind: z.literal("strokes"), strokes: z.number().int().min(0).max(100) }),
+]);
+
 // Accounts-only identity (spec §3): StartRound seats its creator ONLY, always as-self from the
 // caller's Bearer (application/src/golfers/ensureGolfer.ts resolves the account golfer by sub).
 // No `host.name` — the participant name is the golfer record's name at start time, frozen into
@@ -64,14 +84,7 @@ export const startRoundRequestSchema = z.object({
   host: z.object({
     // task-1 (pre-prod hardening): a tee name is a short label, never a paragraph.
     tee: z.string().min(1).max(40),
-    // Widened from the original [-10, 54] (pre-prod hardening fix wave, post-review): that range
-    // rejected LEGITIMATE WHS values. Course Handicap = round(Index × Slope/113 + (Rating − Par))
-    // [WHS Rule 6.1a] — a max index (54.0) on a max slope (155) alone computes ≈74 before the
-    // rating term, and a hard/long course's (Rating − Par) can push a max-handicap player's course
-    // handicap toward 100; symmetrically, an extreme plus player (index ≈ −9, the best humans) can
-    // compute below −10. [-20, 100] is a plausibility bound with margin on both ends, not a WHS
-    // hard limit — it exists only to reject nonsense input, never a real player.
-    courseHandicap: z.number().int().min(-20).max(100),
+    basis: strokeBasisInputSchema,
   }),
 });
 export type StartRoundRequest = z.infer<typeof startRoundRequestSchema>;
@@ -85,8 +98,7 @@ export const joinRoundRequestSchema = z.object({
   // (0/O/1/I/L) — mirrors compositionRoot.ts's JOIN_CODE_ALPHABET, the real minting alphabet.
   code: z.string().length(6).regex(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/),
   tee: z.string().min(1).max(40),
-  // [-20, 100] — see startRoundRequestSchema's own comment above for the WHS 6.1a derivation.
-  courseHandicap: z.number().int().min(-20).max(100),
+  basis: strokeBasisInputSchema,
 });
 export type JoinRoundRequest = z.infer<typeof joinRoundRequestSchema>;
 
@@ -145,16 +157,16 @@ export const recordScoreRequestSchema = z.object({
 });
 export type RecordScoreRequest = z.infer<typeof recordScoreRequestSchema>;
 
-// POST /rounds/{roundId}/handicap (spec 2026-07-20): any participant corrects any participant —
-// the score-for-anyone trust model, so the SUBJECT rides the body while the author is the
-// token's own golferId. The server minds the envelope (server-minted, like join/leave); the
-// value may be negative (plus handicap), and the correction is retroactive by construction.
-export const setHandicapRequestSchema = z.object({
+// POST /rounds/{roundId}/basis (spec 2026-07-20, re-shaped by 2026-07-29): any participant
+// corrects any participant — the score-for-anyone trust model, so the SUBJECT rides the body while
+// the author is the token's own golferId. The server minds the envelope (server-minted, like
+// join/leave), and the correction is retroactive by construction: nothing snapshots strokes, so
+// the fold re-derives the whole roster's dots and every standing on the next read.
+export const setBasisRequestSchema = z.object({
   golferId: golferIdSchema,
-  // [-20, 100] — see startRoundRequestSchema's own comment above for the WHS 6.1a derivation.
-  courseHandicap: z.number().int().min(-20).max(100),
+  basis: strokeBasisInputSchema,
 });
-export type SetHandicapRequest = z.infer<typeof setHandicapRequestSchema>;
+export type SetBasisRequest = z.infer<typeof setBasisRequestSchema>;
 
 export interface StartRoundResponse {
   readonly roundId: RoundId;

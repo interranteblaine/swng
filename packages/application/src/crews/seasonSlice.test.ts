@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { archiveGolferLine, crewScoreboard, deviceId, fixtureLinks18, gameId, golferId, opId, roundId } from "@swng/domain";
-import type { GolferId, GolferRoundLine, Participant, RoundArchive, RoundEvent } from "@swng/domain";
+import type { GolferId, GolferRoundLine, RoundArchive, RoundEvent, RosterEntry } from "@swng/domain";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import {
@@ -40,7 +40,7 @@ const singlesArchive = (
   return {
     roundId: roundId(id),
     card: fixtureLinks18,
-    participants: [a, b].map((g): Participant => ({ golferId: g, name: names[g] ?? g, tee: "white", courseHandicap: 8 })),
+    participants: [a, b].map((g): RosterEntry => ({ golferId: g, name: names[g] ?? g, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
     games: [{ kind: "singles-match", id: gid, a, b }],
     cells: {},
     events: [finalized],
@@ -66,7 +66,7 @@ const fourballArchive = (
   return {
     roundId: roundId(id),
     card: fixtureLinks18,
-    participants: [...a, ...b].map((g): Participant => ({ golferId: g, name: g, tee: "white", courseHandicap: 8 })),
+    participants: [...a, ...b].map((g): RosterEntry => ({ golferId: g, name: g, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
     games: [{ kind: "fourball-match", id: gid, a, b }],
     cells: {},
     events: [finalized],
@@ -84,7 +84,7 @@ const stablefordArchive = (id: string, wallMs: number, players: readonly GolferI
   return {
     roundId: roundId(id),
     card: fixtureLinks18,
-    participants: players.map((g): Participant => ({ golferId: g, name: g, tee: "white", courseHandicap: 8 })),
+    participants: players.map((g): RosterEntry => ({ golferId: g, name: g, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
     games: [{ kind: "stableford", id: gid, players }],
     cells: {},
     events: [finalized],

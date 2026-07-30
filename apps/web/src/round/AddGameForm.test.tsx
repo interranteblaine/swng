@@ -2,7 +2,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixtureLinks, golferId } from "@swng/domain";
-import type { CourseCard, Participant } from "@swng/domain";
+import type { CourseCard, RosterEntry } from "@swng/domain";
 import { AddGameForm } from "./AddGameForm";
 
 afterEach(() => {
@@ -14,23 +14,29 @@ const ALEX = golferId("alex");
 const SAM = golferId("sam");
 const DANA = golferId("dana");
 
-const participant = (id: ReturnType<typeof golferId>, name: string, tee: string, courseHandicap: number): Participant => ({
+// `overPar` is what the seat STATED; `strokes` is what the fold derived for it (spec 2026-07-29
+// §2b). The strokes preview under test reads only the stated basis — it resolves the PROPOSED
+// game's own field — but a fixture that hand-stated a `strokes` the fold could not produce would
+// be a roster reduceRound cannot make, so both are given per seat.
+const participant = (id: ReturnType<typeof golferId>, name: string, tee: string, overPar: number, strokes: number): RosterEntry => ({
   golferId: id,
   name,
   tee,
-  courseHandicap,
+  basis: { kind: "normally-shoots", overPar },
+  strokes,
 });
 
 // Four participants on the shared fixture card (fixtureLinks — the same 9-hole "white" tee
-// SetupPanel.test.tsx uses): Pat ch 5, Alex ch 2, Sam ch 0, Dana ch 8. Chosen so a game between
-// Pat and Sam gives Pat the difference 5 − 0, halved on a nine-hole card = 3 dots spread by
-// stroke index (the "Pat 3 dots" pin), while Sam — the lowest in that field — plays off scratch
+// SetupPanel.test.tsx uses): Pat normally shoots +5, Alex +2, Sam E, Dana +8. Chosen so a game
+// between Pat and Sam gives Pat the difference 5 − 0, halved on a nine-hole card = 3 dots spread
+// by stroke index (the "Pat 3 dots" pin), while Sam — the lowest in that field — plays off scratch
 // and is omitted from the line per strokesSummary's own rule.
-const participants: readonly Participant[] = [
-  participant(PAT, "Pat", "white", 5),
-  participant(ALEX, "Alex", "white", 2),
-  participant(SAM, "Sam", "white", 0),
-  participant(DANA, "Dana", "white", 8),
+// Round-level strokes, off Sam's E anchor and halved for nine holes: 3 / 1 / 0 / 4.
+const participants: readonly RosterEntry[] = [
+  participant(PAT, "Pat", "white", 5, 3),
+  participant(ALEX, "Alex", "white", 2, 1),
+  participant(SAM, "Sam", "white", 0, 0),
+  participant(DANA, "Dana", "white", 8, 4),
 ];
 const card: CourseCard = fixtureLinks;
 

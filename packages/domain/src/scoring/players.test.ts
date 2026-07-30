@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deviceId, golferId, opId } from "../ids.js";
 import type { RoundEvent } from "../round/events.js";
+import type { Participant } from "../round/participant.js";
 import { reduceRound } from "../round/state.js";
 import { playGoldenRoundLog } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
@@ -8,9 +9,9 @@ import { allPlayersComplete } from "./players.js";
 
 const A = golferId("ann");
 const B = golferId("bo");
-const players2 = [
-  { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 },
-  { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
+const players2: readonly Participant[] = [
+  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
+  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
 ];
 
 describe("allPlayersComplete", () => {

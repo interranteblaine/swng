@@ -42,7 +42,7 @@ import {
   peekRound,
   removeCrewMember,
   searchCourses,
-  setHandicap,
+  setBasis,
   shareRound,
   supersedeCard,
   terminateGame,
@@ -86,7 +86,7 @@ afterEach(() => {
 });
 
 describe("createRound", () => {
-  const input: StartRoundRequest = { course: { courseId: courseId("course-1"), cardId: cardId("card-1") }, host: { tee: "white", courseHandicap: 8 } };
+  const input: StartRoundRequest = { course: { courseId: courseId("course-1"), cardId: cardId("card-1") }, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } };
 
   it("POSTs the request body to /rounds and parses a matching response", async () => {
     let seenUrl: string | undefined;
@@ -132,7 +132,7 @@ describe("createRound", () => {
 });
 
 describe("joinRound", () => {
-  const input: JoinRoundRequest = { code: "ABC123", tee: "white", courseHandicap: 2 };
+  const input: JoinRoundRequest = { code: "ABC123", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } };
 
   it("POSTs the request body to /rounds/join and parses a matching response", async () => {
     let seenUrl: string | undefined;
@@ -932,12 +932,13 @@ describe("leaveRound", () => {
   });
 });
 
-// Mid-round handicap correction (spec 2026-07-20): same POST + bearer-token (participant) idiom
-// as leaveRound/terminateGame — the request body carries the SUBJECT golferId (any participant
-// corrects any participant), and the appended participant-handicap-set event comes back for the
-// caller to fold.
-describe("setHandicap", () => {
-  it("POSTs { golferId, courseHandicap } to /rounds/{roundId}/handicap with the bearer token and parses a SetHandicapResponse", async () => {
+// Mid-round basis correction (spec 2026-07-20, re-shaped by 2026-07-29): same POST + bearer-token
+// (participant) idiom as leaveRound/terminateGame — the request body carries the SUBJECT golferId
+// (any participant corrects any participant), and the appended participant-basis-set event comes
+// back for the caller to fold. The URL is a TEMPLATE STRING in api.ts, so nothing but this test
+// pins the path itself: a missed rename here stays green locally and 404s live.
+describe("setBasis", () => {
+  it("POSTs { golferId, basis } to /rounds/{roundId}/basis with the bearer token and parses a SetBasisResponse", async () => {
     let seenUrl: string | undefined;
     let seenInit: RequestInit | undefined;
     stubFetch(async (url, init) => {
@@ -946,12 +947,12 @@ describe("setHandicap", () => {
       return fakeResponse(200, { events: [] });
     });
 
-    const result = await setHandicap(roundId("round-1"), "tok-handicap", { golferId: golferId("bo"), courseHandicap: -2 });
+    const result = await setBasis(roundId("round-1"), "tok-basis", { golferId: golferId("bo"), basis: { kind: "normally-shoots", overPar: -2 } });
 
-    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/handicap`);
+    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/basis`);
     expect(seenInit?.method).toBe("POST");
-    expect(JSON.parse(String(seenInit?.body))).toEqual({ golferId: "bo", courseHandicap: -2 });
-    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-handicap");
+    expect(JSON.parse(String(seenInit?.body))).toEqual({ golferId: "bo", basis: { kind: "normally-shoots", overPar: -2 } });
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-basis");
     expect(seenInit).not.toHaveProperty("token");
     expect(result).toEqual({ events: [] });
   });

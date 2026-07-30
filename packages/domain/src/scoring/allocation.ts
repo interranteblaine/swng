@@ -15,7 +15,6 @@ import type { GameConfig } from "./game.js";
 // gameMembers) costs more than it buys. The engines must go through this function: it is the ONE
 // place the per-game field rule lives.
 import { gameMembers } from "./game.js";
-import type { StrokeBasis } from "./strokeBasis.js";
 import { anchorOf, resolveStrokes } from "./strokeBasis.js";
 import { dotsByHole } from "./strokes.js";
 
@@ -26,10 +25,6 @@ const participantFor = <T extends Participant>(participants: readonly T[], id: G
   if (!found) throw new DomainError("unknown-participant", `no participant "${id}" joined this round`);
   return found;
 };
-
-// TEMPORARY (deleted in Task 3, when Participant.basis replaces courseHandicap): today's stored
-// integer is read as an absolute "normally shoots" figure, which is what the rule expects.
-const basisOf = (participant: Participant): StrokeBasis => ({ kind: "normally-shoots", overPar: participant.courseHandicap });
 
 // ONE rule for every kind (spec §3): the game's field is its own members, strokes are the
 // difference from the lowest among them, allocated by stroke index. The switch this replaced
@@ -48,7 +43,7 @@ export const gameStrokeAllocation = (
   // against each player's OWN tee set; a card with mismatched tee lengths would make the two
   // disagree, and none can exist.
   const holeCount = card.teeSets[0]?.holes.length ?? 18;
-  const bases = members.map((id) => ({ golferId: id, basis: basisOf(participantFor(participants, id)) }));
+  const bases = members.map((id) => ({ golferId: id, basis: participantFor(participants, id).basis }));
   // A game's frozen players[] never drops a member who leaves, so the game's field excludes
   // departed players from its ANCHOR exactly as the card's does (spec §2b) — otherwise a
   // wrong-round joiner still anchors whichever game he was added to before leaving.
@@ -59,14 +54,17 @@ export const gameStrokeAllocation = (
   );
 };
 
-// The STANDARD CARD's dots: each player's own course handicap allocated by stroke index — no
-// game at all (spec 2026-07-19 §2a: the card never changes; a game's own strokes, resolved off
-// its own field, live in that game's panel and are stated there in words).
-export const courseHandicapAllocation = (
-  participants: readonly Participant[],
+// The STANDARD CARD's dots: each player's own ROUND strokes allocated by stroke index — no game
+// at all (spec 2026-07-19 §2a: the card never changes; a game's own strokes, resolved off its own
+// field, live in that game's panel and are stated there in words). Reads the value reduceRound
+// already derived across the round's present roster (spec 2026-07-29 §2b) rather than re-running
+// the rule, which is why this takes a RosterEntry and gameStrokeAllocation above does not: the
+// card's field IS the round, so the fold has already answered it.
+export const roundStrokeAllocation = (
+  participants: readonly RosterEntry[],
   card: CourseCard,
 ): ReadonlyMap<GolferId, ReadonlyMap<number, number>> =>
-  new Map(participants.map((p) => [p.golferId, dotsByHole(p.courseHandicap, findTeeSet(card, p.tee))]));
+  new Map(participants.map((p) => [p.golferId, dotsByHole(p.strokes, findTeeSet(card, p.tee))]));
 
 // dotsByHole's allocation always sums exactly to its input strokes value (allocateStrokes' own
 // documented invariant, strokes.ts) — summing here is safe rather than re-deriving a parallel
@@ -81,8 +79,11 @@ export const totalDots = (perHole: ReadonlyMap<number, number>): number => [...p
 // Lives here (not round/archive.ts) so it has exactly one implementation with two callers:
 // settleRound below, and — per M6 Task 5 — the web's own handicapping display, which
 // currently carries a drift-tested mirror of this exact function.
+// Takes a RosterEntry, not a Participant: the net-double-bogey cap needs the strokes the fold
+// DERIVED (spec 2026-07-29 §2b), which a bare assertion can't answer. Deleted whole in this arc's
+// WHS-deletion task along with RoundArchive.handicapping.
 export const handicappingFor = (
-  participant: Participant,
+  participant: RosterEntry,
   card: CourseCard,
   cells: Readonly<Record<string, ScoreCell>>,
 ):
@@ -96,7 +97,7 @@ export const handicappingFor = (
     if (cell) holes.set(hole.number, cell.result);
   }
   try {
-    const ags = adjustedGrossScore(teeSet, participant.courseHandicap, holes);
+    const ags = adjustedGrossScore(teeSet, participant.strokes, holes);
     // Unrated: the round is fully scored (AGS holds) but has no differential to post
     // (spec §4). It stays out of the WHS index by carrying no differential, never by a
     // downstream filter change.

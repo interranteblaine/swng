@@ -131,7 +131,7 @@ export default [
                 "matchLadder",
                 // stroke allocation + net arithmetic
                 "gameStrokeAllocation",
-                "courseHandicapAllocation",
+                "roundStrokeAllocation",
                 "totalDots",
                 "handicappingFor",
                 "allocateStrokes",

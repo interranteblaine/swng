@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { courseHandicapFor, unratedCourseHandicap } from "@swng/client";
 import type { CourseId } from "@swng/domain";
-import { cardId, formatHandicapIndex, resolveIndex, strokeGrant } from "@swng/domain";
-import type { CourseView, GetMyRecordResponse, StartRoundResponse } from "@swng/contracts";
-import { ApiError, createRound, getCourse, getMyRecord } from "../api";
+import { cardId } from "@swng/domain";
+import type { CourseView, StartRoundResponse } from "@swng/contracts";
+import { ApiError, createRound, getCourse } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
@@ -39,22 +38,16 @@ export function CreateRoundPage() {
   // quiet placeholder and submit stays disabled — the M8 defect (a submit renaming a
   // half-loaded profile) is structurally impossible now that no name is ever typed here.
   const golfer = auth.golfer ?? undefined;
-  // Destructured for a stable effect dep (withAuth is a useCallback — useAuth.ts), rather than
-  // `auth` itself, which is a fresh object literal every render (ProfilePage's own precedent).
-  const { withAuth } = auth;
 
   const [courseView, setCourseView] = useState<CourseView | undefined>(undefined);
   const [tee, setTee] = useState<string>("");
   const [courseError, setCourseError] = useState<string | undefined>(undefined);
-  const [courseHandicap, setCourseHandicap] = useState("0");
-  // The golfer's read-time metrics (GET /me/record) — the live input resolveIndex reads for a
-  // swng/whs source. A nicety: a failed/absent fetch just leaves this undefined, so a computed
-  // source resolves to no value and the strokes field stays typeable, never blocking the page
-  // (index-source model spec §4; unrated-courses T5b).
-  const [record, setRecord] = useState<GetMyRecordResponse | undefined>(undefined);
-  // Seed-once flag (unrated-courses T5b): the strokes suggestion pre-fills the field
-  // only while the golfer hasn't touched it — the moment they type, their value wins forever.
-  const [touched, setTouched] = useState(false);
+  // What the golfer normally shoots relative to par (spec 2026-07-29 §2): starting a round is
+  // joining it as the host, so the creator states the same one number a joiner does, in the same
+  // words. Blank until typed — "0" would assert "I shoot par", a real claim about them, and no
+  // default may put a claim in the round's log.
+  // Task 5: seed from record.metrics.average — blank when there is none, no floor and no fallback.
+  const [overPar, setOverPar] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -102,62 +95,14 @@ export function CreateRoundPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: keyed by the router's own per-navigation identity, not by `state`'s object identity
   }, [location.key]);
 
-  // The metrics resolveIndex reads for a swng/whs source (unrated-courses T5b): one GET /me/record
-  // when signed in. Purely a nicety — a rejection just leaves `record` undefined, so a computed
-  // source resolves to no value (the golfer types their own strokes); it never blocks the page.
-  useEffect(() => {
-    if (!auth.signedIn) return;
-    void withAuth((token) => getMyRecord(token))
-      .then(setRecord)
-      .catch(() => {}); // withAuth already handled a terminal 401; anything else just leaves the record unset
-  }, [auth.signedIn, withAuth]);
-
-  // "Strokes you get here" — the golfer's index turned into today's strokes, shown WITH its
-  // derivation and editable (index-source model spec §6). The active index is resolved from the
-  // golfer's CHOSEN source + the live metrics via the ONE domain resolver (the same one the profile
-  // and JoinRoundPage call) — swng by default, whs if adopted, or a declared value. A rated tee
-  // gets the exact Rule 6.1a figure (courseHandicapFor over the full card's holes); an unrated tee
-  // has no slope/rating to convert, so it falls back to the index itself, hole-count-correct —
-  // round(index) on 18, round(index / 2) on 9 (the /2 is a UI presentation of the estimate, not the
-  // Rule 6.1a formula). No resolved value (a brand-new golfer, or a computed source with no data)
-  // → no derivation note, so the field stays its plain "0" and they just type their strokes.
-  const resolved = resolveIndex(golfer?.indexSource, record?.metrics ?? {});
-  const selectedTeeSet = courseView?.card.teeSets.find((teeSet) => teeSet.name === tee);
-  const suggestion = ((): { readonly value: number; readonly note: string } | undefined => {
-    if (resolved.value === undefined || !selectedTeeSet) return undefined;
-    const indexText = formatHandicapIndex(resolved.value); // +1.2 for a plus index — the domain owns the convention
-    const sourceNoun = resolved.kind === "whs" ? "WHS index" : "index"; // spec §6: name a WHS source
-    // The strokes lead reads through strokeGrant: a plus player GIVES strokes ("You give N"),
-    // everyone else just receives the plain number — the view never tests the sign itself (spec §3).
-    const lead = (value: number): string => {
-      const grant = strokeGrant(value);
-      return grant.kind === "gives" ? `You give ${grant.count}` : `${value}`;
-    };
-    if (selectedTeeSet.rating !== undefined && selectedTeeSet.slope !== undefined) {
-      const value = courseHandicapFor(resolved.value, selectedTeeSet);
-      return { value, note: `${lead(value)} — from your ${sourceNoun} (${indexText}) on this course` };
-    }
-    // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §4).
-    const holeCount = selectedTeeSet.holes.length; // 9 or 18 — every card tee is one or the other
-    const value = unratedCourseHandicap(resolved.value, holeCount);
-    return { value, note: `${lead(value)} — from your ${sourceNoun} (${indexText}), adjusted for ${holeCount} holes; unrated course, adjust if it plays hard/easy` };
-  })();
-  const suggestedValue = suggestion?.value;
-
-  // Seed the field (and re-seed on a tee change) only while untouched — a typed value is never
-  // overwritten (`touched` gates it). The suggested value is a primitive dep, so a re-render that
-  // recomputes the same number doesn't re-fire this.
-  useEffect(() => {
-    if (touched || suggestedValue === undefined) return;
-    setCourseHandicap(String(suggestedValue));
-  }, [touched, suggestedValue]);
+  const parsedOverPar = Number.parseInt(overPar, 10);
+  const canSubmit = courseView !== undefined && tee !== "" && Number.isInteger(parsedOverPar) && golfer !== undefined;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const parsedHandicap = Number.parseInt(courseHandicap, 10);
     // Only ever reachable in the signed-in-with-a-golfer state (the form isn't rendered
-    // otherwise), but guarded anyway: a course, a tee, a valid handicap, and a real golfer.
-    if (!courseView || !tee || !Number.isInteger(parsedHandicap) || !golfer) return;
+    // otherwise), but guarded anyway: a course, a tee, a stated number, and a real golfer.
+    if (!canSubmit || !courseView || !golfer) return;
 
     setSubmitting(true);
     setError(undefined);
@@ -167,7 +112,7 @@ export function CreateRoundPage() {
       // always yourself, resolved server-side from the Bearer — the request carries no
       // name/golferId (the server freezes the account golfer's name into the join event).
       const response: StartRoundResponse = await auth.withAuth((token) =>
-        createRound({ course: { courseId: courseView.courseId, cardId: cardId(courseView.cardId) }, host: { tee, courseHandicap: parsedHandicap } }, token),
+        createRound({ course: { courseId: courseView.courseId, cardId: cardId(courseView.cardId) }, host: { tee, basis: { kind: "normally-shoots", overPar: parsedOverPar } } }, token),
       );
       credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer.name, joinCode: response.joinCode });
       navigate(`/round/${response.roundId}`);
@@ -230,26 +175,24 @@ export function CreateRoundPage() {
             </div>
           )}
 
-          {/* The derivation note is a SIBLING of the <label>, not nested inside it — nesting
-              would fold it into the label's own accessible name (getByLabelText for the field
-              would then have to match the note too). The plain label ("Strokes you get here") plus
-              the visible derivation is the legibility rule (spec §4/§7): the field is the index
-              turned into today's strokes, never a bare number and never a separate declaration. */}
+          {/* The SAME question the join form asks, in the same words (spec 2026-07-29 §2/§9,
+              verbatim): starting a round is joining it as the host. No conversion and no derivation
+              note — the number stated IS the number strokes come from, and the strokes themselves
+              fall out of the whole field once everyone has stated theirs. The hint is a SIBLING of
+              the <label> (not nested), which would fold it into the label's accessible name. */}
           <div className="flex flex-col gap-1">
             <label className="flex flex-col gap-1 text-forest">
-              Strokes you get here
+              What do you normally shoot, relative to par?
               <input
                 type="number"
                 step={1}
-                value={courseHandicap}
-                onChange={(event) => {
-                  setTouched(true); // a typed value wins over the seed from here on
-                  setCourseHandicap(event.target.value);
-                }}
+                inputMode="numeric"
+                value={overPar}
+                onChange={(event) => setOverPar(event.target.value)}
                 className={`${inputBox} text-lg`}
               />
             </label>
-            {suggestion && <span className="text-xs text-fairway/70">{suggestion.note}</span>}
+            <span className="text-xs text-fairway/70">Over par for a normal round — 18 holes. Under par? Use a minus.</span>
           </div>
 
           {error && (
@@ -258,9 +201,11 @@ export function CreateRoundPage() {
             </p>
           )}
 
+          {/* Disabled until the number is there too: a blank field is not a claim, so submitting
+              one must be visibly impossible rather than a silently dead button. */}
           <button
             type="submit"
-            disabled={submitting || !courseView || !golfer}
+            disabled={submitting || !canSubmit}
             className={`${btnPrimary} disabled:opacity-50`}
           >
             Create round

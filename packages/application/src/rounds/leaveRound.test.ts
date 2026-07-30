@@ -74,8 +74,8 @@ const setup = async () => {
 // A live round, Ann (host) + Bo — the starting point every case builds on.
 const freshLiveRound = async () => {
   const ctx = await setup();
-  const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-host" });
-  const bo = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: "sub-bo" });
+  const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: "sub-host" });
+  const bo = await ctx.join({ code: host.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, { sub: "sub-bo" });
   const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
   const boClaims: ParticipantClaims = { roundId: bo.roundId, golferId: bo.golferId };
   return { ...ctx, host, bo, hostClaims, boClaims };

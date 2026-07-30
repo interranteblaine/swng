@@ -49,7 +49,7 @@ import {
   recordScore,
   removeCrewMember,
   searchCourses,
-  setHandicap,
+  setBasis,
   startRound,
   supersedeCard,
   terminateGame,
@@ -332,7 +332,7 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
     leaveRound: leaveRound({ journal, broadcast, clock, ids }),
     // spec 2026-07-20: mid-round course handicap correction — same journal/broadcast/clock/ids
     // instances the other participant round acts above already share.
-    setHandicap: setHandicap({ journal, broadcast, clock, ids }),
+    setBasis: setBasis({ journal, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),

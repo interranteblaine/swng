@@ -6,7 +6,7 @@ import type { RejectedOp } from "@swng/client";
 import { StatusChrome } from "./StatusChrome";
 
 const ANN = golferId("ann");
-const participants: readonly Participant[] = [{ golferId: ANN, name: "Ann", tee: "white", courseHandicap: 8 }];
+const participants: readonly Participant[] = [{ golferId: ANN, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } }];
 
 const scoreRecorded = (hole: number): RoundEvent => ({
   kind: "score-recorded",

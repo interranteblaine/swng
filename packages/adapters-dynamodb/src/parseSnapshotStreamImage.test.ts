@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { marshall } from "@aws-sdk/util-dynamodb";
 import { deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
-import type { Participant, RoundArchive, RoundEvent } from "@swng/domain";
+import type { RosterEntry, RoundArchive, RoundEvent } from "@swng/domain";
 import { snapshotPk } from "./keys.js";
 import { parseSnapshotStreamImage } from "./parseSnapshotStreamImage.js";
 
@@ -18,7 +18,8 @@ const finalizedEvent: RoundEvent = {
 const archive: RoundArchive = {
   roundId: roundId("r1"),
   card: fixtureLinks18,
-  participants: [{ golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 } satisfies Participant],
+  // A lone seat is the field's own anchor, so the fold derives 0 strokes for it (spec 2026-07-29 §2b).
+  participants: [{ golferId: ann, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 } satisfies RosterEntry],
   games: [],
   cells: {},
   events: [finalizedEvent],

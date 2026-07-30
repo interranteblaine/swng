@@ -84,10 +84,10 @@ test.describe.serial("mid-round handicap correction — a wrong course handicap 
     ({ httpUrl } = loadWebEnv());
     const course = await ensureCourse(fixtureLinks.courseName, fixtureLinks, gil);
 
-    const started = await startRoundDirect(httpUrl, gil, { course, tee: "white", courseHandicap: GIL_CH });
+    const started = await startRoundDirect(httpUrl, gil, { course, tee: "white", basis: { kind: "normally-shoots", overPar: GIL_CH } });
     roundId = started.roundId;
     // Rae's deliberately WRONG course handicap at join — the field mistake this whole arc fixes.
-    await joinRoundDirect(httpUrl, rae, { code: started.joinCode, tee: "white", courseHandicap: RAE_CH_WRONG });
+    await joinRoundDirect(httpUrl, rae, { code: started.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: RAE_CH_WRONG } });
     await addGameDirect(httpUrl, started.roundId, started.token, { kind: "stroke-play", scoring: "net", players: [gil.golfer.golferId, rae.golfer.golferId] });
 
     const context = await browser.newContext();
@@ -265,7 +265,10 @@ test.describe.serial("mid-round handicap correction — a wrong course handicap 
     const { events } = parse(getRoundArchiveResponseSchema, archiveJson);
     const archivedState = reduceRound(events);
     const raeArchived = archivedState.participants.find((p) => p.golferId === rae.golfer.golferId);
-    expect(raeArchived?.courseHandicap).toBe(RAE_CH_CORRECTED);
+    // Task 8 owns this spec's oracle re-derivation and its rename to basisCorrection.spec.ts: a
+    // seat's `strokes` is now DERIVED from the whole field (spec 2026-07-29 §2b), so the stated
+    // number and the strokes received are no longer the same value. Compile-fixed only here.
+    expect(raeArchived?.strokes).toBe(RAE_CH_CORRECTED);
     expect(raeArchived?.name).toBe("Rae"); // the correction carries ONLY the number — name/tee are untouched
     expect(raeArchived?.tee).toBe("white");
   });

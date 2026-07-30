@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
 import type { HoleResult } from "../round/holeResult.js";
+import type { Participant, RosterEntry } from "../round/participant.js";
 import { cellKey } from "../round/state.js";
 import type { RoundState } from "../round/state.js";
 import { scoreStableford } from "./stableford.js";
@@ -10,20 +11,20 @@ import type { GameState } from "./game.js";
 
 const A = golferId("ann");
 const B = golferId("bo");
-const players = [
-  { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 },
-  { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
+const players: readonly Participant[] = [
+  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
+  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
 ];
 const game = { kind: "stableford", id: gameId("s1"), players: [A, B] } as const;
 
-// A minimal one-hole RoundState off scratch (courseHandicap 0 for every named golfer) — no dots
+// A minimal one-hole RoundState off scratch (every named golfer states even par) — no dots
 // to complicate a single-hole assertion about the SCORE alone. Mirrors singlesMatch.test.ts's
 // own stateWith (task-2): the shape scoreStableford consumes directly, hole 1 only.
 const stateWith = (results: Readonly<Record<string, HoleResult>>): RoundState => ({
   id: roundId("r-conceded"),
   status: "live",
   card: fixtureLinks,
-  participants: Object.keys(results).map((name) => ({ golferId: golferId(name), name, tee: "white", courseHandicap: 0 })),
+  participants: Object.keys(results).map((name): RosterEntry => ({ golferId: golferId(name), name, tee: "white", basis: { kind: "normally-shoots", overPar: 0 }, strokes: 0 })),
   games: [],
   cells: Object.fromEntries(
     Object.entries(results).map(([name, result], index) => [
@@ -73,9 +74,9 @@ describe("stableford — golden cards", () => {
     // hand-computing net/points arithmetic for two different handicaps.
     const D = golferId("dee");
     const E = golferId("eve");
-    const equalHandicapPlayers = [
-      { golferId: D, name: "Dee", tee: "white", courseHandicap: 5 },
-      { golferId: E, name: "Eve", tee: "white", courseHandicap: 5 },
+    const equalHandicapPlayers: readonly Participant[] = [
+      { golferId: D, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 5 } },
+      { golferId: E, name: "Eve", tee: "white", basis: { kind: "normally-shoots", overPar: 5 } },
     ];
     const tieGame = { kind: "stableford", id: gameId("s4"), players: [D, E] } as const;
     const [state] = playGoldenRound(fixtureLinks, equalHandicapPlayers, [tieGame], {
@@ -122,7 +123,7 @@ describe("stableford — golden cards", () => {
     // h9 par4 dot1 gross6 net5 pts 2+4-5=1
     // total points = 1+1+2+1+1+1+2+1+1 = 11 (one dot fewer on h4 would net 7 there and score
     // max(0, 2+5-7) = 0, so the lapped dot is worth exactly the point this pins).
-    const rosterWithCal = [...players, { golferId: C, name: "Cal", tee: "white", courseHandicap: 26 }];
+    const rosterWithCal: readonly Participant[] = [...players, { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 26 } }];
     const [state] = playGoldenRound(fixtureLinks, rosterWithCal, [wideGame], {
       [B]: [4, 4, 3, 5, 5, 3, 4, 5, 4],
       [C]: [6, 7, 4, 8, 6, 5, 6, 7, 6],

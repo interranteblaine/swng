@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
-import type { GolferId, Participant, RoundArchive, RoundEvent } from "@swng/domain";
+import type { GolferId, RoundArchive, RoundEvent, RosterEntry } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 import { createInMemoryGolferStore, createInMemoryProjectionStore, createInMemorySnapshotStore, createNullLogger, putAndBindGolfer } from "../testing/fakes.js";
@@ -33,7 +33,7 @@ const finalizedEvent = (wallMs: number): RoundEvent => ({
 const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: GolferId; differential?: number }[]): RoundArchive => ({
   roundId: roundId(id),
   card: fixtureLinks18,
-  participants: entries.map((e): Participant => ({ golferId: e.golferId, name: e.golferId, tee: "white", courseHandicap: 8 })),
+  participants: entries.map((e): RosterEntry => ({ golferId: e.golferId, name: e.golferId, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
   games: [],
   cells: {},
   // A real archive's log always opens with round-created (its genesis) — carried here so
@@ -47,7 +47,7 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
     ...entries.map(
       (e, i): RoundEvent => ({
         kind: "participant-joined",
-        participant: { golferId: e.golferId, name: e.golferId, tee: "white", courseHandicap: 8 },
+        participant: { golferId: e.golferId, name: e.golferId, tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
         opId: opId(`joined-${id}-${e.golferId}`),
         hlc: { wallMs: 1, counter: i + 1, deviceId: deviceId("server") },
         authorId: e.golferId,

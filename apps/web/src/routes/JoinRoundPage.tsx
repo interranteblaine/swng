@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { courseHandicapFromRatingSlopePar, unratedCourseHandicap } from "@swng/client";
-import { formatHandicapIndex, resolveIndex, strokeGrant } from "@swng/domain";
-import type { GetMyRecordResponse, PeekRoundResponse } from "@swng/contracts";
-import { ApiError, getMyRecord, joinRound, peekRound, updateMe } from "../api";
+import type { PeekRoundResponse } from "@swng/contracts";
+import { ApiError, joinRound, peekRound, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { teeNumbers } from "../courses/teeNumbers";
@@ -17,18 +15,15 @@ import { usePageTitle } from "../ui/usePageTitle";
 // fires one request per keystroke.
 const DEBOUNCE_MS = 250;
 
-// The peek's per-tee shape — carries `par` and `holes` (the hole count, 9 or 18) always, plus
-// rating/slope (a rated tee only), which is exactly what the join-side strokes derivation needs:
-// par + rating/slope for the rated conversion, `holes` to make the unrated estimate hole-count-
-// correct (the frozen card's holes ARRAY isn't on the peek — only its count is).
+// The peek's per-tee shape — name plus the numbers the tee picker shows (teeNumbers). Nothing
+// here feeds the strokes field any more: what a player states is a fact about THEM, not about the
+// course (spec 2026-07-29 §2), so no course number converts it.
 type PeekTee = PeekRoundResponse["teeSets"][number];
 
 export function JoinRoundPage() {
   usePageTitle("Join a round");
   const navigate = useNavigate();
   const auth = useAuth();
-  // Destructured for a stable effect dep (withAuth is a useCallback — useAuth.ts).
-  const { withAuth } = auth;
   const [searchParams] = useSearchParams();
 
   // The wall (accounts-only identity spec §3): joining is self-join only, from the caller's own
@@ -48,10 +43,11 @@ export function JoinRoundPage() {
   // across the sign-in round trip lands ready to join without retyping.
   const [code, setCode] = useState(() => (searchParams.get("code") ?? "").toUpperCase());
   const [tee, setTee] = useState("");
-  const [courseHandicap, setCourseHandicap] = useState("0");
-  // Seed-once flag (unrated-courses T5b): the strokes suggestion pre-fills the field only
-  // while untouched — the moment the golfer types, their value wins forever.
-  const [touched, setTouched] = useState(false);
+  // What the golfer normally shoots relative to par (spec 2026-07-29 §2): the ONE number they
+  // state, in the unit they already speak on the first tee. Blank until typed — "0" would assert
+  // "I shoot par", a real claim about them, and no default may put a claim in the round's log.
+  // Task 5: seed from record.metrics.average — blank when there is none, no floor and no fallback.
+  const [overPar, setOverPar] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -59,14 +55,9 @@ export function JoinRoundPage() {
   // The round-created wall time from the peek — feeds roundLabel so the join-link framing carries
   // the SAME designation (course + date) as home/archive/watch (accounts-only identity spec §5).
   const [createdAt, setCreatedAt] = useState<number | undefined>(undefined);
-  // The peek's full tee sets (name + par + rating/slope), not just names — the join-side strokes
-  // suggestion (unrated-courses T5b) needs the selected tee's numbers, and the picker shows
-  // each tee's rating/slope via teeNumbers.
+  // The peek's full tee sets (name + par + rating/slope), not just names — the picker shows each
+  // tee's rating/slope via teeNumbers.
   const [peekTees, setPeekTees] = useState<readonly PeekTee[] | undefined>(undefined);
-  // The golfer's read-time metrics (GET /me/record) — the live input resolveIndex reads for a
-  // swng/whs source; a failed/absent fetch just leaves a computed source with no value, so the
-  // golfer types their own strokes, never blocking the page.
-  const [record, setRecord] = useState<GetMyRecordResponse | undefined>(undefined);
   // Only ever true after a peek actually rejected — gates the fallback NOTE (not the fallback
   // input itself, which is simply whatever renders whenever peekTees is absent).
   const [peekFailed, setPeekFailed] = useState(false);
@@ -102,61 +93,15 @@ export function JoinRoundPage() {
     return () => clearTimeout(timer);
   }, [upperCode]);
 
-  // The metrics resolveIndex reads for a swng/whs source (unrated-courses T5b): one GET /me/record
-  // when signed in. A nicety — a rejection leaves `record` undefined, so a computed source resolves
-  // to no value (the golfer types their own strokes); it never blocks the page.
-  useEffect(() => {
-    if (!auth.signedIn) return;
-    void withAuth((token) => getMyRecord(token))
-      .then(setRecord)
-      .catch(() => {}); // withAuth already handled a terminal 401; anything else just leaves the record unset
-  }, [auth.signedIn, withAuth]);
-
-  // "Strokes you get here" — the golfer's index turned into today's strokes, shown WITH its
-  // derivation and editable (index-source model spec §6). The active index is resolved from the
-  // golfer's CHOSEN source + the live metrics via the ONE domain resolver (the same one the profile
-  // and CreateRoundPage call) — swng by default, whs if adopted, or a declared value. The peek
-  // carries `par` + `holes` (not the holes array): a rated tee uses courseHandicapFromRatingSlopePar
-  // (the numbers-only Rule 6.1a helper); an unrated tee falls back to the index itself,
-  // hole-count-correct — round(index) on 18, round(index / 2) on 9 (spec §4; the /2 is a UI
-  // presentation of the estimate). No resolved value, or a free-text tee with no peek numbers → no
-  // derivation note, so the field stays its plain "0".
-  const resolved = resolveIndex(auth.golfer?.indexSource, record?.metrics ?? {});
-  const selectedTee = peekTees?.find((peekTee) => peekTee.name === tee);
-  const suggestion = ((): { readonly value: number; readonly note: string } | undefined => {
-    if (resolved.value === undefined || !selectedTee) return undefined;
-    const indexText = formatHandicapIndex(resolved.value); // +1.2 for a plus index — the domain owns the convention
-    const sourceNoun = resolved.kind === "whs" ? "WHS index" : "index"; // spec §6: name a WHS source
-    // The strokes lead reads through strokeGrant: a plus player GIVES strokes ("You give N"),
-    // everyone else just receives the plain number — the view never tests the sign itself (spec §3).
-    const lead = (value: number): string => {
-      const grant = strokeGrant(value);
-      return grant.kind === "gives" ? `You give ${grant.count}` : `${value}`;
-    };
-    if (selectedTee.rating !== undefined && selectedTee.slope !== undefined) {
-      const value = courseHandicapFromRatingSlopePar(resolved.value, selectedTee.rating, selectedTee.slope, selectedTee.par);
-      return { value, note: `${lead(value)} — from your ${sourceNoun} (${indexText}) on this course` };
-    }
-    // Unrated: the strokes ≈ index estimate, halved for a 9-hole card (spec §4).
-    const value = unratedCourseHandicap(resolved.value, selectedTee.holes);
-    return { value, note: `${lead(value)} — from your ${sourceNoun} (${indexText}), adjusted for ${selectedTee.holes} holes; unrated course, adjust if it plays hard/easy` };
-  })();
-  const suggestedValue = suggestion?.value;
-
-  // Seed the field (and re-seed on a tee change) only while untouched — a typed value is never
-  // overwritten. Primitive dep, so recomputing the same number doesn't re-fire this.
-  useEffect(() => {
-    if (touched || suggestedValue === undefined) return;
-    setCourseHandicap(String(suggestedValue));
-  }, [touched, suggestedValue]);
+  const parsedOverPar = Number.parseInt(overPar, 10);
+  const canSubmit = upperCode.length === 6 && tee.trim() !== "" && Number.isInteger(parsedOverPar);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const parsedHandicap = Number.parseInt(courseHandicap, 10);
     const golfer = auth.golfer;
     // Only ever reachable in the asSelf state (the form isn't rendered otherwise), but guarded
-    // anyway: a real account golfer, a complete code, a tee and a valid handicap.
-    if (upperCode.length !== 6 || !tee.trim() || !Number.isInteger(parsedHandicap) || !golfer || golfer.namePlaceholder === true) return;
+    // anyway: a real account golfer, a complete code, a tee and a stated number.
+    if (!canSubmit || !golfer || golfer.namePlaceholder === true) return;
 
     setSubmitting(true);
     setError(undefined);
@@ -165,7 +110,7 @@ export function JoinRoundPage() {
       // Bearer — the request carries no name/golferId (the server freezes the account golfer's name
       // into the join event).
       const response = await auth.withAuth((token) =>
-        joinRound({ code: upperCode, tee: tee.trim(), courseHandicap: parsedHandicap }, token),
+        joinRound({ code: upperCode, tee: tee.trim(), basis: { kind: "normally-shoots", overPar: parsedOverPar } }, token),
       );
       // The server now echoes the round's canonical join code on JoinRoundResponse (spec
       // 2026-07-20 §2) — that's what's saved, not the typed form value: the server echoes the
@@ -245,25 +190,25 @@ export function JoinRoundPage() {
             </div>
           )}
 
-          {/* The derivation note is a SIBLING of the <label> (not nested) — nesting would fold it
-              into the label's own accessible name. The plain label ("Strokes you get here") plus
-              the visible derivation is the legibility rule (spec §4/§7): the index turned into
-              today's strokes, never a bare number and never a separate declaration. */}
+          {/* ONE number, in the unit everyone already uses on the first tee (spec 2026-07-29 §2/§9,
+              wording verbatim). No conversion and no derivation note: the number a player states IS
+              the number strokes come from, and the strokes themselves fall out of the whole field
+              once everyone has stated theirs — they are never a per-player declaration. The hint is
+              a SIBLING of the <label> (not nested), which would fold it into the label's own
+              accessible name. */}
           <div className="flex flex-col gap-1">
             <label className="flex flex-col gap-1 text-forest">
-              Strokes you get here
+              What do you normally shoot, relative to par?
               <input
                 type="number"
                 step={1}
-                value={courseHandicap}
-                onChange={(event) => {
-                  setTouched(true); // a typed value wins over the seed from here on
-                  setCourseHandicap(event.target.value);
-                }}
+                inputMode="numeric"
+                value={overPar}
+                onChange={(event) => setOverPar(event.target.value)}
                 className={`${inputBox} text-lg`}
               />
             </label>
-            {suggestion && <span className="text-xs text-fairway/70">{suggestion.note}</span>}
+            <span className="text-xs text-fairway/70">Over par for a normal round — 18 holes. Under par? Use a minus.</span>
           </div>
 
           {error && (
@@ -272,7 +217,9 @@ export function JoinRoundPage() {
             </p>
           )}
 
-          <button type="submit" disabled={submitting} className={`${btnPrimary} disabled:opacity-50`}>
+          {/* Disabled until the number is there: a blank field is not a claim, so submitting one
+              must be visibly impossible rather than a silently dead button. */}
+          <button type="submit" disabled={submitting || !canSubmit} className={`${btnPrimary} disabled:opacity-50`}>
             Join round
           </button>
         </form>

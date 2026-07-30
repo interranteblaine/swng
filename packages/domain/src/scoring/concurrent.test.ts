@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { gameId, golferId } from "../ids.js";
+import type { Participant } from "../round/participant.js";
 import { playGoldenRound } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
 
@@ -10,10 +11,10 @@ import { fixtureLinks } from "./golden/fixtureCourse.js";
 const A = golferId("ann");
 const B = golferId("bo");
 const C = golferId("cal");
-const players3 = [
-  { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 },
-  { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
-  { golferId: C, name: "Cal", tee: "white", courseHandicap: 12 },
+const players3: readonly Participant[] = [
+  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
+  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+  { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 12 } },
 ];
 const skins = { kind: "skins", id: gameId("k9"), scoring: "net", players: [A, B, C] } as const;
 const stableford = { kind: "stableford", id: gameId("s9"), players: [A, B, C] } as const;

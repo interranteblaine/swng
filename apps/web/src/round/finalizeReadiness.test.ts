@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { cellKey, deviceId, fixtureLinks18, gameId, golferId, opId, roundId, scoreGame } from "@swng/domain";
-import type { GameConfig, GameState, RoundState, ScoreCell } from "@swng/domain";
+import type { GameConfig, GameState, RosterEntry, RoundState, ScoreCell } from "@swng/domain";
 import { unresolvedGames } from "./finalizeReadiness";
 
 const ANN = golferId("ann");
 const PAT = golferId("pat");
-const participants = [
-  { golferId: ANN, name: "Ann", tee: "white", courseHandicap: 8 },
-  { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 2 },
+const participants: readonly RosterEntry[] = [
+  { golferId: ANN, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 8 }, strokes: 8 },
+  { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "strokes", strokes: 2 }, strokes: 2 },
 ];
 
 let opCounter = 0;

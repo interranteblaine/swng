@@ -1,13 +1,22 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cellKey, deviceId, fixtureLinks, fixtureLinks18, fixtureWhite, fixtureWhite18, gameId, golferId, opId, roundId } from "@swng/domain";
-import type { GameConfig, GolferId, HoleResult, Participant, RoundState, ScoreCell } from "@swng/domain";
+import type { GameConfig, GolferId, HoleResult, RosterEntry, RoundState, ScoreCell } from "@swng/domain";
 import { ScorecardGrid } from "./ScorecardGrid";
 
 const ANN = golferId("ann");
 const BO = golferId("bo");
 
-const participant = (id: GolferId, name: string, tee: string, courseHandicap: number): Participant => ({ golferId: id, name, tee, courseHandicap });
+// The card renders each seat's DERIVED strokes (spec 2026-07-29 §2b), so these fixtures state
+// them directly: a literal `strokes` basis is exactly "the group gave them N", and it passes
+// through the fold's rule unchanged, so the seat's assertion and its derived value agree.
+const participant = (id: GolferId, name: string, tee: string, strokes: number): RosterEntry => ({
+  golferId: id,
+  name,
+  tee,
+  basis: { kind: "strokes", strokes },
+  strokes,
+});
 
 let opCounter = 0;
 // A minimal, valid ScoreCell — only `result` and `recordedBy` matter to any test here; hlc/opId
@@ -122,12 +131,12 @@ describe("ScorecardGrid — Conceded disclosure does not leak across a mid-sheet
   });
 });
 
-// The standard card (spec 2026-07-19 §2a: the card never changes): dots are ALWAYS each
-// player's own full course handicap allocated by stroke index — no game, no
-// chip selection. `ScorecardGridProps` carries no game-typed prop at all; every test below
-// passes only `{ state, recordScore }`.
-describe("ScorecardGrid — course-handicap dots (the standard card)", () => {
-  it("a course handicap of 0 shows plain gross and no dot glyphs", () => {
+// The standard card (spec 2026-07-19 §2a: the card never changes): dots are ALWAYS each player's
+// own ROUND strokes allocated by stroke index — no game, no chip selection.
+// `ScorecardGridProps` carries no game-typed prop at all; every test below passes only
+// `{ state, recordScore }`.
+describe("ScorecardGrid — round-stroke dots (the standard card)", () => {
+  it("a seat with no strokes shows plain gross and no dot glyphs", () => {
     const state = twoPlayerState({
       participants: [participant(ANN, "Ann", "white", 0), participant(BO, "Bo", "white", 0)],
       cells: { [cellKey(ANN, 1)]: scoreCell({ kind: "strokes", strokes: 5 }, ANN) },
@@ -139,7 +148,7 @@ describe("ScorecardGrid — course-handicap dots (the standard card)", () => {
     expect(cell.textContent).not.toMatch("●");
   });
 
-  it("a CH-5 player shows ● on their 5 hardest SI holes and net = gross − dot under scored cells, with NO game in state", () => {
+  it("a 5-stroke player shows ● on their 5 hardest SI holes and net = gross − dot under scored cells, with NO game in state", () => {
     const ann5 = participant(ANN, "Ann", "white", 5);
     const bo0 = participant(BO, "Bo", "white", 0);
     // Hole 2 is SI 1 on fixtureWhite (the 9-hole fixture card) — one of Ann's 5 hardest holes.
@@ -183,34 +192,7 @@ describe("ScorecardGrid — course-handicap dots (the standard card)", () => {
     expect(textB).toBe(textA);
   });
 
-  // A plus handicap (course handicap below 0) GIVES a stroke back rather than receiving one —
-  // it renders through strokeGrant as a hollow ○, and the net reads gross + 1 (net = gross −
-  // dots, and dots is negative here). This is the participant's OWN course handicap; no game is
-  // involved at all.
-  it("renders a plus player's GIVEN stroke as a hollow ○ with net = gross + 1, with no game in state at all", () => {
-    const annPlus = participant(ANN, "Ann", "white", -1); // a plus handicap: gives a stroke back
-    const boScratch = participant(BO, "Bo", "white", 0);
-    const si9Hole = fixtureWhite.holes.find((h) => h.strokeIndex === 9)!; // the easiest hole on the 9-hole fixture — where a single give-back lands
-    const state: RoundState = {
-      id: roundId("round-giveback"),
-      status: "live",
-      card: fixtureLinks,
-      participants: [annPlus, boScratch],
-      games: [],
-      cells: { [cellKey(ANN, si9Hole.number)]: scoreCell({ kind: "strokes", strokes: 5 }, ANN) },
-      terminatedGameIds: new Set(),
-    };
-
-    render(<ScorecardGrid state={state} recordScore={vi.fn()} />);
-
-    const cell = cellButton("Ann", si9Hole.number);
-    expect(cell.textContent).toMatch("○"); // a GIVEN stroke draws hollow...
-    expect(cell.textContent).not.toMatch("●"); // ...never a filled received-stroke glyph
-    expect(within(cell).getByText("5")).toBeTruthy(); // gross
-    expect(within(cell).getByText("6")).toBeTruthy(); // net = 5 − (−1) = gross + 1
-  });
-
-  it("a course handicap of 19 gets a second dot on the SI-1 hole of an 18-hole card, but only one on SI-18", () => {
+  it("19 strokes get a second dot on the SI-1 hole of an 18-hole card, but only one on SI-18", () => {
     const ann0 = participant(ANN, "Ann", "white", 0);
     const bo19 = participant(BO, "Bo", "white", 19);
     const state: RoundState = {

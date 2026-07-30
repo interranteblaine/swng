@@ -116,8 +116,8 @@ const setup = async (clock: Clock = createFixedClock(1_000)) => {
 const freshLiveRound = async () => {
   const ctx = await setup();
   await seedAccounts(ctx.golferStore);
-  const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
-  const bo = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: BO.sub });
+  const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
+  const bo = await ctx.join({ code: host.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, { sub: BO.sub });
   return { ...ctx, host, bo };
 };
 
@@ -126,7 +126,7 @@ describe("round use cases — golden path over in-memory ports", () => {
     const ctx = await setup();
     await seedAccounts(ctx.golferStore);
 
-    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
     // As-self: the creator seat IS Ann's own account golfer, never a fresh id.
     expect(host.golferId).toBe(ANN.id);
 
@@ -150,7 +150,7 @@ describe("round use cases — golden path over in-memory ports", () => {
     // round-started on the status register's canonical (hlc, opId) order.
     expect(reduceRound(genesis.events).status).toBe("live");
 
-    const bo = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: BO.sub });
+    const bo = await ctx.join({ code: host.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, { sub: BO.sub });
     expect(bo.golferId).toBe(BO.id);
     const boJoined = (await ctx.events(host.roundId, 3)).events[0];
     expect(boJoined).toMatchObject({ kind: "participant-joined", authorId: bo.golferId, participant: { golferId: BO.id, name: BO.name }, hlc: { deviceId: "server" } });
@@ -218,7 +218,7 @@ describe("round use cases — golden path over in-memory ports", () => {
   it("rejects a join with an unknown join code — bad-join-code", async () => {
     const ctx = await setup();
     await seedAccounts(ctx.golferStore);
-    await expect(ctx.join({ code: "ZZZZZZ", tee: "white", courseHandicap: 10 }, { sub: BO.sub })).rejects.toMatchObject({ code: "bad-join-code" });
+    await expect(ctx.join({ code: "ZZZZZZ", tee: "white", basis: { kind: "normally-shoots", overPar: 10 } }, { sub: BO.sub })).rejects.toMatchObject({ code: "bad-join-code" });
   });
 
   it("rejects recordScore from a token whose golfer never joined, before any game exists — not-a-participant", async () => {
@@ -245,7 +245,7 @@ describe("round use cases — golden path over in-memory ports", () => {
     const hostClaims: ParticipantClaims = { roundId: round.host.roundId, golferId: round.host.golferId };
     await round.finalize(hostClaims);
     // A brand-new account (sub-cal) never even gets minted: round-final is thrown ahead of the seat.
-    await expect(round.join({ code: round.host.joinCode, tee: "white", courseHandicap: 10 }, { sub: "sub-cal" })).rejects.toMatchObject({ code: "round-final" });
+    await expect(round.join({ code: round.host.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 10 } }, { sub: "sub-cal" })).rejects.toMatchObject({ code: "round-final" });
   });
 
   it("rejects addGame that references a non-participant — unknown-golfer-in-game", async () => {
@@ -326,7 +326,7 @@ describe("StartRound — as-self only", () => {
     const ctx = await setup();
     await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
 
-    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
 
     expect(host.golferId).toBe(ANN.id);
     const genesis = await ctx.events(host.roundId, 0);
@@ -339,7 +339,7 @@ describe("StartRound — as-self only", () => {
   it("mints the caller's golfer on first touch when the sub has none yet — the seat carries the placeholder name f(sub)", async () => {
     const ctx = await setup();
     // No golfer seeded for sub-new: ensureGolfer mints one with placeholderName(sub-new).
-    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: "sub-new" });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: "sub-new" });
 
     expect(host.golferId).toBeDefined();
     // The freshly-minted account is now bound to the sub.
@@ -358,7 +358,7 @@ describe("StartRound — card resolution (course-cards spec §4)", () => {
     const ctx = await setup();
     await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
 
-    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
 
     const genesis = await ctx.events(host.roundId, 0);
     const appendedRoundCreated = genesis.events[0];
@@ -374,7 +374,7 @@ describe("StartRound — card resolution (course-cards spec §4)", () => {
     const superseding = { cardId: cardId("card-2"), courseId: ctx.course.courseId, card: fixtureLinks, enteredBy: ctx.cardRecord.enteredBy, enteredAtMs: 1, provenance: "community" as const, supersedes: ctx.course.cardId };
     await ctx.cardStore.supersede(superseding);
 
-    await expect(ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub })).rejects.toMatchObject({
+    await expect(ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub })).rejects.toMatchObject({
       code: "card-superseded",
     });
     // The card check runs BEFORE any id is minted or journal append attempted — proven here by
@@ -387,7 +387,7 @@ describe("StartRound — card resolution (course-cards spec §4)", () => {
     await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
 
     await expect(
-      ctx.start({ course: { courseId: courseId("nope"), cardId: cardId("nope-card") }, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub }),
+      ctx.start({ course: { courseId: courseId("nope"), cardId: cardId("nope-card") }, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub }),
     ).rejects.toMatchObject({ code: "course-not-found" });
   });
 });
@@ -405,7 +405,7 @@ describe("StartRound's batch under a frozen clock (regression: same-ms server ev
     const ctx = await setup(createFrozenClock(1_000));
     await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
 
-    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
     const genesis = await ctx.events(host.roundId, 0);
 
     expect(genesis.events.map((event) => event.kind)).toEqual(["round-created", "participant-joined", "round-started"]);
@@ -430,9 +430,9 @@ describe("JoinRound — as-self only", () => {
   it("seats the caller's OWN account golfer, freezing its name into the participant event", async () => {
     const ctx = await setup();
     await seedAccounts(ctx.golferStore);
-    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
 
-    const joined = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: BO.sub });
+    const joined = await ctx.join({ code: host.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, { sub: BO.sub });
     expect(joined.golferId).toBe(BO.id);
     expect(joined.joinCode).toBe(host.joinCode);
 
@@ -446,10 +446,10 @@ describe("JoinRound — as-self only", () => {
   it("a placeholder-named golfer joins fine and the event carries the placeholder", async () => {
     const ctx = await setup();
     await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
-    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
 
     // Bo has only ever been minted (never PUT a real name), so his account carries the placeholder.
-    const joined = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: "sub-placeholder" });
+    const joined = await ctx.join({ code: host.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, { sub: "sub-placeholder" });
 
     const boJoinedEvent = (await ctx.events(host.roundId, 3)).events[0];
     expect(boJoinedEvent).toMatchObject({ kind: "participant-joined", participant: { golferId: joined.golferId, name: placeholderName("sub-placeholder") } });
@@ -457,7 +457,7 @@ describe("JoinRound — as-self only", () => {
 
   it("rejects a re-tap from a golfer who is ALREADY a currently-seated participant — golfer-already-in-round", async () => {
     const round = await freshLiveRound(); // Ann (creator) + Bo already seated
-    await expect(round.join({ code: round.host.joinCode, tee: "white", courseHandicap: 3 }, { sub: BO.sub })).rejects.toMatchObject({
+    await expect(round.join({ code: round.host.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 3 } }, { sub: BO.sub })).rejects.toMatchObject({
       code: "golfer-already-in-round",
     });
   });
@@ -469,7 +469,7 @@ describe("JoinRound — as-self only", () => {
     const boClaims: ParticipantClaims = { roundId: round.host.roundId, golferId: round.bo.golferId };
 
     await round.leave(boClaims);
-    const rejoined = await round.join({ code: round.host.joinCode, tee: "white", courseHandicap: 4 }, { sub: BO.sub });
+    const rejoined = await round.join({ code: round.host.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 4 } }, { sub: BO.sub });
 
     expect(rejoined.golferId).toBe(BO.id);
     const events = (await round.events(round.host.roundId, 0)).events;
@@ -487,7 +487,7 @@ describe("StartRound/JoinRound — presence (Task 13)", () => {
   it("StartRound writes a LIVE pointer for the creator, carrying the round's own courseName", async () => {
     const ctx = await setup();
     await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
-    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
 
     const live = await ctx.projectionStore.listLive(host.golferId);
     expect(live).toEqual([{ roundId: host.roundId, courseName: fixtureLinks.courseName, joinedAtMs: expect.any(Number) }]);
@@ -496,8 +496,8 @@ describe("StartRound/JoinRound — presence (Task 13)", () => {
   it("JoinRound writes a LIVE pointer for the joiner", async () => {
     const ctx = await setup();
     await seedAccounts(ctx.golferStore);
-    const host = await ctx.start({ course: ctx.course, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
-    const bo = await ctx.join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: BO.sub });
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
+    const bo = await ctx.join({ code: host.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, { sub: BO.sub });
 
     const live = await ctx.projectionStore.listLive(bo.golferId);
     expect(live).toEqual([{ roundId: host.roundId, courseName: fixtureLinks.courseName, joinedAtMs: expect.any(Number) }]);
@@ -526,7 +526,7 @@ describe("StartRound/JoinRound — presence (Task 13)", () => {
     const course = await seedCard(cardStore, CARD_REF.courseId, CARD_REF.cardId, fixtureLinks);
     const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore: throwingStore, logger, cardStore });
 
-    const host = await start({ course: { courseId: course.courseId, cardId: course.cardId }, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await start({ course: { courseId: course.courseId, cardId: course.cardId }, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
 
     expect(host.roundId).toBeDefined(); // the round started — presence's own failure never propagated
     expect(logger.warnings).toHaveLength(1);
@@ -555,8 +555,8 @@ describe("StartRound/JoinRound — presence (Task 13)", () => {
     const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore: throwingStore, logger, cardStore });
     const join = joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore: throwingStore, logger });
 
-    const host = await start({ course: { courseId: course.courseId, cardId: course.cardId }, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
-    const bo = await join({ code: host.joinCode, tee: "white", courseHandicap: 2 }, { sub: BO.sub });
+    const host = await start({ course: { courseId: course.courseId, cardId: course.cardId }, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
+    const bo = await join({ code: host.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, { sub: BO.sub });
 
     expect(bo.golferId).toBeDefined(); // the join succeeded — presence's own failure never propagated
     // 2 warnings: the creator's own StartRound presence write, then Bo's JoinRound one.
@@ -582,7 +582,7 @@ describe("StartRound — metrics", () => {
     const metrics = createCapturingMetrics();
     const start = startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore, metrics });
 
-    const host = await start({ course: { courseId: course.courseId, cardId: course.cardId }, host: { tee: "white", courseHandicap: 8 } }, { sub: ANN.sub });
+    const host = await start({ course: { courseId: course.courseId, cardId: course.cardId }, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: ANN.sub });
 
     expect(host.roundId).toBeDefined();
     expect(metrics.calls).toEqual(["RoundsCreated"]);

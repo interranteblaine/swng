@@ -30,7 +30,7 @@ const buildServerLog = (roundIdValue: RoundId, golferIdValue: GolferId, name: st
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   const events: RoundEvent[] = [
     { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
-    { kind: "participant-joined", participant: { golferId: golferIdValue, name, tee: "white", courseHandicap: 8 }, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "participant-joined", participant: { golferId: golferIdValue, name, tee: "white", basis: { kind: "normally-shoots", overPar: 8 } }, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
   ];
   return stampSeq(events);
@@ -47,8 +47,8 @@ const buildTwoPlayerServerLog = (roundIdValue: RoundId, ann: GolferId, bo: Golfe
   const nextOpId = (): OpId => opId(`two-op-${(opCounter += 1)}`);
   const events: RoundEvent[] = [
     { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
-    { kind: "participant-joined", participant: { golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 }, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
-    { kind: "participant-joined", participant: { golferId: bo, name: "Bo", tee: "white", courseHandicap: 2 }, authorId: bo, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "participant-joined", participant: { golferId: ann, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } }, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "participant-joined", participant: { golferId: bo, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, authorId: bo, opId: nextOpId(), hlc: nextHlc() },
     // Added in this order deliberately: state.games' join-order (by first-write hlc) makes
     // the singles-match the DEFAULT active game (Task 5's "default stays first game" rule).
     { kind: "game-added", config: { kind: "singles-match", id: gameId("single-1"), a: ann, b: bo }, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
@@ -116,12 +116,16 @@ describe("RoundPage", () => {
     // own courseName ("Fixture Links"), no created-at on RoundState so no date segment.
     expect(document.title).toBe("Fixture Links · swng");
     // "Ann" alone is ambiguous (also a checkbox label in the Add Game form's players list) —
-    // the roster line's fuller text disambiguates. The roster row nests "tee — CH X" in its own
-    // mono span (brand reskin), so getByText's direct-text-only matching can no longer see the
-    // full string on one element — locate the <li> and assert its whole textContent instead,
-    // the same parent-level oracle SetupPanel.test.tsx already uses directly.
+    // the roster line's fuller text disambiguates. The roster row nests its numbers in a mono
+    // span (brand reskin), so getByText's direct-text-only matching can no longer see the full
+    // string on one element — locate the <li> and assert its whole textContent instead, the same
+    // parent-level oracle SetupPanel.test.tsx already uses directly.
+    //
+    // "gets 0" is CORRECT, not a bug, on this one-participant log: strokes are the difference from
+    // the lowest in the field (spec 2026-07-29 §2b), and a lone player is their own anchor — her
+    // stated +8 still shows, because that is what she asserted.
     const rosterRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
-    expect(rosterRow?.textContent).toMatch(/Ann.*white.*CH 8/);
+    expect(rosterRow?.textContent).toMatch(/Ann.*white.*normally \+8 · gets 0/);
     // M9 Task 3 (share): the live view carries its own "Share round" affordance, wired to
     // THIS device's own participant token (credentialStore.save above).
     expect(screen.getByRole("button", { name: "Share round" })).toBeTruthy();
@@ -227,9 +231,11 @@ describe("RoundPage", () => {
     );
     await waitFor(() => expect(screen.getByText("CHIP01")).toBeTruthy());
 
-    // Ann's own course handicap (8) allocates a dot on hole 1 (fixtureLinks SI 5) regardless
-    // of which game (if any) is chip-selected.
-    const annHole1 = () => screen.getByRole("button", { name: "Ann hole 1" });
+    // Ann's own ROUND strokes allocate a dot on hole 2 regardless of which game (if any) is
+    // chip-selected. Hand-derived (spec 2026-07-29 §2b): Bo's stated +2 anchors the field, so Ann
+    // takes (8 − 2) / 2 = 3 on this nine-hole card — dots on SI 1–3, and hole 2 is fixtureLinks'
+    // SI 1. (Hole 1 is SI 5 and gets none, which is why this pins hole 2.)
+    const annHole1 = () => screen.getByRole("button", { name: "Ann hole 2" });
     await waitFor(() => expect(annHole1().textContent).toMatch("●"));
 
     // Tapping the gross stroke-play chip only expands/collapses its own panel — the grid's

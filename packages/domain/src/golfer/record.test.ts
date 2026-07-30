@@ -30,7 +30,9 @@ const fullCard = Object.fromEntries(
 const baseArchive: RoundArchive = {
   roundId: roundId("r1"),
   card: fixtureLinks18,
-  participants: [{ golferId: G, name: "Gigi", tee: "white", courseHandicap: 10 }],
+  // A lone participant is their own anchor, so a stated +10 derives 0 strokes (spec §2b) — this
+  // fixture states the strokes directly so the line's frozen number is a non-zero 10 to assert.
+  participants: [{ golferId: G, name: "Gigi", tee: "white", basis: { kind: "strokes", strokes: 10 }, strokes: 10 }],
   games: [],
   cells: fullCard,
   events: [],
@@ -66,10 +68,10 @@ describe("archiveGolferLine", () => {
     expect(line.differential).toBeUndefined();
   });
 
-  it("carries par (sum of the frozen tee's hole pars) and courseHandicap (frozen at join)", () => {
+  it("carries par (sum of the frozen tee's hole pars) and the strokes the fold derived", () => {
     const line = archiveGolferLine(baseArchive, G);
     expect(line.par).toBe(72); // fixtureWhite18: 36 + 36
-    expect(line.courseHandicap).toBe(10); // baseArchive's participant courseHandicap
+    expect(line.courseHandicap).toBe(10); // baseArchive's participant.strokes
   });
 
   it("surfaces ags with NO differential when the golfer's handicapping row is unrated (unrated-courses spec)", () => {
@@ -77,7 +79,7 @@ describe("archiveGolferLine", () => {
     const line = archiveGolferLine(unrated, G);
     expect(line.ags).toBe(91);
     expect(line.differential).toBeUndefined();
-    // par/courseHandicap are still frozen regardless of handicapping kind.
+    // par/strokes are still frozen regardless of handicapping kind.
     expect(line.par).toBe(72);
     expect(line.courseHandicap).toBe(10);
   });

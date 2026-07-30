@@ -344,7 +344,8 @@ describe("createProjectorHandler", () => {
   const archiveFor = (roundKey: string, wallMs: number, participantId = ann): RoundArchive => ({
     roundId: roundId(roundKey),
     card: fixtureLinks18,
-    participants: [{ golferId: participantId, name: participantId, tee: "white", courseHandicap: 8 }],
+    // A lone seat is the field's own anchor, so the fold derives 0 strokes for it (spec 2026-07-29 §2b).
+    participants: [{ golferId: participantId, name: participantId, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 }],
     games: [],
     cells: {},
     // A real archive's log always opens with round-created (its genesis) — carried so the

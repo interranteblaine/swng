@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
+import type { GolferId } from "../ids.js";
 import type { CourseCard } from "../course/card.js";
+import type { StrokeBasis } from "../scoring/strokeBasis.js";
 import type { Hlc } from "./hlc.js";
 import type { RoundEvent } from "./events.js";
 import { cellAt, cellKey, reduceRound } from "./state.js";
@@ -18,9 +20,12 @@ const B = golferId("b");
 const at = (wallMs: number, device = "d1", counter = 0): Hlc => ({ wallMs, counter, deviceId: deviceId(device) });
 let op = 0;
 const base = (wallMs: number, device?: string) => ({ opId: opId(`op-${op++}`), hlc: at(wallMs, device), authorId: A });
+// What a seat ASSERTS (spec 2026-07-29 §2a) — the number a player states about themselves. The
+// per-seat `strokes` these tests read is never in a fixture: reduceRound derives it.
+const shoots = (overPar: number): StrokeBasis => ({ kind: "normally-shoots", overPar });
 
 const genesis: RoundEvent = { ...base(1), kind: "round-created", roundId: roundId("r1"), card };
-const joinA: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 } };
+const joinA: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", basis: shoots(8) } };
 const started: RoundEvent = { ...base(3), kind: "round-started" };
 
 describe("reduceRound", () => {
@@ -69,10 +74,10 @@ describe("reduceRound", () => {
   });
 
   it("treats a participant re-join as a correcting write (tee fix wins by hlc)", () => {
-    const fixedTee: RoundEvent = { ...base(9), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", courseHandicap: 9 } };
+    const fixedTee: RoundEvent = { ...base(9), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", basis: shoots(9) } };
     const state = reduceRound([genesis, joinA, fixedTee]);
     expect(state.participants).toHaveLength(1);
-    expect(state.participants[0]?.courseHandicap).toBe(9);
+    expect(state.participants[0]?.basis).toEqual(shoots(9));
   });
 
   it("skips unknown event kinds (schema tolerance)", () => {
@@ -98,19 +103,19 @@ describe("reduceRound", () => {
   });
 
   it("audits recordedBy as the WRITE AUTHOR, not the score's subject (score-for-anyone means they differ)", () => {
-    const joinB: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: B, name: "Bea", tee: "white", courseHandicap: 12 } };
+    const joinB: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: B, name: "Bea", tee: "white", basis: shoots(12) } };
     const aRecordsForB: RoundEvent = { opId: opId(`op-${op++}`), hlc: at(11), authorId: A, kind: "score-recorded", golferId: B, hole: 1, result: { kind: "strokes", strokes: 5 } };
     const state = reduceRound([genesis, joinA, joinB, started, aRecordsForB]);
     expect(state.cells[cellKey(B, 1)]?.recordedBy).toBe(A);
   });
 
   it("orders participants and games by join order (first-write hlc), not by the hlc of the winning correction", () => {
-    const joinB: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: B, name: "Bea", tee: "white", courseHandicap: 12 } };
+    const joinB: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: B, name: "Bea", tee: "white", basis: shoots(12) } };
     // A joins first, B joins second, then A's handicap is corrected much later.
-    const correctA: RoundEvent = { ...base(100), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", courseHandicap: 6 } };
+    const correctA: RoundEvent = { ...base(100), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", basis: shoots(6) } };
     const state = reduceRound([genesis, joinA, joinB, correctA]);
     expect(state.participants.map((p) => p.golferId)).toEqual([A, B]);
-    expect(state.participants[0]?.courseHandicap).toBe(6);
+    expect(state.participants[0]?.basis).toEqual(shoots(6));
 
     const gameG1: RoundEvent = { ...base(2), kind: "game-added", config: { kind: "stroke-play", id: gameId("g1"), scoring: "gross", players: [A, B] } };
     const gameG2: RoundEvent = { ...base(3), kind: "game-added", config: { kind: "stroke-play", id: gameId("g2"), scoring: "gross", players: [A, B] } };
@@ -220,10 +225,10 @@ describe("reduceRound — participant leaving (presence by HLC)", () => {
   // authorId follows the ordinary envelope convention (here base()'s default A). The
   // "you can only leave yourself" rule lives in the API layer, not the fold.
   const leaveAt = (wallMs: number, golfer = A, device = "d1"): RoundEvent => ({ ...base(wallMs, device), kind: "participant-left", golferId: golfer });
-  const rejoinAt = (wallMs: number, courseHandicap: number): RoundEvent => ({
+  const rejoinAt = (wallMs: number, overPar: number): RoundEvent => ({
     ...base(wallMs),
     kind: "participant-joined",
-    participant: { golferId: A, name: "Ann", tee: "white", courseHandicap },
+    participant: { golferId: A, name: "Ann", tee: "white", basis: shoots(overPar) },
   });
 
   it("marks a participant departed when a participant-left is later than their latest join", () => {
@@ -244,14 +249,14 @@ describe("reduceRound — participant leaving (presence by HLC)", () => {
     const state = reduceRound([genesis, joinA, started, leaveAt(10), rejoinAt(20, 12)]);
     expect(state.participants).toHaveLength(1);
     expect("departed" in state.participants[0]!).toBe(false);
-    expect(state.participants[0]?.courseHandicap).toBe(12); // the rejoin's seat data wins by hlc
+    expect(state.participants[0]?.basis).toEqual(shoots(12)); // the rejoin's seat data wins by hlc
   });
 
   it("a departed participant still renders with their latest join's seat data (leaving never erases the seat)", () => {
     const fixTee = rejoinAt(5, 9); // a correcting re-join BEFORE the leave
     const state = reduceRound([genesis, joinA, fixTee, started, leaveAt(10)]);
     expect(state.participants[0]?.departed).toBe(true);
-    expect(state.participants[0]?.courseHandicap).toBe(9);
+    expect(state.participants[0]?.basis).toEqual(shoots(9));
   });
 
   it("a participant-left for a golfer with no join yet seen creates no seat and never crashes", () => {
@@ -276,7 +281,7 @@ describe("reduceRound — participant leaving (presence by HLC)", () => {
     const reverse = reduceRound([...log].reverse());
     const shuffled = reduceRound([leave2, genesis, rejoin, started, leave1, joinA]);
     expect(forward.participants[0]?.departed).toBe(true); // latest event is leave2(8) > rejoin(6)
-    expect(forward.participants[0]?.courseHandicap).toBe(15); // latest join is the rejoin
+    expect(forward.participants[0]?.basis).toEqual(shoots(15)); // latest join is the rejoin
     expect(reverse).toEqual(forward);
     expect(shuffled).toEqual(forward);
   });
@@ -292,7 +297,7 @@ describe("reduceRound — participant leaving (presence by HLC)", () => {
   });
 
   it("converges on a game-add referencing a departed golfer in any arrival order — game exists, player departed, holes unscored (no dominance, no voiding)", () => {
-    const joinB: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: B, name: "Bea", tee: "white", courseHandicap: 12 } };
+    const joinB: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: B, name: "Bea", tee: "white", basis: shoots(12) } };
     const gameAB: RoundEvent = { ...base(6), kind: "game-added", config: { kind: "stroke-play", id: gameId("g1"), scoring: "gross", players: [A, B] } };
     const leave = leaveAt(10);
     const forward = reduceRound([genesis, joinA, joinB, started, gameAB, leave]);
@@ -316,13 +321,85 @@ describe("reduceRound — participant leaving (presence by HLC)", () => {
   });
 });
 
-describe("participant-handicap-set", () => {
-  const setA = (wallMs: number, courseHandicap: number): RoundEvent => ({ ...base(wallMs), kind: "participant-handicap-set", golferId: A, courseHandicap });
+// Strokes are the fold's OUTPUT (spec 2026-07-29 §2b): nobody asserts them. Each seat states a
+// StrokeBasis, and reduceRound resolves the whole roster against the lowest stated normal score
+// among the PRESENT field. These are the rule's own cases, at the fold level — resolveStrokes'
+// own arithmetic is pinned in scoring/strokeBasis.test.ts; what's under test here is that the
+// fold scopes the anchor correctly and re-runs for the whole roster on every change.
+describe("reduceRound — derived strokes", () => {
+  const BLAINE = golferId("blaine");
+  const RAVI = golferId("ravi");
+  const STRAY = golferId("stray");
+  // Local builders (not the file's joinA/base) so each event's hlc is explicit — the anchor and
+  // the departed-exclusion rules both turn on HLC ordering.
+  const shoots = (overPar: number): StrokeBasis => ({ kind: "normally-shoots", overPar });
+  const joined = (golfer: GolferId, basis: StrokeBasis, wallMs: number): RoundEvent => ({
+    ...base(wallMs),
+    kind: "participant-joined",
+    participant: { golferId: golfer, name: golfer, tee: "white", basis },
+  });
+  const left = (golfer: GolferId, wallMs: number): RoundEvent => ({ ...base(wallMs), kind: "participant-left", golferId: golfer });
+  const basisSet = (golfer: GolferId, basis: StrokeBasis, wallMs: number): RoundEvent => ({
+    ...base(wallMs),
+    kind: "participant-basis-set",
+    golferId: golfer,
+    basis,
+  });
+  const seatOf = (state: ReturnType<typeof reduceRound>, golfer: GolferId) => state.participants.find((p) => p.golferId === golfer);
 
-  it("a set later than the join overrides the seat's courseHandicap in place", () => {
+  it("derives strokes across the roster — a later, better joiner re-runs the fold", () => {
+    const one = reduceRound([genesis, joined(BLAINE, shoots(30), 2)]);
+    expect(seatOf(one, BLAINE)?.strokes).toBe(0);
+
+    const two = reduceRound([genesis, joined(BLAINE, shoots(30), 2), joined(RAVI, shoots(10), 3)]);
+    expect(seatOf(two, BLAINE)?.strokes).toBe(20);
+    expect(seatOf(two, RAVI)?.strokes).toBe(0);
+  });
+
+  it("excludes a departed player from the anchor", () => {
+    // Spec §2b: a wrong-round joiner who leaves must not permanently anchor everyone's card.
+    const state = reduceRound([
+      genesis,
+      joined(BLAINE, shoots(30), 2),
+      joined(RAVI, shoots(10), 3),
+      joined(STRAY, shoots(2), 4),
+      left(STRAY, 5),
+    ]);
+    expect(seatOf(state, BLAINE)?.strokes).toBe(20);
+    expect(seatOf(state, RAVI)?.strokes).toBe(0);
+    // The departed player resolves against the SURVIVING anchor and clamps at zero — he was the
+    // anchor while he was there and never received a stroke (spec §2b's own case).
+    expect(seatOf(state, STRAY)?.strokes).toBe(0);
+    expect(seatOf(state, STRAY)?.departed).toBe(true);
+  });
+
+  it("applies a basis-set HLC-later than the join", () => {
+    const state = reduceRound([
+      genesis,
+      joined(BLAINE, shoots(30), 2),
+      joined(RAVI, shoots(10), 3),
+      basisSet(BLAINE, { kind: "strokes", strokes: 18 }, 4),
+    ]);
+    expect(seatOf(state, BLAINE)?.strokes).toBe(18);
+    // The stated normal score is REPLACED by the new assertion, not fudged.
+    expect(seatOf(state, BLAINE)?.basis).toEqual({ kind: "strokes", strokes: 18 });
+    // Ravi is now the only stated normal score in the field, so he anchors against himself.
+    expect(seatOf(state, RAVI)?.strokes).toBe(0);
+  });
+});
+
+describe("participant-basis-set", () => {
+  const setA = (wallMs: number, overPar: number): RoundEvent => ({
+    ...base(wallMs),
+    kind: "participant-basis-set",
+    golferId: A,
+    basis: { kind: "normally-shoots", overPar },
+  });
+
+  it("a set later than the join overrides the seat's basis in place", () => {
     const state = reduceRound([genesis, joinA, started, setA(10, 13)]);
     const seat = state.participants.find((p) => p.golferId === A);
-    expect(seat?.courseHandicap).toBe(13);
+    expect(seat?.basis).toEqual({ kind: "normally-shoots", overPar: 13 });
     // Everything else about the seat is the join's own data, untouched.
     expect(seat?.name).toBe("Ann");
     expect(seat?.tee).toBe("white");
@@ -334,38 +411,38 @@ describe("participant-handicap-set", () => {
     expect(reduceRound(shuffled)).toEqual(reduceRound(events));
   });
 
-  it("latest set wins among multiple sets, including a plus-handicap value", () => {
+  it("latest set wins among multiple sets, including an under-par normal score", () => {
     const state = reduceRound([genesis, joinA, started, setA(10, 13), setA(11, -2)]);
-    expect(state.participants.find((p) => p.golferId === A)?.courseHandicap).toBe(-2);
+    expect(state.participants.find((p) => p.golferId === A)?.basis).toEqual({ kind: "normally-shoots", overPar: -2 });
   });
 
-  it("a REJOIN later than a set wins — the fresh join's CH applies", () => {
+  it("a REJOIN later than a set wins — the fresh join's basis applies", () => {
     const leave: RoundEvent = { ...base(11), kind: "participant-left", golferId: A };
-    const rejoin: RoundEvent = { ...base(12), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", courseHandicap: 20 } };
+    const rejoin: RoundEvent = { ...base(12), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", basis: shoots(20) } };
     const state = reduceRound([genesis, joinA, started, setA(10, 13), leave, rejoin]);
     const seat = state.participants.find((p) => p.golferId === A);
-    expect(seat?.courseHandicap).toBe(20);
+    expect(seat?.basis).toEqual({ kind: "normally-shoots", overPar: 20 });
     expect(seat?.departed).toBeUndefined();
   });
 
   it("a set earlier than the latest join loses to that join", () => {
     const leave: RoundEvent = { ...base(11), kind: "participant-left", golferId: A };
-    const rejoin: RoundEvent = { ...base(13), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", courseHandicap: 20 } };
+    const rejoin: RoundEvent = { ...base(13), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", basis: shoots(20) } };
     // Set minted between the leave and the rejoin — the rejoin's later hlc supersedes it.
     const state = reduceRound([genesis, joinA, started, leave, setA(12, 13), rejoin]);
-    expect(state.participants.find((p) => p.golferId === A)?.courseHandicap).toBe(20);
+    expect(state.participants.find((p) => p.golferId === A)?.basis).toEqual({ kind: "normally-shoots", overPar: 20 });
   });
 
-  it("corrects a DEPARTED golfer's CH without re-seating them", () => {
+  it("corrects a DEPARTED golfer's basis without re-seating them", () => {
     const leave: RoundEvent = { ...base(11), kind: "participant-left", golferId: A };
     const state = reduceRound([genesis, joinA, started, leave, setA(12, 13)]);
     const seat = state.participants.find((p) => p.golferId === A);
-    expect(seat?.courseHandicap).toBe(13);
+    expect(seat?.basis).toEqual({ kind: "normally-shoots", overPar: 13 });
     expect(seat?.departed).toBe(true); // presence untouched — the set is not a join
   });
 
   it("a set for a golfer with no folded join contributes nothing and never throws", () => {
-    const setB: RoundEvent = { ...base(10), kind: "participant-handicap-set", golferId: B, courseHandicap: 5 };
+    const setB: RoundEvent = { ...base(10), kind: "participant-basis-set", golferId: B, basis: shoots(5) };
     const state = reduceRound([genesis, joinA, started, setB]);
     expect(state.participants.map((p) => p.golferId)).toEqual([A]);
   });

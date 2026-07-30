@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cellKey,
-  courseHandicapAllocation,
+  roundStrokeAllocation,
   deviceId,
   fieldDeck18,
   fixtureLinks18,
@@ -128,12 +128,12 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
 
   // The standard card (spec 2026-07-19 §2a: the card never changes) — StandingsHeader's chips
   // still switch which game's OWN standings/strokes panel is active, but the grid underneath
-  // is chip-independent: its dots are always the golfer's own course handicap, never a game's.
-  it("StandingsHeader chips do NOT change the grid — dots are course-handicap, chip-independent", () => {
+  // is chip-independent: its dots are always the golfer's own ROUND strokes, never a game's.
+  it("StandingsHeader chips do NOT change the grid — dots are the round's strokes, chip-independent", () => {
     const annId = players[0]!.golferId;
-    // An independent oracle (domain's own courseHandicapAllocation, not the component under
+    // An independent oracle (domain's own roundStrokeAllocation, not the component under
     // test) for Ann's per-hole standard-card dots.
-    const chDots = courseHandicapAllocation(state.participants, state.card).get(annId)!;
+    const chDots = roundStrokeAllocation(state.participants, state.card).get(annId)!;
     const hole = [...chDots.keys()].find((h) => (chDots.get(h) ?? 0) > 0);
     expect(hole).toBeDefined();
 
@@ -218,8 +218,8 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
       status: "final",
       card: fixtureLinks18,
       participants: [
-        { golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 },
-        { golferId: bo, name: "Bo", tee: "white", courseHandicap: 2 },
+        { golferId: ann, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 8 }, strokes: 8 },
+        { golferId: bo, name: "Bo", tee: "white", basis: { kind: "strokes", strokes: 2 }, strokes: 2 },
       ],
       games: [terminatedConfig, resolvedConfig],
       cells: {},
@@ -246,7 +246,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
       id: roundId("r1"),
       status: "final",
       card: fixtureLinks18,
-      participants: [{ golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 }],
+      participants: [{ golferId: ann, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 8 }, strokes: 8 }],
       games: [],
       cells: { [cellKey(ann, 1)]: cellValue },
       terminatedGameIds: new Set(),
@@ -284,7 +284,7 @@ describe("ResultsView — unrated handicapping row", () => {
     id: roundId("r-unrated"),
     status: "final",
     card: unratedCard,
-    participants: [{ golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 }],
+    participants: [{ golferId: ann, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 8 }, strokes: 8 }],
     games: [],
     cells: fullyScoredCells(),
     terminatedGameIds: new Set(),
@@ -319,8 +319,8 @@ describe("ResultsView — no claim affordance (accounts-only)", () => {
     status: "final",
     card: fixtureLinks18,
     participants: [
-      { golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 },
-      { golferId: bo, name: "Bo", tee: "white", courseHandicap: 2 },
+      { golferId: ann, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 8 }, strokes: 8 },
+      { golferId: bo, name: "Bo", tee: "white", basis: { kind: "strokes", strokes: 2 }, strokes: 2 },
     ],
     games: [],
     cells: {},

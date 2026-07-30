@@ -1,17 +1,34 @@
 import { useState } from "react";
-import { formatCourseHandicap } from "@swng/domain";
-import type { GameState, GolferId, Participant, RoundState } from "@swng/domain";
+import type { GameState, GolferId, RosterEntry, RoundState, StrokeBasis } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnQuiet, cardBox, eyebrow, inputBox } from "../ui/classes";
 import { CopiedLinkLine } from "../ui/CopiedLinkLine";
+import { vsPar } from "../ui/vsPar";
 import { AddGameForm } from "./AddGameForm";
 
-// Mid-round handicap correction (spec 2026-07-20): "-2" and "13" both parse fine via
-// `parseInt`, but `parseInt` also silently accepts "12.5" (→ 12) and "" (→ NaN, already
-// guarded) — this is stricter, the only shapes the round's own courseHandicap wire field
-// (`z.number().int()`) accepts.
+// Mid-round basis correction (spec 2026-07-20): "-2" and "13" both parse fine via `parseInt`, but
+// `parseInt` also silently accepts "12.5" (→ 12) and "" (→ NaN, already guarded) — this is
+// stricter, the only shapes the basis wire fields (`z.number().int()`) accept.
 const isValidInt = (value: string): boolean => /^-?\d+$/.test(value.trim());
+
+// Which of a StrokeBasis's two constructors (spec 2026-07-29 §2a) a row's open editor is writing.
+// "A group saying 'just give him 18' is the SECOND constructor, not a fudge of the first", so the
+// two are separate affordances rather than one field whose meaning the reader has to guess.
+type EditKind = StrokeBasis["kind"];
+
+// The two editors' own copy, in one place so the label, the teaching line and the number a Save
+// posts can never drift apart.
+const EDITORS: Readonly<Record<EditKind, { readonly label: (name: string) => string; readonly teaching: string }>> = {
+  "normally-shoots": {
+    label: (name) => `What ${name} normally shoots, relative to par`,
+    teaching: "Strokes come from the difference across the group — dots and games update everywhere.",
+  },
+  strokes: {
+    label: (name) => `Strokes for ${name}`,
+    teaching: "Strokes given directly, for the whole round — dots and games update everywhere.",
+  },
+};
 
 export interface SetupPanelProps {
   readonly state: RoundState;
@@ -22,13 +39,13 @@ export interface SetupPanelProps {
   readonly games: readonly GameState[];
   readonly joinCode: string;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
-  // Mid-round handicap correction (spec 2026-07-20): the roster row is the editor. Implemented
-  // by RoundPage as api.setHandicap + sync() — no optimistic local write; the corrected CH
-  // arrives via the fold like every roster fact.
-  readonly onSetHandicap: (golferId: GolferId, courseHandicap: number) => Promise<void>;
+  // Mid-round basis correction (spec 2026-07-20): the roster row is the editor. Implemented by
+  // RoundPage as api.setBasis + sync() — no optimistic local write; the corrected assertion (and
+  // the strokes the whole field re-derives from it) arrive via the fold like every roster fact.
+  readonly onSetBasis: (golferId: GolferId, basis: StrokeBasis) => Promise<void>;
 }
 
-export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupPanelProps) {
+export function SetupPanel({ state, joinCode, onAddGame, onSetBasis }: SetupPanelProps) {
   // A single `editing` id (not a per-row map) holds at most one open editor. Every OTHER row's
   // own Edit button stays visible and clickable the whole time — only the row currently being
   // edited hides its own Edit button, swapping in the Save/Cancel pair in its place. Tapping a
@@ -38,7 +55,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
   // switching rows mid-request — `save`'s own `setEditing(undefined)`/`setError` would otherwise
   // land on whatever row happens to be open when the request settles, not necessarily the row
   // that started it.
-  const [editing, setEditing] = useState<GolferId | undefined>(undefined);
+  const [editing, setEditing] = useState<{ readonly golferId: GolferId; readonly kind: EditKind } | undefined>(undefined);
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
@@ -62,9 +79,13 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
     }
   };
 
-  const startEdit = (p: Participant) => {
-    setEditing(p.golferId);
-    setValue(String(p.courseHandicap));
+  // Seeds the field with whatever that constructor's CURRENT number is, or blank when the seat
+  // states the other kind — there is nothing honest to convert between them (a normal score is a
+  // fact about the player; strokes are a fact about this round).
+  const startEdit = (p: RosterEntry, kind: EditKind) => {
+    setEditing({ golferId: p.golferId, kind });
+    const stated = p.basis.kind === "normally-shoots" ? p.basis.overPar : p.basis.strokes;
+    setValue(p.basis.kind === kind ? String(stated) : "");
     setError(undefined);
   };
 
@@ -73,21 +94,22 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
     setError(undefined);
   };
 
-  const save = async (golferId: GolferId) => {
+  const save = async (golferId: GolferId, kind: EditKind) => {
     if (!isValidInt(value)) return; // guarded by the disabled Save button too
+    const number = parseInt(value, 10);
     setSaving(true);
     setError(undefined);
     try {
-      await onSetHandicap(golferId, parseInt(value, 10));
-      // No optimistic local write: the corrected CH arrives via the fold once the caller
-      // sync()s (RoundPage's own onSetHandicap), so closing here just dismisses the editor —
-      // the roster row's own displayed value comes from `state.participants`, unchanged until
-      // the next render carries the correction.
+      await onSetBasis(golferId, kind === "normally-shoots" ? { kind, overPar: number } : { kind, strokes: number });
+      // No optimistic local write: the corrected assertion arrives via the fold once the caller
+      // sync()s (RoundPage's own onSetBasis), so closing here just dismisses the editor — the
+      // roster row's own displayed values come from `state.participants`, unchanged until the
+      // next render carries the correction.
       setEditing(undefined);
     } catch {
       // Never a raw generic Error's message (papercut 12's own precedent) — an honest fallback;
       // the editor stays open, retry one tap away.
-      setError("Could not update the course handicap — try again.");
+      setError("Could not update this player's strokes — try again.");
     } finally {
       setSaving(false);
     }
@@ -119,74 +141,86 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetHandicap }: SetupP
       <div>
         <h2 className="text-lg font-semibold text-forest">Roster</h2>
         {/* The standard card (spec 2026-07-19 §2a: the card never changes) — every participant's
-            identity row is name/tee/courseHandicap, full stop. Per-game strokes are that game's
-            own concern now (its panel states them in words), never a roster badge. */}
+            identity row is name/tee/what-they-stated/what-they-get, full stop. Per-game strokes are
+            that game's own concern (its panel states them in words), never a roster badge. */}
         <ul className="flex flex-col gap-2">
-          {state.participants.map((p) => (
-            <li key={p.golferId} className="flex flex-col gap-1 text-forest">
-              <span className="flex flex-wrap items-center gap-2">
-                <span>
-                  <GolferLink golferId={p.golferId} name={p.name} /> — <span className="font-mono text-fairway">{p.tee}</span>
-                  {/* The formatted CH span and the editor are mutually exclusive (review finding:
-                      showing "CH +2" statically while the editor below holds the raw "-2" put two
-                      sign-opposite representations of the same number on screen at once). While
-                      editing, the editor renders IN PLACE of the "— CH ..." text entirely. */}
-                  {editing === p.golferId ? (
-                    <span className="ml-2 inline-flex items-center gap-2">
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        aria-label={`Course handicap for ${p.name}`}
-                        className={`${inputBox} w-16`}
-                        value={value}
-                        onChange={(event) => setValue(event.target.value)}
-                      />
-                      {/* btnQuiet, never a boxed button (owner call, 2026-07-20 — the boxed idioms
-                          are visually oversized inside a text row) and never gold (review finding —
-                          AddGameForm's "Add game" submit below is this SAME panel's one gold
-                          action; the reskin rule, spec 2026-07-19). Same register as ProfilePage's
-                          own index-source "Use this" buttons. */}
-                      <button type="button" className={btnQuiet} disabled={saving || !isValidInt(value)} onClick={() => void save(p.golferId)}>
-                        Save
+          {state.participants.map((p) => {
+            const open = editing?.golferId === p.golferId ? editing : undefined;
+            return (
+              <li key={p.golferId} className="flex flex-col gap-1 text-forest">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span>
+                    <GolferLink golferId={p.golferId} name={p.name} /> — <span className="font-mono text-fairway">{p.tee}</span>
+                    {/* The static numbers and the editor are mutually exclusive (2026-07-20 review
+                        finding: showing a formatted number statically while the editor below held
+                        the raw one put two representations of the same value on screen at once).
+                        While editing, the editor renders IN PLACE of the static text entirely. */}
+                    {open ? (
+                      <span className="ml-2 inline-flex items-center gap-2">
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          aria-label={EDITORS[open.kind].label(p.name)}
+                          className={`${inputBox} w-16`}
+                          value={value}
+                          onChange={(event) => setValue(event.target.value)}
+                        />
+                        {/* btnQuiet, never a boxed button (owner call, 2026-07-20 — the boxed idioms
+                            are visually oversized inside a text row) and never gold (review finding —
+                            AddGameForm's "Add game" submit below is this SAME panel's one gold
+                            action; the reskin rule, spec 2026-07-19). */}
+                        <button type="button" className={btnQuiet} disabled={saving || !isValidInt(value)} onClick={() => void save(p.golferId, open.kind)}>
+                          Save
+                        </button>
+                        <button type="button" className={btnQuiet} disabled={saving} onClick={cancelEdit}>
+                          Cancel
+                        </button>
+                      </span>
+                    ) : (
+                      // What they STATED, then what the whole field's rule turned it into (spec
+                      // 2026-07-29 §2). A seat that stated strokes directly has no normal score to
+                      // show, so the row says so rather than implying one was measured.
+                      <span className="font-mono text-fairway">
+                        {p.basis.kind === "normally-shoots" ? ` — normally ${vsPar(p.basis.overPar, 0)} · gets ${p.strokes}` : ` — gets ${p.strokes} (given directly)`}
+                      </span>
+                    )}
+                  </span>
+                  {/* A departed participant (accounts-only identity spec §4) stays on the roster
+                      WITH their seat data — their played holes are facts — plus this "left"
+                      marker. `departed` is set only when true in the fold (RosterEntry's optional
+                      flag), so a present participant renders exactly as before. */}
+                  {p.departed && <span className={badge}>left</span>}
+                  {/* Mid-round basis correction (spec 2026-07-20): a departed golfer keeps both
+                      affordances — their holes still count, so a fix should still apply. Two
+                      buttons, not one field with a mode: the two constructors are different KINDS
+                      of statement (spec 2026-07-29 §2a), so which one you are writing is chosen
+                      before you type, never inferred from the number. */}
+                  {!open && (
+                    <>
+                      {" "}
+                      <button type="button" className={`${btnQuiet} text-sm`} disabled={saving} onClick={() => startEdit(p, "normally-shoots")}>
+                        Edit
+                      </button>{" "}
+                      <button type="button" className={`${btnQuiet} text-sm`} disabled={saving} onClick={() => startEdit(p, "strokes")}>
+                        Give strokes directly
                       </button>
-                      <button type="button" className={btnQuiet} disabled={saving} onClick={cancelEdit}>
-                        Cancel
-                      </button>
-                    </span>
-                  ) : (
-                    <span className="font-mono text-fairway"> — CH {formatCourseHandicap(p.courseHandicap)}</span>
+                    </>
                   )}
                 </span>
-                {/* A departed participant (accounts-only identity spec §4) stays on the roster
-                    WITH their seat data — their played holes are facts — plus this "left"
-                    marker. `departed` is set only when true in the fold (RosterEntry's optional
-                    flag), so a present participant renders exactly as before. */}
-                {p.departed && <span className={badge}>left</span>}
-                {/* Mid-round handicap correction (spec 2026-07-20): a departed golfer keeps the
-                    Edit affordance — a departed golfer is still correctable (their past scoring
-                    used whatever CH was in effect at the time, but a fix should still apply). */}
-                {editing !== p.golferId && (
-                  <>
-                    {" "}
-                    <button type="button" className={`${btnQuiet} text-sm`} disabled={saving} onClick={() => startEdit(p)}>
-                      Edit
-                    </button>
-                  </>
-                )}
-              </span>
 
-              {editing === p.golferId && (
-                <span className="flex flex-col gap-2">
-                  <span className="text-sm text-fairway">Strokes apply to the whole round — dots and games update everywhere.</span>
-                  {error && (
-                    <p role="alert" className="text-oxblood">
-                      {error}
-                    </p>
-                  )}
-                </span>
-              )}
-            </li>
-          ))}
+                {open && (
+                  <span className="flex flex-col gap-2">
+                    <span className="text-sm text-fairway">{EDITORS[open.kind].teaching}</span>
+                    {error && (
+                      <p role="alert" className="text-oxblood">
+                        {error}
+                      </p>
+                    )}
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       </div>
 

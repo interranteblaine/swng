@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
 import type { HoleResult } from "../round/holeResult.js";
 import type { RoundEvent } from "../round/events.js";
+import type { Participant, RosterEntry } from "../round/participant.js";
 import { cellKey, reduceRound } from "../round/state.js";
 import type { RoundState } from "../round/state.js";
 import { scoreGame } from "./game.js";
@@ -17,21 +18,21 @@ import { fixtureLinks } from "./golden/fixtureCourse.js";
 // halving or the relative rule and every net below moves, so these cards pin both.
 const A = golferId("ann");
 const B = golferId("bo");
-const players = [
-  { golferId: A, name: "Ann", tee: "white", courseHandicap: 14 },
-  { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
+const players: readonly Participant[] = [
+  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 14 } },
+  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
 ];
 const match = { kind: "singles-match", id: gameId("m1"), a: A, b: B } as const;
 
 // A minimal one-hole RoundState, isolated from this file's own 14-vs-2 handicap fixture: every
-// named golfer plays off scratch (courseHandicap 0), so the game's own stroke allocation
+// named golfer states even par, so the game's own stroke allocation
 // contributes nothing and the assertion is about the SCORE alone — the shape scoreSinglesMatch
 // consumes directly, without threading a card through the whole golden-deck event machinery.
 const stateWith = (results: Readonly<Record<string, HoleResult>>): RoundState => ({
   id: roundId("r-conceded"),
   status: "live",
   card: fixtureLinks,
-  participants: Object.keys(results).map((name) => ({ golferId: golferId(name), name, tee: "white", courseHandicap: 0 })),
+  participants: Object.keys(results).map((name): RosterEntry => ({ golferId: golferId(name), name, tee: "white", basis: { kind: "normally-shoots", overPar: 0 }, strokes: 0 })),
   games: [match],
   cells: Object.fromEntries(
     Object.entries(results).map(([name, result], index) => [

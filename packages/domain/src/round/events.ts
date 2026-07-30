@@ -1,6 +1,7 @@
 import type { GameId, GolferId, OpId, RoundId } from "../ids.js";
 import type { CourseCard } from "../course/card.js";
 import type { GameConfig } from "../scoring/game.js";
+import type { StrokeBasis } from "../scoring/strokeBasis.js";
 import type { Hlc } from "./hlc.js";
 import type { Participant } from "./participant.js";
 import type { HoleResult } from "./holeResult.js";
@@ -47,13 +48,26 @@ export type RoundEvent = RoundEventBase &
     // latest of {participant-joined, participant-left} wins. Additive/append-only, like every
     // event kind before it — an old client that never sends it is unaffected.
     | { readonly kind: "participant-left"; readonly golferId: GolferId }
-    // Mid-round course handicap correction (spec 2026-07-20): a NARROW, dedicated event —
-    // deliberately NOT a second participant-joined, which is a presence fact (a later join
-    // clears `departed`; that's what makes rejoin work) and carries the whole seat. This arm
-    // carries ONLY the number, so a correction structurally cannot rewrite a card name or tee
-    // and never touches presence. `golferId` is the SUBJECT (whose handicap); `authorId` (the
-    // envelope) is who recorded it — the score-recorded split; any participant may correct any
-    // participant (the score-for-anyone trust model), enforced at the API layer, not here.
-    // Additive/append-only, like every arm before it.
-    | { readonly kind: "participant-handicap-set"; readonly golferId: GolferId; readonly courseHandicap: number }
+    // Mid-round correction of what a player stated about themselves (spec 2026-07-20, re-shaped
+    // by 2026-07-29 §2a): a NARROW, dedicated event — deliberately NOT a second
+    // participant-joined, which is a presence fact (a later join clears `departed`; that's what
+    // makes rejoin work) and carries the whole seat. This arm carries ONLY the assertion, so a
+    // correction structurally cannot rewrite a card name or tee and never touches presence.
+    // `golferId` is the SUBJECT (whose basis); `authorId` (the envelope) is who recorded it —
+    // the score-recorded split; any participant may correct any participant (the
+    // score-for-anyone trust model), enforced at the API layer, not here.
+    //
+    // NOT additive, unlike every arm above it: this arm was `participant-handicap-set` carrying
+    // an integer `courseHandicap`, and any ALREADY-STORED event of that shape is unparseable
+    // against the wire schema now (contracts/round.ts's roundEventSchema backs six
+    // `events[]`-carrying response schemas; client/src/transport.ts parses every pulled event).
+    // Accepted deliberately: beta's round data and snapshots are wiped at this arc's close-out,
+    // and there is nothing honest to migrate — a stored integer is semantically AMBIGUOUS under
+    // the relative model (some were absolute course handicaps, some were already differences the
+    // group typed by hand), which is the spec's own §8 argument for the wipe. No tolerate-old-
+    // shape branch, no `.default()`, no migration. THE DEPLOY IS LAMBDA-FIRST: a stale bundle
+    // posting the old integer body gets a 400 until it refreshes, whereas web-first would have a
+    // new bundle's `basis` object silently stripped by the old lambda's non-strict parse and a
+    // meaningless event written into a sealed log (the conceded-arm precedent, round.ts).
+    | { readonly kind: "participant-basis-set"; readonly golferId: GolferId; readonly basis: StrokeBasis }
   );

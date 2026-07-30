@@ -24,8 +24,12 @@ export interface GolferRoundLine {
   readonly courseId?: CourseId;
   readonly tee: string;
   readonly holes: 9 | 18;
-  readonly par: number;            // sum of the frozen tee's hole pars (spec §5)
-  readonly courseHandicap: number; // participant.courseHandicap, frozen at join
+  readonly par: number; // sum of the frozen tee's hole pars (spec §5)
+  // The strokes this player actually played off: `participant.strokes`, the value reduceRound
+  // derived across the round's roster and settleRound froze (spec 2026-07-29 §2b). Renamed to
+  // `strokes` — with `normallyShoots?` beside it — by this arc's WHS-deletion task; it keeps its
+  // old name here for exactly one commit so the whole wire/projection rename lands in one place.
+  readonly courseHandicap: number;
   readonly ags?: number;
   readonly differential?: number;
   readonly distribution: {
@@ -83,7 +87,7 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
     // than re-checking it here.
     holes: teeSet.holes.length as 9 | 18,
     par: teeSet.holes.reduce((sum, hole) => sum + hole.par, 0),
-    courseHandicap: participant.courseHandicap,
+    courseHandicap: participant.strokes,
     ...(handicapping?.kind === "complete" ? { ags: handicapping.ags, differential: handicapping.differential } : {}),
     ...(handicapping?.kind === "unrated" ? { ags: handicapping.ags } : {}),
     distribution,

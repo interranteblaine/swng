@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeIndex, deviceId, fixtureLinks, fixtureLinks18, golferId, opId, playGoldenRoundLog, roundId, settleRound } from "@swng/domain";
-import type { GolferId, Participant, RoundArchive, RoundEvent } from "@swng/domain";
+import type { GolferId, Participant, RoundArchive, RoundEvent, RosterEntry } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import { getMyRecord } from "../golfers/getMyRecord.js";
 import { createFrozenClock, createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, putAndBindGolfer } from "../testing/fakes.js";
@@ -34,7 +34,7 @@ const finalizedEvent = (wallMs: number): RoundEvent => ({
 const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: GolferId; differential?: number }[]): RoundArchive => ({
   roundId: roundId(id),
   card: fixtureLinks18,
-  participants: entries.map((e): Participant => ({ golferId: e.golferId, name: e.golferId, tee: "white", courseHandicap: 8 })),
+  participants: entries.map((e): RosterEntry => ({ golferId: e.golferId, name: e.golferId, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
   games: [],
   cells: {},
   // A real archive's log always opens with round-created (its genesis) — carried here so
@@ -48,7 +48,7 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
     ...entries.map(
       (e, i): RoundEvent => ({
         kind: "participant-joined",
-        participant: { golferId: e.golferId, name: e.golferId, tee: "white", courseHandicap: 8 },
+        participant: { golferId: e.golferId, name: e.golferId, tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
         opId: opId(`joined-${id}-${e.golferId}`),
         hlc: { wallMs: 1, counter: i + 1, deviceId: deviceId("server") },
         authorId: e.golferId,
@@ -274,8 +274,8 @@ describe("projectArchive", () => {
   // this test pins is specifically about the gap between "ever seated" and "settled".
   it("clears the LIVE# pointer of a settle-omitted departed participant — presence cleanup runs over the ever-seated roster, not the settled archive", async () => {
     const ctx = await setup();
-    const annP: Participant = { golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 };
-    const boP: Participant = { golferId: bo, name: "Bo", tee: "white", courseHandicap: 10 };
+    const annP: Participant = { golferId: ann, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } };
+    const boP: Participant = { golferId: bo, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 10 } };
     const annNine = [5, 5, 4, 6, 5, 4, 5, 6, 4];
     const leaveBo: RoundEvent = { kind: "participant-left", golferId: bo, opId: opId("leave-bo"), hlc: { wallMs: 5_000, counter: 0, deviceId: deviceId("test") }, authorId: bo };
     const finalize: RoundEvent = { kind: "round-finalized", opId: opId("finalize-omit"), hlc: { wallMs: 6_000, counter: 0, deviceId: deviceId("test") }, authorId: ann };

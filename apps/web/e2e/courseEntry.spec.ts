@@ -213,7 +213,7 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     // scores for Quinn) makes a second tab unnecessary, same precedent as fieldTest.spec.ts's
     // Cal/Dee — but as HIMSELF, with his own Bearer (self-join is the only way onto a card).
     const { httpUrl } = loadWebEnv();
-    await joinRoundDirect(httpUrl, quinn, { code: joinCode, tee: "white", courseHandicap: 2 });
+    await joinRoundDirect(httpUrl, quinn, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } });
     await waitForParticipant(page, "Quinn");
   });
 

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render as rtlRender, screen, within } from "@testin
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixtureLinks, gameId, gameKindBlurb, golferId, roundId } from "@swng/domain";
-import type { GameConfig, GameState, Participant, RoundState } from "@swng/domain";
+import type { GameConfig, GameState, RosterEntry, RoundState } from "@swng/domain";
 import { GamePanel } from "./GamePanel";
 
 // GamePanel now renders GolferLinks (the link sweep, navigation spec task 6) — every render
@@ -19,7 +19,7 @@ const ALEX = golferId("alex");
 const SAM = golferId("sam");
 const DANA = golferId("dana");
 
-const baseState = (games: readonly GameConfig[], participants: readonly Participant[], overrides: Partial<RoundState> = {}): RoundState => ({
+const baseState = (games: readonly GameConfig[], participants: readonly RosterEntry[], overrides: Partial<RoundState> = {}): RoundState => ({
   id: roundId("round-1"),
   status: "live",
   card: fixtureLinks,
@@ -34,10 +34,10 @@ afterEach(() => cleanup());
 
 describe("GamePanel", () => {
   it("stroke play lists EVERY player sorted by vs-par (thru all 18, so ties never engage), not just leaders", () => {
-    const participants: readonly Participant[] = [
-      { golferId: ANN, name: "Ann", tee: "white", courseHandicap: 8 },
-      { golferId: BO, name: "Bo", tee: "white", courseHandicap: 2 },
-      { golferId: CY, name: "Cy", tee: "white", courseHandicap: 12 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: ANN, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: BO, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
+      { golferId: CY, name: "Cy", tee: "white", basis: { kind: "normally-shoots", overPar: 12 }, strokes: 5 },
     ];
     const config: GameConfig = { kind: "stroke-play", id: gameId("g1"), scoring: "net", players: [ANN, BO, CY] };
     // Net totals 40/38/44, vs-par +4/+2/+8 — Bo (lowest vs-par) leads, but ALL THREE must
@@ -74,9 +74,9 @@ describe("GamePanel", () => {
   // a thru-0 phantom whose "E" is only even because they haven't hit a shot — the exact
   // mid-round case (a leader with a low RAW total no longer masks a real leader's better rate).
   it("sorts by vs-par, not raw total — a real under-par leader outranks a thru-0 phantom's trivial E", () => {
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
     ];
     const config: GameConfig = { kind: "stroke-play", id: gameId("g-sort-1"), scoring: "gross", players: [PAT, ALEX] };
     const game: GameState = {
@@ -106,9 +106,9 @@ describe("GamePanel", () => {
   // ranks first — a golfer who has actually played a whole round dead even outranks a
   // thru-0 line that is only nominally "E" because it has no data at all.
   it("ties on vs-par break by holes played — a thru-17 E outranks a thru-0 E", () => {
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 0 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 0 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 0 }, strokes: 0 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 0 }, strokes: 0 },
     ];
     const config: GameConfig = { kind: "stroke-play", id: gameId("g-sort-2"), scoring: "gross", players: [PAT, ALEX] };
     const game: GameState = {
@@ -132,9 +132,9 @@ describe("GamePanel", () => {
   });
 
   it("stableford leads with the decoder ring", () => {
-    const participants: readonly Participant[] = [
-      { golferId: ANN, name: "Ann", tee: "white", courseHandicap: 8 },
-      { golferId: BO, name: "Bo", tee: "white", courseHandicap: 2 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: ANN, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: BO, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
     ];
     const config: GameConfig = { kind: "stableford", id: gameId("g2"), players: [ANN, BO] };
     const game: GameState = {
@@ -158,9 +158,9 @@ describe("GamePanel", () => {
   });
 
   it("a dormie match is explained in plain words", () => {
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
     ];
     const config: GameConfig = { kind: "singles-match", id: gameId("m1"), a: PAT, b: ALEX };
     const game: GameState = {
@@ -181,9 +181,9 @@ describe("GamePanel", () => {
   });
 
   it("the match trail renders a row per side with ● won and · halved", () => {
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
     ];
     const config: GameConfig = { kind: "singles-match", id: gameId("m2"), a: PAT, b: ALEX };
     const game: GameState = {
@@ -213,11 +213,11 @@ describe("GamePanel", () => {
   });
 
   it("a decided fourball match wins in the plural — the panel must match the chip", () => {
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
-      { golferId: SAM, name: "Sam", tee: "white", courseHandicap: 4 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
-      { golferId: DANA, name: "Dana", tee: "white", courseHandicap: 10 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: SAM, name: "Sam", tee: "white", basis: { kind: "normally-shoots", overPar: 4 }, strokes: 1 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
+      { golferId: DANA, name: "Dana", tee: "white", basis: { kind: "normally-shoots", overPar: 10 }, strokes: 4 },
     ];
     const config: GameConfig = { kind: "fourball-match", id: gameId("f1"), a: [PAT, SAM], b: [ALEX, DANA] };
     const game: GameState = {
@@ -247,9 +247,9 @@ describe("GamePanel", () => {
   });
 
   it("the skins story collapses carry runs", () => {
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
     ];
     const config: GameConfig = { kind: "skins", id: gameId("s1"), scoring: "net", players: [PAT, ALEX] };
     const game: GameState = {
@@ -291,9 +291,9 @@ describe("GamePanel", () => {
 // nameOf already produced — rendered TEXT is unchanged, only the wrapping element.
 describe("GamePanel — the link sweep (every visible name links to /golfers/:golferId)", () => {
   it("stroke play + stableford: each row's Player cell links to the golfer", () => {
-    const participants: readonly Participant[] = [
-      { golferId: ANN, name: "Ann", tee: "white", courseHandicap: 8 },
-      { golferId: BO, name: "Bo", tee: "white", courseHandicap: 2 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: ANN, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: BO, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
     ];
     const spConfig: GameConfig = { kind: "stroke-play", id: gameId("g-link-sp"), scoring: "gross", players: [ANN, BO] };
     const spGame: GameState = {
@@ -319,9 +319,9 @@ describe("GamePanel — the link sweep (every visible name links to /golfers/:go
   });
 
   it("singles match: the rowheader name links to the golfer — the status sentence stays plain prose", () => {
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
     ];
     const config: GameConfig = { kind: "singles-match", id: gameId("m-link"), a: PAT, b: ALEX };
     const game: GameState = { kind: "singles-match", id: config.id, up: 1, leader: PAT, thru: 3, remaining: 15, dormie: false, holes: [{ hole: 1, winner: "a" }] };
@@ -337,11 +337,11 @@ describe("GamePanel — the link sweep (every visible name links to /golfers/:go
   });
 
   it("fourball match: the rowheader renders TWO GolferLinks joined by ' & ' — same text as the (unlinked) status sentence", () => {
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
-      { golferId: SAM, name: "Sam", tee: "white", courseHandicap: 4 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
-      { golferId: DANA, name: "Dana", tee: "white", courseHandicap: 10 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: SAM, name: "Sam", tee: "white", basis: { kind: "normally-shoots", overPar: 4 }, strokes: 1 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
+      { golferId: DANA, name: "Dana", tee: "white", basis: { kind: "normally-shoots", overPar: 10 }, strokes: 4 },
     ];
     const config: GameConfig = { kind: "fourball-match", id: gameId("f-link"), a: [PAT, SAM], b: [ALEX, DANA] };
     const game: GameState = { kind: "fourball-match", id: config.id, up: 1, leader: "a", thru: 3, remaining: 15, dormie: false, holes: [{ hole: 1, winner: "a" }] };
@@ -354,9 +354,9 @@ describe("GamePanel — the link sweep (every visible name links to /golfers/:go
   });
 
   it("skins: both the totals line and the story's winner name link to the golfer", () => {
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
     ];
     const config: GameConfig = { kind: "skins", id: gameId("s-link"), scoring: "net", players: [PAT, ALEX] };
     const game: GameState = {
@@ -396,9 +396,9 @@ describe("GamePanel — header (spec §2c)", () => {
   const singlesFixture = (): { config: GameConfig; game: GameState; state: RoundState } => {
     // Both at course handicap 0 — pins the all-zero strokes copy in the same fixture that
     // proves header ORDER, since strokesSummary's exact dot count needs no computation here.
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 0 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 0 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 0 }, strokes: 0 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 0 }, strokes: 0 },
     ];
     const config: GameConfig = { kind: "singles-match", id: gameId("m-header"), a: PAT, b: ALEX };
     const game: GameState = { kind: "singles-match", id: config.id, up: 0, leader: undefined, thru: 0, remaining: 18, dormie: false, holes: [] };
@@ -443,7 +443,7 @@ describe("GamePanel — header (spec §2c)", () => {
   });
 
   it("stroke-play NET states the treatment as the game's own field", () => {
-    const participants: readonly Participant[] = [{ golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 }];
+    const participants: readonly RosterEntry[] = [{ golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 }];
     const config: GameConfig = { kind: "stroke-play", id: gameId("sp-net"), scoring: "net", players: [PAT] };
     const game: GameState = { kind: "stroke-play", id: config.id, scoring: "net", complete: false, leaders: [], lines: [] };
     const state = baseState([config], participants);
@@ -454,7 +454,7 @@ describe("GamePanel — header (spec §2c)", () => {
   });
 
   it("stroke-play GROSS states 'Gross — raw scores, no strokes' and renders NO strokes line at all", () => {
-    const participants: readonly Participant[] = [{ golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 }];
+    const participants: readonly RosterEntry[] = [{ golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 }];
     const config: GameConfig = { kind: "stroke-play", id: gameId("sp-gross"), scoring: "gross", players: [PAT] };
     const game: GameState = { kind: "stroke-play", id: config.id, scoring: "gross", complete: false, leaders: [], lines: [] };
     const state = baseState([config], participants);
@@ -469,9 +469,9 @@ describe("GamePanel — header (spec §2c)", () => {
   it("stableford and skins both render a strokes line", () => {
     // Two players, not one: strokes are relative, so a lone player anchors his own field and gets
     // nothing. Pat's 5 against Alex's 0, halved on this nine-hole card, is 3 dots.
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 5 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 0 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 5 }, strokes: 3 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 0 }, strokes: 0 },
     ];
     const stableford: GameConfig = { kind: "stableford", id: gameId("sf-strokes"), players: [PAT, ALEX] };
     const stablefordState: GameState = { kind: "stableford", id: stableford.id, complete: false, leaders: [], lines: [] };
@@ -495,7 +495,7 @@ describe("GamePanel — header (spec §2c)", () => {
   // Skins now offers the same gross/net choice stroke play has (spec §3), so the panel must state
   // it — and a gross pot allocates nothing, exactly like gross stroke play.
   it("skins GROSS states 'Gross — raw scores, no strokes' and renders NO strokes line at all", () => {
-    const participants: readonly Participant[] = [{ golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 }];
+    const participants: readonly RosterEntry[] = [{ golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 }];
     const config: GameConfig = { kind: "skins", id: gameId("sk-gross"), scoring: "gross", players: [PAT] };
     const game: GameState = { kind: "skins", id: config.id, scoring: "gross", lines: [], carrying: 0, carriedOut: 0, complete: false, holesDecided: 0, holes: [] };
 
@@ -510,9 +510,9 @@ describe("GamePanel — header (spec §2c)", () => {
 // itself stays owned by StandingsHeader — GamePanel only ever triggers it via onTerminate).
 describe("GamePanel — End game… trigger", () => {
   const fixture = (overrides: Partial<RoundState> = {}): { config: GameConfig; game: GameState; state: RoundState } => {
-    const participants: readonly Participant[] = [
-      { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 8 },
-      { golferId: ALEX, name: "Alex", tee: "white", courseHandicap: 2 },
+    const participants: readonly RosterEntry[] = [
+      { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 3 },
+      { golferId: ALEX, name: "Alex", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
     ];
     const config: GameConfig = { kind: "singles-match", id: gameId("m-end"), a: PAT, b: ALEX };
     const game: GameState = { kind: "singles-match", id: config.id, up: 0, leader: undefined, thru: 0, remaining: 18, dormie: false, holes: [] };

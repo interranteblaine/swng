@@ -8,6 +8,7 @@ import { fixtureLinks, fixtureLinks18, fixtureWhite } from "../scoring/golden/fi
 import type { GameConfig } from "../scoring/game.js";
 import { settleRound, unresolvedGames } from "./archive.js";
 import { cellKey, reduceRound } from "./state.js";
+import type { Participant, RosterEntry } from "./participant.js";
 import type { RoundEvent } from "./events.js";
 import type { RoundState, ScoreCell } from "./state.js";
 
@@ -17,10 +18,10 @@ import type { RoundState, ScoreCell } from "./state.js";
 const A = golferId("ann");
 const B = golferId("bo");
 const C = golferId("cal");
-const players3 = [
-  { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 },
-  { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
-  { golferId: C, name: "Cal", tee: "white", courseHandicap: 12 },
+const players3: readonly Participant[] = [
+  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
+  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+  { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 12 } },
 ];
 const skins = { kind: "skins", id: gameId("k9"), scoring: "net", players: [A, B, C] } as const;
 const stableford = { kind: "stableford", id: gameId("s9"), players: [A, B, C] } as const;
@@ -39,6 +40,10 @@ const finalLog = playGoldenRoundLog(fixtureLinks, players3, [skins, stableford],
 // Hand-checked against Rule 3.1b (net double bogey never caps here — every gross score on
 // every player's card is under their per-hole cap post-correction, so AGS = gross sum):
 // Ann 5+5+4+6+5+4+5+6+4 = 44, Bo 4+5+3+6+4+4+4+5+4 = 39, Cal 6+7+4+8+6+5+6+7+6 = 55.
+// Re-checked at the DERIVED strokes (spec 2026-07-29 §2b) rather than the stated numbers: Bo's
+// +2 anchors, so on this nine-hole card Ann gets (8−2)/2 = 3 and Cal (12−2)/2 = 5, tightening
+// every per-hole cap. Still nothing caps — Cal's worst holes (h2 7 vs cap 7, h4 8 vs cap 8) sit
+// exactly ON their caps, and every other score is under, so all three sums are unmoved.
 const HAND_CHECKED_AGS: Readonly<Record<string, number>> = { [A]: 44, [B]: 39, [C]: 55 };
 
 describe("settleRound — concurrency deck", () => {
@@ -103,9 +108,9 @@ describe("settleRound — concurrency deck", () => {
   it("throws game-unresolved when a finalized log leaves a game incomplete", () => {
     const D = golferId("dee");
     const E = golferId("eve");
-    const partialPlayers = [
-      { golferId: D, name: "Dee", tee: "white", courseHandicap: 5 },
-      { golferId: E, name: "Eve", tee: "white", courseHandicap: 10 },
+    const partialPlayers: readonly Participant[] = [
+      { golferId: D, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 5 } },
+      { golferId: E, name: "Eve", tee: "white", basis: { kind: "normally-shoots", overPar: 10 } },
     ];
     const partialGame = { kind: "stroke-play", id: gameId("sp1"), scoring: "gross", players: [D, E] } as const;
     // Dee only has 5 of 9 holes recorded — the round still gets finalized (a crew can
@@ -125,25 +130,31 @@ describe("settleRound — concurrency deck", () => {
   });
 });
 
-// A mid-round handicap correction (spec 2026-07-20) is a plain seat overwrite in the fold
-// (state.ts), so settleRound needs no new logic — participants and handicappingFor both
-// already read courseHandicap off the folded seat. This pins that passthrough: the corrected
-// CH, not the join's original one, is what reaches both the roster AND the AGS calculation.
-describe("settleRound — mid-round handicap correction", () => {
-  it("settles the CORRECTED courseHandicap into archive.participants and handicapping", () => {
-    const player = { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 };
-    // Hole 3 (par 3, SI 9) is blown up to 7 strokes, deliberately: at CH 8 it gets 0 dots
-    // (net-double-bogey cap 5), at the corrected CH 15 it gets 1 dot (cap 6) — a real AGS
+// A mid-round basis correction (spec 2026-07-20, re-shaped by 2026-07-29) is a plain seat
+// overwrite in the fold (state.ts), so settleRound needs no new logic — participants and
+// handicappingFor both read the strokes reduceRound derived from the folded seat. This pins that
+// passthrough: the corrected assertion, not the join's original one, is what reaches both the
+// roster AND the AGS calculation.
+describe("settleRound — mid-round basis correction", () => {
+  it("settles the CORRECTED strokes into archive.participants and handicapping", () => {
+    // A LITERAL strokes assertion, deliberately (spec §2a's second constructor): it passes
+    // through resolveStrokes untouched, so this test isolates the correction passthrough from
+    // the relative rule's own arithmetic — a stated normal score on this nine-hole fixture would
+    // be halved against the field's anchor, and a lone player is their own anchor and would
+    // receive nothing at all, which would prove nothing about the correction.
+    const player: Participant = { golferId: A, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 8 } };
+    // Hole 3 (par 3, SI 9) is blown up to 7 strokes, deliberately: at 8 strokes it gets 0 dots
+    // (net-double-bogey cap 5), at the corrected 15 it gets 1 dot (cap 6) — a real AGS
     // difference, not just a passthrough field, so this proves handicappingFor read the
     // CORRECTED seat rather than the join's original 8.
     const annScores = [4, 4, 7, 5, 4, 3, 4, 5, 4];
     const preFinalize = playGoldenRoundLog(fixtureLinks, [player], [], { [A]: annScores }, [], false);
     const lastWallMs = Math.max(...preFinalize.map((event) => event.hlc.wallMs));
     const set: RoundEvent = {
-      kind: "participant-handicap-set",
+      kind: "participant-basis-set",
       golferId: A,
-      courseHandicap: 15,
-      opId: opId("set-ch-settle"),
+      basis: { kind: "strokes", strokes: 15 },
+      opId: opId("set-basis-settle"),
       hlc: { wallMs: lastWallMs + 1, counter: 0, deviceId: deviceId("test") },
       authorId: A,
     };
@@ -155,14 +166,14 @@ describe("settleRound — mid-round handicap correction", () => {
     };
     const archive = settleRound([...preFinalize, set, finalize]);
 
-    // The seat's courseHandicap is the corrected value, not the join's original 8.
-    expect(archive.participants.find((p) => p.golferId === A)?.courseHandicap).toBe(15);
+    // The seat's derived strokes are the corrected value, not the join's original 8.
+    expect(archive.participants.find((p) => p.golferId === A)?.strokes).toBe(15);
 
     const holesMap = new Map(annScores.map((strokes, index) => [index + 1, { kind: "strokes" as const, strokes }]));
     const correctedAgs = adjustedGrossScore(fixtureWhite, 15, holesMap);
     expect(correctedAgs).toBe(39);
-    // Sanity: the UNCORRECTED CH (8) caps hole 3 tighter — confirms the number above genuinely
-    // tracks which CH won the fold, not an incidental match.
+    // Sanity: the UNCORRECTED 8 caps hole 3 tighter — confirms the number above genuinely
+    // tracks which assertion won the fold, not an incidental match.
     expect(adjustedGrossScore(fixtureWhite, 8, holesMap)).toBe(38);
 
     expect(archive.handicapping).toHaveLength(1);
@@ -177,9 +188,9 @@ describe("settleRound — mid-round handicap correction", () => {
 describe("settleRound — game termination", () => {
   const D = golferId("dee");
   const E = golferId("eve");
-  const partialPlayers = [
-    { golferId: D, name: "Dee", tee: "white", courseHandicap: 5 },
-    { golferId: E, name: "Eve", tee: "white", courseHandicap: 10 },
+  const partialPlayers: readonly Participant[] = [
+    { golferId: D, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 5 } },
+    { golferId: E, name: "Eve", tee: "white", basis: { kind: "normally-shoots", overPar: 10 } },
   ];
   // Dee only has 5 of 9 holes recorded, so a game needing HER card never resolves;
   // a second game scoped to Eve alone (whose card is full) resolves independently —
@@ -352,9 +363,9 @@ describe("settleRound — incomplete handicapping", () => {
   it("resolves a match decided early while both golfers' cards stay incomplete (holes 8-9 never recorded)", () => {
     const D = golferId("dee");
     const E = golferId("eve");
-    const twoPlayers = [
-      { golferId: D, name: "Dee", tee: "white", courseHandicap: 14 },
-      { golferId: E, name: "Eve", tee: "white", courseHandicap: 2 },
+    const twoPlayers: readonly Participant[] = [
+      { golferId: D, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 14 } },
+      { golferId: E, name: "Eve", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
     ];
     const match = { kind: "singles-match", id: gameId("m2"), a: D, b: E } as const;
     // Same shape as singlesMatch.test.ts's "the difference between the two closes it out 3&2"
@@ -503,9 +514,12 @@ describe("round is a sealed leaf — no crewId on state or archive", () => {
 describe("unresolvedGames — finalize readiness", () => {
   const ANN = golferId("ann");
   const PAT = golferId("pat");
-  const participants = [
-    { golferId: ANN, name: "Ann", tee: "white", courseHandicap: 8 },
-    { golferId: PAT, name: "Pat", tee: "white", courseHandicap: 2 },
+  // Strokes as the fold would derive them for this roster (spec 2026-07-29 §2b): Pat's stated +2
+  // is the field's anchor, so Ann's 8 − 2 = 6. unresolvedGames reads neither — it walks games and
+  // cells — but a fixture that stated anything else would be a roster the fold cannot produce.
+  const participants: readonly RosterEntry[] = [
+    { golferId: ANN, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 6 },
+    { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, strokes: 0 },
   ];
   let opCounter = 0;
   const cell = (result: ScoreCell["result"], recordedBy: typeof ANN): ScoreCell => ({
@@ -567,9 +581,9 @@ describe("unresolvedGames — finalize readiness", () => {
   it("names EXACTLY the game settleRound itself throws game-unresolved on — the reuse proof", () => {
     const D = golferId("dee");
     const E = golferId("eve");
-    const partialPlayers = [
-      { golferId: D, name: "Dee", tee: "white", courseHandicap: 5 },
-      { golferId: E, name: "Eve", tee: "white", courseHandicap: 10 },
+    const partialPlayers: readonly Participant[] = [
+      { golferId: D, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 5 } },
+      { golferId: E, name: "Eve", tee: "white", basis: { kind: "normally-shoots", overPar: 10 } },
     ];
     const partialGame = { kind: "stroke-play", id: gameId("sp1"), scoring: "gross", players: [D, E] } as const;
     const partialLog = playGoldenRoundLog(

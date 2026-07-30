@@ -4,7 +4,7 @@ import { fixtureWhite, golferId } from "@swng/domain";
 import type { HoleResult, Participant } from "@swng/domain";
 import { orderedStrokeValues, ScorePad } from "./ScorePad";
 
-const ANN: Participant = { golferId: golferId("ann"), name: "Ann", tee: "white", courseHandicap: 8 };
+const ANN: Participant = { golferId: golferId("ann"), name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } };
 const HOLE_PAR4 = fixtureWhite.holes[0]!; // hole 1: par 4
 
 afterEach(() => cleanup());

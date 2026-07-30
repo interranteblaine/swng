@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { courseHandicapAllocation, netStrokes } from "@swng/client";
+import { netStrokes, roundStrokeAllocation } from "@swng/client";
 import { cellAt, findTeeSet, scoredStrokes, strokeGrant, underPar } from "@swng/domain";
 import type { CourseCard, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { cardBox } from "../ui/classes";
@@ -133,11 +133,11 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
   const holes = canonicalHoles(state.card);
   const current = currentHoleNumber(holes, state.participants, state.cells);
 
-  // The STANDARD CARD's dots: each player's own course handicap, allocated by stroke index —
-  // no game, computed once per render (spec 2026-07-19 §2a). Any concurrent
-  // game's own strokes (resolved off that game's own field) live in that game's own
-  // panel — this grid never re-derives them.
-  const dotsByGolfer = courseHandicapAllocation(state.participants, state.card);
+  // The STANDARD CARD's dots: each player's own ROUND strokes — the value the fold derived across
+  // the present roster (spec 2026-07-29 §2b) — allocated by stroke index, no game, computed once
+  // per render (spec 2026-07-19 §2a). Any concurrent game's own strokes (resolved off that game's
+  // own field) live in that game's own panel — this grid never re-derives them.
+  const dotsByGolfer = roundStrokeAllocation(state.participants, state.card);
 
   const selectedParticipant = selection && state.participants.find((p) => p.golferId === selection.golferId);
   const selectedHole = selection && holes.find((h) => h.number === selection.hole);

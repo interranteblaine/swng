@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
 import type { RoundEvent } from "../round/events.js";
+import type { Participant } from "../round/participant.js";
 import { cellKey, reduceRound } from "../round/state.js";
 import type { RoundState } from "../round/state.js";
 import { scoreGame } from "./game.js";
@@ -12,9 +13,9 @@ import type { GameState } from "./game.js";
 
 const A = golferId("ann");
 const B = golferId("bo");
-const players = [
-  { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 },
-  { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
+const players: readonly Participant[] = [
+  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
+  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
 ];
 
 const grossGame = { kind: "stroke-play", id: gameId("g1"), scoring: "gross", players: [A, B] } as const;
@@ -109,7 +110,7 @@ describe("stroke play — golden cards", () => {
       id: roundId("r-conceded"),
       status: "live",
       card: fixtureLinks,
-      participants: [{ golferId: A, name: "Ann", tee: "white", courseHandicap: 0 }],
+      participants: [{ golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 0 }, strokes: 0 }],
       games: [],
       cells: {
         [cellKey(A, 1)]: { result: { kind: "conceded", strokes: 4 }, recordedBy: A, hlc: { wallMs: 0, counter: 0, deviceId: deviceId("d") }, opId: opId("op-a") },
@@ -124,21 +125,21 @@ describe("stroke play — golden cards", () => {
 describe("stroke play — properties", () => {
   // Two players, not one: strokes are relative now, so a lone player is the field's own anchor and
   // receives nothing — the property would hold vacuously (net === gross) and prove nothing about
-  // dots. Q at 0 is the anchor, so P's dots are roundHalfUp(courseHandicap / 2) ≥ 0 and P's net
-  // can only run at or below P's gross.
+  // dots. Q states even par and is the anchor, so P's dots are roundHalfUp(overPar / 2) ≥ 0 and
+  // P's net can only run at or below P's gross.
   it("net never exceeds gross for a player receiving strokes off the field's anchor, with full cards", () => {
     fc.assert(
       fc.property(
         fc.array(fc.integer({ min: 1, max: 9 }), { minLength: 9, maxLength: 9 }),
         fc.integer({ min: 0, max: 18 }),
-        (strokes, courseHandicap) => {
+        (strokes, overPar) => {
           const P = golferId("p");
           const Q = golferId("q");
           const [state] = playGoldenRound(
             fixtureLinks,
             [
-              { golferId: P, name: "P", tee: "white", courseHandicap },
-              { golferId: Q, name: "Q", tee: "white", courseHandicap: 0 },
+              { golferId: P, name: "P", tee: "white", basis: { kind: "normally-shoots", overPar } },
+              { golferId: Q, name: "Q", tee: "white", basis: { kind: "normally-shoots", overPar: 0 } },
             ],
             [{ kind: "stroke-play", id: gameId("g"), scoring: "net", players: [P, Q] }],
             { [P]: strokes, [Q]: strokes },

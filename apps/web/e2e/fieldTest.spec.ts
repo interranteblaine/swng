@@ -181,8 +181,8 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // is the only way onto a card now; the old roster-seeding path a host could use to add
     // others is deleted, and this harness never had support for it).
     const { httpUrl } = loadWebEnv();
-    await joinRoundDirect(httpUrl, calAccount, { code: joinCode, tee: "white", courseHandicap: 15 });
-    await joinRoundDirect(httpUrl, deeAccount, { code: joinCode, tee: "white", courseHandicap: 5 });
+    await joinRoundDirect(httpUrl, calAccount, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 15 } });
+    await joinRoundDirect(httpUrl, deeAccount, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 5 } });
 
     // Both already-live contexts must observe the full 4-person roster (via WS/pull) before
     // Step 3 drives AddGameForm's participant-derived <select>s.
@@ -510,7 +510,7 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
     // Score-for-anyone precedent (Cal/Dee, Quinn elsewhere in this file) — Quinn's own tab
     // adds nothing this scenario needs; his join carries his own Bearer (self-join only).
     const { httpUrl } = loadWebEnv();
-    await joinRoundDirect(httpUrl, quinnAccount, { code: joinCode, tee: "white", courseHandicap: 0 });
+    await joinRoundDirect(httpUrl, quinnAccount, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 0 } });
     // Quinn's join is a direct HTTP fetch, not a browser — Pat's page only ever learns of it via
     // WS broadcast/pull, cross-context and WS-dependent (same seam as the M5 describe's own
     // waitForParticipant loop), so it gets the announced force-close + Sync-now recovery instead

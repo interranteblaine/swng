@@ -1,9 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { courseId, fixtureLinks18, fixtureWhite, fixtureWhite18, golferId, roundId } from "@swng/domain";
+import { courseId, fixtureLinks18, fixtureWhite18, golferId, roundId } from "@swng/domain";
 import { startRoundRequestSchema } from "@swng/contracts";
-import type { CourseView, GetMeResponse, GetMyRecordResponse } from "@swng/contracts";
+import type { CourseView, GetMeResponse } from "@swng/contracts";
 import { credentialStore } from "../identity";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
@@ -20,7 +20,6 @@ vi.mock("../api", () => ({
   // The suggested-course-handicap fetch (unrated-courses T5b) — defaulted to an empty record in
   // beforeEach so the pre-existing cases (no declared, no metrics) show no suggestion and their
   // manual handicap entry is unaffected; the suggestion cases below stub a real metric.
-  getMyRecord: vi.fn(),
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -33,22 +32,14 @@ vi.mock("../api", () => ({
   },
 }));
 
-import { ApiError, createRound, getCourse, getMe, getMyRecord, searchCourses } from "../api";
+import { ApiError, createRound, getCourse, getMe, searchCourses } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { CreateRoundPage } from "./CreateRoundPage";
-import { courseHandicapFor } from "@swng/domain";
-
 const mockedCreateRound = vi.mocked(createRound);
 const mockedGetCourse = vi.mocked(getCourse);
 const mockedSearchCourses = vi.mocked(searchCourses);
 const mockedGetMe = vi.mocked(getMe);
-const mockedGetMyRecord = vi.mocked(getMyRecord);
-
-// GetMyRecordResponse.metrics.typicalEighteen/indexHistory/bests/milestones are required
-// (metrics-projection-grows spec; analytics spec 2026-07-21 §3) — these tests only exercise the
-// whsIndex/swngIndex suggestion, so every fixture here spreads a zeroed/empty set.
-const zeroMetrics = { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [], bests: {}, milestones: [] } as const;
 
 const courseView: CourseView = {
   courseId: courseId("course-18"),
@@ -65,8 +56,6 @@ beforeEach(() => {
   mockedGetCourse.mockReset();
   mockedSearchCourses.mockReset();
   mockedGetMe.mockReset();
-  mockedGetMyRecord.mockReset();
-  mockedGetMyRecord.mockResolvedValue({ metrics: { ...zeroMetrics }, history: [] });
 });
 
 afterEach(() => {
@@ -143,16 +132,16 @@ describe("CreateRoundPage — create as yourself", () => {
     // The proof-of-negative: no free-text host-name field — the name is the account's.
     expect(screen.queryByLabelText(/your name/i)).toBeNull();
 
-    fireEvent.change(screen.getByLabelText(/strokes you get here/i), { target: { value: "8" } });
+    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "8" } });
     fireEvent.click(screen.getByRole("button", { name: /create round/i }));
 
     await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
     const [body, token] = mockedCreateRound.mock.calls[0]!;
     // Course-cards spec §4: a REFERENCE (courseId + cardId), never a card — the server resolves
     // and freezes the lineage's current card itself. Accounts-only identity (spec §3): the
-    // request carries only that reference + host tee/courseHandicap — the seat (name + golferId)
+    // request carries only that reference + host tee/basis — the seat (name + golferId)
     // is resolved server-side from the Bearer.
-    expect(body).toEqual({ course: { courseId: courseView.courseId, cardId: courseView.cardId }, host: { tee: "white", courseHandicap: 8 } });
+    expect(body).toEqual({ course: { courseId: courseView.courseId, cardId: courseView.cardId }, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } });
     expect(token).toBe(idToken);
     expect(() => startRoundRequestSchema.parse(body)).not.toThrow();
 
@@ -160,7 +149,7 @@ describe("CreateRoundPage — create as yourself", () => {
     expect(credentialStore.load(roundId("round-9"))).toEqual({ token: "tok-9", golferId: golferId("ann-g"), name: "Ann G", joinCode: "ZZZ999" });
   });
 
-  it("accepts a negative (plus) course handicap", async () => {
+  it("accepts a negative — an under-par player states a minus (spec §4's one sign convention)", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
@@ -170,11 +159,11 @@ describe("CreateRoundPage — create as yourself", () => {
     await screen.findByText(fixtureLinks18.courseName);
     await screen.findByText(/playing as/i);
 
-    fireEvent.change(screen.getByLabelText(/strokes you get here/i), { target: { value: "-3" } });
+    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "-3" } });
     fireEvent.click(screen.getByRole("button", { name: /create round/i }));
 
     await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
-    expect(mockedCreateRound.mock.calls[0]![0].host.courseHandicap).toBe(-3);
+    expect(mockedCreateRound.mock.calls[0]![0].host.basis).toEqual({ kind: "normally-shoots", overPar: -3 });
   });
 
   it("submit is disabled until a course is picked", async () => {
@@ -228,7 +217,7 @@ describe("CreateRoundPage — create as yourself", () => {
     await screen.findByText(/playing as/i);
     expect(mockedGetCourse).not.toHaveBeenCalled(); // no re-fetch — EditCoursePage already returned the full CourseView
 
-    fireEvent.change(screen.getByLabelText(/strokes you get here/i), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: /create round/i }));
 
     await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
@@ -250,7 +239,7 @@ describe("CreateRoundPage — create as yourself", () => {
     await screen.findByText(/playing as/i);
     expect(mockedGetCourse).toHaveBeenCalledTimes(1);
 
-    fireEvent.change(screen.getByLabelText(/strokes you get here/i), { target: { value: "8" } });
+    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "8" } });
     fireEvent.click(screen.getByRole("button", { name: /create round/i }));
 
     await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
@@ -261,160 +250,42 @@ describe("CreateRoundPage — create as yourself", () => {
   });
 });
 
-// "Strokes you get here" (handicap-model legibility spec §4/§7): the index turned into today's
-// strokes — seeded once, editable, and shown WITH its derivation (never a bare number, never a
-// separate declaration). The active index defaults to the swng index (spec §3): GET /me/record's
-// swngIndex, or the declared override. CreateRoundPage holds the full card, so a rated tee gets
-// the exact Rule 6.1a figure (courseHandicapFor) and an unrated tee gets the hole-count-correct
-// index estimate — round(index) on an 18-hole card, round(index / 2) on a 9-hole one.
-describe("CreateRoundPage — strokes you get here", () => {
-  it("a rated tee seeds courseHandicapFor over the index, shows the 'from your index' derivation, and stays editable", async () => {
+// ONE number, in the unit everyone already speaks (spec 2026-07-29 §2/§9): starting a round is
+// joining it as the host, so the creator answers the SAME question a joiner does. Nothing converts
+// it and nothing derives it from the card's rating/slope — the strokes fall out of the whole field
+// once everyone has stated theirs.
+describe("CreateRoundPage — what you normally shoot", () => {
+  it("asks the question verbatim, starts blank, and keeps Create disabled until a number is typed", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", indexSource: { kind: "declared", value: 12.4 } } });
+    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
 
     renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
     await screen.findByText(fixtureLinks18.courseName);
     await screen.findByText(/playing as/i);
 
-    const whiteTee = fixtureLinks18.teeSets.find((teeSet) => teeSet.name === "white")!;
-    const expected = String(courseHandicapFor(12.4, whiteTee));
-    await waitFor(() => expect((screen.getByLabelText(/strokes you get here/i) as HTMLInputElement).value).toBe(expected));
-    // The derivation is on the screen — the index→strokes wire, not a bare number (spec §4/§7).
-    expect(screen.getByText(new RegExp(`^${expected} — from your index \\(12\\.4\\) on this course$`))).toBeTruthy();
-    // The jargon label and the old opaque "suggested (WHS)" tag are both gone.
-    expect(screen.queryByText(/course handicap/i)).toBeNull();
-    expect(screen.queryByText(/suggested \(WHS\)/i)).toBeNull();
+    // Blank, never "0": "0" would assert "I shoot par", a real claim about the player.
+    const field = screen.getByLabelText("What do you normally shoot, relative to par?") as HTMLInputElement;
+    expect(field.value).toBe("");
+    expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(true);
 
-    // Editable: a group can agree on a different number, and it wins over the seed.
-    fireEvent.change(screen.getByLabelText(/strokes you get here/i), { target: { value: "9" } });
-    expect((screen.getByLabelText(/strokes you get here/i) as HTMLInputElement).value).toBe("9");
-  });
-
-  // A plus-handicap golfer (index below scratch): the note names the + index (formatHandicapIndex)
-  // and, because the course handicap comes out negative, leads with the give-back ("You give N")
-  // instead of a bare number — both through the domain, no `< 0` decided in the view (spec §3).
-  it("a plus-handicap golfer's note reads the + index and, when the course handicap is negative, a 'You give N' lead", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("plus-g"), name: "Plus G", indexSource: { kind: "declared", value: -1.2 } } });
-    mockedGetCourse.mockResolvedValue({ course: courseView });
-
-    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
-    await screen.findByText(fixtureLinks18.courseName);
-    await screen.findByText(/playing as/i);
-
-    const whiteTee = fixtureLinks18.teeSets.find((teeSet) => teeSet.name === "white")!;
-    const value = courseHandicapFor(-1.2, whiteTee);
-    expect(value).toBeLessThan(0); // a plus index on this rated tee gives strokes back
-    // The seeded strokes field keeps the SIGNED numeric value the engine consumes (waited on, since
-    // the seed lands via an effect after the note renders).
-    await waitFor(() => expect((screen.getByLabelText(/strokes you get here/i) as HTMLInputElement).value).toBe(String(value)));
-    // The + index in the note, and a give-back lead (never a bare negative number).
-    expect(screen.getByText(`You give ${-value} — from your index (+1.2) on this course`)).toBeTruthy();
-  });
-
-  it("defaults the active index to GET /me/record's swngIndex when there's no declared override", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } }); // no declared
-    mockedGetMyRecord.mockResolvedValue({ metrics: { swngIndex: { value: 9.0, differentialsUsed: 5 }, ...zeroMetrics }, history: [] });
-    mockedGetCourse.mockResolvedValue({ course: courseView });
-
-    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
-    await screen.findByText(/playing as/i);
-
-    const whiteTee = fixtureLinks18.teeSets.find((teeSet) => teeSet.name === "white")!;
-    const expected = String(courseHandicapFor(9.0, whiteTee));
-    await waitFor(() => expect((screen.getByLabelText(/strokes you get here/i) as HTMLInputElement).value).toBe(expected));
-    expect(screen.getByText(new RegExp(`^${expected} — from your index \\(9\\.0\\) on this course$`))).toBeTruthy();
-  });
-
-  it("an unrated 18-hole tee seeds round(index) with an 18-hole-named derivation", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", indexSource: { kind: "declared", value: 12.4 } } });
-    // Same 18-hole card, but the selected tee carries no rating/slope — a legitimate unrated tee.
-    const unratedCard = { ...fixtureLinks18, teeSets: [{ name: "white", holes: fixtureWhite18.holes }] };
-    mockedGetCourse.mockResolvedValue({ course: { ...courseView, card: unratedCard } });
-
-    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
-    await screen.findByText(/playing as/i);
-
-    await waitFor(() => expect((screen.getByLabelText(/strokes you get here/i) as HTMLInputElement).value).toBe("12")); // round(12.4)
-    expect(screen.getByText(/your index \(12\.4\), adjusted for 18 holes; unrated course/i)).toBeTruthy();
-    // The old opaque "estimated — unrated course" tag is replaced by the derivation note.
-    expect(screen.queryByText(/estimated — unrated course/i)).toBeNull();
-  });
-
-  it("an unrated 9-hole tee seeds round(index / 2) with a 9-hole-named derivation (the shipped hole-count bug)", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", indexSource: { kind: "declared", value: 12.4 } } });
-    // A 9-hole card (fixtureWhite's holes), unrated — the case the shipped round(index) got wrong.
-    const unrated9Card = { ...fixtureLinks18, teeSets: [{ name: "white", holes: fixtureWhite.holes }] };
-    mockedGetCourse.mockResolvedValue({ course: { ...courseView, card: unrated9Card } });
-
-    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
-    await screen.findByText(/playing as/i);
-
-    await waitFor(() => expect((screen.getByLabelText(/strokes you get here/i) as HTMLInputElement).value).toBe("6")); // round(12.4 / 2)
-    expect(screen.getByText(/your index \(12\.4\), adjusted for 9 holes; unrated course/i)).toBeTruthy();
-  });
-
-  // A golfer ON the WHS source (index-source model spec §3/§6): the resolver reads the live WHS
-  // metric, and the derivation NAMES it ("from your WHS index"). An unrated 9-hole tee halves it.
-  it("a golfer on the WHS source seeds from the live whsIndex metric and names it in the derivation", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", indexSource: { kind: "whs" } } });
-    mockedGetMyRecord.mockResolvedValue({ metrics: { whsIndex: { value: 10, computedAtMs: 1_000, differentialsUsed: 6 }, ...zeroMetrics }, history: [] });
-    const unrated9Card = { ...fixtureLinks18, teeSets: [{ name: "white", holes: fixtureWhite.holes }] };
-    mockedGetCourse.mockResolvedValue({ course: { ...courseView, card: unrated9Card } });
-
-    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
-    await screen.findByText(/playing as/i);
-
-    await waitFor(() => expect((screen.getByLabelText(/strokes you get here/i) as HTMLInputElement).value).toBe("5")); // round(10 / 2)
-    expect(screen.getByText(/from your WHS index \(10\.0\), adjusted for 9 holes; unrated course/i)).toBeTruthy();
-  });
-
-  it("a typed value is never overwritten by a seed that resolves later", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } }); // no declared
-    mockedGetCourse.mockResolvedValue({ course: courseView });
-    let resolveRecord: (record: GetMyRecordResponse) => void = () => {};
-    mockedGetMyRecord.mockReturnValue(
-      new Promise<GetMyRecordResponse>((resolve) => {
-        resolveRecord = resolve;
-      }),
-    );
-    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-typed"), joinCode: "TYP111", token: "tok-typed", golferId: golferId("ann-g") });
-
-    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
-    await screen.findByText(/playing as/i);
-
-    // Type before any seed is available — this value must win.
-    fireEvent.change(screen.getByLabelText(/strokes you get here/i), { target: { value: "7" } });
-
-    // The record resolves with a swngIndex that WOULD seed a very different value — the seed must not fire.
-    resolveRecord({ metrics: { swngIndex: { value: 20.0, differentialsUsed: 5 }, ...zeroMetrics }, history: [] });
-    await waitFor(() => expect(mockedGetMyRecord).toHaveBeenCalled());
-
-    expect((screen.getByLabelText(/strokes you get here/i) as HTMLInputElement).value).toBe("7");
-    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
-    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
-    expect(mockedCreateRound.mock.calls[0]![0].host.courseHandicap).toBe(7);
-  });
-
-  it("a rejected record fetch still seeds from the declared index alone — never blocks the page", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", indexSource: { kind: "declared", value: 12.4 } } });
-    mockedGetCourse.mockResolvedValue({ course: courseView });
-    mockedGetMyRecord.mockRejectedValue(new ApiError("boom", 500, "record unavailable"));
-
-    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
-    await screen.findByText(/playing as/i);
-
-    const whiteTee = fixtureLinks18.teeSets.find((teeSet) => teeSet.name === "white")!;
-    const expected = String(courseHandicapFor(12.4, whiteTee));
-    await waitFor(() => expect((screen.getByLabelText(/strokes you get here/i) as HTMLInputElement).value).toBe(expected));
+    fireEvent.change(field, { target: { value: "26" } });
     expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("renders no index/course-handicap derivation at all, and fetches no record for one", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", indexSource: { kind: "declared", value: 12.4 } } });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(/playing as/i);
+
+    // Every retired vocabulary item, in one gate (spec §9's language rule).
+    expect(screen.queryByLabelText(/strokes you get here/i)).toBeNull();
+    expect(screen.queryByText(/from your index/i)).toBeNull();
+    expect(screen.queryByText(/handicap/i)).toBeNull();
+    expect(screen.queryByText(/index/i)).toBeNull();
   });
 });
 
@@ -436,7 +307,7 @@ describe("CreateRoundPage — identity still loading", () => {
     const submitButton = screen.getByRole("button", { name: /create round/i });
     expect(submitButton.hasAttribute("disabled")).toBe(true);
 
-    fireEvent.change(screen.getByLabelText(/strokes you get here/i), { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "5" } });
     fireEvent.click(submitButton);
 
     expect(mockedCreateRound).not.toHaveBeenCalled();

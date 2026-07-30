@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { gameStrokeAllocation, totalDots } from "./allocation.js";
 import type { FixtureScores } from "./golden/deck.js";
-import { playGoldenRound } from "./golden/deck.js";
+import { playGoldenRound, playGoldenRoundLog } from "./golden/deck.js";
 import { fieldDeck18 } from "./golden/fieldDeck18.js";
 import { fixtureLinks18 } from "./golden/fixtureCourse.js";
+import { reduceRound } from "../round/state.js";
 
 // The M5 field deck: one 18-hole round, fourball match + net skins over the same log.
 // Every number pinned here was hand-verified in the implementation plan (h13
@@ -20,18 +21,25 @@ const thru = (n: number): FixtureScores =>
 
 describe("M5 field deck — 18-hole fourball + skins golden card", () => {
   it("strokes: both games take the difference from the lowest in the field (Bo's 2) — 6/0/13/3", () => {
-    // Derived independently of the engines: the deck's own course handicaps minus the lowest of
-    // them. Every dot on the UI card comes off these numbers.
-    const lowest = Math.min(...players.map((p) => p.courseHandicap));
-    for (const { golferId, courseHandicap } of players) {
-      expect(courseHandicap - lowest).toBe(expected.strokes[golferId]);
-    }
+    // Derived independently of the engines: the deck's own stated normal scores minus the lowest
+    // of them. Every dot on the UI card comes off these numbers.
+    const stated = players.map((p) => (p.basis.kind === "normally-shoots" ? p.basis.overPar : p.basis.strokes));
+    const lowest = Math.min(...stated);
+    players.forEach((player, index) => {
+      expect(stated[index]! - lowest).toBe(expected.strokes[player.golferId]);
+    });
     // And both games allocate exactly that — the same field, so the same dots. No per-kind
-    // convention and no allowance percentage survives to make the two disagree.
+    // convention and no allowance percentage survives to make the two disagree. The ROUND's own
+    // roster resolves to the identical numbers here (one field, one rule), so the fold's derived
+    // `strokes` is what this passes through.
+    const roster = reduceRound(playGoldenRoundLog(fixtureLinks18, players, [fourball, skins], scores, corrections)).participants;
     for (const game of [fourball, skins]) {
-      const allocation = gameStrokeAllocation(game, players, fixtureLinks18);
+      const allocation = gameStrokeAllocation(game, roster, fixtureLinks18);
       for (const { golferId } of players) expect(totalDots(allocation.get(golferId)!)).toBe(expected.strokes[golferId]);
     }
+    // The card's own dots come from the SAME numbers the games do here (spec §2b: the card's
+    // field is the round's present roster, which is exactly both games' field on this deck).
+    for (const entry of roster) expect(entry.strokes).toBe(expected.strokes[entry.golferId]);
   });
 
   it("final card: fourball closes 1 up on the last hole; skins pay 0/5/0/10 with 3 carried out", () => {

@@ -40,8 +40,8 @@ import type {
   RecordScoreResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
-  SetHandicapRequest,
-  SetHandicapResponse,
+  SetBasisRequest,
+  SetBasisResponse,
   ShareLinkResponse,
   StartRoundRequest,
   StartRoundResponse,
@@ -63,7 +63,7 @@ import {
   joinRoundRequestSchema,
   peekCrewInviteRequestSchema,
   recordScoreRequestSchema,
-  setHandicapRequestSchema,
+  setBasisRequestSchema,
   startRoundRequestSchema,
   supersedeCardRequestSchema,
   transferOrganizerRequestSchema,
@@ -91,10 +91,10 @@ export interface UseCases {
   // accounts-only identity spec §4: a participant walks off — appends participant-left for the
   // token's OWN golferId (self-only, no body). "participant"-gated, same tier as the acts above.
   leaveRound: (claims: ParticipantClaims) => Promise<LeaveRoundResponse>;
-  // spec 2026-07-20: mid-round course handicap correction — any participant corrects any
-  // participant (score-for-anyone), the SUBJECT golferId rides the body. "participant"-gated,
-  // same tier as the acts above.
-  setHandicap: (claims: ParticipantClaims, request: SetHandicapRequest) => Promise<SetHandicapResponse>;
+  // spec 2026-07-20 (re-shaped by 2026-07-29): mid-round correction of what a player stated about
+  // themselves — any participant corrects any participant (score-for-anyone), the SUBJECT golferId
+  // rides the body. "participant"-gated, same tier as the acts above.
+  setBasis: (claims: ParticipantClaims, request: SetBasisRequest) => Promise<SetBasisResponse>;
   readEvents: (id: RoundId, sinceSeq: number) => Promise<EventsResponse>;
   peekRound: (code: string) => Promise<PeekRoundResponse>;
   // M9 Task 3 (share): mints (deterministically) this round's own spectator link — participant-
@@ -326,11 +326,11 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
   },
   {
     method: "POST",
-    path: "/rounds/{roundId}/handicap",
-    schema: setHandicapRequestSchema,
+    path: "/rounds/{roundId}/basis",
+    schema: setBasisRequestSchema,
     auth: "participant", // spec 2026-07-20: any participant corrects any participant (score-for-anyone).
-    successStatus: 200, // an act on an existing round (appends participant-handicap-set), not a mint — same 200 spirit as leave/finalize.
-    handler: async (ctx, body) => useCases.setHandicap(ctx.claims!, body as SetHandicapRequest),
+    successStatus: 200, // an act on an existing round (appends participant-basis-set), not a mint — same 200 spirit as leave/finalize.
+    handler: async (ctx, body) => useCases.setBasis(ctx.claims!, body as SetBasisRequest),
   },
   // GET /rounds/peek must be matched BEFORE any /rounds/{roundId}/... template below it —
   // the dispatcher (http/dispatch.ts) walks this array in order and returns the first match,

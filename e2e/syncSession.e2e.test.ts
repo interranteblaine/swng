@@ -12,7 +12,7 @@ import { apiUrl, ensureCourse, loadEndpoints, mintAccountGolfer, post, waitUntil
 // packages/domain/src/scoring/stableford.test.ts. The card and its 10/17 lines are pinned by the domain golden fixture
 // (`packages/domain/src/scoring/stableford.test.ts`) and exercised in-memory by
 // `application/src/rounds/roundSlice.test.ts` and `packages/client/src/session.test.ts`;
-// THIS suite is what first proves them over the wire, offline queueing included. Ann (courseHandicap 8) and Bo (courseHandicap 2),
+// THIS suite is what first proves them over the wire, offline queueing included. Ann (normally shoots +8) and Bo (+2),
 // white tees, one stableford game referencing both. Ann's h4 is a pickup. This suite's whole
 // point is proving that the SAME Ann 10 / Bo 17 numbers survive a real offline outbox drained
 // over the real deployed stack — not deriving them fresh.
@@ -93,13 +93,13 @@ describe("kill-network sync gate: two real createRoundSessions over the deployed
     // Course-cards spec §4: StartRound resolves a REFERENCE now — seed the lineage via the
     // public course API (search-first, create-if-absent), then pass it through.
     const course = await ensureCourse(httpUrl, fixtureLinks.courseName, fixtureLinks, annAccount);
-    const started = await post(rounds(), { course, host: { tee: "white", courseHandicap: 8 } }, startRoundResponseSchema, annAccount.idToken);
+    const started = await post(rounds(), { course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, startRoundResponseSchema, annAccount.idToken);
     roundId = started.roundId;
     annId = started.golferId;
     tokenAnn = started.token;
     expect(annId).toBe(annAccount.golferId); // as-self: the host seat is the account's own golfer
 
-    const joined = await post(rounds("/join"), { code: started.joinCode, tee: "white", courseHandicap: 2 }, joinRoundResponseSchema, boAccount.idToken);
+    const joined = await post(rounds("/join"), { code: started.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, joinRoundResponseSchema, boAccount.idToken);
     boId = joined.golferId;
     tokenBo = joined.token;
     expect(boId).toBe(boAccount.golferId);

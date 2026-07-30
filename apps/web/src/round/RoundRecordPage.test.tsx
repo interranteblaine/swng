@@ -27,8 +27,8 @@ const buildFinalLog = (): RoundEvent[] => {
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   return [
     { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
-    { kind: "participant-joined", participant: { golferId: ANN_ID, name: "Ann", tee: "white", courseHandicap: 8 }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
-    { kind: "participant-joined", participant: { golferId: BO_ID, name: "Bo", tee: "white", courseHandicap: 2 }, authorId: BO_ID, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "participant-joined", participant: { golferId: ANN_ID, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "participant-joined", participant: { golferId: BO_ID, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, authorId: BO_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "score-recorded", golferId: ANN_ID, hole: 1, result: { kind: "strokes", strokes: 4 }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-finalized", authorId: ANN_ID, opId: opId("op-finalize"), hlc: { wallMs: 9_000, counter: 0, deviceId: SERVER_DEVICE } },

@@ -1,13 +1,13 @@
 import { gameStrokeAllocation, totalDots } from "@swng/client";
 import { gameMembers, strokeGrant } from "@swng/domain";
-import type { CourseCard, GameConfig, GolferId, Participant } from "@swng/domain";
+import type { CourseCard, GameConfig, GolferId, RosterEntry } from "@swng/domain";
 
 // A thin delegation to the domain's gameStrokeAllocation (packages/domain/src/scoring/
 // allocation.ts), reached through @swng/client — the one on-device compute seam (this arc's
 // ESLint fence forbids the web importing it straight from @swng/domain). M6 Task 5 deleted this
 // file's own hand-mirrored allocation arithmetic (byte-identical to the domain version, now a
 // single source instead of two to keep in sync).
-export const gameDots = (config: GameConfig, participants: readonly Participant[], card: CourseCard): ReadonlyMap<GolferId, ReadonlyMap<number, number>> =>
+export const gameDots = (config: GameConfig, participants: readonly RosterEntry[], card: CourseCard): ReadonlyMap<GolferId, ReadonlyMap<number, number>> =>
   gameStrokeAllocation(config, participants, card);
 
 // A thin re-export of the domain's totalDots (packages/domain/src/scoring/allocation.ts),
@@ -22,7 +22,7 @@ export { totalDots };
 // Undefined for a GROSS game (spec §9): it allocates nothing by definition, so the all-zero line
 // below would be a false statement about a game that never had strokes to begin with — the
 // treatment line already says so in words.
-export const strokesSummary = (config: GameConfig, participants: readonly Participant[], card: CourseCard): string | undefined => {
+export const strokesSummary = (config: GameConfig, participants: readonly RosterEntry[], card: CourseCard): string | undefined => {
   if ("scoring" in config && config.scoring === "gross") return undefined;
   const dots = gameDots(config, participants, card);
   const nameOf = (id: GolferId): string => participants.find((p) => p.golferId === id)?.name ?? id;

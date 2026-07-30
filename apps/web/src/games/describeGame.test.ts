@@ -30,11 +30,11 @@ const playRound = (
   return { round, states: round.games.map((config) => scoreGame(config, round)) };
 };
 
-const A = golferId("ann"); // courseHandicap 8
-const B = golferId("bo"); // courseHandicap 2
+const A = golferId("ann"); // normally shoots +8
+const B = golferId("bo"); // normally shoots +2
 const twoPlayers: readonly Participant[] = [
-  { golferId: A, name: "Ann", tee: "white", courseHandicap: 8 },
-  { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
+  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
+  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
 ];
 
 describe("describeGame — stroke-play", () => {
@@ -110,8 +110,8 @@ describe("describeGame — singles-match", () => {
   // singlesMatch.test.ts's own roster for these cards: Ann 14 against Bo 2 is a difference of 12,
   // halved on a nine-hole card, so Ann carries the 6 dots those hole-by-hole narratives assume.
   const matchPlayers: readonly Participant[] = [
-    { golferId: A, name: "Ann", tee: "white", courseHandicap: 14 },
-    { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
+    { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 14 } },
+    { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
   ];
 
   it("all square, in-progress: no leader named", () => {

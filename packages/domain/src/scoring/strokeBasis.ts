@@ -40,10 +40,16 @@ export const resolveStrokes = (
 ): ReadonlyMap<GolferId, number> => {
   return new Map(
     bases.map(({ golferId, basis }) => {
-      if (basis.kind === "strokes") return [golferId, basis.strokes];
-      // Clamped at zero — never negative (spec §2b). A departed player better than the surviving
-      // anchor was the anchor while they were there and never received a stroke; and after Task 5
-      // the card renders "●".repeat(dots), which throws RangeError on a negative.
+      // BOTH arms clamp at zero — the invariant is a property of the MODEL (spec §2a: "`strokes`
+      // is bounded at zero and cannot be negative"), not merely of the wire. The request schema's
+      // own `min(0)` stops a negative arriving through the API, but contracts/round.ts's STORED
+      // event arm is deliberately unbounded (Arc A's placement rule: a bound that rejects stored
+      // data bricks a legitimate user), so this function is the only place the invariant can
+      // actually hold for every caller. Load-bearing, not defensive: the card renders dots as
+      // "●".repeat(strokes), and repeat() throws RangeError on a negative.
+      if (basis.kind === "strokes") return [golferId, Math.max(0, basis.strokes)];
+      // A difference below zero is zero too (spec §2b). A departed player better than the
+      // surviving anchor was the anchor while they were there and never received a stroke.
       const difference = anchor === undefined ? 0 : Math.max(0, basis.overPar - anchor);
       return [golferId, holeCount === 9 ? roundHalfUp(difference / 2) : difference];
     }),

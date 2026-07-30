@@ -17,10 +17,10 @@ const cal = golferId("cal");
 const dee = golferId("dee");
 
 const players: readonly Participant[] = [
-  { golferId: ann, name: "Ann", tee: "white", courseHandicap: 8 },
-  { golferId: bo, name: "Bo", tee: "white", courseHandicap: 2 },
-  { golferId: cal, name: "Cal", tee: "white", courseHandicap: 15 },
-  { golferId: dee, name: "Dee", tee: "white", courseHandicap: 5 },
+  { golferId: ann, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
+  { golferId: bo, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+  { golferId: cal, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 15 } },
+  { golferId: dee, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 5 } },
 ];
 
 const fourball: Extract<GameConfig, { kind: "fourball-match" }> = {

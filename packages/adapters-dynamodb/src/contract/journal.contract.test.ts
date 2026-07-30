@@ -55,7 +55,8 @@ const makeFinalizeEvent = (): RoundEvent => ({
 const buildArchive = (id: RoundId, finalizedAtMs: number): RoundArchive => ({
   roundId: id,
   card: fixtureLinks,
-  participants: [{ golferId: golfer, name: "Golfer", tee: "white", courseHandicap: 8 }],
+  // A lone seat is the field's own anchor, so the fold derives 0 strokes for it (spec 2026-07-29 §2b).
+  participants: [{ golferId: golfer, name: "Golfer", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 }],
   games: [],
   cells: {},
   events: [{ kind: "round-finalized", opId: opId(`archive-final-${id}`), hlc: { wallMs: finalizedAtMs, counter: 0, deviceId: deviceId("server") }, authorId: golfer }],

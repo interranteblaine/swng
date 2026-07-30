@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deviceId, gameId, golferId, opId } from "../ids.js";
 import type { RoundEvent } from "../round/events.js";
+import type { Participant } from "../round/participant.js";
 import { reduceRound } from "../round/state.js";
 import { scoreGame } from "./game.js";
 import { playGoldenRound, playGoldenRoundLog } from "./golden/deck.js";
@@ -13,11 +14,11 @@ const C = golferId("cal"); const D = golferId("dee");
 // model's own terms, and without the 90% discount, which is deleted with the rest of the allowance
 // table. Differences from Bo's 2 are 10/0/18/6, halved on a nine-hole card: Ann 5, Bo 0, Cal 9,
 // Dee 3 dots. Drop the halving or the relative rule and every net below moves.
-const players = [
-  { golferId: A, name: "Ann", tee: "white", courseHandicap: 12 },
-  { golferId: B, name: "Bo", tee: "white", courseHandicap: 2 },
-  { golferId: C, name: "Cal", tee: "white", courseHandicap: 20 },
-  { golferId: D, name: "Dee", tee: "white", courseHandicap: 8 },
+const players: readonly Participant[] = [
+  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 12 } },
+  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+  { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 20 } },
+  { golferId: D, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
 ];
 const game = { kind: "fourball-match", id: gameId("f1"), a: [A, B], b: [C, D] } as const;
 

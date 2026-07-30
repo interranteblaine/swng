@@ -46,6 +46,13 @@ describe("resolveStrokes", () => {
     expect(resolve([takes("blaine", 9)], 9).get(g("blaine"))).toBe(9);
   });
 
+  it("clamps a negative strokes ASSERTION to zero", () => {
+    // Spec §2a states the bound as a property of the model, not of the wire: the request schema
+    // bounds `strokes` at min(0), but the STORED event arm is deliberately unbounded (Arc A's
+    // placement rule), so this function is the only place the invariant holds for every caller.
+    expect(resolve([takes("odd", -3), shoots("ravi", 10)], 18).get(g("odd"))).toBe(0);
+  });
+
   it("clamps a below-zero difference to zero", () => {
     // The departed-player path (spec §2b): reduceRound anchors on the PRESENT field, so a
     // departed player better than everyone still there would otherwise resolve negative. After

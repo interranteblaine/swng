@@ -44,15 +44,15 @@ const scoreEvent = fc
 const participantJoinedEvent = fc
   .record({
     golfer: fc.constantFrom(...golfers),
-    courseHandicap: fc.integer({ min: -5, max: 36 }), // varying — exercises LWW correction on re-join, not just first-write
+    overPar: fc.integer({ min: -5, max: 36 }), // varying — exercises LWW correction on re-join, not just first-write
     wallMs: fc.integer({ min: 1, max: 1_000 }),
     counter: fc.integer({ min: 0, max: 3 }),
     device: fc.constantFrom("d1", "d2", "d3"),
     op: fc.integer({ min: 0, max: 500 }),
   })
-  .map(({ golfer, courseHandicap, wallMs, counter, device, op }): RoundEvent => ({
+  .map(({ golfer, overPar, wallMs, counter, device, op }): RoundEvent => ({
     kind: "participant-joined",
-    participant: { golferId: golfer, name: golfer, tee: "white", courseHandicap },
+    participant: { golferId: golfer, name: golfer, tee: "white", basis: { kind: "normally-shoots", overPar } },
     opId: opId(`join-${op}`), hlc: { wallMs, counter, deviceId: deviceId(device) }, authorId: golfer,
   }));
 
@@ -89,32 +89,33 @@ const gameTerminatedEvent = fc
     opId: opId(`terminate-${op}`), hlc: { wallMs, counter, deviceId: deviceId(device) }, authorId: golfers[0]!,
   }));
 
-// A handicap correction (spec 2026-07-20): drawn from the same golfer pool as
-// participantJoinedEvent, seated or not — a set for a golfer this particular shuffle never
-// joins is exactly the "no folded join" case state.ts's fold must tolerate harmlessly. Small
-// ints including negatives cover a plus handicap (state.ts applies it verbatim, no clamping).
-const participantHandicapSetEvent = fc
+// A basis correction (spec 2026-07-20, re-shaped by 2026-07-29): drawn from the same golfer pool
+// as participantJoinedEvent, seated or not — a set for a golfer this particular shuffle never
+// joins is exactly the "no folded join" case state.ts's fold must tolerate harmlessly. Small ints
+// including negatives cover a golfer who shoots under par (state.ts stores the assertion
+// verbatim; the clamp lives in resolveStrokes, on the DERIVED number).
+const participantBasisSetEvent = fc
   .record({
     golfer: fc.constantFrom(...golfers),
-    courseHandicap: fc.integer({ min: -5, max: 36 }),
+    overPar: fc.integer({ min: -5, max: 36 }),
     wallMs: fc.integer({ min: 1, max: 1_000 }),
     counter: fc.integer({ min: 0, max: 3 }),
     device: fc.constantFrom("d1", "d2", "d3"),
     op: fc.integer({ min: 0, max: 500 }),
   })
-  .map(({ golfer, courseHandicap, wallMs, counter, device, op }): RoundEvent => ({
-    kind: "participant-handicap-set",
+  .map(({ golfer, overPar, wallMs, counter, device, op }): RoundEvent => ({
+    kind: "participant-basis-set",
     golferId: golfer,
-    courseHandicap,
+    basis: { kind: "normally-shoots", overPar },
     opId: opId(`set-${op}`), hlc: { wallMs, counter, deviceId: deviceId(device) }, authorId: golfer,
   }));
 
 // The shuffled pool every convergence property draws from — mixing all five
 // event kinds means a shuffle also reorders roster joins, game adds,
-// terminations, and handicap corrections relative to scores, exercising
+// terminations, and basis corrections relative to scores, exercising
 // firstHlc ordering (state.ts #4/#5) and the terminated-set union alongside
 // the cell LWW logic scoreEvent alone already covered.
-const anyEvent = fc.oneof(scoreEvent, participantJoinedEvent, gameAddedEvent, gameTerminatedEvent, participantHandicapSetEvent);
+const anyEvent = fc.oneof(scoreEvent, participantJoinedEvent, gameAddedEvent, gameTerminatedEvent, participantBasisSetEvent);
 
 describe("reduceRound convergence", () => {
   it("is order-independent: any shuffle of the same events folds to the same state", () => {

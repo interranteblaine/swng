@@ -36,7 +36,7 @@ export { terminateGame } from "./rounds/terminateGame.js";
 export { leaveRound } from "./rounds/leaveRound.js";
 // spec 2026-07-20: mid-round course handicap correction — any participant corrects any
 // participant, shaped like leaveRound's own participant-append.
-export { setHandicap } from "./rounds/setHandicap.js";
+export { setBasis } from "./rounds/setBasis.js";
 export { readEvents } from "./rounds/readEvents.js";
 export { peekRound } from "./rounds/peekRound.js";
 export { getShareLink } from "./rounds/getShareLink.js";

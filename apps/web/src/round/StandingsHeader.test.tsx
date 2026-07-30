@@ -1,14 +1,14 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
-import type { GameState, Participant, RoundState } from "@swng/domain";
+import type { GameState, RosterEntry, RoundState } from "@swng/domain";
 import { StandingsHeader } from "./StandingsHeader";
 
 const ANN = golferId("ann");
 const BO = golferId("bo");
-const participants: readonly Participant[] = [
-  { golferId: ANN, name: "Ann", tee: "white", courseHandicap: 8 },
-  { golferId: BO, name: "Bo", tee: "white", courseHandicap: 2 },
+const participants: readonly RosterEntry[] = [
+  { golferId: ANN, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 8 }, strokes: 8 },
+  { golferId: BO, name: "Bo", tee: "white", basis: { kind: "strokes", strokes: 2 }, strokes: 2 },
 ];
 
 const strokePlayConfig = { kind: "stroke-play" as const, id: gameId("g1"), scoring: "gross" as const, players: [ANN, BO] };

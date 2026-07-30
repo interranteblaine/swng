@@ -76,7 +76,7 @@ export function AddCoursePage() {
   const parsedSlope = Number.parseInt(slope, 10);
 
   // Form-completeness gating only (every existing page's own "is this even parseable" guard,
-  // e.g. CreateRoundPage's courseHandicap check) — NOT a re-implementation of domain's bounds/
+  // e.g. CreateRoundPage's own stated-number check) — NOT a re-implementation of domain's bounds/
   // permutation rules (rating 30..90, slope 55..155, SI a permutation, ...). Those live once,
   // in course.ts, and reach the golfer via the server's own coded rejection below. rating/slope
   // no longer gate submission (blank = unrated); a filled one just can't be un-parseable.

@@ -421,7 +421,7 @@ describe("getMyRecord", () => {
       line("r1", 1_000, { ags: 110, differential: 20.0 }),
       line("r2", 2_000, { ags: 111, differential: 21.0 }),
       line("r3", 3_000, { ags: 75, differential: 3.0 }), // one of the two lowest rated differentials
-      { ...line("r4", 4_000, { ags: 97 }), courseName: "Nine Pines (unrated)", tee: "no-card", courseHandicap: 20 }, // unrated — no differential
+      { ...line("r4", 4_000, { ags: 97 }), courseName: "Nine Pines (unrated)", tee: "no-card", basis: { kind: "normally-shoots", overPar: 20 } }, // unrated — no differential
       line("r5", 5_000, { ags: 112, differential: 22.0 }),
       line("r6", 6_000, { ags: 76, differential: 3.05 }), // the OTHER lowest — raw, non-tenth: pins the wire rounding below
       line("r7", 7_000, { ags: 113, differential: 23.0 }),

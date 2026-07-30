@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { fixtureLinks, fixtureLinks18, gameId, golferId } from "@swng/domain";
-import type { GameConfig, Participant } from "@swng/domain";
+import { anchorOf, fixtureLinks, fixtureLinks18, gameId, golferId, resolveStrokes } from "@swng/domain";
+import type { CourseCard, GameConfig, Participant, RosterEntry } from "@swng/domain";
 import { gameDots, strokesSummary, totalDots } from "./dots";
 
 // fixtureLinks (packages/domain/src/scoring/golden/fixtureCourse.ts) carries one 9-hole tee
@@ -16,13 +16,24 @@ const BO = golferId("bo");
 const CAL = golferId("cal");
 const DEE = golferId("dee");
 
-const participant = (id: ReturnType<typeof golferId>, name: string, courseHandicap: number): Participant => ({ golferId: id, name, tee: TEE, courseHandicap });
+// What a player states about themselves (spec 2026-07-29 §2a) — the only input gameDots reads.
+const participant = (id: ReturnType<typeof golferId>, name: string, overPar: number): Participant => ({ golferId: id, name, tee: TEE, basis: { kind: "normally-shoots", overPar } });
+
+// A folded roster. gameDots resolves each GAME's own field and never reads `.strokes`, but a
+// fixture that hand-stated one would be a roster reduceRound could not produce — so this derives
+// it with the domain's own rule over the WHOLE roster, exactly as the fold does. (A test may
+// compute its own oracles straight from @swng/domain; the compute fence covers product code.)
+const roster = (entries: readonly Participant[], card: CourseCard = CARD): readonly RosterEntry[] => {
+  const bases = entries.map(({ golferId: id, basis }) => ({ golferId: id, basis }));
+  const strokes = resolveStrokes(bases, card.teeSets[0]!.holes.length, anchorOf(bases));
+  return entries.map((entry) => ({ ...entry, strokes: strokes.get(entry.golferId)! }));
+};
 
 describe("gameDots", () => {
   // Ann 10, Bo 4 — a difference of 6, halved on this nine-hole card, so Ann gets 3 dots and Bo,
   // the lowest in the field, plays off scratch. The SAME numbers on every kind: no per-kind
   // convention and no allowance percentage survives to make two games disagree (spec §3).
-  const annAndBo = [participant(ANN, "Ann", 10), participant(BO, "Bo", 4)];
+  const annAndBo = roster([participant(ANN, "Ann", 10), participant(BO, "Bo", 4)]);
   const twoPlayerGames: readonly GameConfig[] = [
     { kind: "stableford", id: gameId("g"), players: [ANN, BO] },
     { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] },
@@ -40,7 +51,7 @@ describe("gameDots", () => {
 
   it("the same field on an eighteen-hole card gets the whole difference, unhalved", () => {
     for (const config of twoPlayerGames) {
-      const dots = gameDots(config, annAndBo, fixtureLinks18);
+      const dots = gameDots(config, roster(annAndBo, fixtureLinks18), fixtureLinks18);
       expect(totalDots(dots.get(ANN)!)).toBe(6);
       expect(totalDots(dots.get(BO)!)).toBe(0);
     }
@@ -52,7 +63,7 @@ describe("gameDots", () => {
   });
 
   it("singles-match: the relief flips when b is the higher number", () => {
-    const participants = [participant(ANN, "Ann", 4), participant(BO, "Bo", 10)];
+    const participants = roster([participant(ANN, "Ann", 4), participant(BO, "Bo", 10)]);
     const config: GameConfig = { kind: "singles-match", id: gameId("g"), a: ANN, b: BO };
 
     const dots = gameDots(config, participants, CARD);
@@ -62,7 +73,7 @@ describe("gameDots", () => {
   });
 
   it("fourball-match: all four relative to the lowest of the four", () => {
-    const participants = [participant(ANN, "Ann", 10), participant(BO, "Bo", 6), participant(CAL, "Cal", 14), participant(DEE, "Dee", 2)];
+    const participants = roster([participant(ANN, "Ann", 10), participant(BO, "Bo", 6), participant(CAL, "Cal", 14), participant(DEE, "Dee", 2)]);
     const config: GameConfig = { kind: "fourball-match", id: gameId("g"), a: [ANN, BO], b: [CAL, DEE] };
 
     const dots = gameDots(config, participants, CARD);
@@ -77,7 +88,7 @@ describe("gameDots", () => {
   it("the field is the GAME's members, not the round's roster", () => {
     // Dee at 2 is the lowest in the ROUND, but she is not in this game, so Bo anchors it: Cal's
     // 14 − 4 = 10 halves to 5 dots, not the 6 he would get off Dee.
-    const participants = [participant(ANN, "Ann", 10), participant(BO, "Bo", 4), participant(CAL, "Cal", 14), participant(DEE, "Dee", 2)];
+    const participants = roster([participant(ANN, "Ann", 10), participant(BO, "Bo", 4), participant(CAL, "Cal", 14), participant(DEE, "Dee", 2)]);
     const config: GameConfig = { kind: "stableford", id: gameId("g"), players: [BO, CAL] };
 
     const dots = gameDots(config, participants, CARD);
@@ -96,14 +107,14 @@ describe("strokesSummary", () => {
     // Ann anchors the field at -1, so she gets nothing and Bo's 3 − (−1) = 4 halves to 2 dots.
     // Nobody can go BELOW the anchor, so `strokeGrant`'s give-back branch is now unreachable
     // through gameDots — Task 5 deletes it along with the whole plus-handicap convention.
-    const participants = [participant(ANN, "Ann", -1), participant(BO, "Bo", 3)];
+    const participants = roster([participant(ANN, "Ann", -1), participant(BO, "Bo", 3)]);
     const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] };
 
     expect(strokesSummary(config, participants, CARD)).toBe("Bo 2 dots");
   });
 
   it("reads 'everyone in this game plays level' when every member's total is zero", () => {
-    const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 0)];
+    const participants = roster([participant(ANN, "Ann", 0), participant(BO, "Bo", 0)]);
     const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] };
 
     expect(strokesSummary(config, participants, CARD)).toBe("No strokes — everyone in this game plays level.");
@@ -113,14 +124,14 @@ describe("strokesSummary", () => {
   // detect: under the relative rule an all-zero allocation means the members are EQUAL, at whatever
   // level — two golfers who both play to 12 receive nothing from each other and are not scratch.
   it("says the same thing for two EQUAL non-zero players — nobody is off 0 here", () => {
-    const participants = [participant(ANN, "Ann", 12), participant(BO, "Bo", 12)];
+    const participants = roster([participant(ANN, "Ann", 12), participant(BO, "Bo", 12)]);
     const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] };
 
     expect(strokesSummary(config, participants, CARD)).toBe("No strokes — everyone in this game plays level.");
   });
 
   it("renders nothing at all for a gross game — it has no strokes by definition, not zero of them", () => {
-    const participants = [participant(ANN, "Ann", 10), participant(BO, "Bo", 4)];
+    const participants = roster([participant(ANN, "Ann", 10), participant(BO, "Bo", 4)]);
     const gross: GameConfig = { kind: "skins", id: gameId("g"), scoring: "gross", players: [ANN, BO] };
 
     expect(strokesSummary(gross, participants, CARD)).toBeUndefined();

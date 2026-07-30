@@ -74,7 +74,7 @@ const playRecordRound = async (
   label: string,
   bogeys: number,
 ): Promise<RoundId> => {
-  const started = await startRoundDirect(httpUrl, account, { course, tee: "white", courseHandicap: 8 });
+  const started = await startRoundDirect(httpUrl, account, { course, tee: "white", basis: { kind: "normally-shoots", overPar: 8 } });
   const ops = createScoreOps(`record-${label}`);
   for (const [i, strokes] of holeScoresFor(bogeys).entries()) {
     await recordScoreDirect(httpUrl, started.roundId, started.token, { golferId: account.golfer.golferId, hole: i + 1, strokes }, ops);

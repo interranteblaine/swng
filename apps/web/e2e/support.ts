@@ -62,7 +62,7 @@ import type {
   UpdateMeRequest,
 } from "@swng/contracts";
 import { deviceId as toDeviceId, fieldDeck18, fixtureLinks18, opId as toOpId, playGoldenRoundLog, reduceRound, scoreGame } from "@swng/domain";
-import type { CourseCard, CourseId, CrewId, DeviceId, FixtureScores, GolferId, Hlc, OpId, RoundId, RoundState } from "@swng/domain";
+import type { CourseCard, CourseId, CrewId, DeviceId, FixtureScores, GolferId, Hlc, OpId, RoundId, RoundState, StrokeBasis } from "@swng/domain";
 import type { AuthTokens } from "../src/auth/tokenStore.js";
 import { describeGame } from "../src/games/describeGame.js";
 
@@ -193,12 +193,12 @@ export const getCourseDirect = async (httpUrl: string, id: string): Promise<{ co
 export const joinRoundDirect = async (
   httpUrl: string,
   account: AccountGolfer,
-  input: { readonly code: string; readonly tee: string; readonly courseHandicap: number },
+  input: { readonly code: string; readonly tee: string; readonly basis: StrokeBasis },
 ): Promise<JoinRoundResponse> => {
   const body = parse(joinRoundRequestSchema, {
     code: input.code,
     tee: input.tee,
-    courseHandicap: input.courseHandicap,
+    basis: input.basis,
   });
   const response = await fetch(`${httpUrl}/rounds/join`, {
     method: "POST",
@@ -229,11 +229,11 @@ export const joinRoundDirect = async (
 export const startRoundDirect = async (
   httpUrl: string,
   account: AccountGolfer,
-  input: { readonly course: { readonly courseId: CourseId; readonly cardId: string }; readonly tee: string; readonly courseHandicap: number },
+  input: { readonly course: { readonly courseId: CourseId; readonly cardId: string }; readonly tee: string; readonly basis: StrokeBasis },
 ): Promise<StartRoundResponse> => {
   const body = parse(startRoundRequestSchema, {
     course: input.course,
-    host: { tee: input.tee, courseHandicap: input.courseHandicap },
+    host: { tee: input.tee, basis: input.basis },
   });
   const response = await fetch(`${httpUrl}/rounds`, {
     method: "POST",

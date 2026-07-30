@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { gameId, gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, golferId, strokesNote } from "@swng/domain";
-import type { CourseCard, GameConfig, GolferId, Participant } from "@swng/domain";
+import type { CourseCard, GameConfig, GolferId, RosterEntry } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";
 import { btnPrimary, cardBox, inputBox } from "../ui/classes";
@@ -15,7 +15,7 @@ const KINDS: readonly Kind[] = ["stroke-play", "singles-match", "stableford", "f
 const PREVIEW_ID = gameId("preview");
 
 export interface AddGameFormProps {
-  readonly participants: readonly Participant[];
+  readonly participants: readonly RosterEntry[];
   readonly card: CourseCard;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
 }
@@ -97,7 +97,7 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
     }
   };
 
-  const playerOption = (p: Participant) => (
+  const playerOption = (p: RosterEntry) => (
     <option key={p.golferId} value={p.golferId}>
       {p.name}
     </option>

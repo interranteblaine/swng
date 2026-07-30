@@ -62,7 +62,7 @@ export const startRound =
     const id = roundId(deps.ids.newId());
     const joinCode = deps.ids.newJoinCode();
 
-    const hostParticipant: Participant = { golferId: host, name: creator.name, tee: command.host.tee, courseHandicap: command.host.courseHandicap };
+    const hostParticipant: Participant = { golferId: host, name: creator.name, tee: command.host.tee, basis: command.host.basis };
 
     // One hlc source for the whole batch: round-created, the creator's participant-joined, and
     // round-started all stamp from the same server clock in this single call, so without a

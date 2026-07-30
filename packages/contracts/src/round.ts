@@ -1,11 +1,11 @@
 import { z } from "zod";
-import type { CourseCard, GameConfig, GameResult, HoleResult, Participant, RoundEvent } from "@swng/domain";
+import type { CourseCard, GameConfig, GameResult, HoleResult, Participant, RoundEvent, StrokeBasis } from "@swng/domain";
 import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema, teeIdSchema } from "./ids.js";
 
 // Wire mirrors of domain types. These stay structural (loose numeric bounds where the
 // domain type itself doesn't declare one) — the source of truth for "is this score
 // legal" is domain/M6's course-data validation, not the transport layer; the request
-// schemas in commands.ts own the stricter boundary checks (courseHandicap int, hole >= 1, …).
+// schemas in commands.ts own the stricter boundary checks (basis bounds, hole >= 1, …).
 export const holeResultSchema: z.ZodType<HoleResult> = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("strokes"), strokes: z.number() }),
   z.object({ kind: z.literal("picked-up") }),
@@ -67,11 +67,27 @@ export const courseCardSchema: z.ZodType<CourseCard> = z.object({
   teeSets: z.array(teeSetSchema).min(1).readonly(),
 });
 
+// What a player ASSERTED about their game (spec 2026-07-29 §2a). This is the STORED twin: no
+// bounds at all, following Arc A's placement rule — it backs roundEventSchema's participant-joined
+// and participant-basis-set arms, which are read/fold paths (the client parses every pulled event
+// from seq 0), and a bound that rejected an already-stored value would brick a legitimate round.
+// The bounded request copy is commands.ts's `strokeBasisInputSchema`, which is also where the
+// `strokes` arm's `min(0)` invariant reaches the wire. `strokes` is unbounded here on purpose,
+// including below zero: the model's own clamp lives in domain's resolveStrokes, so a stored
+// negative resolves to 0 rather than making the round unreadable.
+export const strokeBasisSchema: z.ZodType<StrokeBasis> = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("normally-shoots"), overPar: z.number() }),
+  z.object({ kind: z.literal("strokes"), strokes: z.number() }),
+]);
+
+// Mirrors domain's `Participant` — what a join event carries. NOT `RosterEntry`: the fold-derived
+// `strokes` is never on the wire (spec §2b — no client asserts it and no request accepts it); a
+// reader that needs it folds the log itself.
 export const participantSchema: z.ZodType<Participant> = z.object({
   golferId: golferIdSchema,
   name: z.string(),
   tee: z.string(),
-  courseHandicap: z.number(),
+  basis: strokeBasisSchema,
 });
 
 // The per-kind fields shared by GameConfig (below) and GameConfigInput (the id-less,
@@ -196,12 +212,17 @@ export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
   // accounts-only identity spec §4: a participant walks off. Additive/append-only, like every
   // arm above. `golferId` is the SUBJECT (who left); `authorId` (envelope) is who recorded it.
   z.object({ ...envelope, kind: z.literal("participant-left"), golferId: golferIdSchema }),
-  // Mid-round handicap correction (spec 2026-07-20): additive/append-only, like every arm
-  // above. Carries ONLY the number — structurally cannot rewrite a name or tee. `golferId` is
-  // the SUBJECT; `authorId` (envelope) is who recorded it. An OLD deployed bundle that pulls a
-  // log containing this kind fails the union parse until refresh — the accepted stale-bundle
-  // window (cleared-score precedent), open only once someone in the round used the new editor.
-  z.object({ ...envelope, kind: z.literal("participant-handicap-set"), golferId: golferIdSchema, courseHandicap: z.number().int() }),
+  // Mid-round correction of what a player stated (spec 2026-07-20, re-shaped by 2026-07-29 §2a).
+  // Carries ONLY the assertion — structurally cannot rewrite a name or tee. `golferId` is the
+  // SUBJECT; `authorId` (envelope) is who recorded it.
+  //
+  // NOT additive, unlike every arm above: this arm was `participant-handicap-set` with an integer
+  // `courseHandicap`, so an ALREADY-STORED event of that shape no longer parses here at all —
+  // see domain's events.ts for the full record of why that is accepted (beta's round data is
+  // wiped at this arc's close-out and a stored integer is semantically ambiguous under the
+  // relative model, so there is nothing honest to migrate) and why the deploy must be
+  // LAMBDA-FIRST.
+  z.object({ ...envelope, kind: z.literal("participant-basis-set"), golferId: golferIdSchema, basis: strokeBasisSchema }),
 ]);
 export const roundEventSchema: z.ZodType<RoundEvent> = roundEventSchemaImpl;
 
@@ -266,13 +287,13 @@ export const leaveRoundResponseSchema: z.ZodType<LeaveRoundResponse> = z.object(
   events: z.array(roundEventSchema).readonly(),
 });
 
-// POST /rounds/{roundId}/handicap: response mirrors leaveRound's append idiom — `events`
-// carries exactly what THIS call appended (the one participant-handicap-set), seq-stamped.
-export interface SetHandicapResponse {
+// POST /rounds/{roundId}/basis: response mirrors leaveRound's append idiom — `events` carries
+// exactly what THIS call appended (the one participant-basis-set), seq-stamped.
+export interface SetBasisResponse {
   readonly events: readonly RoundEvent[];
 }
 
-export const setHandicapResponseSchema: z.ZodType<SetHandicapResponse> = z.object({
+export const setBasisResponseSchema: z.ZodType<SetBasisResponse> = z.object({
   events: z.array(roundEventSchema).readonly(),
 });
 

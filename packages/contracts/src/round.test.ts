@@ -73,10 +73,22 @@ describe("roundEventSchema", () => {
     expect(roundTripped).toEqual(event);
   });
 
-  it("parses participant-handicap-set (incl. a plus-handicap negative value)", () => {
+  it("parses participant-basis-set (incl. an under-par normal score)", () => {
     const event = {
       opId: "op-1", hlc: { wallMs: 5, counter: 0, deviceId: "d1" }, authorId: "g-author",
-      kind: "participant-handicap-set", golferId: "g-subject", courseHandicap: -2,
+      kind: "participant-basis-set", golferId: "g-subject", basis: { kind: "normally-shoots", overPar: -2 },
+    };
+    expect(roundEventSchema.parse(event)).toEqual(event);
+  });
+
+  // The STORED twin is deliberately unbounded (round.ts's own comment): the request copy in
+  // commands.ts bounds `strokes` at min(0), but a stored negative must still PARSE — the model's
+  // clamp (domain's resolveStrokes) turns it into 0, whereas a schema rejection would make the
+  // whole round unreadable forever.
+  it("parses a stored strokes basis without applying the request bound", () => {
+    const event = {
+      opId: "op-2", hlc: { wallMs: 6, counter: 0, deviceId: "d1" }, authorId: "g-author",
+      kind: "participant-basis-set", golferId: "g-subject", basis: { kind: "strokes", strokes: -3 },
     };
     expect(roundEventSchema.parse(event)).toEqual(event);
   });

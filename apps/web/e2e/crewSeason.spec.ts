@@ -233,11 +233,11 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // because they ARE the accounts' own ids (asserted per join below) — season-long
     // continuity is just identity now, not a reused ghost mint.
     for (let roundNumber = 1; roundNumber <= SEASON_ROUNDS; roundNumber += 1) {
-      const started = await startRoundDirect(httpUrl, al, { course, tee: "member", courseHandicap: 0 });
+      const started = await startRoundDirect(httpUrl, al, { course, tee: "member", basis: { kind: "normally-shoots", overPar: 0 } });
       expect(started.golferId).toBe(ids.al); // as-self: the host seat is Al's account golfer, never a fresh id
 
       for (const account of [bo, cy, dee]) {
-        const joined = await joinRoundDirect(httpUrl, account, { code: started.joinCode, tee: "member", courseHandicap: 0 });
+        const joined = await joinRoundDirect(httpUrl, account, { code: started.joinCode, tee: "member", basis: { kind: "normally-shoots", overPar: 0 } });
         expect(joined.golferId).toBe(account.golfer.golferId); // self-join: the seat is the joiner's own account golfer
       }
 

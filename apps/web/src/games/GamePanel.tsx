@@ -62,10 +62,10 @@ export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanel
   const terminated = state.terminatedGameIds.has(game.id);
 
   // spec 2026-07-19 §2c: the treatment line states the strokes convention in force, up front. ONE
-  // function covers every kind now, gross included (this arc's spec §3) — the old
-  // allowancePhrase/strokePlayTreatment split existed only to keep the percentage off the gross
-  // line, and there is no percentage left.
-  const treatment = config && gameTreatment(config);
+  // function covers every kind now, gross included. Participants are passed through so singles-
+  // match's own arm (spec 2026-07-30 §3) can name who receives and how many — the other four kinds
+  // ignore the argument entirely (their line is fixed by kind alone).
+  const treatment = config && gameTreatment(config, state.participants);
 
   // strokesSummary renders nothing for a gross game (dots.ts) — gross never allocates a single
   // dot, so there is nothing to summarize.

@@ -75,7 +75,7 @@ describe("strokes preview", () => {
     await user.click(screen.getByRole("radio", { name: "Skins" }));
     await user.click(screen.getByRole("checkbox", { name: "Pat" }));
     await user.click(screen.getByRole("checkbox", { name: "Sam" }));
-    expect(screen.getByText("Net — everyone plays off the lowest in this game")).toBeTruthy();
+    expect(screen.getByText("Net — uses the strokes on the card")).toBeTruthy();
     // Skins is a MEDAL kind, so each member takes their own roster number: Pat's 3 → "Pat 3 dots";
     // Sam is on 0, so he receives nothing and is omitted from the line.
     expect(screen.getByText(/Pat 3 dots/)).toBeTruthy();
@@ -84,13 +84,13 @@ describe("strokes preview", () => {
     expect(screen.queryByText(/plays off scratch/)).toBeNull(); // the retired handicap-era register, pinned absent
   });
 
-  it("match play explains the difference rule", async () => {
+  it("match play names who receives and how many, from the actual pairing — Pat's 3 against Alex's 1", async () => {
     const user = userEvent.setup();
     render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
     await user.click(screen.getByRole("radio", { name: "Match play" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Player 1" }), "Pat");
     await user.selectOptions(screen.getByRole("combobox", { name: "Player 2" }), "Alex");
-    expect(screen.getByText("Strokes are the difference between you two")).toBeTruthy();
+    expect(screen.getByText("Played off the difference — Pat gets 2")).toBeTruthy();
     expect(screen.getByText("Only the higher number gets strokes — the lower gets none.")).toBeTruthy();
   });
 
@@ -111,7 +111,7 @@ describe("strokes preview", () => {
     expect(document.body.textContent).not.toMatch(/handicap|%/);
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "net");
-    expect(screen.getByText("Net — everyone plays off the lowest in this game")).toBeTruthy();
+    expect(screen.getByText("Net — uses the strokes on the card")).toBeTruthy();
     expect(screen.queryByText("Gross — raw scores, no strokes")).toBeNull();
   });
 
@@ -140,7 +140,7 @@ describe("strokes preview", () => {
     await user.selectOptions(within(team1).getByRole("combobox", { name: "Second player" }), "Alex");
     await user.selectOptions(within(team2).getByRole("combobox", { name: "First player" }), "Sam");
     await user.selectOptions(within(team2).getByRole("combobox", { name: "Second player" }), "Dana");
-    expect(screen.getByText("Everyone plays off the lowest of the four")).toBeTruthy();
+    expect(screen.getByText("Played off the difference — everyone off the lowest of the four")).toBeTruthy();
     expect(screen.getByText("Only the three higher numbers get strokes — the lowest gets none.")).toBeTruthy();
   });
 });

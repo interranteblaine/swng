@@ -181,7 +181,7 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
       {previewConfig && (
         <div className={`${cardBox} flex flex-col gap-1 p-3`}>
           <span className="font-semibold text-forest">Strokes</span>
-          <span className="text-sm text-fairway">{gameTreatment(previewConfig)}</span>
+          <span className="text-sm text-fairway">{gameTreatment(previewConfig, participants)}</span>
           {preview && <span className="text-sm text-forest">{preview}</span>}
           {note && <span className="text-sm text-fairway">{note}</span>}
         </div>

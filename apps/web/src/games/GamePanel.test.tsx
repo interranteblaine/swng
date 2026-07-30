@@ -389,13 +389,14 @@ describe("GamePanel — the link sweep (every visible name links to /golfers/:go
   });
 });
 
-// spec 2026-07-19 §2c: the panel header states the handicap treatment in words, up front —
+// spec 2026-07-19 §2c: the panel header states the strokes treatment in words, up front —
 // title, then the treatment line, then the strokes line, then a per-kind note — and the rules
 // blurb (picker-only teaching copy) never repeats here.
 describe("GamePanel — header (spec §2c)", () => {
   const singlesFixture = (): { config: GameConfig; game: GameState; state: RoundState } => {
-    // Both at course handicap 0 — pins the all-zero strokes copy in the same fixture that
-    // proves header ORDER, since strokesSummary's exact dot count needs no computation here.
+    // Both at 0 strokes — pins the all-zero/level copy in the same fixture that proves header
+    // ORDER, since neither strokesSummary's dot count nor gameTreatment's own singles arm needs
+    // any real computation here (0 vs 0 is a tie either way).
     const participants: readonly RosterEntry[] = [
       { golferId: PAT, name: "Pat", tee: "white", strokes: 0 },
       { golferId: ALEX, name: "Alex", tee: "white", strokes: 0 },
@@ -429,7 +430,7 @@ describe("GamePanel — header (spec §2c)", () => {
     const region = screen.getByRole("region", { name: "Match play standings" });
     const text = region.textContent ?? "";
     const titleAt = text.indexOf("Match play");
-    const treatmentAt = text.indexOf("Strokes are the difference between you two");
+    const treatmentAt = text.indexOf("Played off the difference — level, nobody receives");
     const strokesAt = text.indexOf("No strokes — everyone in this game plays level.");
     const noteAt = text.indexOf("Only the higher number gets strokes — the lower gets none.");
 
@@ -450,7 +451,7 @@ describe("GamePanel — header (spec §2c)", () => {
 
     render(<GamePanel game={game} state={state} />);
 
-    expect(screen.getByText("Net — everyone plays off the lowest in this game")).toBeTruthy();
+    expect(screen.getByText("Net — uses the strokes on the card")).toBeTruthy();
   });
 
   it("stroke-play GROSS states 'Gross — raw scores, no strokes' and renders NO strokes line at all", () => {

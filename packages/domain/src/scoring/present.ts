@@ -1,10 +1,14 @@
 import type { GameConfig } from "./game.js";
+import type { Participant } from "../round/participant.js";
 
-// The games' human meaning as domain truth — names, one-line rules, who a game fits, and
-// how its handicap convention reads in words. One tested copy (the handicap/present.ts
-// precedent): every surface that names a game renders through these, so the copy can never
-// fork per view. Pure formatters — no golf RESULT is computed here, which is why the web
-// may import them directly (they are not in the compute-fence banlist).
+// The games' human meaning as domain truth — names, one-line rules, who a game fits, and how its
+// strokes convention reads in words. One tested copy: every surface that names a game renders
+// through these, so the copy can never fork per view. Pure formatters — no golf RESULT is
+// computed here, which is why the web may import them directly (they are not in the
+// compute-fence banlist). gameTreatment's singles-match arm reads two ALREADY-STORED roster
+// numbers (Participant.strokes) and compares them — the same register as underPar below (a
+// comparison of stored inputs), not a second copy of gameStrokeAllocation's per-hole placement
+// rule, which is the only thing that needs a CourseCard.
 type GameKind = GameConfig["kind"];
 
 export const gameKindLabel = (kind: GameKind): string => {
@@ -51,25 +55,42 @@ export const gameKindFits = (kind: GameKind): string => {
   }
 };
 
-// One treatment line for every kind, gross included — the ONE copy every panel and the
-// add-game preview render through. Replaces allowancePhrase + strokePlayTreatment, whose split
-// left the non-stroke-play kinds rendering a percentage that no longer exists.
+// One treatment line for every kind, gross included — the ONE copy every panel and the add-game
+// preview render through. A card is absolute, a match is relative (spec 2026-07-30 §3): there are
+// two behaviours, so there are two sentences, not one softened to cover both (the prior arc's own
+// single net sentence was collapsed across all three medal kinds AND the two match kinds, which
+// made it false for the match kinds — a singles/fourball panel showing different dots than the
+// card is CORRECT, and the panel now says why instead of leaving the player to discover it alone).
 //
-// The net line does NOT say "uses the strokes on the card" (spec §3's first wording, corrected in
-// §11): the card renders each player's FULL number, a game renders the difference from its own
-// field's lowest, so the two genuinely disagree for any game played by a subset of the roster. This
-// wording is true in every case, and it is the fourball line's own vocabulary.
-export const gameTreatment = (config: GameConfig): string => {
+// Medal kinds (stroke play, Stableford, skins) use each player's own roster number, so the line
+// names the CARD — it is the same number either way, by construction, so there is nothing to
+// compute here.
+//
+// Match kinds use the DIFFERENCE off the lowest of the game's own field. Four-ball's completion
+// ("everyone off the lowest of the four") is a fixed structural fact, true regardless of the actual
+// numbers, so it needs no roster. Singles' completion genuinely varies per pairing, so it is the
+// one arm that reads `participants` — optional so a caller with no roster in scope (or a config
+// alone, as every OTHER arm allows) still gets a true statement rather than a crash: absent data
+// resolves to a 0-vs-0 tie, which is exactly the honest "level" line below.
+export const gameTreatment = (config: GameConfig, participants: readonly Participant[] = []): string => {
   if ("scoring" in config && config.scoring === "gross") return "Gross — raw scores, no strokes";
   switch (config.kind) {
     case "stroke-play":
     case "skins":
     case "stableford":
-      return "Net — everyone plays off the lowest in this game";
-    case "singles-match":
-      return "Strokes are the difference between you two";
+      return "Net — uses the strokes on the card";
     case "fourball-match":
-      return "Everyone plays off the lowest of the four";
+      return "Played off the difference — everyone off the lowest of the four";
+    case "singles-match": {
+      const strokesOf = (id: typeof config.a): number => participants.find((p) => p.golferId === id)?.strokes ?? 0;
+      const diff = strokesOf(config.a) - strokesOf(config.b);
+      // Not "{name} gets 0" (the SeasonPanel precedent, crews/SeasonPanel.tsx): a tie is a real,
+      // honest answer once strokes are a plain count, not a nonsensical sentence to suppress.
+      if (diff === 0) return "Played off the difference — level, nobody receives";
+      const receiverId = diff > 0 ? config.a : config.b;
+      const receiverName = participants.find((p) => p.golferId === receiverId)?.name ?? receiverId;
+      return `Played off the difference — ${receiverName} gets ${Math.abs(diff)}`;
+    }
   }
 };
 

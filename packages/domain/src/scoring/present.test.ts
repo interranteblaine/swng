@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { gameId, golferId } from "../ids.js";
 import type { GameConfig } from "./game.js";
+import type { Participant } from "../round/participant.js";
 import { gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, strokesNote, underPar } from "./present.js";
 
 const A = golferId("a");
@@ -15,6 +16,10 @@ const skins = (scoring: "gross" | "net"): GameConfig => ({ kind: "skins", id: ga
 const stableford: GameConfig = { kind: "stableford", id: gameId("st"), players: [A, B] };
 const singles: GameConfig = { kind: "singles-match", id: gameId("sm"), a: A, b: B };
 const fourball: GameConfig = { kind: "fourball-match", id: gameId("fb"), a: [A, B], b: [C, D] };
+
+// A roster seat: name and tee are incidental to gameTreatment, the strokes number is the whole
+// subject (the allocation.test.ts precedent).
+const participant = (id: ReturnType<typeof golferId>, name: string, strokes: number): Participant => ({ golferId: id, name, tee: "white", strokes });
 
 describe("gameKindLabel", () => {
   it("names every kind in golf's own plainest terms", () => {
@@ -47,34 +52,59 @@ describe("gameKindFits", () => {
 });
 
 describe("gameTreatment", () => {
-  // NOT "uses the strokes on the card" (spec §3's first wording, corrected in §11): the card shows
-  // each player's FULL number and a game shows the difference from its own field's lowest, so that
-  // line was false for any game played by a subset of the roster.
-  it("states the net treatment as the game's own field, with no percentage and no card claim", () => {
-    expect(gameTreatment(strokePlay("net"))).toBe("Net — everyone plays off the lowest in this game");
-    expect(gameTreatment(skins("net"))).toBe("Net — everyone plays off the lowest in this game");
-    expect(gameTreatment(stableford)).toBe("Net — everyone plays off the lowest in this game");
+  // A card is absolute, a match is relative (spec 2026-07-30 §3) — two true sentences, not one
+  // softened to cover both. The medal kinds (stroke play, Stableford, skins) use each player's own
+  // roster number, so their line names the CARD; a match uses the difference, so its line names
+  // the DIFFERENCE.
+  it("says a medal game uses the strokes on the card", () => {
+    expect(gameTreatment({ kind: "skins", id: gameId("g"), scoring: "net", players: [] })).toBe("Net — uses the strokes on the card");
   });
-  it("names the field for the two kinds whose field is not simply everyone in the game", () => {
-    expect(gameTreatment(singles)).toBe("Strokes are the difference between you two");
-    expect(gameTreatment(fourball)).toBe("Everyone plays off the lowest of the four");
+  it("states the medal treatment identically across every net kind — one sentence, not per-kind drift", () => {
+    expect(gameTreatment(strokePlay("net"))).toBe("Net — uses the strokes on the card");
+    expect(gameTreatment(skins("net"))).toBe("Net — uses the strokes on the card");
+    expect(gameTreatment(stableford)).toBe("Net — uses the strokes on the card");
   });
   it("gross has no strokes at all, by definition — on either kind that offers the choice", () => {
     expect(gameTreatment(strokePlay("gross"))).toBe("Gross — raw scores, no strokes");
     expect(gameTreatment(skins("gross"))).toBe("Gross — raw scores, no strokes");
   });
+  it("says a match is played off the difference", () => {
+    // `a`/`b` are 2-tuples on FourballOutcome's own GameConfig arm, not bare arrays — filled with
+    // placeholder ids here since this line reads no roster at all (it's fixed by kind alone).
+    expect(gameTreatment({ kind: "fourball-match", id: gameId("f"), a: [A, B], b: [C, D] })).toBe("Played off the difference — everyone off the lowest of the four");
+  });
+  it("four-ball names the fixed rule from the config alone — no roster needed, unlike singles", () => {
+    expect(gameTreatment(fourball)).toBe("Played off the difference — everyone off the lowest of the four");
+  });
+  it("singles names who receives and how many, from the roster's own strokes", () => {
+    const participants = [participant(A, "Ann", 6), participant(B, "Bo", 2)];
+    expect(gameTreatment(singles, participants)).toBe("Played off the difference — Ann gets 4");
+  });
+  it("flips which side receives when b is the higher number", () => {
+    const participants = [participant(A, "Ann", 2), participant(B, "Bo", 6)];
+    expect(gameTreatment(singles, participants)).toBe("Played off the difference — Bo gets 4");
+  });
+  // Not "Bo gets 0" — the SeasonPanel precedent (crews/SeasonPanel.tsx): a tie is a real, honest
+  // answer, and "{name} gets 0" reads as a nonsensical sentence once strokes are a real count.
+  it("says the level truth for equal strokes — never '{name} gets 0'", () => {
+    const participants = [participant(A, "Ann", 5), participant(B, "Bo", 5)];
+    expect(gameTreatment(singles, participants)).toBe("Played off the difference — level, nobody receives");
+  });
+  it("degrades to the level line rather than crashing when no roster is supplied at all", () => {
+    expect(gameTreatment(singles)).toBe("Played off the difference — level, nobody receives");
+  });
 });
 
 describe("strokesNote", () => {
-  it("names WHO RECEIVES for the two match kinds — the fact their treatment line doesn't carry", () => {
+  it("states the general RULE for the two match kinds — gameTreatment's own singles arm names the concrete instance instead", () => {
     // Neither says "plays off scratch" (controller ruling, post-task-1): handicap-era vocabulary
-    // for playing to par, and false about an anchor who is simply the lowest in the field.
+    // for playing to par, and false about a golfer who is simply the lowest in the field.
     expect(strokesNote("singles-match")).toBe("Only the higher number gets strokes — the lower gets none.");
     expect(strokesNote("fourball-match")).toBe("Only the three higher numbers get strokes — the lowest gets none.");
   });
   it("stays undefined for the three kinds whose treatment line already states their field", () => {
-    // The net treatment line IS "everyone plays off the lowest in this game" — a note repeating it
-    // would render the same sentence twice under the same heading.
+    // The net treatment line IS "Net — uses the strokes on the card" — a note repeating it would
+    // render the same sentence twice under the same heading.
     expect(strokesNote("stroke-play")).toBeUndefined();
     expect(strokesNote("stableford")).toBeUndefined();
     expect(strokesNote("skins")).toBeUndefined();

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { grossForHoles, netStrokes, roundStrokeAllocation } from "@swng/client";
+import { dotsForHoles, grossForHoles, netStrokes, parForHoles, roundStrokeAllocation } from "@swng/client";
 import { cellAt, findTeeSet, scoredStrokes, underPar } from "@swng/domain";
 import type { CourseCard, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { cardBox } from "../ui/classes";
@@ -81,7 +81,10 @@ const segmentTotalFor = (
 ): SegmentTotal | undefined => {
   const gross = grossForHoles(cells, golferId, segmentHoles);
   if (gross === undefined) return undefined;
-  const dotsSum = segmentHoles.reduce((sum, hole) => sum + (dots?.get(hole.number) ?? 0), 0);
+  // dotsForHoles (@swng/client) — the same sum totalDots does, restricted to this ONE segment
+  // (totalDots only ever takes a whole per-hole map); this used to hand-roll the reduce inline
+  // (task-5 fix round, spec 2026-07-30 §10 review M5).
+  const dotsSum = dotsForHoles(dots, segmentHoles);
   return { gross, net: netStrokes(gross, dotsSum) };
 };
 
@@ -236,8 +239,10 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
                   <div className="font-semibold">{segment.label}</div>
                   {/* Same "Par N" shape as an ordinary hole row's own header cell above — one
                       composite string, not a number wrapped in its own element for a test's
-                      sake (review fix, task-4 fix round 1). */}
-                  <div>Par {segment.holes.reduce((sum, hole) => sum + hole.par, 0)}</div>
+                      sake (review fix, task-4 fix round 1). parForHoles (@swng/client) replaces
+                      a hand-rolled reduce that duplicated ResultsView.tsx's own par total (task-5
+                      fix round, spec 2026-07-30 §10 review M5). */}
+                  <div>Par {parForHoles(segment.holes)}</div>
                 </th>
                 {state.participants.map((p) => {
                   const total = segmentTotalFor(p.golferId, segment.holes, state.cells, dotsByGolfer.get(p.golferId));

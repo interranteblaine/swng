@@ -2,7 +2,7 @@ import { scoredStrokes } from "../round/holeResult.js";
 import type { RoundState } from "../round/state.js";
 import { cellAt } from "../round/state.js";
 import { gameStrokeAllocation } from "./allocation.js";
-import type { GameConfig, GameState, SkinsHole } from "./game.js";
+import type { GameConfig, GameState, SkinsHole, SkinsLine } from "./game.js";
 import { allPlayersComplete, playerTeeSet } from "./players.js";
 
 type SkinsConfig = Extract<GameConfig, { kind: "skins" }>;
@@ -73,3 +73,11 @@ export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState =>
     holes: trail,
   };
 };
+
+// Skins won descending — the leaderboard order. Extracted from GamePanel.tsx (the web) alongside
+// its stroke-play/stableford siblings in task-5's fix round (spec 2026-07-30 §10 review, an
+// extension beyond the two sites the review named — the same defect class, so left inconsistent
+// would have been a half-measure): a ranking rule is golf logic, the same class `aggregateSeason`
+// already moved server-side for crew standings, so it belongs here, one implementation, called
+// through @swng/client. Returns a NEW array (never mutates `lines`).
+export const sortedSkinsLines = (lines: readonly SkinsLine[]): readonly SkinsLine[] => [...lines].sort((a, b) => b.skins - a.skins);

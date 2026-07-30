@@ -59,4 +59,28 @@ export const foldAndScore = (events: readonly RoundEvent[]): { state: RoundState
 // nine-hole-doubling rule alone (spec §2d), not the average fold, and RecordSections.tsx needs it
 // to render a history row's "counts +32" line over already-served score/par fields — the fix for
 // the last golf logic this arc found re-derived inline in the web (`(score - par) * 2`).
-export { gameStrokeAllocation, roundStrokeAllocation, netStrokes, totalDots, grossForHoles, unresolvedGames, nineHoleContribution } from "@swng/domain";
+//
+// `parForHoles`/`dotsForHoles` (task-5 fix round) are the static par/dots totals over a set of
+// holes — ResultsView.tsx's "Par N" headline and ScorecardGrid.tsx's OUT/IN/TOT rows hand-rolled
+// these sums in two places each until the review caught the duplication; one copy beside
+// grossForHoles, which already owns the score half of the same segment.
+//
+// `sortedStrokePlayLines`/`sortedStablefordLines`/`sortedSkinsLines` (task-5 fix round, spec
+// 2026-07-30 §10 review I2) replace GamePanel.tsx's three inline `.sort()` calls — a leaderboard's
+// ranking order is golf logic (the stroke-play order carries an owner ruling, spec 2026-07-19
+// §2b), the same class `aggregateSeason` already moved server-side for crew standings ("the web
+// never re-ranks").
+export {
+  gameStrokeAllocation,
+  roundStrokeAllocation,
+  netStrokes,
+  totalDots,
+  dotsForHoles,
+  grossForHoles,
+  parForHoles,
+  unresolvedGames,
+  nineHoleContribution,
+  sortedStrokePlayLines,
+  sortedStablefordLines,
+  sortedSkinsLines,
+} from "@swng/domain";

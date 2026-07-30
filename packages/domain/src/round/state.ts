@@ -63,6 +63,14 @@ export const grossForHoles = (cells: Readonly<Record<string, ScoreCell>>, golfer
   return gross;
 };
 
+// The static par total for a set of holes — a course-card FACT, not a derived rule, but the exact
+// shape grossForHoles was extracted for: ResultsView.tsx's "Par N" headline and ScorecardGrid.tsx's
+// OUT/IN/TOT row header summed `hole.par` by hand in two separate files (task-5 fix round, spec
+// 2026-07-30 §10 review) — a live two-copy duplication of the same segment grossForHoles already
+// walks. One copy, beside it, through the same @swng/client seam. Always defined (unlike
+// grossForHoles): par is known for every hole on the card whether or not it's been played.
+export const parForHoles = (holes: readonly Hole[]): number => holes.reduce((sum, hole) => sum + hole.par, 0);
+
 const LIFECYCLE_STATUS: Record<"round-created" | "round-started" | "round-finalized" | "round-reopened" | "round-abandoned", RoundStatus> = {
   "round-created": "setup",
   "round-started": "live",

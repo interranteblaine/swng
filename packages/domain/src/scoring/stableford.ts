@@ -2,7 +2,7 @@ import { scoredStrokes } from "../round/holeResult.js";
 import type { RoundState } from "../round/state.js";
 import { cellAt } from "../round/state.js";
 import { gameStrokeAllocation } from "./allocation.js";
-import type { GameConfig, GameState } from "./game.js";
+import type { GameConfig, GameState, StablefordLine } from "./game.js";
 import { allPlayersComplete, playerTeeSet } from "./players.js";
 
 type StablefordConfig = Extract<GameConfig, { kind: "stableford" }>;
@@ -50,3 +50,9 @@ export const scoreStableford = (config: StablefordConfig, state: RoundState): Ga
 
   return { kind: "stableford", id: config.id, lines, complete, leaders };
 };
+
+// Points descending — the leaderboard order, extracted from GamePanel.tsx (the web) in task-5's
+// fix round (spec 2026-07-30 §10 review): a ranking rule is golf logic, the same class
+// `aggregateSeason` already moved server-side for crew standings, so it belongs here, one
+// implementation, called through @swng/client. Returns a NEW array (never mutates `lines`).
+export const sortedStablefordLines = (lines: readonly StablefordLine[]): readonly StablefordLine[] => [...lines].sort((a, b) => b.points - a.points);

@@ -3,6 +3,8 @@ import { gameId, golferId } from "../ids.js";
 import type { Participant } from "../round/participant.js";
 import { playGoldenRound } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
+import { sortedStablefordLines } from "./stableford.js";
+import type { StablefordLine } from "./game.js";
 
 const A = golferId("ann");
 const B = golferId("bo");
@@ -106,5 +108,22 @@ describe("stableford — golden cards", () => {
       kind: "stableford", complete: true,
       lines: [{ golferId: B, thru: 9, points: 17 }, { golferId: C, thru: 9, points: 11 }],
     });
+  });
+});
+
+// Extracted from GamePanel.tsx (the web) in task-5's fix round (spec 2026-07-30 §10 review) so
+// there is exactly one implementation, called through @swng/client.
+describe("sortedStablefordLines", () => {
+  const line = (id: string, points: number): StablefordLine => ({ golferId: golferId(id), thru: 9, points });
+
+  it("sorts points descending — the highest score leads", () => {
+    const sorted = sortedStablefordLines([line("a", 20), line("b", 35), line("c", 28)]);
+    expect(sorted.map((l) => l.golferId)).toEqual([golferId("b"), golferId("c"), golferId("a")]);
+  });
+
+  it("does not mutate its input array", () => {
+    const lines = [line("a", 20), line("b", 35)];
+    sortedStablefordLines(lines);
+    expect(lines.map((l) => l.golferId)).toEqual([golferId("a"), golferId("b")]);
   });
 });

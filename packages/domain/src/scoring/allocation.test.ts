@@ -6,7 +6,7 @@ import type { RosterEntry } from "../round/participant.js";
 import { dotsByHole } from "./strokes.js";
 import { fieldDeck18 } from "./golden/fieldDeck18.js";
 import { fixtureLinks18 } from "./golden/fixtureCourse.js";
-import { gameStrokeAllocation, roundStrokeAllocation, totalDots } from "./allocation.js";
+import { dotsForHoles, gameStrokeAllocation, roundStrokeAllocation, totalDots } from "./allocation.js";
 import type { GameConfig } from "./game.js";
 
 // The M5 field deck: strokes 6/0/13/3 (ann/bo/cal/dee), typed onto the roster. Hand-derived in the
@@ -195,5 +195,22 @@ describe("totalDots", () => {
     for (const [id, relative] of Object.entries(expectedRelative)) {
       expect(totalDots(allocation.get(golferId(id))!)).toBe(relative);
     }
+  });
+});
+
+describe("dotsForHoles", () => {
+  it("sums only the requested holes' dots, not the whole allocation", () => {
+    const perHole = dotsByHole(11, whiteTeeSet); // 18 holes, 11 wraps: SI 1-11 get 1 extra, all get a base 1... (see totalDots' own fixture)
+    const front9 = whiteTeeSet.holes.filter((h) => h.number <= 9);
+    const back9 = whiteTeeSet.holes.filter((h) => h.number > 9);
+    expect(dotsForHoles(perHole, front9) + dotsForHoles(perHole, back9)).toBe(totalDots(perHole));
+  });
+
+  it("is zero when the allocation is undefined (a gross game's empty allocation)", () => {
+    expect(dotsForHoles(undefined, whiteTeeSet.holes)).toBe(0);
+  });
+
+  it("is zero for an empty hole list", () => {
+    expect(dotsForHoles(dotsByHole(11, whiteTeeSet), [])).toBe(0);
   });
 });

@@ -1,4 +1,4 @@
-import { grossForHoles, netStrokes } from "@swng/client";
+import { grossForHoles, netStrokes, parForHoles } from "@swng/client";
 import type { GameState, RoundState } from "@swng/domain";
 import { GolferLink } from "../ui/GolferLink";
 import { canonicalHoles, ScorecardGrid } from "./ScorecardGrid";
@@ -35,7 +35,11 @@ const strokesLabel = (strokes: number): string => (strokes === 0 ? "0" : `−${s
 
 export function ResultsView({ state, games, shareToken }: ResultsViewProps) {
   const holes = canonicalHoles(state.card);
-  const parTotal = holes.reduce((sum, hole) => sum + hole.par, 0);
+  // parForHoles (@swng/client) — the static par total for a set of holes, a course-card fact
+  // rather than a rule, but the exact shape grossForHoles was extracted for; this and
+  // ScorecardGrid.tsx's OUT/IN/TOT header used to hand-sum `hole.par` two separate ways (task-5
+  // fix round, spec 2026-07-30 §10 review M5).
+  const parTotal = parForHoles(holes);
 
   return (
     <section className="flex flex-col gap-6 p-4">

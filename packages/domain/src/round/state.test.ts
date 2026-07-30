@@ -5,7 +5,7 @@ import type { CourseCard } from "../course/card.js";
 import type { Hlc } from "./hlc.js";
 import type { HoleResult } from "./holeResult.js";
 import type { RoundEvent } from "./events.js";
-import { cellAt, cellKey, grossForHoles, reduceRound } from "./state.js";
+import { cellAt, cellKey, grossForHoles, parForHoles, reduceRound } from "./state.js";
 import type { ScoreCell } from "./state.js";
 
 const card: CourseCard = {
@@ -477,5 +477,19 @@ describe("grossForHoles", () => {
 
   it("an empty hole list has a gross of zero — vacuously true, matching a fold's own empty identity", () => {
     expect(grossForHoles({}, A, [])).toBe(0);
+  });
+});
+
+// The static par total (task-5 fix round, spec 2026-07-30 §10 review — one copy replacing two
+// hand-rolled `reduce((sum, hole) => sum + hole.par, 0)` sites in apps/web/src).
+describe("parForHoles", () => {
+  const holes = card.teeSets[0]!.holes; // par 4, par 4, par 3
+
+  it("sums par across every hole", () => {
+    expect(parForHoles(holes)).toBe(11);
+  });
+
+  it("is zero for an empty hole list", () => {
+    expect(parForHoles([])).toBe(0);
   });
 });

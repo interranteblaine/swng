@@ -104,8 +104,10 @@ export default [
     // they ban disjoint things so nothing double-reports. Test files are exempt (see `ignores`) —
     // a test is an oracle that legitimately computes expected values straight from @swng/domain
     // (scoreGame/settleRound/reduceRound/the golden decks), which @swng/client does not re-export;
-    // the boundary being sealed is the PRODUCT on-device compute path, matching Task 5's own
-    // grep, which excludes `.test.`.
+    // the boundary being sealed is the PRODUCT on-device compute path, matching the
+    // domain-boundary-restore arc's own Task 5 grep (2026-07-18, commit 0798828), which excludes
+    // `.test.` — NOT the "strokes are typed" arc's task 5 (2026-07-30), a different task of the
+    // same ordinal number that landed the `no-restricted-syntax` re-derivation rule below.
     files: ["apps/web/src/**/*.{ts,tsx}"],
     ignores: ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
     rules: {
@@ -133,13 +135,23 @@ export default [
                 "gameStrokeAllocation",
                 "roundStrokeAllocation",
                 "totalDots",
+                "dotsForHoles",
                 "grossForHoles",
+                "parForHoles",
                 "allocateStrokes",
                 "dotsByHole",
                 "strokesReceivedOnHole",
                 "netDoubleBogey",
                 "netStrokes",
                 "roundHalfUp",
+                // leaderboard ORDER (task-5 fix round, spec 2026-07-30 §10 review I2): a ranking
+                // rule is golf logic — GamePanel.tsx's three inline `.sort()` calls moved here, the
+                // same class `aggregateSeason` already moved server-side for crew standings ("the
+                // web never re-ranks"). sortedStrokePlayLines carries the owner ruling (spec
+                // 2026-07-19 §2b, vs-par ascending then thru descending) — see its own comment.
+                "sortedStrokePlayLines",
+                "sortedStablefordLines",
+                "sortedSkinsLines",
                 // resolveStrokes/anchorOf are gone from this list with scoring/strokeBasis.ts
                 // itself (spec 2026-07-30 §9): strokes are asserted on the roster now, so there is
                 // no resolution rule left for the web to re-derive. The allowance table
@@ -148,22 +160,26 @@ export default [
                 // banlist block that stood here (adjustedGrossScore, scoreDifferential,
                 // computeIndex(Detail), swngIndex, courseHandicapFor(RatingSlopePar),
                 // unratedCourseHandicap, combineNineHoleDifferentials) is gone with handicap/whs.ts
-                // itself. These are DELIBERATELY not re-exported through @swng/client either: the
-                // average is server-computed and served, so an on-device copy would be fence-legal
-                // and boundary-wrong. formatOverPar is absent on purpose — a presentation
-                // formatter, like underPar (the handicap/present.ts precedent).
+                // itself. The six names below (through `overPar`) are DELIBERATELY not re-exported
+                // through @swng/client: the average is server-computed and served, so an on-device
+                // copy would be fence-legal and boundary-wrong. formatOverPar is absent on purpose
+                // — a presentation formatter, like underPar (the handicap/present.ts precedent).
+                // (`nineHoleContribution`, immediately below these six, is the ONE exception in
+                // this whole file — it IS re-exported; see its own comment, not this one.)
                 "averageOf",
                 "averageOfValues",
                 "spreadOfValues",
                 "averageHistory",
                 "scoredOverPar",
                 "overPar",
-                // nineHoleContribution (task 5, the last golf logic that had leaked into the web —
-                // RecordSections.tsx's history row re-derived `* 2` inline for a nine's "counts
-                // +32" line) IS re-exported through @swng/client, unlike its neighbors above: it's
-                // a small pure fact (a nine counts doubled), not the average fold itself, and the
-                // web still needs it to render over already-served score/par fields. Still banned
-                // straight from @swng/domain — the client re-export is the one sanctioned path.
+                // nineHoleContribution (task 5 — RecordSections.tsx's history row re-derived `* 2`
+                // inline for a nine's "counts +32" line) IS re-exported through @swng/client,
+                // unlike its neighbors above: it's a small pure fact (a nine counts doubled), not
+                // the average fold itself, and the web still needs it to render over already-served
+                // score/par fields. Still banned straight from @swng/domain — the client re-export
+                // is the one sanctioned path. (Two more leaks of the SAME class — GamePanel.tsx's
+                // ranking sorts — surfaced in task 5's own fix round; see sortedStrokePlayLines et
+                // al. above and parForHoles/dotsForHoles near totalDots.)
                 "nineHoleContribution",
                 // golfer metrics + per-round archive line
                 "golferMetrics",
@@ -196,6 +212,41 @@ export default [
                 "Golf compute runs on-device via @swng/client (the one sanctioned client-side path) — import it from @swng/client, not @swng/domain. See docs/architecture.md 'Where golf logic lives'.",
             },
           ],
+        },
+      ],
+      // The RE-DERIVATION fence (task-5 fix round, spec 2026-07-30 §10 review I1): the
+      // no-restricted-imports rule above only catches IMPORTING a banned compute name — it never
+      // noticed a rule being RETYPED inline instead, which is how two real leaks shipped (the
+      // crew board's `a.average - b.average`, deleted task 4; RecordSections.tsx's
+      // `(score - par) * 2`, moved into nineHoleContribution above, task 5). A regex-based test
+      // file was tried first and the review planted five re-derivations that all passed it clean
+      // — reversed operands (`2 * (a - b)`), a local variable (`const raw = a - b; raw * 2`), and
+      // the two idioms TypeScript itself pushes a developer toward for an `optional` served field
+      // (`a.average ?? 0`, `a.average!`) all defeat a regex, but not an AST: a BinaryExpression
+      // touching a `.average`/`.strokes`/`.par` property is the same NODE shape regardless of
+      // operand order, whitespace, or the `!`/`??` wrapped around the property read. This selector
+      // subsumed the regex file entirely (deleted, apps/web/test/noGolfArithmetic.test.ts) — one
+      // mechanism, not two with different coverage.
+      //
+      // `par` in the property list also flags RecordSections.tsx's own two legitimate
+      // `line.score - line.par` reads (feeding `formatOverPar` for on-screen display — the
+      // subtraction itself is not a rule, only the DOUBLING is, and that's `nineHoleContribution`'s
+      // job now) — the ONLY two sites in the tree this fires on that are correct as written; both
+      // carry a narrowly-scoped `eslint-disable-next-line` with this same reasoning inline, so
+      // nothing else may quietly claim the same exemption.
+      //
+      // Known, accepted residual (stated here, not solved): a re-derivation fully hidden behind an
+      // opaque local — `const { score, par } = line; const raw = score - par; raw * 2;`, where
+      // NEITHER the property read nor the multiplication shares a single expression — defeats this
+      // selector exactly as it would defeat any text- or AST-based fence with no dataflow
+      // analysis. If this rule ever fails to catch a real leak of that shape, that is why; add
+      // dataflow tooling or catch it in review, don't just widen this pattern by guesswork.
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "BinaryExpression[operator=/^[-+*]$/] MemberExpression[property.name=/^(average|strokes|par)$/]",
+          message:
+            "This re-derives a golf rule inline over a served average/strokes/par field (however it's spelled — reversed operands, `!`, `?? 0` all match). Move the rule into @swng/domain and call it through @swng/client. If this is genuinely just display arithmetic over an already-served number (not a rule), it needs an eslint-disable-next-line with a comment stating why — see RecordSections.tsx's two exemptions for the pattern. Never delete or widen this rule just to go green.",
         },
       ],
     },

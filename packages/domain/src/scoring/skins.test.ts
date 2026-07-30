@@ -6,6 +6,8 @@ import { reduceRound } from "../round/state.js";
 import { scoreGame } from "./game.js";
 import { playGoldenRound, playGoldenRoundLog } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
+import { sortedSkinsLines } from "./skins.js";
+import type { SkinsLine } from "./game.js";
 
 const A = golferId("ann");
 const B = golferId("bo");
@@ -180,5 +182,23 @@ describe("skins — golden cards", () => {
         { golferId: C, skins: 0 },
       ],
     });
+  });
+});
+
+// Extracted from GamePanel.tsx (the web) in task-5's fix round (spec 2026-07-30 §10 review,
+// beyond the two sites the review named — the same defect class) so there is exactly one
+// implementation, called through @swng/client.
+describe("sortedSkinsLines", () => {
+  const line = (id: string, skins: number): SkinsLine => ({ golferId: golferId(id), skins });
+
+  it("sorts skins won descending — the biggest winner leads", () => {
+    const sorted = sortedSkinsLines([line("a", 2), line("b", 6), line("c", 0)]);
+    expect(sorted.map((l) => l.golferId)).toEqual([golferId("b"), golferId("a"), golferId("c")]);
+  });
+
+  it("does not mutate its input array", () => {
+    const lines = [line("a", 2), line("b", 6)];
+    sortedSkinsLines(lines);
+    expect(lines.map((l) => l.golferId)).toEqual([golferId("a"), golferId("b")]);
   });
 });

@@ -288,9 +288,18 @@ export function HistoryList({ history, historyLimit }: HistoryListProps) {
             className={`${cardBox} block px-3 py-2 text-sm text-fairway underline decoration-fairway tabular-nums`}
           >
             {line.courseName} · {line.tee}
+            {/* eslint-disable-next-line no-restricted-syntax -- `score - par` here is DISPLAY
+                arithmetic over two already-served numbers, not a re-derived rule (see the block
+                comment above): it feeds formatOverPar for the row's own vs-par figure, the same
+                subtraction the served average was folded from. Only the DOUBLING below is a rule,
+                and that one goes through nineHoleContribution, not this line. */}
             {line.score !== undefined && ` · ${line.score} (${formatOverPar(line.score - line.par)})`}
-            {line.holes === 9 &&
-              (line.score !== undefined ? ` · 9 holes, counts ${formatOverPar(nineHoleContribution(line.score - line.par))}` : " · 9 holes")}
+            {line.holes === 9 && (
+              /* eslint-disable-next-line no-restricted-syntax -- same exemption as above: `score -
+                 par` is the raw display figure fed INTO nineHoleContribution, which is the actual
+                 rule (the multiplication happens inside that function, not here). */
+              line.score !== undefined ? ` · 9 holes, counts ${formatOverPar(nineHoleContribution(line.score - line.par))}` : " · 9 holes"
+            )}
           </Link>
         </li>
       ))}

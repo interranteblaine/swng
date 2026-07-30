@@ -1,4 +1,4 @@
-import type { CourseCard } from "../course/card.js";
+import type { CourseCard, Hole } from "../course/card.js";
 import { findTeeSet } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import type { GolferId } from "../ids.js";
@@ -74,6 +74,14 @@ export const roundStrokeAllocation = (
 // documented invariant, strokes.ts) — summing here is safe rather than re-deriving a parallel
 // "total dots" formula that could drift from the per-hole one above.
 export const totalDots = (perHole: ReadonlyMap<number, number>): number => [...perHole.values()].reduce((sum, dots) => sum + dots, 0);
+
+// The SAME sum as totalDots, restricted to one segment of holes (OUT/IN, not the whole card) —
+// totalDots alone can't express this since it only ever takes a whole per-hole map. Added beside
+// it (task-5 fix round, spec 2026-07-30 §10 review) because ScorecardGrid.tsx's OUT/IN/TOT rows
+// were hand-rolling this exact reduce inline. `perHole` is undefined for a gross game (no
+// allocation at all, see gameStrokeAllocation above) — every hole then contributes 0, not a throw.
+export const dotsForHoles = (perHole: ReadonlyMap<number, number> | undefined, holes: readonly Hole[]): number =>
+  holes.reduce((sum, hole) => sum + (perHole?.get(hole.number) ?? 0), 0);
 
 // `handicappingFor` (adjusted gross score → score differential per participant) is DELETED with
 // the whole WHS pipeline (spec 2026-07-29 §7) and so is RoundArchive.handicapping, which was its

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { gameKindLabel, gameTreatment, strokesNote } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
+import { sortedSkinsLines, sortedStablefordLines, sortedStrokePlayLines } from "@swng/client";
 import { strokesSummary } from "../round/dots";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnDanger, cardBox } from "../ui/classes";
@@ -101,12 +102,11 @@ export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanel
 
 function StrokePlayBody({ game, state }: { game: Extract<GameState, { kind: "stroke-play" }>; state: RoundState }) {
   const total = (line: (typeof game.lines)[number]) => (game.scoring === "net" ? line.net!.total : line.gross.total);
-  // Owner ruling (spec 2026-07-19 §2b, closing the queued sort ruling): vs-par ascending, then
-  // holes-played descending — NOT raw total. A thru-0 line's raw total is always the lowest
-  // possible number regardless of how the real field is playing; sorting by vs-par instead is
-  // fair across different thru counts, and the thru tie-break means a golfer who's actually
-  // played the round outranks one who's only nominally tied because they haven't started.
-  const sorted = [...game.lines].sort((a, b) => a.relativeToPar - b.relativeToPar || b.thru - a.thru);
+  // sortedStrokePlayLines (@swng/client) carries the owner ruling (spec 2026-07-19 §2b): vs-par
+  // ascending, then holes-played descending — NOT raw total. This used to sort inline here; a
+  // ranking rule is golf logic, moved to @swng/domain in task-5's fix round (spec 2026-07-30 §10
+  // review I2) alongside the domain's own comment stating the ruling in full.
+  const sorted = sortedStrokePlayLines(game.lines);
   if (sorted.length === 0) return <p className="text-sm text-fairway">No scores yet</p>;
   return (
     <div className="overflow-x-auto">
@@ -137,7 +137,9 @@ function StrokePlayBody({ game, state }: { game: Extract<GameState, { kind: "str
 }
 
 function StablefordBody({ game, state }: { game: Extract<GameState, { kind: "stableford" }>; state: RoundState }) {
-  const sorted = [...game.lines].sort((a, b) => b.points - a.points);
+  // sortedStablefordLines (@swng/client) — points descending, moved to @swng/domain alongside its
+  // stroke-play/skins siblings in task-5's fix round (spec 2026-07-30 §10 review I2).
+  const sorted = sortedStablefordLines(game.lines);
   return (
     <>
       <p className="text-sm text-fairway">Eagle 4 · Birdie 3 · Par 2 · Bogey 1 · worse 0</p>
@@ -267,7 +269,11 @@ function SkinsBody({ game, state }: { game: Extract<GameState, { kind: "skins" }
     : game.carrying > 0
       ? `Carrying ${game.carrying} into hole ${game.holesDecided + 1}`
       : undefined;
-  const totals = [...game.lines].sort((a, b) => b.skins - a.skins);
+  // sortedSkinsLines (@swng/client) — skins won descending, moved to @swng/domain alongside its
+  // stroke-play/stableford siblings (task-5 fix round, spec 2026-07-30 §10 review — this third
+  // site wasn't in the review's own two named locations, but it's the identical defect class left
+  // half-fixed if skipped).
+  const totals = sortedSkinsLines(game.lines);
   return (
     <>
       {status && <p className="text-sm font-medium">{status}</p>}

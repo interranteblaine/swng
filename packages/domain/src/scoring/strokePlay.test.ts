@@ -7,7 +7,8 @@ import { reduceRound } from "../round/state.js";
 import { scoreGame } from "./game.js";
 import { playGoldenRound, playGoldenRoundLog } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
-import type { GameState } from "./game.js";
+import { sortedStrokePlayLines } from "./strokePlay.js";
+import type { GameState, ScoredStrokePlayLine } from "./game.js";
 
 const A = golferId("ann");
 const B = golferId("bo");
@@ -127,5 +128,31 @@ describe("stroke play — properties", () => {
         },
       ),
     );
+  });
+});
+
+// The owner-ruled sort (spec 2026-07-19 §2b), extracted from GamePanel.tsx in task-5's fix round
+// (spec 2026-07-30 §10 review) so there is exactly one implementation, called through
+// @swng/client rather than hand-sorted per screen.
+describe("sortedStrokePlayLines", () => {
+  const line = (id: string, relativeToPar: number, thru: number): ScoredStrokePlayLine => ({
+    golferId: golferId(id), thru, gross: { total: 0, pickups: 0 }, relativeToPar,
+  });
+
+  it("sorts vs-par ascending — the lowest (best) score leads", () => {
+    const sorted = sortedStrokePlayLines([line("a", 5, 9), line("b", -2, 9), line("c", 1, 9)]);
+    expect(sorted.map((l) => l.golferId)).toEqual([golferId("b"), golferId("c"), golferId("a")]);
+  });
+
+  it("breaks a vs-par tie by holes played descending — a thru-0 line never outranks a played one", () => {
+    // Both at +0, but "a" hasn't teed off (thru 0) while "b" is thru 9 at even par — "b" leads.
+    const sorted = sortedStrokePlayLines([line("a", 0, 0), line("b", 0, 9)]);
+    expect(sorted.map((l) => l.golferId)).toEqual([golferId("b"), golferId("a")]);
+  });
+
+  it("does not mutate its input array", () => {
+    const lines = [line("a", 5, 9), line("b", -2, 9)];
+    sortedStrokePlayLines(lines);
+    expect(lines.map((l) => l.golferId)).toEqual([golferId("a"), golferId("b")]);
   });
 });

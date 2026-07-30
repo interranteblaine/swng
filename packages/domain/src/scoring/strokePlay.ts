@@ -2,7 +2,7 @@ import { scoredStrokes } from "../round/holeResult.js";
 import type { RoundState } from "../round/state.js";
 import { cellAt } from "../round/state.js";
 import { gameStrokeAllocation } from "./allocation.js";
-import type { GameConfig, GameState, RunningTotal } from "./game.js";
+import type { GameConfig, GameState, RunningTotal, ScoredStrokePlayLine } from "./game.js";
 import { allPlayersComplete, playerTeeSet } from "./players.js";
 import { netDoubleBogey } from "./strokes.js";
 
@@ -77,3 +77,15 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
 
   return { kind: "stroke-play", id: config.id, scoring: config.scoring, lines, complete, leaders };
 };
+
+// Owner ruling (spec 2026-07-19 §2b, closing the queued sort ruling): vs-par ascending, then
+// holes-played descending — NOT raw total. A thru-0 line's raw total is always the lowest possible
+// number regardless of how the real field is playing; sorting by vs-par instead is fair across
+// different thru counts, and the thru tie-break means a golfer who's actually played the round
+// outranks one who's only nominally tied because they haven't started. This lived inline in
+// GamePanel.tsx (the web) until task-5's fix round (spec 2026-07-30 §10 review) — a ranking rule
+// is golf logic, the exact class `aggregateSeason` already moved server-side for crew standings, so
+// it belongs here, one implementation, called through @swng/client. Returns a NEW array (never
+// mutates `lines`, which GameState callers may hold onto elsewhere).
+export const sortedStrokePlayLines = (lines: readonly ScoredStrokePlayLine[]): readonly ScoredStrokePlayLine[] =>
+  [...lines].sort((a, b) => a.relativeToPar - b.relativeToPar || b.thru - a.thru);

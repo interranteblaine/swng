@@ -111,11 +111,11 @@ function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
       disabled={readOnly}
       className={`${cardBox} flex min-h-14 w-full min-w-14 flex-col items-center justify-center gap-0.5 px-1 py-1 active:bg-goldwash`}
     >
-      {/* Dots are strokes RECEIVED, always: strokes are non-negative by construction now (spec
-          2026-07-29 §2a/§2b — resolveStrokes clamps at zero and the request schema bounds the
-          assertion), so the hollow ○ give-back glyph a plus handicap used to draw has no reachable
-          state and is deleted with the convention. `repeat` throws RangeError on a negative, which
-          is exactly what makes that clamp load-bearing rather than cosmetic. */}
+      {/* Dots are strokes RECEIVED, always: a roster number is bounded at zero by the request
+          schema (spec 2026-07-30 §11) and a match subtracts the lowest of its own members, so the
+          hollow ○ give-back glyph a plus handicap used to draw has no reachable state and is
+          deleted with the convention. `repeat` throws RangeError on a negative, which is exactly
+          what makes that bound load-bearing rather than cosmetic. */}
       {dots !== 0 && (
         <span aria-hidden className="text-[10px] leading-none text-forest">
           {"●".repeat(dots)}

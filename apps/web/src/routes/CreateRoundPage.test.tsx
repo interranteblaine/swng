@@ -117,7 +117,7 @@ describe("CreateRoundPage — signed out", () => {
 // Signed in, a round is created AS the caller's own account golfer — host.name is the account's
 // name, never a typed input (the field is gone).
 describe("CreateRoundPage — create as yourself", () => {
-  it("a preselected courseId sends startRound the fetched card verbatim + the tee + basis + the account's Bearer (seat resolved server-side)", async () => {
+  it("a preselected courseId sends startRound the course reference + the tee + the account's Bearer (seat resolved server-side)", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
@@ -132,38 +132,23 @@ describe("CreateRoundPage — create as yourself", () => {
     // The proof-of-negative: no free-text host-name field — the name is the account's.
     expect(screen.queryByLabelText(/your name/i)).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "8" } });
+    // Nothing is asked about the creator's game (spec 2026-07-30 §9): strokes start at 0 and are
+    // typed onto the roster.
+    expect(screen.queryByLabelText(/normally shoot/i)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /create round/i }));
 
     await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
     const [body, token] = mockedCreateRound.mock.calls[0]!;
     // Course-cards spec §4: a REFERENCE (courseId + cardId), never a card — the server resolves
     // and freezes the lineage's current card itself. Accounts-only identity (spec §3): the
-    // request carries only that reference + host tee/basis — the seat (name + golferId)
-    // is resolved server-side from the Bearer.
-    expect(body).toEqual({ course: { courseId: courseView.courseId, cardId: courseView.cardId }, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } });
+    // request carries only that reference + a host tee — the seat (name + golferId) is resolved
+    // server-side from the Bearer.
+    expect(body).toEqual({ course: { courseId: courseView.courseId, cardId: courseView.cardId }, host: { tee: "white" } });
     expect(token).toBe(idToken);
     expect(() => startRoundRequestSchema.parse(body)).not.toThrow();
 
     await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
     expect(credentialStore.load(roundId("round-9"))).toEqual({ token: "tok-9", golferId: golferId("ann-g"), name: "Ann G", joinCode: "ZZZ999" });
-  });
-
-  it("accepts a negative — an under-par player states a minus (spec §4's one sign convention)", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
-    mockedGetCourse.mockResolvedValue({ course: courseView });
-    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-10"), joinCode: "AAA000", token: "tok-10", golferId: golferId("bo-g") });
-
-    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
-    await screen.findByText(fixtureLinks18.courseName);
-    await screen.findByText(/playing as/i);
-
-    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "-3" } });
-    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
-
-    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
-    expect(mockedCreateRound.mock.calls[0]![0].host.basis).toEqual({ kind: "normally-shoots", overPar: -3 });
   });
 
   it("submit is disabled until a course is picked", async () => {
@@ -217,7 +202,6 @@ describe("CreateRoundPage — create as yourself", () => {
     await screen.findByText(/playing as/i);
     expect(mockedGetCourse).not.toHaveBeenCalled(); // no re-fetch — EditCoursePage already returned the full CourseView
 
-    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: /create round/i }));
 
     await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
@@ -239,7 +223,6 @@ describe("CreateRoundPage — create as yourself", () => {
     await screen.findByText(/playing as/i);
     expect(mockedGetCourse).toHaveBeenCalledTimes(1);
 
-    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "8" } });
     fireEvent.click(screen.getByRole("button", { name: /create round/i }));
 
     await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
@@ -250,12 +233,10 @@ describe("CreateRoundPage — create as yourself", () => {
   });
 });
 
-// ONE number, in the unit everyone already speaks (spec 2026-07-29 §2/§9): starting a round is
-// joining it as the host, so the creator answers the SAME question a joiner does. Nothing converts
-// it and nothing derives it from the card's rating/slope — the strokes fall out of the whole field
-// once everyone has stated theirs.
-describe("CreateRoundPage — what you normally shoot", () => {
-  it("asks the question verbatim, starts blank, and keeps Create disabled until a number is typed", async () => {
+// The form asks NOTHING about the creator's game (spec 2026-07-30 §9): strokes start at 0 and are
+// typed onto the round's roster by whoever agreed them.
+describe("CreateRoundPage — no question about your game", () => {
+  it("asks nothing about what you shoot, and Create is enabled on a course + tee alone", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
@@ -264,12 +245,9 @@ describe("CreateRoundPage — what you normally shoot", () => {
     await screen.findByText(fixtureLinks18.courseName);
     await screen.findByText(/playing as/i);
 
-    // Blank, never "0": "0" would assert "I shoot par", a real claim about the player.
-    const field = screen.getByLabelText("What do you normally shoot, relative to par?") as HTMLInputElement;
-    expect(field.value).toBe("");
-    expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(true);
-
-    fireEvent.change(field, { target: { value: "26" } });
+    expect(screen.queryByLabelText(/normally/i)).toBeNull();
+    expect(screen.queryByLabelText(/relative to par/i)).toBeNull();
+    expect(screen.queryByLabelText(/strokes/i)).toBeNull();
     expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(false);
   });
 
@@ -314,7 +292,6 @@ describe("CreateRoundPage — identity still loading", () => {
     const submitButton = screen.getByRole("button", { name: /create round/i });
     expect(submitButton.hasAttribute("disabled")).toBe(true);
 
-    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "5" } });
     fireEvent.click(submitButton);
 
     expect(mockedCreateRound).not.toHaveBeenCalled();

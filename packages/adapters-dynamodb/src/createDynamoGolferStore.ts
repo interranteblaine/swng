@@ -15,7 +15,7 @@ const BATCH_GET_MAX_KEYS = 100;
 // NO number and no index source (spec 2026-07-29 §5): the `indexSource` map attr this once stored
 // is deleted with the index it selected between, and nothing replaces it — what a golfer shoots is
 // computed on read from their own round lines (getMyRecord's metrics.average), and what they play
-// off in a round is the basis they state when they join it. A stray beta row that still carries the
+// off in a round is the strokes the group types onto that round's roster. A stray beta row that still carries the
 // old attr is simply not read (no users / no prod → no migration, no tolerate machinery); its next
 // whole-item put drops it, exactly as the legacy `declared`/`official` attrs were dropped before it.
 interface GolferItem {

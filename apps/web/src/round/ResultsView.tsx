@@ -23,9 +23,9 @@ export interface ResultsViewProps {
 // two different minus signs on the same row.
 const signedNumber = (n: number): string => (n < 0 ? `−${-n}` : String(n));
 
-// strokes is non-negative by construction (resolveStrokes clamps both arms at zero, spec §2a), so
-// there is no give-back case left to render here — no formatter, no grant branch, no plus
-// convention. And deliberately NOT `formatOverPar`: this is a strokes count being SUBTRACTED on the
+// strokes is non-negative by construction (the request schema bounds it at min(0), spec
+// 2026-07-30 §11), so there is no give-back case left to render here — no formatter, no grant
+// branch, no plus convention. And deliberately NOT `formatOverPar`: this is a strokes count being SUBTRACTED on the
 // totals line ("96 −20 76"), not a vs-par figure, so it wears a leading minus where formatOverPar
 // would write a plus. Written as `=== 0` rather than `> 0`, deliberately: a negative strokes value would be an
 // invariant break (review fix, task-4 fix round 1) — `> 0`'s else-branch would have silently

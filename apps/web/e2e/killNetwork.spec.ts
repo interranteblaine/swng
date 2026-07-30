@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
 import { fixtureLinks } from "@swng/domain";
-import { ensureCourse, enterScore, expectOrRecover, injectAuthTokens, installWsProxy, mintAccountGolfer, normallyShootsField, waitForParticipant } from "./support.js";
+import { ensureCourse, enterScore, expectOrRecover, injectAuthTokens, installWsProxy, mintAccountGolfer, setStrokesInBrowser, waitForParticipant } from "./support.js";
 import type { WsRouteHandle } from "./support.js";
 
 // M9 Task 4 (task-4-brief.md, Step 2 — reconnect QA): three named arms —
@@ -65,10 +65,9 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     const result = pageA.getByRole("button", { name: `${fixtureLinks.courseName} · ${fixtureLinks.teeSets[0]!.holes.length} holes`, exact: true }).first(); // CourseSearch renders "name · N holes"
     await expect(result).toBeVisible();
     await result.click();
-    // No name entry: the create form renders "Playing as Ann" from the account's own record.
-    // Ann states the LOWER number of the two on purpose — see the stated-numbers note on Bo's own
-    // fill() below; the dedup pin in test 3 needs Bo to be the one receiving a stroke.
-    await normallyShootsField(pageA).fill("4");
+    // No name entry: the create form renders "Playing as Ann" from the account's own record, and
+    // the form asks nothing about anyone's game (spec 2026-07-30 §9). Ann stays on the default 0;
+    // Bo's own number is typed onto the roster below.
     await pageA.getByRole("button", { name: "Create round" }).click();
     await expect(pageA).toHaveURL(/\/round\//);
 
@@ -83,20 +82,19 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     // prompt, no name field, "Playing as Bo" from the record.
     await expect(pageB.getByText(`Joining ${fixtureLinks.courseName}`)).toBeVisible();
     await pageB.getByLabel("Tee").selectOption("white");
-    // The two stated numbers are HARNESS INPUTS, not a frozen deck — nothing in this file is a
-    // scoring oracle (its whole point is the reconnect seam) — but which of the two is LOWER is
-    // load-bearing for test 3's exact-string dedup pin. Under the one stroke rule (spec 2026-07-29
-    // §2b) exactly one player in a two-player round receives anything: the anchor is the lower
-    // stated number and gets zero. Bo therefore states the HIGHER number so his cell carries dots
-    // + gross + net, keeping test 3's "●65" pin covering all three spans of a Cell's render. (Before
-    // this arc both players carried their own absolute number and both drew dots, so either order
-    // produced a three-span cell; that is no longer true.)
-    await normallyShootsField(pageB).fill("8");
     await pageB.getByRole("button", { name: "Join round" }).click();
     await expect(pageB).toHaveURL(/\/round\//);
 
     await waitForParticipant(pageA, "Bo");
     await waitForParticipant(pageB, "Ann");
+
+    // Bo's own number, typed onto the roster from his own page (spec 2026-07-30 §2/§8). A HARNESS
+    // INPUT, not a frozen deck — nothing in this file is a scoring oracle (its whole point is the
+    // reconnect seam) — but Bo receiving SOMETHING is load-bearing for test 3's exact-string dedup
+    // pin: 2 strokes on this nine puts a dot on SI<=2, which includes hole 2, so his cell there
+    // carries dots + gross + net and the "●65" pin covers all three spans of a Cell's render. Ann
+    // stays on 0, so her cells stay single-span.
+    await setStrokesInBrowser(pageB, "Bo", 2);
 
     await enterScore(pageA, "Ann", 1, 4);
     await enterScore(pageB, "Bo", 1, 5);
@@ -142,11 +140,10 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     // pulled back by that SAME Sync-now HTTP fetch (push-then-pull, both inside one doSync()
     // pass — session.ts) — the client's confirmed-vs-outbox/opId reconciliation must fold the
     // pulled-back copy as the SAME event as the still-pending local one, not a second
-    // application. Exact full-text pin, RE-DERIVED for the one stroke rule (spec 2026-07-29 §2b):
-    // Ann stated +4 and Bo +8, so the anchor is 4, Ann derives 0 and Bo derives
-    // roundHalfUp((8 − 4)/2) = 2 on this nine-hole card. allocateStrokes(2, 9 holes) puts a single
-    // dot on the two lowest-SI holes only — hole 2 is SI 1, so Bo's cell renders ● + gross 6 +
-    // net 6−1=5, and any concatenated/duplicated fold (e.g. "●665") corrupts this exact string.
+    // application. Exact full-text pin, derived from the number typed in test 1: Bo is on 2
+    // strokes. allocateStrokes(2, 9 holes) puts a single dot on the two lowest-SI holes only —
+    // hole 2 is SI 1, so Bo's cell renders ● + gross 6 + net 6−1=5, and any concatenated/
+    // duplicated fold (e.g. "●665") corrupts this exact string.
     await expect(pageB.getByRole("button", { name: "Bo hole 2", exact: true })).toHaveText("●65");
     await expect(pageB.getByRole("status", { name: /couldn.t be saved/i })).not.toBeVisible(); // no rejected-op toast either
 
@@ -183,8 +180,8 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     const result = page.getByRole("button", { name: `${fixtureLinks.courseName} · ${fixtureLinks.teeSets[0]!.holes.length} holes`, exact: true }).first(); // CourseSearch renders "name · N holes"
     await expect(result).toBeVisible();
     await result.click();
-    // No name entry: "Playing as Ann" comes from the account's own record.
-    await normallyShootsField(page).fill("8");
+    // No name entry: "Playing as Ann" comes from the account's own record, and nothing is asked
+    // about her game — she plays alone on the default 0 strokes.
     await page.getByRole("button", { name: "Create round" }).click();
     await expect(page).toHaveURL(/\/round\//);
 

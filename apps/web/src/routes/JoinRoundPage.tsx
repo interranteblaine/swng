@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import type { PeekRoundResponse } from "@swng/contracts";
-import { ApiError, getMyRecord, joinRound, peekRound, updateMe } from "../api";
+import { ApiError, joinRound, peekRound, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { teeNumbers } from "../courses/teeNumbers";
@@ -15,19 +15,15 @@ import { usePageTitle } from "../ui/usePageTitle";
 // fires one request per keystroke.
 const DEBOUNCE_MS = 250;
 
-// The peek's per-tee shape — name plus the numbers the tee picker shows (teeNumbers). Nothing
-// here feeds the strokes field any more: what a player states is a fact about THEM, not about the
-// course (spec 2026-07-29 §2), so no course number converts it.
+// The peek's per-tee shape — name plus the numbers the tee picker shows (teeNumbers). Nothing on
+// this page asks about your game (spec 2026-07-30 §9): strokes are typed onto the round's roster
+// by whoever agreed them, so joining is a code and a tee.
 type PeekTee = PeekRoundResponse["teeSets"][number];
 
 export function JoinRoundPage() {
   usePageTitle("Join a round");
   const navigate = useNavigate();
   const auth = useAuth();
-  // Destructured so the record-fetch effect below lists a stable function reference as its dep
-  // (withAuth's own useCallback identity, useAuth.ts) rather than the whole `auth` object — the
-  // ProfilePage/CreateRoundPage precedent.
-  const { withAuth } = auth;
   const [searchParams] = useSearchParams();
 
   // The wall (accounts-only identity spec §3): joining is self-join only, from the caller's own
@@ -47,16 +43,6 @@ export function JoinRoundPage() {
   // across the sign-in round trip lands ready to join without retyping.
   const [code, setCode] = useState(() => (searchParams.get("code") ?? "").toUpperCase());
   const [tee, setTee] = useState("");
-  // What the golfer normally shoots relative to par (spec 2026-07-29 §2): the ONE number they
-  // state, in the unit they already speak on the first tee.
-  // Pre-filled from the golfer's own average (spec 2026-07-29 §2c): what they normally shoot is
-  // exactly the number this field asks for, so the one they can already read on their profile lands
-  // here as a starting point they can type over. BLANK when there is no average — a brand-new
-  // golfer, or one whose every round contains a pickup — with no floor and no fallback chain: one
-  // finished round is better evidence than a guess, and a guess in this field becomes a claim in
-  // the round's log. Seeded ONCE, and only while the field is still untouched, so a pre-fill
-  // arriving after the golfer has typed can never overwrite what they typed.
-  const [overPar, setOverPar] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -65,9 +51,7 @@ export function JoinRoundPage() {
   // the SAME designation (course + date) as home/archive/watch (accounts-only identity spec §5).
   const [createdAt, setCreatedAt] = useState<number | undefined>(undefined);
   // The peek's tee sets (name + rating/slope), not just names — the picker shows each tee's
-  // rating/slope via teeNumbers. The peek carried `par` and `holes` too until the strokes model
-  // stopped deriving anything from an index; nothing reads them now, so they are gone (spec §7,
-  // no dormant fields).
+  // rating/slope via teeNumbers.
   const [peekTees, setPeekTees] = useState<readonly PeekTee[] | undefined>(undefined);
   // Only ever true after a peek actually rejected — gates the fallback NOTE (not the fallback
   // input itself, which is simply whatever renders whenever peekTees is absent).
@@ -76,24 +60,6 @@ export function JoinRoundPage() {
   // joinRoundRequestSchema expects the canonical uppercase 6-char form — uppercase here so a
   // golfer typing lowercase never hits a validation error on something this trivial to fix.
   const upperCode = code.trim().toUpperCase();
-
-  // GET /me/record purely for the pre-fill above — the average is served, never computed here
-  // (the compute fence: `averageOf` is deliberately not re-exported to the client). A failed fetch
-  // just leaves the field blank, which is the honest no-average state anyway.
-  useEffect(() => {
-    if (!auth.signedIn) return;
-    let ignore = false;
-    void withAuth((token) => getMyRecord(token))
-      .then((record) => {
-        if (ignore) return;
-        const average = record.metrics.average;
-        if (average !== undefined) setOverPar((current) => (current === "" ? String(average) : current));
-      })
-      .catch(() => {}); // withAuth already handles a terminal 401; anything else leaves the field blank
-    return () => {
-      ignore = true;
-    };
-  }, [auth.signedIn, withAuth]);
 
   useEffect(() => {
     setCourseName(undefined);
@@ -122,14 +88,13 @@ export function JoinRoundPage() {
     return () => clearTimeout(timer);
   }, [upperCode]);
 
-  const parsedOverPar = Number.parseInt(overPar, 10);
-  const canSubmit = upperCode.length === 6 && tee.trim() !== "" && Number.isInteger(parsedOverPar);
+  const canSubmit = upperCode.length === 6 && tee.trim() !== "";
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const golfer = auth.golfer;
     // Only ever reachable in the asSelf state (the form isn't rendered otherwise), but guarded
-    // anyway: a real account golfer, a complete code, a tee and a stated number.
+    // anyway: a real account golfer, a complete code and a tee.
     if (!canSubmit || !golfer || golfer.namePlaceholder === true) return;
 
     setSubmitting(true);
@@ -138,9 +103,7 @@ export function JoinRoundPage() {
       // Accounts-only identity (spec §3): join is always as-self, resolved server-side from the
       // Bearer — the request carries no name/golferId (the server freezes the account golfer's name
       // into the join event).
-      const response = await auth.withAuth((token) =>
-        joinRound({ code: upperCode, tee: tee.trim(), basis: { kind: "normally-shoots", overPar: parsedOverPar } }, token),
-      );
+      const response = await auth.withAuth((token) => joinRound({ code: upperCode, tee: tee.trim() }, token));
       // The server now echoes the round's canonical join code on JoinRoundResponse (spec
       // 2026-07-20 §2) — that's what's saved, not the typed form value: the server echoes the
       // exact stored code its lookup just matched.
@@ -219,35 +182,12 @@ export function JoinRoundPage() {
             </div>
           )}
 
-          {/* ONE number, in the unit everyone already uses on the first tee (spec 2026-07-29 §2/§9,
-              wording verbatim). No conversion and no derivation note: the number a player states IS
-              the number strokes come from, and the strokes themselves fall out of the whole field
-              once everyone has stated theirs — they are never a per-player declaration. The hint is
-              a SIBLING of the <label> (not nested), which would fold it into the label's own
-              accessible name. */}
-          <div className="flex flex-col gap-1">
-            <label className="flex flex-col gap-1 text-forest">
-              What do you normally shoot, relative to par?
-              <input
-                type="number"
-                step={1}
-                inputMode="numeric"
-                value={overPar}
-                onChange={(event) => setOverPar(event.target.value)}
-                className={`${inputBox} text-lg`}
-              />
-            </label>
-            <span className="text-xs text-fairway/70">Over par for a normal round — 18 holes. Under par? Use a minus.</span>
-          </div>
-
           {error && (
             <p role="alert" className="text-oxblood">
               {error}
             </p>
           )}
 
-          {/* Disabled until the number is there: a blank field is not a claim, so submitting one
-              must be visibly impossible rather than a silently dead button. */}
           <button type="submit" disabled={submitting || !canSubmit} className={`${btnPrimary} disabled:opacity-50`}>
             Join round
           </button>

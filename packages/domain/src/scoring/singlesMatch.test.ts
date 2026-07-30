@@ -4,16 +4,14 @@ import type { Participant } from "../round/participant.js";
 import { playGoldenRound } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
 
-// Match strokes were ALWAYS the difference between the two, so the ONE rule (spec §3) produces
-// the same allocation this file's hand-verified cards were built on — restated in the new model's
-// own terms: Ann 14 vs Bo 2 is a difference of 12, halved on a nine-hole card, so Ann gets 6 dots
-// on SI 1..6 (holes 1,2,4,7,8,9) and Bo, the lowest in the field, plays off scratch. Drop the
-// halving or the relative rule and every net below moves, so these cards pin both.
+// A singles match is played off the DIFFERENCE between the two (spec 2026-07-30 §3). Ann's roster
+// number is 6 and Bo's is 0, so Ann gets 6 dots on SI 1..6 (holes 1,2,4,7,8,9) and Bo plays off
+// scratch. Every net below is built on that allocation.
 const A = golferId("ann");
 const B = golferId("bo");
 const players: readonly Participant[] = [
-  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 14 } },
-  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+  { golferId: A, name: "Ann", tee: "white", strokes: 6 },
+  { golferId: B, name: "Bo", tee: "white", strokes: 0 },
 ];
 const match = { kind: "singles-match", id: gameId("m1"), a: A, b: B } as const;
 

@@ -20,7 +20,6 @@ const toWireLine = (
   holes: line.holes,
   par: line.par,
   strokes: line.strokes,
-  ...(line.normallyShoots !== undefined ? { normallyShoots: line.normallyShoots } : {}),
   ...(line.score !== undefined ? { score: line.score } : {}),
   distribution: line.distribution,
   finalizedAt: line.finalizedAtMs,

@@ -59,7 +59,8 @@ export const joinRound =
       throw new ApplicationError("golfer-already-in-round", `golfer ${golfer} is already a participant in this round`);
     }
 
-    const participant: Participant = { golferId: golfer, name: golferRecord.name, tee: command.tee, basis: command.basis };
+    // Strokes start at 0 (spec 2026-07-30 §2): joining asks no question about your game.
+    const participant: Participant = { golferId: golfer, name: golferRecord.name, tee: command.tee, strokes: 0 };
 
     const hlc = createServerHlcSource(deps.clock);
     const result = await deps.journal.append(id, [{ kind: "participant-joined", participant, ...serverEnvelope({ hlc, ids: deps.ids }, golfer) }]);

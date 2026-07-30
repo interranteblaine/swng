@@ -77,8 +77,8 @@ const setup = async () => {
 // unscored, the starting point every case below builds on.
 const freshLiveRoundWithGame = async () => {
   const ctx = await setup();
-  const host = await ctx.start({ course: ctx.course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, { sub: "sub-host" });
-  const bo = await ctx.join({ code: host.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, { sub: "sub-bo" });
+  const host = await ctx.start({ course: ctx.course, host: { tee: "white" } }, { sub: "sub-host" });
+  const bo = await ctx.join({ code: host.joinCode, tee: "white" }, { sub: "sub-bo" });
   const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
   const boClaims: ParticipantClaims = { roundId: bo.roundId, golferId: bo.golferId };
   const added = await ctx.addStableford(hostClaims, { game: { kind: "stableford", players: [host.golferId, bo.golferId] } });

@@ -36,7 +36,7 @@ const finalizedEvent = (wallMs: number): RoundEvent => ({
 const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: GolferId }[]): RoundArchive => ({
   roundId: roundId(id),
   card: fixtureLinks18,
-  participants: entries.map((e): RosterEntry => ({ golferId: e.golferId, name: e.golferId, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
+  participants: entries.map((e): RosterEntry => ({ golferId: e.golferId, name: e.golferId, tee: "white", strokes: 0 })),
   games: [],
   cells: {},
   // A real archive's log always opens with round-created (its genesis) — carried here so
@@ -50,7 +50,7 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
     ...entries.map(
       (e, i): RoundEvent => ({
         kind: "participant-joined",
-        participant: { golferId: e.golferId, name: e.golferId, tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
+        participant: { golferId: e.golferId, name: e.golferId, tee: "white", strokes: 0 },
         opId: opId(`joined-${id}-${e.golferId}`),
         hlc: { wallMs: 1, counter: i + 1, deviceId: deviceId("server") },
         authorId: e.golferId,

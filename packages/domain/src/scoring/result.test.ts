@@ -9,8 +9,8 @@ import { fixtureLinks } from "./golden/fixtureCourse.js";
 const A = golferId("ann");
 const B = golferId("bo");
 const players: readonly Participant[] = [
-  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
-  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+  { golferId: A, name: "Ann", tee: "white", strokes: 3 },
+  { golferId: B, name: "Bo", tee: "white", strokes: 0 },
 ];
 
 describe("resultOf", () => {
@@ -43,11 +43,11 @@ describe("resultOf", () => {
 
   it("settles a closed singles match into its outcome and thru", () => {
     const match = { kind: "singles-match", id: gameId("m1"), a: A, b: B } as const;
-    // singlesMatch.test.ts's own 3&2 roster: Ann 14 against Bo 2 is a difference of 12, halved on a
-    // nine-hole card, so Ann carries the same 6 dots that card's hole-by-hole narrative was built on.
+    // singlesMatch.test.ts's own 3&2 roster: Ann on 6 against Bo on 0, so Ann carries the same 6
+    // dots that card's hole-by-hole narrative was built on.
     const matchPlayers: readonly Participant[] = [
-      { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 14 } },
-      { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+      { golferId: A, name: "Ann", tee: "white", strokes: 6 },
+      { golferId: B, name: "Bo", tee: "white", strokes: 0 },
     ];
     const [state] = playGoldenRound(fixtureLinks, matchPlayers, [match], {
       [A]: [5, 5, 3, 6, 4, 4, 5],
@@ -99,13 +99,13 @@ describe("resultOf", () => {
   it("settles a closed fourball match into its outcome and thru", () => {
     const C = golferId("cal");
     const D = golferId("dee");
-    // fourballMatch.test.ts's own 3&1 roster: differences from Bo's 2 are 10/0/18/6, halved on a
-    // nine-hole card, so the four carry the same 5/0/9/3 dots that card's narrative was built on.
+    // fourballMatch.test.ts's own 3&1 roster: 5/0/9/3, with Bo already the lowest, so the four
+    // carry the same dots that card's narrative was built on.
     const fourPlayers: readonly Participant[] = [
-      { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 12 } },
-      { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
-      { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 20 } },
-      { golferId: D, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
+      { golferId: A, name: "Ann", tee: "white", strokes: 5 },
+      { golferId: B, name: "Bo", tee: "white", strokes: 0 },
+      { golferId: C, name: "Cal", tee: "white", strokes: 9 },
+      { golferId: D, name: "Dee", tee: "white", strokes: 3 },
     ];
     const fourball = { kind: "fourball-match", id: gameId("f1"), a: [A, B], b: [C, D] } as const;
     const [state] = playGoldenRound(fixtureLinks, fourPlayers, [fourball], {
@@ -124,7 +124,7 @@ describe("resultOf", () => {
 
   it("settles a complete skins game into who won what plus the stranded pot", () => {
     const C = golferId("cal");
-    const threePlayers: readonly Participant[] = [...players, { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 12 } }];
+    const threePlayers: readonly Participant[] = [...players, { golferId: C, name: "Cal", tee: "white", strokes: 5 }];
     const skins = { kind: "skins", id: gameId("k1"), scoring: "net", players: [A, B, C] } as const;
     // The end-on-tie golden card from skins.test.ts: h9 ties (Bo and Cal both net 5), stranding 1.
     const [state] = playGoldenRound(fixtureLinks, threePlayers, [skins], {
@@ -146,7 +146,7 @@ describe("resultOf", () => {
 
   it("returns undefined for a skins game that isn't complete yet", () => {
     const C = golferId("cal");
-    const threePlayers: readonly Participant[] = [...players, { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 12 } }];
+    const threePlayers: readonly Participant[] = [...players, { golferId: C, name: "Cal", tee: "white", strokes: 5 }];
     const skins = { kind: "skins", id: gameId("k1"), scoring: "net", players: [A, B, C] } as const;
     const [state] = playGoldenRound(fixtureLinks, threePlayers, [skins], {
       [A]: [5, 5],
@@ -161,8 +161,8 @@ describe("resultOf", () => {
     const D = golferId("dee");
     const fourPlayers: readonly Participant[] = [
       ...players,
-      { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 12 } },
-      { golferId: D, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 5 } },
+      { golferId: C, name: "Cal", tee: "white", strokes: 5 },
+      { golferId: D, name: "Dee", tee: "white", strokes: 2 },
     ];
     const fourball = { kind: "fourball-match", id: gameId("f1"), a: [A, B], b: [C, D] } as const;
     const [state] = playGoldenRound(fixtureLinks, fourPlayers, [fourball], {

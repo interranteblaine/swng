@@ -49,7 +49,7 @@ import {
   recordScore,
   removeCrewMember,
   searchCourses,
-  setBasis,
+  setStrokes,
   startRound,
   supersedeCard,
   terminateGame,
@@ -333,7 +333,7 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
     // spec 2026-07-20 (re-shaped by 2026-07-29): mid-round correction of what a player stated
     // about themselves — same journal/broadcast/clock/ids instances the other participant round
     // acts above already share.
-    setBasis: setBasis({ journal, broadcast, clock, ids }),
+    setStrokes: setStrokes({ journal, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),

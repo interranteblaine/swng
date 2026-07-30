@@ -6,16 +6,16 @@ import { fixtureLinks } from "./golden/fixtureCourse.js";
 
 const A = golferId("ann"); const B = golferId("bo");
 const C = golferId("cal"); const D = golferId("dee");
-// Four-ball strokes were ALWAYS relative to the lowest of the four, so the ONE rule (spec §3)
-// produces the same allocation this file's hand-verified cards were built on — restated in the new
-// model's own terms, and without the 90% discount, which is deleted with the rest of the allowance
-// table. Differences from Bo's 2 are 10/0/18/6, halved on a nine-hole card: Ann 5, Bo 0, Cal 9,
-// Dee 3 dots. Drop the halving or the relative rule and every net below moves.
+// Four-ball is a MATCH kind: everyone plays off the lowest of the four (spec 2026-07-30 §3). The
+// roster numbers here are 5/0/9/3, and Bo is already the lowest, so the difference leaves them
+// unchanged — the same dots this file's hand-verified cards were built on. Drop the relative rule
+// and nothing here moves; raise Bo above 0 and everything does, which is why the relative arm is
+// pinned in allocation.test.ts instead.
 const players: readonly Participant[] = [
-  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 12 } },
-  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
-  { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 20 } },
-  { golferId: D, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
+  { golferId: A, name: "Ann", tee: "white", strokes: 5 },
+  { golferId: B, name: "Bo", tee: "white", strokes: 0 },
+  { golferId: C, name: "Cal", tee: "white", strokes: 9 },
+  { golferId: D, name: "Dee", tee: "white", strokes: 3 },
 ];
 const game = { kind: "fourball-match", id: gameId("f1"), a: [A, B], b: [C, D] } as const;
 

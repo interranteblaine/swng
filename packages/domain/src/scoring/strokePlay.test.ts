@@ -12,8 +12,8 @@ import type { GameState } from "./game.js";
 const A = golferId("ann");
 const B = golferId("bo");
 const players: readonly Participant[] = [
-  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
-  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+  { golferId: A, name: "Ann", tee: "white", strokes: 3 },
+  { golferId: B, name: "Bo", tee: "white", strokes: 0 },
 ];
 
 const grossGame = { kind: "stroke-play", id: gameId("g1"), scoring: "gross", players: [A, B] } as const;
@@ -101,26 +101,26 @@ describe("stroke play — golden cards", () => {
 });
 
 describe("stroke play — properties", () => {
-  // Two players, not one: strokes are relative now, so a lone player is the field's own anchor and
-  // receives nothing — the property would hold vacuously (net === gross) and prove nothing about
-  // dots. Q states even par and is the anchor, so P's dots are roundHalfUp(overPar / 2) ≥ 0 and
-  // P's net can only run at or below P's gross.
-  it("net never exceeds gross for a player receiving strokes off the field's anchor, with full cards", () => {
+  // Stroke play is a medal kind, so P's dots are P's own asserted strokes — no anchoring, no
+  // subtraction (spec 2026-07-30 §3). Dots are never negative, so P's net can only run at or below
+  // P's gross, whatever number the group typed. Q rides along at 0 to keep the game a real
+  // two-player card.
+  it("net never exceeds gross for a player receiving strokes, with full cards", () => {
     fc.assert(
       fc.property(
         fc.array(fc.integer({ min: 1, max: 9 }), { minLength: 9, maxLength: 9 }),
         fc.integer({ min: 0, max: 18 }),
-        (strokes, overPar) => {
+        (scores, given) => {
           const P = golferId("p");
           const Q = golferId("q");
           const [state] = playGoldenRound(
             fixtureLinks,
             [
-              { golferId: P, name: "P", tee: "white", basis: { kind: "normally-shoots", overPar } },
-              { golferId: Q, name: "Q", tee: "white", basis: { kind: "normally-shoots", overPar: 0 } },
+              { golferId: P, name: "P", tee: "white", strokes: given },
+              { golferId: Q, name: "Q", tee: "white", strokes: 0 },
             ],
             [{ kind: "stroke-play", id: gameId("g"), scoring: "net", players: [P, Q] }],
-            { [P]: strokes, [Q]: strokes },
+            { [P]: scores, [Q]: scores },
           );
           const line = (state as GameState & { kind: "stroke-play" }).lines[0]!;
           expect(line.net!.total).toBeLessThanOrEqual(line.gross.total);

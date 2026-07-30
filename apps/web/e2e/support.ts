@@ -62,7 +62,7 @@ import type {
   UpdateMeRequest,
 } from "@swng/contracts";
 import { deviceId as toDeviceId, fieldDeck18, fixtureLinks18, opId as toOpId, playGoldenRoundLog, reduceRound, scoreGame } from "@swng/domain";
-import type { CourseCard, CourseId, CrewId, DeviceId, FixtureScores, GolferId, Hlc, OpId, RoundId, RoundState, StrokeBasis } from "@swng/domain";
+import type { CourseCard, CourseId, CrewId, DeviceId, FixtureScores, GolferId, Hlc, OpId, RoundId, RoundState } from "@swng/domain";
 import type { AuthTokens } from "../src/auth/tokenStore.js";
 import { describeGame } from "../src/games/describeGame.js";
 
@@ -193,12 +193,11 @@ export const getCourseDirect = async (httpUrl: string, id: string): Promise<{ co
 export const joinRoundDirect = async (
   httpUrl: string,
   account: AccountGolfer,
-  input: { readonly code: string; readonly tee: string; readonly basis: StrokeBasis },
+  input: { readonly code: string; readonly tee: string },
 ): Promise<JoinRoundResponse> => {
   const body = parse(joinRoundRequestSchema, {
     code: input.code,
     tee: input.tee,
-    basis: input.basis,
   });
   const response = await fetch(`${httpUrl}/rounds/join`, {
     method: "POST",
@@ -229,11 +228,11 @@ export const joinRoundDirect = async (
 export const startRoundDirect = async (
   httpUrl: string,
   account: AccountGolfer,
-  input: { readonly course: { readonly courseId: CourseId; readonly cardId: string }; readonly tee: string; readonly basis: StrokeBasis },
+  input: { readonly course: { readonly courseId: CourseId; readonly cardId: string }; readonly tee: string },
 ): Promise<StartRoundResponse> => {
   const body = parse(startRoundRequestSchema, {
     course: input.course,
-    host: { tee: input.tee, basis: input.basis },
+    host: { tee: input.tee },
   });
   const response = await fetch(`${httpUrl}/rounds`, {
     method: "POST",
@@ -1029,7 +1028,20 @@ export const chip = (page: Page, titlePrefix: string) => page.getByRole("button"
 // eight sites across four specs, and renaming it is invisible to `tsc` — every one of those
 // `getByLabel(...)` calls kept compiling and would have resolved NOTHING at the live gate. One
 // copy, checked against the JSX once.
-export const normallyShootsField = (page: Page): Locator => page.getByLabel("What do you normally shoot, relative to par?", { exact: true });
+// The roster row's own strokes editor (SetupPanel.tsx, spec 2026-07-30 §8): tap Edit on a
+// player's row, type the number the group agreed, Save. There is no join/create-form question
+// about anyone's game any more, so this is the ONE place a browser spec types a stroke count.
+export const setStrokesInBrowser = async (page: Page, name: string, strokes: number): Promise<void> => {
+  // `li` + hasText, the same locator every spec in this suite already uses for a roster row — the
+  // roster is the only <li> list on a live round page that carries a player's name next to an Edit
+  // button, and `.first()` pins the match even when an open game panel adds lists of its own.
+  const row = page.locator("li").filter({ hasText: name }).first();
+  await row.getByRole("button", { name: "Edit" }).click();
+  const input = page.getByRole("spinbutton", { name: `Strokes for ${name}` });
+  await input.fill(String(strokes));
+  await row.getByRole("button", { name: "Save" }).click();
+  await expect(row.getByRole("spinbutton")).toHaveCount(0);
+};
 
 // Every game chip (StandingsHeader.tsx) carries `aria-expanded` — the ONE attribute that
 // distinguishes it from every other button on a round page (Add game/Sync now/Finalize

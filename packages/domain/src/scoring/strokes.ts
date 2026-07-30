@@ -3,13 +3,13 @@ import { DomainError } from "../errors.js";
 
 export const roundHalfUp = (value: number): number => Math.floor(value + 0.5);
 
-// Dots on the hardest holes first, wrapping past a full lap. Non-negative by construction: under
-// the relative model the lowest in the field is the anchor and nobody gives strokes back
-// (spec 2026-07-29 §2a/§2b), so `resolveStrokes` clamps at zero and the request schema bounds
-// `strokes` at min(0). The give-back branch that mirrored this rule from the EASIEST hole is
-// deleted with the plus-handicap convention it served — a negative input now allocates negative
-// dots hole-by-hole, which no caller can produce and no renderer accepts (ScorecardGrid's
-// `"●".repeat(dots)` throws RangeError on one, which is what makes the clamp load-bearing).
+// Dots on the hardest holes first, wrapping past a full lap. Non-negative by construction: a
+// player's strokes are asserted, and the request schema bounds them at min(0) (spec 2026-07-30
+// §11), so nobody ever gives strokes back. The give-back branch that mirrored this rule from the
+// EASIEST hole is deleted with the plus-handicap convention it served — a negative input now
+// allocates negative dots hole-by-hole, which no caller can produce and no renderer accepts
+// (ScorecardGrid's `"●".repeat(dots)` throws RangeError on one, which is what makes the bound
+// load-bearing).
 export const allocateStrokes = (strokes: number, teeSet: TeeSet): number[] => {
   const holeCount = teeSet.holes.length;
   const base = Math.floor(strokes / holeCount);

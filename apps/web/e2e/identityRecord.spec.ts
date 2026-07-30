@@ -88,7 +88,7 @@ const playRecordRound = async (
   label: string,
   bogeys: number,
 ): Promise<RoundId> => {
-  const started = await startRoundDirect(httpUrl, account, { course, tee: "white", basis: { kind: "normally-shoots", overPar: 8 } });
+  const started = await startRoundDirect(httpUrl, account, { course, tee: "white" });
   const ops = createScoreOps(`record-${label}`);
   for (const [i, strokes] of holeScoresFor(bogeys).entries()) {
     await recordScoreDirect(httpUrl, started.roundId, started.token, { golferId: account.golfer.golferId, hole: i + 1, strokes }, ops);
@@ -177,16 +177,13 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     // `score - par` is exactly what a history row renders beside the score (spec §5), and it is the
     // per-round figure the headline average is the mean of — pinned so the two can never disagree.
     expect(record.history.map((line) => line.score! - line.par)).toEqual([PINNED_OVER_PAR[2], PINNED_OVER_PAR[1], PINNED_OVER_PAR[0]]);
-    // Every line carries the strokes the fold derived: a lone player is their own anchor, so
-    // playRecordRound's stated +8 resolves to 8 − 8 = 0 strokes for all three rounds (spec §2b).
-    // Stated as a NON-ZERO number on purpose — the assertion would be vacuous if the deck had
-    // stated +0, since 0 is also what a fold that confused the assertion with the derived value
-    // would print.
+    // Every line carries the strokes the seat played off. Nobody typed a number onto these solo
+    // rounds' rosters, so every seat sat on the default 0 (spec 2026-07-30 §2).
     expect(record.history.map((line) => line.strokes)).toEqual([0, 0, 0]);
-    expect(record.history.map((line) => line.normallyShoots)).toEqual([8, 8, 8]);
-    // The retired columns are pinned ABSENT, not merely unasserted.
+    // The retired columns are pinned ABSENT, not merely unasserted — `normallyShoots` among them:
+    // it recorded an assertion that only became strokes through a rule that no longer exists.
     for (const line of record.history) {
-      for (const retired of ["ags", "differential"]) expect(line).not.toHaveProperty(retired);
+      for (const retired of ["ags", "differential", "normallyShoots"]) expect(line).not.toHaveProperty(retired);
     }
 
     // Round 3 finalized last -> newest -> history[0]; round 1 first -> oldest -> history[2].

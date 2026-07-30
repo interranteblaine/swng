@@ -19,11 +19,12 @@ const playRound = (
   return { round, states: round.games.map((config) => scoreGame(config, round)) };
 };
 
-const A = golferId("ann"); // normally shoots +8
-const B = golferId("bo"); // normally shoots +2
+const A = golferId("ann");
+const B = golferId("bo");
+// strokePlay.test.ts / stableford.test.ts's own roster: Ann on 3, Bo off scratch.
 const twoPlayers: readonly Participant[] = [
-  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
-  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+  { golferId: A, name: "Ann", tee: "white", strokes: 3 },
+  { golferId: B, name: "Bo", tee: "white", strokes: 0 },
 ];
 
 describe("describeGame — stroke-play", () => {
@@ -55,8 +56,8 @@ describe("describeGame — stroke-play", () => {
 
   it("net scoring uses the net running total (and its own vs-par), not gross", () => {
     // strokePlay.test.ts's golden net card: Ann net 44 (pickup resolved at net double bogey),
-    // Bo net 37 — Bo is the lowest in the field, so he plays off scratch and his net IS his
-    // gross, which is also the lower total, so he leads under net scoring.
+    // Bo net 37 — Bo is on 0, so his net IS his gross, which is also the lower total, so he leads
+    // under net scoring.
     const { round, states } = playRound(fixtureLinks, twoPlayers, [netGame], {
       [A]: [5, 6, 3, "picked-up", 5, 4, 5, 6, 5],
       [B]: [4, 4, 3, 5, 5, 3, 4, 5, 4],
@@ -96,11 +97,11 @@ describe("describeGame — stableford", () => {
 
 describe("describeGame — singles-match", () => {
   const match: GameConfig = { kind: "singles-match", id: gameId("m1"), a: A, b: B };
-  // singlesMatch.test.ts's own roster for these cards: Ann 14 against Bo 2 is a difference of 12,
-  // halved on a nine-hole card, so Ann carries the 6 dots those hole-by-hole narratives assume.
+  // singlesMatch.test.ts's own roster for these cards: Ann on 6 against Bo on 0, so Ann carries
+  // the 6 dots those hole-by-hole narratives assume.
   const matchPlayers: readonly Participant[] = [
-    { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 14 } },
-    { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+    { golferId: A, name: "Ann", tee: "white", strokes: 6 },
+    { golferId: B, name: "Bo", tee: "white", strokes: 0 },
   ];
 
   it("all square, in-progress: no leader named", () => {

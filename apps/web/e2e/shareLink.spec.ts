@@ -48,7 +48,7 @@ test.describe.serial("M9 Task 3 field test — the round has a link: live specta
     // Course-cards spec §4: StartRound resolves a REFERENCE now — seed the lineage once via the
     // public course API, then pass it through.
     const course = await ensureCourse(fixtureLinks.courseName, fixtureLinks, ann);
-    const started = await startRoundDirect(httpUrl, ann, { course, tee: "white", basis: { kind: "normally-shoots", overPar: 8 } });
+    const started = await startRoundDirect(httpUrl, ann, { course, tee: "white" });
     roundIdValue = started.roundId;
     hostToken = started.token;
     hostGolferId = started.golferId;

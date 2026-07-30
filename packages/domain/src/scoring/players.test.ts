@@ -10,8 +10,8 @@ import { allPlayersComplete } from "./players.js";
 const A = golferId("ann");
 const B = golferId("bo");
 const players2: readonly Participant[] = [
-  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
-  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+  { golferId: A, name: "Ann", tee: "white", strokes: 3 },
+  { golferId: B, name: "Bo", tee: "white", strokes: 0 },
 ];
 
 describe("allPlayersComplete", () => {

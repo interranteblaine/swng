@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import type { CourseCard } from "@swng/domain";
 import type { AuthTokens } from "../src/auth/tokenStore.js";
-import { enterScore, ensureCourse, injectAuthTokens, mintAccountGolfer, mintThrowawayUser, normallyShootsField, screenshotPath } from "./support.js";
+import { enterScore, ensureCourse, injectAuthTokens, mintAccountGolfer, mintThrowawayUser, screenshotPath } from "./support.js";
 
 // The primary path, accounts-only (the original M8 headline, rewritten for the wall): a fresh
 // golfer signs in, names themselves ONCE at the funnel's own prompt, and plays a round as
@@ -96,13 +96,9 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
 
     await page.screenshot({ path: screenshotPath("primary-path-playing-as.png"), fullPage: true });
 
-    // Required, not optional (spec 2026-07-29 §2): the one number a player states about themselves
-    // has no default, because "0" would assert "I shoot par" — a real claim — so CreateRoundPage
-    // starts it BLANK and keeps Create round disabled until it parses. This step used to lean on
-    // the old field's "0" default and never touch it; a primary path that submits nothing this
-    // form requires is not the primary path.
-    await normallyShootsField(page).fill("18");
-
+    // The form asks nothing else (spec 2026-07-30 §9): a course and a tee, and Create round is
+    // already enabled. Strokes start at 0 and are typed onto the roster when a group agrees them —
+    // this golfer plays alone, so nobody ever does.
     const create = page.getByRole("button", { name: /^create round$/i });
     await expect(create).toBeEnabled();
     await create.click();
@@ -127,8 +123,8 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
     // belongs: this is the one all-browser gate that plays a whole round and finalizes it.
     //
     // DERIVED BY HAND from this file's own fixture: the card is 18 holes of par 4 (par 72) and
-    // test 3 scored a flat 4 on every hole, so gross = 72. This golfer plays ALONE, so they are
-    // their own anchor and the stated +18 derives 0 strokes (spec §2b) — net = 72 − 0 = 72.
+    // test 3 scored a flat 4 on every hole, so gross = 72. Nobody typed a number onto this
+    // one-player roster, so the seat is on its default 0 strokes — net = 72 − 0 = 72.
     // ResultsView.tsx renders the row as `{name} — {gross} gross · {strokesLabel} · {net} net`,
     // with strokesLabel(0) === "0" (never "−0"). Scoped to the aria-labelled list because the
     // read-only card below it prints its own totals from the SAME grossForHoles.
@@ -137,12 +133,12 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
     // ...and the CARD's own totals row, the other half of spec §4's "it gains a totals row". This
     // is the ONE spec that plays a whole card with no pickup and no gap, so it is the only place
     // OUT, IN and TOT can all carry real numbers rather than a dash (courseEntry scores one hole,
-    // basisCorrection two of nine, unratedCourse two of nine — every segment in all three dashes;
+    // strokesCorrection two of nine, unratedCourse two of nine — every segment in all three dashes;
     // fieldTest's own multi-player version, with a real pickup, is pinned in its test 9).
     //
     // DERIVED BY HAND from the same fixture: 18 holes of par 4 → OUT and IN are par 36 each and
-    // TOT is par 72; a flat 4 on every hole gives 36 / 36 / 72 gross; 0 derived strokes means 0
-    // dots, so each segment's net equals its gross (netStrokes(gross, 0)).
+    // TOT is par 72; a flat 4 on every hole gives 36 / 36 / 72 gross; 0 strokes means 0 dots, so
+    // each segment's net equals its gross (netStrokes(gross, 0)).
     // ScorecardGrid.tsx renders a segment cell as two adjacent <div>s — gross then net — with no
     // separator, so the cell's whole text is the two numbers concatenated: "3636", "7272".
     // The row's own <th scope="row"> is a `rowheader`, not a `cell`, so getByRole("cell") yields

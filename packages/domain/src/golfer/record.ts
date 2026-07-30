@@ -24,13 +24,11 @@ export interface GolferRoundLine {
   readonly tee: string;
   readonly holes: 9 | 18;
   readonly par: number; // sum of the frozen tee's hole pars (spec §5)
-  // The strokes this player actually played off: `participant.strokes`, the value reduceRound
-  // derived across the round's roster and settleRound froze (spec 2026-07-29 §2b).
+  // The strokes this player played off: `participant.strokes`, the number the group agreed and
+  // typed, which settleRound froze (spec 2026-07-30 §2). There is no second field beside it —
+  // the old `normallyShoots` recorded an assertion that only became strokes through a rule that
+  // no longer exists.
   readonly strokes: number;
-  // What they STATED, when they stated a normal score — absent when they stated raw strokes
-  // instead (spec §2a's second constructor). The assertion beside its consequence: `strokes` is
-  // what the fold made of it against the rest of the field.
-  readonly normallyShoots?: number;
   // The round's own gross total, present iff every hole carries a number (`hasCompleteScore`).
   // LOAD-BEARING, not tidiness: `holeResults` never rides the wire, so without this a history row
   // would have no score to render at all. Absent means the card has a pickup or a gap — there is
@@ -89,7 +87,6 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
     holes: teeSet.holes.length as 9 | 18,
     par: teeSet.holes.reduce((sum, hole) => sum + hole.par, 0),
     strokes: participant.strokes,
-    ...(participant.basis.kind === "normally-shoots" ? { normallyShoots: participant.basis.overPar } : {}),
     distribution,
     holeResults,
   };

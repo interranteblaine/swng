@@ -40,7 +40,7 @@ const singlesArchive = (
   return {
     roundId: roundId(id),
     card: fixtureLinks18,
-    participants: [a, b].map((g): RosterEntry => ({ golferId: g, name: names[g] ?? g, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
+    participants: [a, b].map((g): RosterEntry => ({ golferId: g, name: names[g] ?? g, tee: "white", strokes: 0 })),
     games: [{ kind: "singles-match", id: gid, a, b }],
     cells: {},
     events: [finalized],
@@ -65,7 +65,7 @@ const fourballArchive = (
   return {
     roundId: roundId(id),
     card: fixtureLinks18,
-    participants: [...a, ...b].map((g): RosterEntry => ({ golferId: g, name: g, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
+    participants: [...a, ...b].map((g): RosterEntry => ({ golferId: g, name: g, tee: "white", strokes: 0 })),
     games: [{ kind: "fourball-match", id: gid, a, b }],
     cells: {},
     events: [finalized],
@@ -82,7 +82,7 @@ const stablefordArchive = (id: string, wallMs: number, players: readonly GolferI
   return {
     roundId: roundId(id),
     card: fixtureLinks18,
-    participants: players.map((g): RosterEntry => ({ golferId: g, name: g, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
+    participants: players.map((g): RosterEntry => ({ golferId: g, name: g, tee: "white", strokes: 0 })),
     games: [{ kind: "stableford", id: gid, players }],
     cells: {},
     events: [finalized],

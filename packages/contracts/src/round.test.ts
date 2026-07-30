@@ -71,24 +71,29 @@ describe("roundEventSchema", () => {
     expect(roundTripped).toEqual(event);
   });
 
-  it("parses participant-basis-set (incl. an under-par normal score)", () => {
+  it("parses participant-strokes-set", () => {
     const event = {
       opId: "op-1", hlc: { wallMs: 5, counter: 0, deviceId: "d1" }, authorId: "g-author",
-      kind: "participant-basis-set", golferId: "g-subject", basis: { kind: "normally-shoots", overPar: -2 },
+      kind: "participant-strokes-set", golferId: "g-subject", strokes: 20,
     };
     expect(roundEventSchema.parse(event)).toEqual(event);
   });
 
-  // The STORED twin is deliberately unbounded (round.ts's own comment): the request copy in
-  // commands.ts bounds `strokes` at min(0), but a stored negative must still PARSE — the model's
-  // clamp (domain's resolveStrokes) turns it into 0, whereas a schema rejection would make the
-  // whole round unreadable forever.
-  it("parses a stored strokes basis without applying the request bound", () => {
-    const event = {
+  // The STORED arm is deliberately unbounded (round.ts's own comment, Arc A's placement rule):
+  // the request copy in commands.ts bounds `strokes` to [0, 54], but an already-stored value
+  // outside that must still PARSE — a schema rejection on a read path would make the whole round
+  // unreadable forever.
+  it("parses a stored strokes value outside the request bounds, on both the set and the join", () => {
+    const set = {
       opId: "op-2", hlc: { wallMs: 6, counter: 0, deviceId: "d1" }, authorId: "g-author",
-      kind: "participant-basis-set", golferId: "g-subject", basis: { kind: "strokes", strokes: -3 },
+      kind: "participant-strokes-set", golferId: "g-subject", strokes: 99,
     };
-    expect(roundEventSchema.parse(event)).toEqual(event);
+    expect(roundEventSchema.parse(set)).toEqual(set);
+    const join = {
+      opId: "op-3", hlc: { wallMs: 7, counter: 0, deviceId: "d1" }, authorId: "g-author",
+      kind: "participant-joined", participant: { golferId: "g-subject", name: "Ann", tee: "white", strokes: -3 },
+    };
+    expect(roundEventSchema.parse(join)).toEqual(join);
   });
 
   const card: CourseCard = {

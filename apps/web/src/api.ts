@@ -28,7 +28,7 @@ import {
   peekRoundResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
-  setBasisResponseSchema,
+  setStrokesResponseSchema,
   shareLinkResponseSchema,
   startRoundResponseSchema,
   supersedeCardResponseSchema,
@@ -69,8 +69,8 @@ import type {
   PeekRoundResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
-  SetBasisRequest,
-  SetBasisResponse,
+  SetStrokesRequest,
+  SetStrokesResponse,
   ShareLinkResponse,
   StartRoundRequest,
   StartRoundResponse,
@@ -182,14 +182,14 @@ export const leaveRound = async (roundId: RoundId, token: string): Promise<Leave
   return parse(leaveRoundResponseSchema, json);
 };
 
-// POST /rounds/{roundId}/basis (spec 2026-07-20, re-shaped by 2026-07-29): any participant
-// corrects what any participant stated about themselves mid-round; the correction is retroactive by
-// construction (nothing snapshots strokes — dots, standings, and the eventual archive all read the
-// folded roster, which re-derives the WHOLE field's strokes). Append idiom — the response carries
-// the one participant-basis-set this call appended; the caller sync()s and lets the fold render.
-export const setBasis = async (roundId: RoundId, token: string, request: SetBasisRequest): Promise<SetBasisResponse> => {
-  const json = await requestJson(`/rounds/${roundId}/basis`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request), token });
-  return parse(setBasisResponseSchema, json);
+// POST /rounds/{roundId}/strokes (spec 2026-07-30 §2): any participant sets any participant's
+// strokes mid-round; the change is retroactive by construction (nothing snapshots strokes — the
+// card's dots, the standings, and the eventual archive all read the folded roster). Append idiom —
+// the response carries the one participant-strokes-set this call appended; the caller sync()s and
+// lets the fold render.
+export const setStrokes = async (roundId: RoundId, token: string, request: SetStrokesRequest): Promise<SetStrokesResponse> => {
+  const json = await requestJson(`/rounds/${roundId}/strokes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request), token });
+  return parse(setStrokesResponseSchema, json);
 };
 
 // M9 Task 3 (share): mints this round's own immortal spectator link. `url` is a path+fragment

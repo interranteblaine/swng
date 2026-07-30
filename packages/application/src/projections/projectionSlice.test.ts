@@ -53,7 +53,7 @@ const cellsFor = (id: string, entries: readonly ArchiveEntry[]): Record<string, 
 const archiveAt = (id: string, wallMs: number, entries: readonly ArchiveEntry[]): RoundArchive => ({
   roundId: roundId(id),
   card: fixtureLinks18,
-  participants: entries.map((e): RosterEntry => ({ golferId: e.golferId, name: e.golferId, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
+  participants: entries.map((e): RosterEntry => ({ golferId: e.golferId, name: e.golferId, tee: "white", strokes: 0 })),
   games: [],
   cells: cellsFor(id, entries),
   // A real archive's log always opens with round-created (its genesis) — carried here so
@@ -67,7 +67,7 @@ const archiveAt = (id: string, wallMs: number, entries: readonly ArchiveEntry[])
     ...entries.map(
       (e, i): RoundEvent => ({
         kind: "participant-joined",
-        participant: { golferId: e.golferId, name: e.golferId, tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
+        participant: { golferId: e.golferId, name: e.golferId, tee: "white", strokes: 0 },
         opId: opId(`joined-${id}-${e.golferId}`),
         hlc: { wallMs: 1, counter: i + 1, deviceId: deviceId("server") },
         authorId: e.golferId,
@@ -113,9 +113,9 @@ describe("projectArchive", () => {
 
     const history = await ctx.projectionStore.listLines(ann);
     expect(history).toHaveLength(1);
-    // The line records what the round said about this golfer: the strokes the fold derived, the
-    // normal score they stated, and the round's own gross (18 x 5 on fixtureLinks18's par 72).
-    expect(history[0]).toMatchObject({ roundId: roundId("r1"), strokes: 0, normallyShoots: 8, score: 90, finalizedAtMs: 1_000 });
+    // The line records what the round said about this golfer: the strokes they played off and the
+    // round's own gross (18 x 5 on fixtureLinks18's par 72).
+    expect(history[0]).toMatchObject({ roundId: roundId("r1"), strokes: 0, score: 90, finalizedAtMs: 1_000 });
   });
 
   // The read-side pin runs the SAME two steps a real request does: project finalizes (the
@@ -291,8 +291,8 @@ describe("projectArchive", () => {
   // this test pins is specifically about the gap between "ever seated" and "settled".
   it("clears the LIVE# pointer of a settle-omitted departed participant — presence cleanup runs over the ever-seated roster, not the settled archive", async () => {
     const ctx = await setup();
-    const annP: Participant = { golferId: ann, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } };
-    const boP: Participant = { golferId: bo, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 10 } };
+    const annP: Participant = { golferId: ann, name: "Ann", tee: "white", strokes: 0 };
+    const boP: Participant = { golferId: bo, name: "Bo", tee: "white", strokes: 0 };
     const annNine = [5, 5, 4, 6, 5, 4, 5, 6, 4];
     const leaveBo: RoundEvent = { kind: "participant-left", golferId: bo, opId: opId("leave-bo"), hlc: { wallMs: 5_000, counter: 0, deviceId: deviceId("test") }, authorId: bo };
     const finalize: RoundEvent = { kind: "round-finalized", opId: opId("finalize-omit"), hlc: { wallMs: 6_000, counter: 0, deviceId: deviceId("test") }, authorId: ann };

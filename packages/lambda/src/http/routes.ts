@@ -40,8 +40,8 @@ import type {
   RecordScoreResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
-  SetBasisRequest,
-  SetBasisResponse,
+  SetStrokesRequest,
+  SetStrokesResponse,
   ShareLinkResponse,
   StartRoundRequest,
   StartRoundResponse,
@@ -63,7 +63,7 @@ import {
   joinRoundRequestSchema,
   peekCrewInviteRequestSchema,
   recordScoreRequestSchema,
-  setBasisRequestSchema,
+  setStrokesRequestSchema,
   startRoundRequestSchema,
   supersedeCardRequestSchema,
   transferOrganizerRequestSchema,
@@ -94,7 +94,7 @@ export interface UseCases {
   // spec 2026-07-20 (re-shaped by 2026-07-29): mid-round correction of what a player stated about
   // themselves — any participant corrects any participant (score-for-anyone), the SUBJECT golferId
   // rides the body. "participant"-gated, same tier as the acts above.
-  setBasis: (claims: ParticipantClaims, request: SetBasisRequest) => Promise<SetBasisResponse>;
+  setStrokes: (claims: ParticipantClaims, request: SetStrokesRequest) => Promise<SetStrokesResponse>;
   readEvents: (id: RoundId, sinceSeq: number) => Promise<EventsResponse>;
   peekRound: (code: string) => Promise<PeekRoundResponse>;
   // M9 Task 3 (share): mints (deterministically) this round's own spectator link — participant-
@@ -326,11 +326,11 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
   },
   {
     method: "POST",
-    path: "/rounds/{roundId}/basis",
-    schema: setBasisRequestSchema,
-    auth: "participant", // spec 2026-07-20: any participant corrects any participant (score-for-anyone).
-    successStatus: 200, // an act on an existing round (appends participant-basis-set), not a mint — same 200 spirit as leave/finalize.
-    handler: async (ctx, body) => useCases.setBasis(ctx.claims!, body as SetBasisRequest),
+    path: "/rounds/{roundId}/strokes",
+    schema: setStrokesRequestSchema,
+    auth: "participant", // spec 2026-07-30 §2: any participant sets any participant's strokes (score-for-anyone).
+    successStatus: 200, // an act on an existing round (appends participant-strokes-set), not a mint — same 200 spirit as leave/finalize.
+    handler: async (ctx, body) => useCases.setStrokes(ctx.claims!, body as SetStrokesRequest),
   },
   // GET /rounds/peek must be matched BEFORE any /rounds/{roundId}/... template below it —
   // the dispatcher (http/dispatch.ts) walks this array in order and returns the first match,

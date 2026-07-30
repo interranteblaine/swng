@@ -6,10 +6,10 @@ import {
   getRoundArchiveResponseSchema,
   joinRoundResponseSchema,
   recordScoreResponseSchema,
-  setBasisResponseSchema,
+  setStrokesResponseSchema,
   startRoundResponseSchema,
 } from "@swng/contracts";
-import type { AddGameRequest, FinalizeRoundResponse, RecordScoreRequest, SetBasisRequest } from "@swng/contracts";
+import type { AddGameRequest, FinalizeRoundResponse, RecordScoreRequest, SetStrokesRequest } from "@swng/contracts";
 import { fixtureLinks, reduceRound, resultOf, scoreGame } from "@swng/domain";
 import type { GameResult, GolferId, HoleResult, RoundEvent, RoundId } from "@swng/domain";
 import { apiUrl, connectWs, createClientOps, ensureCourse, get, loadEndpoints, mintAccountGolfer, post, waitUntil } from "./support/client.js";
@@ -79,7 +79,7 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
     // public course API (search-first, create-if-absent — apps/web/e2e/support.ts's own
     // ensureCourse idiom, mirrored here), then pass it through.
     const course = await ensureCourse(httpUrl, fixtureLinks.courseName, fixtureLinks, ann);
-    const started = await post(rounds(), { course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, startRoundResponseSchema, ann.idToken);
+    const started = await post(rounds(), { course, host: { tee: "white" } }, startRoundResponseSchema, ann.idToken);
     roundId = started.roundId;
     joinCode = started.joinCode;
     token1 = started.token;
@@ -97,17 +97,25 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
     const boAccount = await mintAccountGolfer(httpUrl, "slice-bo", "Bo");
     const calAccount = await mintAccountGolfer(httpUrl, "slice-cal", "Cal");
 
-    const bo = await post(rounds("/join"), { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, joinRoundResponseSchema, boAccount.idToken);
+    const bo = await post(rounds("/join"), { code: joinCode, tee: "white" }, joinRoundResponseSchema, boAccount.idToken);
     // The join response echoes the canonical code (spec 2026-07-20: token implies code); the
-    // re-mint arm of the same invariant is proven in the browser (basisCorrection.spec).
+    // re-mint arm of the same invariant is proven in the browser (strokesCorrection.spec).
     expect(bo.joinCode).toBe(joinCode);
     token2 = bo.token;
     boId = bo.golferId;
     expect(boId).toBe(boAccount.golferId);
 
-    const cal = await post(rounds("/join"), { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 12 } }, joinRoundResponseSchema, calAccount.idToken);
+    const cal = await post(rounds("/join"), { code: joinCode, tee: "white" }, joinRoundResponseSchema, calAccount.idToken);
     calId = cal.golferId;
     expect(calId).toBe(calAccount.golferId);
+
+    // The deck's own strokes, typed onto the roster (spec 2026-07-30 §2) — Ann 3, Bo 0, Cal 5, the
+    // same numbers concurrent.test.ts and archive.test.ts hand-derive for this deck. Every seat
+    // joins on 0, so Bo's row is deliberately left alone. Ann's participant token authors both:
+    // any participant sets any participant's strokes.
+    for (const [golferId, strokes] of [[annId, 3], [calId, 5]] as const) {
+      await post(rounds(`/${roundId}/strokes`), { golferId, strokes }, setStrokesResponseSchema, token1);
+    }
 
     ws2 = await connectWs(wsUrl, token2);
 
@@ -200,9 +208,9 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
 
   // Step 8: finalize reproduces the M2 post-correction golden numbers over deployed
   // infrastructure — skins ann 2 / bo 6 / cal 0, carriedOut 1; stableford ann 13 / bo 15 /
-  // cal 4; and the response carries no handicapping block at all. Both games' strokes are the difference
-  // from the lowest in the field (Bo's 2), halved on this nine-hole card: Ann 3 dots, Bo 0, Cal 5
-  // — the same numbers concurrent.test.ts and archive.test.ts hand-derive for this deck.
+  // cal 4; and the response carries no handicapping block at all. Both games are MEDAL kinds, so
+  // both read each player's own roster number — Ann 3, Bo 0, Cal 5, typed in step 2 — the same
+  // numbers concurrent.test.ts and archive.test.ts hand-derive for this deck.
   it("8: finalize reproduces the M2 post-correction golden numbers", async () => {
     finalize1 = await post(rounds(`/${roundId}/finalize`), undefined, finalizeRoundResponseSchema, token1);
 
@@ -259,70 +267,66 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
   });
 });
 
-// Mid-round basis correction (spec 2026-07-20, re-shaped by 2026-07-29): a self-contained scenario with its own
-// accounts and its own round — the M2 golden-deck round above is already finalized by the
-// time this file's other tests run (steps 8-10), and setBasis throws round-not-live on a
-// finalized round (packages/application/src/rounds/setBasis.ts), so this can't reuse any
-// of the state above. One `it`, five inline steps, mirroring the task brief's own scenario
-// verbatim — the same account-minting/course-seeding/score-posting idioms as the suite above,
-// just not threaded through numbered `it`s sharing closure state.
-describe("deployed vertical slice: mid-round basis correction", () => {
+// Setting a player's strokes mid-round (spec 2026-07-30 §2): a self-contained scenario with its
+// own accounts and its own round — the M2 golden-deck round above is already finalized by the
+// time this file's other tests run (steps 8-10), and setStrokes throws round-not-live on a
+// finalized round (packages/application/src/rounds/setStrokes.ts), so this can't reuse any
+// of the state above. One `it`, five inline steps — the same account-minting/course-seeding/
+// score-posting idioms as the suite above, just not threaded through numbered `it`s sharing
+// closure state.
+describe("deployed vertical slice: setting a player's strokes mid-round", () => {
   const { httpUrl } = loadEndpoints();
   const rounds = (path = ""): string => apiUrl(httpUrl, `/rounds${path}`);
   const holeCount = fixtureLinks.teeSets[0]!.holes.length; // 9 — fixtureLinks is the same 9-hole card the M2 deck above plays
 
-  it("corrects what a player stated mid-round: events carry it, the fold and archive reflect it", async () => {
-    // 1. Start a round (host normally shoots +8), join a second account (+2).
-    const host = await mintAccountGolfer(httpUrl, "basis-host", "Host");
+  it("sets one player's strokes mid-round: events carry it, the fold and archive reflect it, and nobody else moves", async () => {
+    // 1. Start a round and join a second account — both seats start on 0 strokes.
+    const host = await mintAccountGolfer(httpUrl, "strokes-host", "Host");
     const course = await ensureCourse(httpUrl, fixtureLinks.courseName, fixtureLinks, host);
-    const started = await post(rounds(), { course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, startRoundResponseSchema, host.idToken);
+    const started = await post(rounds(), { course, host: { tee: "white" } }, startRoundResponseSchema, host.idToken);
     const roundId = started.roundId;
-    const hostToken = started.token; // round-scoped participant token — "participant"-gated routes (scores/basis/finalize) take THIS, never the account's own idToken
+    const hostToken = started.token; // round-scoped participant token — "participant"-gated routes (scores/strokes/finalize) take THIS, never the account's own idToken
     const hostId = started.golferId;
     expect(hostId).toBe(host.golferId); // as-self: the host seat IS the account's own golfer
 
-    const guest = await mintAccountGolfer(httpUrl, "basis-guest", "Guest");
-    const joined = await post(rounds("/join"), { code: started.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, joinRoundResponseSchema, guest.idToken);
+    const guest = await mintAccountGolfer(httpUrl, "strokes-guest", "Guest");
+    const joined = await post(rounds("/join"), { code: started.joinCode, tee: "white" }, joinRoundResponseSchema, guest.idToken);
     const guestToken = joined.token;
     const guestId = joined.golferId;
     expect(guestId).toBe(guest.golferId);
 
-    const hostOps = createClientOps("basis-host-phone");
-    const guestOps = createClientOps("basis-guest-phone");
+    const hostOps = createClientOps("strokes-host-phone");
+    const guestOps = createClientOps("strokes-guest-phone");
     const scoresUrl = rounds(`/${roundId}/scores`);
 
     // 2. Score hole 1 for both.
     await post(scoresUrl, { golferId: hostId, hole: 1, result: { kind: "strokes", strokes: 5 }, ...hostOps.next() }, recordScoreResponseSchema, hostToken);
     await post(scoresUrl, { golferId: guestId, hole: 1, result: { kind: "strokes", strokes: 6 }, ...guestOps.next() }, recordScoreResponseSchema, guestToken);
 
-    // 3. POST /rounds/{roundId}/basis as the HOST with { golferId: <second>, basis: +13 }.
-    //    Assert 200 and events[0].kind === "participant-basis-set". (`post()` itself throws
+    // 3. POST /rounds/{roundId}/strokes as the HOST with { golferId: <second>, strokes: 13 }.
+    //    Assert 200 and events[0].kind === "participant-strokes-set". (`post()` itself throws
     //    on a non-2xx status — see e2e/support/client.ts's own httpError — so a resolved call
     //    here already IS the 200 assertion; the response body is what's left to check.)
-    const correctionRequest: SetBasisRequest = { golferId: guestId, basis: { kind: "normally-shoots", overPar: 13 } };
-    const setResponse = await post(rounds(`/${roundId}/basis`), correctionRequest, setBasisResponseSchema, hostToken);
+    const setRequest: SetStrokesRequest = { golferId: guestId, strokes: 13 };
+    const setResponse = await post(rounds(`/${roundId}/strokes`), setRequest, setStrokesResponseSchema, hostToken);
     expect(setResponse.events).toHaveLength(1);
-    expect(setResponse.events[0]?.kind).toBe("participant-basis-set");
+    expect(setResponse.events[0]?.kind).toBe("participant-strokes-set");
 
-    // 4. GET events → fold with reduceRound → the second seat's stated basis is the corrected +13,
-    //    its DERIVED strokes moved with it, departed undefined, name/tee untouched.
-    //
-    //    Hand-derived (spec 2026-07-29 §2b, this 9-hole card): the guest's +2 anchored the field
-    //    at join, so the correction to +13 makes the host's +8 the lowest — the host drops to 0
-    //    and the guest takes (13 − 8) / 2 = 2.5 → 3, halved once at the end and rounded half-up.
+    // 4. GET events → fold with reduceRound → the second seat carries 13, the HOST is untouched
+    //    at 0 (spec 2026-07-30 §2: nothing about one player's number moves another's), departed
+    //    undefined, name/tee untouched.
     const midRoundEvents = await get(rounds(`/${roundId}/events?since=0`), eventsResponseSchema, hostToken);
     const midRoundState = reduceRound(midRoundEvents.events);
     const guestSeatMidRound = midRoundState.participants.find((p) => p.golferId === guestId);
-    if (!guestSeatMidRound) throw new Error("guest seat missing from the folded roster after the correction");
-    expect(guestSeatMidRound.basis).toEqual({ kind: "normally-shoots", overPar: 13 });
-    expect(guestSeatMidRound.strokes).toBe(3);
+    if (!guestSeatMidRound) throw new Error("guest seat missing from the folded roster after the set");
+    expect(guestSeatMidRound.strokes).toBe(13);
     expect(midRoundState.participants.find((p) => p.golferId === hostId)?.strokes).toBe(0);
     expect(guestSeatMidRound.departed).toBeUndefined();
     expect(guestSeatMidRound.name).toBe(guest.name);
     expect(guestSeatMidRound.tee).toBe("white");
 
     // 5. Score remaining holes, finalize, GET /rounds/{roundId}/archive → participants carry the
-    //    corrected assertion and the strokes it derived (a sealed snapshot freezes both).
+    //    number that was set (a sealed snapshot freezes it).
     for (let hole = 2; hole <= holeCount; hole += 1) {
       await post(scoresUrl, { golferId: hostId, hole, result: { kind: "strokes", strokes: 5 }, ...hostOps.next() }, recordScoreResponseSchema, hostToken);
       await post(scoresUrl, { golferId: guestId, hole, result: { kind: "strokes", strokes: 5 }, ...guestOps.next() }, recordScoreResponseSchema, guestToken);
@@ -336,7 +340,7 @@ describe("deployed vertical slice: mid-round basis correction", () => {
     const archive = await get(rounds(`/${roundId}/archive`), getRoundArchiveResponseSchema, host.idToken);
     const archivedState = reduceRound(archive.events);
     const guestSeatArchived = archivedState.participants.find((p) => p.golferId === guestId);
-    expect(guestSeatArchived?.basis).toEqual({ kind: "normally-shoots", overPar: 13 });
-    expect(guestSeatArchived?.strokes).toBe(3);
+    expect(guestSeatArchived?.strokes).toBe(13);
+    expect(archivedState.participants.find((p) => p.golferId === hostId)?.strokes).toBe(0);
   });
 });

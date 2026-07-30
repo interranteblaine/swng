@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import WS from "ws";
-import { addGameResponseSchema, finalizeRoundResponseSchema, joinRoundResponseSchema, startRoundResponseSchema } from "@swng/contracts";
+import { addGameResponseSchema, finalizeRoundResponseSchema, joinRoundResponseSchema, setStrokesResponseSchema, startRoundResponseSchema } from "@swng/contracts";
 import type { FinalizeRoundResponse } from "@swng/contracts";
 import { createHttpTransport, createRoundSession } from "@swng/client";
 import type { RoundSession } from "@swng/client";
@@ -12,7 +12,7 @@ import { apiUrl, ensureCourse, loadEndpoints, mintAccountGolfer, post, waitUntil
 // packages/domain/src/scoring/stableford.test.ts. The card and its 10/17 lines are pinned by the domain golden fixture
 // (`packages/domain/src/scoring/stableford.test.ts`) and exercised in-memory by
 // `application/src/rounds/roundSlice.test.ts` and `packages/client/src/session.test.ts`;
-// THIS suite is what first proves them over the wire, offline queueing included. Ann (normally shoots +8) and Bo (+2),
+// THIS suite is what first proves them over the wire, offline queueing included. Ann (3 strokes) and Bo (0),
 // white tees, one stableford game referencing both. Ann's h4 is a pickup. This suite's whole
 // point is proving that the SAME Ann 10 / Bo 17 numbers survive a real offline outbox drained
 // over the real deployed stack — not deriving them fresh.
@@ -93,16 +93,21 @@ describe("kill-network sync gate: two real createRoundSessions over the deployed
     // Course-cards spec §4: StartRound resolves a REFERENCE now — seed the lineage via the
     // public course API (search-first, create-if-absent), then pass it through.
     const course = await ensureCourse(httpUrl, fixtureLinks.courseName, fixtureLinks, annAccount);
-    const started = await post(rounds(), { course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, startRoundResponseSchema, annAccount.idToken);
+    const started = await post(rounds(), { course, host: { tee: "white" } }, startRoundResponseSchema, annAccount.idToken);
     roundId = started.roundId;
     annId = started.golferId;
     tokenAnn = started.token;
     expect(annId).toBe(annAccount.golferId); // as-self: the host seat is the account's own golfer
 
-    const joined = await post(rounds("/join"), { code: started.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, joinRoundResponseSchema, boAccount.idToken);
+    const joined = await post(rounds("/join"), { code: started.joinCode, tee: "white" }, joinRoundResponseSchema, boAccount.idToken);
     boId = joined.golferId;
     tokenBo = joined.token;
     expect(boId).toBe(boAccount.golferId);
+
+    // The golden deck's own strokes, typed onto the roster (spec 2026-07-30 §2): Ann 3, Bo 0 —
+    // the numbers packages/domain/src/scoring/stableford.test.ts's 10/17 lines are built on. Bo
+    // joins on 0 already, so only Ann's row is written.
+    await post(rounds(`/${roundId}/strokes`), { golferId: annId, strokes: 3 }, setStrokesResponseSchema, tokenAnn);
 
     const added = await post(rounds(`/${roundId}/games`), { game: { kind: "stableford", players: [annId, boId] } }, addGameResponseSchema, tokenAnn);
     expect(added.gameId).toBeDefined();

@@ -40,9 +40,8 @@ const fullCardWith = (hole: number, result: HoleResult): Readonly<Record<string,
 const baseArchive: RoundArchive = {
   roundId: roundId("r1"),
   card: fixtureLinks18,
-  // A lone participant is their own anchor, so a stated +10 derives 0 strokes (spec §2b) — this
-  // fixture states the strokes directly so the line's frozen number is a non-zero 10 to assert.
-  participants: [{ golferId: G, name: "Gigi", tee: "white", basis: { kind: "strokes", strokes: 10 }, strokes: 10 }],
+  // A non-zero number so the line's frozen `strokes` is worth asserting.
+  participants: [{ golferId: G, name: "Gigi", tee: "white", strokes: 10 }],
   games: [],
   cells: fullCard,
   events: [],
@@ -64,25 +63,15 @@ describe("archiveGolferLine", () => {
     expect(line.holes).toBe(18);
   });
 
-  it("carries par (sum of the frozen tee's hole pars) and the strokes the fold derived", () => {
+  it("carries par (sum of the frozen tee's hole pars) and the strokes the roster asserted", () => {
     const line = archiveGolferLine(baseArchive, G);
     expect(line.par).toBe(72); // fixtureWhite18: 36 + 36
     expect(line.strokes).toBe(10); // baseArchive's participant.strokes
   });
 
-  // The assertion beside its consequence (spec §2a/§2b): `normallyShoots` is what the player SAID,
-  // present only for the first constructor; `strokes` is what the fold made of it.
-  it("carries normallyShoots when the player stated a normal score", () => {
-    const stated: RoundArchive = {
-      ...baseArchive,
-      participants: [{ golferId: G, name: "Gigi", tee: "white", basis: { kind: "normally-shoots", overPar: 22 }, strokes: 12 }],
-    };
-    const line = archiveGolferLine(stated, G);
-    expect(line.normallyShoots).toBe(22);
-    expect(line.strokes).toBe(12);
-  });
-
-  it("omits normallyShoots when the player stated raw strokes instead", () => {
+  it("records only the strokes played off — there is no second number beside it", () => {
+    // `normallyShoots` is deleted (spec 2026-07-30 §11): it recorded an assertion that only became
+    // strokes through a rule that no longer exists.
     const line = archiveGolferLine(baseArchive, G);
     expect("normallyShoots" in line).toBe(false);
   });

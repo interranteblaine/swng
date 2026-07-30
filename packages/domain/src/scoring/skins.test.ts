@@ -10,13 +10,12 @@ import { fixtureLinks } from "./golden/fixtureCourse.js";
 const A = golferId("ann");
 const B = golferId("bo");
 const C = golferId("cal");
-// Strokes are the difference from the lowest in the game's field (spec §2b), halved on a nine-hole
-// card: Bo at 2 is the lowest and plays off scratch; Ann's 8 − 2 = 6 halves to 3 dots on SI 1..3
-// (h2, h7, h4); Cal's 12 − 2 = 10 halves to 5 dots on SI 1..5 (h2, h7, h4, h8, h1).
+// Skins is a MEDAL kind (spec 2026-07-30 §3), so each player's own roster number is what they get:
+// Bo off scratch, Ann's 3 dots on SI 1..3 (h2, h7, h4), Cal's 5 on SI 1..5 (h2, h7, h4, h8, h1).
 const players3: readonly Participant[] = [
-  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
-  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
-  { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 12 } },
+  { golferId: A, name: "Ann", tee: "white", strokes: 3 },
+  { golferId: B, name: "Bo", tee: "white", strokes: 0 },
+  { golferId: C, name: "Cal", tee: "white", strokes: 5 },
 ];
 const game = { kind: "skins", id: gameId("k1"), scoring: "net", players: [A, B, C] } as const;
 

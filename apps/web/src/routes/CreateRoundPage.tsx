@@ -4,13 +4,13 @@ import { Link, useLocation, useNavigate } from "react-router";
 import type { CourseId } from "@swng/domain";
 import { cardId } from "@swng/domain";
 import type { CourseView, StartRoundResponse } from "@swng/contracts";
-import { ApiError, createRound, getCourse, getMyRecord } from "../api";
+import { ApiError, createRound, getCourse } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 import { CourseSummaryCard } from "../courses/CourseSummaryCard";
 import { credentialStore } from "../identity";
-import { btnPrimary, cardBox, inputBox } from "../ui/classes";
+import { btnPrimary, cardBox } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
 
 interface LocationState {
@@ -31,10 +31,6 @@ export function CreateRoundPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuth();
-  // Destructured so the record-fetch effect below lists a stable function reference as its dep
-  // (withAuth's own useCallback identity, useAuth.ts) rather than the whole `auth` object, which is
-  // a fresh literal every AuthProvider render — the ProfilePage precedent.
-  const { withAuth } = auth;
   // The wall (accounts-only identity spec §3): anonymous round creation is gone from the UI —
   // starting a round means being signed in, playing AS your account golfer. `auth.golfer` being
   // truthy is the one condition the create form renders in ("Playing as <name>"); while it's
@@ -46,37 +42,8 @@ export function CreateRoundPage() {
   const [courseView, setCourseView] = useState<CourseView | undefined>(undefined);
   const [tee, setTee] = useState<string>("");
   const [courseError, setCourseError] = useState<string | undefined>(undefined);
-  // What the golfer normally shoots relative to par (spec 2026-07-29 §2): starting a round is
-  // joining it as the host, so the creator states the same one number a joiner does, in the same
-  // words.
-  // Pre-filled from the golfer's own average (spec 2026-07-29 §2c): what they normally shoot is
-  // exactly the number this field asks for, so the one they can already read on their profile lands
-  // here as a starting point they can type over. BLANK when there is no average — a brand-new
-  // golfer, or one whose every round contains a pickup — with no floor and no fallback chain: one
-  // finished round is better evidence than a guess, and a guess in this field becomes a claim in
-  // the round's log. Seeded ONCE, and only while the field is still untouched, so a pre-fill
-  // arriving after the golfer has typed can never overwrite what they typed.
-  const [overPar, setOverPar] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-
-  // GET /me/record purely for the pre-fill above — the average is served, never computed here
-  // (the compute fence: `averageOf` is deliberately not re-exported to the client). A failed fetch
-  // just leaves the field blank, which is the honest no-average state anyway.
-  useEffect(() => {
-    if (!auth.signedIn) return;
-    let ignore = false;
-    void withAuth((token) => getMyRecord(token))
-      .then((record) => {
-        if (ignore) return;
-        const average = record.metrics.average;
-        if (average !== undefined) setOverPar((current) => (current === "" ? String(average) : current));
-      })
-      .catch(() => {}); // withAuth already handles a terminal 401; anything else leaves the field blank
-    return () => {
-      ignore = true;
-    };
-  }, [auth.signedIn, withAuth]);
 
   const selectCourse = (courseId: CourseId) => {
     setCourseError(undefined);
@@ -122,13 +89,12 @@ export function CreateRoundPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: keyed by the router's own per-navigation identity, not by `state`'s object identity
   }, [location.key]);
 
-  const parsedOverPar = Number.parseInt(overPar, 10);
-  const canSubmit = courseView !== undefined && tee !== "" && Number.isInteger(parsedOverPar) && golfer !== undefined;
+  const canSubmit = courseView !== undefined && tee !== "" && golfer !== undefined;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     // Only ever reachable in the signed-in-with-a-golfer state (the form isn't rendered
-    // otherwise), but guarded anyway: a course, a tee, a stated number, and a real golfer.
+    // otherwise), but guarded anyway: a course, a tee, and a real golfer.
     if (!canSubmit || !courseView || !golfer) return;
 
     setSubmitting(true);
@@ -139,7 +105,7 @@ export function CreateRoundPage() {
       // always yourself, resolved server-side from the Bearer — the request carries no
       // name/golferId (the server freezes the account golfer's name into the join event).
       const response: StartRoundResponse = await auth.withAuth((token) =>
-        createRound({ course: { courseId: courseView.courseId, cardId: cardId(courseView.cardId) }, host: { tee, basis: { kind: "normally-shoots", overPar: parsedOverPar } } }, token),
+        createRound({ course: { courseId: courseView.courseId, cardId: cardId(courseView.cardId) }, host: { tee } }, token),
       );
       credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer.name, joinCode: response.joinCode });
       navigate(`/round/${response.roundId}`);
@@ -202,34 +168,12 @@ export function CreateRoundPage() {
             </div>
           )}
 
-          {/* The SAME question the join form asks, in the same words (spec 2026-07-29 §2/§9,
-              verbatim): starting a round is joining it as the host. No conversion and no derivation
-              note — the number stated IS the number strokes come from, and the strokes themselves
-              fall out of the whole field once everyone has stated theirs. The hint is a SIBLING of
-              the <label> (not nested), which would fold it into the label's accessible name. */}
-          <div className="flex flex-col gap-1">
-            <label className="flex flex-col gap-1 text-forest">
-              What do you normally shoot, relative to par?
-              <input
-                type="number"
-                step={1}
-                inputMode="numeric"
-                value={overPar}
-                onChange={(event) => setOverPar(event.target.value)}
-                className={`${inputBox} text-lg`}
-              />
-            </label>
-            <span className="text-xs text-fairway/70">Over par for a normal round — 18 holes. Under par? Use a minus.</span>
-          </div>
-
           {error && (
             <p role="alert" className="text-oxblood">
               {error}
             </p>
           )}
 
-          {/* Disabled until the number is there too: a blank field is not a claim, so submitting
-              one must be visibly impossible rather than a silently dead button. */}
           <button
             type="submit"
             disabled={submitting || !canSubmit}

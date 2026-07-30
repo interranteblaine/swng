@@ -95,7 +95,7 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // spec 2026-07-20 (re-shaped by 2026-07-29): mid-round correction of what a player stated about
   // themselves — any participant corrects any participant (score-for-anyone) — "participant"-gated,
   // same tier as leave/finalize above.
-  { method: HttpMethod.POST, path: "/rounds/{roundId}/basis" },
+  { method: HttpMethod.POST, path: "/rounds/{roundId}/strokes" },
   { method: HttpMethod.GET, path: "/rounds/{roundId}/events" },
   // M9 Task 3 (share): mints this round's immortal spectator link — participant-gated, same
   // tier as finalize/terminate above.

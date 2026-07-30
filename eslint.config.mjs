@@ -140,12 +140,11 @@ export default [
                 "netDoubleBogey",
                 "netStrokes",
                 "roundHalfUp",
-                // the ONE stroke-resolution rule — strokes are the difference from the lowest in
-                // the field (spec 2026-07-29 §2b). Replaces the deleted allowance table
-                // (defaultAllowance/playingHandicap), which was banned here for the same reason.
-                "resolveStrokes",
-                "anchorOf",
-                // what you normally shoot relative to par (spec 2026-07-29 §2c/§5) — the whole WHS
+                // resolveStrokes/anchorOf are gone from this list with scoring/strokeBasis.ts
+                // itself (spec 2026-07-30 §9): strokes are asserted on the roster now, so there is
+                // no resolution rule left for the web to re-derive. The allowance table
+                // (defaultAllowance/playingHandicap) that stood here before them is equally gone.
+                // what you shoot relative to par (spec 2026-07-29 §2c/§5) — the whole WHS
                 // banlist block that stood here (adjustedGrossScore, scoreDifferential,
                 // computeIndex(Detail), swngIndex, courseHandicapFor(RatingSlopePar),
                 // unratedCourseHandicap, combineNineHoleDifferentials) is gone with handicap/whs.ts

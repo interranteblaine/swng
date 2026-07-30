@@ -62,7 +62,9 @@ export const startRound =
     const id = roundId(deps.ids.newId());
     const joinCode = deps.ids.newJoinCode();
 
-    const hostParticipant: Participant = { golferId: host, name: creator.name, tee: command.host.tee, basis: command.host.basis };
+    // Strokes start at 0 (spec 2026-07-30 §2): nobody is asked what they shoot, and the group
+    // types a number onto the roster when they settle it on the first tee.
+    const hostParticipant: Participant = { golferId: host, name: creator.name, tee: command.host.tee, strokes: 0 };
 
     // One hlc source for the whole batch: round-created, the creator's participant-joined, and
     // round-started all stamp from the same server clock in this single call, so without a

@@ -76,7 +76,7 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
   }, [load]);
 
   // Spec 2026-07-22 §2: editing the end date IS the whole lifecycle — an organizer-only Edit
-  // (the roster-row edit idiom: SetupPanel.tsx's mid-round basis correction) swaps the header
+  // (the roster-row edit idiom: SetupPanel.tsx's own strokes editor) swaps the header
   // for name + two date inputs + Save/Cancel. Save PUTs, then re-runs `load` (the SAME fetch the
   // initial mount uses) rather than trusting the response shape locally — one source of truth
   // for "what this season currently says."
@@ -152,15 +152,13 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
   const roundCollidesOnDay = dayCollisionChecker(standings.rounds);
 
   // The head-to-head strokes line (spec 2026-07-29 §6): comparing two crew-mates who have never
-  // necessarily played together is the SAME rule a round applies at join (resolveStrokes,
-  // packages/domain/src/scoring/strokeBasis.ts — strokes are the non-negative difference from
-  // the lowest in the field), applied here to the board's own season averages instead of a
-  // round's stated numbers. A subtraction of two already-SERVED numbers is not a golf result, so
-  // this stays a component computation, not a @swng/domain export (the compute fence exempts
-  // it). It is NOT a promise about what an actual round will produce — the round resolves from
-  // what each player states THAT day, against their own career average, and either may state
+  // necessarily played together applies the same difference a group does on the first tee, here
+  // to the board's own season averages. A subtraction of two already-SERVED numbers is not a golf
+  // result, so this stays a component computation, not a @swng/domain export (the compute fence
+  // exempts it). It is NOT a promise about what an actual round will produce — a round's strokes
+  // are whatever the group agrees and types onto its roster (spec 2026-07-30 §2), which may be
   // something else entirely — which is exactly why the copy says "if you played tomorrow" rather
-  // than naming the season.
+  // than naming the season. (Spec 2026-07-30 §6 deletes this line whole; Task 4 does that.)
   //
   // One line, not all C(n,2) pairs (a 12-member crew has 66) — the CLOSEST pair by average,
   // among members who both have one. Sorted ascending by average first (never assumed from wire
@@ -175,8 +173,7 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
   //
   // Season averages are already whole numbers (averageOfValues rounds the mean before this ever
   // sees it), so the difference of any two is already an integer — there is no second rounding
-  // rule to invent here. `resolveStrokes`' own halving is a rule for a 9-hole ROUND; this
-  // comparison is over a season, with no single round's hole count to halve by.
+  // rule to invent here.
   // `.filter` already returns a fresh array, so sorting it in place here never touches
   // `standings.scoreboard`'s own served order (still rendered untouched by the table above).
   const rankedByAverage = standings.scoreboard

@@ -15,10 +15,10 @@ export const gameDots = (config: GameConfig, participants: readonly RosterEntry[
 // this file's own reduce, which was byte-identical to the domain version.
 export { totalDots };
 
-// "Pat 5 dots · Alex 1 dot" — a game's strokes as one plain line, from the same allocation the
-// card's dots render. Members with no strokes are omitted; a game where nobody gets any says so in
-// words. Nobody GIVES strokes anymore (spec 2026-07-29 §2a): the lowest in the field is the anchor
-// and receives nothing, so the "Sam gives 1" branch this line once carried is deleted with the
+// "Pat 5 dots · Alex 1 dot" — a game's strokes as one plain line, from that game's own allocation.
+// Members with no strokes are omitted; a game where nobody gets any says so in words. Nobody GIVES
+// strokes: a roster number is bounded at zero and a match subtracts the lowest of its members
+// (spec 2026-07-30 §2/§3), so the "Sam gives 1" branch this line once carried is deleted with the
 // plus-handicap convention.
 //
 // Undefined for a GROSS game (spec §9): it allocates nothing by definition, so the all-zero line
@@ -34,9 +34,8 @@ export const strokesSummary = (config: GameConfig, participants: readonly Roster
     if (total === 0) return [];
     return [`${nameOf(id)} ${total} ${total === 1 ? "dot" : "dots"}`];
   });
-  // "everyone plays off 0" was true under the old absolute allocation, where zero dots for
-  // everyone meant every member really was a scratch player. Under the ONE rule zero dots means
-  // the members are EQUAL — at any level — so two golfers who both normally shoot +20 would have
-  // been told they were scratch. What is true in both cases is that nobody is receiving.
+  // "everyone plays off 0" would be false for a MATCH, where zero dots means the members are
+  // EQUAL at whatever level — two golfers both on 20 receive nothing from each other and are not
+  // scratch (spec 2026-07-30 §3). What is true for both arms is that nobody is receiving.
   return parts.length > 0 ? parts.join(" · ") : "No strokes — everyone in this game plays level.";
 };

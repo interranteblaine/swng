@@ -6,7 +6,7 @@ import { courseIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
 // There is no index source and no asserted number here (spec 2026-07-29 §5): the profile is a
 // reporting artifact with no inputs beyond name and home course. What a golfer shoots is
 // `metrics.average` on the record responses below, computed on read from their own rounds; what
-// they play off in a round is the `basis` they state when they join it.
+// they play off in a round is the strokes the group typed onto that round's roster.
 export interface GolferView {
   readonly golferId: GolferId;
   readonly name: string;
@@ -71,12 +71,10 @@ const golferRoundLineFields = {
   tee: z.string(),
   holes: z.union([z.literal(9), z.literal(18)]),
   par: z.number(),
-  // The strokes the fold derived (spec 2026-07-29 §2b), the normal score the player STATED when
-  // that is what they stated, and the round's own gross — present iff every hole carried a number
-  // (`hasCompleteScore`). `score` is what a history row renders: `holeResults` never crosses the
-  // wire, so without it a row would have no number at all (spec §8).
+  // The strokes this player played off (spec 2026-07-30 §2) and the round's own gross — present
+  // iff every hole carried a number (`hasCompleteScore`). `score` is what a history row renders:
+  // `holeResults` never crosses the wire, so without it a row would have no number at all.
   strokes: z.number(),
-  normallyShoots: z.number().optional(),
   score: z.number().optional(),
   distribution: z.object({
     eagles: z.number().int(),
@@ -90,8 +88,8 @@ const golferRoundLineFields = {
 // The metrics read projection (spec 2026-07-29 §5, domain/golfer/metrics.ts's golferMetrics):
 // every derived number in one place, computed at read time and never stored. REQUIRED object;
 // `average` stays OPTIONAL — absent is the honest answer for a golfer with no round that carries a
-// score (a card with a pickup has none, spec §2d), never a 0 and never a floor — and it is what
-// they normally shoot relative to par over their last ten scored rounds. There is deliberately no
+// score (a card with a pickup has none), never a 0 and never a floor — and it is what they shoot
+// relative to par over their last ten scored rounds. There is deliberately no
 // `spread` on this response (controller ruling): spread is the crew board's own column, over the
 // SEASON window (spec §6), and a rolling-10 spread here would be a second number under the same
 // name with neither labelled by its window. `typicalEighteen` (career

@@ -12,7 +12,7 @@ import {
   joinRoundDirect,
   loadWebEnv,
   mintAccountGolfer,
-  normallyShootsField,
+  setStrokesInBrowser,
   openGamePanel,
   pollUntil,
   readJoinCode,
@@ -67,38 +67,26 @@ const PAR_TOTAL = 36; // = sum of HOLES[*].par — the frozen tee's par, carried
 
 const DOT = "●"; // ScorecardGrid.tsx's own dot glyph (Cell's aria-hidden "●".repeat(dots) span)
 
-// What each player STATES at the tee (spec §2a) — a normal score relative to par, never the
-// strokes they receive. Named for what they are: the old UMA_CH/VIC_CH names invited exactly the
-// mistake the derivation below had to be corrected for (reading them as absolute numbers to
-// allocate directly, skipping the relative rule AND the nine-hole halving).
-const UMA_OVER_PAR = 13;
-const VIC_OVER_PAR = 2;
+// The strokes the group agreed and typed onto the roster (spec 2026-07-30 §2). Vic stays on the
+// default 0 — the better player, giving strokes rather than receiving them.
+const UMA_STROKES = 6;
 
 // The STANDARD CARD's dots (spec 2026-07-19 §2a: the card never changes) — ScorecardGrid renders
-// roundStrokeAllocation (packages/domain/src/scoring/allocation.ts): each player's DERIVED round
+// roundStrokeAllocation (packages/domain/src/scoring/allocation.ts): each player's own roster
 // strokes, allocated by stroke index, no game.
 //
-// RE-DERIVED BY HAND (spec 2026-07-29 §2b — this replaces an absolute-handicap derivation that was
-// wrong twice over once strokes became relative and halved on a nine):
-//   anchor = min(stated normal scores) = min(13, 2) = 2 (Vic, the better player)
-//   Vic:  difference 2 − 2 = 0  → 9 holes → roundHalfUp(0/2)  = 0 strokes
-//   Uma:  difference 13 − 2 = 11 → 9 holes → roundHalfUp(11/2) = roundHalfUp(5.5) = 6 strokes
-// allocateStrokes(6, 9 holes): base = floor(6/9) = 0, extra = 6 % 9 = 6 → every hole whose stroke
-// index is <= 6 gets exactly one dot. This card's stroke indices, holes 1..9, are
-// [5, 1, 9, 3, 7, 2, 8, 4, 6] → holes 1, 2, 4, 6, 8, 9 get a dot; holes 3 (SI 9), 5 (SI 7) and
-// 7 (SI 8) get none. Sum 6, as it must.
-// allocateStrokes(0, 9 holes) is all zeros — and that ZERO ROW is now the interesting half of the
-// assertion: under the retired absolute model the anchor still carried his own 2 dots, so "the best
-// player in the field receives nothing" is a real property this loop proves, not filler.
+// DERIVED BY HAND. allocateStrokes(6, 9 holes): base = floor(6/9) = 0, extra = 6 % 9 = 6 → every
+// hole whose stroke index is <= 6 gets exactly one dot. This card's stroke indices, holes 1..9,
+// are [5, 1, 9, 3, 7, 2, 8, 4, 6] → holes 1, 2, 4, 6, 8, 9 get a dot; holes 3 (SI 9), 5 (SI 7)
+// and 7 (SI 8) get none. Sum 6, as it must.
+// allocateStrokes(0, 9 holes) is all zeros.
 // The missing rating changes NONE of this: dots are pure stroke-index + strokes arithmetic.
 const EXPECTED_UMA_DOTS = [1, 1, 0, 1, 0, 1, 0, 1, 1] as const; // holes 1..9 — sum 6
-const EXPECTED_VIC_DOTS = [0, 0, 0, 0, 0, 0, 0, 0, 0] as const; // holes 1..9 — the anchor receives nothing
+const EXPECTED_VIC_DOTS = [0, 0, 0, 0, 0, 0, 0, 0, 0] as const; // holes 1..9 — Vic is on 0 strokes
 
-// The Match play PANEL'S own strokes line. gameStrokeAllocation resolves the SAME one rule over the
-// GAME's own field (spec §2b), and here that field is the whole two-player roster — so the panel
-// states the same 6 the card shows. The two only diverge for a game played by a subset of the
-// roster; that is the case the general rule exists for, not this one. Vic is omitted from the line
-// because his allocation is 0 (strokesSummary, apps/web/src/round/dots.ts).
+// The Match play PANEL'S own strokes line. A match is played off the DIFFERENCE (spec 2026-07-30
+// §3), and Vic is already on 0, so the panel states the same 6 the card shows. Vic is omitted from
+// the line because his allocation is 0 (strokesSummary, apps/web/src/round/dots.ts).
 const EXPECTED_MATCH_STROKES_LINE = "Uma 6 dots";
 
 // The six record-building rounds' hole-by-hole gross scores, oldest-first. Every hole carries a
@@ -114,12 +102,6 @@ const ROUND_SCORES: readonly (readonly number[])[] = [
   [5, 5, 3, 5, 4, 4, 3, 5, 4], // gross 38 — bogeys on holes 1,2
   [5, 5, 4, 6, 4, 4, 3, 5, 4], // gross 40 — bogeys on holes 1,2,3,4
 ];
-// What Uma states at the tee (spec §2a's first constructor). She plays every round alone, so she is
-// her own anchor and it derives ZERO strokes — the grosses below are untouched by it. Pinned as a
-// non-zero value on purpose: it rides onto every line as `normallyShoots`, so a fold that confused
-// the ASSERTION with the DERIVED strokes would show up.
-const STATED_OVER_PAR = 8;
-
 // Hand-pinned gross per round, oldest-first (== each row's own sum). Every hole carries a stroke
 // count, so `hasCompleteScore` holds and each line's wire `score` IS this number (spec §2d/§8).
 const PINNED_SCORES_OLDEST_FIRST = [39, 41, 40, 42, 38, 40] as const;
@@ -175,7 +157,7 @@ const playUnratedNine = async (
   label: string,
   scores: readonly number[],
 ): Promise<void> => {
-  const started = await startRoundDirect(httpUrl, account, { course, tee: "white", basis: { kind: "normally-shoots", overPar: STATED_OVER_PAR } });
+  const started = await startRoundDirect(httpUrl, account, { course, tee: "white" });
   const ops = createScoreOps(`unrated-${label}`);
   for (const [i, strokes] of scores.entries()) {
     await recordScoreDirect(httpUrl, started.roundId, started.token, { golferId: account.golfer.golferId, hole: i + 1, strokes }, ops);
@@ -258,31 +240,33 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
   });
 
   test("2: a live round on the unrated tee — the standard card's dots come straight from stroke index + the DERIVED strokes, the Match play panel states the same, and two-tap scoring nets against the card", async () => {
-    // "Start a round here" preselects the course; Uma creates on the unrated white tee, stating +13.
+    // "Start a round here" preselects the course; Uma creates on the unrated white tee.
     await page.getByRole("link", { name: /^start a round here$/i }).click();
     await expect(page).toHaveURL(/\/create/);
     await expect(page.getByText(courseName, { exact: true })).toBeVisible();
     await expect(page.getByText("Playing as", { exact: true })).toBeVisible(); // no name field — the account's own record
-    await normallyShootsField(page).fill(String(UMA_OVER_PAR));
     await page.getByRole("button", { name: /^create round$/i }).click();
 
     await expect(page).toHaveURL(/\/round\//);
     const joinCode = await readJoinCode(page);
 
     // Vic joins as HIMSELF over a direct HTTP self-join (score-for-anyone makes his own browser
-    // unnecessary — the same precedent as courseEntry.spec.ts's Quinn), on the same unrated tee, stating +2.
+    // unnecessary — the same precedent as courseEntry.spec.ts's Quinn), on the same unrated tee.
     const { httpUrl } = loadWebEnv();
-    await joinRoundDirect(httpUrl, vic, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: VIC_OVER_PAR } });
+    await joinRoundDirect(httpUrl, vic, { code: joinCode, tee: "white" });
     await waitForParticipant(page, "Vic");
 
-    // Add the singles match (Uma vs Vic) via SetupPanel — one stroke rule, the difference between
-    // the two, exactly the pinned allocation above.
+    // The number the group agreed, typed onto the roster through the real editor (spec §2/§8).
+    await setStrokesInBrowser(page, "Uma", UMA_STROKES);
+
+    // Add the singles match (Uma vs Vic) via SetupPanel — played off the difference, which with
+    // Vic on 0 is exactly the pinned allocation above.
     await addSinglesGame(page, "Uma", "Vic");
     await expect(chip(page, "Match play")).toBeVisible();
 
     // The STANDARD CARD's dots, hole-by-hole against the hand-verified allocation above — the CORE
     // assertion: an unrated tee allocates dots identically to a rated one (stroke index + the
-    // DERIVED strokes only, nothing rating-shaped), and the grid renders each player's own ROUND
+    // roster's own strokes, nothing rating-shaped), and the grid renders each player's own round
     // strokes, never a game's own field (spec 2026-07-19 §2a — chip taps don't touch the grid). If
     // this ever disagrees with EXPECTED_UMA_DOTS/EXPECTED_VIC_DOTS, that's the BLOCKED condition,
     // not a pin this test may quietly re-derive.
@@ -337,16 +321,14 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     expect(line.holes).toBe(9);
     expect(line.par).toBe(PAR_TOTAL);
     expect(line.score).toBe(PINNED_SCORES_OLDEST_FIRST[0]); // 39 — the round's own gross
-    // The assertion beside its consequence (spec §2a/§2b): she stated +8, and playing alone she is
-    // her own anchor, so the fold derived 0 strokes.
-    expect(line.normallyShoots).toBe(STATED_OVER_PAR);
+    // Nobody typed a number onto this solo round's roster, so the seat is on its default 0.
     expect(line.strokes).toBe(0);
     // Rating and slope are recorded on the card and read by NOTHING (spec §7): an unrated round is
     // an ordinary round, so ONE of them already produces an average — 39 on par 36 is +3, doubled
     // to +6 for the nine.
     expect(record.metrics.average).toBe(PINNED_AVERAGE_AFTER_ONE);
     // The retired WHS/index members can never come back onto this wire.
-    for (const retired of ["ags", "differential"]) expect(line).not.toHaveProperty(retired);
+    for (const retired of ["ags", "differential", "normallyShoots"]) expect(line).not.toHaveProperty(retired);
     for (const retired of ["whsIndex", "swngIndex", "indexHistory", "spread"]) expect(record.metrics).not.toHaveProperty(retired);
   });
 

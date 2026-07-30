@@ -21,7 +21,7 @@ import {
   loadWebEnv,
   mintAccountGolfer,
   mintThrowawayUser,
-  normallyShootsField,
+  setStrokesInBrowser,
   PLAYER_NAMES,
   readJoinCode,
   screenshotPath,
@@ -121,7 +121,8 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // No name entry: the create form renders "Playing as Ann" from the account's own record —
     // there is no name field to fill anymore.
     await expect(pageA.getByText("Playing as", { exact: true })).toBeVisible();
-    await normallyShootsField(pageA).fill("8");
+    // The form asks nothing about anyone's game (spec 2026-07-30 §9) — the deck's numbers are
+    // typed onto the roster once all four are seated (below).
     await pageA.getByRole("button", { name: "Create round" }).click();
 
     await expect(pageA).toHaveURL(/\/round\//);
@@ -171,7 +172,6 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await expect(pageB.getByText(`Joining ${fixtureLinks18.courseName}`)).toBeVisible();
     await pageB.getByLabel("Tee").selectOption("white");
 
-    await normallyShootsField(pageB).fill("2");
     await pageB.getByRole("button", { name: "Join round" }).click();
     await expect(pageB).toHaveURL(/\/round\//);
 
@@ -182,8 +182,8 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // is the only way onto a card now; the old roster-seeding path a host could use to add
     // others is deleted, and this harness never had support for it).
     const { httpUrl } = loadWebEnv();
-    await joinRoundDirect(httpUrl, calAccount, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 15 } });
-    await joinRoundDirect(httpUrl, deeAccount, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 5 } });
+    await joinRoundDirect(httpUrl, calAccount, { code: joinCode, tee: "white" });
+    await joinRoundDirect(httpUrl, deeAccount, { code: joinCode, tee: "white" });
 
     // Both already-live contexts must observe the full 4-person roster (via WS/pull) before
     // Step 3 drives AddGameForm's participant-derived <select>s.
@@ -191,6 +191,23 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
       await waitForParticipant(page, "Cal");
       await waitForParticipant(page, "Dee");
     }
+
+    // The frozen deck's own strokes (fieldDeck18.expected.strokes — 6/0/13/3), typed onto the
+    // roster through the real editor (spec 2026-07-30 §2/§8). Every hand-derived dot, net and
+    // standing in this file reads off these four numbers. Bo is already on the default 0, so his
+    // row is deliberately not touched — the honest way to seat a player who receives nothing.
+    for (const [name, strokes] of [["Ann", 6], ["Cal", 13], ["Dee", 3]] as const) {
+      await setStrokesInBrowser(pageA, name, strokes);
+    }
+    // B only learns of A's roster writes via WS broadcast — cross-context, WS-dependent, the exact
+    // seam expectOrRecover exists for. Cal's 13 is the largest of the three, so it is the one whose
+    // absence would corrupt the most downstream assertions.
+    await expectOrRecover(
+      pageB,
+      "B sees the deck's strokes on the roster (test 2)",
+      () => expect(pageB.locator("li").filter({ hasText: "Cal" }).first()).toContainText("white · 13 strokes"),
+      bRoute,
+    );
   });
 
   test("3: A adds fourball (Ann+Bo vs Cal+Dee) and skins (all four) via SetupPanel; both contexts render both chips", async () => {
@@ -229,10 +246,8 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
       }
     }
 
-    // The deck's pinned pre-correction snapshot, RE-DERIVED for the one stroke rule (spec
-    // 2026-07-29 §2b): the four state +8/+2/+15/+5, so the anchor is Bo's 2 and the field derives
-    // Ann 6 / Bo 0 / Cal 13 / Dee 3 — Cal's dots now cover SI 1–13, including hole 9 (SI 11),
-    // which the retired 100%-of-your-own-handicap skins convention also gave him. His as-entered
+    // The deck's pinned pre-correction snapshot, off the roster numbers typed in test 2 —
+    // Ann 6 / Bo 0 / Cal 13 / Dee 3. Cal's dots cover SI 1–13, including hole 9 (SI 11). His as-entered
     // h9 4 therefore still nets 3, uniquely lowest, taking the pot every hole from h1 carried:
     // "Cal 9" (nine holes' worth, not the old five — no hole before it is won under the new
     // allocation either). B only ever learns holes 1-9 via WS broadcast from A — cross-context,
@@ -321,7 +336,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // separate confirm step. Every other entry in this spec goes through enterScore() (the
     // same two clicks), so this one entry stands in for all of them, per the brief.
     const cell = pageA.getByRole("button", { name: "Ann hole 13", exact: true });
-    await expect(cell).toContainText("–"); // idle placeholder (dots may already show — the standard card's own DERIVED round strokes, not a game: Ann's 6 = 8 − Bo's anchor 2 covers SI 1–6, and hole 13 is SI 4)
+    await expect(cell).toContainText("–"); // idle placeholder (dots may already show — the standard card's own roster strokes, not a game: Ann's 6 covers SI 1–6, and hole 13 is SI 4)
     await cell.click(); // click 1 of 2
     const dialog = pageA.getByRole("dialog", { name: "Score for Ann, hole 13", exact: true });
     await expect(dialog).toBeVisible();
@@ -434,7 +449,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // primaryPath.spec.ts pins the all-real case on a flat solo card.
     //
     // DERIVED BY HAND from the frozen deck (fieldDeck18's scores + the h9 correction) and
-    // fixtureLinks18's stroke indices. Strokes: Ann 6, Bo 0, Cal 13, Dee 3 (anchor Bo's +2).
+    // fixtureLinks18's stroke indices. Strokes: Ann 6, Bo 0, Cal 13, Dee 3, as typed in test 2.
     // Dots per segment — a hole gets one iff its SI <= the player's strokes:
     //   front SIs 9,1,17,5,13,15,3,7,11 | back SIs 2,16,8,4,12,10,18,6,14
     //   Ann (SI<=6):  front h2,h4,h7        = 3 | back h10,h13,h17               = 3
@@ -549,8 +564,8 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
       .first();
     await expect(result).toBeVisible();
     await result.click();
-    // No name entry: "Playing as Pat" renders from the account's own record.
-    await normallyShootsField(page).fill("0");
+    // No name entry: "Playing as Pat" renders from the account's own record, and nothing is
+    // asked about anyone's game — both seats stay on the default 0 strokes for this scenario.
     await page.getByRole("button", { name: "Create round" }).click();
 
     await expect(page).toHaveURL(/\/round\//);
@@ -559,7 +574,7 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
     // Score-for-anyone precedent (Cal/Dee, Quinn elsewhere in this file) — Quinn's own tab
     // adds nothing this scenario needs; his join carries his own Bearer (self-join only).
     const { httpUrl } = loadWebEnv();
-    await joinRoundDirect(httpUrl, quinnAccount, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 0 } });
+    await joinRoundDirect(httpUrl, quinnAccount, { code: joinCode, tee: "white" });
     // Quinn's join is a direct HTTP fetch, not a browser — Pat's page only ever learns of it via
     // WS broadcast/pull, cross-context and WS-dependent (same seam as the M5 describe's own
     // waitForParticipant loop), so it gets the announced force-close + Sync-now recovery instead

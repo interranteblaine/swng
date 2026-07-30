@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { GameId, GameResult, GolferId, HoleResult, RoundEvent, RoundId, StrokeBasis } from "@swng/domain";
+import type { GameId, GameResult, GolferId, HoleResult, RoundEvent, RoundId } from "@swng/domain";
 import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
 import { gameConfigFields, gameResultSchema, roundEventSchema } from "./round.js";
 
@@ -48,42 +48,17 @@ export const gameConfigInputSchema = z.discriminatedUnion("kind", [
 ]);
 export type GameConfigInput = z.infer<typeof gameConfigInputSchema>;
 
-// What a player asserts about their game (spec 2026-07-29 §2a), at the REQUEST ingress: defined
-// once here and used by every command that takes one (start's host, join, set-basis). This is the
-// bounded copy — round.ts's `strokeBasisSchema` is the unbounded stored twin, per Arc A's
-// placement rule (a bound that rejects already-stored data bricks a legitimate user), the same
-// input/stored split `gameConfigInputSchema` and `scoreResultInputSchema` already follow.
+// A player's strokes at the REQUEST ingress (spec 2026-07-30 §2): defined once here and used by
+// every command that takes one (start's host, join, set-strokes). Request ingress ONLY — the
+// stored event arm in round.ts stays unbounded, per Arc A's placement rule (a bound on a
+// stored/fold schema rejects already-stored data on a read path), the same input/stored split
+// `gameConfigInputSchema` and `scoreResultInputSchema` already follow.
 //
-// The bounds themselves are plausibility limits with margin, not golf rules — they exist only to
-// reject nonsense, never a real player. A century over par on 18 holes is already absurd; 20 under
-// is well past the best round ever played.
-//
-// Built as an UNANNOTATED literal (`strokeBasisInputArms`) so the exhaustiveness check below can
-// read its own inferred literal-kind union — the same split, for the same empirically-verified
-// reason, as `scoreResultInputArms` further down this file; `strokeBasisInputSchema` re-applies the
-// z.ZodType<StrokeBasis> annotation on a separate binding so callers still get the field-shape and
-// extra-arm guarantee against the domain type.
-const strokeBasisInputArms = z.discriminatedUnion("kind", [
-  // SIGNED: a golfer who shoots two under par states -2 (spec §2a).
-  z.object({ kind: z.literal("normally-shoots"), overPar: z.number().int().min(-20).max(100) }),
-  // NOT signed. Under a relative model the anchor is the best player at 0 and nobody gives strokes
-  // back — giving A two is the same round as taking two from B, which is what the rule already
-  // produces. min(0) makes the plus-handicap case unrepresentable at the wire (spec §2a); the
-  // model's own clamp (domain's resolveStrokes) is what makes the invariant hold for the stored
-  // path too, which this schema deliberately does not bound.
-  z.object({ kind: z.literal("strokes"), strokes: z.number().int().min(0).max(100) }),
-]);
-
-// Compile-time exhaustiveness: every StrokeBasis kind must have a request arm above. A third
-// constructor added to the domain type (or an arm dropped here) fails to typecheck until the two
-// match, rather than being silently unaccepted at the wire. Same one-tuple ([A] extends [B])
-// non-distributive form scoreResultInputArms' own check uses — see its comment for why the naked
-// `A extends B` is vacuous here (it distributes, so a missing member's `never` just vanishes).
-type _RequestCoversEveryStrokeBasisKind =
-  [StrokeBasis["kind"]] extends [z.infer<typeof strokeBasisInputArms>["kind"]] ? true : never;
-export const _strokeBasisExhaustive: _RequestCoversEveryStrokeBasisKind = true;
-
-export const strokeBasisInputSchema: z.ZodType<StrokeBasis> = strokeBasisInputArms;
+// NOT signed: nobody gives strokes back, so min(0) makes a negative unrepresentable at the wire
+// — load-bearing, since the card renders dots as `"●".repeat(strokes)`. max(54) is a plausibility
+// limit with margin (three a hole on a nine, one a hole plus half again on an eighteen), there to
+// reject nonsense rather than a real player.
+export const strokesInputSchema = z.number().int().min(0).max(54);
 
 // Accounts-only identity (spec §3): StartRound seats its creator ONLY, always as-self from the
 // caller's Bearer (application/src/golfers/ensureGolfer.ts resolves the account golfer by sub).
@@ -98,10 +73,11 @@ export const strokeBasisInputSchema: z.ZodType<StrokeBasis> = strokeBasisInputAr
 // old `card:` shape is gone, not tolerated — an old client gets 400 invalid-request).
 export const startRoundRequestSchema = z.object({
   course: z.object({ courseId: courseIdSchema, cardId: cardIdSchema }),
+  // Just a tee (spec 2026-07-30 §9): the creator's strokes start at 0 like everyone else's, and
+  // are typed onto the roster when the group settles them on the first tee.
   host: z.object({
     // task-1 (pre-prod hardening): a tee name is a short label, never a paragraph.
     tee: z.string().min(1).max(40),
-    basis: strokeBasisInputSchema,
   }),
 });
 export type StartRoundRequest = z.infer<typeof startRoundRequestSchema>;
@@ -114,8 +90,8 @@ export const joinRoundRequestSchema = z.object({
   // task-1 (pre-prod hardening): the join-code alphabet excludes visually-ambiguous characters
   // (0/O/1/I/L) — mirrors compositionRoot.ts's JOIN_CODE_ALPHABET, the real minting alphabet.
   code: z.string().length(6).regex(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/),
+  // Just a tee (spec 2026-07-30 §9): joining asks no question about your game.
   tee: z.string().min(1).max(40),
-  basis: strokeBasisInputSchema,
 });
 export type JoinRoundRequest = z.infer<typeof joinRoundRequestSchema>;
 
@@ -169,16 +145,16 @@ export const recordScoreRequestSchema = z.object({
 });
 export type RecordScoreRequest = z.infer<typeof recordScoreRequestSchema>;
 
-// POST /rounds/{roundId}/basis (spec 2026-07-20, re-shaped by 2026-07-29): any participant
-// corrects any participant — the score-for-anyone trust model, so the SUBJECT rides the body while
-// the author is the token's own golferId. The server minds the envelope (server-minted, like
-// join/leave), and the correction is retroactive by construction: nothing snapshots strokes, so
-// the fold re-derives the whole roster's dots and every standing on the next read.
-export const setBasisRequestSchema = z.object({
+// POST /rounds/{roundId}/strokes (spec 2026-07-30 §2): any participant sets any participant's
+// strokes — the score-for-anyone trust model, so the SUBJECT rides the body while the author is
+// the token's own golferId. The server mints the envelope (like join/leave), and the change is
+// retroactive by construction: nothing snapshots strokes, so the card's dots and every standing
+// move on the next read.
+export const setStrokesRequestSchema = z.object({
   golferId: golferIdSchema,
-  basis: strokeBasisInputSchema,
+  strokes: strokesInputSchema,
 });
-export type SetBasisRequest = z.infer<typeof setBasisRequestSchema>;
+export type SetStrokesRequest = z.infer<typeof setStrokesRequestSchema>;
 
 export interface StartRoundResponse {
   readonly roundId: RoundId;

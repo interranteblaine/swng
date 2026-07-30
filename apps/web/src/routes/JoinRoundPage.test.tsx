@@ -172,7 +172,7 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
     expect(screen.getByRole("link", { name: /change/i }).getAttribute("href")).toBe("/profile");
   });
 
-  it("uppercases the code and joins as-self: code + tee + basis + the account's Bearer (seat resolved server-side, never a typed name)", async () => {
+  it("uppercases the code and joins as-self: code + tee + the account's Bearer (seat resolved server-side, never a typed name)", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     // The response's own joinCode is DELIBERATELY different from the typed "self01"/"SELF01" —
@@ -185,14 +185,15 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
 
     fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "self01" } });
     fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
-    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "6" } });
+    // Nothing is asked about your game (spec 2026-07-30 §9).
+    expect(screen.queryByLabelText(/normally shoot/i)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /join round/i }));
 
     await waitFor(() => expect(mockedJoinRound).toHaveBeenCalledTimes(1));
     const [body, token] = mockedJoinRound.mock.calls[0]!;
-    // Accounts-only identity (spec §3): join is as-self — the request carries only code + tee +
-    // basis; the seat (name + golferId) is resolved server-side from the Bearer.
-    expect(body).toEqual({ code: "SELF01", tee: "white", basis: { kind: "normally-shoots", overPar: 6 } });
+    // Accounts-only identity (spec §3): join is as-self — the request carries only code + tee;
+    // the seat (name + golferId) is resolved server-side from the Bearer.
+    expect(body).toEqual({ code: "SELF01", tee: "white" });
     expect(token).toBe(idToken);
 
     await waitFor(() => expect(screen.getByText("round view")).toBeTruthy());
@@ -247,20 +248,17 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
     expect(teeField.tagName).toBe("INPUT");
 
     fireEvent.change(teeField, { target: { value: "white" } });
-    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "5" } });
     fireEvent.click(screen.getByRole("button", { name: /join round/i }));
 
     await waitFor(() => expect(mockedJoinRound).toHaveBeenCalledTimes(1));
-    expect(mockedJoinRound.mock.calls[0]![0]).toEqual({ code: "ZZZ999", tee: "white", basis: { kind: "normally-shoots", overPar: 5 } });
+    expect(mockedJoinRound.mock.calls[0]![0]).toEqual({ code: "ZZZ999", tee: "white" });
   });
 });
 
-// ONE number, in the unit everyone already speaks (spec 2026-07-29 §2/§9): what you normally
-// shoot relative to par. Nothing converts it and nothing derives it from a course's rating/slope —
-// the strokes themselves fall out of the whole field once everyone has stated theirs, so this form
-// has no per-player strokes figure and no derivation note at all.
-describe("JoinRoundPage — what you normally shoot", () => {
-  it("asks the question verbatim, starts blank, and keeps Join disabled until a number is typed", async () => {
+// The form asks NOTHING about your game (spec 2026-07-30 §9): strokes are typed onto the round's
+// roster by whoever agreed them, so joining is a code and a tee.
+describe("JoinRoundPage — no question about your game", () => {
+  it("asks nothing about what you shoot, and Join is enabled on a code + tee alone", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedPeekRound.mockResolvedValue({
@@ -276,13 +274,9 @@ describe("JoinRoundPage — what you normally shoot", () => {
     // the same label until the peek resolves, and only the peek sets a tee, which Join needs.
     await waitFor(() => expect(screen.getByLabelText(/^tee$/i).tagName).toBe("SELECT"));
 
-    // Blank, never "0": "0" would assert "I shoot par", a real claim about the player, and no
-    // default may put a claim in the round's log.
-    const field = screen.getByLabelText("What do you normally shoot, relative to par?") as HTMLInputElement;
-    expect(field.value).toBe("");
-    expect(screen.getByRole("button", { name: /join round/i }).hasAttribute("disabled")).toBe(true);
-
-    fireEvent.change(field, { target: { value: "26" } });
+    expect(screen.queryByLabelText(/normally/i)).toBeNull();
+    expect(screen.queryByLabelText(/relative to par/i)).toBeNull();
+    expect(screen.queryByLabelText(/strokes/i)).toBeNull();
     expect(screen.getByRole("button", { name: /join round/i }).hasAttribute("disabled")).toBe(false);
   });
 
@@ -312,22 +306,6 @@ describe("JoinRoundPage — what you normally shoot", () => {
     expect(teeSelect.options[0]!.textContent).toMatch(/rating 71.6, slope 128/);
   });
 
-  it("submits a negative for an under-par player — minus means under par, the one sign convention left", async () => {
-    signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("under-g"), name: "Under" } });
-    mockedJoinRound.mockResolvedValue({ roundId: roundId("round-under"), token: "tok-under", golferId: golferId("under-g"), joinCode: "ABC234" });
-
-    renderJoin();
-    await screen.findByText(/playing as/i);
-
-    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc234" } });
-    fireEvent.change(screen.getByLabelText(/^tee$/i), { target: { value: "white" } });
-    fireEvent.change(screen.getByLabelText("What do you normally shoot, relative to par?"), { target: { value: "-2" } });
-    fireEvent.click(screen.getByRole("button", { name: /join round/i }));
-
-    await waitFor(() => expect(mockedJoinRound).toHaveBeenCalledTimes(1));
-    expect(mockedJoinRound.mock.calls[0]![0]).toEqual({ code: "ABC234", tee: "white", basis: { kind: "normally-shoots", overPar: -2 } });
-  });
 });
 
 // The M8 defect class the milestone must not reintroduce: a submit during the GET /me loading

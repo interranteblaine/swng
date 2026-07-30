@@ -12,14 +12,14 @@ const A = golferId("ann");
 const B = golferId("bo");
 const C = golferId("cal");
 const players3: readonly Participant[] = [
-  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
-  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
-  { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 12 } },
+  { golferId: A, name: "Ann", tee: "white", strokes: 3 },
+  { golferId: B, name: "Bo", tee: "white", strokes: 0 },
+  { golferId: C, name: "Cal", tee: "white", strokes: 5 },
 ];
 const skins = { kind: "skins", id: gameId("k9"), scoring: "net", players: [A, B, C] } as const;
 const stableford = { kind: "stableford", id: gameId("s9"), players: [A, B, C] } as const;
-// The skins golden card. Both games share the field, so both read the same dots: differences from
-// Bo's 2, halved on a nine-hole card — Ann 3 (h2/h7/h4), Bo 0, Cal 5 (h2/h7/h4/h8/h1).
+// The skins golden card. Both games are MEDAL kinds, so both read each player's own roster number
+// — Ann 3 (h2/h7/h4), Bo 0, Cal 5 (h2/h7/h4/h8/h1).
 const cards = {
   [A]: [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"],
   [B]: [4, 5, 3, 6, 4, 4, 4, 5, 4],

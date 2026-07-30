@@ -11,7 +11,6 @@ import type { GameConfig } from "./game.js";
 // gameMembers) costs more than it buys. The engines must go through this function: it is the ONE
 // place the per-game field rule lives.
 import { gameMembers } from "./game.js";
-import { anchorOf, resolveStrokes } from "./strokeBasis.js";
 import { dotsByHole } from "./strokes.js";
 
 // Generic in the entry type so a lookup preserves what the caller passed: `gameStrokeAllocation`
@@ -22,40 +21,47 @@ const participantFor = <T extends Participant>(participants: readonly T[], id: G
   return found;
 };
 
-// ONE rule for every kind (spec §3): the game's field is its own members, strokes are the
-// difference from the lowest among them, allocated by stroke index. The switch this replaced
-// encoded five conventions and a hidden allowance percentage; there is nothing per-kind left.
+// A card is absolute, a match is relative (spec 2026-07-30 §3). Medal kinds use each player's own
+// roster number, so they always agree with the card. Match kinds use the DIFFERENCE, allocated
+// from the hardest hole down — "you get ten off me" puts those ten on SI 1-10, which is what
+// stroke index is for. Same shot count as subtracting two absolute allocations, different holes,
+// and the holes are the point: no test that counts dots can tell the two apart, so the hole
+// placement is pinned explicitly in allocation.test.ts.
+//
+// Nobody in the history of golf has said "I get 20 and you get 10." They say "you get 10."
 export const gameStrokeAllocation = (
   config: GameConfig,
   participants: readonly RosterEntry[],
   card: CourseCard,
 ): ReadonlyMap<GolferId, ReadonlyMap<number, number>> => {
   if ("scoring" in config && config.scoring === "gross") return new Map();
-  const members = gameMembers(config);
-  // Any tee set answers "how many holes is this card", because every tee set on one card has the
-  // same hole count — the whole-card supersession rule that made the card the stored unit pins it
-  // (course-cards spec 2026-07-15: no hole-count change on an existing card, asserted structurally).
-  // That is what lets the halving decision read teeSets[0] while the dots below are allocated
-  // against each player's OWN tee set; a card with mismatched tee lengths would make the two
-  // disagree, and none can exist.
-  const holeCount = card.teeSets[0]?.holes.length ?? 18;
-  const bases = members.map((id) => ({ golferId: id, basis: participantFor(participants, id).basis }));
-  // A game's frozen players[] never drops a member who leaves, so the game's field excludes
-  // departed players from its ANCHOR exactly as the card's does (spec §2b) — otherwise a
-  // wrong-round joiner still anchors whichever game he was added to before leaving.
-  const present = bases.filter(({ golferId }) => participantFor(participants, golferId).departed !== true);
-  const strokes = resolveStrokes(bases, holeCount, anchorOf(present));
-  return new Map(
-    members.map((id) => [id, dotsByHole(strokes.get(id)!, findTeeSet(card, participantFor(participants, id).tee))]),
-  );
+  const dotsFor = (id: GolferId, strokes: number) => {
+    const p = participantFor(participants, id);
+    return [id, dotsByHole(strokes, findTeeSet(card, p.tee))] as const;
+  };
+  const strokesOf = (id: GolferId) => participantFor(participants, id).strokes;
+
+  switch (config.kind) {
+    case "stroke-play":
+    case "stableford":
+    case "skins":
+      return new Map(gameMembers(config).map((id) => dotsFor(id, strokesOf(id))));
+    case "singles-match":
+    case "fourball-match": {
+      // Singles falls out of the SAME expression as four-ball: with two members the lowest is one
+      // of them, so the higher receives the difference and the lower receives none. A separate
+      // two-player branch would be a second copy of one rule.
+      const members = gameMembers(config);
+      const lowest = Math.min(...members.map(strokesOf));
+      return new Map(members.map((id) => dotsFor(id, strokesOf(id) - lowest)));
+    }
+  }
 };
 
-// The STANDARD CARD's dots: each player's own ROUND strokes allocated by stroke index — no game
-// at all (spec 2026-07-19 §2a: the card never changes; a game's own strokes, resolved off its own
-// field, live in that game's panel and are stated there in words). Reads the value reduceRound
-// already derived across the round's present roster (spec 2026-07-29 §2b) rather than re-running
-// the rule, which is why this takes a RosterEntry and gameStrokeAllocation above does not: the
-// card's field IS the round, so the fold has already answered it.
+// The STANDARD CARD's dots: each player's own roster strokes allocated by stroke index — no game
+// at all (spec 2026-07-19 §2a: the card never changes). The medal kinds above therefore agree
+// with this by construction, since they read the same per-player number; the match kinds
+// deliberately do not, and their panel says so in words (spec 2026-07-30 §3).
 export const roundStrokeAllocation = (
   participants: readonly RosterEntry[],
   card: CourseCard,

@@ -10,7 +10,7 @@ import { toGolferView } from "./golferView.js";
 // Name and home course are the whole editable profile (spec 2026-07-29 §5) — the index source this
 // also used to patch went with the index itself. There is nothing on a golfer row a golfer asserts
 // about their game anymore: what they shoot is computed from their rounds, and what they play off
-// is the basis they state when they join a round.
+// is the strokes the group types onto that round's roster.
 //
 // PUT /me get-or-creates through the ONE shared ensureGolfer (accounts-only identity spec §2):
 // a PUT before any prior GET /me still lands on a real, sub-bound row — minted with the

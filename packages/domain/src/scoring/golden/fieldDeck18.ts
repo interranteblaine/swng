@@ -16,11 +16,14 @@ const bo = golferId("bo");
 const cal = golferId("cal");
 const dee = golferId("dee");
 
+// The strokes the group typed onto the roster (spec 2026-07-30 §2). Byte-identical to the numbers
+// the deck's cards were built on — the derivation this arc deleted turned stated normal scores of
+// 8/2/15/5 into exactly these, so every hand-verified net below is unmoved.
 const players: readonly Participant[] = [
-  { golferId: ann, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
-  { golferId: bo, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
-  { golferId: cal, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 15 } },
-  { golferId: dee, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 5 } },
+  { golferId: ann, name: "Ann", tee: "white", strokes: 6 },
+  { golferId: bo, name: "Bo", tee: "white", strokes: 0 },
+  { golferId: cal, name: "Cal", tee: "white", strokes: 13 },
+  { golferId: dee, name: "Dee", tee: "white", strokes: 3 },
 ];
 
 const fourball: Extract<GameConfig, { kind: "fourball-match" }> = {
@@ -61,10 +64,10 @@ const finalSkinsLines = [
 ] as const;
 
 const expected = {
-  // One rule for both games (spec §3): each takes the difference from the lowest in its own field,
-  // and both fields here are all four players, so both allocate identically off Bo's 2 — Ann on
-  // SI 1–6, Cal on SI 1–13, Dee on SI 1–3, Bo off scratch. No allowance percentage, no per-kind
-  // convention: the fourball's old 90% discount and skins' old full-handicap-of-your-own are gone.
+  // Both games allocate identically on THIS deck, for two different reasons (spec 2026-07-30 §3):
+  // skins is medal, so each player gets their own roster number; the fourball is relative, and Bo
+  // is already on 0, so the difference from the lowest of the four IS each player's own number.
+  // Ann lands on SI 1–6, Cal on SI 1–13, Dee on SI 1–3, Bo off scratch.
   strokes: { [ann]: 6, [bo]: 0, [cal]: 13, [dee]: 3 } as Readonly<Record<GolferId, number>>,
   fourballFinal: {
     kind: "fourball-match",

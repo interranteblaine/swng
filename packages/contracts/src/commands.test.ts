@@ -7,7 +7,7 @@ import {
   gameConfigInputSchema,
   joinRoundRequestSchema,
   recordScoreRequestSchema,
-  setBasisRequestSchema,
+  setStrokesRequestSchema,
   startRoundRequestSchema,
 } from "./commands.js";
 
@@ -28,60 +28,38 @@ describe("startRoundRequestSchema", () => {
 
   // Course-cards spec §4: the request carries a REFERENCE (courseId + cardId), never a card — the
   // server resolves and freezes the lineage's current card itself. Accounts-only identity (spec
-  // §3): the creator seat is always as-self from the caller's Bearer, so host carries only
-  // tee/basis. No host.name (the golfer record's name is frozen into the event server-side), no
-  // golferId, no players[].
+  // §3): the creator seat is always as-self from the caller's Bearer, so host carries only a tee.
+  // No host.name (the golfer record's name is frozen into the event server-side), no golferId, no
+  // players[], and — spec 2026-07-30 §9 — no question about the creator's game: strokes start at 0
+  // and are typed onto the roster.
   it("accepts a valid start-round request", () => {
-    const request = { course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } };
+    const request = { course, host: { tee: "white" } };
     expect(parse(startRoundRequestSchema, request)).toEqual(request);
-  });
-
-  it("rejects a non-integer overPar", () => {
-    const request = { course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8.5 } } };
-    expect(() => parse(startRoundRequestSchema, request)).toThrow(ContractError);
   });
 
   // task-1 (pre-prod hardening, wire-ingress length/count bounds): every user-supplied string
   // gets a .max() at the request boundary.
   it("rejects an over-long tee name", () => {
-    expect(() =>
-      parse(startRoundRequestSchema, {
-        course,
-        host: { tee: "x".repeat(41), basis: { kind: "normally-shoots", overPar: 10 } },
-      }),
-    ).toThrow();
-  });
-
-  // [-20, 100] is a plausibility bound on what a golfer can state they normally shoot, not a golf
-  // rule — a century over par on 18 holes is already absurd, and 20 under is well past the best
-  // round ever played (spec 2026-07-29 §2a).
-  it("rejects an overPar outside [-20, 100]", () => {
-    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 101 } } })).toThrow(ContractError);
-    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: -21 } } })).toThrow(ContractError);
-  });
-
-  it("accepts an overPar at the [-20, 100] boundary", () => {
-    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 100 } } })).not.toThrow();
-    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: -20 } } })).not.toThrow();
+    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "x".repeat(41) } })).toThrow();
   });
 
   // Course-cards spec invariant 4/5: the client can never author a card — the old `card:` shape
   // is GONE, not tolerated. A request still shaped the old way (a full card, no `course`
   // reference) is rejected as invalid, not silently accepted.
   it("rejects the old card: shape — a client can never author a card", () => {
-    const request = { card, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } };
+    const request = { card, host: { tee: "white" } };
     expect(() => parse(startRoundRequestSchema, request)).toThrow(ContractError);
   });
 
   // The schema isn't `.strict()`, so an OLD client still sending the deleted identity fields
-  // (host.name / golferId / players / crewId) isn't rejected — Zod's default strips the unknown
-  // keys silently, leaving exactly the accounts-only shape.
-  it("strips deleted/old-client fields (host.name, golferId, players, crewId) rather than rejecting them", () => {
+  // (host.name / host.basis / golferId / players / crewId) isn't rejected — Zod's default strips
+  // the unknown keys silently, leaving exactly the accounts-only shape.
+  it("strips deleted/old-client fields (host.name, host.basis, golferId, players, crewId) rather than rejecting them", () => {
     const request = {
       course,
       host: { name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
       golferId: "ann-1",
-      players: [{ name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }],
+      players: [{ name: "Bo", tee: "white" }],
       crewId: "crew-1",
     };
     const parsed = parse(startRoundRequestSchema, request);
@@ -89,71 +67,44 @@ describe("startRoundRequestSchema", () => {
     expect(parsed).not.toHaveProperty("players");
     expect(parsed).not.toHaveProperty("crewId");
     expect(parsed.host).not.toHaveProperty("name");
-    expect(parsed).toEqual({ course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } });
+    expect(parsed.host).not.toHaveProperty("basis");
+    expect(parsed).toEqual({ course, host: { tee: "white" } });
   });
 });
 
 describe("joinRoundRequestSchema", () => {
-  // Accounts-only identity (spec §3): join is always as-self — only code + tee + basis.
+  // Accounts-only identity (spec §3): join is always as-self — and, spec 2026-07-30 §9, it asks
+  // nothing about your game either, so the whole request is code + tee.
   // "AB2345" (not "ABC123"): task-1's regex bound excludes 0/O/1/I/L from the join-code
   // alphabet, and "1" isn't a character the real minting alphabet ever produces.
   it("accepts a valid join-round request", () => {
-    const request = { code: "AB2345", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } };
+    const request = { code: "AB2345", tee: "white" };
     expect(parse(joinRoundRequestSchema, request)).toEqual(request);
   });
 
   it("rejects a code that isn't exactly 6 characters", () => {
-    const request = { code: "ABC12", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } };
-    expect(() => parse(joinRoundRequestSchema, request)).toThrow(ContractError);
-  });
-
-  it("rejects a non-integer overPar", () => {
-    const request = { code: "AB2345", tee: "white", basis: { kind: "normally-shoots", overPar: 2.5 } };
-    expect(() => parse(joinRoundRequestSchema, request)).toThrow(ContractError);
-  });
-
-  // Spec §2a: `strokes` is the SECOND constructor and is bounded at zero — the plus-handicap case
-  // is unrepresentable, because under a relative model the anchor is the best player at 0 and
-  // nobody gives strokes back.
-  it("accepts a literal strokes basis, and rejects a negative one", () => {
-    const given = { code: "AB2345", tee: "white", basis: { kind: "strokes", strokes: 18 } };
-    expect(parse(joinRoundRequestSchema, given)).toEqual(given);
-    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", basis: { kind: "strokes", strokes: -1 } })).toThrow(ContractError);
-  });
-
-  it("rejects an unknown basis kind", () => {
-    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", basis: { kind: "index", value: 12.4 } })).toThrow(ContractError);
+    expect(() => parse(joinRoundRequestSchema, { code: "ABC12", tee: "white" })).toThrow(ContractError);
   });
 
   // task-1 (pre-prod hardening): the join-code alphabet excludes visually-ambiguous
   // characters (0/O/1/I/L) — see compositionRoot.ts's JOIN_CODE_ALPHABET, the real minting
   // alphabet this regex mirrors exactly.
   it("rejects a join code with a character outside the safe alphabet", () => {
-    expect(() => parse(joinRoundRequestSchema, { code: "ABC0O1", tee: "White", basis: { kind: "normally-shoots", overPar: 10 } })).toThrow(); // 0/O/1 are excluded from the join-code alphabet
+    expect(() => parse(joinRoundRequestSchema, { code: "ABC0O1", tee: "White" })).toThrow(); // 0/O/1 are excluded from the join-code alphabet
   });
 
   it("rejects an over-long tee name", () => {
-    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "x".repeat(41), basis: { kind: "normally-shoots", overPar: 2 } })).toThrow(ContractError);
+    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "x".repeat(41) })).toThrow(ContractError);
   });
 
-  // See startRoundRequestSchema's own comment above for where [-20, 100] comes from.
-  it("rejects an overPar outside [-20, 100]", () => {
-    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", basis: { kind: "normally-shoots", overPar: 101 } })).toThrow(ContractError);
-    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", basis: { kind: "normally-shoots", overPar: -21 } })).toThrow(ContractError);
-  });
-
-  it("accepts an overPar at the [-20, 100] boundary", () => {
-    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", basis: { kind: "normally-shoots", overPar: 100 } })).not.toThrow();
-    expect(() => parse(joinRoundRequestSchema, { code: "AB2345", tee: "white", basis: { kind: "normally-shoots", overPar: -20 } })).not.toThrow();
-  });
-
-  // NOT `.strict()`: an old client still sending name / golferId strips silently.
-  it("strips the deleted name / golferId fields rather than rejecting them", () => {
+  // NOT `.strict()`: an old client still sending name / golferId / basis strips silently.
+  it("strips the deleted name / golferId / basis fields rather than rejecting them", () => {
     const request = { code: "AB2345", name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 }, golferId: "g-1" };
     const parsed = parse(joinRoundRequestSchema, request);
     expect(parsed).not.toHaveProperty("name");
     expect(parsed).not.toHaveProperty("golferId");
-    expect(parsed).toEqual({ code: "AB2345", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } });
+    expect(parsed).not.toHaveProperty("basis");
+    expect(parsed).toEqual({ code: "AB2345", tee: "white" });
   });
 });
 
@@ -220,26 +171,24 @@ describe("recordScoreRequestSchema", () => {
   });
 });
 
-describe("setBasisRequestSchema", () => {
-  it("accepts an under-par normal score, rejects a non-integer", () => {
-    const under = { golferId: "g1", basis: { kind: "normally-shoots" as const, overPar: -2 } };
-    expect(setBasisRequestSchema.parse(under)).toEqual(under);
-    expect(() => setBasisRequestSchema.parse({ golferId: "g1", basis: { kind: "normally-shoots", overPar: 12.4 } })).toThrow();
+describe("setStrokesRequestSchema", () => {
+  it("accepts a non-negative integer and rejects a fractional one", () => {
+    const request = { golferId: "g1", strokes: 20 };
+    expect(setStrokesRequestSchema.parse(request)).toEqual(request);
+    expect(() => setStrokesRequestSchema.parse({ golferId: "g1", strokes: 12.4 })).toThrow();
   });
 
-  // Widened from the original [-10, 54] — see startRoundRequestSchema's own comment (commands.ts)
-  // for the WHS 6.1a derivation of [-20, 100].
-  it("rejects an overPar outside [-20, 100]", () => {
-    expect(() => parse(setBasisRequestSchema, { golferId: "g", basis: { kind: "normally-shoots", overPar: 101 } })).toThrow();
+  // min(0) is a MODEL invariant reaching the wire (spec 2026-07-30 §2): nobody gives strokes
+  // back, and the card renders dots as `"●".repeat(strokes)`.
+  it("rejects a negative strokes count", () => {
+    expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: -1 })).toThrow(ContractError);
   });
 
-  it("rejects an overPar below -20", () => {
-    expect(() => parse(setBasisRequestSchema, { golferId: "g", basis: { kind: "normally-shoots", overPar: -21 } })).toThrow();
-  });
-
-  it("accepts an overPar at the [-20, 100] boundary", () => {
-    expect(() => parse(setBasisRequestSchema, { golferId: "g", basis: { kind: "normally-shoots", overPar: 100 } })).not.toThrow();
-    expect(() => parse(setBasisRequestSchema, { golferId: "g", basis: { kind: "normally-shoots", overPar: -20 } })).not.toThrow();
+  // max(54) is a plausibility limit with margin, not a golf rule.
+  it("rejects a strokes count above 54 and accepts the boundary", () => {
+    expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: 55 })).toThrow(ContractError);
+    expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: 54 })).not.toThrow();
+    expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: 0 })).not.toThrow();
   });
 });
 

@@ -14,7 +14,7 @@ const ANN_ID = golferId("ann");
 const buildArchive = (overrides?: Partial<RoundArchive>): RoundArchive => ({
   roundId: ROUND_ID,
   card: fixtureLinks,
-  participants: [{ golferId: ANN_ID, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 }],
+  participants: [{ golferId: ANN_ID, name: "Ann", tee: "white", strokes: 0 }],
   games: [],
   cells: {},
   events: [],

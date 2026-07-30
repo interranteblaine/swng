@@ -171,10 +171,10 @@ const idConfigs = (ids: SeasonGolferIds): readonly GameConfig[] => [
 export const computeLocalArchives = (ids: SeasonGolferIds): readonly RoundArchive[] => {
   const card = buildCourseCard("Local Oracle Course");
   const participants: readonly Participant[] = [
-    { golferId: ids.al, name: "Al", tee: "member", basis: { kind: "normally-shoots", overPar: 0 } },
-    { golferId: ids.bo, name: "Bo", tee: "member", basis: { kind: "normally-shoots", overPar: 0 } },
-    { golferId: ids.cy, name: "Cy", tee: "member", basis: { kind: "normally-shoots", overPar: 0 } },
-    { golferId: ids.dee, name: "Dee", tee: "member", basis: { kind: "normally-shoots", overPar: 0 } },
+    { golferId: ids.al, name: "Al", tee: "member", strokes: 0 },
+    { golferId: ids.bo, name: "Bo", tee: "member", strokes: 0 },
+    { golferId: ids.cy, name: "Cy", tee: "member", strokes: 0 },
+    { golferId: ids.dee, name: "Dee", tee: "member", strokes: 0 },
   ];
   const games = idConfigs(ids);
 

@@ -20,25 +20,21 @@ const thru = (n: number): FixtureScores =>
   Object.fromEntries(Object.entries(scores).map(([golfer, holes]) => [golfer, holes.slice(0, n)]));
 
 describe("M5 field deck — 18-hole fourball + skins golden card", () => {
-  it("strokes: both games take the difference from the lowest in the field (Bo's 2) — 6/0/13/3", () => {
-    // Derived independently of the engines: the deck's own stated normal scores minus the lowest
-    // of them. Every dot on the UI card comes off these numbers.
-    const stated = players.map((p) => (p.basis.kind === "normally-shoots" ? p.basis.overPar : p.basis.strokes));
-    const lowest = Math.min(...stated);
-    players.forEach((player, index) => {
-      expect(stated[index]! - lowest).toBe(expected.strokes[player.golferId]);
-    });
-    // And both games allocate exactly that — the same field, so the same dots. No per-kind
-    // convention and no allowance percentage survives to make the two disagree. The ROUND's own
-    // roster resolves to the identical numbers here (one field, one rule), so the fold's derived
-    // `strokes` is what this passes through.
+  it("strokes: the deck's own typed numbers — 6/0/13/3 — reach both games and the card", () => {
+    // Read straight off the roster, not derived: strokes are asserted (spec 2026-07-30 §2). Every
+    // dot on the UI card comes off these numbers.
+    for (const player of players) expect(player.strokes).toBe(expected.strokes[player.golferId]);
+    // Both games allocate exactly that, though by DIFFERENT rules: skins is medal (each player's
+    // own number) and the fourball is relative (the difference from the lowest of the four) — and
+    // Bo is on 0, so the two coincide on this deck. A four-ball whose lowest member were above 0
+    // would legitimately differ from skins, which is why the two arms are pinned apart in
+    // allocation.test.ts rather than here.
     const roster = reduceRound(playGoldenRoundLog(fixtureLinks18, players, [fourball, skins], scores, corrections)).participants;
     for (const game of [fourball, skins]) {
       const allocation = gameStrokeAllocation(game, roster, fixtureLinks18);
       for (const { golferId } of players) expect(totalDots(allocation.get(golferId)!)).toBe(expected.strokes[golferId]);
     }
-    // The card's own dots come from the SAME numbers the games do here (spec §2b: the card's
-    // field is the round's present roster, which is exactly both games' field on this deck).
+    // The card's own dots come from the SAME numbers, because the fold seats what the log asserts.
     for (const entry of roster) expect(entry.strokes).toBe(expected.strokes[entry.golferId]);
   });
 

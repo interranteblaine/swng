@@ -6,8 +6,9 @@ import type { CourseId, GolferId } from "../ids.js";
 // The golfer record holds NO number and no source to pick (spec 2026-07-29 §5): `handicap`
 // (`HandicapProfile`/`IndexSource` — the swng/whs/declared choice) is deleted with the index it
 // selected between. What a golfer shoots is `metrics.average`, computed on read from their own
-// rounds; what they play off in a round is the `basis` they state when they join it. The profile
-// is a reporting artifact with no inputs beyond name and home course.
+// rounds; what they play off in a round is the strokes the group typed onto that round's roster
+// (spec 2026-07-30 §2), which is a fact about the round and never travels with the golfer. The
+// profile is a reporting artifact with no inputs beyond name and home course.
 export interface Golfer {
   readonly id: GolferId;
   readonly name: string;

@@ -84,9 +84,9 @@ export interface PeekRoundResponse {
   readonly courseName: string;
   // Name + rating/slope only. `par` and `holes` used to ride here for the join-side strokes
   // derivation (the handicap-model legibility arc: par fed the rated conversion, the hole count
-  // made the unrated estimate hole-count-correct). That derivation is deleted — a player now
-  // states what they normally shoot and the fold takes the difference (spec 2026-07-29 §2b) — and
-  // §7 allows no dormant fields, so both are gone. The one reader of a peek tee is
+  // made the unrated estimate hole-count-correct). Nothing derives strokes any more — they are one
+  // integer someone typed onto the roster (spec 2026-07-30 §2) — and no dormant fields are kept,
+  // so both are gone. The one reader of a peek tee is
   // JoinRoundPage's picker, which renders `name` and `teeNumbers(tee)`; teeNumbers reads
   // rating/slope alone.
   readonly teeSets: readonly { readonly name: string; readonly rating?: number; readonly slope?: number }[];

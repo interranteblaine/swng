@@ -105,13 +105,11 @@ describe("getMyRecordResponseSchema", () => {
     holes: 18,
     par: 72,
     strokes: 8,
-    normallyShoots: 22,
     score: 90,
     distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
   };
 
-  // No `score` and no `normallyShoots`: a card with a pickup carries no score (spec §2d), and a
-  // player who stated raw strokes asserted no normal number (spec §2a).
+  // No `score`: a card with a pickup carries no score, so there is no number to serve.
   const incompleteLine: GolferRoundLine = {
     roundId: roundId("r2"),
     courseName: "Casa Verde GC",
@@ -242,7 +240,6 @@ describe("getGolferResponseSchema", () => {
     holes: 18,
     par: 72,
     strokes: 8,
-    normallyShoots: 22,
     score: 90,
     distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
   };

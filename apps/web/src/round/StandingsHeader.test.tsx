@@ -7,8 +7,8 @@ import { StandingsHeader } from "./StandingsHeader";
 const ANN = golferId("ann");
 const BO = golferId("bo");
 const participants: readonly RosterEntry[] = [
-  { golferId: ANN, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 8 }, strokes: 8 },
-  { golferId: BO, name: "Bo", tee: "white", basis: { kind: "strokes", strokes: 2 }, strokes: 2 },
+  { golferId: ANN, name: "Ann", tee: "white", strokes: 8 },
+  { golferId: BO, name: "Bo", tee: "white", strokes: 2 },
 ];
 
 const strokePlayConfig = { kind: "stroke-play" as const, id: gameId("g1"), scoring: "gross" as const, players: [ANN, BO] };

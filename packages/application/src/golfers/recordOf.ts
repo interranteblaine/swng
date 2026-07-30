@@ -16,11 +16,9 @@ const toWireLine = (
   tee: line.tee,
   holes: line.holes,
   par: line.par,
-  // The strokes the fold derived, the normal score the player stated (absent when they stated raw
-  // strokes), and the round's own gross (absent when the card carries a pickup or a gap — spec
-  // 2026-07-29 §2d). `score` is what a history row renders: holeResults never crosses the wire.
+  // The strokes this player played off, and the round's own gross (absent when the card carries a
+  // pickup or a gap). `score` is what a history row renders: holeResults never crosses the wire.
   strokes: line.strokes,
-  ...(line.normallyShoots !== undefined ? { normallyShoots: line.normallyShoots } : {}),
   ...(line.score !== undefined ? { score: line.score } : {}),
   distribution: line.distribution,
   finalizedAt: line.finalizedAtMs,

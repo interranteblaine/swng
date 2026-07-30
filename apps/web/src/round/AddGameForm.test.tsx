@@ -14,29 +14,23 @@ const ALEX = golferId("alex");
 const SAM = golferId("sam");
 const DANA = golferId("dana");
 
-// `overPar` is what the seat STATED; `strokes` is what the fold derived for it (spec 2026-07-29
-// §2b). The strokes preview under test reads only the stated basis — it resolves the PROPOSED
-// game's own field — but a fixture that hand-stated a `strokes` the fold could not produce would
-// be a roster reduceRound cannot make, so both are given per seat.
-const participant = (id: ReturnType<typeof golferId>, name: string, tee: string, overPar: number, strokes: number): RosterEntry => ({
+// A roster seat: name, tee, and the strokes the group typed (spec 2026-07-30 §2).
+const participant = (id: ReturnType<typeof golferId>, name: string, tee: string, strokes: number): RosterEntry => ({
   golferId: id,
   name,
   tee,
-  basis: { kind: "normally-shoots", overPar },
   strokes,
 });
 
 // Four participants on the shared fixture card (fixtureLinks — the same 9-hole "white" tee
-// SetupPanel.test.tsx uses): Pat normally shoots +5, Alex +2, Sam E, Dana +8. Chosen so a game
-// between Pat and Sam gives Pat the difference 5 − 0, halved on a nine-hole card = 3 dots spread
-// by stroke index (the "Pat 3 dots" pin), while Sam — the lowest in that field — receives nothing
+// SetupPanel.test.tsx uses), on 3 / 1 / 0 / 4 strokes. Chosen so a game between Pat and Sam gives
+// Pat 3 dots spread by stroke index (the "Pat 3 dots" pin), while Sam — on 0 — receives nothing
 // and is omitted from the line per strokesSummary's own rule.
-// Round-level strokes, off Sam's E anchor and halved for nine holes: 3 / 1 / 0 / 4.
 const participants: readonly RosterEntry[] = [
-  participant(PAT, "Pat", "white", 5, 3),
-  participant(ALEX, "Alex", "white", 2, 1),
-  participant(SAM, "Sam", "white", 0, 0),
-  participant(DANA, "Dana", "white", 8, 4),
+  participant(PAT, "Pat", "white", 3),
+  participant(ALEX, "Alex", "white", 1),
+  participant(SAM, "Sam", "white", 0),
+  participant(DANA, "Dana", "white", 4),
 ];
 const card: CourseCard = fixtureLinks;
 

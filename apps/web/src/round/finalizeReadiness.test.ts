@@ -6,8 +6,8 @@ import { unresolvedGames } from "./finalizeReadiness";
 const ANN = golferId("ann");
 const PAT = golferId("pat");
 const participants: readonly RosterEntry[] = [
-  { golferId: ANN, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 8 }, strokes: 8 },
-  { golferId: PAT, name: "Pat", tee: "white", basis: { kind: "strokes", strokes: 2 }, strokes: 2 },
+  { golferId: ANN, name: "Ann", tee: "white", strokes: 8 },
+  { golferId: PAT, name: "Pat", tee: "white", strokes: 2 },
 ];
 
 let opCounter = 0;

@@ -7,14 +7,11 @@ import { ScorecardGrid } from "./ScorecardGrid";
 const ANN = golferId("ann");
 const BO = golferId("bo");
 
-// The card renders each seat's DERIVED strokes (spec 2026-07-29 §2b), so these fixtures state
-// them directly: a literal `strokes` basis is exactly "the group gave them N", and it passes
-// through the fold's rule unchanged, so the seat's assertion and its derived value agree.
+// The card renders each seat's own asserted strokes (spec 2026-07-30 §2).
 const participant = (id: GolferId, name: string, tee: string, strokes: number): RosterEntry => ({
   golferId: id,
   name,
   tee,
-  basis: { kind: "strokes", strokes },
   strokes,
 });
 
@@ -361,7 +358,7 @@ describe("ScorecardGrid — totals (OUT/IN/TOT)", () => {
   // both dash, while IN — fully scored, untouched by the pickup — still shows real numbers. No
   // information is lost for IN; nothing is fabricated for OUT/TOT.
   it("a picked-up hole dashes its own segment and TOT, but a fully-scored sibling segment still totals", () => {
-    const ann2: RosterEntry = { golferId: ANN, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 2 }, strokes: 2 };
+    const ann2: RosterEntry = { golferId: ANN, name: "Ann", tee: "white", strokes: 2 };
     const parOf = (holeNumber: number): number => fixtureWhite18.holes.find((h) => h.number === holeNumber)!.par;
     const cells: Record<string, ScoreCell> = {};
     for (const hole of fixtureWhite18.holes) {

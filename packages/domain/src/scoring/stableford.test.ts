@@ -7,16 +7,15 @@ import { fixtureLinks } from "./golden/fixtureCourse.js";
 const A = golferId("ann");
 const B = golferId("bo");
 const players: readonly Participant[] = [
-  { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
-  { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
+  { golferId: A, name: "Ann", tee: "white", strokes: 3 },
+  { golferId: B, name: "Bo", tee: "white", strokes: 0 },
 ];
 const game = { kind: "stableford", id: gameId("s1"), players: [A, B] } as const;
 
 describe("stableford — golden cards", () => {
   it("standard points with a pickup scoring zero: Ann 10, Bo 17", () => {
-    // Strokes are the difference from the lowest in the field (spec §2b): Bo at 2 is the lowest, so
-    // he plays off scratch — 0 dots, net === gross — and Ann's 8 − 2 = 6, halved on a nine-hole
-    // card, gives her 3 dots on SI 1..3 (holes 2, 4, 7).
+    // Stableford is a MEDAL kind, so each player takes their own roster number (spec 2026-07-30
+    // §3): Bo is on 0 — net === gross — and Ann's 3 dots land on SI 1..3 (holes 2, 4, 7).
     // Ann: nets 5,5,3,PU,5,4,4,6,5 → pts 1,1,2,0,1,1,2,1,1 = 10
     // Bo: nets 4,4,3,5,5,3,4,5,4 → pts 2,2,2,2,1,2,2,2,2 = 17
     const [state] = playGoldenRound(fixtureLinks, players, [game], {
@@ -47,13 +46,13 @@ describe("stableford — golden cards", () => {
   });
 
   it("a tie for the lead lists every tied golferId", () => {
-    // Same course handicap (so identical dots) and identical scores guarantee a tie without
-    // hand-computing net/points arithmetic for two different handicaps.
+    // Same strokes (so identical dots) and identical scores guarantee a tie without
+    // hand-computing net/points arithmetic for two different numbers.
     const D = golferId("dee");
     const E = golferId("eve");
     const equalHandicapPlayers: readonly Participant[] = [
-      { golferId: D, name: "Dee", tee: "white", basis: { kind: "normally-shoots", overPar: 5 } },
-      { golferId: E, name: "Eve", tee: "white", basis: { kind: "normally-shoots", overPar: 5 } },
+      { golferId: D, name: "Dee", tee: "white", strokes: 0 },
+      { golferId: E, name: "Eve", tee: "white", strokes: 0 },
     ];
     const tieGame = { kind: "stableford", id: gameId("s4"), players: [D, E] } as const;
     const [state] = playGoldenRound(fixtureLinks, equalHandicapPlayers, [tieGame], {
@@ -68,9 +67,8 @@ describe("stableford — golden cards", () => {
     // hole wherever its cell exists — scoreStableford's loop `continue`s past a
     // missing cell instead of breaking, so a gap doesn't stop later holes counting.
     const soloGame = { kind: "stableford", id: gameId("s2"), players: [A] } as const;
-    // Ann is the only player in THIS game, so she is her own field's anchor and receives nothing
-    // (spec §2b: strokes cannot be allocated when only one person's level is known — correct, not
-    // degenerate). She plays h1 and h3 but leaves h2 with no cell at all.
+    // Ann's 3 strokes land on SI 1..3 (holes 2, 7, 4); she plays h1 (SI 5) and h3 (SI 9), so
+    // neither of the holes under test carries a dot. She leaves h2 with no cell at all.
     // h1: par4, no dot -> net 5, pts max(0, 2+4-5) = 1
     // h2: no cell recorded — not counted in thru or points
     // h3: par3, no dot -> net 3, pts 2+3-3 = 2
@@ -85,9 +83,8 @@ describe("stableford — golden cards", () => {
   it("a difference wide enough to lap the card gives two dots on the hardest holes", () => {
     const C = golferId("cal");
     const wideGame = { kind: "stableford", id: gameId("s3"), players: [B, C] } as const;
-    // Cal at 26 against Bo's 2 is a difference of 24, halved on a nine-hole card = 12 strokes over
-    // 9 holes: base floor(12/9) = 1 dot on every hole, plus extra 12%9 = 3 on SI<=3 (h2 SI1,
-    // h7 SI2, h4 SI3), which get 2. Bo, the field's lowest, plays off scratch.
+    // Cal's 12 strokes over 9 holes: base floor(12/9) = 1 dot on every hole, plus extra 12%9 = 3
+    // on SI<=3 (h2 SI1, h7 SI2, h4 SI3), which get 2. Bo is on 0 and plays off scratch.
     // Card (pars [4,4,3,5,4,3,4,5,4]), Cal's gross [6,7,4,8,6,5,6,7,6]:
     // h1 par4 dot1 gross6 net5 pts 2+4-5=1
     // h2 par4 dot2 gross7 net5 pts 2+4-5=1
@@ -100,7 +97,7 @@ describe("stableford — golden cards", () => {
     // h9 par4 dot1 gross6 net5 pts 2+4-5=1
     // total points = 1+1+2+1+1+1+2+1+1 = 11 (one dot fewer on h4 would net 7 there and score
     // max(0, 2+5-7) = 0, so the lapped dot is worth exactly the point this pins).
-    const rosterWithCal: readonly Participant[] = [...players, { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 26 } }];
+    const rosterWithCal: readonly Participant[] = [...players, { golferId: C, name: "Cal", tee: "white", strokes: 12 }];
     const [state] = playGoldenRound(fixtureLinks, rosterWithCal, [wideGame], {
       [B]: [4, 4, 3, 5, 5, 3, 4, 5, 4],
       [C]: [6, 7, 4, 8, 6, 5, 6, 7, 6],

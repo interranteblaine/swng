@@ -154,7 +154,7 @@ describe("updateMyGolfer", () => {
   // The golfer record holds NO number and no source to pick (spec 2026-07-29 §5): the whole
   // index-source model — and every field the models before it left behind — is gone from the wire.
   // What a golfer shoots is `metrics.average` on the record response; what they play off is the
-  // basis they state at join.
+  // strokes the group typed onto that round's roster.
   it("carries no number of any kind on the wire — name and home course are the whole profile", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1" }, { name: "Annika", homeCourseId: courseId("course-1") });
@@ -198,7 +198,7 @@ describe("getMyRecord", () => {
 
   // courseId (course-cards spec §4, the analytics join key): carried when the stored line has
   // it, omitted for a pre-scrap line without it — absent means ABSENT, never an explicit
-  // undefined key (toWireLine's conditional-spread idiom, same as normallyShoots/score).
+  // undefined key (toWireLine's conditional-spread idiom, same as `score`).
   // finalizedAt/createdAt (index-chart-polish spec §1.6, the chart's date anchors): finalizedAt
   // always equals the stored finalizedAtMs; createdAt carries only when the line has createdAtMs.
   it("carries courseId/finalizedAt/createdAt on a history line when the stored line has them, omitting courseId/createdAt for a line without", async () => {

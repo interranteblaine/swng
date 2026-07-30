@@ -30,7 +30,7 @@ const buildServerLog = (roundIdValue: RoundId, golferIdValue: GolferId, name: st
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   const events: RoundEvent[] = [
     { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
-    { kind: "participant-joined", participant: { golferId: golferIdValue, name, tee: "white", basis: { kind: "normally-shoots", overPar: 8 } }, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "participant-joined", participant: { golferId: golferIdValue, name, tee: "white", strokes: 0 }, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
   ];
   return stampSeq(events);
@@ -47,8 +47,10 @@ const buildTwoPlayerServerLog = (roundIdValue: RoundId, ann: GolferId, bo: Golfe
   const nextOpId = (): OpId => opId(`two-op-${(opCounter += 1)}`);
   const events: RoundEvent[] = [
     { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
-    { kind: "participant-joined", participant: { golferId: ann, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } }, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
-    { kind: "participant-joined", participant: { golferId: bo, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, authorId: bo, opId: nextOpId(), hlc: nextHlc() },
+    // Ann on 3 strokes, Bo on 0 — the card's dots below are hers, and the chip-tap test needs a
+    // non-zero allocation to have something that could wrongly move.
+    { kind: "participant-joined", participant: { golferId: ann, name: "Ann", tee: "white", strokes: 3 }, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "participant-joined", participant: { golferId: bo, name: "Bo", tee: "white", strokes: 0 }, authorId: bo, opId: nextOpId(), hlc: nextHlc() },
     // Added in this order deliberately: state.games' join-order (by first-write hlc) makes
     // the singles-match the DEFAULT active game (Task 5's "default stays first game" rule).
     { kind: "game-added", config: { kind: "singles-match", id: gameId("single-1"), a: ann, b: bo }, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
@@ -121,11 +123,10 @@ describe("RoundPage", () => {
     // string on one element — locate the <li> and assert its whole textContent instead, the same
     // parent-level oracle SetupPanel.test.tsx already uses directly.
     //
-    // "gets 0" is CORRECT, not a bug, on this one-participant log: strokes are the difference from
-    // the lowest in the field (spec 2026-07-29 §2b), and a lone player is their own anchor — her
-    // stated +8 still shows, because that is what she asserted.
+    // 0 strokes is what a seat starts on (spec 2026-07-30 §2) — the join event asserts nothing
+    // else, and nothing derives a number from anywhere.
     const rosterRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
-    expect(rosterRow?.textContent).toMatch(/Ann.*white.*normally \+8 · gets 0/);
+    expect(rosterRow?.textContent).toMatch(/Ann.*white · 0 strokes/);
     // M9 Task 3 (share): the live view carries its own "Share round" affordance, wired to
     // THIS device's own participant token (credentialStore.save above).
     expect(screen.getByRole("button", { name: "Share round" })).toBeTruthy();
@@ -232,9 +233,8 @@ describe("RoundPage", () => {
     await waitFor(() => expect(screen.getByText("CHIP01")).toBeTruthy());
 
     // Ann's own ROUND strokes allocate a dot on hole 2 regardless of which game (if any) is
-    // chip-selected. Hand-derived (spec 2026-07-29 §2b): Bo's stated +2 anchors the field, so Ann
-    // takes (8 − 2) / 2 = 3 on this nine-hole card — dots on SI 1–3, and hole 2 is fixtureLinks'
-    // SI 1. (Hole 1 is SI 5 and gets none, which is why this pins hole 2.)
+    // chip-selected: her 3 land on SI 1–3, and hole 2 is fixtureLinks' SI 1. (Hole 1 is SI 5 and
+    // gets none, which is why this pins hole 2.)
     const annHole2 = () => screen.getByRole("button", { name: "Ann hole 2" });
     await waitFor(() => expect(annHole2().textContent).toMatch("●"));
 

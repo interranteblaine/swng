@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CourseCard, GameConfig, GameResult, HoleResult, Participant, RoundEvent } from "@swng/domain";
+import type { CourseCard, GameConfig, GameResult, HoleResult, Participant, RosterEntry, RoundArchive, RoundEvent, ScoreCell } from "@swng/domain";
 import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema, teeIdSchema } from "./ids.js";
 
 // Wire mirrors of domain types. These stay structural (loose numeric bounds where the
@@ -61,12 +61,17 @@ export const courseCardSchema: z.ZodType<CourseCard> = z.object({
 // event from seq 0), and a bound that rejected an already-stored value would brick a legitimate
 // round. The bounded request copy is commands.ts's `strokesInputSchema`, which is where the
 // min(0)/max(54) invariant reaches the wire.
-export const participantSchema: z.ZodType<Participant> = z.object({
+//
+// Split into a field set so `rosterEntrySchema` (bottom of this file) can extend it with
+// `departed` without restating the seat — one definition of what a seat is.
+const participantFields = {
   golferId: golferIdSchema,
   name: z.string(),
   tee: z.string(),
   strokes: z.number().int(),
-});
+};
+
+export const participantSchema: z.ZodType<Participant> = z.object(participantFields);
 
 // The per-kind fields shared by GameConfig (below) and GameConfigInput (the id-less,
 // client-submitted shape built in commands.ts) — the single source of truth so a new
@@ -239,6 +244,42 @@ export const gameResultSchemaImpl = z.discriminatedUnion("kind", [
   }),
 ]);
 export const gameResultSchema: z.ZodType<GameResult> = gameResultSchemaImpl;
+
+// A settled seat: `Participant` plus the fold's own `departed` derivation. Only ever `true` —
+// its absence IS false (domain/round/participant.ts), so a round with no departures parses
+// byte-identically to one produced before the field existed.
+const rosterEntrySchema: z.ZodType<RosterEntry> = z.object({ ...participantFields, departed: z.boolean().optional() });
+
+const scoreCellSchema: z.ZodType<ScoreCell> = z.object({
+  result: holeResultSchema,
+  recordedBy: golferIdSchema,
+  hlc: hlcSchema,
+  opId: opIdSchema,
+});
+
+// The stored shape of a settled round — the snapshots table's `archive` attribute, written by
+// createDynamoEventJournal's atomic finalize commit (projection-realignment spec §2, "the atom").
+//
+// It never crosses the wire whole (GET /rounds/{roundId}/archive serves its `events` only), which
+// is exactly why it went unparsed for so long — but it IS a serialization boundary the server
+// reads back and hands straight to the domain: to the projector (a golfer's permanent record), to
+// crew standings, and to finalizeRound's idempotent replay. Spec 2026-07-30 §10: the type must not
+// assert what the read path cannot guarantee, and "the read path" is not only the wire.
+//
+// Its card, games, events and results are the SAME schemas the wire already uses, so no second
+// definition of any of them exists here to drift. The two shapes the wire never carried on their
+// own — a settled seat and a score cell — are declared just above, each once.
+export const roundArchiveSchemaImpl = z.object({
+  roundId: roundIdSchema,
+  card: courseCardSchema,
+  participants: z.array(rosterEntrySchema).readonly(),
+  games: z.array(gameConfigSchemaImpl).readonly(),
+  cells: z.record(z.string(), scoreCellSchema),
+  events: z.array(roundEventSchemaImpl).readonly(),
+  results: z.array(gameResultSchemaImpl).readonly(),
+  terminatedGameIds: z.array(gameIdSchema).readonly(),
+});
+export const roundArchiveSchema: z.ZodType<RoundArchive> = roundArchiveSchemaImpl;
 
 // POST /rounds/{roundId}/games/{gameId}/terminate has no request body (path params only —
 // the M7 plan's Task 2 brief). Response mirrors recordScore's append idiom (commands.ts):

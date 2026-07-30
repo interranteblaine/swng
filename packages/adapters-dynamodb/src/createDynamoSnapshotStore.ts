@@ -3,6 +3,7 @@ import { BatchGetCommand, GetCommand, ScanCommand } from "@aws-sdk/lib-dynamodb"
 import type { RoundArchive, RoundId } from "@swng/domain";
 import type { SnapshotStore } from "@swng/application";
 import { snapshotPk } from "./keys.js";
+import { parseStoredArchive } from "./parseStored.js";
 
 // DynamoDB caps one BatchGetItem at 100 keys — getMany chunks its input to stay under it.
 const BATCH_GET_MAX_KEYS = 100;
@@ -28,7 +29,13 @@ export const createDynamoSnapshotStore = (config: { client: DynamoDBDocumentClie
     // round's own atomic finalize commit must never miss the snapshot that commit just wrote
     // (same rationale as every base-table read in this adapter family that feeds a next decision).
     const result = await client.send(new GetCommand({ TableName: tableName, Key: { pk: snapshotPk(roundId) }, ConsistentRead: true }));
-    return (result.Item as { archive: RoundArchive } | undefined)?.archive;
+    if (result.Item === undefined) return undefined;
+    // Absent and corrupt stay different facts. Collapsing a corrupt archive into `undefined` would
+    // make finalizeRound's idempotent branch report "is final but has no snapshot — corrupt" — a
+    // true-sounding sentence naming the wrong fault, since the snapshot is right there and only its
+    // SHAPE is wrong — and would make getRoundArchive answer round-not-found for a round that is
+    // very much on file. The throw below says which field, on which round.
+    return parseStoredArchive(`createDynamoSnapshotStore.get: round ${roundId}`, result.Item["archive"]);
   };
 
   return {
@@ -45,7 +52,9 @@ export const createDynamoSnapshotStore = (config: { client: DynamoDBDocumentClie
         // throttle/size backpressure signal, not an error) are re-driven until the chunk drains.
         while (remaining && remaining.length > 0) {
           const result = await client.send(new BatchGetCommand({ RequestItems: { [tableName]: { Keys: remaining } } }));
-          for (const item of result.Responses?.[tableName] ?? []) archives.push((item as { archive: RoundArchive }).archive);
+          for (const item of result.Responses?.[tableName] ?? []) {
+            archives.push(parseStoredArchive(`createDynamoSnapshotStore.getMany: round ${String(item["pk"])}`, item["archive"]));
+          }
           remaining = result.UnprocessedKeys?.[tableName]?.Keys as { pk: string }[] | undefined;
         }
       }
@@ -61,7 +70,10 @@ export const createDynamoSnapshotStore = (config: { client: DynamoDBDocumentClie
           ExclusiveStartKey: cursor !== undefined ? decodeCursor(cursor) : undefined,
         }),
       );
-      const snapshots = (result.Items ?? []).map((item) => (item as { archive: RoundArchive }).archive);
+      // A page that can't be parsed stops the backfill at that page rather than projecting garbage
+      // from it. `rebuildProjections` is cursor-resumable, so the operator sees exactly which
+      // snapshot is bad and the walk resumes from the cursor once it's dealt with.
+      const snapshots = (result.Items ?? []).map((item) => parseStoredArchive(`createDynamoSnapshotStore.page: round ${String(item["pk"])}`, item["archive"]));
       return { snapshots, cursor: result.LastEvaluatedKey !== undefined ? encodeCursor(result.LastEvaluatedKey) : undefined };
     },
   };

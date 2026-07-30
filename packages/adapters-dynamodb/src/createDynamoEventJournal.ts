@@ -2,10 +2,12 @@ import { TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import type { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import type { OpId, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import { DomainError } from "@swng/domain";
 import type { AppendOptions, AppendResult, EventJournal } from "@swng/application";
 import { finalizedAtMsOf } from "@swng/application";
 import { evtSk, evtSkMax, opIdSk, roundPk, snapshotPk } from "./keys.js";
 import { queryAllPages } from "./paginate.js";
+import { STORED_EVENT_INVALID, parseStoredEvent } from "./parseStored.js";
 
 // Each Query page is capped well under DynamoDB's natural ~1MB boundary so `read` always
 // exercises its own pagination loop rather than relying on payload size — a round's log is
@@ -47,8 +49,25 @@ const headSeq = async (client: DynamoDBDocumentClient, tableName: string, roundI
       ConsistentRead: true,
     }),
   );
-  const head = result.Items?.[0] as { event: RoundEvent } | undefined;
-  return head?.event.seq ?? 0;
+  const item = result.Items?.[0];
+  if (item === undefined) return 0; // no EVT items yet — this round's log starts at seq 1.
+
+  // Deliberately NOT a roundEventSchema parse, and the difference is the point of spec §10 rather
+  // than an exception to it: this reads ONE number to pick the next seq slot and hands no
+  // domain-typed value to anyone, so it declares only what it actually needs — and CHECKS that —
+  // instead of asserting a whole RoundEvent it never looks at. (Parsing the head event here would
+  // also make every append attempt of the hot write path pay for a full event parse, and would
+  // reject the atomicity fixture in journal.contract.test.ts that deliberately pre-occupies a slot
+  // with a seq-only sentinel.)
+  const seq = (item["event"] as { seq?: unknown } | undefined)?.seq;
+  if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0) {
+    // The code is repeated into the message for the same reason parseStored does it — see there.
+    throw new DomainError(
+      STORED_EVENT_INVALID,
+      `${STORED_EVENT_INVALID} — createDynamoEventJournal.headSeq: round ${roundId}'s head event carries no non-negative integer seq (got ${JSON.stringify(seq)})`,
+    );
+  }
+  return seq;
 };
 
 // Stamps `batch` starting at `head + 1` and attempts to land every event + its OPID marker
@@ -214,7 +233,11 @@ export const createDynamoEventJournal = (config: {
           // (task-6-report.md's "round-not-live" failure mode).
           ConsistentRead: true,
         },
-        (item) => (item as { event: RoundEvent }).event,
+        // Spec 2026-07-30 §10: PARSE, don't assert. This is the read every use case folds through
+        // loadRoundState and every pull hands to a client, so it is the exact seam where a stored
+        // shape the domain type no longer describes — a deleted `conceded` cell, a seat with no
+        // `strokes` — used to be believed rather than caught (parseStored.ts's own doc).
+        (item) => parseStoredEvent(`createDynamoEventJournal.read: round ${roundId} ${String(item["sk"])}`, item["event"]),
       ),
   };
 };

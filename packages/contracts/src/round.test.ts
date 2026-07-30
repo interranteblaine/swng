@@ -1,9 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { deviceId, gameId, golferId, opId, roundId } from "@swng/domain";
-import type { CourseCard, GameConfig, GameResult, RoundEvent } from "@swng/domain";
+import type { CourseCard, GameConfig, GameResult, RoundArchive, RoundEvent } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
-import { gameConfigSchemaImpl, gameResultSchemaImpl, holeResultSchema, leaveRoundResponseSchema, roundEventSchema, roundEventSchemaImpl, shareLinkResponseSchema, terminateGameResponseSchema } from "./round.js";
+import {
+  gameConfigSchemaImpl,
+  gameResultSchemaImpl,
+  holeResultSchema,
+  leaveRoundResponseSchema,
+  roundArchiveSchema,
+  roundArchiveSchemaImpl,
+  roundEventSchema,
+  roundEventSchemaImpl,
+  shareLinkResponseSchema,
+  terminateGameResponseSchema,
+} from "./round.js";
 
 const baseHlc = { wallMs: 1_000, counter: 0, deviceId: deviceId("device-1") };
 
@@ -152,7 +163,7 @@ describe("roundEventSchema", () => {
     expect(parsed).toMatchObject({ kind: "game-added", config: { kind: "skins", scoring: "net" } });
   });
 
-  it("roundEventSchema, gameConfigSchema, and gameResultSchema type-parity holds in both directions (compile-time check)", () => {
+  it("roundEventSchema, gameConfigSchema, gameResultSchema and roundArchiveSchema type-parity holds in both directions (compile-time check)", () => {
     // Deliberately checked against the *Impl consts (round.ts), not the exported
     // roundEventSchema / gameConfigSchema / gameResultSchema aliases: those aliases carry
     // an explicit `z.ZodType<RoundEvent>` annotation, which makes
@@ -169,10 +180,54 @@ describe("roundEventSchema", () => {
     const backwardConfig: z.infer<typeof gameConfigSchemaImpl> = {} as GameConfig;
     const forwardResult: GameResult = {} as z.infer<typeof gameResultSchemaImpl>;
     const backwardResult: z.infer<typeof gameResultSchemaImpl> = {} as GameResult;
+    const forwardArchive: RoundArchive = {} as z.infer<typeof roundArchiveSchemaImpl>;
+    const backwardArchive: z.infer<typeof roundArchiveSchemaImpl> = {} as RoundArchive;
     // These assignments above are the actual test — they only compile if z.infer and the
     // domain type are structurally identical in both directions. This assertion just gives
     // vitest something to run.
-    expect([forwardEvent, backwardEvent, forwardConfig, backwardConfig, forwardResult, backwardResult]).toHaveLength(6);
+    expect([forwardEvent, backwardEvent, forwardConfig, backwardConfig, forwardResult, backwardResult, forwardArchive, backwardArchive]).toHaveLength(8);
+  });
+});
+
+// The stored shape of a settled round (spec 2026-07-30 §10). Its members are the same wire
+// schemas the tests above already exercise, so this suite covers only what composing them adds:
+// that a real settled archive round-trips, and that the absences the adapters' old cast waved
+// through are now rejected.
+describe("roundArchiveSchema", () => {
+  const archiveCard: CourseCard = {
+    courseName: "Test Links",
+    teeSets: [
+      { name: "white", rating: 71.2, slope: 128, holes: Array.from({ length: 9 }, (_, index) => ({ number: index + 1, par: 4, yardage: 380, strokeIndex: index + 1 })) },
+    ],
+  };
+
+  const archive: RoundArchive = {
+    roundId: roundId("r1"),
+    card: archiveCard,
+    participants: [
+      { golferId: golferId("ann"), name: "Ann", tee: "white", strokes: 0 },
+      // A departed seat that still settled — `departed` is optional and only ever true.
+      { golferId: golferId("bo"), name: "Bo", tee: "blue", strokes: 6, departed: true },
+    ],
+    games: [{ kind: "skins", id: gameId("g1"), scoring: "net", players: [golferId("ann"), golferId("bo")] }],
+    cells: { "ann#1": { result: { kind: "strokes", strokes: 4 }, recordedBy: golferId("ann"), hlc: baseHlc, opId: opId("op-cell-1") } },
+    events: [scoreRecordedEvent],
+    results: [{ kind: "skins", id: gameId("g1"), won: [{ golferId: golferId("ann"), skins: 1 }], carriedOut: 0 }],
+    terminatedGameIds: [gameId("g2")],
+  };
+
+  it("round-trips a settled archive through JSON unchanged", () => {
+    expect(parse(roundArchiveSchema, JSON.parse(JSON.stringify(archive)) as unknown)).toEqual(archive);
+  });
+
+  it("rejects a participant with no strokes — the required field the adapters' cast used to wave through", () => {
+    const corrupt = { ...archive, participants: [{ golferId: golferId("ann"), name: "Ann", tee: "white" }] };
+    expect(() => parse(roundArchiveSchema, corrupt)).toThrow(ContractError);
+  });
+
+  it("rejects a cell carrying the deleted `conceded` arm rather than reading it as a pickup", () => {
+    const corrupt = { ...archive, cells: { "ann#1": { result: { kind: "conceded", strokes: 5 }, recordedBy: golferId("ann"), hlc: baseHlc, opId: opId("op-cell-1") } } };
+    expect(() => parse(roundArchiveSchema, corrupt)).toThrow(ContractError);
   });
 });
 

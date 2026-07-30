@@ -334,6 +334,9 @@ importers:
       '@swng/domain':
         specifier: workspace:*
         version: link:../domain
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

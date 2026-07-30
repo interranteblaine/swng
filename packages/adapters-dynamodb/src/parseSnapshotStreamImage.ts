@@ -1,6 +1,7 @@
 import { unmarshall } from "@aws-sdk/util-dynamodb";
 import type { AttributeValue } from "@aws-sdk/client-dynamodb";
 import type { RoundArchive } from "@swng/domain";
+import { parseStoredArchive } from "./parseStored.js";
 
 // The DynamoDB Streams NEW_IMAGE counterpart to the snapshots table's item shape
 // (`{ pk: <roundId>, finalizedAt: <ms>, archive: <RoundArchive> }`, written by
@@ -27,5 +28,11 @@ export const parseSnapshotStreamImage = (image: Record<string, unknown> | undefi
     throw new Error("parseSnapshotStreamImage: stream record has no `archive` attribute — not a snapshot item, or a corrupt one");
   }
 
-  return item["archive"] as RoundArchive;
+  // Spec 2026-07-30 §10: the archive is PARSED, not asserted — through the same
+  // `parseStoredArchive` the snapshots table's own read side uses, so what the projector refuses
+  // and what a standings read refuses cannot diverge. This is the strictest place for it to
+  // matter: whatever gets past here lands in a golfer's permanent record. A failure is a poison
+  // record by design (bisect, retry, DLQ — createProjectorHandler), which is the right answer for
+  // a snapshot that isn't what it claims to be; the wrong answer was projecting it anyway.
+  return parseStoredArchive("parseSnapshotStreamImage", item["archive"]);
 };

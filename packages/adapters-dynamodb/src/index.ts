@@ -15,4 +15,9 @@ export { createDynamoCrewStore } from "./createDynamoCrewStore.js";
 export { createDynamoProjectionStore } from "./createDynamoProjectionStore.js";
 export { createDynamoSnapshotStore } from "./createDynamoSnapshotStore.js";
 export { parseSnapshotStreamImage } from "./parseSnapshotStreamImage.js";
+// Spec 2026-07-30 §10: the codes this package's read paths throw when stored data doesn't match
+// its schema. The parse functions themselves stay internal — these two strings are exported only
+// because they are the contract with the lambda's error boundary, which pins their behaviour
+// against the real names rather than invented ones.
+export { STORED_ARCHIVE_INVALID, STORED_EVENT_INVALID } from "./parseStored.js";
 export { createDocumentClient } from "./createDocumentClient.js";

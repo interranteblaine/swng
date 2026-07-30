@@ -333,6 +333,80 @@ describe("createDynamoEventJournal", () => {
     });
   });
 
+  // Spec 2026-07-30 §10: "the stored-data cast is made honest." `read` used to assert each item
+  // into `RoundEvent` with a cast, so a field the domain type declares required could simply be
+  // absent at runtime and every consumer downstream believed the type. The asymmetry was the
+  // tell — the client parses every event it pulls (client/src/transport.ts), the server parsed
+  // nothing it read. These four tests pin the read path's new behaviour: it PARSES through the
+  // same `roundEventSchema` the client uses, so what it rejects and what it tolerates are one
+  // decision, made in one place.
+  describe("read parses stored events rather than asserting them", () => {
+    const putRawEvent = (id: RoundId, seq: number, event: unknown): Promise<unknown> =>
+      local.client.send(new PutCommand({ TableName: local.roundsTable, Item: { pk: roundPk(id), sk: evtSk(seq), event } }));
+
+    it("rejects a stored event that does not match the schema rather than trusting it", async () => {
+      const id = roundId(randomUUID());
+      await putRawEvent(id, 1, { kind: "nonsense" });
+
+      await expect(newJournal().read(id, 0)).rejects.toThrow(/stored-event-invalid/);
+    });
+
+    // The reviewer's open question carried out of Task 1 (progress.md), answered here rather than
+    // inherited: the `conceded` hole-result arm is deleted, so a stored `{ kind: "conceded" }` cell
+    // reaching the OLD cast would have been believed by the type and then fallen through every
+    // `kind === "strokes"` branch — reading as a pickup, i.e. silently unscoring a hole the group
+    // played. Parsing makes that shape loud instead. No such cell survives this arc (spec §11 wipes
+    // beta round data), so this pins the DECISION, not a live migration: a deleted arm is refused,
+    // never re-interpreted as the nearest surviving one.
+    it("rejects a stored score-recorded carrying the deleted `conceded` arm — never silently reads it as a pickup", async () => {
+      const id = roundId(randomUUID());
+      await putRawEvent(id, 1, {
+        kind: "score-recorded",
+        golferId: golfer,
+        hole: 7,
+        result: { kind: "conceded", strokes: 5 },
+        opId: opId("op-conceded-legacy"),
+        hlc: { wallMs: 1_000, counter: 0, deviceId: device },
+        authorId: golfer,
+        seq: 1,
+      });
+
+      await expect(newJournal().read(id, 0)).rejects.toThrow(/stored-event-invalid/);
+    });
+
+    // Proof the read path really PARSES (not merely shape-checks): skins' `scoring` arrived after
+    // rounds were already on file, so the shared field set defaults it to "net" (contracts/round.ts).
+    // The server now gets that same default the client always got, instead of handing the domain a
+    // config with no `scoring` key at all.
+    it("applies the schema's own tolerance — a legacy skins game-added with no scoring key reads as net", async () => {
+      const id = roundId(randomUUID());
+      await putRawEvent(id, 1, {
+        kind: "game-added",
+        config: { kind: "skins", id: "g-legacy", players: [golfer] },
+        opId: opId("op-legacy-skins"),
+        hlc: { wallMs: 1_000, counter: 0, deviceId: device },
+        authorId: golfer,
+        seq: 1,
+      });
+
+      const log = await newJournal().read(id, 0);
+      expect(log[0]).toMatchObject({ kind: "game-added", config: { kind: "skins", scoring: "net" } });
+    });
+
+    // The other half of that same tolerance, at the seam that matters most: an M8-era genesis still
+    // carrying a stray `crewId` key parses and is STRIPPED, exactly as it is on the client. Parsing
+    // must not turn tolerate-old-data into reject-old-data.
+    it("still tolerates an M8-era genesis carrying a stray crewId — parsed, stripped, not rejected", async () => {
+      const journal = newJournal();
+      const id = roundId(randomUUID());
+      await journal.append(id, settledLog(id, `crew-${randomUUID()}`));
+
+      const log = await journal.read(id, 0);
+      expect(log[0]).toMatchObject({ kind: "round-created", roundId: id });
+      expect(log[0]).not.toHaveProperty("crewId");
+    });
+  });
+
   // Regression for task-6-report.md: 27 fully-concurrent single-event appends (one journal
   // instance per call, matching 27 separate Lambda invocations racing one round's head slot,
   // as in the M3 E2E deck's RecordScore burst) must ALL converge — no throw, seqs exactly

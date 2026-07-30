@@ -461,7 +461,11 @@ export const createProjectorHandler =
         const archive = deps.parseArchive(record.dynamodb?.NewImage);
         await deps.project(archive);
       } catch (error) {
-        deps.logger.error("projector: failed to project a stream record — will retry (no DLQ on this beta event source)", {
+        // The message named "no DLQ on this beta event source" until pre-prod hardening D4b gave
+        // this event source real poison handling (swngStack.ts: bisectBatchOnError, retryAttempts
+        // 10, an SQS DLQ that is a bookmark — rebuild is the re-drive). Corrected here so the log
+        // an operator reads at 2am describes the machinery that actually exists.
+        deps.logger.error("projector: failed to project a stream record — the event source will bisect and retry, then park it on the DLQ", {
           error: error instanceof Error ? (error.stack ?? error.message) : String(error),
           eventId: record.eventID,
         });

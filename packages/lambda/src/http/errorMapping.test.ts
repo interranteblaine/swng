@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApplicationError, createNullLogger } from "@swng/application";
+import { STORED_ARCHIVE_INVALID, STORED_EVENT_INVALID } from "@swng/adapters-dynamodb";
 import { DomainError } from "@swng/domain";
 import { toHttpError } from "./errorMapping.js";
 
@@ -74,6 +75,18 @@ describe("toHttpError — course validation DomainErrors map to coded 400s", () 
   // An unmapped DomainError code is still a genuine-bug 500, never a client-shaped error.
   it("falls through to 500 for a DomainError code this boundary doesn't recognize", () => {
     const result = toHttpError(new DomainError("some-unmapped-code", "boom"), logger);
+    expect(result.statusCode).toBe(500);
+    expect(JSON.parse(result.body)).toEqual({ code: "internal-error", message: "an unexpected error occurred" });
+  });
+
+  // Spec 2026-07-30 §10: the adapters' read paths parse stored data instead of asserting it, and
+  // throw these two named codes when it doesn't match. Their absence from DOMAIN_ERROR_STATUS is
+  // a DECISION, not an oversight — a corrupt stored item is a genuine bug that no client can fix
+  // by sending different bytes, so it gets the generic 500 and the detail goes to the log only.
+  // Pinned against the codes the adapter really exports (never invented strings — see the M6
+  // lesson below) so adding a table entry for either has to be a deliberate, test-breaking act.
+  it.each([STORED_EVENT_INVALID, STORED_ARCHIVE_INVALID])("keeps %s a generic 500 that leaks no stored detail", (code) => {
+    const result = toHttpError(new DomainError(code, `${code} — round r1: participants.0.strokes: Invalid input`), logger);
     expect(result.statusCode).toBe(500);
     expect(JSON.parse(result.body)).toEqual({ code: "internal-error", message: "an unexpected error occurred" });
   });

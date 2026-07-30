@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { marshall } from "@aws-sdk/util-dynamodb";
-import { deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
-import type { RosterEntry, RoundArchive, RoundEvent } from "@swng/domain";
+import { deviceId, fixtureLinks, fixtureLinks18, gameId, golferId, opId, playGoldenRoundLog, roundId, settleRound } from "@swng/domain";
+import type { Participant, RosterEntry, RoundArchive, RoundEvent } from "@swng/domain";
 import { snapshotPk } from "./keys.js";
 import { parseSnapshotStreamImage } from "./parseSnapshotStreamImage.js";
 
@@ -46,5 +46,43 @@ describe("parseSnapshotStreamImage", () => {
     const image = marshall({ pk: snapshotPk(archive.roundId), finalizedAt: 1_000 }, { removeUndefinedValues: true });
 
     expect(() => parseSnapshotStreamImage(image)).toThrow(/archive/);
+  });
+
+  // Spec 2026-07-30 §10: the archive is PARSED now, not asserted. These two tests are the pair
+  // that makes that safe — one proves it accepts what settleRound actually produces (a parse the
+  // projector rejects is a DLQ'd finalize, so this is the load-bearing half), the other proves it
+  // refuses what the old cast waved through.
+  it("accepts a REAL settled archive — a full round through the golden deck, marshalled as a stream image", () => {
+    const bo = golferId("bo");
+    const players: readonly Participant[] = [
+      { golferId: ann, name: "Ann", tee: "white", strokes: 0 },
+      { golferId: bo, name: "Bo", tee: "white", strokes: 6 },
+    ];
+    const settled = settleRound(
+      playGoldenRoundLog(
+        fixtureLinks,
+        players,
+        [
+          { kind: "singles-match", id: gameId("m1"), a: ann, b: bo },
+          { kind: "skins", id: gameId("s1"), scoring: "net", players: [ann, bo] },
+          { kind: "stableford", id: gameId("st1"), players: [ann, bo] },
+        ],
+        { [ann]: [4, 5, 4, 5, 4, 4, 5, 5, 4], [bo]: [5, 5, 5, 6, 5, "picked-up", 5, 6, 5] },
+      ),
+    );
+    // Not a hand-built shape: participants, three game configs, 18 cells (one carrying a pickup),
+    // three results and the whole event log all came out of the real engines.
+    expect(settled.results).toHaveLength(3);
+
+    const image = marshall({ pk: snapshotPk(settled.roundId), finalizedAt: 1_000, archive: settled }, { removeUndefinedValues: true });
+
+    expect(parseSnapshotStreamImage(image)).toEqual(settled);
+  });
+
+  it("rejects an archive whose participant carries no strokes — the field the cast used to wave through", () => {
+    const corrupt = { ...archive, participants: [{ golferId: ann, name: "Ann", tee: "white" }] };
+    const image = marshall({ pk: snapshotPk(archive.roundId), finalizedAt: 1_000, archive: corrupt }, { removeUndefinedValues: true });
+
+    expect(() => parseSnapshotStreamImage(image)).toThrow(/stored-archive-invalid/);
   });
 });

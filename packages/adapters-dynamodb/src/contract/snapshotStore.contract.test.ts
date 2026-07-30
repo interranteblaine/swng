@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { PutCommand } from "@aws-sdk/lib-dynamodb";
+import { DeleteCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { RoundArchive, RoundId } from "@swng/domain";
 import { fixtureLinks, roundId } from "@swng/domain";
@@ -71,6 +71,54 @@ describe("createDynamoSnapshotStore", () => {
     for (const archive of archives) {
       expect(found.find((a) => a.roundId === archive.roundId)).toEqual(archive);
     }
+  });
+
+  // Spec 2026-07-30 §10, the same correction as journal.read's: this store used to assert
+  // `item.archive as RoundArchive` on all three read paths, so a snapshot missing a field the
+  // domain type requires was believed by the type and folded anyway — into the golfer's permanent
+  // record (the projector), into a crew's standings, into a finalize's idempotent replay. It now
+  // parses through `roundArchiveSchema`, the one schema that also backs the stream image the
+  // projector reads, so a corrupt snapshot is loud at every door rather than silent at three.
+  describe("reads parse the stored archive rather than asserting it", () => {
+    // `page` (below) Scans the WHOLE table, so a corrupt item left behind would fail it for the
+    // right reason at the wrong seam. Each probe cleans up its own item.
+    const withCorruptSnapshot = async (archive: unknown, probe: (id: RoundId) => Promise<void>): Promise<void> => {
+      const id = roundId(randomUUID());
+      await local.client.send(new PutCommand({ TableName: local.snapshotsTable, Item: { pk: snapshotPk(id), finalizedAt: 9_000, archive } }));
+      try {
+        await probe(id);
+      } finally {
+        await local.client.send(new DeleteCommand({ TableName: local.snapshotsTable, Key: { pk: snapshotPk(id) } }));
+      }
+    };
+
+    it("get rejects a snapshot whose archive is missing a required field", async () => {
+      const store = createDynamoSnapshotStore({ client: local.client, tableName: local.snapshotsTable });
+      // Every field but `participants` — exactly the "a field the type declares required is
+      // absent at runtime" shape the cast used to wave through.
+      await withCorruptSnapshot({ roundId: "r-corrupt", card: fixtureLinks, games: [], cells: {}, events: [], results: [], terminatedGameIds: [] }, async (id) => {
+        await expect(store.get(id)).rejects.toThrow(/stored-archive-invalid/);
+      });
+    });
+
+    it("getMany rejects a corrupt archive rather than folding it", async () => {
+      const store = createDynamoSnapshotStore({ client: local.client, tableName: local.snapshotsTable });
+      // A participant with no `strokes` — the exact field this arc made required (spec §2), and
+      // the exact class of absence the cast made unrepresentable-in-theory and routine-in-practice.
+      const archive = {
+        roundId: "r-corrupt",
+        card: fixtureLinks,
+        participants: [{ golferId: "ann", name: "Ann", tee: "white" }],
+        games: [],
+        cells: {},
+        events: [],
+        results: [],
+        terminatedGameIds: [],
+      };
+      await withCorruptSnapshot(archive, async (id) => {
+        await expect(store.getMany([id])).rejects.toThrow(/stored-archive-invalid/);
+      });
+    });
   });
 
   it("page walks every item exactly once across ≥3 pages (page size 2, cursor-driven)", async () => {

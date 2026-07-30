@@ -1494,7 +1494,8 @@ Strokes now come from what you shoot, not an index (2026-07-29/30, spec
 `docs/superpowers/plans/2026-07-29-relative-to-par-strokes-model.md`, **9 planned SDD tasks — 8
 landed, the 9th is the controller-run beta close-out**, each landed task independently reviewed,
 seven fix-round dispatches across them (task 4 needed two), then a whole-branch review and its
-single fix wave, commits `77fb675..9851b44` plus this docs sweep): the owner's field report — a group
+single fix wave, commits `77fb675..065c226` plus the one commit that records this range — which
+**the close-out must re-check**, since it moves again): the owner's field report — a group
 settling strokes by asking each other "for an average round, how do you shoot relative to par?"
 and taking the difference — closed the entire WHS/swng-Index pipeline and replaced it with the
 number a first tee already speaks. **One number, stated, never converted:** a golfer's

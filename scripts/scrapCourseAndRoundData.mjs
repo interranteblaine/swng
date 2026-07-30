@@ -10,6 +10,8 @@
 //                         `GOLFER#`/`sk="GOLFER"` item carrying a `homeCourseId` attribute gets
 //                         that attribute REMOVEd (a wiped course must not dangle from a
 //                         profile). Golfers, SUB# pointers, and crews are otherwise untouched.
+//                         SKIPPABLE — pass `--keep-courses` (see FLAGS) when only round data
+//                         is being scrapped; the other three passes have no opt-out.
 //   - rounds table:       delete every item — the table holds only round event journals,
 //                         META pointers, and OPID# tombstones, none of which survive the scrap.
 //   - snapshots table:    delete every item — one immutable RoundArchive per finalized round
@@ -37,7 +39,25 @@
 // harmless only because no consumer exists. Before ANY future bulk delete, enumerate every
 // stream consumer in the blast radius first — that is the general rule this incident bought.
 //
-//   node scripts/scrapCourseAndRoundData.mjs [--stage beta] [--dry-run]
+// FLAGS
+//
+//   --stage <name>    which stage's four tables to operate on (default `beta`).
+//   --dry-run         count and report, delete nothing. Composes with every other flag.
+//   --keep-courses    make the CORE-TABLE PASS ABOVE A NO-OP: no `COURSE#` item is deleted and
+//                     no golfer's `homeCourseId` is stripped. The rounds/snapshots/projections
+//                     passes still run in full. Named for the OUTCOME rather than the pass,
+//                     because at a terminal under pressure "keep courses" has exactly one
+//                     reading. The pass logs that it was skipped — silence is how someone later
+//                     concludes it ran.
+//
+//                     Use it whenever an arc replaces the ROUND model and leaves the course
+//                     model alone: the hand-seeded real cards (Casa Verde GC, Sandy Hollow
+//                     Nine) are the field-test fixtures, and the field e2e specs RE-SEED
+//                     courses, so losing them is silent and permanent — no gate catches it.
+//                     The relative-to-par strokes arc (spec 2026-07-29 §8) is the first
+//                     close-out that requires this flag.
+//
+//   node scripts/scrapCourseAndRoundData.mjs [--stage beta] [--dry-run] [--keep-courses]
 import { createRequire } from "node:module";
 
 const require = createRequire(new URL("../packages/adapters-dynamodb/package.json", import.meta.url));
@@ -46,6 +66,8 @@ const { DynamoDBDocumentClient, ScanCommand, DeleteCommand, UpdateCommand } = re
 
 const stage = process.argv.includes("--stage") ? process.argv[process.argv.indexOf("--stage") + 1] : "beta";
 const dryRun = process.argv.includes("--dry-run");
+// Opt out of the course pass only — see the FLAGS block above for why this exists.
+const keepCourses = process.argv.includes("--keep-courses");
 
 const coreTable = `swng-core-${stage}`;
 const roundsTable = `swng-rounds-${stage}`;
@@ -55,40 +77,49 @@ const projectionsTable = `swng-projections-${stage}`;
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({ region: "us-east-1", profile: process.env.AWS_PROFILE ?? "swng" }));
 
 // --- core table: wipe every COURSE# item; strip dangling homeCourseId off golfer profiles ----
+// Skippable whole via --keep-courses (FLAGS above). `exclusiveStartKey` is declared out here
+// because the three passes below reuse the same cursor variable.
 
 let coursesDeleted = 0;
 let golfersUpdated = 0;
 let coreKept = 0;
 let exclusiveStartKey;
-do {
-  const page = await client.send(
-    new ScanCommand({ TableName: coreTable, ProjectionExpression: "pk, sk, homeCourseId", ExclusiveStartKey: exclusiveStartKey }),
-  );
-  for (const item of page.Items ?? []) {
-    if (item.pk.startsWith("COURSE#")) {
-      coursesDeleted += 1;
-      if (!dryRun) await client.send(new DeleteCommand({ TableName: coreTable, Key: { pk: item.pk, sk: item.sk } }));
-      continue;
-    }
-    if (item.pk.startsWith("GOLFER#") && item.sk === "GOLFER" && item.homeCourseId !== undefined) {
-      golfersUpdated += 1;
-      if (!dryRun) {
-        await client.send(
-          new UpdateCommand({ TableName: coreTable, Key: { pk: item.pk, sk: item.sk }, UpdateExpression: "REMOVE homeCourseId" }),
-        );
+if (keepCourses) {
+  // Announced, never silent: a skipped destructive pass that logs nothing is indistinguishable
+  // from one that ran and found nothing, and someone reading this transcript later has to be
+  // able to tell which happened.
+  console.log(`${dryRun ? "[dry-run] " : ""}SKIPPED the ${coreTable} course pass (--keep-courses): no COURSE# item deleted, no homeCourseId stripped`);
+} else {
+  do {
+    const page = await client.send(
+      new ScanCommand({ TableName: coreTable, ProjectionExpression: "pk, sk, homeCourseId", ExclusiveStartKey: exclusiveStartKey }),
+    );
+    for (const item of page.Items ?? []) {
+      if (item.pk.startsWith("COURSE#")) {
+        coursesDeleted += 1;
+        if (!dryRun) await client.send(new DeleteCommand({ TableName: coreTable, Key: { pk: item.pk, sk: item.sk } }));
+        continue;
       }
-      continue;
+      if (item.pk.startsWith("GOLFER#") && item.sk === "GOLFER" && item.homeCourseId !== undefined) {
+        golfersUpdated += 1;
+        if (!dryRun) {
+          await client.send(
+            new UpdateCommand({ TableName: coreTable, Key: { pk: item.pk, sk: item.sk }, UpdateExpression: "REMOVE homeCourseId" }),
+          );
+        }
+        continue;
+      }
+      coreKept += 1;
     }
-    coreKept += 1;
-  }
-  exclusiveStartKey = page.LastEvaluatedKey;
-} while (exclusiveStartKey);
+    exclusiveStartKey = page.LastEvaluatedKey;
+  } while (exclusiveStartKey);
 
-console.log(
-  `${dryRun ? "[dry-run] would delete" : "deleted"} ${coursesDeleted} COURSE# item(s) and ` +
-    `${dryRun ? "would strip" : "stripped"} homeCourseId from ${golfersUpdated} golfer profile(s) on ${coreTable} ` +
-    `(${coreKept} other core item(s) untouched)`,
-);
+  console.log(
+    `${dryRun ? "[dry-run] would delete" : "deleted"} ${coursesDeleted} COURSE# item(s) and ` +
+      `${dryRun ? "would strip" : "stripped"} homeCourseId from ${golfersUpdated} golfer profile(s) on ${coreTable} ` +
+      `(${coreKept} other core item(s) untouched)`,
+  );
+}
 
 // --- rounds table: wipe every item — journals, META, OPID#, all of it -------------------------
 

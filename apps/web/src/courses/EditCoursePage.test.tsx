@@ -331,8 +331,8 @@ describe("EditCoursePage", () => {
 
   // unrated-courses arc: an UNRATED card must round-trip through a supersede untouched — both the
   // edited tee AND the carried-over other tee stay unrated (no rating/slope on the wire). This is
-  // the carryOver rework: the old placeholder THREW `tee-unrated`, so this whole flow used to be
-  // impossible (submit never even reached supersedeCard).
+  // the carryOver rework: the old placeholder threw on an unrated carried-over tee, so this whole
+  // flow used to be impossible (submit never even reached supersedeCard).
   const unratedBaseView: CourseView = {
     courseId: courseId("course-1"),
     cardId: "card-1",

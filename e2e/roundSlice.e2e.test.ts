@@ -200,7 +200,7 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
 
   // Step 8: finalize reproduces the M2 post-correction golden numbers over deployed
   // infrastructure — skins ann 2 / bo 6 / cal 0, carriedOut 1; stableford ann 13 / bo 15 /
-  // cal 4; all three golfers' handicapping is complete. Both games' strokes are the difference
+  // cal 4; and the response carries no handicapping block at all. Both games' strokes are the difference
   // from the lowest in the field (Bo's 2), halved on this nine-hole card: Ann 3 dots, Bo 0, Cal 5
   // — the same numbers concurrent.test.ts and archive.test.ts hand-derive for this deck.
   it("8: finalize reproduces the M2 post-correction golden numbers", async () => {

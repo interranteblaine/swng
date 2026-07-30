@@ -16,8 +16,10 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
   const { teeSet: cardTeeSet } = playerTeeSet(state, config.a);
 
   // The game's own field, off the ONE rule (spec §3) — the difference between the two, which for
-  // a two-player field means only the higher number receives dots and the lower plays off
-  // scratch. The higher/lower branch this replaced was that same arithmetic, spelled a second time.
+  // a two-player field means only the higher number receives dots and the lower receives none.
+  // "Plays off scratch" would be the wrong words for it: the anchor is whoever states the lower
+  // number, who may be a +20 that simply gets nothing here, not a scratch golfer. The higher/lower
+  // branch this replaced was that same arithmetic, spelled a second time.
   const allocation = gameStrokeAllocation(config, state.participants, state.card);
 
   const netFor = (golferId: GolferId, cell: ScoreCell | undefined, holeNumber: number): number | undefined => {

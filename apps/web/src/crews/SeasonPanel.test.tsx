@@ -290,9 +290,9 @@ describe("SeasonPanel — scoreboard", () => {
     const row = within(table).getAllByRole("row")[1]!;
     const cells = within(row).getAllByRole("cell");
     expect(cells[1]!.textContent).toBe("1"); // rounds
-    expect(cells[2]!.textContent).toBe("—"); // best18
-    expect(cells[3]!.textContent).toBe("—"); // netPer18
-    expect(cells[4]!.textContent).toBe("—"); // index
+    expect(cells[2]!.textContent).toBe("—"); // average
+    expect(cells[3]!.textContent).toBe("—"); // spread
+    expect(cells[4]!.textContent).toBe("—"); // best18
   });
 
   // Best 18 moved to the LAST column (spec 2026-07-29 §6's own order) — cell index 4.

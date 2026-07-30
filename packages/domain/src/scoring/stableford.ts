@@ -14,7 +14,11 @@ export const scoreStableford = (config: StablefordConfig, state: RoundState): Ga
   const allocation = gameStrokeAllocation(config, state.participants, state.card);
   const lines = config.players.map((golferId) => {
     const { teeSet } = playerTeeSet(state, golferId);
-    const dots = allocation.get(golferId)!;
+    // `?.` below, not a `!` here — symmetric with strokePlay/skins, which read the same map. Safe
+    // either way today (stableford is always net, so the allocation always has an entry for every
+    // member), but a `!` in one engine and a `?.` in two invites a copy-paste into a kind that DOES
+    // have a gross arm, where the allocation is empty by design.
+    const dots = allocation.get(golferId);
 
     let points = 0;
     let thru = 0;
@@ -30,7 +34,7 @@ export const scoreStableford = (config: StablefordConfig, state: RoundState): Ga
       // one worth nothing, unlike stroke play's net double bogey resolution which never applies here.
       const strokes = scoredStrokes(cell.result);
       if (strokes !== undefined) {
-        const net = strokes - (dots.get(hole.number) ?? 0);
+        const net = strokes - (dots?.get(hole.number) ?? 0);
         points += Math.max(0, 2 + hole.par - net);
       }
     }

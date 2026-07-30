@@ -8,7 +8,7 @@ import { GolferPage } from "./GolferPage";
 
 const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;
 
-// GetGolferResponse.metrics.typicalEighteen/indexHistory/bests/milestones are REQUIRED on the
+// GetGolferResponse.metrics.typicalEighteen/averageHistory/bests/milestones are REQUIRED on the
 // wire (same contract as GetMyRecordResponse; analytics spec 2026-07-21 §3) — every fixture
 // below spreads this in.
 const emptyMetricsExtras = {

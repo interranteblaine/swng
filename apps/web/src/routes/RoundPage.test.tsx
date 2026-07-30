@@ -468,7 +468,7 @@ describe("RoundPage", () => {
           hlc: { wallMs: 9_999, counter: 0, deviceId: SERVER_DEVICE },
           seq: transport.log.length + 1,
         });
-        return { ok: true, status: 200, json: async () => ({ results: [], handicapping: [] }) } as unknown as Response;
+        return { ok: true, status: 200, json: async () => ({ results: [] }) } as unknown as Response;
       }),
     );
 
@@ -747,7 +747,7 @@ describe("RoundPage", () => {
             hlc: { wallMs: 9_999, counter: 0, deviceId: SERVER_DEVICE },
             seq: transport.log.length + 1,
           });
-          return { ok: true, status: 200, json: async () => ({ results: [], handicapping: [] }) } as unknown as Response;
+          return { ok: true, status: 200, json: async () => ({ results: [] }) } as unknown as Response;
         }
         throw new Error(`unexpected fetch ${u}`);
       }),

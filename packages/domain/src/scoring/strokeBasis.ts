@@ -29,6 +29,13 @@ export const anchorOf = (bases: readonly { readonly basis: StrokeBasis }[]): num
   return stated.length > 0 ? Math.min(...stated) : undefined;
 };
 
+// SECOND SITE, on purpose: `apps/web/src/crews/SeasonPanel.tsx` applies this same difference rule
+// by hand, over the crew board's already-SERVED season averages ("If you played tomorrow, Blaine
+// gets 16" — spec §6 sanctions it, and a subtraction of two served numbers is not a golf result,
+// so the compute fence does not reach it). It genuinely CANNOT call resolveStrokes: there is no
+// StrokeBasis on a board row and no round's hole count to halve by. So a change to this rule's
+// rounding or clamping must visit that file too — it will not surface as a type error.
+//
 // `anchor` is REQUIRED and this function has NO fallback of its own — deliberately. A fallback
 // that computed the anchor from `bases` would silently re-admit a departed player whenever nobody
 // still present had stated a normal score, since callers pass the full roster (departed included)

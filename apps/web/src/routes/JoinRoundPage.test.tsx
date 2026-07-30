@@ -85,7 +85,7 @@ const signIn = (): string => {
 // a sign-in funnel, not a form — and it preserves the join code across the Hosted-UI round trip
 // so a tap on a share link lands the new account back on the round it was invited to.
 describe("JoinRoundPage — the funnel (signed out)", () => {
-  it("shows a sign-in CTA and NO join form — no name/tee/handicap fields, no anonymous join", () => {
+  it("shows a sign-in CTA and NO join form — no name/tee/strokes fields, no anonymous join", () => {
     renderJoin();
 
     expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
@@ -126,7 +126,7 @@ describe("JoinRoundPage — the name prompt (signed in, placeholder golfer)", ()
     renderJoin();
 
     await screen.findByLabelText(/what should the card call you/i);
-    // The join form is gated behind the name prompt — no tee/handicap/Join button until named.
+    // The join form is gated behind the name prompt — no tee field and no Join button until named.
     expect(screen.queryByLabelText(/^tee$/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /join round/i })).toBeNull();
     expect(screen.queryByText(/playing as/i)).toBeNull();
@@ -172,7 +172,7 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
     expect(screen.getByRole("link", { name: /change/i }).getAttribute("href")).toBe("/profile");
   });
 
-  it("uppercases the code and joins as-self: code + tee/handicap + the account's Bearer (seat resolved server-side, never a typed name)", async () => {
+  it("uppercases the code and joins as-self: code + tee + basis + the account's Bearer (seat resolved server-side, never a typed name)", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     // The response's own joinCode is DELIBERATELY different from the typed "self01"/"SELF01" —
@@ -286,7 +286,7 @@ describe("JoinRoundPage — what you normally shoot", () => {
     expect(screen.getByRole("button", { name: /join round/i }).hasAttribute("disabled")).toBe(false);
   });
 
-  it("renders no index/course-handicap derivation and no per-player strokes figure at all", async () => {
+  it("renders no derived-number machinery and no per-player strokes figure at all", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedPeekRound.mockResolvedValue({

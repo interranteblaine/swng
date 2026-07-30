@@ -117,7 +117,7 @@ describe("CreateRoundPage — signed out", () => {
 // Signed in, a round is created AS the caller's own account golfer — host.name is the account's
 // name, never a typed input (the field is gone).
 describe("CreateRoundPage — create as yourself", () => {
-  it("a preselected courseId sends startRound the fetched card verbatim + the tee/handicap + the account's Bearer (seat resolved server-side)", async () => {
+  it("a preselected courseId sends startRound the fetched card verbatim + the tee + basis + the account's Bearer (seat resolved server-side)", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
@@ -277,7 +277,7 @@ describe("CreateRoundPage — what you normally shoot", () => {
   // `getMyRecord` is absent from this file's `vi.mock("../api", …)` factory, so a page that called
   // it would throw on an undefined export rather than quietly pass. Said out loud because the
   // title used to claim a fetch check that no line in the body performed.
-  it("renders no index/course-handicap derivation at all — a declared index changes nothing on this page", async () => {
+  it("renders no derived-number machinery at all — nothing on the golfer record changes this page", async () => {
     signIn();
     // A golfer with a real declared index: the input that USED to drive the whole derivation.
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });

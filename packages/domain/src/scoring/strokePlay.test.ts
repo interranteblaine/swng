@@ -38,9 +38,9 @@ describe("stroke play — golden cards", () => {
   });
 
   it("net with dots and a pickup: Ann nets 44 via net double bogey, Bo nets his gross 37", () => {
-    // Strokes are the difference from the lowest in the game's field (spec §2b): Bo at 2 is the
-    // lowest, so he plays off scratch — 0 dots, net === gross — and Ann's 8 − 2 = 6, halved on a
-    // nine-hole card, gives her 3 dots on SI 1..3 (holes 2, 4, 7).
+    // Stroke play is a MEDAL kind, so each player gets their own roster number — no difference,
+    // no anchor (spec 2026-07-30 §3). Bo's typed 0 means no dots and net === gross; Ann's typed 3
+    // lands on SI 1..3 (holes 2, 4, 7).
     // Ann picks up on hole 4 (par 5, 1 dot): counts par+2 = 7 net.
     const [state] = playGoldenRound(fixtureLinks, players, [netGame], {
       [A]: [5, 6, 3, "picked-up", 5, 4, 5, 6, 5],

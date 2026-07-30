@@ -13,7 +13,7 @@ const fakeResponse = (status: number, body: unknown): Response => ({ ok: status 
 // below spreads this in.
 const emptyMetricsExtras = {
   typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
-  indexHistory: [] as unknown[],
+  averageHistory: [] as unknown[],
   bests: {},
   milestones: [] as unknown[],
 };
@@ -66,21 +66,19 @@ describe("GolferPage", () => {
     expect(sessionStorage.getItem("swng:returnTo")).toBe("/golfers/bo");
   });
 
-  // (b) loaded: name h1, "plays off {formatted} · {phrase}", RecordSections rendered.
-  it("loaded: renders the golfer's name, the index line with its (third-person) source, and the record sections", async () => {
+  // (b) loaded: name h1 then RecordSections. The separate "plays off N · from all their rounds"
+  // line this page used to render is deleted with the index it named (spec 2026-07-29 §7) —
+  // RecordSections' own third-person headline is the ONE number about this golfer now, so there is
+  // no second one to keep in sync.
+  it("loaded: renders the golfer's name and the record sections, third-person throughout", async () => {
     signIn();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
         if (path === "/golfers/bo") {
-          return fakeResponse(200, {
-            name: "Bo",
-            indexSource: { kind: "swng" },
-            metrics: { swngIndex: { value: 12.4, differentialsUsed: 8 }, ...emptyMetricsExtras },
-            history: [],
-          });
+          return fakeResponse(200, { name: "Bo", metrics: { average: 26, ...emptyMetricsExtras }, history: [] });
         }
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -89,29 +87,32 @@ describe("GolferPage", () => {
     renderGolferPage("bo");
 
     expect(await screen.findByRole("heading", { name: "Bo" })).toBeTruthy();
-    expect(screen.getByText("plays off 12.4 · from all their rounds")).toBeTruthy();
+    // The ONE number about this golfer, third-person and served.
+    expect(screen.getByRole("heading", { name: "What they shoot" })).toBeTruthy();
+    expect(screen.getByText("+26")).toBeTruthy();
+    expect(screen.getByText("their last 10 finished rounds, score minus par")).toBeTruthy();
     // RecordSections rendered with the response's (empty) history.
     expect(screen.getByText("No rounds yet.")).toBeTruthy();
     // person="their" (whole-branch-review finding): GolferPage renders someone ELSE's record, so
     // RecordSections' own copy must read third-person too — no second-person "Your"/"Keep going."
     // text anywhere on the page.
-    expect(screen.getByRole("heading", { name: "Their index over time" })).toBeTruthy();
-    expect(screen.getByText("Their index history shows up at 8 rounds — they've played 0.")).toBeTruthy();
-    expect(screen.queryByText(/Your index over time/)).toBeNull();
+    expect(screen.getByRole("heading", { name: "Their average over time" })).toBeTruthy();
+    expect(screen.getByText("Their average over time shows up at 8 rounds — they've played 0.")).toBeTruthy();
+    expect(screen.queryByText(/Your average over time/)).toBeNull();
     expect(screen.queryByText(/Keep going\./)).toBeNull();
   });
 
-  // An unresolvable index (no computed data for the golfer's chosen source) renders the "—"
-  // treatment, exactly as ProfilePage's own per-row "—" fallback — never a crash, never a 0.
-  it("an unresolvable index renders the '—' treatment", async () => {
+  // A golfer with no scored round yet renders "—" — absent is the honest answer, never a crash and
+  // never a 0.
+  it("a golfer with no average renders the '—' treatment", async () => {
     signIn();
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
         if (path === "/golfers/bo") {
-          return fakeResponse(200, { name: "Bo", indexSource: { kind: "swng" }, metrics: { ...emptyMetricsExtras }, history: [] });
+          return fakeResponse(200, { name: "Bo", metrics: { ...emptyMetricsExtras }, history: [] });
         }
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -119,7 +120,8 @@ describe("GolferPage", () => {
 
     renderGolferPage("bo");
 
-    expect(await screen.findByText("plays off — · from all their rounds")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "What they shoot" })).toBeTruthy();
+    expect(screen.getByText("—")).toBeTruthy();
   });
 
   // (c) API 404 → the honest empty state, a link home, no crash.
@@ -129,7 +131,7 @@ describe("GolferPage", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
         if (path === "/golfers/nope") {
           return { ok: false, status: 404, json: async () => ({ code: "golfer-not-found", message: "no such golfer" }) } as unknown as Response;
         }
@@ -151,9 +153,9 @@ describe("GolferPage", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
         if (path === "/golfers/ann") {
-          return fakeResponse(200, { name: "Ann", indexSource: { kind: "swng" }, metrics: { ...emptyMetricsExtras }, history: [] });
+          return fakeResponse(200, { name: "Ann", metrics: { ...emptyMetricsExtras }, history: [] });
         }
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -172,9 +174,9 @@ describe("GolferPage", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
         if (path === "/golfers/bo") {
-          return fakeResponse(200, { name: "Bo", indexSource: { kind: "swng" }, metrics: { ...emptyMetricsExtras }, history: [] });
+          return fakeResponse(200, { name: "Bo", metrics: { ...emptyMetricsExtras }, history: [] });
         }
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -193,9 +195,9 @@ describe("GolferPage", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
         if (path === "/golfers/bo") {
-          return fakeResponse(200, { name: "Bo", indexSource: { kind: "swng" }, metrics: { ...emptyMetricsExtras }, history: [] });
+          return fakeResponse(200, { name: "Bo", metrics: { ...emptyMetricsExtras }, history: [] });
         }
         throw new Error(`unexpected fetch ${path}`);
       }),

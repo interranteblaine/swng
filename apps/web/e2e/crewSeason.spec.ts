@@ -149,17 +149,18 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     const scoreboard = crewScoreboard(members, { startMs: 0 });
     expect(scoreboard).toEqual(frozenScoreboardExpectation(placeholderIds));
 
-    // Expected shape (crew-scoreboard spec §3a, verified rather than assumed): 12 rounds each;
-    // best18/netPer18/index all present (>=3 qualifying lines clears the netPer18 floor); no
-    // member has a pre-window line, so indexDelta is ABSENT for everyone — never a `0`/`undefined`
-    // value sitting on the object, no key at all.
+    // Expected shape (spec 2026-07-29 §6, verified rather than assumed): 12 rounds each, with
+    // best18/average/spread ALL present — every deck round is fully holed out (so best18 exists)
+    // and carries a score on every hole (so it feeds the average), and 12 rounds clears the
+    // 5-round spread floor. The retired index/indexDelta/netPer18 keys are pinned ABSENT, not
+    // merely unasserted.
     expect(scoreboard).toHaveLength(4);
     for (const row of scoreboard) {
       expect(row.rounds).toBe(SEASON_ROUNDS);
       expect(row.best18).toBeDefined();
-      expect(row.netPer18).toBeDefined();
-      expect(row.index).toBeDefined();
-      expect(row).not.toHaveProperty("indexDelta");
+      expect(row.average).toBeDefined();
+      expect(row.spread).toBeDefined();
+      for (const retired of ["netPer18", "index", "indexDelta"]) expect(row).not.toHaveProperty(retired);
     }
   });
 
@@ -359,8 +360,8 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(included.scoreboard[0]?.golferId).toBe(ids.al);
     expect(included.scoreboard[0]?.rounds).toBe(SEASON_ROUNDS);
     expect(included.scoreboard[0]?.best18).toBeDefined();
-    expect(included.scoreboard[0]?.netPer18).toBeDefined();
-    expect(included.scoreboard[0]?.index).toBeDefined();
+    expect(included.scoreboard[0]?.average).toBeDefined();
+    expect(included.scoreboard[0]?.spread).toBeDefined();
     // Al is still the roster's only member (Bo doesn't join until test 8) — the together-folds
     // stay honestly empty through the widen too, the same law as above, not a special case of it.
     expect(included.rounds).toEqual([]);
@@ -387,22 +388,16 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     console.log(`[crewSeason] rebuild: ${summary.processed} snapshots processed`);
     expect(summary.processed).toBeGreaterThanOrEqual(SEASON_ROUNDS); // at least this run's own 12 rounds
 
-    // Deep-equal on history: archiveGolferLine is a pure recompute from the SAME stored
-    // archives before and after the backfill — no wall-clock or randomness in it. computedAtMs
-    // is the one deliberate exception: since pre-prod hardening D4a it's getMyRecord's
-    // read-time stamp, so two reads always differ and it says nothing about the rebuild — the
-    // rebuild proof is the history deep-equal plus value/differentialsUsed equality below.
+    // Deep-equal on history AND on the whole metrics object: archiveGolferLine is a pure recompute
+    // from the SAME stored archives before and after the backfill — no wall-clock or randomness in
+    // it, and nothing on this response is a read-time stamp anymore (the whsIndex computedAtMs that
+    // used to be the one deliberate exception went with the index itself, spec §7). Rebuild parity
+    // must cover the holeResults-DERIVED metrics too — history equality alone would pass a rebuild
+    // that dropped holeResults (whole-branch review, 2026-07-21), and `average`/`averageHistory`
+    // are now in that same class.
     const post = await getMyRecordDirect(httpUrl, al.tokens.idToken);
     expect(post.history).toEqual(pre.history);
-    expect(post.metrics.whsIndex?.value).toBe(pre.metrics.whsIndex?.value);
-    expect(post.metrics.whsIndex?.differentialsUsed).toBe(pre.metrics.whsIndex?.differentialsUsed);
-
-    // Rebuild parity must cover the holeResults-DERIVED metrics too — history/whsIndex equality
-    // alone would pass a rebuild that dropped holeResults (whole-branch review, 2026-07-21).
-    expect(post.metrics.bests).toEqual(pre.metrics.bests);
-    expect(post.metrics.milestones).toEqual(pre.metrics.milestones);
-
-    expect(post.metrics.whsIndex?.computedAtMs).not.toBe(pre.metrics.whsIndex?.computedAtMs);
+    expect(post.metrics).toEqual(pre.metrics);
 
     // Standings are computed on read from the DERIVED shared rounds — there is no season
     // projection for a rebuild to touch, and membership itself is untouched by a rebuild (it

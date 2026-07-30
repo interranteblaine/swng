@@ -29,7 +29,7 @@ const participant = (id: ReturnType<typeof golferId>, name: string, tee: string,
 // Four participants on the shared fixture card (fixtureLinks — the same 9-hole "white" tee
 // SetupPanel.test.tsx uses): Pat normally shoots +5, Alex +2, Sam E, Dana +8. Chosen so a game
 // between Pat and Sam gives Pat the difference 5 − 0, halved on a nine-hole card = 3 dots spread
-// by stroke index (the "Pat 3 dots" pin), while Sam — the lowest in that field — plays off scratch
+// by stroke index (the "Pat 3 dots" pin), while Sam — the lowest in that field — receives nothing
 // and is omitted from the line per strokesSummary's own rule.
 // Round-level strokes, off Sam's E anchor and halved for nine holes: 3 / 1 / 0 / 4.
 const participants: readonly RosterEntry[] = [
@@ -83,11 +83,11 @@ describe("strokes preview", () => {
     await user.click(screen.getByRole("checkbox", { name: "Sam" }));
     expect(screen.getByText("Net — everyone plays off the lowest in this game")).toBeTruthy();
     // Pat's 5 against Sam's 0, halved on a nine-hole card → "Pat 3 dots"; Sam is the lowest in
-    // the field, so he plays off scratch and is omitted from the line.
+    // the field, so he receives nothing and is omitted from the line.
     expect(screen.getByText(/Pat 3 dots/)).toBeTruthy();
     // No note under it: the treatment line already states this game's field, so a note would
     // render the same sentence twice.
-    expect(screen.queryByText(/plays off scratch/)).toBeNull();
+    expect(screen.queryByText(/plays off scratch/)).toBeNull(); // the retired handicap-era register, pinned absent
   });
 
   it("match play explains the difference rule", async () => {
@@ -97,7 +97,7 @@ describe("strokes preview", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Player 1" }), "Pat");
     await user.selectOptions(screen.getByRole("combobox", { name: "Player 2" }), "Alex");
     expect(screen.getByText("Strokes are the difference between you two")).toBeTruthy();
-    expect(screen.getByText("Only the higher number gets strokes — the lower plays off scratch.")).toBeTruthy();
+    expect(screen.getByText("Only the higher number gets strokes — the lower gets none.")).toBeTruthy();
   });
 
   // Live-walk finding (2026-07-19), carried forward: with Gross picked, the preview must state the
@@ -147,7 +147,7 @@ describe("strokes preview", () => {
     await user.selectOptions(within(team2).getByRole("combobox", { name: "First player" }), "Sam");
     await user.selectOptions(within(team2).getByRole("combobox", { name: "Second player" }), "Dana");
     expect(screen.getByText("Everyone plays off the lowest of the four")).toBeTruthy();
-    expect(screen.getByText("Only the three higher numbers get strokes — the lowest plays off scratch.")).toBeTruthy();
+    expect(screen.getByText("Only the three higher numbers get strokes — the lowest gets none.")).toBeTruthy();
   });
 });
 

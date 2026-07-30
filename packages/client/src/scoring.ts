@@ -46,15 +46,12 @@ export const foldAndScore = (events: readonly RoundEvent[]): { state: RoundState
 // The on-device round-compute the web needs, re-exported through the one sanctioned seam (the
 // ESLint fence forbids the web importing these straight from @swng/domain). scoreGame/reduceRound
 // are deliberately NOT re-exported — foldAndScore and RoundSession subsume every web use of them.
-export {
-  gameStrokeAllocation,
-  roundStrokeAllocation,
-  netStrokes,
-  totalDots,
-  grossForHoles,
-  unresolvedGames,
-  courseHandicapFor,
-  courseHandicapFromRatingSlopePar,
-  unratedCourseHandicap,
-  handicappingFor,
-} from "@swng/domain";
+//
+// The four handicap re-exports that stood here (handicappingFor, courseHandicapFor,
+// courseHandicapFromRatingSlopePar, unratedCourseHandicap) are DELETED with handicap/whs.ts itself
+// (spec 2026-07-29 §7): nothing converts an index into strokes anymore, because a player states
+// the number directly. Nothing replaces them — `averageOf`/`spreadOf` are deliberately NOT
+// re-exported either: the average is server-computed and served on the record responses, so an
+// on-device copy would be fence-legal and boundary-wrong. `formatOverPar` is a presentation
+// formatter the web imports straight from @swng/domain, exactly as `underPar` already does.
+export { gameStrokeAllocation, roundStrokeAllocation, netStrokes, totalDots, grossForHoles, unresolvedGames } from "@swng/domain";

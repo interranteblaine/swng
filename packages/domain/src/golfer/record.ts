@@ -3,7 +3,9 @@ import { DomainError } from "../errors.js";
 import type { CourseId, GolferId, RoundId } from "../ids.js";
 import type { RoundArchive } from "../round/archive.js";
 import type { DecidedHoleResult } from "../round/holeResult.js";
+import { scoredStrokes } from "../round/holeResult.js";
 import { cellAt } from "../round/state.js";
+import { hasCompleteScore, scoreOf } from "./analytics.js";
 
 // One decided hole from the frozen card (analytics spec 2026-07-21 §2) — par is the card's
 // par for that hole AS PLAYED, so a later card supersession never rewrites a historical line.
@@ -14,10 +16,7 @@ export interface GolferHoleLine {
 }
 
 // What one archive contributes to one golfer's permanent record — the per-round line a
-// history view lists and the index projector folds over (architecture.md §2's "everything
-// counts"). ags/differential are absent exactly when handicappingFor downgraded the
-// golfer's card to "incomplete" (see allocation.ts) — a partial card still gets a line,
-// just without a postable number.
+// history view lists and the projector folds over (architecture.md §2's "everything counts").
 export interface GolferRoundLine {
   readonly roundId: RoundId;
   readonly courseName: string;
@@ -26,12 +25,17 @@ export interface GolferRoundLine {
   readonly holes: 9 | 18;
   readonly par: number; // sum of the frozen tee's hole pars (spec §5)
   // The strokes this player actually played off: `participant.strokes`, the value reduceRound
-  // derived across the round's roster and settleRound froze (spec 2026-07-29 §2b). Renamed to
-  // `strokes` — with `normallyShoots?` beside it — by this arc's WHS-deletion task; it keeps its
-  // old name here for exactly one commit so the whole wire/projection rename lands in one place.
-  readonly courseHandicap: number;
-  readonly ags?: number;
-  readonly differential?: number;
+  // derived across the round's roster and settleRound froze (spec 2026-07-29 §2b).
+  readonly strokes: number;
+  // What they STATED, when they stated a normal score — absent when they stated raw strokes
+  // instead (spec §2a's second constructor). The assertion beside its consequence: `strokes` is
+  // what the fold made of it against the rest of the field.
+  readonly normallyShoots?: number;
+  // The round's own gross total, present iff every hole carries a number (`hasCompleteScore`,
+  // conceded holes included — spec §2d). LOAD-BEARING, not tidiness: `holeResults` never rides
+  // the wire, so without this a history row would have no score to render at all. Absent means
+  // the card has a pickup or a gap — there is no score, and none is invented.
+  readonly score?: number;
   readonly distribution: {
     readonly eagles: number;
     readonly birdies: number;
@@ -51,14 +55,12 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
   const participant = archive.participants.find((p) => p.golferId === golferId);
   if (!participant) throw new DomainError("unknown-participant", `no participant "${golferId}" in this archive`);
   const teeSet = findTeeSet(archive.card, participant.tee);
-  const handicapping = archive.handicapping.find((h) => h.golferId === golferId);
 
-  // Par-relative buckets over DECIDED stroke cells only — a picked-up hole has no stroke count
-  // to compare against par at all, and an unscored hole is silence, not a zero. A conceded hole
-  // DOES carry a stroke count (spec §2d — a conceded hole is a scored hole everywhere), but this
-  // fold doesn't count it yet either: reworking the distribution to include it is a later task's
-  // job, alongside the record's own average. All three read as "not in the distribution" today,
-  // per the hand-pinned buckets this mirrors.
+  // Par-relative buckets over every DECIDED cell that carries a NUMBER — a stroke count or a
+  // conceded score (spec §2d: a conceded hole is a scored hole everywhere, so it goes in the
+  // buckets too). A picked-up hole has no number to compare against par at all, and an unscored
+  // hole is silence, not a zero; both stay out. Leaving conceded holes out — as this fold used to
+  // — would make "your typical 18" disagree with the average built from the same card.
   const distribution = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
   const holeResults: GolferHoleLine[] = [];
   for (const hole of teeSet.holes) {
@@ -66,8 +68,9 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
     if (!cell) continue;
     if (cell.result.kind === "cleared") continue; // unreachable (cellAt hides cleared) — narrows the type
     holeResults.push({ hole: hole.number, par: hole.par, result: cell.result });
-    if (cell.result.kind !== "strokes") continue;
-    const relativeToPar = cell.result.strokes - hole.par;
+    const strokes = scoredStrokes(cell.result);
+    if (strokes === undefined) continue;
+    const relativeToPar = strokes - hole.par;
     if (relativeToPar <= -2) distribution.eagles += 1;
     else if (relativeToPar === -1) distribution.birdies += 1;
     else if (relativeToPar === 0) distribution.pars += 1;
@@ -75,7 +78,7 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
     else distribution.doublePlus += 1;
   }
 
-  return {
+  const line: GolferRoundLine = {
     roundId: archive.roundId,
     courseName: archive.card.courseName,
     // spec §4: recorded from day one because it cannot be backfilled; absent on pre-scrap archives.
@@ -87,10 +90,14 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
     // than re-checking it here.
     holes: teeSet.holes.length as 9 | 18,
     par: teeSet.holes.reduce((sum, hole) => sum + hole.par, 0),
-    courseHandicap: participant.strokes,
-    ...(handicapping?.kind === "complete" ? { ags: handicapping.ags, differential: handicapping.differential } : {}),
-    ...(handicapping?.kind === "unrated" ? { ags: handicapping.ags } : {}),
+    strokes: participant.strokes,
+    ...(participant.basis.kind === "normally-shoots" ? { normallyShoots: participant.basis.overPar } : {}),
     distribution,
     holeResults,
   };
+
+  // `score` is added on top of the finished line rather than computed inline, so the ONE
+  // predicate/sum pair the average itself uses (analytics.ts) decides it here too — a second
+  // hand-rolled "is this card complete" here is exactly the two-copy drift the arc deletes.
+  return hasCompleteScore(line) ? { ...line, score: scoreOf(line) } : line;
 };

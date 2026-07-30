@@ -225,8 +225,10 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
       ]),
     );
 
-    expect(finalize1.handicapping).toHaveLength(3);
-    expect(finalize1.handicapping.every((entry) => entry.kind === "complete")).toBe(true);
+    // `handicapping` (per-participant adjusted gross score + differential) is deleted from this
+    // response with the whole WHS pipeline (spec 2026-07-29 §7) — a finalize now returns the settled
+    // game results and nothing else.
+    expect(finalize1).not.toHaveProperty("handicapping");
   });
 
   // Step 9: catch-up is the correctness path — GET events?since=0 returns the full log,

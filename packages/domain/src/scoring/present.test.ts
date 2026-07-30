@@ -67,8 +67,10 @@ describe("gameTreatment", () => {
 
 describe("strokesNote", () => {
   it("names WHO RECEIVES for the two match kinds — the fact their treatment line doesn't carry", () => {
-    expect(strokesNote("singles-match")).toBe("Only the higher number gets strokes — the lower plays off scratch.");
-    expect(strokesNote("fourball-match")).toBe("Only the three higher numbers get strokes — the lowest plays off scratch.");
+    // Neither says "plays off scratch" (controller ruling, post-task-1): handicap-era vocabulary
+    // for playing to par, and false about an anchor who is simply the lowest in the field.
+    expect(strokesNote("singles-match")).toBe("Only the higher number gets strokes — the lower gets none.");
+    expect(strokesNote("fourball-match")).toBe("Only the three higher numbers get strokes — the lowest gets none.");
   });
   it("stays undefined for the three kinds whose treatment line already states their field", () => {
     // The net treatment line IS "everyone plays off the lowest in this game" — a note repeating it

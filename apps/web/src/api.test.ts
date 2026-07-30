@@ -566,7 +566,7 @@ describe("finalizeRound", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { results: [], handicapping: [] });
+      return fakeResponse(200, { results: [] });
     });
 
     const result = await finalizeRound(roundId("round-1"), "tok-4");
@@ -575,7 +575,7 @@ describe("finalizeRound", () => {
     expect(seenInit?.method).toBe("POST");
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-4");
     expect(seenInit).not.toHaveProperty("token");
-    expect(result).toEqual({ results: [], handicapping: [] });
+    expect(result).toEqual({ results: [] });
   });
 
   it("surfaces a fetch rejection as ApiError('network')", async () => {
@@ -753,14 +753,14 @@ describe("getMe", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+      return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
     });
 
     const result = await getMe("tok-me");
 
     expect(seenUrl).toBe(`${HTTP_URL}/me`);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
-    expect(result).toEqual({ golfer: { golferId: golferId("ann"), name: "Ann", indexSource: { kind: "swng" } } });
+    expect(result).toEqual({ golfer: { golferId: golferId("ann"), name: "Ann" } });
   });
 
   // GET /me NEVER creates (the plan's amendment) — a signed-in user with no golfer row gets
@@ -781,10 +781,10 @@ describe("updateMe", () => {
     stubFetch(async (url, init) => {
       seenUrl = String(url);
       seenInit = init;
-      return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann Updated", indexSource: { kind: "declared", value: 12.3 } } });
+      return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann Updated" } });
     });
 
-    const input: UpdateMeRequest = { name: "Ann Updated", indexSource: { kind: "declared", value: 12.3 } };
+    const input: UpdateMeRequest = { name: "Ann Updated" };
     const result = await updateMe("tok-me", input);
 
     expect(seenUrl).toBe(`${HTTP_URL}/me`);
@@ -803,7 +803,7 @@ describe("getMyRecord", () => {
       seenUrl = String(url);
       seenInit = init;
       return fakeResponse(200, {
-        metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [], bests: {}, milestones: [] },
+        metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, averageHistory: [], bests: {}, milestones: [] },
         history: [],
       });
     });
@@ -813,7 +813,7 @@ describe("getMyRecord", () => {
     expect(seenUrl).toBe(`${HTTP_URL}/me/record`);
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-me");
     expect(result).toEqual({
-      metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [], bests: {}, milestones: [] },
+      metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, averageHistory: [], bests: {}, milestones: [] },
       history: [],
     });
   });

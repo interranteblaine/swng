@@ -11,22 +11,19 @@ import { golferGsi2pk, golferGsi2sk, golferIdFromPk, golferPk, golferSk, golferS
 // idiom as createDynamoSnapshotStore.getMany).
 const BATCH_GET_MAX_KEYS = 100;
 
-// A raw golfer item's shape on the core table (keys.ts's golferPk/golferSk): Golfer's nested
-// `handicap: { indexSource }` is stored as a small `indexSource` map attr (index-source model
-// spec §3/§8) — the CHOICE, never a computed value. Read defensively as `{ kind, value? }`
-// because it's stored data (a stale/partial row's map is tolerate-and-default, not trusted): an
-// absent or malformed source folds to `{ kind: "swng" }` in golferOf below. The old flattened
-// `declared`/`official` attrs are gone (no users / no prod → no legacy migration; a stray beta
-// row simply loses a declared value nobody will miss, and its next put writes a well-formed
-// source). `computed` was never persisted here at all — it's a read-time metric (getMyRecord's
-// metrics.whsIndex).
+// A raw golfer item's shape on the core table (keys.ts's golferPk/golferSk). A golfer row holds
+// NO number and no index source (spec 2026-07-29 §5): the `indexSource` map attr this once stored
+// is deleted with the index it selected between, and nothing replaces it — what a golfer shoots is
+// computed on read from their own round lines (getMyRecord's metrics.average), and what they play
+// off in a round is the basis they state when they join it. A stray beta row that still carries the
+// old attr is simply not read (no users / no prod → no migration, no tolerate machinery); its next
+// whole-item put drops it, exactly as the legacy `declared`/`official` attrs were dropped before it.
 interface GolferItem {
   readonly pk: string;
   readonly sk: string;
   readonly revision: number;
   readonly name: string;
   readonly homeCourseId?: string;
-  readonly indexSource?: { readonly kind: string; readonly value?: number };
   // accounts-only identity spec §2: true iff `name` is the sub-derived placeholder a mint used.
   // Written only when true, tolerated as absent on read — old rows never carry it, no migration.
   readonly namePlaceholder?: boolean;
@@ -48,19 +45,6 @@ const golferOf = (item: GolferItem): Golfer => ({
   name: item.name,
   ...(item.homeCourseId !== undefined ? { homeCourseId: courseId(item.homeCourseId) } : {}),
   ...(item.namePlaceholder === true ? { namePlaceholder: true } : {}),
-  // index-source model spec §3/§8: the persisted source of truth is `indexSource` (a small map).
-  // No users / no prod, so NO legacy migration — an absent or malformed stored source simply
-  // defaults to swng (old beta rows lose a declared value nobody will miss); the next put writes
-  // a well-formed source. Read each arm explicitly so a partial map (e.g. a `declared` kind with
-  // no `value`) can never fabricate a broken source — it too falls through to swng.
-  handicap: {
-    indexSource:
-      item.indexSource?.kind === "whs"
-        ? { kind: "whs" }
-        : item.indexSource?.kind === "declared" && item.indexSource.value !== undefined
-          ? { kind: "declared", value: item.indexSource.value }
-          : { kind: "swng" },
-  },
 });
 
 export const createDynamoGolferStore = (config: { client: DynamoDBDocumentClient; tableName: string }): GolferStore => {
@@ -100,10 +84,6 @@ export const createDynamoGolferStore = (config: { client: DynamoDBDocumentClient
         // Written only when true (spec §2, absent = false) — a real-name PUT drops it by NOT
         // re-including it here, never by writing `false`.
         ...(golfer.namePlaceholder === true ? { namePlaceholder: true } : {}),
-        // The chosen index source stored verbatim as a small map — the CHOICE, never a computed
-        // value (index-source model spec §2/§8). Always defined on a domain Golfer; the spread is
-        // belt-and-suspenders, and a partial/absent stored map folds to swng on read (golferOf).
-        ...(golfer.handicap.indexSource !== undefined ? { indexSource: golfer.handicap.indexSource } : {}),
         // put's `sub` is a plain overwrite, not conditional — it mirrors the caller's OWN
         // golfer object exactly (matches the in-memory fake's `const { sub, ...plain } =
         // golfer` destructure). The guard above is what stops a caller from actually DROPPING

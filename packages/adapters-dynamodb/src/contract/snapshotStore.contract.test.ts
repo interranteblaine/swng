@@ -33,7 +33,6 @@ const minimalArchive = (id: RoundId): RoundArchive => ({
   events: [],
   results: [],
   terminatedGameIds: [],
-  handicapping: [],
 });
 
 // Seeds one snapshot item in the exact shape createDynamoEventJournal's atomic commit writes

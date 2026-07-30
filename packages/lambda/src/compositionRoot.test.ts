@@ -357,7 +357,6 @@ describe("createProjectorHandler", () => {
     ],
     results: [],
     terminatedGameIds: [],
-    handicapping: [{ golferId: participantId, kind: "complete", ags: 90, differential: 9.0 }],
   });
 
   // The "image" the fake parseArchive below reads back is the archive itself, unwrapped —

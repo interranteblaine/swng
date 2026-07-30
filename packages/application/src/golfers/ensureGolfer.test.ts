@@ -79,7 +79,7 @@ describe("ensureGolfer", () => {
     // invocation entirely. This double stands in for that winner's already-bound row: the first
     // getBySub call (this request's own initial check) misses, the second (the loser's re-read
     // inside the catch) returns it.
-    const winner: Golfer = { id: golferId("winner-1"), name: placeholderName("sub-race"), handicap: { indexSource: { kind: "swng" } }, namePlaceholder: true };
+    const winner: Golfer = { id: golferId("winner-1"), name: placeholderName("sub-race"), namePlaceholder: true };
     let getBySubCalls = 0;
     const golferStore: GolferStore = {
       getBySub: async () => {

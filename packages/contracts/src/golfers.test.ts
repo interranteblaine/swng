@@ -21,17 +21,16 @@ const roundTrips = <S extends z.ZodType>(schema: S, value: z.infer<S>): void => 
 };
 
 describe("golferViewSchema (via getMeResponseSchema)", () => {
-  it("round-trips a bare golfer on the default swng source (no home course)", () => {
-    roundTrips(getMeResponseSchema, { golfer: { golferId: golferId("g1"), name: "Ann", indexSource: { kind: "swng" } } });
+  it("round-trips a bare golfer (no home course)", () => {
+    roundTrips(getMeResponseSchema, { golfer: { golferId: golferId("g1"), name: "Ann" } });
   });
 
-  it("round-trips a fully-populated golfer on a declared source (index-source model spec §3)", () => {
+  it("round-trips a fully-populated golfer — name and home course are the WHOLE profile (spec 2026-07-29 §5)", () => {
     roundTrips(getMeResponseSchema, {
       golfer: {
         golferId: golferId("g1"),
         name: "Ann",
         homeCourseId: courseId("course-1"),
-        indexSource: { kind: "declared", value: 12.3 },
       },
     });
   });
@@ -44,38 +43,36 @@ describe("golferViewSchema (via getMeResponseSchema)", () => {
 
   // accounts-only identity spec §2: namePlaceholder rides the view, emitted only when true.
   it("round-trips a golfer carrying namePlaceholder: true", () => {
-    roundTrips(getMeResponseSchema, { golfer: { golferId: golferId("g1"), name: "Golfer 4821", indexSource: { kind: "swng" }, namePlaceholder: true } });
+    roundTrips(getMeResponseSchema, { golfer: { golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } });
   });
 });
 
-// The index-source discriminated union (index-source model spec §3): each kind round-trips; a
-// bad kind is rejected; a `declared` source missing its `value` is rejected (the union's own
-// per-arm shape enforcement).
-describe("golferViewSchema — indexSource discriminated union", () => {
-  const view = (indexSource: unknown) => ({ golferId: golferId("g1"), name: "Ann", indexSource });
-
-  it("accepts each kind: swng, whs, declared", () => {
-    expect(() => parse(golferViewSchema, view({ kind: "swng" }))).not.toThrow();
-    expect(() => parse(golferViewSchema, view({ kind: "whs" }))).not.toThrow();
-    expect(() => parse(golferViewSchema, view({ kind: "declared", value: 8 }))).not.toThrow();
+// The index-source union (swng/whs/declared) is DELETED with the index itself (spec §7). What
+// survives is the negative: a golfer view carries no number and no source, and a client still
+// sending one is rejected rather than silently accepted (`.strict()` on the request, below).
+describe("golferViewSchema — no index of any kind", () => {
+  it("round-trips a view with no source and drops nothing", () => {
+    const view = { golferId: golferId("g1"), name: "Ann" };
+    expect(parse(golferViewSchema, view)).toEqual(view);
   });
 
-  it("rejects an unknown kind", () => {
-    expect(() => parse(golferViewSchema, view({ kind: "nope" }))).toThrow(ContractError);
-  });
-
-  it("rejects a declared source missing its value", () => {
-    expect(() => parse(golferViewSchema, view({ kind: "declared" }))).toThrow(ContractError);
+  it("strips a legacy indexSource rather than carrying it through (non-strict response schema)", () => {
+    expect(parse(golferViewSchema, { golferId: golferId("g1"), name: "Ann", indexSource: { kind: "swng" } })).toEqual({
+      golferId: golferId("g1"),
+      name: "Ann",
+    });
   });
 });
 
 describe("updateMeRequestSchema", () => {
-  it("round-trips a partial patch (only indexSource set — a declared assertion)", () => {
-    roundTrips(updateMeRequestSchema, { indexSource: { kind: "declared", value: 14.2 } });
+  it("round-trips a partial patch (only homeCourseId set)", () => {
+    roundTrips(updateMeRequestSchema, { homeCourseId: courseId("course-1") });
   });
 
-  it("round-trips a patch adopting a computed source (whs)", () => {
-    roundTrips(updateMeRequestSchema, { indexSource: { kind: "whs" } });
+  // The profile has no number to set (spec §5): an old bundle still PUTting an index source gets a
+  // clean 400 off `.strict()`, never a silent no-op.
+  it("rejects a legacy indexSource patch", () => {
+    expect(() => parse(updateMeRequestSchema, { indexSource: { kind: "whs" } })).toThrow(ContractError);
   });
 
   it("round-trips an empty patch", () => {
@@ -107,36 +104,38 @@ describe("getMyRecordResponseSchema", () => {
     tee: "white",
     holes: 18,
     par: 72,
-    courseHandicap: 8,
-    ags: 90,
-    differential: 12.3,
+    strokes: 8,
+    normallyShoots: 22,
+    score: 90,
     distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
   };
 
+  // No `score` and no `normallyShoots`: a card with a pickup carries no score (spec §2d), and a
+  // player who stated raw strokes asserted no normal number (spec §2a).
   const incompleteLine: GolferRoundLine = {
     roundId: roundId("r2"),
     courseName: "Casa Verde GC",
     tee: "white",
     holes: 9,
     par: 36,
-    courseHandicap: 5,
+    strokes: 5,
     distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
   };
 
-  // Both required (papercut 17): a zeroed typicalEighteen + empty indexHistory, unless a fixture
+  // Both required (spec §5): a zeroed typicalEighteen + empty averageHistory, unless a fixture
   // asserts otherwise below.
   const zeroTypicalEighteen = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
 
   // Both required (analytics spec §3): {} / [] unless a fixture asserts otherwise below.
   const zeroBestsMilestones = { bests: {}, milestones: [] };
 
-  it("round-trips a record with both metrics (whsIndex + swngIndex), a typicalEighteen shape, an indexHistory with both indices, a best18, and an achieved milestone, plus mixed complete/incomplete history lines", () => {
+  it("round-trips a full record: average + spread, a typicalEighteen shape, an averageHistory, a best18, an achieved milestone, and mixed scored/unscored history lines", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: {
-        whsIndex: { value: 7.2, computedAtMs: 5_000, differentialsUsed: 1 },
-        swngIndex: { value: 9.4, differentialsUsed: 1 },
+        average: 26,
+        spread: 4.2,
         typicalEighteen: { eagles: 0, birdies: 3, pars: 20, bogeys: 12, doublePlus: 2 },
-        indexHistory: [{ roundId: roundId("r1"), swngIndex: 9.4, whsIndex: 7.2 }],
+        averageHistory: [{ roundId: roundId("r1"), average: 26 }],
         bests: { best18: { roundId: roundId("r1"), gross: 82, toPar: 10 } },
         milestones: [{ kind: "broke-90", roundId: roundId("r1") }],
       },
@@ -144,43 +143,52 @@ describe("getMyRecordResponseSchema", () => {
     });
   });
 
-  // unrated-courses spec §6: a wholly-unrated history has a swngIndex but no whsIndex — same
-  // absence shows up per-point in indexHistory.
-  it("round-trips a record carrying only a swngIndex (no whsIndex), indexHistory point with only swngIndex", () => {
+  // Below five scored rounds the spread is held back while the average still shows (spec §6's own
+  // floor, applied on the profile too) — the two are independently optional on the wire.
+  it("round-trips a record carrying an average but no spread", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: {
-        swngIndex: { value: 9.4, differentialsUsed: 1 },
+        average: 26,
         typicalEighteen: zeroTypicalEighteen,
-        indexHistory: [{ roundId: roundId("r2"), swngIndex: 9.4 }],
+        averageHistory: [{ roundId: roundId("r2"), average: 26 }],
         ...zeroBestsMilestones,
       },
       history: [incompleteLine],
     });
   });
 
-  it("round-trips a bootstrap-not-met record: no computed indexes, zeroed typicalEighteen, empty indexHistory, history present", () => {
+  // An UNDER-par average is a plain negative on the wire — there is one sign convention now
+  // (spec §4), and no plus-handicap encoding to confuse it with.
+  it("round-trips a negative average (a golfer who shoots under par)", () => {
     roundTrips(getMyRecordResponseSchema, {
-      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones },
+      metrics: { average: -2, typicalEighteen: zeroTypicalEighteen, averageHistory: [{ roundId: roundId("r1"), average: -2 }], ...zeroBestsMilestones },
+      history: [completeLine],
+    });
+  });
+
+  it("round-trips a record with no scored round at all: no average/spread, zeroed typicalEighteen, empty averageHistory, history present", () => {
+    roundTrips(getMyRecordResponseSchema, {
+      metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones },
       history: [incompleteLine],
     });
   });
 
   it("round-trips an entirely empty record", () => {
-    roundTrips(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones }, history: [] });
+    roundTrips(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones }, history: [] });
   });
 
   // course-cards spec §4: courseId (the analytics join key) is OPTIONAL on a history line —
   // pre-scrap lines carry none, tolerated as absent.
   it("round-trips a history line carrying courseId", () => {
     roundTrips(getMyRecordResponseSchema, {
-      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones },
+      metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones },
       history: [{ ...completeLine, courseId: courseId("course-1") }],
     });
   });
 
   it("round-trips a pre-scrap history line with no courseId", () => {
     roundTrips(getMyRecordResponseSchema, {
-      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones },
+      metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones },
       history: [completeLine],
     });
   });
@@ -190,25 +198,25 @@ describe("getMyRecordResponseSchema", () => {
   // practice for finalizedAt.
   it("round-trips a history line carrying finalizedAt and createdAt", () => {
     roundTrips(getMyRecordResponseSchema, {
-      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones },
+      metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones },
       history: [{ ...completeLine, finalizedAt: 2_000, createdAt: 1_500 }],
     });
   });
 
   it("round-trips a history line with no finalizedAt/createdAt (the old-lambda tolerance pin)", () => {
     roundTrips(getMyRecordResponseSchema, {
-      metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones },
+      metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones },
       history: [completeLine],
     });
   });
 
-  // typicalEighteen, indexHistory, bests, and milestones are all REQUIRED — a metrics object
+  // typicalEighteen, averageHistory, bests, and milestones are all REQUIRED — a metrics object
   // missing any one of them is rejected, not silently defaulted.
   it("rejects a metrics object missing typicalEighteen", () => {
-    expect(() => parse(getMyRecordResponseSchema, { metrics: { indexHistory: [], ...zeroBestsMilestones }, history: [] })).toThrow(ContractError);
+    expect(() => parse(getMyRecordResponseSchema, { metrics: { averageHistory: [], ...zeroBestsMilestones }, history: [] })).toThrow(ContractError);
   });
 
-  it("rejects a metrics object missing indexHistory", () => {
+  it("rejects a metrics object missing averageHistory", () => {
     expect(() => parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, ...zeroBestsMilestones }, history: [] })).toThrow(
       ContractError,
     );
@@ -216,13 +224,13 @@ describe("getMyRecordResponseSchema", () => {
 
   it("rejects a metrics object missing bests", () => {
     expect(() =>
-      parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], milestones: [] }, history: [] }),
+      parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], milestones: [] }, history: [] }),
     ).toThrow(ContractError);
   });
 
   it("rejects a metrics object missing milestones", () => {
     expect(() =>
-      parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, indexHistory: [], bests: {} }, history: [] }),
+      parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], bests: {} }, history: [] }),
     ).toThrow(ContractError);
   });
 });
@@ -233,27 +241,26 @@ describe("getMyRecordResponseSchema", () => {
 describe("getGolferResponseSchema", () => {
   const zeroTypicalEighteen = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
   const zeroBestsMilestones = { bests: {}, milestones: [] };
-  const bareMetrics = { typicalEighteen: zeroTypicalEighteen, indexHistory: [], ...zeroBestsMilestones };
+  const bareMetrics = { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones };
   const completeLine: GolferRoundLine = {
     roundId: roundId("r1"),
     courseName: "Casa Verde GC",
     tee: "white",
     holes: 18,
     par: 72,
-    courseHandicap: 8,
-    ags: 90,
-    differential: 12.3,
+    strokes: 8,
+    normallyShoots: 22,
+    score: 90,
     distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
   };
 
   it("round-trips a bare golfer with no history", () => {
-    roundTrips(getGolferResponseSchema, { name: "Ann", indexSource: { kind: "swng" }, metrics: bareMetrics, history: [] });
+    roundTrips(getGolferResponseSchema, { name: "Ann", metrics: bareMetrics, history: [] });
   });
 
   it("round-trips a history line carrying finalizedAt and createdAt", () => {
     roundTrips(getGolferResponseSchema, {
       name: "Ann",
-      indexSource: { kind: "swng" },
       metrics: bareMetrics,
       history: [{ ...completeLine, finalizedAt: 2_000, createdAt: 1_500 }],
     });
@@ -262,7 +269,7 @@ describe("getGolferResponseSchema", () => {
   // The old-lambda tolerance pin (index-chart-polish spec §1.6): a history row without the new
   // fields still parses clean.
   it("round-trips a history line with no finalizedAt/createdAt", () => {
-    roundTrips(getGolferResponseSchema, { name: "Ann", indexSource: { kind: "swng" }, metrics: bareMetrics, history: [completeLine] });
+    roundTrips(getGolferResponseSchema, { name: "Ann", metrics: bareMetrics, history: [completeLine] });
   });
 });
 
@@ -305,7 +312,7 @@ describe("getMyCourseRecordResponseSchema", () => {
 // accounts-only identity spec §5: createdAt (the "course + date" designation) is OPTIONAL on both
 // list responses — old projection lines / stale presence pointers carry none, tolerated as absent.
 describe("getMyRoundsResponseSchema", () => {
-  const line = { roundId: roundId("r1"), courseName: "Casa Verde GC", tee: "white", holes: 18 as const, par: 72, courseHandicap: 8, distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 } };
+  const line = { roundId: roundId("r1"), courseName: "Casa Verde GC", tee: "white", holes: 18 as const, par: 72, strokes: 8, score: 90, distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 } };
 
   it("round-trips a round line carrying createdAt", () => {
     roundTrips(getMyRoundsResponseSchema, { rounds: [{ ...line, finalizedAt: 2_000, createdAt: 1_500 }] });

@@ -74,15 +74,20 @@ export const gameTreatment = (config: GameConfig): string => {
 };
 
 // The sentence under the treatment line, for the two kinds where WHO RECEIVES is worth saying out
-// loud: strokes are relative now, so in a match somebody plays off scratch and it is worth naming
+// loud: strokes are relative now, so in a match somebody receives nothing and it is worth naming
 // which side. The other three get nothing here on purpose — gameTreatment's own net line already
 // states their field, and a note repeating it would just be the same sentence twice.
+//
+// Neither arm says "plays off scratch" (controller ruling, post-task-1): that is the same
+// misleading register this arc deleted from dots.ts's "everyone plays off 0", which wrongly told
+// two equal +20 golfers they were scratch golfers. Under a relative model the anchor may be a +20
+// who simply receives nothing, and "scratch" is handicap-era vocabulary for playing to par.
 export const strokesNote = (kind: GameKind): string | undefined => {
   switch (kind) {
     case "singles-match":
-      return "Only the higher number gets strokes — the lower plays off scratch.";
+      return "Only the higher number gets strokes — the lower gets none.";
     case "fourball-match":
-      return "Only the three higher numbers get strokes — the lowest plays off scratch.";
+      return "Only the three higher numbers get strokes — the lowest gets none.";
     case "stroke-play":
     case "stableford":
     case "skins":
@@ -94,3 +99,10 @@ export const strokesNote = (kind: GameKind): string | undefined => {
 // presentation predicate (no golf RESULT computed here), so the web renders through it
 // directly wherever a gross or net score sits beside its hole's par.
 export const underPar = (score: number, par: number): boolean => score < par;
+
+// A vs-par number: positive is over par, E is level, minus is under. The ONE signed-number
+// convention left in the product (spec 2026-07-29 §4). Golf's "+2 means better than scratch"
+// notation existed only because a handicap index is a number where lower is better; a vs-par
+// score has no such problem, so the notation evaporates with the index that required it.
+// Absorbs apps/web/src/ui/vsPar.ts so there is one copy.
+export const formatOverPar = (value: number): string => (value === 0 ? "E" : value > 0 ? `+${value}` : `${value}`);

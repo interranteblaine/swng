@@ -1,10 +1,10 @@
 import { useState } from "react";
 import type { GameState, GolferId, RosterEntry, RoundState, StrokeBasis } from "@swng/domain";
+import { formatOverPar } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnQuiet, cardBox, eyebrow, inputBox } from "../ui/classes";
 import { CopiedLinkLine } from "../ui/CopiedLinkLine";
-import { vsPar } from "../ui/vsPar";
 import { AddGameForm } from "./AddGameForm";
 
 // Mid-round basis correction (spec 2026-07-20): "-2" and "13" both parse fine via `parseInt`, but
@@ -181,7 +181,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetBasis }: SetupPane
                       // 2026-07-29 §2). A seat that stated strokes directly has no normal score to
                       // show, so the row says so rather than implying one was measured.
                       <span className="font-mono text-fairway">
-                        {p.basis.kind === "normally-shoots" ? ` — normally ${vsPar(p.basis.overPar, 0)} · gets ${p.strokes}` : ` — gets ${p.strokes} (given directly)`}
+                        {p.basis.kind === "normally-shoots" ? ` — normally ${formatOverPar(p.basis.overPar)} · gets ${p.strokes}` : ` — gets ${p.strokes} (given directly)`}
                       </span>
                     )}
                   </span>

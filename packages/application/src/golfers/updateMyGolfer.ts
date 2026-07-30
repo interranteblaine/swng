@@ -7,10 +7,10 @@ import type { Metrics } from "../ports/metrics.js";
 import { ensureGolfer } from "./ensureGolfer.js";
 import { toGolferView } from "./golferView.js";
 
-// indexSource is the golfer's chosen index source (index-source model spec §3): picking a
-// computed source (swng/whs) or asserting their own (declared) — patched exactly like
-// name/homeCourseId. The stored value is a CHOICE, never a computed number, so adopting WHS
-// tracks WHS live with no copy to drift (spec §2).
+// Name and home course are the whole editable profile (spec 2026-07-29 §5) — the index source this
+// also used to patch went with the index itself. There is nothing on a golfer row a golfer asserts
+// about their game anymore: what they shoot is computed from their rounds, and what they play off
+// is the basis they state when they join a round.
 //
 // PUT /me get-or-creates through the ONE shared ensureGolfer (accounts-only identity spec §2):
 // a PUT before any prior GET /me still lands on a real, sub-bound row — minted with the
@@ -32,7 +32,7 @@ export const updateMyGolfer =
 
     // A PUT that lands a real name replaces the sub-derived placeholder, so the flag is DROPPED
     // (accounts-only identity spec §2, absent = false — never rewritten to `false`): destructure it
-    // off, then re-add it only when this PUT leaves the name untouched (e.g. an index-source-only
+    // off, then re-add it only when this PUT leaves the name untouched (e.g. a home-course-only
     // edit before the funnel's name prompt) and the golfer was still on the placeholder.
     const { namePlaceholder: wasPlaceholder, ...golferBase } = found.golfer;
     const patched: Golfer = {
@@ -40,9 +40,6 @@ export const updateMyGolfer =
       ...(command.name !== undefined ? { name: command.name } : {}),
       ...(command.homeCourseId !== undefined ? { homeCourseId: command.homeCourseId } : {}),
       ...(command.name === undefined && wasPlaceholder ? { namePlaceholder: true } : {}),
-      // The chosen source when the PUT sends one, else the stored source untouched (partial-patch
-      // semantics) — always a well-formed IndexSource, never a computed value cached (spec §2).
-      handicap: command.indexSource !== undefined ? { indexSource: command.indexSource } : found.golfer.handicap,
     };
 
     await deps.golferStore.put({ ...patched, sub: found.sub }, found.revision);

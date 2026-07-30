@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { CrewId, GolferId } from "@swng/domain";
-import { formatHandicapIndex } from "@swng/domain";
+import { formatOverPar } from "@swng/domain";
 import type { SeasonStandingsResponse } from "@swng/contracts";
 import { getSeasonStandings, updateSeason } from "../api";
 import { useAuth } from "../auth/useAuth";
 import { dayCollisionChecker, roundLabel } from "../roundLabel";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnQuiet, cardBox, inputBox } from "../ui/classes";
-import { vsPar } from "../ui/vsPar";
 import { headToHeadLine } from "./headToHeadLine";
 
 export interface SeasonPanelProps {
@@ -226,8 +225,11 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
 
       {/* The scoreboard leads (crew-scoreboard spec §5) — one row per CURRENT roster member,
           `rounds: 0` included, served order (crewScoreboard's own total order — never re-sorted
-          here). Every cell renders through the shared signed-number presentation discipline
-          (vsPar/formatHandicapIndex) — a dash where the underlying stat hasn't built up yet.
+          here). Rounds · Average · Spread · Best (spec 2026-07-29 §6): once every round collapses
+          to one number in one unit, a golfer's record is a DISTRIBUTION, so the board describes it —
+          average is level, spread is consistency, best is ceiling. Every signed cell renders through
+          `formatOverPar`, the ONE vs-par renderer (spec §4) — a dash where the underlying stat
+          hasn't built up yet.
           Spec 2026-07-22 §5: a VISIBLE `<h4>Standings` heading (this IS the real board — it
           serves both crew scenarios, played-together and remote — the missing heading was the
           owner's own field report), aria-label to match. */}
@@ -239,9 +241,9 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
               <tr className="font-mono text-fairway">
                 <th className="py-1 pr-2 font-medium">Golfer</th>
                 <th className="py-1 pr-2 font-medium">Rounds</th>
-                <th className="py-1 pr-2 font-medium">Best 18</th>
-                <th className="py-1 pr-2 font-medium">Net/18</th>
-                <th className="py-1 font-medium">Index</th>
+                <th className="py-1 pr-2 font-medium">Average</th>
+                <th className="py-1 pr-2 font-medium">Spread</th>
+                <th className="py-1 font-medium">Best 18</th>
               </tr>
             </thead>
             <tbody>
@@ -251,21 +253,19 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
                     <GolferLink golferId={row.golferId} name={row.name} />
                   </td>
                   <td className="py-2 pr-2 font-mono tabular-nums">{row.rounds}</td>
-                  <td className="py-2 pr-2 font-mono tabular-nums">{row.best18 ? `${row.best18.gross} (${vsPar(row.best18.toPar, 0)})` : "—"}</td>
-                  <td className="py-2 pr-2 font-mono tabular-nums">{row.netPer18 !== undefined ? vsPar(row.netPer18, 0) : "—"}</td>
-                  <td className="py-2 font-mono tabular-nums">
-                    {row.index !== undefined
-                      ? `${formatHandicapIndex(row.index)}${row.indexDelta !== undefined ? ` (${row.indexDelta >= 0 ? "+" : "−"}${Math.abs(row.indexDelta).toFixed(1)})` : ""}`
-                      : "—"}
-                  </td>
+                  <td className="py-2 pr-2 font-mono tabular-nums">{row.average !== undefined ? formatOverPar(row.average) : "—"}</td>
+                  {/* A spread is a magnitude, never signed — "±4.2" is the whole notation, so it
+                      deliberately does NOT go through formatOverPar. */}
+                  <td className="py-2 pr-2 font-mono tabular-nums">{row.spread !== undefined ? `±${row.spread.toFixed(1)}` : "—"}</td>
+                  <td className="py-2 font-mono tabular-nums">{row.best18 ? `${row.best18.gross} (${formatOverPar(row.best18.toPar)})` : "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         <p className="font-serif text-xs text-fairway">
-          Best 18 — lowest gross, fully holed out · Net/18 — net vs par per 18 holes, from adjusted scores; builds at 3 rounds · Index — swng index, with change over
-          this season.
+          Average — score minus par over this season&apos;s rounds, a nine counting double · Spread — how much those rounds vary; builds at 5 rounds · Best 18 —
+          lowest gross, fully holed out.
         </p>
         {scoreboardEmpty && <p className="text-fairway">Rounds appear here automatically when members finalize them.</p>}
       </div>

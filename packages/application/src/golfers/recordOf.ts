@@ -1,5 +1,5 @@
 import type { GolferMetrics, GolferRoundLine } from "@swng/domain";
-import { golferMetrics, postedDifferential } from "@swng/domain";
+import { golferMetrics } from "@swng/domain";
 import { sortLines } from "../projections/projectArchive.js";
 
 // The store's finalizedAtMs/createdAtMs cross the wire under GetMyRounds' own names
@@ -16,12 +16,12 @@ const toWireLine = (
   tee: line.tee,
   holes: line.holes,
   par: line.par,
-  courseHandicap: line.courseHandicap,
-  ...(line.ags !== undefined ? { ags: line.ags } : {}),
-  // A posted differential is a one-decimal value (postedDifferential's own doc comment) — the
-  // wire NEVER carries the raw full-precision figure the index fold averages internally. Only
-  // this display step rounds; golferMetrics below still folds the RAW `sorted` lines.
-  ...(line.differential !== undefined ? { differential: postedDifferential(line.differential) } : {}),
+  // The strokes the fold derived, the normal score the player stated (absent when they stated raw
+  // strokes), and the round's own gross (absent when the card carries a pickup or a gap — spec
+  // 2026-07-29 §2d). `score` is what a history row renders: holeResults never crosses the wire.
+  strokes: line.strokes,
+  ...(line.normallyShoots !== undefined ? { normallyShoots: line.normallyShoots } : {}),
+  ...(line.score !== undefined ? { score: line.score } : {}),
   distribution: line.distribution,
   finalizedAt: line.finalizedAtMs,
   ...(line.createdAtMs !== undefined ? { createdAt: line.createdAtMs } : {}),
@@ -35,12 +35,12 @@ const toWireLine = (
 // fold (golferMetrics), and `.reverse()` turns that same order into newest-first for the wire
 // history, one ordering serving both consumers.
 //
-// `metrics` here is the BARE domain GolferMetrics — no `computedAtMs` on whsIndex. That
-// read-time stamp is getMyRecord.ts's own addition on top of this fold's output (it needs a
-// Clock this pure function doesn't take); getGolfer.ts serves the bare shape as-is
-// (GetGolferResponse's own `metrics: GolferMetrics` field). `recordOf([])` is already the
-// honest empty answer (golferMetrics([]) yields a zeroed typicalEighteen + empty indexHistory,
-// no computed indexes) — there is no separate "no data" branch to keep in sync.
+// `metrics` is the BARE domain GolferMetrics, and BOTH responses now serve it as-is: the
+// read-time `computedAtMs` stamp that used to ride getMyRecord's own whsIndex went with the index
+// itself (spec 2026-07-29 §7), so there is no longer any difference between the two shapes.
+// `recordOf([])` is already the honest empty answer (golferMetrics([]) yields a zeroed
+// typicalEighteen + empty averageHistory, no average/spread) — there is no separate "no data"
+// branch to keep in sync.
 export const recordOf = (
   lines: readonly (GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number })[],
 ): { metrics: GolferMetrics; history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number })[] } => {

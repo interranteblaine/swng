@@ -37,7 +37,7 @@ const makeLine = (id: ReturnType<typeof roundId>, finalizedAtMs: number, overrid
   tee: "white",
   holes: 18,
   par: 72,
-  courseHandicap: 8,
+  strokes: 8,
   distribution,
   finalizedAtMs,
   ...overrides,

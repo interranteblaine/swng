@@ -22,32 +22,29 @@ import {
 } from "./support.js";
 import type { AccountGolfer } from "./support.js";
 
-// The unrated-courses arc gate (docs/superpowers/specs/2026-07-14/15 unrated-courses; Task 6):
-// a REAL 9-hole course with NO course rating plays end-to-end — its scorecard, games, and dots
-// work exactly as a rated course's do (dots come from stroke index + course handicap, which the
-// missing rating never touches), a finalized round posts an AGS but NO handicap differential
-// (unrated → not postable), the golfer's WHS index is never moved by it, and the round's
-// difficulty-neutral (ags − par) pseudo-differential feeds the SWNG index — the declaration
-// aid an unrated golfer reasonably puts in their declared field.
+// The unrated-courses arc gate (docs/superpowers/specs/2026-07-14/15 unrated-courses; Task 6),
+// RE-AIMED by spec 2026-07-29: a REAL 9-hole course with NO course rating enters, plays and
+// finalizes end-to-end, and its rounds land on the golfer's record like any other.
 //
-// THE PAIRING TRAP (spec's own headline risk — and a correction to the task brief's own
-// arithmetic): the swng index reuses domain's published 2020 nine-hole pairing
-// (combineNineHoleDifferentials) and the Rule 5.2a small-sample table (computeIndexDetail).
-// computeIndexDetail is UNDEFINED below THREE differentials (packages/domain/src/handicap/
-// whs.test.ts: "is undefined under three scores"; "swngIndex is undefined below the
-// 3-differential bootstrap"). Two 9-hole rounds pair into exactly ONE combined pseudo-
-// differential → still below the bootstrap → swngIndex ABSENT. A 9-hole course therefore
-// needs SIX finalized rounds (three oldest-first pairs → three combined pseudo-differentials)
-// before the swng index materializes — NOT two. Every expected number below (the pars/SIs,
-// the singles-match dots, the AGS per round, and the swng index itself) was hand-pinned and
-// cross-checked against the real domain engines BEFORE any live call, and is asserted verbatim:
-// a live disagreement is a BLOCKED finding to escalate, never a pin quietly adjusted to match
-// observed output (the run's-the-oracle inversion).
+// **The premise this file was built on is gone, and that is the point.** Rating and slope are
+// still recorded on the card (they are printed on the real scorecard) and read by NOTHING (spec
+// §7): the adjusted gross score, the score differential, the Rule 5.2a small-sample table, the
+// published 2020 nine-hole differential pairing, and both indexes are deleted whole. So "unrated"
+// is no longer a distinct code path to gate — there is nothing left for a missing rating to
+// disable. What survives is the honest half of the original gate: a blank-rating card must not be
+// REJECTED anywhere, and its rounds must feed the average exactly like a rated card's do. The old
+// PAIRING TRAP paragraph — six rounds needed before an index materialized — is deleted with the
+// machinery it described; ONE scored round is already an average.
+//
+// Every expected number below (the pars/SIs, the singles-match dots, the gross per round, and the
+// average/spread) is hand-pinned and derived BEFORE any live call, and asserted verbatim: a live
+// disagreement is a BLOCKED finding to escalate, never a pin quietly adjusted to match observed
+// output (the run's-the-oracle inversion).
 //
 // Everything is browser-driven where the story needs a browser (course entry, whose "unrated"
 // render IS under test; a live round, whose dots + two-tap scoring ARE under test) and
 // out-of-browser via the *Direct helpers where it doesn't (the six record-building rounds —
-// finalize/AGS/index math is not a UI behavior; the same precedent as identityRecord.spec.ts).
+// finalize and the average fold are not UI behavior; the same precedent as identityRecord.spec.ts).
 // Accounts-only (the wall): Uma and Vic are both signed-in accounts, minted + named by the
 // harness; Uma runs signed in from her first navigation (course entry and round creation are
 // both sign-in-gated), Vic joins the live round as HIMSELF over a direct HTTP self-join.
@@ -74,30 +71,28 @@ const UMA_CH = 13;
 const VIC_CH = 2;
 
 // The STANDARD CARD's dots (spec 2026-07-19 §2a: the card never changes) — ScorecardGrid always
-// renders courseHandicapAllocation (packages/domain/src/scoring/allocation.ts), EACH PLAYER'S
-// OWN course handicap allocated by stroke index, no allowance, no game. allocateStrokes(13, 9
+// renders roundStrokeAllocation (packages/domain/src/scoring/allocation.ts), EACH PLAYER'S
+// OWN round strokes allocated by stroke index, no game. allocateStrokes(13, 9
 // holes): base = floor(13/9) = 1, extra = 13 % 9 = 4 → every hole gets 1, and the four hardest
 // holes (stroke index 1-4 — holes 2, 6, 4, 8 in this card) get a 2nd. allocateStrokes(2, 9
 // holes): base = 0, extra = 2 → only stroke index 1 and 2 (holes 2 and 6) get a single dot,
-// everywhere else 0. The missing rating changes NONE of this: dots are pure stroke-index +
-// course-handicap arithmetic. Cross-checked against courseHandicapAllocation(participants,
-// card) directly.
+// everywhere else 0. The missing rating changes NONE of this: dots are pure stroke-index + strokes
+// arithmetic. Cross-checked against roundStrokeAllocation(participants, card) directly.
 const EXPECTED_UMA_DOTS = [1, 2, 1, 2, 1, 2, 1, 2, 1] as const; // holes 1..9
 const EXPECTED_VIC_DOTS = [0, 1, 0, 0, 0, 1, 0, 0, 0] as const; // holes 1..9
 
 // The Match play PANEL'S own strokes line (relative, not each player's own CH) — moved here from
 // the grid, which now renders the standard card's dots above instead. gameStrokeAllocation:
 // singles-match is RELATIVE — only the higher-handicap player (Uma) receives any, the lower
-// (Vic) plays scratch. diff = playingHandicap(|13 − 2| = 11, allowance 1.0 = 100%) = 11 — exactly
-// what strokesSummary (apps/web/src/round/dots.ts) states in the panel; Vic is omitted (his
-// relative allocation is 0, strokeGrant "none").
+// (Vic) is the field's anchor and receives nothing. Under the ONE stroke rule (spec §2b) the
+// difference is |13 − 2| = 11 — exactly what strokesSummary (apps/web/src/round/dots.ts) states in
+// the panel; Vic is omitted from that line because his allocation is 0.
 const EXPECTED_MATCH_STROKES_LINE = "Uma 11 dots";
 
-// The six record-building rounds' hole-by-hole gross scores, oldest-first. Every score is at or
-// below bogey (par + 1) and the AGS course handicap (8) puts every net-double-bogey cap (par + 2
-// + dots) strictly above it, so NO hole is ever capped and AGS == gross exactly, independent of
-// which specific holes take a stroke — the same "keep every score under its cap" trick
-// identityRecord.spec.ts uses so the composition arithmetic is hand-verifiable. PAR per hole:
+// The six record-building rounds' hole-by-hole gross scores, oldest-first. Every hole carries a
+// stroke count (no pickup anywhere), which is what makes each card a SCORED card that feeds the
+// average (spec §2d). No cap applies to any of them — the net-double-bogey cap now touches only a
+// picked-up hole — so each round's `score` is simply its own sum. PAR per hole:
 // [4,4,3,5,4,4,3,5,4].
 const ROUND_SCORES: readonly (readonly number[])[] = [
   [5, 5, 4, 5, 4, 4, 3, 5, 4], // gross 39 — bogeys on holes 1,2,3
@@ -107,20 +102,32 @@ const ROUND_SCORES: readonly (readonly number[])[] = [
   [5, 5, 3, 5, 4, 4, 3, 5, 4], // gross 38 — bogeys on holes 1,2
   [5, 5, 4, 6, 4, 4, 3, 5, 4], // gross 40 — bogeys on holes 1,2,3,4
 ];
-const AGS_HTTP_CH = 8; // AGS's own course handicap — irrelevant to the totals (no hole is ever capped), pinned so the gate is explicit
+// What Uma states at the tee (spec §2a's first constructor). She plays every round alone, so she is
+// her own anchor and it derives ZERO strokes — the grosses below are untouched by it. Pinned as a
+// non-zero value on purpose: it rides onto every line as `normallyShoots`, so a fold that confused
+// the ASSERTION with the DERIVED strokes would show up.
+const STATED_OVER_PAR = 8;
 
-// Hand-pinned AGS per round, oldest-first (== each row's gross sum, since nothing caps).
-// Verified against adjustedGrossScore(unratedTee, 8, card) round-by-round.
-const PINNED_AGS_OLDEST_FIRST = [39, 41, 40, 42, 38, 40] as const;
+// Hand-pinned gross per round, oldest-first (== each row's own sum). Every hole carries a stroke
+// count, so `hasCompleteScore` holds and each line's wire `score` IS this number (spec §2d/§8).
+const PINNED_SCORES_OLDEST_FIRST = [39, 41, 40, 42, 38, 40] as const;
 
-// THE GATE. The (ags − par) pseudo-differentials, oldest-first: [3, 5, 4, 6, 2, 4]. The 2020
-// nine-hole pairing folds them oldest-first — (3,5)→8, (4,6)→10, (2,4)→6 — into the three
-// combined pseudo-differentials [8, 10, 6]. computeIndexDetail over three values uses the lowest
-// 1 with a −2.0 adjustment (Rule 5.2a small-sample table): 6 − 2.0 = 4.0, differentialsUsed 1.
-// Verified against swngIndex(lines) directly. A single 9 (round 1 alone) and five 9s
-// (rounds 1–5 → only two combined pairs) both stay BELOW the three-differential bootstrap, so the
-// swng index is absent until the sixth round completes the third pair.
-const PINNED_SWNG = { value: 4, differentialsUsed: 1 } as const;
+// THE GATE, re-derived for the average (spec 2026-07-29 §5/§7 — the adjusted gross score, the
+// differentials, the 9-hole pairing and both indexes are deleted whole; nothing computes from
+// rating or slope, so a blank-rating card is no longer a distinct code path at all). A NINE
+// contributes its vs-par figure DOUBLED (spec §2d), so on this par-36 card:
+//
+//   gross     39   41   40   42   38   40
+//   vs par    +3   +5   +4   +6   +2   +4
+//   doubled   +6  +10   +8  +12   +4   +8
+//
+// after round 1: mean(6) = 6                      -> average 6; spread ABSENT (1 < 5 rounds)
+// after round 6: sum 48, mean 48/6 = 8            -> average 8
+//                population sd = sqrt(40/6) = 2.581989  -> spread 2.6
+//   (deviations from 8: -2, +2, 0, +4, -4, 0; squares 4+4+0+16+16+0 = 40)
+const PINNED_AVERAGE_AFTER_ONE = 6;
+const PINNED_AVERAGE_AFTER_SIX = 8;
+const PINNED_SPREAD_AFTER_SIX = 2.6;
 
 // AddCoursePage/HoleGrid own the keyboard-first grid (par default 4; yardage/SI blank). One
 // script-driven focus() lands on Hole 1's par, and every field-to-field move from there is a Tab
@@ -147,9 +154,8 @@ const fillNineHoleGridKeyboardOnly = async (page: Page): Promise<void> => {
 
 // One record-building round, played entirely out-of-browser: start as-self (Bearer + the
 // account's own golferId, both sourced from the record by startRoundDirect), score nine holes via
-// the round's own participant token, finalize. No game is added — a solo card with an AGS is all
-// the record needs, and finalize with an empty must-resolve set is exactly identityRecord's own
-// idiom.
+// the round's own participant token, finalize. No game is added — a solo scored card is all the
+// record needs, and finalize with an empty must-resolve set is exactly identityRecord's own idiom.
 const playUnratedNine = async (
   httpUrl: string,
   account: AccountGolfer,
@@ -157,7 +163,7 @@ const playUnratedNine = async (
   label: string,
   scores: readonly number[],
 ): Promise<void> => {
-  const started = await startRoundDirect(httpUrl, account, { course, tee: "white", basis: { kind: "normally-shoots", overPar: AGS_HTTP_CH } });
+  const started = await startRoundDirect(httpUrl, account, { course, tee: "white", basis: { kind: "normally-shoots", overPar: STATED_OVER_PAR } });
   const ops = createScoreOps(`unrated-${label}`);
   for (const [i, strokes] of scores.entries()) {
     await recordScoreDirect(httpUrl, started.roundId, started.token, { golferId: account.golfer.golferId, hole: i + 1, strokes }, ops);
@@ -257,8 +263,8 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     await joinRoundDirect(httpUrl, vic, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: VIC_CH } });
     await waitForParticipant(page, "Vic");
 
-    // Add the singles match (Uma vs Vic) via SetupPanel — default 100% allowance, exactly the
-    // pinned allocation above.
+    // Add the singles match (Uma vs Vic) via SetupPanel — one stroke rule, the difference between
+    // the two, exactly the pinned allocation above.
     await addSinglesGame(page, "Uma", "Vic");
     await expect(chip(page, "Match play")).toBeVisible();
 
@@ -293,10 +299,10 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     await enterScore(page, "Uma", 6, 6);
     await expect(page.getByRole("button", { name: "Uma hole 6", exact: true })).toHaveText(`${DOT}${DOT}64`);
     // This live round is deliberately left unfinalized — it proves the live experience, and its
-    // partial card would settle "incomplete" (no AGS), contributing nothing to Uma's record below.
+    // partial card carries no score at all, contributing nothing to Uma's record below.
   });
 
-  test("3: one finalized unrated 9 posts an AGS but NO differential — and a lone 9 yields no swng index yet", async () => {
+  test("3: one finalized unrated 9 posts its score and an average — nothing needs a rating", async () => {
     test.setTimeout(90_000);
     const { httpUrl } = loadWebEnv();
 
@@ -316,22 +322,26 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     const line = record.history[0]!;
     expect(line.holes).toBe(9);
     expect(line.par).toBe(PAR_TOTAL);
-    expect(line.ags).toBe(PINNED_AGS_OLDEST_FIRST[0]); // 39 — an AGS is posted
-    expect(line.differential).toBeUndefined(); // …but never a differential: unrated, not postable
-
-    // An unrated round cannot move the WHS index — it carries no differential, so it never reaches
-    // Rule 5.2a. A fresh account with only this round has no WHS index at all.
-    expect(record.metrics.whsIndex).toBeUndefined();
-    // A single 9 has no partner: combineNineHoleDifferentials leaves it pending → no combined
-    // pseudo-differential → below the three-differential bootstrap → no swng index yet.
-    expect(record.metrics.swngIndex).toBeUndefined();
+    expect(line.score).toBe(PINNED_SCORES_OLDEST_FIRST[0]); // 39 — the round's own gross
+    // The assertion beside its consequence (spec §2a/§2b): she stated +8, and playing alone she is
+    // her own anchor, so the fold derived 0 strokes.
+    expect(line.normallyShoots).toBe(STATED_OVER_PAR);
+    expect(line.strokes).toBe(0);
+    // Rating and slope are recorded on the card and read by NOTHING (spec §7): an unrated round is
+    // an ordinary round, so ONE of them already produces an average — 39 on par 36 is +3, doubled
+    // to +6 for the nine.
+    expect(record.metrics.average).toBe(PINNED_AVERAGE_AFTER_ONE);
+    expect(record.metrics.spread).toBeUndefined(); // one round is below the 5-round floor
+    // The retired WHS/index members can never come back onto this wire.
+    for (const retired of ["ags", "differential"]) expect(line).not.toHaveProperty(retired);
+    for (const retired of ["whsIndex", "swngIndex", "indexHistory"]) expect(record.metrics).not.toHaveProperty(retired);
   });
 
-  test("4: six finalized 9s pair oldest-first into the swng index; the WHS index stays untouched", async () => {
+  test("4: six finalized unrated 9s average to +8 with a real spread — every nine counted double", async () => {
     test.setTimeout(240_000); // five more sequential API rounds + the projector catch-up poll
     const { httpUrl } = loadWebEnv();
 
-    // Strictly in order (each finalized before the next starts) — the oldest-first pairing below
+    // Strictly in order (each finalized before the next starts) — the averageHistory assertion below
     // depends on exactly this finalize sequence, the same discipline identityRecord.spec.ts relies on.
     for (let i = 1; i < ROUND_SCORES.length; i += 1) {
       await playUnratedNine(httpUrl, uma, course, `r${i + 1}`, ROUND_SCORES[i]!);
@@ -345,27 +355,24 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     );
     expect(record.history).toHaveLength(6);
 
-    // Every unrated line: an AGS, never a differential — on a 9-hole card of par 36.
+    // Every unrated line: a real score on a 9-hole card of par 36, and nothing rating-derived.
     for (const [i, line] of record.history.entries()) {
       expect(line.holes, `history[${i}].holes`).toBe(9);
       expect(line.par, `history[${i}].par`).toBe(PAR_TOTAL);
-      expect(line.ags, `history[${i}].ags`).toBeDefined();
-      expect(line.differential, `history[${i}].differential`).toBeUndefined();
+      expect(line.score, `history[${i}].score`).toBeDefined();
     }
 
     // history is newest-first (getMyRecord's sortLines + reverse) and finalize ran r1..r6, so the
-    // AGS column newest-first is the pinned oldest-first list reversed: [40, 38, 42, 40, 41, 39].
-    const expectedAgsNewestFirst = [...PINNED_AGS_OLDEST_FIRST].reverse();
-    for (const [i, line] of record.history.entries()) {
-      expect(line.ags, `history[${i}].ags`).toBe(expectedAgsNewestFirst[i]);
-    }
+    // score column newest-first is the pinned oldest-first list reversed: [40, 38, 42, 40, 41, 39].
+    expect(record.history.map((line) => line.score)).toEqual([...PINNED_SCORES_OLDEST_FIRST].reverse());
 
-    // A wholly-unrated season still cannot produce a WHS index — no differentials exist to average.
-    expect(record.metrics.whsIndex).toBeUndefined();
-
-    // THE GATE: the six (ags − par) pseudo-differentials [3,5,4,6,2,4] pair oldest-first into
-    // [8,10,6], and computeIndexDetail takes the lowest 1 of three with a −2.0 adjustment →
-    // 6 − 2.0 = 4.0, differentialsUsed 1. The swng index now reflects the unrated play.
-    expect(record.metrics.swngIndex).toEqual(PINNED_SWNG);
+    // THE GATE: six unrated nines, each contributing its vs-par figure DOUBLED — [6,10,8,12,4,8] —
+    // average to exactly +8, with a population spread of 2.6. Unrated play feeds the average like
+    // any other round; there is no second number and no bootstrap to cross.
+    expect(record.metrics.average).toBe(PINNED_AVERAGE_AFTER_SIX);
+    expect(record.metrics.spread).toBe(PINNED_SPREAD_AFTER_SIX);
+    // averageHistory is oldest -> newest, one point per round, and its last point IS the headline.
+    expect(record.metrics.averageHistory).toHaveLength(6);
+    expect(record.metrics.averageHistory.at(-1)?.average).toBe(PINNED_AVERAGE_AFTER_SIX);
   });
 });

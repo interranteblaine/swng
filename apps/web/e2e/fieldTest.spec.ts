@@ -426,10 +426,12 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
     // RecordSections (GolferPage.tsx) — the SAME extraction ProfilePage renders for yourself,
     // rendered here with person="their" (whole-branch-review finding: the copy itself must read
-    // third-person, not just the index line above it), no controls. Both section headings render
-    // regardless of how much history Ann has accrued (the chart's own <8-rounds gate changes its
-    // body text, never its heading).
-    await expect(pageB.getByRole("heading", { name: "Their index over time" })).toBeVisible();
+    // third-person), no controls. All three headings render regardless of how much history Ann has
+    // accrued (the chart's own <8-rounds gate changes its body text, never its heading), and the
+    // headline is the ONE number about her now — the separate "plays off N" index line this page
+    // used to carry is deleted with the index (spec 2026-07-29 §7).
+    await expect(pageB.getByRole("heading", { name: "What they shoot" })).toBeVisible();
+    await expect(pageB.getByRole("heading", { name: "Their average over time" })).toBeVisible();
     await expect(pageB.getByRole("heading", { name: "History" })).toBeVisible();
   });
 

@@ -193,8 +193,8 @@ describe("season + standings schemas", () => {
     });
   });
 
-  // A scoreboard row's every optional (best18/netPer18/index/indexDelta) round-trips both
-  // present (a full row) and absent (rounds-only — the dash-arm case the web renders "—" for).
+  // A scoreboard row's every optional (average/spread/best18) round-trips both present (a full
+  // row) and absent (rounds-only — the dash-arm case the web renders "—" for).
   it("seasonStandingsResponseSchema round-trips a full scoreboard row and a bare rounds-only row; partners grow alongside", () => {
     roundTrips(seasonStandingsResponseSchema, {
       seasonId: "s-1",
@@ -202,7 +202,7 @@ describe("season + standings schemas", () => {
       startsAt: "2026-01-01",
       endsAt: "2026-12-31",
       scoreboard: [
-        { golferId: golferId("ann"), name: "Ann", rounds: 4, best18: { gross: 82, toPar: 10 }, netPer18: 1.2, index: 14.1, indexDelta: -0.4 },
+        { golferId: golferId("ann"), name: "Ann", rounds: 4, average: 26, spread: 4.2, best18: { gross: 82, toPar: 10 } },
         { golferId: golferId("bo"), name: "Bo", rounds: 0 },
       ],
       rounds: [],

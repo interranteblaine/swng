@@ -189,7 +189,7 @@ const setup = async (verifier: AccountVerifier = subVerifier, logger: Logger = c
     terminateGame: terminateGame({ journal, broadcast, clock, ids }),
     getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids }),
-    getMyRecord: getMyRecord({ golferStore, projectionStore, clock }),
+    getMyRecord: getMyRecord({ golferStore, projectionStore }),
     getMyCourseRecord: getMyCourseRecord({ golferStore, projectionStore }),
     getMyRounds: getMyRounds({ golferStore, projectionStore }),
     getMyLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
@@ -890,7 +890,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/record", token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(200);
     expect(getMyRecordResponseSchema.parse(JSON.parse(resp.body!))).toEqual({
-      metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [], bests: {}, milestones: [] },
+      metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, averageHistory: [], bests: {}, milestones: [] },
       history: [],
     });
   });
@@ -2006,7 +2006,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
   // Navigation spec §6a: the golfer page's read — "golfer"-gated (any signed-in caller), but
   // NOT self-scoped (unlike GET /me/record just above): the target golferId rides the PATH.
   describe("GET /golfers/{golferId}", () => {
-    it("returns another golfer's name/indexSource/metrics/history for any signed-in caller", async () => {
+    it("returns another golfer's name/metrics/history for any signed-in caller", async () => {
       const { dispatcher } = await setupArchive();
       const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
       const { golfer } = golferResponseSchema.parse(JSON.parse(putResp.body!));
@@ -2016,8 +2016,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       const parsed = getGolferResponseSchema.parse(JSON.parse(resp.body!));
       expect(parsed).toEqual({
         name: "Ann",
-        indexSource: { kind: "swng" },
-        metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [], bests: {}, milestones: [] },
+        metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, averageHistory: [], bests: {}, milestones: [] },
         history: [],
       });
     });

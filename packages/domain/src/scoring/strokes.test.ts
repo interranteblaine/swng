@@ -35,10 +35,6 @@ describe("allocateStrokes", () => {
   it("wraps past a full lap: 11 on 9 holes = 1 everywhere + extras on SI 1..2", () => {
     expect(allocateStrokes(11, nine)).toEqual([1, 2, 1, 1, 1, 1, 2, 1, 1]);
   });
-  it("gives strokes back from the easiest holes for plus handicaps", () => {
-    // -2 → SI 9 and 8 → holes 3 and 6 get -1
-    expect(allocateStrokes(-2, nine)).toEqual([0, 0, -1, 0, 0, -1, 0, 0, 0]);
-  });
   it("zero means a clean card", () => {
     expect(allocateStrokes(0, nine)).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
   });
@@ -68,10 +64,6 @@ describe("netStrokes", () => {
   it("positive dots (received strokes): net is less than gross", () => {
     expect(netStrokes(5, 1)).toBe(4);
     expect(netStrokes(6, 2)).toBe(4);
-  });
-  it("negative dots (a plus handicap giving strokes back): net is greater than gross", () => {
-    expect(netStrokes(5, -1)).toBe(6);
-    expect(netStrokes(4, -2)).toBe(6);
   });
   it("zero dots: net equals gross", () => {
     expect(netStrokes(5, 0)).toBe(5);

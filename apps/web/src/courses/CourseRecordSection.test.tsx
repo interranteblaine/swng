@@ -76,7 +76,7 @@ describe("CourseRecordSection", () => {
 
   it("renders nothing at zero rounds — the record 'shows from the 1st round'", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann", indexSource: { kind: "swng" } } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetMyCourseRecord.mockResolvedValue({ courseId: COURSE, rounds: 0 });
 
     renderSection();
@@ -87,7 +87,7 @@ describe("CourseRecordSection", () => {
 
   it("below 5 rounds: shows the stat lines and the gate copy, not the hole insights", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann", indexSource: { kind: "swng" } } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     const record: GetMyCourseRecordResponse = {
       courseId: COURSE,
       rounds: 3,
@@ -110,7 +110,7 @@ describe("CourseRecordSection", () => {
 
   it("at 5+ rounds: renders the hole insights via the domain phrase formatters", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann", indexSource: { kind: "swng" } } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     const record: GetMyCourseRecordResponse = {
       courseId: COURSE,
       rounds: 5,
@@ -135,7 +135,7 @@ describe("CourseRecordSection", () => {
 
   it("a fetch failure renders the honest fallback line, never raw error text", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann", indexSource: { kind: "swng" } } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetMyCourseRecord.mockRejectedValue(new Error("network down"));
 
     renderSection();

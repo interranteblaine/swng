@@ -24,18 +24,29 @@ export * from "./scoring/present.js";
 export * from "./scoring/golden/fixtureCourse.js";
 export * from "./scoring/golden/deck.js";
 export * from "./scoring/golden/fieldDeck18.js";
-export * from "./handicap/whs.js";
-export * from "./handicap/present.js";
+// handicap/ is deleted in its entirety (spec 2026-07-29 §7): whs.ts's adjusted gross score, score
+// differentials, the Rule 5.2a table, the 9-hole pairing and the course-handicap conversions, and
+// present.ts's formatHandicapIndex/formatCourseHandicap/strokeGrant/indexSourcePhrase — every one
+// of which existed to render a NEGATIVE stroke count, which `strokes` can no longer be. The one
+// signed-number renderer left is `formatOverPar` in scoring/present.js, exported above.
 export * from "./golfer/golfer.js";
 export * from "./golfer/placeholderName.js";
 export * from "./golfer/record.js";
+// golfer/average.ts (spec 2026-07-29 §2c/§5): what you normally shoot relative to par — the fold
+// the record and the crew board both read, plus AveragePoint for the profile's chart. Banned onto
+// the web-side fence below like every other barrel-exported golf computation, and deliberately NOT
+// re-exported through @swng/client: the average is server-computed and served, so an on-device
+// copy would be fence-legal and boundary-wrong.
+export * from "./golfer/average.js";
 export * from "./golfer/metrics.js";
 export * from "./golfer/coursesPlayed.js";
 // analytics.ts (analytics spec 2026-07-21 §3): export the types every consumer needs to name
 // (GolferMetrics.bests/milestones' own member shapes) plus fullyHoledOut/grossOf — the "fully
 // holed out" definition Task 4's course-record fold reuses. bestsOf/milestonesOf stay
 // package-internal (metrics.ts imports them directly): nothing outside @swng/domain calls them —
-// golferMetrics is the one sanctioned way to reach a bests/milestones value.
+// golferMetrics is the one sanctioned way to reach a bests/milestones value. hasCompleteScore/
+// scoreOf (spec 2026-07-29 §2d — "does this card have a score, and what is it") stay
+// package-internal for the same reason: average.ts and record.ts are their only callers.
 export type { BestRound, GolferBests, MilestoneKind, Milestone } from "./golfer/analytics.js";
 export { fullyHoledOut, grossOf } from "./golfer/analytics.js";
 // courseRecord.ts (analytics spec 2026-07-21 §4): "Your record here" — the per-course fold plus

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import type { CourseId } from "@swng/domain";
-import { neverBirdiedPhrase, scoringHolePhrase, worstHolePhrase } from "@swng/domain";
+import { formatOverPar, neverBirdiedPhrase, scoringHolePhrase, worstHolePhrase } from "@swng/domain";
 import type { GetMyCourseRecordResponse } from "@swng/contracts";
 import { getMyCourseRecord } from "../api";
 import { useAuth } from "../auth/useAuth";
@@ -9,10 +9,6 @@ import { linkEntity } from "../ui/classes";
 
 const INSIGHTS_MIN_ROUNDS = 5;
 
-// Presentation-only sign formatting (RecordSections.tsx's own `vsPar` precedent) — `toPar`
-// already arrived pre-computed on the wire (gross − the round's own frozen par); this only
-// decides how to prefix it, no golf compute.
-const signed = (toPar: number): string => (toPar === 0 ? "E" : toPar > 0 ? `+${toPar}` : `${toPar}`);
 
 // "Your record here" (analytics read-folds spec 2026-07-21 §4): the caller's own rows at ONE
 // course — signed-in only (CoursePage itself is a public, "none"-auth page, so this section gates
@@ -66,7 +62,7 @@ export function CourseRecordSection({ courseId }: { readonly courseId: CourseId 
             <li>
               Best round —{" "}
               <Link to={`/rounds/${record.best.roundId}`} className={linkEntity}>
-                {record.best.gross} ({signed(record.best.toPar)})
+                {record.best.gross} ({formatOverPar(record.best.toPar)})
               </Link>
             </li>
           )}

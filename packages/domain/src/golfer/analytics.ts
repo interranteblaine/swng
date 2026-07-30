@@ -1,4 +1,5 @@
 import type { RoundId } from "../ids.js";
+import { scoredStrokes } from "../round/holeResult.js";
 import type { GolferRoundLine } from "./record.js";
 
 // "Fully holed out" (analytics spec 2026-07-21 §2, the shared definition every fold below
@@ -16,6 +17,25 @@ export const fullyHoledOut = (line: GolferRoundLine): boolean =>
 // non-strokes hole has nothing meaningful to sum).
 export const grossOf = (line: GolferRoundLine): number =>
   line.holeResults!.reduce((sum, h) => sum + (h.result.kind === "strokes" ? h.result.strokes : 0), 0);
+
+// Every hole has a NUMBER — a stroke count or a conceded score (spec 2026-07-29 §2d). Distinct
+// from fullyHoledOut above, which is stricter (a conceded putt means you did not hole out) and
+// still gates Best and the milestones. This one gates the average, which is why match rounds
+// count. Both read the same `holeResults`, so the ONE thing that separates them is which hole
+// kinds carry a number — expressed here through `scoredStrokes`, the ONE accessor for exactly
+// that question (round/holeResult.ts), rather than a hand-rolled kind test that could drift from
+// it. `holeResults` absent (a line written before the analytics arc) is tolerated as "no score",
+// never a throw — the fullyHoledOut precedent.
+export const hasCompleteScore = (line: GolferRoundLine): boolean =>
+  line.holeResults !== undefined &&
+  line.holeResults.length === line.holes &&
+  line.holeResults.every((h) => scoredStrokes(h.result) !== undefined);
+
+// Sum over a line with a complete score — call only when hasCompleteScore(line) (the
+// `holeResults!` documents that precondition rather than re-checking it, the grossOf precedent).
+// Unlike grossOf this counts a conceded hole at its recorded score, because you made that score.
+export const scoreOf = (line: GolferRoundLine): number =>
+  line.holeResults!.reduce((sum, h) => sum + (scoredStrokes(h.result) ?? 0), 0);
 
 // One record: the round that set it, its gross, and gross relative to that round's own frozen
 // par (spec §3).

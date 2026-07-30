@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import type { PeekRoundResponse } from "@swng/contracts";
-import { ApiError, joinRound, peekRound, updateMe } from "../api";
+import { ApiError, getMyRecord, joinRound, peekRound, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { teeNumbers } from "../courses/teeNumbers";
@@ -24,6 +24,10 @@ export function JoinRoundPage() {
   usePageTitle("Join a round");
   const navigate = useNavigate();
   const auth = useAuth();
+  // Destructured so the record-fetch effect below lists a stable function reference as its dep
+  // (withAuth's own useCallback identity, useAuth.ts) rather than the whole `auth` object — the
+  // ProfilePage/CreateRoundPage precedent.
+  const { withAuth } = auth;
   const [searchParams] = useSearchParams();
 
   // The wall (accounts-only identity spec §3): joining is self-join only, from the caller's own
@@ -44,9 +48,14 @@ export function JoinRoundPage() {
   const [code, setCode] = useState(() => (searchParams.get("code") ?? "").toUpperCase());
   const [tee, setTee] = useState("");
   // What the golfer normally shoots relative to par (spec 2026-07-29 §2): the ONE number they
-  // state, in the unit they already speak on the first tee. Blank until typed — "0" would assert
-  // "I shoot par", a real claim about them, and no default may put a claim in the round's log.
-  // Task 5: seed from record.metrics.average — blank when there is none, no floor and no fallback.
+  // state, in the unit they already speak on the first tee.
+  // Pre-filled from the golfer's own average (spec 2026-07-29 §2c): what they normally shoot is
+  // exactly the number this field asks for, so the one they can already read on their profile lands
+  // here as a starting point they can type over. BLANK when there is no average — a brand-new
+  // golfer, or one whose every round contains a pickup — with no floor and no fallback chain: one
+  // finished round is better evidence than a guess, and a guess in this field becomes a claim in
+  // the round's log. Seeded ONCE, and only while the field is still untouched, so a pre-fill
+  // arriving after the golfer has typed can never overwrite what they typed.
   const [overPar, setOverPar] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -65,6 +74,24 @@ export function JoinRoundPage() {
   // joinRoundRequestSchema expects the canonical uppercase 6-char form — uppercase here so a
   // golfer typing lowercase never hits a validation error on something this trivial to fix.
   const upperCode = code.trim().toUpperCase();
+
+  // GET /me/record purely for the pre-fill above — the average is served, never computed here
+  // (the compute fence: `averageOf` is deliberately not re-exported to the client). A failed fetch
+  // just leaves the field blank, which is the honest no-average state anyway.
+  useEffect(() => {
+    if (!auth.signedIn) return;
+    let ignore = false;
+    void withAuth((token) => getMyRecord(token))
+      .then((record) => {
+        if (ignore) return;
+        const average = record.metrics.average;
+        if (average !== undefined) setOverPar((current) => (current === "" ? String(average) : current));
+      })
+      .catch(() => {}); // withAuth already handles a terminal 401; anything else leaves the field blank
+    return () => {
+      ignore = true;
+    };
+  }, [auth.signedIn, withAuth]);
 
   useEffect(() => {
     setCourseName(undefined);

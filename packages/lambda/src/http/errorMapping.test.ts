@@ -33,18 +33,9 @@ describe("toHttpError — course validation DomainErrors map to coded 400s", () 
     expect(JSON.parse(result.body)).toEqual({ code, message: `${code}: some detail` });
   });
 
-  // task-1 (unrated courses): whs.ts's scoreDifferential/courseHandicapFor throw this on an
-  // unrated tee — NOT thrown by course.ts, so it's pinned here as its own case rather than
-  // folded into courseValidationCodes above (whose doc comment above names course.ts as the
-  // sole source for that list).
-  it("maps tee-unrated to 400", () => {
-    const result = toHttpError(new DomainError("tee-unrated", "tee \"blue\" is unrated — use round(index) for a course-handicap estimate"), logger);
-    expect(result.statusCode).toBe(400);
-    expect(JSON.parse(result.body)).toEqual({
-      code: "tee-unrated",
-      message: 'tee "blue" is unrated — use round(index) for a course-handicap estimate',
-    });
-  });
+  // "tee-unrated" is no longer in the table (spec 2026-07-29 §7): the only thrower was
+  // handicap/whs.ts, deleted whole. An unmapped DomainError falls through to the table's own
+  // default, which this suite's fallback test below already pins.
 
   // Pre-existing DomainError mappings must survive this addition unchanged.
   it("still maps unknown-tee-set to 400 (pre-existing)", () => {

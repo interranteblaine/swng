@@ -111,7 +111,7 @@ beforeEach(() => {
   mockedGetCourse.mockReset();
   mockedSupersedeCard.mockReset();
   mockedGetMe.mockReset();
-  mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("g-ann"), name: "Ann" } });
+  mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("g-ann"), name: "Ann" } });
   vi.stubGlobal("localStorage", createMemoryStorage());
   vi.stubGlobal("sessionStorage", createMemoryStorage());
 });

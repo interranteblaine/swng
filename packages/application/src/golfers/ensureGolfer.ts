@@ -29,9 +29,9 @@ export const ensureGolfer =
     const existing = await deps.golferStore.getBySub(claims.sub);
     if (existing) return existing.golfer;
 
-    // A fresh mint is on the default source (index-source model spec §3): `{ kind: "swng" }` — a
-    // working handicap with no action, computed from rounds as they play.
-    const golfer: Golfer = { id: golferId(deps.idGenerator.newId()), name: placeholderName(claims.sub), handicap: { indexSource: { kind: "swng" } }, namePlaceholder: true };
+    // A fresh mint carries a name and nothing else (spec 2026-07-29 §5): there is no index source
+    // to default, and what this golfer shoots is computed from their rounds as they play them.
+    const golfer: Golfer = { id: golferId(deps.idGenerator.newId()), name: placeholderName(claims.sub), namePlaceholder: true };
     await deps.golferStore.put(golfer, undefined);
 
     try {

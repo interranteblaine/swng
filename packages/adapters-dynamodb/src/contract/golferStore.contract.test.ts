@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { Golfer } from "@swng/domain";
 import { courseId, golferId, placeholderName } from "@swng/domain";
 import { ensureGolfer } from "@swng/application";
 import { createSequentialIds } from "@swng/application";
 import { createDynamoGolferStore } from "../createDynamoGolferStore.js";
-import { golferPk, golferSk } from "../keys.js";
+import { golferPk, golferSk, golferSubPk, golferSubSk } from "../keys.js";
 import type { LocalDynamo } from "../testing/local.js";
 import { startLocalDynamo } from "../testing/local.js";
 
@@ -31,7 +31,6 @@ const newStore = () => createDynamoGolferStore({ client: local.client, tableName
 const makeGolfer = (overrides: Partial<Golfer> = {}): Golfer => ({
   id: golferId(randomUUID()),
   name: "Cal",
-  handicap: { indexSource: { kind: "swng" } },
   ...overrides,
 });
 
@@ -39,7 +38,7 @@ describe("createDynamoGolferStore", () => {
   describe("put/get round-trip", () => {
     it("put (create, sub-less) + get round-trip", async () => {
       const store = newStore();
-      const golfer = makeGolfer({ handicap: { indexSource: { kind: "declared", value: 12.3 } } });
+      const golfer = makeGolfer({ homeCourseId: courseId("course-1") });
 
       await store.put(golfer, undefined);
 
@@ -133,59 +132,69 @@ describe("createDynamoGolferStore", () => {
         }),
       );
 
-      const clean: Golfer = { id, name: "Legacy Ghost", handicap: { indexSource: { kind: "swng" } } };
+      const clean: Golfer = { id, name: "Legacy Ghost" };
       expect(await store.get(id)).toEqual({ golfer: clean, sub: legacySub, revision: 3 });
       const many = await store.getMany([id]);
       expect(many).toEqual([{ golfer: clean, sub: legacySub, revision: 3 }]);
     });
 
-    // index-source model spec §3/§8: the persisted source of truth is the `indexSource` map — the
-    // CHOICE a golfer made, never a computed value. A `whs` source and a `declared` source both
-    // round-trip verbatim; a row with NO stored source (a stale/pre-model row) defaults to swng.
-    describe("indexSource (index-source model spec §3/§8)", () => {
-      it("a put on the whs source round-trips { kind: 'whs' } — the choice, no cached number", async () => {
+    // The golfer row holds NO number and no index source (spec 2026-07-29 §5): the `indexSource`
+    // map attr is deleted with the index it selected between. There is no migration and no
+    // tolerate machinery — a stray beta row that still carries the old attr is simply not read,
+    // and its next whole-item put drops it. These pins are the negative form of the old
+    // round-trip tests they replace: nothing about the source survives either direction.
+    describe("no index source is written or read (spec 2026-07-29 §5)", () => {
+      it("a put writes no indexSource attribute at all", async () => {
         const store = newStore();
-        const golfer = makeGolfer({ handicap: { indexSource: { kind: "whs" } } });
+        const golfer = makeGolfer();
 
         await store.put(golfer, undefined);
 
-        expect((await store.get(golfer.id))?.golfer.handicap).toEqual({ indexSource: { kind: "whs" } });
-        expect(await store.getMany([golfer.id])).toEqual([{ golfer, sub: undefined, revision: 1 }]);
+        const raw = await local.client.send(new GetCommand({ TableName: local.coreTable, Key: { pk: golferPk(golfer.id), sk: golferSk } }));
+        expect(raw.Item).toBeDefined();
+        expect(raw.Item).not.toHaveProperty("indexSource");
       });
 
-      it("a put on a declared source round-trips its asserted value", async () => {
+      it("a stored item that still carries a legacy indexSource reads back WITHOUT it, on every read path", async () => {
         const store = newStore();
-        const golfer = makeGolfer({ handicap: { indexSource: { kind: "declared", value: 8 } } });
+        const id = golferId(randomUUID());
+        const sub = `sub-${randomUUID()}`;
+        await local.client.send(
+          new PutCommand({
+            TableName: local.coreTable,
+            Item: {
+              pk: golferPk(id),
+              sk: golferSk,
+              revision: 2,
+              name: "Legacy Source",
+              // The retired attr, plus the SUB# binding so getBySub can reach the same row.
+              indexSource: { kind: "declared", value: 8 },
+              sub,
+              gsi2pk: `SUB#${sub}`,
+              gsi2sk: "GOLFER",
+            },
+          }),
+        );
+        await local.client.send(new PutCommand({ TableName: local.coreTable, Item: { pk: golferSubPk(sub), sk: golferSubSk, golferId: id } }));
 
-        await store.put(golfer, undefined);
-
-        expect((await store.get(golfer.id))?.golfer.handicap).toEqual({ indexSource: { kind: "declared", value: 8 } });
+        const clean: Golfer = { id, name: "Legacy Source" };
+        expect(await store.get(id)).toEqual({ golfer: clean, sub, revision: 2 });
+        expect(await store.getMany([id])).toEqual([{ golfer: clean, sub, revision: 2 }]);
+        expect(await store.getBySub(sub)).toEqual({ golfer: clean, sub, revision: 2 });
       });
 
-      it("a stored item with NO indexSource reads back on the default swng source (no migration)", async () => {
+      it("a whole-item put over a legacy row DROPS the stale attribute", async () => {
         const store = newStore();
         const id = golferId(randomUUID());
         await local.client.send(
-          new PutCommand({ TableName: local.coreTable, Item: { pk: golferPk(id), sk: golferSk, revision: 2, name: "No Source" } }),
+          new PutCommand({ TableName: local.coreTable, Item: { pk: golferPk(id), sk: golferSk, revision: 1, name: "Stale", indexSource: { kind: "whs" } } }),
         );
 
-        const clean: Golfer = { id, name: "No Source", handicap: { indexSource: { kind: "swng" } } };
-        expect(await store.get(id)).toEqual({ golfer: clean, sub: undefined, revision: 2 });
-        expect(await store.getMany([id])).toEqual([{ golfer: clean, sub: undefined, revision: 2 }]);
-      });
+        await store.put({ id, name: "Fresh" }, 1);
 
-      // The production read path (getBySub) folds the source identically to get/getMany — closing
-      // the review's open gap. Write via put+bindSub, read via the SUB# pointer path.
-      it("getBySub returns the same folded source as get — a declared source written then read by sub", async () => {
-        const store = newStore();
-        const golfer = makeGolfer({ handicap: { indexSource: { kind: "declared", value: 8 } } });
-        const sub = `sub-${randomUUID()}`;
-        await store.put(golfer, undefined);
-        await store.bindSub(golfer.id, sub);
-
-        const bound = await store.getBySub(sub);
-        expect(bound?.golfer.handicap).toEqual({ indexSource: { kind: "declared", value: 8 } });
-        expect(bound?.golfer.handicap).toEqual((await store.get(golfer.id))?.golfer.handicap);
+        const raw = await local.client.send(new GetCommand({ TableName: local.coreTable, Key: { pk: golferPk(id), sk: golferSk } }));
+        expect(raw.Item).not.toHaveProperty("indexSource");
+        expect(await store.get(id)).toEqual({ golfer: { id, name: "Fresh" }, sub: undefined, revision: 2 });
       });
     });
 
@@ -271,7 +280,7 @@ describe("createDynamoGolferStore", () => {
   describe("bindSub", () => {
     it("binds sub to an existing sub-less row, bumping revision, resolvable via getBySub", async () => {
       const store = newStore();
-      const golfer = makeGolfer({ name: "Ghost Golfer", handicap: { indexSource: { kind: "declared", value: 18 } } });
+      const golfer = makeGolfer({ name: "Ghost Golfer" });
       await store.put(golfer, undefined);
       const sub = `sub-${randomUUID()}`;
 

@@ -224,7 +224,7 @@ describe("CoursePage", () => {
   // here (SeasonPanel/CrewPage.test.tsx's own precedent for a composed section).
   it("composes CourseRecordSection, wired to this course's own id, once signed in", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann", indexSource: { kind: "swng" } } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCourse.mockResolvedValue({ course: view });
     mockedGetMyCourseRecord.mockResolvedValue({ courseId: view.courseId, rounds: 2 });
 

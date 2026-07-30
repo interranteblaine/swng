@@ -26,7 +26,6 @@ const buildResultArchive = (input: {
   cells: {},
   events: [],
   terminatedGameIds: [],
-  handicapping: [],
   games: input.games,
   results: input.results,
 });

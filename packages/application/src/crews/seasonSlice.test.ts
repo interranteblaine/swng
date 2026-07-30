@@ -46,7 +46,6 @@ const singlesArchive = (
     events: [finalized],
     results: [{ kind: "singles-match", id: gid, outcome: { winner, closing: "3&2" }, thru: 16 }],
     terminatedGameIds: [],
-    handicapping: [],
   };
 };
 
@@ -72,7 +71,6 @@ const fourballArchive = (
     events: [finalized],
     results: [{ kind: "fourball-match", id: gid, outcome: { winner, closing: "2&1" }, thru: 17 }],
     terminatedGameIds: [],
-    handicapping: [],
   };
 };
 
@@ -90,7 +88,6 @@ const stablefordArchive = (id: string, wallMs: number, players: readonly GolferI
     events: [finalized],
     results: [{ kind: "stableford", id: gid, points: players.map((g) => ({ golferId: g, points: points[g] ?? 0 })) }],
     terminatedGameIds: [],
-    handicapping: [],
   };
 };
 
@@ -465,21 +462,23 @@ describe("getSeasonStandings — scoreboard", () => {
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
 
     // Ann: three rated 18-hole lines within the (open, unbounded) window -> netPer18 present.
-    // Bo: none at all -> a zero row, sorted after Ann's real netPer18 (crewScoreboard's own
+    // Bo: none at all -> a zero row, sorted after Ann's real average (crewScoreboard's own
     // "absent last" rule).
-    const annLine = (id: string, ms: number, ags: number, differential: number): GolferRoundLine & { finalizedAtMs: number } => ({
+    // Real holeResults so hasCompleteScore holds and the line reaches the average (spec §2d):
+    // 18 holes of par 4 at `perHole` strokes, i.e. gross 18 x perHole against par 72.
+    const annLine = (id: string, ms: number, perHole: number): GolferRoundLine & { finalizedAtMs: number } => ({
       roundId: roundId(id),
       courseName: "Casa Verde GC",
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
-      ags,
-      differential,
+      strokes: 8,
+      score: 18 * perHole,
       distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+      holeResults: Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: 4, result: { kind: "strokes" as const, strokes: perHole } })),
       finalizedAtMs: ms,
     });
-    const annLines = [annLine("a1", 1_000, 90, 12.0), annLine("a2", 2_000, 88, 10.0), annLine("a3", 3_000, 86, 8.0)];
+    const annLines = [annLine("a1", 1_000, 6), annLine("a2", 2_000, 5), annLine("a3", 3_000, 5)];
     for (const line of annLines) await ctx.projectionStore.putLine(ann, line);
 
     const window = { startMs: 0 };

@@ -134,7 +134,6 @@ export default [
                 "roundStrokeAllocation",
                 "totalDots",
                 "grossForHoles",
-                "handicappingFor",
                 "allocateStrokes",
                 "dotsByHole",
                 "strokesReceivedOnHole",
@@ -146,16 +145,21 @@ export default [
                 // (defaultAllowance/playingHandicap), which was banned here for the same reason.
                 "resolveStrokes",
                 "anchorOf",
-                // WHS / handicap-index math + course handicaps
-                "adjustedGrossScore",
-                "scoreDifferential",
-                "computeIndexDetail",
-                "computeIndex",
-                "swngIndex",
-                "courseHandicapFor",
-                "courseHandicapFromRatingSlopePar",
-                "unratedCourseHandicap",
-                "combineNineHoleDifferentials",
+                // what you normally shoot relative to par (spec 2026-07-29 §2c/§5) — the whole WHS
+                // banlist block that stood here (adjustedGrossScore, scoreDifferential,
+                // computeIndex(Detail), swngIndex, courseHandicapFor(RatingSlopePar),
+                // unratedCourseHandicap, combineNineHoleDifferentials) is gone with handicap/whs.ts
+                // itself. These are DELIBERATELY not re-exported through @swng/client either: the
+                // average is server-computed and served, so an on-device copy would be fence-legal
+                // and boundary-wrong. formatOverPar is absent on purpose — a presentation
+                // formatter, like underPar (the handicap/present.ts precedent).
+                "averageOf",
+                "spreadOf",
+                "averageOfValues",
+                "spreadOfValues",
+                "averageHistory",
+                "scoredOverPar",
+                "overPar",
                 // golfer metrics + per-round archive line
                 "golferMetrics",
                 "archiveGolferLine",

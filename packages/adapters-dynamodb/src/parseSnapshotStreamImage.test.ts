@@ -25,7 +25,6 @@ const archive: RoundArchive = {
   events: [finalizedEvent],
   results: [],
   terminatedGameIds: [],
-  handicapping: [{ golferId: ann, kind: "complete", ags: 90, differential: 9.0 }],
 };
 
 // Mirrors createDynamoEventJournal's snapshot-leg Item shape — the real producer of what a

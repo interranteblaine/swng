@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { GameId, GameResult, GolferId, HoleResult, RoundArchive, RoundEvent, RoundId, StrokeBasis } from "@swng/domain";
+import type { GameId, GameResult, GolferId, HoleResult, RoundEvent, RoundId, StrokeBasis } from "@swng/domain";
 import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
 import { gameConfigFields, gameResultSchema, roundEventSchema } from "./round.js";
 
@@ -213,9 +213,11 @@ export interface RecordScoreResponse {
   readonly duplicate: boolean;
 }
 
+// `handicapping` (per-participant adjusted gross score + differential) is DELETED with the whole
+// WHS pipeline (spec 2026-07-29 §7), here and on RoundArchive itself. The finished round's numbers
+// are the card's own totals, which the results view computes from the cells it already renders.
 export interface FinalizeRoundResponse {
   readonly results: readonly GameResult[];
-  readonly handicapping: RoundArchive["handicapping"];
 }
 
 // POST /rounds/{roundId}/abandon (task-15): a scrapped round produces no snapshot and counts
@@ -255,16 +257,8 @@ export const recordScoreResponseSchema: z.ZodType<RecordScoreResponse> = z.objec
   duplicate: z.boolean(),
 });
 
-// Mirrors RoundArchive["handicapping"]'s element union exactly (domain/round/archive.ts).
-const handicappingEntrySchema = z.discriminatedUnion("kind", [
-  z.object({ golferId: golferIdSchema, kind: z.literal("complete"), ags: z.number(), differential: z.number() }),
-  z.object({ golferId: golferIdSchema, kind: z.literal("unrated"), ags: z.number() }),
-  z.object({ golferId: golferIdSchema, kind: z.literal("incomplete") }),
-]);
-
 export const finalizeRoundResponseSchema: z.ZodType<FinalizeRoundResponse> = z.object({
   results: z.array(gameResultSchema).readonly(),
-  handicapping: z.array(handicappingEntrySchema).readonly(),
 });
 
 export const abandonRoundResponseSchema: z.ZodType<AbandonRoundResponse> = z.object({

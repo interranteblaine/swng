@@ -98,7 +98,7 @@ const renderPanel = (isOrganizer = false) =>
 
 const signInAsAnn = () => {
   signIn();
-  mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: ANN, name: "Ann" } });
+  mockedGetMe.mockResolvedValue({ golfer: { golferId: ANN, name: "Ann" } });
 };
 
 describe("SeasonPanel — window header", () => {
@@ -257,7 +257,7 @@ describe("SeasonPanel — scoreboard", () => {
       // Deliberately NOT in name/golferId order — Bo first, even though "Ann" would sort first
       // alphabetically — pinning that the component renders exactly what it's handed.
       scoreboard: [
-        { golferId: BO, name: "Bo", rounds: 4, best18: { gross: 82, toPar: 10 }, netPer18: 1.2, index: 14.1, indexDelta: -0.4 },
+        { golferId: BO, name: "Bo", rounds: 4, average: 26, spread: 4.2, best18: { gross: 82, toPar: 10 } },
         { golferId: ANN, name: "Ann", rounds: 2 },
       ],
     });
@@ -295,7 +295,8 @@ describe("SeasonPanel — scoreboard", () => {
     expect(cells[4]!.textContent).toBe("—"); // index
   });
 
-  it("best18 renders '{gross} ({vsPar})' — over and under par both", async () => {
+  // Best 18 moved to the LAST column (spec 2026-07-29 §6's own order) — cell index 4.
+  it("best18 renders '{gross} ({vs par})' — over and under par both", async () => {
     signInAsAnn();
     mockedGetSeasonStandings.mockResolvedValue({
       ...baseStandings,
@@ -309,21 +310,20 @@ describe("SeasonPanel — scoreboard", () => {
 
     const table = await screen.findByRole("table", { name: "Standings" });
     const rows = within(table).getAllByRole("row").slice(1);
-    expect(within(rows[0]!).getAllByRole("cell")[2]!.textContent).toBe("82 (+10)");
-    expect(within(rows[1]!).getAllByRole("cell")[2]!.textContent).toBe("68 (-4)");
+    expect(within(rows[0]!).getAllByRole("cell")[4]!.textContent).toBe("82 (+10)");
+    expect(within(rows[1]!).getAllByRole("cell")[4]!.textContent).toBe("68 (-4)");
   });
 
-  // netPer18 is ALREADY a signed vs-par delta (crewScoreboard's own doc comment: "sum(ags −
-  // courseHandicap − par) / sum(holes) × 18") — rendered through vsPar's own sign convention
-  // exactly like best18's toPar, over par (positive), under par (negative), and dead even.
-  it("netPer18 renders as a signed vs-par delta — over, under, and even", async () => {
+  // The average is a signed vs-par figure, rendered through formatOverPar (spec 2026-07-29 §4) —
+  // over par, under par, and dead level. Column index 2: Golfer · Rounds · Average · Spread · Best 18.
+  it("the average renders as a signed vs-par figure — over, under, and even", async () => {
     signInAsAnn();
     mockedGetSeasonStandings.mockResolvedValue({
       ...baseStandings,
       scoreboard: [
-        { golferId: ANN, name: "Ann", rounds: 5, netPer18: 1.2 },
-        { golferId: BO, name: "Bo", rounds: 5, netPer18: -0.5 },
-        { golferId: golferId("cy-g"), name: "Cy", rounds: 5, netPer18: 0 },
+        { golferId: ANN, name: "Ann", rounds: 5, average: 26 },
+        { golferId: BO, name: "Bo", rounds: 5, average: -2 },
+        { golferId: golferId("cy-g"), name: "Cy", rounds: 5, average: 0 },
       ],
     });
 
@@ -331,19 +331,22 @@ describe("SeasonPanel — scoreboard", () => {
 
     const table = await screen.findByRole("table", { name: "Standings" });
     const rows = within(table).getAllByRole("row").slice(1);
-    expect(within(rows[0]!).getAllByRole("cell")[3]!.textContent).toBe("+1.2");
-    expect(within(rows[1]!).getAllByRole("cell")[3]!.textContent).toBe("-0.5");
-    expect(within(rows[2]!).getAllByRole("cell")[3]!.textContent).toBe("E");
+    expect(within(rows[0]!).getAllByRole("cell")[2]!.textContent).toBe("+26");
+    expect(within(rows[1]!).getAllByRole("cell")[2]!.textContent).toBe("-2"); // under par reads as a plain minus
+    expect(within(rows[2]!).getAllByRole("cell")[2]!.textContent).toBe("E");
   });
 
-  it("index renders the delta sign both directions, and with no delta at all", async () => {
+  // A spread is a MAGNITUDE, never signed: "±4.2" is the whole notation, so it deliberately does
+  // NOT go through formatOverPar. Held back below 5 scored rounds (the domain's own floor), where
+  // the cell reads "—".
+  it("the spread renders as ±N.N, and as a dash when it has not built up", async () => {
     signInAsAnn();
     mockedGetSeasonStandings.mockResolvedValue({
       ...baseStandings,
       scoreboard: [
-        { golferId: ANN, name: "Ann", rounds: 5, index: 14.1, indexDelta: -0.4 }, // improved
-        { golferId: BO, name: "Bo", rounds: 5, index: 9.0, indexDelta: 0.6 }, // worsened
-        { golferId: golferId("cy-g"), name: "Cy", rounds: 5, index: 20.0 }, // no delta at all
+        { golferId: ANN, name: "Ann", rounds: 5, average: 26, spread: 4.2 },
+        { golferId: BO, name: "Bo", rounds: 3, average: 10 }, // below the 5-round floor
+        { golferId: golferId("cy-g"), name: "Cy", rounds: 5, average: 10, spread: 0 }, // a golfer who shoots his number exactly
       ],
     });
 
@@ -351,19 +354,46 @@ describe("SeasonPanel — scoreboard", () => {
 
     const table = await screen.findByRole("table", { name: "Standings" });
     const rows = within(table).getAllByRole("row").slice(1);
-    expect(within(rows[0]!).getAllByRole("cell")[4]!.textContent).toBe("14.1 (−0.4)");
-    expect(within(rows[1]!).getAllByRole("cell")[4]!.textContent).toBe("9.0 (+0.6)");
-    expect(within(rows[2]!).getAllByRole("cell")[4]!.textContent).toBe("20.0");
+    expect(within(rows[0]!).getAllByRole("cell")[3]!.textContent).toBe("±4.2");
+    expect(within(rows[1]!).getAllByRole("cell")[3]!.textContent).toBe("—");
+    expect(within(rows[2]!).getAllByRole("cell")[3]!.textContent).toBe("±0.0");
   });
 
-  it("renders the table footnote naming Best 18 / Net/18 / Index, including the 3-round floor", async () => {
+  it("a member with no scored round shows a dash for both average and spread, with their real round count", async () => {
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValue({ ...baseStandings, scoreboard: [{ golferId: ANN, name: "Ann", rounds: 2 }] });
+
+    renderPanel();
+
+    const table = await screen.findByRole("table", { name: "Standings" });
+    const cells = within(within(table).getAllByRole("row")[1]!).getAllByRole("cell");
+    expect(cells[1]!.textContent).toBe("2"); // the rounds happened...
+    expect(cells[2]!.textContent).toBe("—"); // ...but none of them carried a score
+    expect(cells[3]!.textContent).toBe("—");
+    expect(cells[4]!.textContent).toBe("—");
+  });
+
+  it("renders the column headers in spec order: Rounds · Average · Spread · Best 18", async () => {
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValue({ ...baseStandings, scoreboard: [{ golferId: ANN, name: "Ann", rounds: 0 }] });
+
+    renderPanel();
+
+    const table = await screen.findByRole("table", { name: "Standings" });
+    const headers = within(table).getAllByRole("columnheader").map((cell) => cell.textContent);
+    expect(headers).toEqual(["Golfer", "Rounds", "Average", "Spread", "Best 18"]);
+  });
+
+  it("renders the table footnote naming Average / Spread / Best 18, including the 5-round floor", async () => {
     signInAsAnn();
     mockedGetSeasonStandings.mockResolvedValue({ ...baseStandings, scoreboard: [{ golferId: ANN, name: "Ann", rounds: 1 }] });
 
     renderPanel();
 
     expect(
-      await screen.findByText("Best 18 — lowest gross, fully holed out · Net/18 — net vs par per 18 holes, from adjusted scores; builds at 3 rounds · Index — swng index, with change over this season."),
+      await screen.findByText(
+        "Average — score minus par over this season's rounds, a nine counting double · Spread — how much those rounds vary; builds at 5 rounds · Best 18 — lowest gross, fully holed out.",
+      ),
     ).toBeTruthy();
   });
 

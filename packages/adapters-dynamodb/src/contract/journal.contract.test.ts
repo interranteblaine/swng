@@ -62,7 +62,6 @@ const buildArchive = (id: RoundId, finalizedAtMs: number): RoundArchive => ({
   events: [{ kind: "round-finalized", opId: opId(`archive-final-${id}`), hlc: { wallMs: finalizedAtMs, counter: 0, deviceId: deviceId("server") }, authorId: golfer }],
   results: [],
   terminatedGameIds: [],
-  handicapping: [{ golferId: golfer, kind: "complete", ags: 90, differential: 9.0 }],
 });
 
 // A minimal final log for settleRound to produce a REAL archive from. `strayCrewId` models an

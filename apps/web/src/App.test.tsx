@@ -68,7 +68,7 @@ describe("App", () => {
     tokenStore.save({ idToken, refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } }) }) as unknown as Response),
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ golfer: { golferId: "ann", name: "Ann" } }) }) as unknown as Response),
     );
 
     render(<App />);

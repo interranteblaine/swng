@@ -121,7 +121,7 @@ describe("JoinRoundPage — the funnel (signed out)", () => {
 describe("JoinRoundPage — the name prompt (signed in, placeholder golfer)", () => {
   it("a placeholder golfer sees 'What should the card call you?' — not the join form yet", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } });
 
     renderJoin();
 
@@ -136,9 +136,9 @@ describe("JoinRoundPage — the name prompt (signed in, placeholder golfer)", ()
     signIn();
     // First GET /me finds the placeholder; the refetch after PUT /me returns the real name.
     mockedGetMe
-      .mockResolvedValueOnce({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } })
-      .mockResolvedValueOnce({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("g1"), name: "Bo Real" } });
-    mockedUpdateMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("g1"), name: "Bo Real" } });
+      .mockResolvedValueOnce({ golfer: { golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } })
+      .mockResolvedValueOnce({ golfer: { golferId: golferId("g1"), name: "Bo Real" } });
+    mockedUpdateMe.mockResolvedValue({ golfer: { golferId: golferId("g1"), name: "Bo Real" } });
 
     renderJoin();
 
@@ -159,7 +159,7 @@ describe("JoinRoundPage — the name prompt (signed in, placeholder golfer)", ()
 describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
   it("goes straight to the join form as 'Playing as <name>' — the name INPUT is gone (structural pin)", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
 
     renderJoin();
 
@@ -174,7 +174,7 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
 
   it("uppercases the code and joins as-self: code + tee/handicap + the account's Bearer (seat resolved server-side, never a typed name)", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     // The response's own joinCode is DELIBERATELY different from the typed "self01"/"SELF01" —
     // the saved-credential assertion below must pin the RESPONSE's code, not the typed form
     // value, and a matching pair of strings wouldn't distinguish the two sources.
@@ -206,7 +206,7 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
   // timers with that async identity settle is the fiddle this avoids.
   it("once the code is 6 chars, a peek swaps the free-text tee for a picker of the round's tee names", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedPeekRound.mockResolvedValue({
       courseName: "Fixture Links 18",
       teeSets: [
@@ -233,7 +233,7 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
 
   it("a failed peek falls back to free text with a note — joining is never blocked by it", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("dee-g"), name: "Dee" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("dee-g"), name: "Dee" } });
     mockedPeekRound.mockRejectedValue(new Error("no round with that code"));
     mockedJoinRound.mockResolvedValue({ roundId: roundId("round-3"), token: "tok-3", golferId: golferId("dee-g"), joinCode: "ZZZ999" });
 
@@ -262,7 +262,7 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
 describe("JoinRoundPage — what you normally shoot", () => {
   it("asks the question verbatim, starts blank, and keeps Join disabled until a number is typed", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedPeekRound.mockResolvedValue({
       courseName: "Fixture Links 18",
       teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.6, slope: 128 }],
@@ -288,7 +288,7 @@ describe("JoinRoundPage — what you normally shoot", () => {
 
   it("renders no index/course-handicap derivation and no per-player strokes figure at all", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G", indexSource: { kind: "declared", value: 12.4 } } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedPeekRound.mockResolvedValue({
       courseName: "Fixture Links 18",
       teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.6, slope: 128 }],
@@ -314,7 +314,7 @@ describe("JoinRoundPage — what you normally shoot", () => {
 
   it("submits a negative for an under-par player — minus means under par, the one sign convention left", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("under-g"), name: "Under" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("under-g"), name: "Under" } });
     mockedJoinRound.mockResolvedValue({ roundId: roundId("round-under"), token: "tok-under", golferId: golferId("under-g"), joinCode: "ABC234" });
 
     renderJoin();

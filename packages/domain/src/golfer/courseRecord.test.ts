@@ -14,7 +14,7 @@ const line = (over: Partial<GolferRoundLine>): GolferRoundLine => ({
   tee: "white",
   holes: 18,
   par: 72,
-  courseHandicap: 8,
+  strokes: 8,
   distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
   ...over,
 });

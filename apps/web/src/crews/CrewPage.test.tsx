@@ -134,7 +134,7 @@ const waitForLoaded = () => screen.findByRole("button", { name: "Invite" });
 describe("CrewPage", () => {
   it("shows an Invite button (no join code) and the roster with the organizer badge (no account badge)", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -165,7 +165,7 @@ describe("CrewPage", () => {
   // roster's own member names link to /golfers/:golferId.
   it("links each roster member's name to /golfers/:golferId", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -183,7 +183,7 @@ describe("CrewPage", () => {
   // one way in now.
   it("no 'Add member' form renders — an Invite link is the one way to grow the roster", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -203,7 +203,7 @@ describe("CrewPage", () => {
   // this shape) — the point here is that the WEB never reads or renders it even when present.
   it("no standing-game or play-the-usual remnants render, even when the crew's own payload still carries a stray standingGame field", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({
       crew: { ...crew, standingGame: { tee: "white", games: [] } } as unknown as CrewView,
     });
@@ -220,7 +220,7 @@ describe("CrewPage", () => {
 
   it("a non-member 403 shows humanized copy, never the raw server text", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("zed-g"), name: "Zed" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("zed-g"), name: "Zed" } });
     mockedGetCrew.mockRejectedValue(new ApiError("not-a-member", 403, 'golfer "zed-g" is not a member of crew "crew-1"'));
     mockedListSeasons.mockRejectedValue(new ApiError("not-a-member", 403, 'golfer "zed-g" is not a member of crew "crew-1"'));
 
@@ -244,7 +244,7 @@ describe("CrewPage", () => {
 describe("CrewPage — invite", () => {
   it("mints an invite, composes /crews/join#<token> from this device's own origin, and copies it — exact feedback copy", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     mockedMintCrewInvite.mockResolvedValue({ token: "invite-tok-1", expiresAtMs: 1_700_000_000_000 });
@@ -265,7 +265,7 @@ describe("CrewPage — invite", () => {
 
   it("still shows the raw url as a visible fallback when clipboard access fails", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     mockedMintCrewInvite.mockResolvedValue({ token: "invite-tok-2", expiresAtMs: 1_700_000_000_000 });
@@ -288,7 +288,7 @@ describe("CrewPage — invite", () => {
 
   it("a mint failure shows honest copy, never the raw server text", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     mockedMintCrewInvite.mockRejectedValue(new Error("network down"));
@@ -309,7 +309,7 @@ describe("CrewPage — invite", () => {
 describe("CrewPage — organizer authority", () => {
   it("the organizer sees Remove…/Make organizer… on every OTHER row, never on their own", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -334,7 +334,7 @@ describe("CrewPage — organizer authority", () => {
 
   it("the row actions wear the quiet text register, not a boxed button (owner field report, 2026-07-23)", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -356,7 +356,7 @@ describe("CrewPage — organizer authority", () => {
 
   it("a non-organizer sees neither affordance on any row", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -369,7 +369,7 @@ describe("CrewPage — organizer authority", () => {
 
   it("Remove…: exact confirm copy naming the member, cancel does nothing", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -391,7 +391,7 @@ describe("CrewPage — organizer authority", () => {
 
   it("Remove…: confirming DELETEs the member and replaces the roster with the server's response", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     const afterRemoval: CrewView = { ...crew, members: crew.members.filter((m) => m.golferId !== golferId("bo-g")) };
@@ -414,7 +414,7 @@ describe("CrewPage — organizer authority", () => {
   // organizer plainly IS one; the honest copy names the TARGET's own vanished standing.
   it("Remove…: a not-a-member failure (target vanished mid-race) gets copy distinct from 'you're not a member'", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     mockedRemoveCrewMember.mockRejectedValue(new ApiError("not-a-member", 403, 'golfer "bo-g" is not a member of crew "crew-1"'));
@@ -434,7 +434,7 @@ describe("CrewPage — organizer authority", () => {
 
   it("Make organizer…: confirming transfers the role and replaces the roster with the server's response", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     const afterTransfer: CrewView = {
@@ -462,7 +462,7 @@ describe("CrewPage — organizer authority", () => {
 
   it("the organizer's own row has no Leave crew button — a note names transferring first instead", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -486,7 +486,7 @@ describe("CrewPage — seasons", () => {
 
   it("lists seasons newest-createdAtMs-first, even when the wire returns them in another order", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     // Deliberately wire-unsorted (oldest first) — CrewPage imposes its own newest-first order.
     mockedListSeasons.mockResolvedValue({ seasons: [seasonA, seasonB] });
@@ -501,7 +501,7 @@ describe("CrewPage — seasons", () => {
 
   it("picking a season fetches and renders its standings via SeasonPanel", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue({ seasons: [seasonB] });
     mockedGetSeasonStandings.mockResolvedValue(emptyStandings("season-b", "2026"));
@@ -517,7 +517,7 @@ describe("CrewPage — seasons", () => {
 
   it("creates a season with the typed name, POSTs it, and adds it to the list", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     mockedCreateSeason.mockResolvedValue({ season: seasonB });
@@ -543,7 +543,7 @@ describe("CrewPage — seasons", () => {
 
   it("a 400 invalid-season-name shows honest copy, never the raw server text", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     // A well-formed-looking name still round-trips into the server's own 400 here — the point
@@ -573,7 +573,7 @@ describe("CrewPage — seasons", () => {
 describe("CrewPage — no all-time surface", () => {
   it("renders no separate 'all-time' section (the record's own old empty-state copy) — a season's own wide dates are the whole story", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -592,7 +592,7 @@ describe("CrewPage — no all-time surface", () => {
 describe("CrewPage — crew name edit", () => {
   it("the organizer sees an Edit button beside the crew name; a non-organizer does not", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -604,7 +604,7 @@ describe("CrewPage — crew name edit", () => {
 
   it("a non-organizer sees no Edit button beside the crew name", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -619,7 +619,7 @@ describe("CrewPage — crew name edit", () => {
 
   it("Edit swaps the name for an input; Save PUTs the trimmed name and replaces it with the server's response", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     const renamed: CrewView = { ...crew, name: "Sunday Regulars" };
@@ -639,7 +639,7 @@ describe("CrewPage — crew name edit", () => {
 
   it("Cancel discards the edit without calling updateCrew", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -657,7 +657,7 @@ describe("CrewPage — crew name edit", () => {
 
   it("a not-organizer failure (a stale role underneath the caller) shows honest copy, never the raw server text", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     mockedUpdateCrew.mockRejectedValue(new ApiError("not-organizer", 403, 'golfer "ann-g" is not the organizer of crew "crew-1"'));
@@ -681,7 +681,7 @@ describe("CrewPage — crew name edit", () => {
 describe("CrewPage — leave crew", () => {
   it("Leave crew reveals a confirm step and does nothing until confirmed", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
 
@@ -699,7 +699,7 @@ describe("CrewPage — leave crew", () => {
 
   it("confirming leave POSTs /crews/{id}/leave and navigates home on success", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     mockedLeaveCrew.mockResolvedValue({ crewId: crewId("crew-1") });
@@ -716,7 +716,7 @@ describe("CrewPage — leave crew", () => {
 
   it("a leave failure shows honest copy, never the raw server text", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     // A generic failure (network/500) — the unknown-crew arm (a race: the crew vanished between
@@ -737,7 +737,7 @@ describe("CrewPage — leave crew", () => {
 
   it("a leave against a crew that's vanished mid-race (unknown-crew) gets its own honest copy, never the raw server text", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     mockedLeaveCrew.mockRejectedValue(new ApiError("unknown-crew", 404, 'no crew "crew-1"'));
@@ -756,7 +756,7 @@ describe("CrewPage — leave crew", () => {
 
   it("a leave rejected with organizer-must-transfer (a stale role underneath the caller) names the way out", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo" } });
     mockedGetCrew.mockResolvedValue({ crew });
     mockedListSeasons.mockResolvedValue(emptySeasons);
     mockedLeaveCrew.mockRejectedValue(new ApiError("organizer-must-transfer", 409, "the organizer cannot leave — transfer the role to another member first"));

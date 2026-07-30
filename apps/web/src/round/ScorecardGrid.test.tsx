@@ -192,36 +192,10 @@ describe("ScorecardGrid — round-stroke dots (the standard card)", () => {
     expect(textB).toBe(textA);
   });
 
-  // COVERS A BRANCH THAT IS SCHEDULED TO DIE, deliberately (review finding, task 3): the model
-  // makes a negative stroke count unreachable in production — resolveStrokes clamps both arms at
-  // zero and the request schema bounds `strokes` at min(0) — but `strokes: number` still ADMITS a
-  // negative at the type level, so the seat below constructs the give-back case fine, and
-  // ScorecardGrid.tsx's `strokeGrant` branch still executes for it. Until the plus-handicap layer
-  // is deleted later in this arc (which simplifies the glyph to `"●".repeat(strokes)`), that branch
-  // is live code and live code gets a test. DELETE THIS TEST WITH THAT BRANCH — not before, and
-  // never on its own.
-  it("still draws a negative stroke count as a hollow ○ give-back with net = gross + 1 (a branch this arc deletes later)", () => {
-    const annGiveBack: RosterEntry = { golferId: ANN, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: -1 }, strokes: -1 };
-    const boScratch = participant(BO, "Bo", "white", 0);
-    const si9Hole = fixtureWhite.holes.find((h) => h.strokeIndex === 9)!; // the easiest hole on the 9-hole fixture — where a single give-back lands
-    const state: RoundState = {
-      id: roundId("round-giveback"),
-      status: "live",
-      card: fixtureLinks,
-      participants: [annGiveBack, boScratch],
-      games: [],
-      cells: { [cellKey(ANN, si9Hole.number)]: scoreCell({ kind: "strokes", strokes: 5 }, ANN) },
-      terminatedGameIds: new Set(),
-    };
-
-    render(<ScorecardGrid state={state} recordScore={vi.fn()} />);
-
-    const cell = cellButton("Ann", si9Hole.number);
-    expect(cell.textContent).toMatch("○"); // a GIVEN stroke draws hollow...
-    expect(cell.textContent).not.toMatch("●"); // ...never a filled received-stroke glyph
-    expect(within(cell).getByText("5")).toBeTruthy(); // gross
-    expect(within(cell).getByText("6")).toBeTruthy(); // net = 5 − (−1) = gross + 1
-  });
+  // The hollow ○ give-back test that stood here is DELETED WITH ITS BRANCH, exactly as its own
+  // comment instructed (task 3 restored it deliberately, on the rule that live code gets a test).
+  // Strokes are non-negative by construction now (spec 2026-07-29 §2a/§2b) and ScorecardGrid draws
+  // `"●".repeat(dots)` — there is no give-back state left to cover, and `repeat` would throw on one.
 
   it("19 strokes get a second dot on the SI-1 hole of an 18-hole card, but only one on SI-18", () => {
     const ann0 = participant(ANN, "Ann", "white", 0);

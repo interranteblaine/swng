@@ -196,7 +196,7 @@ describe("CrewJoinPage — the name prompt (signed in, placeholder golfer)", () 
   it("a placeholder golfer sees 'What should the card call you?' — not the Join button yet", async () => {
     signIn();
     mockedPeekCrewInvite.mockResolvedValue(peekResponse);
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } });
 
     renderJoin("/crews/join#tok-1");
 
@@ -208,9 +208,9 @@ describe("CrewJoinPage — the name prompt (signed in, placeholder golfer)", () 
     signIn();
     mockedPeekCrewInvite.mockResolvedValue(peekResponse);
     mockedGetMe
-      .mockResolvedValueOnce({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } })
-      .mockResolvedValueOnce({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("g1"), name: "Bo Real" } });
-    mockedUpdateMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("g1"), name: "Bo Real" } });
+      .mockResolvedValueOnce({ golfer: { golferId: golferId("g1"), name: "Golfer 4821", namePlaceholder: true } })
+      .mockResolvedValueOnce({ golfer: { golferId: golferId("g1"), name: "Bo Real" } });
+    mockedUpdateMe.mockResolvedValue({ golfer: { golferId: golferId("g1"), name: "Bo Real" } });
 
     renderJoin("/crews/join#tok-1");
 
@@ -242,7 +242,7 @@ describe("CrewJoinPage — join as yourself (signed in, real name)", () => {
   it("Join calls joinCrewByInvite with the token and navigates to the crew page on success", async () => {
     const idToken = signIn();
     mockedPeekCrewInvite.mockResolvedValue(peekResponse);
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedJoinCrewByInvite.mockResolvedValue({ crew: { crewId: crewId("crew-9"), name: "The Saturday Boys", members: [] } });
 
     renderJoin("/crews/join#invite-abc");
@@ -257,7 +257,7 @@ describe("CrewJoinPage — join as yourself (signed in, real name)", () => {
   it("a join failure (e.g. the invite expired mid-visit) shows the mapped copy, never the raw server text, and stays on the page", async () => {
     signIn();
     mockedPeekCrewInvite.mockResolvedValue(peekResponse);
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedJoinCrewByInvite.mockRejectedValue(new ApiError("crew-invite-expired", 403, "invite token expired"));
 
     renderJoin("/crews/join#invite-abc");

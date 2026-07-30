@@ -25,10 +25,9 @@ const signedNumber = (n: number): string => (n < 0 ? `−${-n}` : String(n));
 
 // strokes is non-negative by construction (resolveStrokes clamps both arms at zero, spec §2a), so
 // there is no give-back case left to render here — no formatter, no grant branch, no plus
-// convention. Do NOT reach for formatCourseHandicap: it writes a negative as "+N" (golf's
-// plus-handicap convention, a player who GIVES that many), which is exactly backwards for a
-// receiver's own strokes count; that convention — and formatCourseHandicap itself — is deleted in
-// Task 5. Written as `=== 0` rather than `> 0`, deliberately: a negative strokes value would be an
+// convention. And deliberately NOT `formatOverPar`: this is a strokes count being SUBTRACTED on the
+// totals line ("96 −20 76"), not a vs-par figure, so it wears a leading minus where formatOverPar
+// would write a plus. Written as `=== 0` rather than `> 0`, deliberately: a negative strokes value would be an
 // invariant break (review fix, task-4 fix round 1) — `> 0`'s else-branch would have silently
 // rendered it as the plausible-looking "0"; this way it prints the visibly malformed `−${strokes}`
 // instead, failing loudly rather than lying quietly.

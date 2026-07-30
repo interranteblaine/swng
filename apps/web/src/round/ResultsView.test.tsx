@@ -86,7 +86,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
   // hand-invented payload, so it genuinely CAN disagree with localGames if either side has a
   // bug (the brief's own framing: "same domain, same log; a mismatch is a real bug").
   const archive = settleRound(events);
-  const response: FinalizeRoundResponse = { results: archive.results, handicapping: archive.handicapping };
+  const response: FinalizeRoundResponse = { results: archive.results };
 
   it("round is genuinely final and every game resolved — sanity, not the assertion itself", () => {
     expect(state.status).toBe("final");

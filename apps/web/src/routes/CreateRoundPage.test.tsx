@@ -119,7 +119,7 @@ describe("CreateRoundPage — signed out", () => {
 describe("CreateRoundPage — create as yourself", () => {
   it("a preselected courseId sends startRound the fetched card verbatim + the tee/handicap + the account's Bearer (seat resolved server-side)", async () => {
     const idToken = signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
     mockedCreateRound.mockResolvedValue({ roundId: roundId("round-9"), joinCode: "ZZZ999", token: "tok-9", golferId: golferId("ann-g") });
 
@@ -151,7 +151,7 @@ describe("CreateRoundPage — create as yourself", () => {
 
   it("accepts a negative — an under-par player states a minus (spec §4's one sign convention)", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("bo-g"), name: "Bo G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
     mockedCreateRound.mockResolvedValue({ roundId: roundId("round-10"), joinCode: "AAA000", token: "tok-10", golferId: golferId("bo-g") });
 
@@ -168,7 +168,7 @@ describe("CreateRoundPage — create as yourself", () => {
 
   it("submit is disabled until a course is picked", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
 
     renderCreate();
     await screen.findByText(/playing as/i);
@@ -179,7 +179,7 @@ describe("CreateRoundPage — create as yourself", () => {
   it("search → pick a result → the tee picker populates from the fetched CourseView", async () => {
     vi.useFakeTimers();
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
     mockedSearchCourses.mockResolvedValue({ courses: [{ courseId: courseId("course-18"), name: fixtureLinks18.courseName, holeCount: 18 }] });
     mockedGetCourse.mockResolvedValue({ course: courseView });
 
@@ -207,7 +207,7 @@ describe("CreateRoundPage — create as yourself", () => {
   // M7 Task 7 (M-i): the edit flow's own return hand-off (router state, no re-fetch needed).
   it("M-i: EditCoursePage's return hand-off (refreshedCourse router state) replaces this page's held card", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("cy-g"), name: "Cy G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("cy-g"), name: "Cy G" } });
     const revisedCard = { ...fixtureLinks18, teeSets: [{ ...fixtureWhite18, rating: 65.1 }] };
     const revisedCourseView: CourseView = { ...courseView, cardId: "card-18-v2", card: revisedCard };
     mockedCreateRound.mockResolvedValue({ roundId: roundId("round-mi-2"), joinCode: "DDD333", token: "tok-mi-2", golferId: golferId("cy-g") });
@@ -230,7 +230,7 @@ describe("CreateRoundPage — create as yourself", () => {
   // numbers the golfer never actually reviewed.
   it("a card-superseded rejection re-fetches the course and shows a review notice", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
     mockedCreateRound.mockRejectedValueOnce(new ApiError("card-superseded", 409, "the CURRENT pointer has moved"));
 
@@ -257,7 +257,7 @@ describe("CreateRoundPage — create as yourself", () => {
 describe("CreateRoundPage — what you normally shoot", () => {
   it("asks the question verbatim, starts blank, and keeps Create disabled until a number is typed", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
 
     renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
@@ -280,7 +280,7 @@ describe("CreateRoundPage — what you normally shoot", () => {
   it("renders no index/course-handicap derivation at all — a declared index changes nothing on this page", async () => {
     signIn();
     // A golfer with a real declared index: the input that USED to drive the whole derivation.
-    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", indexSource: { kind: "declared", value: 12.4 } } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
 
     renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
@@ -335,7 +335,7 @@ describe("CreateRoundPage — identity still loading", () => {
     expect(screen.queryByText(/playing as/i)).toBeNull();
     expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(true);
 
-    resolveGetMe({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
+    resolveGetMe({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
 
     await screen.findByText(/playing as/i);
     expect(screen.getByText("Ann G")).toBeTruthy();

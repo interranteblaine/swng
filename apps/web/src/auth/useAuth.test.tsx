@@ -40,7 +40,7 @@ function Harness() {
       <button type="button" onClick={() => void auth.refetch()}>
         Refetch
       </button>
-      <button type="button" onClick={() => auth.applyGolfer({ golferId: golferId("ann"), name: "Ann Applied", indexSource: { kind: "whs" } })}>
+      <button type="button" onClick={() => auth.applyGolfer({ golferId: golferId("ann"), name: "Ann Applied" })}>
         Apply golfer
       </button>
       <button
@@ -107,7 +107,7 @@ describe("AuthProvider / useAuth — signed out", () => {
 describe("AuthProvider / useAuth — signed in", () => {
   it("loads saved tokens, GETs /me once, and exposes the returned golfer", async () => {
     tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1", email: "ann@example.com" }), refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
-    const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } }));
+    const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } }));
     vi.stubGlobal("fetch", fetchSpy);
 
     render(
@@ -146,7 +146,7 @@ describe("AuthProvider / useAuth — signed in", () => {
     tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } })),
+      vi.fn(async () => fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } })),
     );
 
     render(
@@ -174,7 +174,7 @@ describe("AuthProvider / useAuth — signed in", () => {
     tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } })),
+      vi.fn(async () => fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } })),
     );
 
     render(
@@ -204,7 +204,7 @@ describe("AuthProvider / useAuth — signed in", () => {
       "fetch",
       vi.fn(async () => {
         call += 1;
-        return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: call === 1 ? "Ann" : "Ann Updated" } });
+        return fakeResponse(200, { golfer: { golferId: "ann", name: call === 1 ? "Ann" : "Ann Updated" } });
       }),
     );
 
@@ -225,7 +225,7 @@ describe("AuthProvider / useAuth — signed in", () => {
   // response) — the one-request counterpart to refetch: NO GET /me fires across the call.
   it("applyGolfer() sets the golfer in place with no GET /me refetch", async () => {
     tokenStore.save({ idToken: fakeIdToken({ sub: "sub-1" }), refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
-    const fetchSpy = vi.fn(async () => fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } }));
+    const fetchSpy = vi.fn(async () => fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } }));
     vi.stubGlobal("fetch", fetchSpy);
 
     render(
@@ -292,7 +292,7 @@ describe("AuthProvider / useAuth — 401 anywhere: one silent refresh retry, the
         }
         if (path === "/me") {
           calls.push("refreshed");
-          return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
+          return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
         }
         throw new Error(`unexpected fetch ${path}`);
       }),
@@ -317,7 +317,7 @@ describe("AuthProvider / useAuth — 401 anywhere: one silent refresh retry, the
       "fetch",
       vi.fn(async (url: string) => {
         const path = new URL(url).pathname;
-        if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } }); // mount fetch succeeds
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } }); // mount fetch succeeds
         if (path === "/me/record") return fakeResponse(401, { code: "invalid-token", message: "expired" });
         if (path === "/oauth2/token") return fakeResponse(400, { error: "invalid_grant" }); // refresh fails
         throw new Error(`unexpected fetch ${path}`);
@@ -351,7 +351,7 @@ describe("AuthProvider / useAuth — proactive refresh before expiry", () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = new URL(url).pathname;
       if (path === "/oauth2/token") return fakeResponse(200, { id_token: freshToken, expires_in: 3600 });
-      if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
+      if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
       throw new Error(`unexpected fetch ${path}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -380,7 +380,7 @@ describe("AuthProvider / useAuth — proactive refresh before expiry", () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = new URL(url).pathname;
       if (path === "/oauth2/token") return fakeResponse(200, { id_token: freshToken, expires_in: 3600 });
-      if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
+      if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
       throw new Error(`unexpected fetch ${path}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -401,7 +401,7 @@ describe("AuthProvider / useAuth — proactive refresh before expiry", () => {
     tokenStore.save({ idToken: storedToken, refreshToken: "refresh-1", expiresAt: Date.now() + 3_600_000 });
     const fetchMock = vi.fn(async (url: string) => {
       const path = new URL(url).pathname;
-      if (path === "/me") return fakeResponse(200, { golfer: { indexSource: { kind: "swng" }, golferId: "ann", name: "Ann" } });
+      if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
       throw new Error(`unexpected fetch ${path}`);
     });
     vi.stubGlobal("fetch", fetchMock);

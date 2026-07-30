@@ -57,11 +57,6 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
   ],
   results: [],
   terminatedGameIds: [],
-  handicapping: entries.map((e) =>
-    e.differential === undefined
-      ? { golferId: e.golferId, kind: "incomplete" as const }
-      : { golferId: e.golferId, kind: "complete" as const, ags: 90, differential: e.differential },
-  ),
 });
 
 // Wraps the real in-memory ProjectionStore, recording every WRITE method it sees (never the

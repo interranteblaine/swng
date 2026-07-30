@@ -1,27 +1,16 @@
 import { z } from "zod";
-import type { CourseId, GolferBests, GolferId, GolferMetrics, GolferRoundLine, IndexSource, Milestone, RoundId } from "@swng/domain";
+import type { CourseId, GolferBests, GolferId, GolferMetrics, GolferRoundLine, Milestone, RoundId } from "@swng/domain";
 import { courseIdSchema, golferIdSchema, roundIdSchema } from "./ids.js";
 
-// The index a golfer is ON is a SOURCE they choose (index-source model spec §3): swng/whs are
-// live computed views, declared is the one number a golfer asserts. The wire carries the
-// CHOICE, never a computed value — the "never store a computed number" invariant (spec §2) is
-// the whole design. The concrete value the golfer sees is resolved client-side from this source
-// + GET /me/record's metrics via domain's `resolveIndex`, so an adopted swng/whs source always
-// tracks the live number it names (apps/web/src/routes/ProfilePage.tsx).
-const indexSourceSchema: z.ZodType<IndexSource> = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("swng") }),
-  z.object({ kind: z.literal("whs") }),
-  z.object({ kind: z.literal("declared"), value: z.number() }),
-]);
-
-// The wire projection of a Golfer aggregate (application/src/golfers/golferView.ts builds it) —
-// `indexSource` is the golfer's chosen index source (above), REQUIRED (every golfer has one; a
-// fresh mint defaults to `{ kind: "swng" }`).
+// The wire projection of a Golfer aggregate (application/src/golfers/golferView.ts builds it).
+// There is no index source and no asserted number here (spec 2026-07-29 §5): the profile is a
+// reporting artifact with no inputs beyond name and home course. What a golfer shoots is
+// `metrics.average` on the record responses below, computed on read from their own rounds; what
+// they play off in a round is the `basis` they state when they join it.
 export interface GolferView {
   readonly golferId: GolferId;
   readonly name: string;
   readonly homeCourseId?: CourseId;
-  readonly indexSource: IndexSource;
   // accounts-only identity spec §2: true iff `name` is the deterministic sub-derived backstop a
   // get-or-create mint used (placeholderName(sub)), not a name the golfer chose — the web prompts
   // for a real one while it's true. Absent means false (old golfers never carry it; a PUT /me with
@@ -33,7 +22,6 @@ export const golferViewSchema: z.ZodType<GolferView> = z.object({
   golferId: golferIdSchema,
   name: z.string(),
   homeCourseId: courseIdSchema.optional(),
-  indexSource: indexSourceSchema,
   namePlaceholder: z.boolean().optional(),
 });
 
@@ -58,16 +46,15 @@ export const golferResponseSchema: z.ZodType<GolferResponse> = z.object({ golfer
 // Every field optional — a partial patch (PATCH-like semantics: an absent key leaves the
 // stored value untouched; there is no way to CLEAR a set field in v1). `.strict()` like
 // courses.ts's request bodies: a client proposing golferId/computed (server-derived, never
-// client-set) is a rejection, not a silently-dropped extra key. `indexSource` is the golfer's
-// chosen index source (index-source model spec §3): picking a computed source (`{kind:"swng"}`/
-// `{kind:"whs"}`) or asserting their own (`{kind:"declared", value}`) — never a stored computed
-// number, so adopting WHS tracks WHS with no copy to go stale (spec §2).
+// client-set) is a rejection, not a silently-dropped extra key. Name and home course are the
+// WHOLE editable profile now (spec 2026-07-29 §5) — the `indexSource` field went with the index
+// itself, and `.strict()` means an old bundle still sending one gets a clean 400 rather than a
+// silent no-op.
 export const updateMeRequestSchema = z
   .object({
     // task-1 (pre-prod hardening): a display name, never a paragraph.
     name: z.string().min(1).max(60).optional(),
     homeCourseId: courseIdSchema.optional(),
-    indexSource: indexSourceSchema.optional(),
   })
   .strict();
 export type UpdateMeRequest = z.infer<typeof updateMeRequestSchema>;
@@ -84,9 +71,13 @@ const golferRoundLineFields = {
   tee: z.string(),
   holes: z.union([z.literal(9), z.literal(18)]),
   par: z.number(),
-  courseHandicap: z.number(),
-  ags: z.number().optional(),
-  differential: z.number().optional(),
+  // The strokes the fold derived (spec 2026-07-29 §2b), the normal score the player STATED when
+  // that is what they stated, and the round's own gross — present iff every hole carried a number
+  // (`hasCompleteScore`). `score` is what a history row renders: `holeResults` never crosses the
+  // wire, so without it a row would have no number at all (spec §8).
+  strokes: z.number(),
+  normallyShoots: z.number().optional(),
+  score: z.number().optional(),
   distribution: z.object({
     eagles: z.number().int(),
     birdies: z.number().int(),
@@ -96,26 +87,21 @@ const golferRoundLineFields = {
   }),
 } as const;
 
-// The metrics read projection (handicap-model legibility spec §2, §9; unrated-courses spec §6;
-// papercut 17, domain/golfer/metrics.ts's golferMetrics): every derived index in one place,
-// computed at read time (never stored). REQUIRED object; `whsIndex`/`swngIndex` stay optional —
-// an empty `{}` (plus a zeroed typicalEighteen/empty indexHistory) is the honest answer for a
-// golfer with no postable rounds. `whsIndex` is Rule 5.2a over rated differentials (with
-// getMyRecord's read-time `computedAtMs` stamp); `swngIndex` is the WHS fold EXTENDED to unrated
-// rounds — real `differential` when rated, the neutral `ags − par` estimate only when unrated (no
-// stamp) — so a rated-only golfer's swngIndex equals their whsIndex exactly. differentialsUsed on
-// each is Rule 5.2a's `use` count (domain's computeIndexDetail, whs.ts) — how many differentials
-// were actually averaged, not how many were in the window. `typicalEighteen` (career scoring
-// buckets, summed across ALL lines and normalized to a per-18-hole rate) and `indexHistory` ("your
-// index over time" — one point per round, oldest → newest, each recomputed from every line up to
-// and including it; the headline whsIndex/swngIndex above is exactly indexHistory's own last
-// point) are REQUIRED — both always present, zeros/`[]` rather than absent. `bests`/`milestones`
-// (analytics spec §3) are REQUIRED the same way, `{}`/`[]` rather than absent.
-// Shared metrics sub-schemas — the domain `GolferMetrics` fold's own shape (domain/golfer/
-// metrics.ts), reused verbatim below by BOTH getMyRecordResponseSchema (which layers a
-// read-time `computedAtMs` stamp onto its own whsIndex — a Clock reading the pure fold never
-// carries) and getGolferResponseSchema (which serves the bare fold as-is) — never redeclared.
-const indexMetricSchema = z.object({ value: z.number(), differentialsUsed: z.number().int() });
+// The metrics read projection (spec 2026-07-29 §5, domain/golfer/metrics.ts's golferMetrics):
+// every derived number in one place, computed at read time and never stored. REQUIRED object;
+// `average`/`spread` stay OPTIONAL — absent is the honest answer for a golfer with no round that
+// carries a score (a card with a pickup has none, spec §2d), never a 0 and never a floor.
+// `average` is what they normally shoot relative to par over their last ten scored rounds;
+// `spread` is the standard deviation over the same set, gated at five. `typicalEighteen` (career
+// scoring buckets normalized to a per-18-hole rate) and `averageHistory` ("your average over
+// time" — one point per CONTRIBUTING round, oldest → newest, the headline being exactly its last
+// point) are REQUIRED, zeros/`[]` rather than absent. `bests`/`milestones` (analytics spec §3) are
+// REQUIRED the same way, `{}`/`[]` rather than absent.
+//
+// Shared metrics sub-schemas — the domain `GolferMetrics` fold's own shape, reused verbatim by
+// BOTH getMyRecordResponseSchema and getGolferResponseSchema, never redeclared. Nothing layers a
+// read-time stamp on top anymore: the whsIndex `computedAtMs` that motivated the split is gone
+// with the index itself, so both responses now serve the bare fold.
 const scoringShapeSchema = z.object({
   eagles: z.number().int(),
   birdies: z.number().int(),
@@ -123,13 +109,10 @@ const scoringShapeSchema = z.object({
   bogeys: z.number().int(),
   doublePlus: z.number().int(),
 });
-const indexHistorySchema = z.array(z.object({ roundId: roundIdSchema, swngIndex: z.number().optional(), whsIndex: z.number().optional() })).readonly();
+const averageHistorySchema = z.array(z.object({ roundId: roundIdSchema, average: z.number() })).readonly();
 
-// bests/milestones (analytics spec 2026-07-21 §3, domain/golfer/analytics.ts): a contingency
-// fix landing in the SAME task that made them required GolferMetrics members (Task 2 of the
-// analytics-read-folds arc) — schema-vs-type assignability below would otherwise fail at build.
-// Task 5 owns the rest of the wire (GetMyRecordResponse's own bests/milestones, the course-page
-// route); these two sub-schemas mirror the domain shapes exactly, no richer than that.
+// bests/milestones (analytics spec 2026-07-21 §3, domain/golfer/analytics.ts) mirror the domain
+// shapes exactly, no richer than that.
 const bestRoundSchema = z.object({ roundId: roundIdSchema, gross: z.number().int(), toPar: z.number().int() });
 const bestsSchema: z.ZodType<GolferBests> = z.object({ best18: bestRoundSchema.optional(), best9: bestRoundSchema.optional() });
 const milestoneSchema: z.ZodType<Milestone> = z.object({
@@ -137,27 +120,17 @@ const milestoneSchema: z.ZodType<Milestone> = z.object({
   roundId: roundIdSchema,
 });
 
-// The bare domain GolferMetrics shape, straight off golferMetrics() — no computedAtMs (that's
-// getMyRecordResponseSchema's own read-time addition below); getGolferResponseSchema serves
-// this as-is.
 const golferMetricsSchema: z.ZodType<GolferMetrics> = z.object({
-  whsIndex: indexMetricSchema.optional(),
-  swngIndex: indexMetricSchema.optional(),
+  average: z.number().optional(),
+  spread: z.number().optional(),
   typicalEighteen: scoringShapeSchema,
-  indexHistory: indexHistorySchema,
+  averageHistory: averageHistorySchema,
   bests: bestsSchema,
   milestones: z.array(milestoneSchema).readonly(),
 });
 
 export interface GetMyRecordResponse {
-  readonly metrics: {
-    readonly whsIndex?: { readonly value: number; readonly computedAtMs: number; readonly differentialsUsed: number };
-    readonly swngIndex?: { readonly value: number; readonly differentialsUsed: number };
-    readonly typicalEighteen: { readonly eagles: number; readonly birdies: number; readonly pars: number; readonly bogeys: number; readonly doublePlus: number };
-    readonly indexHistory: readonly { readonly roundId: RoundId; readonly swngIndex?: number; readonly whsIndex?: number }[];
-    readonly bests: GolferBests;
-    readonly milestones: readonly Milestone[];
-  };
+  readonly metrics: GolferMetrics;
   // newest first (application/src/golfers/getMyRecord.ts); finalizedAt/createdAt (index-chart-
   // polish spec §1.6, the chart's date anchors) mirror GetMyRounds' own rename discipline
   // (finalizedAtMs/createdAtMs -> finalizedAt/createdAt). Optional on the wire so a new bundle
@@ -166,14 +139,7 @@ export interface GetMyRecordResponse {
 }
 
 export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.object({
-  metrics: z.object({
-    whsIndex: indexMetricSchema.extend({ computedAtMs: z.number().int() }).optional(),
-    swngIndex: indexMetricSchema.optional(),
-    typicalEighteen: scoringShapeSchema,
-    indexHistory: indexHistorySchema,
-    bests: bestsSchema,
-    milestones: z.array(milestoneSchema).readonly(),
-  }),
+  metrics: golferMetricsSchema,
   history: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int().optional(), createdAt: z.number().int().optional() })).readonly(),
 });
 
@@ -213,12 +179,10 @@ export const getMyCourseRecordResponseSchema: z.ZodType<GetMyCourseRecordRespons
 // may view any golfer — golf handicaps are posted in every clubhouse; the record is scores,
 // not messages (spec §6a's own visibility decision). Deliberately narrower than GolferView +
 // GetMyRecordResponse combined: no homeCourseId/namePlaceholder (the page never renders them —
-// serve only what renders), and `metrics` is the bare domain GolferMetrics, not the richer
-// wire shape above — application/src/golfers/getGolfer.ts runs the SAME lines-to-
+// serve only what renders) — application/src/golfers/getGolfer.ts runs the SAME lines-to-
 // `{metrics, history}` fold getMyRecord.ts runs (recordOf.ts), never a second implementation.
 export interface GetGolferResponse {
   readonly name: string;
-  readonly indexSource: IndexSource;
   readonly metrics: GolferMetrics;
   // finalizedAt/createdAt (index-chart-polish spec §1.6) — same rename discipline and
   // old-lambda tolerance as GetMyRecordResponse's own history above.
@@ -227,7 +191,6 @@ export interface GetGolferResponse {
 
 export const getGolferResponseSchema: z.ZodType<GetGolferResponse> = z.object({
   name: z.string(),
-  indexSource: indexSourceSchema,
   metrics: golferMetricsSchema,
   history: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int().optional(), createdAt: z.number().int().optional() })).readonly(),
 });

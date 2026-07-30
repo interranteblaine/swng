@@ -150,7 +150,6 @@ describe("finalizeRound — atomic snapshot commit", () => {
     expect(stored).toBeDefined();
     expect(stored).toEqual(settleRound(log));
     expect(stored!.results).toEqual(result.results);
-    expect(stored!.handicapping).toEqual(result.handicapping);
   });
 
   it("idempotent branch: already-final round returns the stored snapshot without appending", async () => {

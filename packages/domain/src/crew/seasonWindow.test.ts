@@ -12,7 +12,7 @@ const mkLine = (finalizedAtMs: number, createdAtMs?: number): StoredLine => ({
   tee: "white",
   holes: 18,
   par: 72,
-  courseHandicap: 10,
+  strokes: 10,
   distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
   finalizedAtMs,
   ...(createdAtMs !== undefined ? { createdAtMs } : {}),

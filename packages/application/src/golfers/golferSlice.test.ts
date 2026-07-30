@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { combineNineHoleDifferentials, computeIndexDetail, courseId, deviceId, fixtureLinks, golferId, golferMetrics, opId, placeholderName, postedDifferential, roundId, swngIndex } from "@swng/domain";
+import { courseId, deviceId, fixtureLinks, golferId, golferMetrics, opId, placeholderName, roundId } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
-import { createCapturingMetrics, createFrozenClock, createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
+import { createCapturingMetrics, createInMemoryGolferStore, createInMemoryJournal, createInMemoryProjectionStore, createSequentialIds } from "../testing/fakes.js";
 import { getMyCourseRecord } from "./getMyCourseRecord.js";
 import { getMyGolfer } from "./getMyGolfer.js";
 import { getMyLiveRounds } from "./getMyLiveRounds.js";
@@ -10,9 +10,20 @@ import { getMyRecord } from "./getMyRecord.js";
 import { getMyRounds } from "./getMyRounds.js";
 import { updateMyGolfer } from "./updateMyGolfer.js";
 
-// getMyRecord's read-time index fold (pre-prod hardening D4a) needs a frozen clock so
-// computedAtMs is a known, assertable value rather than a live Date.now() read.
-const FROZEN_NOW = 9_999;
+// A scored 18 on a par-72 card: every hole a stroke count, so `hasCompleteScore` holds and the
+// line feeds the average (spec 2026-07-29 §2d). gross = 18 x perHole, so vs-par = gross - 72.
+const scoredLine = (id: string, finalizedAtMs: number, perHole: number) => ({
+  roundId: roundId(id),
+  courseName: "Casa Verde GC",
+  tee: "white",
+  holes: 18 as const,
+  par: 72,
+  strokes: 8,
+  score: 18 * perHole,
+  distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+  holeResults: Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: 4, result: { kind: "strokes" as const, strokes: perHole } })),
+  finalizedAtMs,
+});
 
 // Accounts-only identity (spec §1): there are no ghosts and nothing to claim, so this file's
 // golfer surface is get-or-create (GET /me / PUT /me via ensureGolfer) plus the record/rounds
@@ -21,14 +32,13 @@ const setup = (golferStore: GolferStore = createInMemoryGolferStore()) => {
   const idGenerator = createSequentialIds("g");
   const projectionStore = createInMemoryProjectionStore();
   const journal = createInMemoryJournal();
-  const clock = createFrozenClock(FROZEN_NOW);
   return {
     golferStore,
     projectionStore,
     journal,
     getMe: getMyGolfer({ golferStore, idGenerator }),
     updateMe: updateMyGolfer({ golferStore, idGenerator }),
-    record: getMyRecord({ golferStore, projectionStore, clock }),
+    record: getMyRecord({ golferStore, projectionStore }),
     courseRecord: getMyCourseRecord({ golferStore, projectionStore }),
     myRounds: getMyRounds({ golferStore, projectionStore }),
     myLiveRounds: getMyLiveRounds({ golferStore, projectionStore, journal }),
@@ -100,13 +110,13 @@ describe("namePlaceholder lifecycle", () => {
     expect(reread.golfer).not.toHaveProperty("namePlaceholder");
   });
 
-  it("a PUT /me that leaves the name untouched (an index-source-only edit) PRESERVES the flag", async () => {
+  it("a PUT /me that leaves the name untouched (a home-course-only edit) PRESERVES the flag", async () => {
     const ctx = setup();
     await ctx.getMe({ sub: "sub-1" }); // mint with the flag
 
-    const patched = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "declared", value: 12.0 } });
+    const patched = await ctx.updateMe({ sub: "sub-1" }, { homeCourseId: courseId("course-1") });
     expect(patched.golfer.namePlaceholder).toBe(true);
-    expect(patched.golfer.indexSource).toEqual({ kind: "declared", value: 12.0 });
+    expect(patched.golfer.homeCourseId).toBe(courseId("course-1"));
   });
 });
 
@@ -115,114 +125,75 @@ describe("updateMyGolfer", () => {
     const ctx = setup();
     // First PUT (empty patch) get-or-creates via ensureGolfer: the create name is the sub-derived
     // placeholder (Cognito is a pure authenticator — never the email localpart), flag preserved by
-    // the declared-only patch.
+    // the home-course-only patch.
     await ctx.updateMe({ sub: "sub-1" }, {});
 
-    const updated = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "declared", value: 14.2 } });
+    const updated = await ctx.updateMe({ sub: "sub-1" }, { homeCourseId: courseId("course-1") });
     expect(updated.golfer.name).toBe(placeholderName("sub-1")); // untouched — still the placeholder, never "ann"
-    expect(updated.golfer.indexSource).toEqual({ kind: "declared", value: 14.2 });
+    expect(updated.golfer.homeCourseId).toBe(courseId("course-1"));
 
     const renamed = await ctx.updateMe({ sub: "sub-1" }, { name: "Annika" });
     expect(renamed.golfer.name).toBe("Annika");
-    expect(renamed.golfer.indexSource).toEqual({ kind: "declared", value: 14.2 }); // untouched by the second patch
+    expect(renamed.golfer.homeCourseId).toBe(courseId("course-1")); // untouched by the second patch
   });
 
   it("get-or-creates on the first PUT /me — one shared ensureGolfer path (GET /me get-or-creates too)", async () => {
     const ctx = setup();
-    const updated = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "declared", value: 9.1 } });
-    expect(updated.golfer.indexSource).toEqual({ kind: "declared", value: 9.1 });
+    const updated = await ctx.updateMe({ sub: "sub-1" }, { homeCourseId: courseId("course-1") });
+    expect(updated.golfer.homeCourseId).toBe(courseId("course-1"));
   });
 
-  it("creates with the sub-derived placeholder name, NEVER the email localpart (Cognito is a pure authenticator), on the default swng source", async () => {
+  it("creates with the sub-derived placeholder name, NEVER the email localpart (Cognito is a pure authenticator)", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
     expect(golfer.name).toBe(placeholderName("sub-1"));
     expect(golfer.name).not.toBe("ann");
     expect(golfer.namePlaceholder).toBe(true);
-    // A fresh mint is on the default source (index-source model spec §3).
-    expect(golfer.indexSource).toEqual({ kind: "swng" });
   });
 
-  it("carries indexSource on the wire as the sole handicap field — no declared/computed/effective/official (index-source model spec §3); adopting a computed source stores the SOURCE, not a value", async () => {
+  // The golfer record holds NO number and no source to pick (spec 2026-07-29 §5): the whole
+  // index-source model — and every field the models before it left behind — is gone from the wire.
+  // What a golfer shoots is `metrics.average` on the record response; what they play off is the
+  // basis they state at join.
+  it("carries no number of any kind on the wire — name and home course are the whole profile", async () => {
     const ctx = setup();
-    await ctx.updateMe({ sub: "sub-1" }, {});
-    const declaredOnly = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "declared", value: 14.2 } });
-    expect(declaredOnly.golfer.indexSource).toEqual({ kind: "declared", value: 14.2 });
-    expect(declaredOnly.golfer).not.toHaveProperty("declared");
-    expect(declaredOnly.golfer).not.toHaveProperty("effective");
-    expect(declaredOnly.golfer).not.toHaveProperty("computed");
-    expect(declaredOnly.golfer).not.toHaveProperty("official");
-
-    // Adopting WHS stores the SOURCE — no computed number is copied into the profile (spec §2, the
-    // whole point): the wire carries `{ kind: "whs" }`, never a cached value.
-    const onWhs = await ctx.updateMe({ sub: "sub-1" }, { indexSource: { kind: "whs" } });
-    expect(onWhs.golfer.indexSource).toEqual({ kind: "whs" });
-    expect(onWhs.golfer).not.toHaveProperty("declared");
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, { name: "Annika", homeCourseId: courseId("course-1") });
+    expect(golfer).toEqual({ golferId: golfer.golferId, name: "Annika", homeCourseId: courseId("course-1") });
+    for (const retired of ["indexSource", "handicap", "declared", "effective", "computed", "official"]) {
+      expect(golfer).not.toHaveProperty(retired);
+    }
   });
 });
 
 describe("getMyRecord", () => {
-  it("returns an empty record (no computed indexes, zeroed typicalEighteen, empty indexHistory, empty history) for a sub with no golfer at all — no throw, no create", async () => {
+  it("returns an empty record (no average/spread, zeroed typicalEighteen, empty averageHistory, empty history) for a sub with no golfer at all — no throw, no create", async () => {
     const ctx = setup();
     const record = await ctx.record({ sub: "sub-1" });
     expect(record).toEqual({
-      metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, indexHistory: [], bests: {}, milestones: [] },
+      metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, averageHistory: [], bests: {}, milestones: [] },
       history: [],
     });
   });
 
-  it("bootstrap not met: history present, whsIndex absent below 3 differentials", async () => {
+  it("a history line with no score leaves the average ABSENT, not zero — no number is invented (spec §2d)", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
+    // No holeResults at all: the round happened, but the card carries no score.
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r1"),
       courseName: "Casa Verde GC",
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
-      ags: 90,
-      differential: 9.0,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
     });
 
     const record = await ctx.record({ sub: "sub-1" });
-    expect(record.metrics.whsIndex).toBeUndefined();
-    expect(record.history).toHaveLength(1);
-  });
-
-  // unrated-courses spec §6: a wholly-unrated history (every line has an ags but no differential —
-  // no rating/slope to post one) yields a swngIndex (the neutral ags−par estimate) but no
-  // whsIndex (Rule 5.2a needs rated differentials, which unrated rounds never carry).
-  it("a wholly-unrated history yields metrics.swngIndex but no metrics.whsIndex", async () => {
-    const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
-    const unrated = [
-      { roundId: roundId("r1"), ags: 96, finalizedAtMs: 1_000 },
-      { roundId: roundId("r2"), ags: 101, finalizedAtMs: 2_000 },
-      { roundId: roundId("r3"), ags: 94, finalizedAtMs: 3_000 },
-    ];
-    for (const line of unrated) {
-      await ctx.projectionStore.putLine(golfer.golferId, {
-        roundId: line.roundId,
-        courseName: "Nine Pines (unrated)",
-        tee: "no-card",
-        holes: 18,
-        par: 72,
-        courseHandicap: 20,
-        ags: line.ags, // no differential — an unrated tee posts none
-        distribution: { eagles: 0, birdies: 0, pars: 4, bogeys: 10, doublePlus: 4 },
-        finalizedAtMs: line.finalizedAtMs,
-      });
-    }
-
-    const record = await ctx.record({ sub: "sub-1" });
-    expect(record.metrics.whsIndex).toBeUndefined();
-    expect(record.metrics.swngIndex).toBeDefined();
-    const expected = swngIndex(unrated.map((l) => ({ ags: l.ags, par: 72, holes: 18 as const })))!;
-    expect(record.metrics.swngIndex).toEqual({ value: expected.value, differentialsUsed: expected.differentialsUsed });
-    expect(record.history).toHaveLength(3);
+    expect(record.metrics.average).toBeUndefined();
+    expect(record.metrics.averageHistory).toEqual([]);
+    expect(record.history).toHaveLength(1); // it still appears in the history
   });
 
   // courseId (course-cards spec §4, the analytics join key): carried when the stored line has
@@ -240,7 +211,7 @@ describe("getMyRecord", () => {
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 2_000,
       createdAtMs: 1_900,
@@ -252,7 +223,7 @@ describe("getMyRecord", () => {
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
     });
@@ -267,110 +238,39 @@ describe("getMyRecord", () => {
     expect(record.history[1]).not.toHaveProperty("createdAt");
   });
 
-  // Below the 3-differential bootstrap (Rule 5.2a's own minimum), the whsIndex is ABSENT, not
-  // zero — computeIndexDetail itself returns undefined under 3 (whs.ts), and getMyRecord
-  // must pass that absence straight through, never coercing it into a 0 the wire schema
-  // could mistake for a real (if unlikely) index value.
-  it("below the 3-differential bootstrap the whsIndex is ABSENT, not zero", async () => {
+  // The pre-prod hardening headline pin (D4a), carried forward to the average: every derived
+  // number is computed HERE, at read time, from the SAME lines this response already carries —
+  // never a stored snapshot (no putIndex/putAverage call exists to consult). The oracle is
+  // golferMetrics over the same lines, so a second implementation on the way to the wire would
+  // fail rather than quietly disagree.
+  it("computes the average at read time from the history lines — no stored snapshot is consulted", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
-    await ctx.projectionStore.putLine(golfer.golferId, {
-      roundId: roundId("r1"),
-      courseName: "Casa Verde GC",
-      tee: "white",
-      holes: 18,
-      par: 72,
-      courseHandicap: 8,
-      ags: 90,
-      differential: 9.0,
-      distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
-      finalizedAtMs: 1_000,
-    });
-    await ctx.projectionStore.putLine(golfer.golferId, {
-      roundId: roundId("r2"),
-      courseName: "Casa Verde GC",
-      tee: "white",
-      holes: 18,
-      par: 72,
-      courseHandicap: 8,
-      ags: 95,
-      differential: 14.0,
-      distribution: { eagles: 0, birdies: 0, pars: 5, bogeys: 13, doublePlus: 0 },
-      finalizedAtMs: 2_000,
-    });
-
-    const record = await ctx.record({ sub: "sub-1" });
-    expect(record.metrics.whsIndex).toBeUndefined();
-    expect(record.history).toHaveLength(2);
-  });
-
-  // The pre-prod hardening headline pin (D4a): the index is computed HERE, at read time, from
-  // the SAME lines this response already carries — never a stored snapshot (no putIndex call
-  // anywhere in this test). The oracle is the identical domain fold projectArchive used to run
-  // (sortLines -> combineNineHoleDifferentials -> computeIndexDetail), proving getMyRecord's
-  // wire index agrees with it byte-for-byte, with computedAtMs pinned to this setup's frozen
-  // clock rather than a live wall-clock read.
-  it("computes the index at read time from the history lines — no stored snapshot is consulted", async () => {
-    const ctx = setup();
-    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
-    const seededCompleteLines = [
-      { roundId: roundId("r1"), ags: 90, differential: 9.0, finalizedAtMs: 1_000 },
-      { roundId: roundId("r2"), ags: 95, differential: 14.0, finalizedAtMs: 2_000 },
-      { roundId: roundId("r3"), ags: 92, differential: 11.0, finalizedAtMs: 3_000 },
-    ];
-    for (const line of seededCompleteLines) {
-      await ctx.projectionStore.putLine(golfer.golferId, {
-        roundId: line.roundId,
-        courseName: "Casa Verde GC",
-        tee: "white",
-        holes: 18,
-        par: 72,
-        courseHandicap: 8,
-        ags: line.ags,
-        differential: line.differential,
-        distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
-        finalizedAtMs: line.finalizedAtMs,
-      });
-    }
+    const seeded = [scoredLine("r1", 1_000, 5), scoredLine("r2", 2_000, 6), scoredLine("r3", 3_000, 5)];
+    for (const line of seeded) await ctx.projectionStore.putLine(golfer.golferId, line);
 
     const response = await ctx.record({ sub: "sub-1" });
 
-    const expected = computeIndexDetail(combineNineHoleDifferentials(seededCompleteLines.map((l) => ({ differential: l.differential, holes: 18 }))))!;
-    expect(response.metrics.whsIndex).toEqual({ value: expected.value, computedAtMs: FROZEN_NOW, differentialsUsed: expected.differentialsUsed });
+    // 90 (+18), 108 (+36), 90 (+18) -> mean 72/3 = 24.
+    expect(response.metrics.average).toBe(24);
+    expect(response.metrics.average).toBe(golferMetrics(seeded).average);
     expect(response.history.map((line) => line.roundId)).toEqual(["r3", "r2", "r1"]); // newest first
   });
 
   // ProjectionStore.listLines is UNORDERED by contract (ports/projectionStore.ts) — the stable
   // ROUND# sk carries no time to sort by. This proves getMyRecord itself imposes the
-  // (finalizedAtMs, roundId) order BEFORE the index fold (the fold moved here from the
-  // projector with D4a — this pin replaces projectArchive's own former version of the same
-  // proof), via a fake store whose listLines returns lines in the OPPOSITE order from how they
-  // were logically produced. combineNineHoleDifferentials pairs ADJACENT entries positionally
-  // (its own doc comment) — feeding it unsorted mispairs everyone, not just reorders the same
-  // pairs: 7 nine-hole lines, chronological r1..r7, sorted ascending pairs (r1,r2)=1+2=3,
-  // (r3,r4)=3+4=7, (r5,r6)=5+6=11, r7 pending → combined=[3,7,11]. A wrong implementation that
-  // skips the sort would fold the REVERSED feed into a DIFFERENT value entirely, not just a
-  // reordering of the same one.
-  it("sorts lines by finalizedAtMs before folding — an out-of-order store never mispairs 9-hole differentials", async () => {
-    const nineHoleLine = (id: string, finalizedAtMs: number, differential: number) => ({
-      roundId: roundId(id),
-      courseName: "Casa Verde GC",
-      tee: "white",
-      holes: 9 as const,
-      par: 36,
-      courseHandicap: 5,
-      differential,
-      distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
-      finalizedAtMs,
-    });
+  // (finalizedAtMs, roundId) order BEFORE the fold, via a fake store whose listLines returns lines
+  // in the OPPOSITE order from how they were logically produced. Order is load-bearing twice over:
+  // the average's own rolling window is the LAST ten scored rounds, and averageHistory is one
+  // point per round oldest -> newest. The fixture is built so an unsorted fold lands on a DIFFERENT
+  // number, not merely a reordering of the same one: 12 rounds, the two OLDEST at +36 and the ten
+  // newest at +18. Sorted, the window is the ten +18s -> 18. Fed the reversed array, slice(-10)
+  // would take r10..r1 — dragging both +36s in -> (36x2 + 18x8)/10 = 21.6 -> 22.
+  it("sorts lines by finalizedAtMs before folding — an out-of-order store never mis-windows the last ten", async () => {
     const chronological = [
-      nineHoleLine("r1", 1_000, 1),
-      nineHoleLine("r2", 2_000, 2),
-      nineHoleLine("r3", 3_000, 3),
-      nineHoleLine("r4", 4_000, 4),
-      nineHoleLine("r5", 5_000, 5),
-      nineHoleLine("r6", 6_000, 6),
-      nineHoleLine("r7", 7_000, 7),
+      scoredLine("r01", 1_000, 6),
+      scoredLine("r02", 2_000, 6),
+      ...Array.from({ length: 10 }, (_, i) => scoredLine(`r${String(i + 3).padStart(2, "0")}`, 3_000 + i, 5)),
     ];
     const reversed = [...chronological].reverse();
     const outOfOrderStore: ProjectionStore = {
@@ -381,76 +281,56 @@ describe("getMyRecord", () => {
       listLive: async () => [],
     };
     const golferStore = createInMemoryGolferStore();
-    await golferStore.put({ id: golferId("ann"), name: "Ann", handicap: { indexSource: { kind: "swng" } } }, undefined);
+    await golferStore.put({ id: golferId("ann"), name: "Ann" }, undefined);
     await golferStore.bindSub(golferId("ann"), "sub-ann");
-    const record = getMyRecord({ golferStore, projectionStore: outOfOrderStore, clock: createFrozenClock(FROZEN_NOW) });
+    const record = getMyRecord({ golferStore, projectionStore: outOfOrderStore });
 
     const response = await record({ sub: "sub-ann" });
 
-    const expected = computeIndexDetail(combineNineHoleDifferentials([3, 7, 11].map((differential) => ({ differential, holes: 18 }))))!;
-    expect(response.metrics.whsIndex).toEqual({ value: expected.value, computedAtMs: FROZEN_NOW, differentialsUsed: expected.differentialsUsed });
+    expect(response.metrics.average).toBe(18);
+    expect(response.metrics.average).not.toBe(22); // the unsorted answer, named so a regression is unmistakable
+    // averageHistory is oldest -> newest regardless of the store's order: the first point is r01's
+    // own +36, the last is the headline.
+    expect(response.metrics.averageHistory[0]).toEqual({ roundId: roundId("r01"), average: 36 });
+    expect(response.metrics.averageHistory.at(-1)?.average).toBe(18);
   });
 
-  // Papercut 17 (task 3, the wire cut) — typicalEighteen + indexHistory are the SAME
-  // golferMetrics fold as whsIndex/swngIndex above, just two more members: this proves the
-  // wire's typicalEighteen/indexHistory agree byte-for-byte with calling golferMetrics
-  // directly over the same (sorted, RAW) lines, for a mixed rated/unrated/incomplete
-  // fixture (six rated rounds, one unrated ags-bearing round, one no-ags-at-all incomplete
-  // card). It ALSO proves the posted (0.1-rounded) wire differential never leaks into the
-  // index fold: r3/r6's raw differentials (3.0, 3.05) are deliberately the two LOWEST rated
-  // values in a 6-differential window (use=2), so folding the POSTED values (3.0, 3.1)
-  // instead of the raw ones would shift both whsIndex and swngIndex by a full tenth
-  // (2.0->2.1, 3.0->3.1) — a real, not merely notional, regression trap for "getMyRecord
-  // accidentally computes golferMetrics over toWireLine's rounded output" rather than the
-  // raw `sorted` lines.
-  it("typicalEighteen + indexHistory on the wire equal golferMetrics(sorted); the headline index is computed from RAW differentials even though the wire differential is posted to 0.1", async () => {
+  // typicalEighteen + averageHistory are the SAME golferMetrics fold as `average` above, just two
+  // more members: this proves the wire's copies agree byte-for-byte with calling golferMetrics
+  // directly over the same (sorted) lines, for a mixed scored/unscored fixture — so no member can
+  // acquire a second implementation on its way to the wire.
+  it("typicalEighteen + averageHistory on the wire equal golferMetrics(sorted)", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
-    const line = (id: string, ms: number, extra: { ags?: number; differential?: number }) => ({
-      roundId: roundId(id),
-      courseName: "Casa Verde GC",
-      tee: "white",
-      holes: 18 as const,
-      par: 72,
-      courseHandicap: 8,
-      distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 5, doublePlus: 2 },
-      finalizedAtMs: ms,
-      ...extra,
-    });
     const stored = [
-      line("r1", 1_000, { ags: 110, differential: 20.0 }),
-      line("r2", 2_000, { ags: 111, differential: 21.0 }),
-      line("r3", 3_000, { ags: 75, differential: 3.0 }), // one of the two lowest rated differentials
-      { ...line("r4", 4_000, { ags: 97 }), courseName: "Nine Pines (unrated)", tee: "no-card", basis: { kind: "normally-shoots", overPar: 20 } }, // unrated — no differential
-      line("r5", 5_000, { ags: 112, differential: 22.0 }),
-      line("r6", 6_000, { ags: 76, differential: 3.05 }), // the OTHER lowest — raw, non-tenth: pins the wire rounding below
-      line("r7", 7_000, { ags: 113, differential: 23.0 }),
-      { ...line("r8", 8_000, {}), distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 } }, // incomplete — no ags, no differential
+      { ...scoredLine("r1", 1_000, 6), distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 5, doublePlus: 2 } },
+      { ...scoredLine("r2", 2_000, 5), distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 5, doublePlus: 2 } },
+      { ...scoredLine("r3", 3_000, 5), distribution: { eagles: 1, birdies: 2, pars: 9, bogeys: 4, doublePlus: 2 } },
+      // A round with no score at all — in the history, out of the average and its chart.
+      {
+        roundId: roundId("r4"),
+        courseName: "Casa Verde GC",
+        tee: "white",
+        holes: 18 as const,
+        par: 72,
+        strokes: 8,
+        distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
+        finalizedAtMs: 4_000,
+      },
     ];
     for (const l of stored) await ctx.projectionStore.putLine(golfer.golferId, l);
 
     const record = await ctx.record({ sub: "sub-1" });
 
-    // The oracle: golferMetrics over the SAME (raw) lines, sorted oldest -> newest — the
-    // identical fold getMyRecord itself runs (its own sortLines contract).
+    // The oracle: golferMetrics over the SAME lines, sorted oldest -> newest — the identical fold
+    // getMyRecord itself runs (its own sortLines contract).
     const sortedOldestFirst = [...stored].sort((a, b) => a.finalizedAtMs - b.finalizedAtMs);
     const expected = golferMetrics(sortedOldestFirst);
     expect(record.metrics.typicalEighteen).toEqual(expected.typicalEighteen);
-    expect(record.metrics.indexHistory).toEqual(expected.indexHistory);
-
-    // The headline still agrees with the RAW-line oracle: best-2-of-6 rated differentials are
-    // {3.0, 3.05} (avg 3.025, adjustment -1.0) -> whsIndex 2.0; best-2-of-7 ags-bearing entries
-    // are the same pair (adjustment 0) -> swngIndex 3.0. Folding the POSTED pair {3.0, 3.1}
-    // instead would land on 2.1 / 3.0->3.1 respectively — a materially different number.
-    expect(record.metrics.whsIndex).toEqual({ ...expected.whsIndex, value: 2.0, differentialsUsed: 2, computedAtMs: FROZEN_NOW });
-    expect(record.metrics.swngIndex).toEqual({ ...expected.swngIndex, value: 3.0, differentialsUsed: 2 });
-
-    // The wire differential is the POSTED (0.1) value, never the raw float: r6's raw 3.05 posts
-    // as 3.1 (postedDifferential's own ".05 rounds up" rule), while r3's raw 3.0 is already a
-    // tenth and posts unchanged — yet the headline above used the RAW 3.0/3.05, not 3.0/3.1.
-    expect(record.history.find((l) => l.roundId === roundId("r6"))?.differential).toBe(postedDifferential(3.05));
-    expect(record.history.find((l) => l.roundId === roundId("r6"))?.differential).toBe(3.1);
-    expect(record.history.find((l) => l.roundId === roundId("r3"))?.differential).toBe(3.0);
+    expect(record.metrics.averageHistory).toEqual(expected.averageHistory);
+    // Three scored rounds -> three points; the unscored r4 is not a data point.
+    expect(record.metrics.averageHistory.map((point) => point.roundId)).toEqual(["r1", "r2", "r3"]);
+    expect(record.history).toHaveLength(4);
   });
 });
 
@@ -482,7 +362,7 @@ describe("getMyCourseRecord", () => {
       tee: "white",
       holes: 18 as const,
       par: 72,
-      courseHandicap: 8,
+      strokes: 8,
       ags: gross,
       differential: gross - 72,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
@@ -517,7 +397,7 @@ describe("getMyCourseRecord", () => {
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
     });
@@ -545,9 +425,7 @@ describe("getMyRounds", () => {
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
-      ags: 90,
-      differential: 9.0,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
     });
@@ -557,9 +435,7 @@ describe("getMyRounds", () => {
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
-      ags: 95,
-      differential: 14.0,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 5, bogeys: 13, doublePlus: 0 },
       finalizedAtMs: 2_000,
     });
@@ -582,7 +458,7 @@ describe("getMyRounds", () => {
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 2_000,
       createdAtMs: 1_500,
@@ -594,7 +470,7 @@ describe("getMyRounds", () => {
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
     });
@@ -617,7 +493,7 @@ describe("getMyRounds", () => {
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 2_000,
     });
@@ -628,7 +504,7 @@ describe("getMyRounds", () => {
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
     });
@@ -650,9 +526,7 @@ describe("getMyRounds", () => {
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
-      ags: 90,
-      differential: 9.0,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
     });
@@ -662,9 +536,7 @@ describe("getMyRounds", () => {
       tee: "white",
       holes: 18,
       par: 72,
-      courseHandicap: 8,
-      ags: 95,
-      differential: 14.0,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 5, bogeys: 13, doublePlus: 0 },
       finalizedAtMs: 2_000,
     });

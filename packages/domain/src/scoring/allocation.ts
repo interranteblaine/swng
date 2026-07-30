@@ -1,12 +1,8 @@
 import type { CourseCard } from "../course/card.js";
-import { findTeeSet, isRated } from "../course/card.js";
+import { findTeeSet } from "../course/card.js";
 import { DomainError } from "../errors.js";
-import { adjustedGrossScore, scoreDifferential } from "../handicap/whs.js";
 import type { GolferId } from "../ids.js";
-import type { HoleResult } from "../round/holeResult.js";
 import type { Participant, RosterEntry } from "../round/participant.js";
-import type { ScoreCell } from "../round/state.js";
-import { cellAt } from "../round/state.js";
 import type { GameConfig } from "./game.js";
 // game.js → the five engines → back here: the engines all read their dots from
 // gameStrokeAllocation below, so this is a module cycle, and a deliberate one. It is safe because
@@ -71,49 +67,8 @@ export const roundStrokeAllocation = (
 // "total dots" formula that could drift from the per-hole one above.
 export const totalDots = (perHole: ReadonlyMap<number, number>): number => [...perHole.values()].reduce((sum, dots) => sum + dots, 0);
 
-// A differential can only be posted once every tee-set hole has decided (a stroke count, a
-// pickup, or a concession — adjustedGrossScore's own rule). Mid-round, or for a golfer who
-// never finished, that's not an error — it's the ordinary "incomplete" case a v1 crew hits
-// whenever someone walks in after a few holes or picks up on the last one.
-//
-// Lives here (not round/archive.ts) so it has exactly one implementation with two callers:
-// settleRound below, and — per M6 Task 5 — the web's own handicapping display, which
-// currently carries a drift-tested mirror of this exact function.
-// Takes a RosterEntry, not a Participant: the net-double-bogey cap needs the strokes the fold
-// DERIVED (spec 2026-07-29 §2b), which a bare assertion can't answer. Deleted whole in this arc's
-// WHS-deletion task along with RoundArchive.handicapping.
-export const handicappingFor = (
-  participant: RosterEntry,
-  card: CourseCard,
-  cells: Readonly<Record<string, ScoreCell>>,
-):
-  | { readonly golferId: GolferId; readonly kind: "complete"; readonly ags: number; readonly differential: number }
-  | { readonly golferId: GolferId; readonly kind: "unrated"; readonly ags: number }
-  | { readonly golferId: GolferId; readonly kind: "incomplete" } => {
-  const teeSet = findTeeSet(card, participant.tee);
-  const holes = new Map<number, HoleResult>();
-  for (const hole of teeSet.holes) {
-    const cell = cellAt(cells, participant.golferId, hole.number);
-    if (cell) holes.set(hole.number, cell.result);
-  }
-  try {
-    const ags = adjustedGrossScore(teeSet, participant.strokes, holes);
-    // Unrated: the round is fully scored (AGS holds) but has no differential to post
-    // (spec §4). It stays out of the WHS index by carrying no differential, never by a
-    // downstream filter change.
-    if (!isRated(teeSet)) return { golferId: participant.golferId, kind: "unrated", ags };
-    // Raw per-tee-set differential only — combining two 9-hole differentials into one
-    // 18-hole-equivalent is the index projection's job (published 2020 WHS rule), not
-    // settlement's; the archive stays index-independent, per this tee set alone.
-    const differential = scoreDifferential(teeSet, ags);
-    return { golferId: participant.golferId, kind: "complete", ags, differential };
-  } catch (error) {
-    // holes-undecided is the one expected failure of a partial card; anything else (e.g.
-    // an unknown tee-set name, which would mean a corrupt round) is a real bug and must
-    // surface rather than be swallowed into a silent "incomplete".
-    if (error instanceof DomainError && error.code === "holes-undecided") {
-      return { golferId: participant.golferId, kind: "incomplete" };
-    }
-    throw error;
-  }
-};
+// `handicappingFor` (adjusted gross score → score differential per participant) is DELETED with
+// the whole WHS pipeline (spec 2026-07-29 §7) and so is RoundArchive.handicapping, which was its
+// only home. What the record needs from a finished round is now the plain gross — archiveGolferLine
+// sums it from `holeResults` via `scoreOf` (golfer/analytics.ts), and ResultsView's own totals come
+// from `grossForHoles` over the cells it already renders.

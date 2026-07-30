@@ -20,7 +20,6 @@ const buildArchive = (overrides?: Partial<RoundArchive>): RoundArchive => ({
   events: [],
   results: [],
   terminatedGameIds: [],
-  handicapping: [],
   ...overrides,
 });
 

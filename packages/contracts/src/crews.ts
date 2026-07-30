@@ -224,23 +224,25 @@ const partnerStandingRecordSchema: z.ZodType<PartnerStandingRecord> = z.object({
 // (crew/scoreboard.ts) plus the roster's own name (the nameByGolfer precedent every other row
 // on this response already follows) — never the golfer store's name, which can drift from what
 // THIS crew calls someone.
+// Rounds · Average · Spread · Best (spec 2026-07-29 §6) — `index`/`indexDelta` went with the index
+// itself, and `netPer18` was replaced because it was also plain wrong (it subtracted whatever
+// integer was typed at join, so a player who typed a difference read several strokes better than
+// the truth).
 export interface ScoreboardRow {
   readonly golferId: GolferId;
   readonly name: string;
   readonly rounds: number;
+  readonly average?: number;
+  readonly spread?: number;
   readonly best18?: { readonly gross: number; readonly toPar: number };
-  readonly netPer18?: number;
-  readonly index?: number;
-  readonly indexDelta?: number;
 }
 const scoreboardRowSchema: z.ZodType<ScoreboardRow> = z.object({
   golferId: golferIdSchema,
   name: z.string(),
   rounds: z.number().int(),
+  average: z.number().optional(),
+  spread: z.number().optional(),
   best18: z.object({ gross: z.number().int(), toPar: z.number().int() }).optional(),
-  netPer18: z.number().optional(),
-  index: z.number().optional(),
-  indexDelta: z.number().optional(),
 });
 
 // "Played together" — a derived shared round (crew-scoreboard spec §3b), the successor of the

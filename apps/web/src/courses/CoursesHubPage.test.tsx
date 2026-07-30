@@ -91,7 +91,7 @@ const line = (
   tee: "white",
   holes: 18,
   par: 72,
-  courseHandicap: 10,
+  strokes: 10,
   distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
   finalizedAt: 1_000 + n,
 });
@@ -122,7 +122,7 @@ describe("CoursesHubPage", () => {
   it("signed in with a home course: shows a 'Your home course' card linking to its page", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({
-      golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G", homeCourseId: courseId("home-1") },
+      golfer: { golferId: golferId("ann-g"), name: "Ann G", homeCourseId: courseId("home-1") },
     });
     const homeCourseView: CourseView = {
       courseId: courseId("home-1"),
@@ -142,7 +142,7 @@ describe("CoursesHubPage", () => {
 
   it("signed in with round lines: 'Courses you've played' renders coursesPlayed's rows, skipping the courseId-less line", async () => {
     signIn();
-    mockedGetMe.mockResolvedValue({ golfer: { indexSource: { kind: "swng" }, golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
     mockedGetMyRounds.mockResolvedValue({
       rounds: [line("casa-verde", "Casa Verde GC", 1), line("walker", "Walker", 2), line(undefined, "Pre-course-cards Muni", 3)],
     });

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { grossForHoles, netStrokes, roundStrokeAllocation } from "@swng/client";
-import { cellAt, findTeeSet, scoredStrokes, strokeGrant, underPar } from "@swng/domain";
+import { cellAt, findTeeSet, scoredStrokes, underPar } from "@swng/domain";
 import type { CourseCard, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { cardBox } from "../ui/classes";
 import { ScorePad } from "./ScorePad";
@@ -117,17 +117,16 @@ function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
       disabled={readOnly}
       className={`${cardBox} flex min-h-14 w-full min-w-14 flex-col items-center justify-center gap-0.5 px-1 py-1 active:bg-goldwash`}
     >
-      {(() => {
-        const grant = strokeGrant(dots);
-        if (grant.kind === "none") return null;
-        // received strokes are filled ●; GIVEN strokes (a plus handicap) are hollow ○ — on the
-        // screen now, not silently dropped. net = gross − dots already reads gross + 1 for a give.
-        return (
-          <span aria-hidden className="text-[10px] leading-none text-forest">
-            {(grant.kind === "receives" ? "●" : "○").repeat(grant.count)}
-          </span>
-        );
-      })()}
+      {/* Dots are strokes RECEIVED, always: strokes are non-negative by construction now (spec
+          2026-07-29 §2a/§2b — resolveStrokes clamps at zero and the request schema bounds the
+          assertion), so the hollow ○ give-back glyph a plus handicap used to draw has no reachable
+          state and is deleted with the convention. `repeat` throws RangeError on a negative, which
+          is exactly what makes that clamp load-bearing rather than cosmetic. */}
+      {dots !== 0 && (
+        <span aria-hidden className="text-[10px] leading-none text-forest">
+          {"●".repeat(dots)}
+        </span>
+      )}
       {cell ? (
         <span
           className={

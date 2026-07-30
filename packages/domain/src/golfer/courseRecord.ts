@@ -1,4 +1,5 @@
 import type { CourseId } from "../ids.js";
+import { scoredStrokes } from "../round/holeResult.js";
 import { roundHalfUp } from "../scoring/strokes.js";
 import type { BestRound } from "./analytics.js";
 import { fullyHoledOut, grossOf } from "./analytics.js";
@@ -32,14 +33,17 @@ const HOLE_INSIGHT_MIN_PLAYS = 3;
 const NEVER_BIRDIED_MIN = 1;
 const NEVER_BIRDIED_MAX = 3;
 
-// One hole's running aggregate, built ONLY from strokes-play cells (picked-up/conceded are not
-// strokes-plays — the distribution precedent) — except `par`, which tracks the MOST RECENT
-// line's par for that hole regardless of that line's result kind (a later card revision's par is
-// the truth even for a hole the golfer picked up on that round).
+// One hole's running aggregate, built from every cell that carries a NUMBER — a stroke count or a
+// conceded score (spec 2026-07-29 §2d: a conceded hole is a scored hole everywhere, the same
+// correction applied to archiveGolferLine's distribution; leaving it out would make a conceded par
+// vanish from your record at this course while it lifted your average from the same card). A
+// picked-up hole has no number and stays out. `par` tracks the MOST RECENT line's par for that
+// hole regardless of that line's result kind (a later card revision's par is the truth even for a
+// hole the golfer picked up on that round).
 interface HoleAgg {
   par: number;
-  strokesPlays: number;
-  sumOverPar: number; // Σ(strokes − par) over strokes-plays, unrounded — ranking uses this raw value
+  strokesPlays: number; // holes played to a number here (strokes or conceded)
+  sumOverPar: number; // Σ(strokes − par) over those plays, unrounded — ranking uses this raw value
   doublePlus: number; // strokes ≥ par + 2
   parOrBetter: number; // strokes ≤ par
   underPar: number; // strokes < par (birdie or better)
@@ -56,8 +60,9 @@ const aggregateHoles = (lines: readonly GolferRoundLine[]): Map<number, HoleAgg>
     for (const h of line.holeResults) {
       const agg = holes.get(h.hole) ?? { par: h.par, strokesPlays: 0, sumOverPar: 0, doublePlus: 0, parOrBetter: 0, underPar: 0 };
       agg.par = h.par; // lines arrive oldest→newest, so the last write wins — "most recent line's par"
-      if (h.result.kind === "strokes") {
-        const overPar = h.result.strokes - h.par;
+      const strokes = scoredStrokes(h.result);
+      if (strokes !== undefined) {
+        const overPar = strokes - h.par;
         agg.strokesPlays += 1;
         agg.sumOverPar += overPar;
         if (overPar >= 2) agg.doublePlus += 1;

@@ -431,7 +431,7 @@ describe("GamePanel — header (spec §2c)", () => {
     const titleAt = text.indexOf("Match play");
     const treatmentAt = text.indexOf("Strokes are the difference between you two");
     const strokesAt = text.indexOf("No strokes — everyone in this game plays level.");
-    const noteAt = text.indexOf("Only the higher number gets strokes — the lower plays off scratch.");
+    const noteAt = text.indexOf("Only the higher number gets strokes — the lower gets none.");
 
     expect(titleAt).toBeGreaterThanOrEqual(0);
     expect(treatmentAt).toBeGreaterThan(titleAt);
@@ -489,7 +489,7 @@ describe("GamePanel — header (spec §2c)", () => {
   it("the singles note reads verbatim", () => {
     const { game, state } = singlesFixture();
     render(<GamePanel game={game} state={state} />);
-    expect(screen.getByText("Only the higher number gets strokes — the lower plays off scratch.")).toBeTruthy();
+    expect(screen.getByText("Only the higher number gets strokes — the lower gets none.")).toBeTruthy();
   });
 
   // Skins now offers the same gross/net choice stroke play has (spec §3), so the panel must state

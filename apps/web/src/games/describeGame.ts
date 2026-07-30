@@ -1,4 +1,4 @@
-import { DomainError, gameKindLabel } from "@swng/domain";
+import { DomainError, formatOverPar, gameKindLabel } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 
 export interface GameDescription {
@@ -42,9 +42,10 @@ export const describeGame = (game: GameState, round: RoundState): GameDescriptio
 
 const nameOf = (participants: readonly Participant[], golfer: GolferId): string => participants.find((p) => p.golferId === golfer)?.name ?? golfer;
 
-// "(E)" for even par, "(+N)"/"(-N)" otherwise — golf's own vs-par notation, defined once here
-// and reused by GamePanel's stroke-play body (its own "vs par" column) — the one definition site.
-export const vsPar = (relative: number): string => (relative === 0 ? "(E)" : relative > 0 ? `(+${relative})` : `(${relative})`);
+// A vs-par figure in parentheses, for the inline "Ann 74 (+2)" register a chip/panel line uses.
+// The SIGN itself is the model's one convention (`formatOverPar`, spec 2026-07-29 §4) — this adds
+// only the brackets, so the web holds no second copy of "how a signed number reads".
+export const vsPar = (relative: number): string => `(${formatOverPar(relative)})`;
 
 type StrokePlay = Extract<GameState, { kind: "stroke-play" }>;
 

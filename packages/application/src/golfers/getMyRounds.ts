@@ -19,9 +19,9 @@ const toWireLine = (
   tee: line.tee,
   holes: line.holes,
   par: line.par,
-  courseHandicap: line.courseHandicap,
-  ...(line.ags !== undefined ? { ags: line.ags } : {}),
-  ...(line.differential !== undefined ? { differential: line.differential } : {}),
+  strokes: line.strokes,
+  ...(line.normallyShoots !== undefined ? { normallyShoots: line.normallyShoots } : {}),
+  ...(line.score !== undefined ? { score: line.score } : {}),
   distribution: line.distribution,
   finalizedAt: line.finalizedAtMs,
   // createdAt (spec §5, the "course + date" designation) — omitted for lines written before the

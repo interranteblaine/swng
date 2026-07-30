@@ -180,7 +180,7 @@ describe("RoundRecordPage — archived (the old ArchivedRoundPage content, absor
 
     // Now identity resolves — the exact review scenario: `golfer` transitions from undefined to
     // a real GolferView well after the archive already loaded and rendered.
-    resolveMe(fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } }));
+    resolveMe(fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } }));
     // Let the resolution's re-render(s) settle.
     await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
 
@@ -230,7 +230,7 @@ describe("RoundRecordPage — resolution when the archive read fails (navigation
       vi.fn(async (url: string, init?: RequestInit) => {
         const path = new URL(url).pathname;
         const method = init?.method ?? "GET";
-        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann", indexSource: { kind: "swng" } } });
+        if (path === "/me") return fakeResponse(200, { golfer: { golferId: "ann", name: "Ann" } });
         if (path === `/rounds/${ROUND_ID}/archive`) {
           return { ok: false, status: 404, json: async () => ({ code: "round-not-found", message: "no snapshot for round archived-round-1" }) } as unknown as Response;
         }

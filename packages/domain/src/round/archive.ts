@@ -2,7 +2,6 @@ import type { CourseCard } from "../course/card.js";
 import { findTeeSet } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import type { GameId, GolferId, RoundId } from "../ids.js";
-import { handicappingFor } from "../scoring/allocation.js";
 import type { GameConfig } from "../scoring/game.js";
 import { gameMembers, scoreGame } from "../scoring/game.js";
 import type { GameResult } from "../scoring/result.js";
@@ -37,11 +36,10 @@ export interface RoundArchive {
   // archive field. `games` above keeps every config regardless (audit trail); this is
   // the honest record of which of them were terminated rather than resolved.
   readonly terminatedGameIds: readonly GameId[];
-  readonly handicapping: readonly (
-    | { readonly golferId: GolferId; readonly kind: "complete"; readonly ags: number; readonly differential: number }
-    | { readonly golferId: GolferId; readonly kind: "unrated"; readonly ags: number }
-    | { readonly golferId: GolferId; readonly kind: "incomplete" }
-  )[];
+  // `handicapping` (per-participant adjusted gross score + score differential) is DELETED with the
+  // whole WHS pipeline (spec 2026-07-29 §7). A finished round's numbers are the cells it already
+  // holds: archiveGolferLine sums the gross from them for the golfer's record, and the results view
+  // totals them for the screen. Nothing about rating or slope is recorded here anymore.
 }
 
 // The must-resolve set: every configured game except one explicitly terminated (a terminated
@@ -86,8 +84,8 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   // played holes and resolved games (concessions included) count exactly as scored — the
   // `departed: true` flag is already on the folded roster entry and simply rides along. The one
   // extra rule is the empty case: a departed participant with NO scored holes AND membership in
-  // NO game is omitted from the archive entirely — no participant entry, no handicapping line —
-  // so they appear nowhere downstream. That is settle deciding once, not a reader filtering:
+  // NO game is omitted from the archive entirely — no participant entry at all — so they appear
+  // nowhere downstream. That is settle deciding once, not a reader filtering:
   // there is genuinely nothing to aggregate for them. Every non-departed participant is kept
   // unconditionally (this filter only ever removes a departed one).
   const hasScoredHole = (entry: RosterEntry): boolean => {
@@ -96,8 +94,6 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   };
   const inSomeGame = (golferId: GolferId): boolean => state.games.some((config) => gameMembers(config).includes(golferId));
   const settledParticipants = state.participants.filter((entry) => !entry.departed || hasScoredHole(entry) || inSomeGame(entry.golferId));
-
-  const handicapping = settledParticipants.map((participant) => handicappingFor(participant, state.card, state.cells));
 
   // seq is server-ack metadata, not event content (see state.ts) — the archive's identity
   // must be the same regardless of which device's copy happened to get acked, so every
@@ -121,7 +117,6 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
     events: canonicalEvents,
     results,
     terminatedGameIds,
-    handicapping,
   };
 };
 

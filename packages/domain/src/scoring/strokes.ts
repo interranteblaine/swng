@@ -3,23 +3,19 @@ import { DomainError } from "../errors.js";
 
 export const roundHalfUp = (value: number): number => Math.floor(value + 0.5);
 
+// Dots on the hardest holes first, wrapping past a full lap. Non-negative by construction: under
+// the relative model the lowest in the field is the anchor and nobody gives strokes back
+// (spec 2026-07-29 §2a/§2b), so `resolveStrokes` clamps at zero and the request schema bounds
+// `strokes` at min(0). The give-back branch that mirrored this rule from the EASIEST hole is
+// deleted with the plus-handicap convention it served — a negative input now allocates negative
+// dots hole-by-hole, which no caller can produce and no renderer accepts (ScorecardGrid's
+// `"●".repeat(dots)` throws RangeError on one, which is what makes the clamp load-bearing).
 export const allocateStrokes = (strokes: number, teeSet: TeeSet): number[] => {
   const holeCount = teeSet.holes.length;
-  const magnitude = Math.abs(strokes);
-  const base = Math.floor(magnitude / holeCount);
-  const extra = magnitude % holeCount;
+  const base = Math.floor(strokes / holeCount);
+  const extra = strokes % holeCount;
 
-  return teeSet.holes.map(({ strokeIndex }) => {
-    if (strokes >= 0) {
-      return base + (strokeIndex <= extra ? 1 : 0);
-    }
-    // Plus handicaps give strokes back rather than take them: mirror the
-    // positive rule by walking from the EASIEST hole (highest strokeIndex)
-    // instead of the hardest, so a full lap still spreads evenly and the
-    // dots sum exactly to the (negative) allocation.
-    const giveBack = base + (strokeIndex > holeCount - extra ? 1 : 0);
-    return giveBack === 0 ? 0 : -giveBack;
-  });
+  return teeSet.holes.map(({ strokeIndex }) => base + (strokeIndex <= extra ? 1 : 0));
 };
 
 // Hole-number → dots lookup, computed from a SINGLE allocateStrokes run. Callers that
@@ -39,8 +35,7 @@ export const strokesReceivedOnHole = (strokes: number, teeSet: TeeSet, hole: num
 
 export const netDoubleBogey = (par: number, strokesReceived: number): number => par + 2 + strokesReceived;
 
-// A cell's net score: gross minus the dots allocated on that hole. Correct for BOTH received
-// strokes (positive dots — net < gross, the ordinary case) and GIVEN strokes on a plus handicap
-// (negative dots — net = gross + |dots|, the give-back). Callers decide WHEN to show a net
+// A cell's net score: gross minus the dots allocated on that hole. Dots are never negative
+// (allocateStrokes above), so a net is never above its gross. Callers decide WHEN to show a net
 // (e.g. only where dots !== 0); this is only the arithmetic.
 export const netStrokes = (gross: number, dots: number): number => gross - dots;

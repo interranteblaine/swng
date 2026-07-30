@@ -238,35 +238,51 @@ export const frozenSeasonExpectation = (
 // test 1 repeats) and reading the printed output — the test-1 discipline (BLOCKED-don't-fudge):
 // a mismatch here is a bug in this file or in scoreboard.ts, never something adjusted to match a
 // live run. Every role's row is independent of which real golferId it lands on: course handicap
-// is 0 for everyone all season (this file's header), so best18/netPer18/index differ only by the
+// is 0 for everyone all season (this file's header), so best18/average/spread differ only by the
 // H2H holes ROUND_PLAN gives Al/Bo (never Cy/Dee, who only ever move off par to win hole 18's
 // skins pot). best18 71 (-1) for all four: the lowest 18-hole gross anyone ever cards is a flat
 // par-71 with hole 18 birdied (3), which happens for whoever is that round's hole18Winner —
 // every role wins hole 18 in exactly 3 of the 12 rounds (frozenSeasonExpectation's own skins
-// derivation), so every role reaches 71 at least once. indexDelta is intentionally ABSENT from
-// every row: crewScoreboard's `before` cohort is lines with playedAtMs < window.startMs, and
-// this file always windows from {startMs: 0} — no line is ever that early.
+// derivation), so every role reaches 71 at least once.
+//
+// RE-DERIVED BY HAND for the average/spread board (spec 2026-07-29 §6, replacing netPer18/index/
+// indexDelta). **No hand-designed SCORE moved** — `roundScores` above is byte-untouched; only the
+// expected results below are new. Every round is 18 holes of scored strokes on par 72, so a round's
+// vs-par figure is exactly `gross - 72` (no nine-hole doubling anywhere in this deck), and the
+// BOARD averages EVERY round in the window (no rolling-10 slice, spec §6). Al's gross is
+// `72 + (decisive holes favouring Bo) - (1 if he wins hole 18)`; Bo's is the mirror; Cy/Dee card a
+// flat 72 except the three rounds each wins hole 18 outright:
+//
+//   al   [-1, 0, 0, 0, -1, 0, 0, +1, +1, 0, +1, +1]  sum +2  mean  1/6  -> average  0   sd 0.687184 -> spread 0.7
+//   bo   [ 0,+1,+1,+1,  0, 0, 0,  0,  0,-1,  0,  0]  sum +2  mean  1/6  -> average  0   sd 0.552771 -> spread 0.6
+//   cy   [ 0, 0,-1, 0,  0, 0,-1,  0,  0, 0, -1,  0]  sum -3  mean -1/4  -> average  0   sd 0.433013 -> spread 0.4
+//   dee  [ 0, 0, 0,-1,  0, 0, 0, -1,  0, 0,  0, -1]  sum -3  mean -1/4  -> average  0   sd 0.433013 -> spread 0.4
+//
+// average = roundHalfUp(mean) — an INTEGER (domain/golfer/average.ts), so all four land on 0 (1/6
+// and -1/4 both round to 0); spread = roundHalfUp(populationSd x 10) / 10. Al's spread is the
+// widest because ROUND_PLAN spreads his margins across -1..+1; Cy/Dee's is the tightest (a flat
+// par with three birdied 18s). Every role clears the 5-round spread floor at 12 rounds, so no row
+// carries a "-".
 interface FrozenScoreboardRow {
   readonly rounds: number;
+  readonly average: number;
+  readonly spread: number;
   readonly best18: { readonly gross: number; readonly toPar: number };
-  readonly netPer18: number;
-  readonly index: number;
 }
 const FROZEN_SCOREBOARD: Readonly<Record<Role, FrozenScoreboardRow>> = {
-  al: { rounds: SEASON_ROUNDS, best18: { gross: 71, toPar: -1 }, netPer18: 0.2, index: -0.5 },
-  bo: { rounds: SEASON_ROUNDS, best18: { gross: 71, toPar: -1 }, netPer18: 0.2, index: -0.2 },
-  cy: { rounds: SEASON_ROUNDS, best18: { gross: 71, toPar: -1 }, netPer18: -0.2, index: -0.7 },
-  dee: { rounds: SEASON_ROUNDS, best18: { gross: 71, toPar: -1 }, netPer18: -0.2, index: -0.7 },
+  al: { rounds: SEASON_ROUNDS, average: 0, spread: 0.7, best18: { gross: 71, toPar: -1 } },
+  bo: { rounds: SEASON_ROUNDS, average: 0, spread: 0.6, best18: { gross: 71, toPar: -1 } },
+  cy: { rounds: SEASON_ROUNDS, average: 0, spread: 0.4, best18: { gross: 71, toPar: -1 } },
+  dee: { rounds: SEASON_ROUNDS, average: 0, spread: 0.4, best18: { gross: 71, toPar: -1 } },
 };
 
 // The frozen scoreboard, mapped onto whichever real golferIds the live crew mints, PRE-SORTED
-// via crewScoreboard's own total order (netPer18 asc, rounds desc, golferId asc — scoreboard.ts)
-// so callers compare directly with toEqual, never re-sorting at the call site. Cy and Dee are a
-// FULL tie (both -0.2/12/whatever their live golferIds are) exactly like Al and Bo (both 0.2/12)
-// — both pairs fall back to golferId asc, same shape as frozenSeasonExpectation's own tie
-// handling above.
+// via crewScoreboard's own total order (average asc, rounds desc, golferId asc — scoreboard.ts)
+// so callers compare directly with toEqual, never re-sorting at the call site. All four roles are a
+// FULL tie on the sort keys now (average 0, rounds 12 — the spread is NOT a sort key), so the order
+// is purely golferId asc, the same fallback frozenSeasonExpectation's own tie handling uses.
 export const frozenScoreboardExpectation = (ids: SeasonGolferIds): readonly ScoreboardLine[] => {
   const rows: (FrozenScoreboardRow & { readonly golferId: GolferId })[] = ROLES.map((role) => ({ golferId: ids[role], ...FROZEN_SCOREBOARD[role] }));
-  rows.sort((a, b) => a.netPer18 - b.netPer18 || b.rounds - a.rounds || (a.golferId < b.golferId ? -1 : a.golferId > b.golferId ? 1 : 0));
+  rows.sort((a, b) => a.average - b.average || b.rounds - a.rounds || (a.golferId < b.golferId ? -1 : a.golferId > b.golferId ? 1 : 0));
   return rows;
 };

@@ -360,10 +360,11 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
     // case above shares.
     getMyGolfer: getMyGolfer({ golferStore, idGenerator: ids, metrics }),
     updateMyGolfer: updateMyGolfer({ golferStore, idGenerator: ids, metrics }),
-    // clock (pre-prod hardening D4a): the handicap index is computed HERE, at read time, from
-    // the SAME lines the response already carries — never a stored snapshot. The SAME system
-    // clock every other use case above shares.
-    getMyRecord: getMyRecord({ golferStore, projectionStore, clock }),
+    // Every derived number (the average, its chart, bests/milestones) is computed HERE, at read
+    // time, from the SAME lines the response already carries — never a stored snapshot
+    // (pre-prod hardening D4a). No clock: the read-time stamp that once rode the wire index went
+    // with the index itself (spec 2026-07-29 §7).
+    getMyRecord: getMyRecord({ golferStore, projectionStore }),
     // analytics spec 2026-07-21 §4: the SAME golferStore/projectionStore instances getMyRecord
     // above shares — get-or-nothing, filtered to one course.
     getMyCourseRecord: getMyCourseRecord({ golferStore, projectionStore }),

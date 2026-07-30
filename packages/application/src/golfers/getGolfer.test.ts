@@ -15,7 +15,7 @@ const setup = () => {
 };
 
 describe("getGolfer", () => {
-  it("returns {name, indexSource, metrics, history} for a stored golfer, with metrics/history exactly recordOf(lines)'s own output", async () => {
+  it("returns {name, metrics, history} for a stored golfer, with metrics/history exactly recordOf(lines)'s own output", async () => {
     const ctx = setup();
     const annId = golferId("ann");
     await putAndBindGolfer(ctx.golferStore, annId, "sub-ann", "Ann");
@@ -25,9 +25,7 @@ describe("getGolfer", () => {
       tee: "white",
       holes: 18 as const,
       par: 72,
-      courseHandicap: 8,
-      ags: 90,
-      differential: 9.0,
+      strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
       createdAtMs: 900,
@@ -37,7 +35,7 @@ describe("getGolfer", () => {
     const response = await ctx.golfer({ golferId: annId });
 
     const expected = recordOf([line]);
-    expect(response).toEqual({ name: "Ann", indexSource: { kind: "swng" }, metrics: expected.metrics, history: expected.history });
+    expect(response).toEqual({ name: "Ann", metrics: expected.metrics, history: expected.history });
     // finalizedAt/createdAt (index-chart-polish spec §1.6, the chart's date anchors): asserted
     // directly against the fixture's own stored values, not just agreement-with-recordOf (which
     // would pass even if both sides silently stripped the same fields).
@@ -55,7 +53,7 @@ describe("getGolfer", () => {
     const boId = golferId("bo");
     // Mints exactly like ensureGolfer's own get-or-create: name = f(sub), no rows in the
     // projection store — the "no history yet" case a fresh account is always in.
-    await ctx.golferStore.put({ id: boId, name: placeholderName("sub-bo"), handicap: { indexSource: { kind: "swng" } }, namePlaceholder: true }, undefined);
+    await ctx.golferStore.put({ id: boId, name: placeholderName("sub-bo"), namePlaceholder: true }, undefined);
     await ctx.golferStore.bindSub(boId, "sub-bo");
 
     const response = await ctx.golfer({ golferId: boId });

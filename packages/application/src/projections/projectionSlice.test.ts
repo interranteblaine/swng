@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { computeIndex, deviceId, fixtureLinks, fixtureLinks18, golferId, opId, playGoldenRoundLog, roundId, settleRound } from "@swng/domain";
-import type { GolferId, Participant, RoundArchive, RoundEvent, RosterEntry } from "@swng/domain";
+import { cellKey, deviceId, fixtureLinks, fixtureLinks18, golferId, golferMetrics, opId, playGoldenRoundLog, roundId, settleRound } from "@swng/domain";
+import type { GolferId, Participant, RoundArchive, RoundEvent, RosterEntry, ScoreCell } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import { getMyRecord } from "../golfers/getMyRecord.js";
-import { createFrozenClock, createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, putAndBindGolfer } from "../testing/fakes.js";
+import { createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, putAndBindGolfer } from "../testing/fakes.js";
 import { finalizedAtMsOf, projectArchive } from "./projectArchive.js";
 
 const ann = golferId("ann");
@@ -26,17 +26,36 @@ const finalizedEvent = (wallMs: number): RoundEvent => ({
   authorId: ann,
 });
 
-// A minimal, hand-built finalized archive — no real scoring/handicap math involved (that's
-// domain's job, exhaustively tested elsewhere in handicap/whs.test.ts and
-// golfer/record.test.ts); `differential` is hand-pinned directly per participant, same
-// idiom as golfer/record.test.ts's baseArchive. Always 18 holes (fixtureLinks18) — the
-// 9-hole combining rule itself stays domain's own unit-gated concern (Task 1).
-const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: GolferId; differential?: number }[]): RoundArchive => ({
+// A minimal, hand-built finalized archive. `perHole` is the ONLY scoring input: given, it fills
+// every one of the card's 18 holes with that stroke count for that golfer, so the projected line
+// carries a real `score` (18 x perHole against fixtureLinks18's par 72 — spec 2026-07-29 §2d's
+// hasCompleteScore). Omitted, the golfer's card is empty and the line honestly carries no score at
+// all, which is how the "never bootstraps" cases below are built. Always 18 holes (fixtureLinks18).
+type ArchiveEntry = { golferId: GolferId; perHole?: number };
+
+const cellsFor = (id: string, entries: readonly ArchiveEntry[]): Record<string, ScoreCell> =>
+  Object.fromEntries(
+    entries.flatMap((e) =>
+      e.perHole === undefined
+        ? []
+        : fixtureLinks18.teeSets[0]!.holes.map((hole) => [
+            cellKey(e.golferId, hole.number),
+            {
+              result: { kind: "strokes" as const, strokes: e.perHole! },
+              recordedBy: e.golferId,
+              hlc: { wallMs: 1, counter: hole.number, deviceId: deviceId("server") },
+              opId: opId(`score-${id}-${e.golferId}-${hole.number}`),
+            } satisfies ScoreCell,
+          ]),
+    ),
+  );
+
+const archiveAt = (id: string, wallMs: number, entries: readonly ArchiveEntry[]): RoundArchive => ({
   roundId: roundId(id),
   card: fixtureLinks18,
   participants: entries.map((e): RosterEntry => ({ golferId: e.golferId, name: e.golferId, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
   games: [],
-  cells: {},
+  cells: cellsFor(id, entries),
   // A real archive's log always opens with round-created (its genesis) — carried here so
   // createdAtMsOf (accounts-only identity spec §5) resolves; its wall time (1) is arbitrary,
   // no test below asserts it, only its PRESENCE matters. One participant-joined event per
@@ -58,11 +77,6 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
   ],
   results: [],
   terminatedGameIds: [],
-  handicapping: entries.map((e) =>
-    e.differential === undefined
-      ? { golferId: e.golferId, kind: "incomplete" as const }
-      : { golferId: e.golferId, kind: "complete" as const, ags: 90, differential: e.differential },
-  ),
 });
 
 // Seeds ann + bo as account golfers by default — the participants every projectArchive test below
@@ -76,7 +90,7 @@ const setup = async () => ({
 
 describe("finalizedAtMsOf", () => {
   it("reads the round-finalized event's hlc.wallMs", () => {
-    const archive = archiveAt("r1", 4_242, [{ golferId: ann, differential: 9.0 }]);
+    const archive = archiveAt("r1", 4_242, [{ golferId: ann, perHole: 5 }]);
     expect(finalizedAtMsOf(archive)).toBe(4_242);
   });
 
@@ -92,42 +106,45 @@ describe("projectArchive", () => {
   // whole write surface here is the line upsert — there is no getIndex to even ask.
   it("writes one history line per participant", async () => {
     const ctx = await setup();
-    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]);
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }]);
     const project = projectArchive(ctx);
 
     await project(archive);
 
     const history = await ctx.projectionStore.listLines(ann);
     expect(history).toHaveLength(1);
-    expect(history[0]).toMatchObject({ roundId: roundId("r1"), differential: 9.0, finalizedAtMs: 1_000 });
+    // The line records what the round said about this golfer: the strokes the fold derived, the
+    // normal score they stated, and the round's own gross (18 x 5 on fixtureLinks18's par 72).
+    expect(history[0]).toMatchObject({ roundId: roundId("r1"), strokes: 0, normallyShoots: 8, score: 90, finalizedAtMs: 1_000 });
   });
 
-  // The bootstrap-crossing pin now runs the SAME two steps a real request does: project three
-  // finalizes (the projector's only job — line upserts, no index write at all), then read
-  // getMyRecord and check its wire index against the domain fold oracle directly — proving the
-  // two functions agree, not just that some store round-trips a value.
-  it("crosses the bootstrap on the 3rd differential; differentialsUsed is the WHS use-count, not the window size", async () => {
+  // The read-side pin runs the SAME two steps a real request does: project finalizes (the
+  // projector's only job — line upserts, no derived number written at all), then read getMyRecord
+  // and check its average against the domain fold over the very lines the projector wrote. There
+  // is no bootstrap to cross anymore (spec 2026-07-29 §7): ONE scored round is already an average.
+  it("the average moves with each projected round, computed at read time from the lines themselves", async () => {
     const ctx = await setup();
     const project = projectArchive(ctx);
-    const record = getMyRecord({ golferStore: ctx.golferStore, projectionStore: ctx.projectionStore, clock: createFrozenClock(5_000) });
+    const record = getMyRecord({ golferStore: ctx.golferStore, projectionStore: ctx.projectionStore });
 
-    await project(archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]));
-    expect((await record({ sub: "sub-ann" })).metrics.whsIndex).toBeUndefined();
+    await project(archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }])); // 90 on par 72 -> +18
+    expect((await record({ sub: "sub-ann" })).metrics.average).toBe(18);
 
-    await project(archiveAt("r2", 2_000, [{ golferId: ann, differential: 10.0 }]));
-    expect((await record({ sub: "sub-ann" })).metrics.whsIndex).toBeUndefined();
+    await project(archiveAt("r2", 2_000, [{ golferId: ann, perHole: 6 }])); // 108 -> +36; mean 27
+    expect((await record({ sub: "sub-ann" })).metrics.average).toBe(27);
 
-    await project(archiveAt("r3", 3_000, [{ golferId: ann, differential: 11.0 }]));
+    await project(archiveAt("r3", 3_000, [{ golferId: ann, perHole: 5 }])); // +18; mean 72/3 = 24
     const { metrics } = await record({ sub: "sub-ann" });
-    // 3 differentials available → Rule 5.2a uses only the lowest 1 (whs.test.ts's
-    // computeIndexDetail pin), not 3. computedAtMs is the READ-time clock (D4a), never a
-    // stored snapshot's.
-    expect(metrics.whsIndex).toEqual({ value: computeIndex([9.0, 10.0, 11.0]), computedAtMs: 5_000, differentialsUsed: 1 });
+    expect(metrics.average).toBe(24);
+    // ...and it agrees with the domain fold over the projector's OWN stored lines, so neither side
+    // can drift into a second implementation.
+    const stored = [...(await ctx.projectionStore.listLines(ann))].sort((a, b) => a.finalizedAtMs - b.finalizedAtMs);
+    expect(metrics.average).toBe(golferMetrics(stored).average);
   });
 
   it("is idempotent: re-putting the same history line doesn't duplicate it", async () => {
     const ctx = await setup();
-    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]);
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }]);
     const project = projectArchive(ctx);
 
     await project(archive);
@@ -140,10 +157,10 @@ describe("projectArchive", () => {
   it("is idempotent across the bootstrap boundary: re-projecting the last archive leaves listLines unchanged", async () => {
     const ctx = await setup();
     const project = projectArchive(ctx);
-    const third = archiveAt("r3", 3_000, [{ golferId: ann, differential: 11.0 }]);
+    const third = archiveAt("r3", 3_000, [{ golferId: ann, perHole: 5 }]);
 
-    await project(archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]));
-    await project(archiveAt("r2", 2_000, [{ golferId: ann, differential: 10.0 }]));
+    await project(archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }]));
+    await project(archiveAt("r2", 2_000, [{ golferId: ann, perHole: 5 }]));
     await project(third);
     const historyBefore = await ctx.projectionStore.listLines(ann);
 
@@ -152,18 +169,18 @@ describe("projectArchive", () => {
     expect(await ctx.projectionStore.listLines(ann)).toEqual(historyBefore);
   });
 
-  it("tracks each participant's history independently; an always-incomplete golfer's wire index never bootstraps", async () => {
+  it("tracks each participant's history independently; a golfer who never posts a score never gets an average", async () => {
     const ctx = await setup();
     const project = projectArchive(ctx);
-    const record = getMyRecord({ golferStore: ctx.golferStore, projectionStore: ctx.projectionStore, clock: createFrozenClock(5_000) });
+    const record = getMyRecord({ golferStore: ctx.golferStore, projectionStore: ctx.projectionStore });
 
-    await project(archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo }]));
-    await project(archiveAt("r2", 2_000, [{ golferId: ann, differential: 10.0 }, { golferId: bo }]));
-    await project(archiveAt("r3", 3_000, [{ golferId: ann, differential: 11.0 }, { golferId: bo }]));
+    await project(archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }, { golferId: bo }]));
+    await project(archiveAt("r2", 2_000, [{ golferId: ann, perHole: 5 }, { golferId: bo }]));
+    await project(archiveAt("r3", 3_000, [{ golferId: ann, perHole: 5 }, { golferId: bo }]));
 
-    expect((await record({ sub: "sub-ann" })).metrics.whsIndex).toBeDefined();
-    expect(await ctx.projectionStore.listLines(bo)).toHaveLength(3);
-    expect((await record({ sub: "sub-bo" })).metrics.whsIndex).toBeUndefined(); // incomplete every round — never a differential to combine
+    expect((await record({ sub: "sub-ann" })).metrics.average).toBe(18);
+    expect(await ctx.projectionStore.listLines(bo)).toHaveLength(3); // Bo's rounds are all on file...
+    expect((await record({ sub: "sub-bo" })).metrics.average).toBeUndefined(); // ...but none of them carries a score
   });
 
   it("throws for a settled archive with no round-finalized event", async () => {
@@ -181,7 +198,7 @@ describe("projectArchive", () => {
   // PRIMARY removal path (TTL is only a backstop for a round that never finalizes).
   it("deletes the LIVE pointer for every participant on the archive", async () => {
     const ctx = await setup();
-    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo }]);
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }, { golferId: bo }]);
     await ctx.projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
     await ctx.projectionStore.putLive(bo, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600, expiresAtSec: 9_999_999_999 });
     // A DIFFERENT round's presence for ann must survive untouched.
@@ -199,7 +216,7 @@ describe("projectArchive", () => {
   // rebuild replay) calls deleteLive on a pointer that's already gone — never an error.
   it("re-projecting the same archive a second time is a no-op for presence, not an error", async () => {
     const ctx = await setup();
-    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]);
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }]);
     await ctx.projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
     const project = projectArchive(ctx);
 
@@ -221,11 +238,11 @@ describe("projectArchive", () => {
     const logger = createNullLogger();
     // ann is a real account; bo has a golfer row but NO sub (still a ghost).
     const golferStore = await accountsFor(ann);
-    await golferStore.put({ id: bo, name: "Bo Ghost", handicap: { indexSource: { kind: "swng" } } }, undefined); // sub-less row
+    await golferStore.put({ id: bo, name: "Bo Ghost" }, undefined); // sub-less row
     // Pre-existing presence for the ghost — presence-cleanup clears it regardless of account status.
     await projectionStore.putLive(bo, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 600, expiresAtSec: 9_999_999_999 });
 
-    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo, differential: 12.0 }]);
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }, { golferId: bo, perHole: 5 }]);
     const project = projectArchive({ projectionStore, golferStore, logger });
     await project(archive);
 
@@ -242,7 +259,7 @@ describe("projectArchive", () => {
   it("skips a participant with no golfer row at all — never throws", async () => {
     const projectionStore = createInMemoryProjectionStore();
     const golferStore = await accountsFor(ann); // bo has no row whatsoever
-    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }, { golferId: bo, differential: 12.0 }]);
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }, { golferId: bo, perHole: 5 }]);
     const project = projectArchive({ projectionStore, golferStore, logger: createNullLogger() });
 
     await expect(project(archive)).resolves.toBeUndefined();
@@ -257,7 +274,7 @@ describe("projectArchive", () => {
     const projectionStore = createInMemoryProjectionStore();
     const golferStore = await accountsFor(ann);
     await projectionStore.putLive(ann, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 500, expiresAtSec: 9_999_999_999 });
-    const archive = archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]);
+    const archive = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }]);
     const project = projectArchive({ projectionStore, golferStore, logger: createNullLogger() });
 
     await project(archive);

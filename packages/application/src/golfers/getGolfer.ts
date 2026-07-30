@@ -23,7 +23,6 @@ export const getGolfer =
 
     return {
       name: found.golfer.name,
-      indexSource: found.golfer.handicap.indexSource,
       metrics,
       history,
     };

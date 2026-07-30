@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import type { GetMyRecordResponse } from "@swng/contracts";
-import { postedDifferential } from "@swng/domain";
 import type { CourseCard, RoundId } from "@swng/domain";
 import {
   createScoreOps,
@@ -56,13 +55,25 @@ const buildIdentityCourseCard = (courseName: string): CourseCard => ({
 // scratch par).
 const holeScoresFor = (bogeys: number): readonly number[] => Array.from({ length: 18 }, (_, i) => (i < bogeys ? 5 : 4));
 
-// Hand-pinned (BLOCKED-don't-fudge territory): differential = (113/128)*(AGS-71.6) for AGS
-// 82/85/88. Unrounded (scoreDifferential's own contract) — asserted via toBeCloseTo below,
-// the SAME convention packages/domain/src/handicap/whs.test.ts itself uses for raw
-// (pre-tenth-rounding) differential values, never a brittle exact toBe on a float.
-const PINNED_DIFFERENTIALS = [9.18125, 11.8296875, 14.478125] as const;
-const PINNED_INDEX = 7.2;
-const PINNED_DIFFERENTIALS_USED = 1;
+// Hand-pinned (BLOCKED-don't-fudge territory), RE-DERIVED for the average (spec 2026-07-29 §5,
+// replacing the retired differential/index pins — the deck's own SCORES are unchanged). Every
+// round is an 18-hole card on the par-72 all-par-4 course with `bogeys` fives and the rest fours,
+// so gross = 72 + bogeys and the round's vs-par figure is exactly `bogeys`:
+//
+//   round 1: 10 bogeys -> gross 82 -> +10
+//   round 2: 13 bogeys -> gross 85 -> +13
+//   round 3: 16 bogeys -> gross 88 -> +16
+//
+// average  = roundHalfUp(mean(10, 13, 16)) = roundHalfUp(13) = 13
+// spread   = ABSENT: three scored rounds is below the 5-round floor (domain/golfer/average.ts)
+// averageHistory (one point per round, the rolling mean as of that round):
+//   after r1: mean(10)          = 10    -> 10
+//   after r2: mean(10, 13)      = 11.5  -> roundHalfUp -> 12
+//   after r3: mean(10, 13, 16)  = 13    -> 13
+const PINNED_SCORES = [82, 85, 88] as const;
+const PINNED_OVER_PAR = [10, 13, 16] as const;
+const PINNED_AVERAGE = 13;
+const PINNED_AVERAGE_HISTORY = [10, 12, 13] as const;
 
 // One deck round, played entirely as the account itself: start as-self (Bearer + the
 // account's own golferId — startRoundDirect sources both from the record), 18 scores via the
@@ -91,24 +102,25 @@ const playRecordRound = async (
 // entries/projector.ts) — asynchronous relative to finalizeRound's own HTTP response, so a
 // bare single fetch right after finalize is a race. Polls the SAME endpoint finalize's own doc
 // comment already treats as the authoritative read, not a fixed sleep.
-// Since the pre-prod hardening (D4a) the index is computed at read time from the very lines
-// this response carries — once history.length crosses the bootstrap, index is present in the
-// SAME response by construction (the projector's old putLine-then-store-the-index write gap,
-// which this gate's dual condition was originally built to ride out, no longer exists). The
-// dual gate stays as a cheap invariant assertion, not a race fix.
+// Since the pre-prod hardening (D4a) every derived number is computed at read time from the very
+// lines this response carries — so once a scored line lands, the average is present in the SAME
+// response by construction (the projector's old putLine-then-store-the-index write gap, which this
+// gate's dual condition was originally built to ride out, no longer exists). The dual gate stays as
+// a cheap invariant assertion, not a race fix. There is no bootstrap to wait for anymore: ONE
+// scored round is already an average.
 const pollRecord = async (httpUrl: string, token: string, minHistory: number, timeoutMs = 60_000): Promise<GetMyRecordResponse> => {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const record = await getMyRecordDirect(httpUrl, token);
-    if (record.history.length >= minHistory && record.metrics.whsIndex !== undefined) return record;
+    if (record.history.length >= minHistory && record.metrics.average !== undefined) return record;
     if (Date.now() >= deadline) {
-      throw new Error(`/me/record still has ${record.history.length}/${minHistory} history lines (whsIndex ${record.metrics.whsIndex ? "present" : "absent"}) after ${timeoutMs}ms`);
+      throw new Error(`/me/record still has ${record.history.length}/${minHistory} history lines (average ${record.metrics.average !== undefined ? "present" : "absent"}) after ${timeoutMs}ms`);
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 };
 
-test.describe.serial("identity/record gate — one account, three rounds as self, live index, rebuild parity", () => {
+test.describe.serial("identity/record gate — one account, three rounds as self, live average, rebuild parity", () => {
   let page: Page;
   const courseName = `Identity Record Course ${Date.now()}`;
   const card = buildIdentityCourseCard(courseName);
@@ -156,31 +168,42 @@ test.describe.serial("identity/record gate — one account, three rounds as self
 
     // history is newest-first (packages/contracts/src/golfers.ts's own doc comment;
     // getMyRecord.ts implements it via sortLines + reverse) — and test 1's own control flow
-    // finalizes strictly in deck order: round 1 (AGS 82), round 2 (85), round 3 (88).
-    // Newest-first is therefore [round3 (88), round2 (85), round1 (82)] —
-    // PINNED_DIFFERENTIALS reversed. Derived from the pinned constant rather than re-typed
-    // literals, so a future re-ordering of the play sequence fails this assertion loudly
-    // instead of silently passing a stale expectation.
-    // The WIRE serves the POSTED differential — one decimal (record-redesign arc 2026-07-18): a
-    // golfer's record reads 9.2, not the raw 9.18125. The index still folds the RAW full-precision
-    // lines (PINNED_INDEX below is unchanged), so only the DISPLAYED value rounds — assert the exact
-    // posted value via the domain's own postedDifferential, not the raw pin.
-    const expectedNewestFirst = [PINNED_DIFFERENTIALS[2], PINNED_DIFFERENTIALS[1], PINNED_DIFFERENTIALS[0]];
-    for (const [i, value] of record.history.map((line) => line.differential).entries()) {
-      expect(value, `history[${i}].differential`).toBeCloseTo(postedDifferential(expectedNewestFirst[i]!), 6);
+    // finalizes strictly in deck order: round 1 (gross 82), round 2 (85), round 3 (88).
+    // Newest-first is therefore [round3 (88), round2 (85), round1 (82)] — PINNED_SCORES reversed.
+    // Derived from the pinned constant rather than re-typed literals, so a future re-ordering of the
+    // play sequence fails this assertion loudly instead of silently passing a stale expectation.
+    // `score` is an exact integer on the wire now (the round's own gross, spec §8) — no float
+    // tolerance and no rounding step, unlike the differential this replaces.
+    expect(record.history.map((line) => line.score)).toEqual([PINNED_SCORES[2], PINNED_SCORES[1], PINNED_SCORES[0]]);
+    // `score - par` is exactly what a history row renders beside the score (spec §5), and it is the
+    // per-round figure the headline average is the mean of — pinned so the two can never disagree.
+    expect(record.history.map((line) => line.score! - line.par)).toEqual([PINNED_OVER_PAR[2], PINNED_OVER_PAR[1], PINNED_OVER_PAR[0]]);
+    // Every line carries the strokes the fold derived: a lone player is their own anchor, so a
+    // stated +0 resolves to 0 strokes for all three rounds (spec §2b).
+    expect(record.history.map((line) => line.strokes)).toEqual([0, 0, 0]);
+    // The retired columns are pinned ABSENT, not merely unasserted.
+    for (const line of record.history) {
+      for (const retired of ["ags", "differential"]) expect(line).not.toHaveProperty(retired);
     }
 
     // Round 3 finalized last -> newest -> history[0]; round 1 first -> oldest -> history[2].
     expect(record.history[0]?.roundId).toBe(roundIds[2]);
     expect(record.history[2]?.roundId).toBe(roundIds[0]);
 
-    // Three differentials -> WHS small-sample table row (<=3: use 1, adjustment -2.0) -> lowest
-    // 9.18125 - 2.0 = 7.18125 -> tenth-rounded -> 7.2, differentialsUsed 1 (packages/domain/
-    // src/handicap/whs.ts's smallSampleTable). If the live system disagrees with either pinned
-    // number, this assertion fails loudly rather than being adjusted to match — the
-    // BLOCKED-don't-fudge instruction.
-    expect(record.metrics.whsIndex?.value).toBe(PINNED_INDEX);
-    expect(record.metrics.whsIndex?.differentialsUsed).toBe(PINNED_DIFFERENTIALS_USED);
+    // The average, hand-derived from the deck's own scores above (see PINNED_AVERAGE's derivation):
+    // mean(+10, +13, +16) = 13. The spread is ABSENT at three rounds (its own 5-round floor), and
+    // averageHistory carries the rolling mean as of each round, oldest -> newest. If the live
+    // system disagrees with any pinned number, this fails loudly rather than being adjusted to
+    // match — the BLOCKED-don't-fudge instruction.
+    expect(record.metrics.average).toBe(PINNED_AVERAGE);
+    expect(record.metrics.spread).toBeUndefined();
+    expect(record.metrics.averageHistory.map((point) => point.average)).toEqual([...PINNED_AVERAGE_HISTORY]);
+    // averageHistory is oldest -> newest, the OPPOSITE of history's newest-first ordering.
+    expect(record.metrics.averageHistory.map((point) => point.roundId)).toEqual(roundIds);
+    // The headline IS the last point, by construction — pinned so the two can never drift.
+    expect(record.metrics.average).toBe(record.metrics.averageHistory.at(-1)?.average);
+    // Every retired index member is pinned absent on the wire.
+    for (const retired of ["whsIndex", "swngIndex", "indexHistory"]) expect(record.metrics).not.toHaveProperty(retired);
 
     // Bests + milestones (analytics read-folds spec 2026-07-21 §3, packages/domain/src/golfer/
     // analytics.ts) — hand-derived BEFORE any live run from this deck's own pinned scores, never
@@ -217,19 +240,17 @@ test.describe.serial("identity/record gate — one account, three rounds as self
   test("3: ProfilePage renders the same live record for the signed-in golfer", async () => {
     await page.goto("/profile");
 
-    // "Your index" (handicap-model legibility spec §3): the old "swng Index {value} — from N
-    // differential(s)" paragraph this test pinned against was DELETED whole by HL-T2 — it was a
-    // mislabel (a "swng Index" heading over what was actually the WHS value). The value pinned
-    // in test 2 above (record.metrics.whsIndex.value === PINNED_INDEX) has a direct analog on
-    // the new surface: the "WHS index · <value>" data point (ProfilePage.tsx's INDEX_SOURCES
-    // row), read straight off the very same field — the account plays only rated rounds, so its
-    // swng index and WHS index are numerically identical (7.2 either way), but the WHS row is
-    // the more direct read of the field this suite already pinned. The new surface renders no
-    // differentials-count copy anywhere near the value, so the old `/from 1 differential(?!s)/`
-    // half of this assertion has nothing left to target — dropped rather than invented against
-    // text that no longer exists.
-    const whsIndexRow = page.getByText(/WHS index/);
-    await expect(whsIndexRow).toContainText("7.2");
+    // The whole "Your index" section — the swng/WHS source rows, their one-tap commit, and the
+    // override box — is DELETED with the index-source model (spec 2026-07-29 §5/§7). The profile is
+    // a reporting artifact with no inputs, and the value test 2 just pinned over the API
+    // (record.metrics.average === PINNED_AVERAGE) has its direct on-screen analog in
+    // RecordSections' own headline: "What you shoot" over the average rendered vs par.
+    await expect(page.getByRole("heading", { name: "What you shoot" })).toBeVisible();
+    await expect(page.getByText(`+${PINNED_AVERAGE}`)).toBeVisible();
+    await expect(page.getByText("your last 10 finished rounds, score minus par")).toBeVisible();
+    // The retired surface is pinned GONE, not merely unasserted — a stale bundle would fail here.
+    await expect(page.getByText(/WHS index/)).toHaveCount(0);
+    await expect(page.getByLabel("Your own number")).toHaveCount(0);
 
     // "History" h3's own following <ul> (ProfilePage.tsx: history.length > 0 renders exactly
     // this shape) — same structural-lookup idiom as support.ts's readJoinCode, since neither
@@ -237,7 +258,7 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     const historyList = page.locator("xpath=//h3[normalize-space(text())='History']/following-sibling::ul[1]");
     await expect(historyList.getByRole("listitem")).toHaveCount(3);
 
-    // Legibility walk (papercuts.md §4): ProfilePage with a real record — index, trend, history.
+    // Legibility walk (papercuts.md §4): ProfilePage with a real record — average, chart, history.
     await page.screenshot({ path: screenshotPath("profile-with-record.png"), fullPage: true });
   });
 
@@ -251,23 +272,16 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     const { httpUrl } = loadWebEnv();
     const postRebuildRecord = await getMyRecordDirect(httpUrl, account.tokens.idToken);
 
-    // Deep-equal on history: archiveGolferLine is a pure recompute from the SAME stored
-    // archive both before and after rebuild — no wall-clock or randomness anywhere in it, so
-    // this holds bit-for-bit, not just toBeCloseTo.
+    // Deep-equal on history AND on the WHOLE metrics object: archiveGolferLine is a pure recompute
+    // from the SAME stored archive both before and after rebuild — no wall-clock or randomness
+    // anywhere in it, so this holds bit-for-bit. Nothing on this response is a read-time stamp
+    // anymore (the whsIndex `computedAtMs` that used to be a deliberate exclusion from this
+    // equality went with the index itself, spec §7), which lets the assertion be the strongest
+    // possible form: one `toEqual` over every metric, so a rebuild that dropped holeResults
+    // (whole-branch review, 2026-07-21) or moved the average by a stroke fails here.
     expect(postRebuildRecord.history).toEqual(preRebuildRecord.history);
-    expect(postRebuildRecord.metrics.whsIndex?.value).toBe(preRebuildRecord.metrics.whsIndex?.value);
-    expect(postRebuildRecord.metrics.whsIndex?.differentialsUsed).toBe(preRebuildRecord.metrics.whsIndex?.differentialsUsed);
-
-    // Rebuild parity must cover the holeResults-DERIVED metrics too — history/whsIndex equality
-    // alone would pass a rebuild that dropped holeResults (whole-branch review, 2026-07-21).
-    expect(postRebuildRecord.metrics.bests).toEqual(preRebuildRecord.metrics.bests);
-    expect(postRebuildRecord.metrics.milestones).toEqual(preRebuildRecord.metrics.milestones);
-
-    // computedAtMs is deliberately EXCLUDED from the equality above — since pre-prod
-    // hardening D4a it's getMyRecord's read-time stamp (`deps.clock.now()` at each GET), so
-    // two reads at different instants ALWAYS differ; it proves nothing about the rebuild. The
-    // real parity proof is the history deep-equal plus the value/differentialsUsed equality
-    // just above — the index recomputed from rebuilt lines landing identical.
-    expect(postRebuildRecord.metrics.whsIndex?.computedAtMs).not.toBe(preRebuildRecord.metrics.whsIndex?.computedAtMs);
+    expect(postRebuildRecord.metrics).toEqual(preRebuildRecord.metrics);
+    // ...and the pinned values still hold after the rebuild, not merely "the same as before".
+    expect(postRebuildRecord.metrics.average).toBe(PINNED_AVERAGE);
   });
 });

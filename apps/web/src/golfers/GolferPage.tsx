@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import type { GetGolferResponse } from "@swng/contracts";
-import { formatHandicapIndex, golferId as makeGolferId, indexSourcePhrase, resolveIndex } from "@swng/domain";
+import { golferId as makeGolferId } from "@swng/domain";
 import { ApiError, getGolfer } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
@@ -12,10 +12,13 @@ import { RecordSections } from "./RecordSections";
 const NOT_FOUND_MESSAGE = "This golfer isn't available";
 
 // GET /golfers/{golferId} (navigation spec §6c): any signed-in golfer's own record, read-only —
-// the SAME index line + record sections ProfilePage renders for yourself, but third-person
-// (indexSourcePhrase(kind, "their")) and with NO controls: name/home Save and the index-source
-// picker stay ProfilePage-only, never here. Signed-out hit runs the same SignInCta funnel every
-// gated page uses, returnTo the current path so the round trip lands back here.
+// the SAME record sections ProfilePage renders for yourself, third-person (person="their") and
+// with NO controls: name/home Save stays ProfilePage-only. The separate "plays off N · from all
+// their rounds" line this page used to render above the sections is deleted with the index it
+// named — RecordSections' own headline ("What they shoot") already states the one number, so
+// keeping a second one here would be two numbers for the same fact. Signed-out hit runs the same
+// SignInCta funnel every gated page uses, returnTo the current path so the round trip lands back
+// here.
 export function GolferPage() {
   const { golferId: param } = useParams<{ golferId: string }>();
   const auth = useAuth();
@@ -74,18 +77,11 @@ export function GolferPage() {
     );
   }
 
-  // Resolved exactly as ProfilePage does — the SAME resolveIndex + formatHandicapIndex imports —
-  // but named third-person via indexSourcePhrase's "their" arm (@swng/domain, the model owning
-  // both arms of the same convention).
-  const resolved = resolveIndex(golfer.indexSource, golfer.metrics);
   const isSelf = auth.golfer != null && auth.golfer.golferId === makeGolferId(param);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col gap-8 bg-cream p-6">
       <h1 className="text-2xl font-bold text-forest">{golfer.name}</h1>
-      <p className="text-fairway">
-        plays off {resolved.value !== undefined ? formatHandicapIndex(resolved.value) : "—"} · {indexSourcePhrase(resolved.kind, "their")}
-      </p>
 
       {isSelf && (
         <Link to="/profile" className={`text-sm text-forest ${linkEntity}`}>

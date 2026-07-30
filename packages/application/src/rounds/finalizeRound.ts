@@ -58,7 +58,7 @@ export const finalizeRound =
         // silently re-settling a log a different reader might settle differently.
         const archived = await deps.snapshots.get(claims.roundId);
         if (!archived) throw new Error(`finalizeRound: round ${claims.roundId} is final but has no snapshot — corrupt`);
-        return { results: archived.results, handicapping: archived.handicapping };
+        return { results: archived.results };
       }
 
       const hlc = createServerHlcSource(deps.clock);
@@ -87,7 +87,7 @@ export const finalizeRound =
 
       await deps.broadcast.publish(claims.roundId, result.appended);
       deps.metrics?.count("RoundsFinalized");
-      return { results: archive.results, handicapping: archive.handicapping };
+      return { results: archive.results };
     }
 
     throw new Error(`finalizeRound: did not converge after ${MAX_FINALIZE_ATTEMPTS} attempts (round ${claims.roundId})`);

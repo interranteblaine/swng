@@ -1,13 +1,12 @@
 import type { GolferId, RoundId } from "../ids.js";
 import { fullyHoledOut, grossOf } from "../golfer/analytics.js";
-import { golferMetrics } from "../golfer/metrics.js";
+import { averageOfValues, scoredOverPar, spreadOfValues } from "../golfer/average.js";
 import type { GolferRoundLine } from "../golfer/record.js";
-import { roundHalfUp } from "../scoring/strokes.js";
 
-// The crew scoreboard (crew-scoreboard spec §3a): a pure fold over ALREADY-FETCHED golfer
-// projection lines — never a fetcher (the crew/analytics.ts discipline). `lines` per member
-// is the FULL career in chronological order (application sorts via sortLines — golferMetrics'
-// own contract); the fold windows internally so index/indexDelta can see the whole record.
+// The crew scoreboard (crew-scoreboard spec §3a, reshaped by spec 2026-07-29 §6): a pure fold over
+// ALREADY-FETCHED golfer projection lines — never a fetcher (the crew/analytics.ts discipline).
+// `lines` per member is the FULL career in chronological order (application sorts via sortLines —
+// golferMetrics' own contract); the fold windows to the season internally.
 
 export type StoredLine = GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number };
 
@@ -28,16 +27,20 @@ export const inWindow = (window: SeasonWindow, line: StoredLine): boolean => {
   return at >= window.startMs && (window.endMs === undefined || at <= window.endMs);
 };
 
+// Rounds · Average · Spread · Best (spec 2026-07-29 §6): once every round collapses to one number
+// in one unit, a golfer's record is a DISTRIBUTION, not a point estimate — so the board describes
+// it. `average` is level, `spread` is consistency (the most useful competitive fact about an
+// opponent: ±4.2 beats better players more often than the averages suggest and loses to worse
+// ones), `best18` is ceiling. The retired `netPer18` was also plain wrong: it subtracted whatever
+// integer was typed at join, so a player who typed a difference read several strokes better than
+// the truth. `index`/`indexDelta` go with the index itself; the trend lives on the profile chart.
 export interface ScoreboardLine {
   readonly golferId: GolferId;
   readonly rounds: number;
+  readonly average?: number;
+  readonly spread?: number;
   readonly best18?: { readonly gross: number; readonly toPar: number };
-  readonly netPer18?: number;
-  readonly index?: number;
-  readonly indexDelta?: number;
 }
-
-const NET_PER_18_MIN_ROUNDS = 3; // the deleted net-average superlative's own refusing-to-draw-noise floor, carried forward (spec §3a)
 
 export const crewScoreboard = (
   members: readonly { readonly golferId: GolferId; readonly lines: readonly StoredLine[] }[],
@@ -55,41 +58,31 @@ export const crewScoreboard = (
       if (best18 === undefined || gross < best18.gross) best18 = { gross, toPar: gross - line.par };
     }
 
-    // AGS-based, vs-par, normalized per 18 (spec §3a's honesty argument); one decimal.
-    const netLines = windowed.filter((line) => line.ags !== undefined);
-    const netPer18 =
-      netLines.length >= NET_PER_18_MIN_ROUNDS
-        ? roundHalfUp(
-            (netLines.reduce((sum, line) => sum + (line.ags! - line.courseHandicap - line.par), 0) /
-              netLines.reduce((sum, line) => sum + line.holes, 0)) *
-              18 *
-              10,
-          ) / 10
-        : undefined;
-
-    // The index is always the whole career; the delta is window-scoped via the same
-    // played-date rule the window itself uses.
-    const index = golferMetrics(lines).swngIndex?.value;
-    const before = golferMetrics(lines.filter((line) => playedAtMs(line) < window.startMs)).swngIndex?.value;
-    const indexDelta = index !== undefined && before !== undefined ? roundHalfUp((index - before) * 10) / 10 : undefined;
+    // Average + spread over EVERY finished round in the window — deliberately NOT the profile's
+    // rolling last-10 (spec §6: `Rounds 12` beside an average of 10 of them would be a lie on the
+    // same row). Hence `averageOfValues`/`spreadOfValues` over the season's own values rather than
+    // `averageOf`/`spreadOf`, which would silently re-slice to 10 on top of the window. The
+    // profile answers "what do you shoot"; the board answers "what did you shoot this season".
+    const values = scoredOverPar(windowed);
+    const average = averageOfValues(values);
+    const spread = spreadOfValues(values);
 
     return {
       golferId,
       rounds: windowed.length,
+      ...(average !== undefined ? { average } : {}),
+      ...(spread !== undefined ? { spread } : {}),
       ...(best18 !== undefined ? { best18 } : {}),
-      ...(netPer18 !== undefined ? { netPer18 } : {}),
-      ...(index !== undefined ? { index } : {}),
-      ...(indexDelta !== undefined ? { indexDelta } : {}),
     };
   });
 
-  // Total order, domain-owned (the aggregateSeason precedent): netPer18 asc with absent
+  // Total order, domain-owned (the aggregateSeason precedent): average asc with absent
   // LAST, rounds desc, golferId asc.
   return rows.sort((x, y) => {
-    if (x.netPer18 !== y.netPer18) {
-      if (x.netPer18 === undefined) return 1;
-      if (y.netPer18 === undefined) return -1;
-      return x.netPer18 - y.netPer18;
+    if (x.average !== y.average) {
+      if (x.average === undefined) return 1;
+      if (y.average === undefined) return -1;
+      return x.average - y.average;
     }
     return y.rounds !== x.rounds ? y.rounds - x.rounds : x.golferId < y.golferId ? -1 : x.golferId > y.golferId ? 1 : 0;
   });

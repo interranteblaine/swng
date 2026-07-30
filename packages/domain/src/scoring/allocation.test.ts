@@ -1,18 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { findTeeSet } from "../course/card.js";
-import type { CourseCard, TeeSet } from "../course/card.js";
 import { gameId, golferId } from "../ids.js";
 import type { GolferId } from "../ids.js";
-import { settleRound } from "../round/archive.js";
-import { reduceRound } from "../round/state.js";
 import type { Participant, RosterEntry } from "../round/participant.js";
 import { dotsByHole } from "./strokes.js";
 import { fieldDeck18 } from "./golden/fieldDeck18.js";
-import { fixtureLinks, fixtureLinks18, fixtureWhite } from "./golden/fixtureCourse.js";
-import { playGoldenRoundLog } from "./golden/deck.js";
-import type { FixtureScores } from "./golden/deck.js";
+import { fixtureLinks18 } from "./golden/fixtureCourse.js";
 import { anchorOf, resolveStrokes } from "./strokeBasis.js";
-import { gameStrokeAllocation, handicappingFor, roundStrokeAllocation, totalDots } from "./allocation.js";
+import { gameStrokeAllocation, roundStrokeAllocation, totalDots } from "./allocation.js";
 import type { GameConfig } from "./game.js";
 
 // The M5 field deck: stated normal scores 8/2/15/5 (ann/bo/cal/dee) give relative dots 6/0/13/3
@@ -166,83 +161,11 @@ describe("totalDots", () => {
   it("sums to zero for an empty allocation (e.g. gross stroke-play)", () => {
     expect(totalDots(new Map())).toBe(0);
   });
-  it("sums a plus-handicap (negative) allocation back to the negative total", () => {
-    const perHole = dotsByHole(-4, whiteTeeSet);
-    expect(totalDots(perHole)).toBe(-4);
-  });
   it("agrees with gameStrokeAllocation's own per-golfer allocation on the fourball fixture (6/0/13/3)", () => {
     const allocation = gameStrokeAllocation(fourball, fieldRoster, fixtureLinks18);
     const expectedRelative: Readonly<Record<string, number>> = { [ann]: 6, [bo]: 0, [cal]: 13, [dee]: 3 };
     for (const [id, relative] of Object.entries(expectedRelative)) {
       expect(totalDots(allocation.get(golferId(id))!)).toBe(relative);
     }
-  });
-});
-
-describe("handicappingFor — agreement with settleRound's own consumption", () => {
-  const A = golferId("ann");
-  const B = golferId("bo");
-  const C = golferId("cal");
-  const players3: readonly Participant[] = [
-    { golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } },
-    { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
-    { golferId: C, name: "Cal", tee: "white", basis: { kind: "normally-shoots", overPar: 12 } },
-  ];
-  const skinsGame = { kind: "skins", id: gameId("k9"), scoring: "net", players: [A, B, C] } as const;
-  const stableford = { kind: "stableford", id: gameId("s9"), players: [A, B, C] } as const;
-  const cards = {
-    [A]: [5, 5, 4, 6, 5, 4, 5, 6, "picked-up"],
-    [B]: [4, 5, 3, 6, 4, 4, 4, 5, 4],
-    [C]: [6, 7, 4, 8, 6, 5, 6, 7, 6],
-  } as const;
-  const corrections = [{ golfer: A, hole: 9, score: 4 }] as const;
-  const finalLog = playGoldenRoundLog(fixtureLinks, players3, [skinsGame, stableford], cards, corrections);
-
-  it("calling the exported helper directly reproduces settleRound's own handicapping rows exactly", () => {
-    const archive = settleRound(finalLog);
-    const state = reduceRound(finalLog);
-
-    for (const participant of state.participants) {
-      const direct = handicappingFor(participant, state.card, state.cells);
-      const fromArchive = archive.handicapping.find((row) => row.golferId === participant.golferId);
-      expect(direct).toEqual(fromArchive);
-    }
-  });
-});
-
-// Unrated-courses spec (Task 2): a round played on an unrated tee still scores an AGS —
-// it just carries no differential. handicappingFor must return kind "unrated" (never
-// "complete" and never let scoreDifferential's tee-unrated throw escape uncaught).
-describe("handicappingFor — unrated tee", () => {
-  const golfer = golferId("uno");
-  const participant: Participant = { golferId: golfer, name: "Uno", tee: "white", basis: { kind: "normally-shoots", overPar: 8 } };
-  // The FOLDED seat, not the assertion: handicappingFor needs the strokes reduceRound derived
-  // (here 0 — a lone player is their own anchor), so reading it off the fold is the only honest
-  // way to build this argument.
-  const seatOf = (state: ReturnType<typeof reduceRound>): RosterEntry => state.participants.find((entry) => entry.golferId === golfer)!;
-  // Same holes as the rated fixture (par/strokeIndex only — AGS never reads rating/slope),
-  // just without rating/slope, so the two cards' AGS for identical scores can be compared.
-  const unratedWhite: TeeSet = { name: "white", holes: fixtureWhite.holes };
-  const unratedLinks: CourseCard = { courseName: "Unrated Links", teeSets: [unratedWhite] };
-  const fullScores: FixtureScores = { [golfer]: [5, 5, 4, 6, 5, 4, 5, 6, 5] };
-
-  it("all holes decided: kind unrated, AGS equal to the rated computation's AGS (rating/slope-independent)", () => {
-    const log = playGoldenRoundLog(fixtureLinks, [participant], [], fullScores, [], false);
-    const state = reduceRound(log);
-
-    const rated = handicappingFor(seatOf(state), fixtureLinks, state.cells);
-    if (rated.kind !== "complete") throw new Error(`expected the rated tee to be complete, got ${rated.kind}`);
-
-    const unrated = handicappingFor(seatOf(state), unratedLinks, state.cells);
-    expect(unrated).toEqual({ golferId: golfer, kind: "unrated", ags: rated.ags });
-  });
-
-  it("still incomplete when a hole is undecided on an unrated tee", () => {
-    const partialScores: FixtureScores = { [golfer]: [5, 5, 4, 6, 5, 4, 5, 6, null] };
-    const log = playGoldenRoundLog(fixtureLinks, [participant], [], partialScores, [], false);
-    const state = reduceRound(log);
-
-    const result = handicappingFor(seatOf(state), unratedLinks, state.cells);
-    expect(result).toEqual({ golferId: golfer, kind: "incomplete" });
   });
 });

@@ -171,7 +171,49 @@ only state meaning there is no number."
 - Consumes: nothing from Task 1 beyond a green tree.
 - Produces: `Participant.strokes: number`; event `participant-strokes-set { golferId, strokes }`; route `POST /rounds/{roundId}/strokes`; `JoinRoundRequest = { code, tee }`.
 
-- [ ] **Step 1: Write the failing fold tests**
+Add to `packages/domain/src/scoring/allocation.test.ts`, pinning both behaviours and the hole
+placement that is the whole reason match kinds stay relative:
+
+```ts
+const roster = [p("ann", 20), p("bo", 10), p("cy", 5), p("dee", 0)];
+
+it("a medal game uses each player's own number — it agrees with the card", () => {
+  const allocation = gameStrokeAllocation(
+    { kind: "stroke-play", id: gameId("g"), scoring: "net", players: [golferId("ann"), golferId("bo")] },
+    roster,
+    fixtureLinks18,
+  );
+  expect(totalDots(allocation.get(golferId("ann"))!)).toBe(20);
+  expect(totalDots(allocation.get(golferId("bo"))!)).toBe(10);
+});
+
+it("a match is played off the difference, on the HARDEST holes", () => {
+  const allocation = gameStrokeAllocation(
+    { kind: "singles-match", id: gameId("m"), a: golferId("ann"), b: golferId("bo") },
+    roster,
+    fixtureLinks18,
+  );
+  expect(totalDots(allocation.get(golferId("ann"))!)).toBe(10);
+  expect(totalDots(allocation.get(golferId("bo"))!)).toBe(0);
+  // The ten shots land on stroke index 1-10 — not on SI 1, 2 and 11-18, which is what
+  // subtracting two absolute allocations would have produced.
+  const anns = allocation.get(golferId("ann"))!;
+  const dottedHoles = fixtureLinks18.teeSets[0]!.holes.filter((h) => (anns.get(h.number) ?? 0) > 0);
+  expect(dottedHoles.every((h) => h.strokeIndex <= 10)).toBe(true);
+});
+
+it("a four-ball puts all four off the lowest of the four", () => {
+  const allocation = gameStrokeAllocation(
+    { kind: "fourball-match", id: gameId("f"), a: [golferId("ann"), golferId("cy")], b: [golferId("bo"), golferId("dee")] },
+    roster,
+    fixtureLinks18,
+  );
+  expect(totalDots(allocation.get(golferId("ann"))!)).toBe(20);
+  expect(totalDots(allocation.get(golferId("dee"))!)).toBe(0);
+});
+```
+
+- [ ] **Step 1b: Write the failing fold tests**
 
 Replace the derivation block in `packages/domain/src/round/state.test.ts` with:
 
@@ -246,29 +288,49 @@ rather than rewriting it. **Delete the whole post-roster derivation pass** (`res
 
 `rm packages/domain/src/scoring/strokeBasis.ts packages/domain/src/scoring/strokeBasis.test.ts`.
 
-In `allocation.ts`, `gameStrokeAllocation` reads each member's own roster number — no anchor, no
-present-field scoping:
+In `allocation.ts`, `gameStrokeAllocation` gets **two** behaviours (spec §3) — a card is absolute,
+a match is relative. No allowances in either:
 
 ```ts
-// Every game uses the strokes on the card (spec §3). No re-anchoring to the game's own field
-// and no allowance: the card and every game therefore always show the same dots.
+// A card is absolute, a match is relative (spec §3). Medal kinds use each player's own roster
+// number, so they always agree with the card. Match kinds use the DIFFERENCE, allocated from the
+// hardest hole down — "you get ten off me" puts those ten on SI 1-10, which is what stroke index
+// is for. Same shot count as subtracting two absolute allocations, different holes, and the
+// holes are the point.
 export const gameStrokeAllocation = (
   config: GameConfig,
   participants: readonly RosterEntry[],
   card: CourseCard,
 ): ReadonlyMap<GolferId, ReadonlyMap<number, number>> => {
   if ("scoring" in config && config.scoring === "gross") return new Map();
-  return new Map(
-    gameMembers(config).map((id) => {
-      const p = participantFor(participants, id);
-      return [id, dotsByHole(p.strokes, findTeeSet(card, p.tee))];
-    }),
-  );
+  const dotsFor = (id: GolferId, strokes: number) => {
+    const p = participantFor(participants, id);
+    return [id, dotsByHole(strokes, findTeeSet(card, p.tee))] as const;
+  };
+  const strokesOf = (id: GolferId) => participantFor(participants, id).strokes;
+
+  switch (config.kind) {
+    case "stroke-play":
+    case "stableford":
+    case "skins":
+      return new Map(gameMembers(config).map((id) => dotsFor(id, strokesOf(id))));
+    case "singles-match":
+    case "fourball-match": {
+      const members = gameMembers(config);
+      const lowest = Math.min(...members.map(strokesOf));
+      return new Map(members.map((id) => dotsFor(id, strokesOf(id) - lowest)));
+    }
+  }
 };
 ```
 
-`roundStrokeAllocation` is now the same expression over the whole roster — keep both names (the
-card and a game are different callers) but note in a comment that they agree by construction.
+Singles match falls out of the same expression as four-ball: with two members the lowest is one of
+them, so the higher receives the difference and the lower receives none. Do not write a separate
+two-player branch.
+
+`roundStrokeAllocation` (the card) stays each player's own number over the whole roster — note in a
+comment that the medal kinds therefore agree with it by construction, and the match kinds
+deliberately do not.
 
 - [ ] **Step 6: Change the wire**
 
@@ -337,35 +399,40 @@ Games read the same number the card shows — no re-anchoring, no allowances."
 
 ---
 
-## Task 3: The panel copy names the card again
+## Task 3: Two panel lines, both true
 
 **Files:**
 - Modify: `packages/domain/src/scoring/present.ts` (+test), `apps/web/src/round/dots.ts` (+test), `apps/web/src/games/GamePanel.tsx`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 ```ts
-it("says a net game uses the strokes on the card", () => {
+it("says a medal game uses the strokes on the card", () => {
   expect(gameTreatment({ kind: "skins", id: gameId("g"), scoring: "net", players: [] }))
     .toBe("Net — uses the strokes on the card");
+});
+
+it("says a match is played off the difference", () => {
+  expect(gameTreatment({ kind: "fourball-match", id: gameId("f"), a: [], b: [] }))
+    .toBe("Played off the difference — everyone off the lowest of the four");
 });
 ```
 
 - [ ] **Step 2: Run and watch fail**
 
 Run: `pnpm -F @swng/domain vitest run src/scoring/present.test.ts`
-Expected: FAIL — still returns `Net — everyone plays off the lowest in this game`.
+Expected: FAIL — every arm still returns `Net — everyone plays off the lowest in this game`.
 
-- [ ] **Step 3: Revert the copy**
+- [ ] **Step 3: Write the two lines**
 
-The prior arc changed this line because a subset game re-anchored, making "the card" false. Task 2
-removed the re-anchoring, so the original sentence is true again. Restore it for the stroke-play,
-skins and stableford arms. `strokesNote` drops both match-kind notes about who receives — with no
-relative rule there is nothing to explain.
+The prior arc softened one sentence to cover both behaviours. There are two behaviours, so there
+are two sentences (spec §3's table). Medal arms name the card; match arms name the difference.
+Singles match names who receives — `Played off the difference — {name} gets N` — which `strokesNote`
+already has the roster to compute; four-ball names the rule.
 
 - [ ] **Step 4: Grep the specs for the retired string**
 
-`grep -rn "plays off the lowest" apps e2e packages | grep -v /dist/` must return nothing.
+`grep -rn "plays off the lowest in this game" apps e2e packages | grep -v /dist/` must return nothing.
 
 - [ ] **Step 5: Gate and commit**
 
@@ -556,6 +623,7 @@ git commit -m "docs: strokes are typed, not derived"
   2. Roster shows `name` / `tee · 0 strokes` / one `Edit`. Set 20 on one player; the other stays 0.
   3. Card shows 20 dots on the 20 hardest holes for that player, none for the other.
   4. Add net skins and gross skins; the net panel says `Net — uses the strokes on the card` and its dots match the card exactly.
+  4b. Add a singles match between the 20 and a player at 10; the panel says it is played off the difference, and the 10 shots land on stroke index 1–10 — **not** on SI 1, 2 and 11–18. This is the one place a game's dots deliberately differ from the card.
   5. Score a hole; take a gimme by tapping the number — confirm no `Conceded` control exists anywhere.
   6. Pick up a hole; confirm the segment dashes.
   7. Finalize: gross · strokes · net.
@@ -568,7 +636,9 @@ git commit -m "docs: strokes are typed, not derived"
 
 ## Self-Review
 
-**Spec coverage.** §1 → T7. §2 → T2. §3 → T2, T3. §4 → unchanged, no task. §5 → T2 (deletes the join pre-fill; the profile itself is already read-only). §6 → T4. §7 → T1. §8 → T2. §9 → T1, T2, T3, T4. §10 → T5, T6. §11 → T2, T8. §12 is framing.
+**Spec coverage.** §1 → T7. §2 → T2. §3 → T2 (the two allocation behaviours), T3 (the two panel lines). §4 → unchanged, no task. §5 → T2 (deletes the join pre-fill; the profile itself is already read-only). §6 → T4. §7 → T1. §8 → T2. §9 → T1, T2, T3, T4. §10 → T5, T6. §11 → T2, T8. §12 is framing.
+
+**The one thing a reviewer should not "simplify".** `gameStrokeAllocation` has two arms on purpose. A reviewer who sees medal and match kinds diverging and proposes collapsing them is proposing the exact error this arc corrects — the shot *count* comes out the same either way, only the *holes* differ, so no test that counts dots will catch it. Task 2's stroke-index assertion is the one that does.
 
 **Type consistency.** `Participant.strokes: number` (T2) is read by `gameStrokeAllocation` (T2) and `SetupPanel` (T2). `scoredStrokes` (T1) keeps its signature. `hasCompleteScore` (pre-existing) gains `bestsOf` as a caller (T1). `nineHoleContribution` (T5) is the only new export.
 

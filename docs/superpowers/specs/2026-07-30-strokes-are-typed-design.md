@@ -59,22 +59,47 @@ comparing what people shoot — which is why §5's record exists and is worth re
 "give him one a side." Sometimes it is zeros, because nobody is playing anything. All three are the
 same integer.
 
-## 3. Games
+## 3. Games — a card is absolute, a match is relative
 
-**A game uses each player's roster strokes. There is no re-anchoring and there are no allowances.**
+**There are two behaviours, and both are sentences a golfer says out loud.**
 
-The card and every game therefore always show the same dots, and a panel can honestly say the
-strokes come from the card.
+- **Stroke play, Stableford, skins** use each player's **own roster number**. That is what a
+  scorecard is: your shots are yours, whoever else is in the game.
+- **Singles match and four-ball** use **the difference**, allocated from the hardest hole down. In
+  a singles match the higher number receives `higher − lower` and the lower receives none; in a
+  four-ball all four play off the lowest of the four.
 
-- **Gross/net stays a real choice on stroke play and skins.** Gross ignores strokes entirely; net
-  uses the roster number, spread by stroke index.
-- **Stableford** is net by construction.
-- **Match play and four-ball** use the roster numbers as-is.
+**No allowances.** The 95% / 90% / 100% multipliers are gone and stay gone — they are invisible
+percentages nobody can verify.
 
-**Traditional match play is off the difference** — a 20 against a 10 plays 10-and-scratch, and that
-allocates differently hole-by-hole than 20-and-10. Under this model you get it by typing it: put 10
-and 0 on the roster for that match. The app records what was agreed; it does not hold an opinion
-about what should have been.
+**Why not one rule for everything.** The 2026-07-29 arc collapsed five per-kind conventions into
+one and treated it as a simplification. Deleting the *allowances* was right. Deleting the
+*relative-vs-absolute distinction* was not, because that distinction is the game. Work it: four
+players at 20 / 10 / 5 / 0, and the 20 plays a match against the 10. Using the roster numbers
+straight, the 20 gets a dot everywhere plus a second on SI 1–2 and the 10 gets one on SI 1–10, so
+the net shot falls on SI 1, SI 2 and SI 11–18 — ten shots, the right count, on the wrong holes.
+Played the real way, the 10 says "you get ten off me" and those ten land on SI 1–10, the hardest
+ten. Same count, different holes, and the difference matters because a shot on the hardest hole is
+worth more than one on the easiest. Allocating by stroke index from the hardest hole down is the
+entire purpose of stroke index.
+
+Nobody in the history of golf has said "I get 20 and you get 10." They say "you get 10."
+
+**Gross/net stays a real choice on stroke play and skins.** Gross ignores strokes entirely.
+Stableford is net by construction.
+
+**The panels therefore carry two different true statements**, rather than one softened to cover
+both:
+
+| kind | line |
+|---|---|
+| stroke play / skins, gross | `Gross — raw scores, no strokes` |
+| stroke play / skins, net | `Net — uses the strokes on the card` |
+| stableford | `Net — uses the strokes on the card` |
+| singles match | `Played off the difference — {name} gets N` |
+| four-ball | `Played off the difference — everyone off the lowest of the four` |
+
+A match panel showing different dots than the card is correct and expected, and now says so.
 
 ## 4. The card and the finished round
 
@@ -141,8 +166,12 @@ into the UI as a choice the user had to make.
 - the join form's `What do you normally shoot, relative to par?` question, and the pre-fill from
   the golfer's average — `JoinRoundRequest` becomes `{ code, tee }`, `StartRoundRequest`'s host
   becomes `{ tee }`
-- per-game re-anchoring in `gameStrokeAllocation`; the panel copy
-  `Net — everyone plays off the lowest in this game` reverts to naming the card
+- the medal kinds' per-game re-anchoring in `gameStrokeAllocation` — stroke play, Stableford and
+  skins go back to each player's own number, so they always agree with the card. The **match
+  kinds keep** their relative allocation (§3); it is the allowances that stay deleted, not the
+  relative rule.
+- the panel copy `Net — everyone plays off the lowest in this game`, which existed only to cover
+  medal kinds having become relative (§3's table replaces it)
 - `HoleResult`'s `conceded` arm; `fullyHoledOut`; the ScorePad conceded disclosure; the `Nc` glyph
 - the crew board's head-to-head line
 - the roster's `Give strokes directly` control and the `normally +N · gets N` composition

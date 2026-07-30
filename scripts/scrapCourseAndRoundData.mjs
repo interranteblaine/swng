@@ -41,23 +41,38 @@
 //
 // FLAGS
 //
+// THE COURSE CHOICE IS MANDATORY. Exactly one of `--keep-courses` / `--wipe-courses` must be
+// passed; the script exits non-zero and does nothing otherwise. There is NO default, safe or
+// dangerous (owner decision, 2026-07-30). The reasoning is the one this codebase runs on:
+// make illegal states unrepresentable rather than documenting the hazard — and it applies with
+// MORE force here, because this instrument is irreversible and operates on data no test can
+// regenerate. Two hand-entered real course cards (Casa Verde GC, Sandy Hollow Nine) are the
+// field-test fixtures, the field e2e specs RE-SEED courses so no gate would catch their loss,
+// and "run by the controller, never by an agent" above is prose — prose stops nothing. An exit
+// code does.
+//
 //   --stage <name>    which stage's four tables to operate on (default `beta`).
 //   --dry-run         count and report, delete nothing. Composes with every other flag.
 //   --keep-courses    make the CORE-TABLE PASS ABOVE A NO-OP: no `COURSE#` item is deleted and
 //                     no golfer's `homeCourseId` is stripped. The rounds/snapshots/projections
 //                     passes still run in full. Named for the OUTCOME rather than the pass,
 //                     because at a terminal under pressure "keep courses" has exactly one
-//                     reading. The pass logs that it was skipped — silence is how someone later
-//                     concludes it ran.
+//                     reading.
 //
-//                     Use it whenever an arc replaces the ROUND model and leaves the course
-//                     model alone: the hand-seeded real cards (Casa Verde GC, Sandy Hollow
-//                     Nine) are the field-test fixtures, and the field e2e specs RE-SEED
-//                     courses, so losing them is silent and permanent — no gate catches it.
-//                     The relative-to-par strokes arc (spec 2026-07-29 §8) is the first
-//                     close-out that requires this flag.
+//                     This is the choice whenever an arc replaces the ROUND model and leaves
+//                     the course model alone — the relative-to-par strokes arc (spec 2026-07-29
+//                     §8) is the first close-out that requires it.
 //
-//   node scripts/scrapCourseAndRoundData.mjs [--stage beta] [--dry-run] [--keep-courses]
+//   --wipe-courses    run the core-table pass in full: delete every `COURSE#` item and strip
+//                     `homeCourseId` from every golfer profile. The original course-cards-arc
+//                     behaviour (spec 2026-07-15 §9), kept available and unchanged — an arc that
+//                     legitimately replaces the COURSE model still needs it. Just no longer
+//                     what you get by forgetting to say so.
+//
+// Whichever is chosen is LOGGED, in dry-run and for real: `SKIPPED …` or `RAN …`, naming the
+// flag. Silence is how someone later concludes the wrong thing happened.
+//
+//   node scripts/scrapCourseAndRoundData.mjs --stage beta (--keep-courses|--wipe-courses) [--dry-run]
 import { createRequire } from "node:module";
 
 const require = createRequire(new URL("../packages/adapters-dynamodb/package.json", import.meta.url));
@@ -66,8 +81,21 @@ const { DynamoDBDocumentClient, ScanCommand, DeleteCommand, UpdateCommand } = re
 
 const stage = process.argv.includes("--stage") ? process.argv[process.argv.indexOf("--stage") + 1] : "beta";
 const dryRun = process.argv.includes("--dry-run");
-// Opt out of the course pass only — see the FLAGS block above for why this exists.
+// The course choice — see the FLAGS block above. Neither is a default; exactly one is required.
 const keepCourses = process.argv.includes("--keep-courses");
+const wipeCourses = process.argv.includes("--wipe-courses");
+
+// Refuse to run without an explicit choice, BEFORE anything reads or writes a table. This guard
+// is the whole safety mechanism: it is not advice, and it cannot be forgotten past. Both flags
+// together is equally illegal — it is not a state a human means, so it is not one we resolve.
+if (keepCourses === wipeCourses) {
+  console.error(
+    keepCourses
+      ? "error: --keep-courses and --wipe-courses contradict each other — pass exactly one."
+      : "error: choose what happens to courses — pass --keep-courses (scrap rounds/snapshots/projections only) or --wipe-courses (also delete every COURSE# item and strip homeCourseId). There is no default.",
+  );
+  process.exit(1);
+}
 
 const coreTable = `swng-core-${stage}`;
 const roundsTable = `swng-rounds-${stage}`;
@@ -77,8 +105,9 @@ const projectionsTable = `swng-projections-${stage}`;
 const client = DynamoDBDocumentClient.from(new DynamoDBClient({ region: "us-east-1", profile: process.env.AWS_PROFILE ?? "swng" }));
 
 // --- core table: wipe every COURSE# item; strip dangling homeCourseId off golfer profiles ----
-// Skippable whole via --keep-courses (FLAGS above). `exclusiveStartKey` is declared out here
-// because the three passes below reuse the same cursor variable.
+// Runs iff --wipe-courses (FLAGS above); --keep-courses makes it a no-op. The guard above has
+// already proven exactly one of the two was passed, so the `if` below is a branch, not a default.
+// `exclusiveStartKey` is declared out here because the three passes below reuse the same cursor.
 
 let coursesDeleted = 0;
 let golfersUpdated = 0;
@@ -87,7 +116,7 @@ let exclusiveStartKey;
 if (keepCourses) {
   // Announced, never silent: a skipped destructive pass that logs nothing is indistinguishable
   // from one that ran and found nothing, and someone reading this transcript later has to be
-  // able to tell which happened.
+  // able to tell which happened. The --wipe-courses arm announces itself symmetrically below.
   console.log(`${dryRun ? "[dry-run] " : ""}SKIPPED the ${coreTable} course pass (--keep-courses): no COURSE# item deleted, no homeCourseId stripped`);
 } else {
   do {
@@ -115,8 +144,9 @@ if (keepCourses) {
   } while (exclusiveStartKey);
 
   console.log(
-    `${dryRun ? "[dry-run] would delete" : "deleted"} ${coursesDeleted} COURSE# item(s) and ` +
-      `${dryRun ? "would strip" : "stripped"} homeCourseId from ${golfersUpdated} golfer profile(s) on ${coreTable} ` +
+    `${dryRun ? "[dry-run] " : ""}RAN the ${coreTable} course pass (--wipe-courses): ` +
+      `${dryRun ? "would delete" : "deleted"} ${coursesDeleted} COURSE# item(s), ` +
+      `${dryRun ? "would strip" : "stripped"} homeCourseId from ${golfersUpdated} golfer profile(s) ` +
       `(${coreKept} other core item(s) untouched)`,
   );
 }

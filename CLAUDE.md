@@ -1569,7 +1569,16 @@ documented command would have silently and permanently destroyed **Casa Verde GC
 Hollow Nine** (a read-only dry run priced it: 281 `COURSE#` items, plus one golfer's home
 course; the field specs re-seed courses, so no gate would have caught it) — now
 **`--keep-courses`**, which no-ops that pass, LOGS that it skipped, composes with `--dry-run`,
-and is named in plan Task 9 Step 3 as the exact command to run. Then: `milestonesOf`'s
+and is named in plan Task 9 Step 3 as the exact command to run. **Escalated to the owner rather
+than decided, and the ruling went further (2026-07-30): the script now REFUSES to run without an
+explicit course choice** — exactly one of `--keep-courses` / `--wipe-courses`, exiting 1 and
+touching nothing otherwise, with no default safe or dangerous (both flags together is refused
+too). `--wipe-courses` preserves the original course-cards-arc behaviour unchanged for an arc
+that legitimately replaces the COURSE model; it is simply no longer what forgetting to say gets
+you. The reasoning is the arc's own law applied to an operational instrument — make illegal
+states unrepresentable rather than documenting the hazard, with MORE force here because the act
+is irreversible on data no test can regenerate, and the header's "never by an agent" is prose,
+which stops nothing; an exit code does. Then: `milestonesOf`'s
 first-birdie/first-eagle scan was a **third** fold violating §2d's "a conceded hole is a scored
 hole everywhere" (a conceded three-footer for a birdie counted in your typical 18 and your course
 record while "First birdie" never fired) — §2d had enumerated only two, so the spec carries a

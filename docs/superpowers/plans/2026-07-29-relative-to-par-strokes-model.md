@@ -1022,14 +1022,16 @@ git commit -m "test(e2e): re-derive the oracles and reconcile the locators"
 
 - [ ] **Step 1:** `pnpm validate` → exit 0; `pnpm test:contract` → green.
 - [ ] **Step 2:** `pnpm deploy:beta` → `UPDATE_COMPLETE`. **Lambda first** — `basis` and the reshaped metrics are new required wire fields, so an old bundle against a new lambda fails only on submit while a new bundle against an old lambda fails on load.
-- [ ] **Step 3: Wipe round data — NOT courses.** `scrapCourseAndRoundData.mjs`'s first pass deletes every `COURSE#` item and strips `homeCourseId` from every golfer. This arc does not touch the course model, and Casa Verde GC / Sandy Hollow Nine are the field-test fixtures — so that pass must not run. **It has an explicit opt-out: `--keep-courses`** (added by the whole-branch fix wave; before it, the flagless script made the documented "skip that pass" instruction unexecutable, and the field specs re-seed courses so no gate would have caught the loss).
+- [ ] **Step 3: Wipe round data — NOT courses.** `scrapCourseAndRoundData.mjs`'s first pass deletes every `COURSE#` item and strips `homeCourseId` from every golfer. This arc does not touch the course model, and Casa Verde GC / Sandy Hollow Nine are the field-test fixtures — so that pass must not run.
+
+**The script now REFUSES to run without an explicit course choice** (owner decision, 2026-07-30, delivered by the whole-branch fix wave): exactly one of `--keep-courses` / `--wipe-courses` is required, and it exits 1 doing nothing otherwise. There is no default, safe or dangerous. Before the wave the flagless command silently destroyed 281 `COURSE#` items on beta — and the field specs re-seed courses, so no gate would have caught it.
 
 ```bash
 node scripts/scrapCourseAndRoundData.mjs --stage beta --keep-courses --dry-run   # read the counts first
 node scripts/scrapCourseAndRoundData.mjs --stage beta --keep-courses
 ```
 
-Confirm the transcript's first line reads `SKIPPED the swng-core-beta course pass (--keep-courses)`, then record the rounds/snapshots/projections deleted counts.
+Confirm the transcript's first line reads `SKIPPED the swng-core-beta course pass (--keep-courses): no COURSE# item deleted, no homeCourseId stripped`, then record the rounds/snapshots/projections deleted counts. A line beginning `RAN the swng-core-beta course pass (--wipe-courses)` means the wrong flag was typed — stop and check the course list before doing anything else.
 - [ ] **Step 4:** `pnpm publish:web:beta` — record the bundle hash, confirm the CloudFront invalidation completed.
 - [ ] **Step 5:** `pnpm e2e:beta` ×2 → green both runs. `pnpm e2e:field` → all specs green.
 - [ ] **Step 6: Adversarial USE pass on deployed `beta.swng.golf`.** Two throwaway accounts, phone viewport, real PKCE. Reproduce the owner's own field report:

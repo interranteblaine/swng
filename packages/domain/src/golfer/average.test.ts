@@ -21,12 +21,6 @@ describe("averageOf", () => {
     expect(averageOf([line("a", 9, 6)])).toBe(36);
   });
 
-  it("counts a round containing a conceded hole", () => {
-    const base = line("a", 18, 5);
-    const conceded = { ...base, holeResults: base.holeResults!.map((h, i) => (i === 0 ? { ...h, result: { kind: "conceded" as const, strokes: 5 } } : h)) };
-    expect(averageOf([conceded])).toBe(18);
-  });
-
   it("skips a round containing a pickup — there is no score", () => {
     const base = line("a", 18, 5);
     const pickedUp = { ...base, holeResults: base.holeResults!.map((h, i) => (i === 0 ? { ...h, result: { kind: "picked-up" as const } } : h)) };

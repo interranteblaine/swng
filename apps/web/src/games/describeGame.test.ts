@@ -1,17 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  deviceId,
-  fieldDeck18,
-  fixtureLinks,
-  fixtureLinks18,
-  gameId,
-  golferId,
-  opId,
-  playGoldenRoundLog,
-  reduceRound,
-  scoreGame,
-} from "@swng/domain";
-import type { CourseCard, GameConfig, GameState, Participant, RoundEvent, RoundState } from "@swng/domain";
+import { fieldDeck18, fixtureLinks, fixtureLinks18, gameId, golferId, playGoldenRoundLog, reduceRound, scoreGame } from "@swng/domain";
+import type { CourseCard, GameConfig, GameState, Participant, RoundState } from "@swng/domain";
 import { describeGame } from "./describeGame";
 
 // Builds the same RoundState + scored GameState[] playGoldenRound itself returns, but keeps
@@ -140,23 +129,12 @@ describe("describeGame — singles-match", () => {
   });
 
   it("a match that ends all square renders 'Match halved'", () => {
-    // Same corrected card as singlesMatch.test.ts's "ends all square" test (task-2): Ann's h9
-    // concession carries an actual (worse) score, which the match compares on its own net
-    // rather than an automatic loss — see that file for the hole-by-hole derivation. "conceded"
-    // needs a number now, so it's no longer expressible through playRound's FixtureScores
-    // shorthand — Ann's h9 is appended as a raw score-recorded event instead, the same way a
-    // "cleared" cell already has to be built elsewhere in this codebase.
-    const events = playGoldenRoundLog(
-      fixtureLinks, matchPlayers, [match],
-      { [A]: [5, 5, 4, 6, 4, 4, 5, 6], [B]: [4, 6, 3, 6, 4, 4, 4, 5, 5] },
-      [], false,
-    );
-    const concedeAnnH9: RoundEvent = {
-      kind: "score-recorded", golferId: A, hole: 9, result: { kind: "conceded", strokes: 7 },
-      opId: opId("concede-ann-h9"), hlc: { wallMs: 9_999, counter: 0, deviceId: deviceId("concede-device") }, authorId: A,
-    };
-    const round = reduceRound([...events, concedeAnnH9]);
-    const states = round.games.map((config) => scoreGame(config, round));
+    // Ann's h9 (a worse score than Bo's) still levels the match on hole count, not by any
+    // automatic-loss rule — see singlesMatch.test.ts for the hole-by-hole derivation.
+    const { round, states } = playRound(fixtureLinks, matchPlayers, [match], {
+      [A]: [5, 5, 4, 6, 4, 4, 5, 6, 7],
+      [B]: [4, 6, 3, 6, 4, 4, 4, 5, 5],
+    });
     expect(describeGame(states[0]!, round)).toEqual({ title: "Match play", line: "Match halved" });
   });
 });

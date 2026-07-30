@@ -41,14 +41,15 @@ export * from "./golfer/average.js";
 export * from "./golfer/metrics.js";
 export * from "./golfer/coursesPlayed.js";
 // analytics.ts (analytics spec 2026-07-21 §3): export the types every consumer needs to name
-// (GolferMetrics.bests/milestones' own member shapes) plus fullyHoledOut/grossOf — the "fully
-// holed out" definition Task 4's course-record fold reuses. bestsOf/milestonesOf stay
+// (GolferMetrics.bests/milestones' own member shapes). bestsOf/milestonesOf stay
 // package-internal (metrics.ts imports them directly): nothing outside @swng/domain calls them —
 // golferMetrics is the one sanctioned way to reach a bests/milestones value. hasCompleteScore/
-// scoreOf (spec 2026-07-29 §2d — "does this card have a score, and what is it") stay
-// package-internal for the same reason: average.ts and record.ts are their only callers.
+// scoreOf ("does this card have a score, and what is it" — task-1, spec §7, which also deleted
+// the separate fullyHoledOut/grossOf pair this file used to export: once a gimme is just a
+// `strokes` cell, "has a number" and "holed out" are the same question) stay package-internal
+// for the same reason: average.ts, record.ts, courseRecord.ts and crew/scoreboard.ts are their
+// only callers.
 export type { BestRound, GolferBests, MilestoneKind, Milestone } from "./golfer/analytics.js";
-export { fullyHoledOut, grossOf } from "./golfer/analytics.js";
 // courseRecord.ts (analytics spec 2026-07-21 §4): "Your record here" — the per-course fold plus
 // its CourseHoleInsight member shape. `courseRecord` itself is compute (bans onto the web-side
 // fence below); the phrase formatters in present.ts are fence-ALLOWED, the handicap/present.ts

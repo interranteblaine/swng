@@ -22,7 +22,7 @@ describe("orderedStrokeValues", () => {
 });
 
 describe("ScorePad", () => {
-  it("renders value buttons 1-12 par-first, plus Picked up, Conceded, and a cancel affordance", () => {
+  it("renders value buttons 1-12 par-first, plus Picked up, and a cancel affordance", () => {
     render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={vi.fn()} onCancel={vi.fn()} />);
 
     const buttons = screen.getAllByRole("button").map((b) => b.textContent);
@@ -31,23 +31,22 @@ describe("ScorePad", () => {
     // the v1 cap must be one tap away, same as any other value.
     for (const value of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) expect(buttons).toContain(String(value));
     expect(buttons).toContain("Picked up");
-    expect(buttons).toContain("Conceded");
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
   });
 
-  it("renders exactly 14 buttons (12 values + Picked up + Conceded) in the value grid", () => {
+  it("renders exactly 13 buttons (12 values + Picked up) in the value grid", () => {
     render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={vi.fn()} onCancel={vi.fn()} />);
 
-    // 15 total on the sheet: the 14-button value grid plus the separate Cancel button.
-    expect(screen.getAllByRole("button")).toHaveLength(15);
+    // 14 total on the sheet: the 13-button value grid plus the separate Cancel button.
+    expect(screen.getAllByRole("button")).toHaveLength(14);
   });
 
-  it("every value/Picked up/Conceded button meets the 56px touch-target sizing", () => {
+  it("every value/Picked up button meets the 56px touch-target sizing", () => {
     render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={vi.fn()} onCancel={vi.fn()} />);
 
     // Tailwind's h-14/min-h-14 = 56px — asserted via the class name itself (jsdom doesn't
     // compute real layout), matching the brief's "≥56px, Tailwind sizing" contract.
-    for (const label of ["4", "10", "11", "12", "Picked up", "Conceded"]) {
+    for (const label of ["4", "10", "11", "12", "Picked up"]) {
       const button = screen.getByRole("button", { name: label });
       expect(button.className).toMatch(/min-h-14/);
     }
@@ -86,48 +85,6 @@ describe("ScorePad", () => {
     const onCancel = vi.fn();
     render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={onSubmit} onCancel={onCancel} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-    expect(onCancel).toHaveBeenCalledTimes(1);
-    expect(onSubmit).not.toHaveBeenCalled();
-  });
-});
-
-// Conceded is a disclosure, not a one-tap post (task-2, spec §2d) — a deliberate deviation from
-// product.md §9's two-tap rule for a rarer, more deliberate act: scoring stays two taps,
-// conceding costs three (cell → Conceded → the number).
-describe("ScorePad — Conceded (a disclosure, not a one-tap post)", () => {
-  it("tapping Conceded reveals the same number row asking what you would have made, without posting", () => {
-    const onSubmit = vi.fn();
-    render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={onSubmit} onCancel={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Conceded" }));
-
-    expect(onSubmit).not.toHaveBeenCalled(); // a disclosure, not a post
-    expect(screen.getByText("Conceded — what would you have made?")).toBeTruthy();
-    // The same par-first number row, still one tap away.
-    for (const value of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) {
-      expect(screen.getByRole("button", { name: String(value) })).toBeTruthy();
-    }
-  });
-
-  it("tapping a number after Conceded posts { kind: 'conceded', strokes: N } — three taps, not two", () => {
-    const onSubmit = vi.fn<(result: HoleResult) => void>();
-    render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={onSubmit} onCancel={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Conceded" })); // tap 2 (tap 1 is the cell, one level up)
-    fireEvent.click(screen.getByRole("button", { name: "5" })); // tap 3
-
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith({ kind: "conceded", strokes: 5 });
-  });
-
-  it("Cancel from inside the Conceded disclosure still backs out without posting anything", () => {
-    const onSubmit = vi.fn();
-    const onCancel = vi.fn();
-    render(<ScorePad golfer={ANN} hole={HOLE_PAR4} onSubmit={onSubmit} onCancel={onCancel} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Conceded" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(onCancel).toHaveBeenCalledTimes(1);

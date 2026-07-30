@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
-import type { HoleResult } from "../round/holeResult.js";
-import type { Participant, RosterEntry } from "../round/participant.js";
-import { cellKey } from "../round/state.js";
-import type { RoundState } from "../round/state.js";
-import { scoreStableford } from "./stableford.js";
+import { gameId, golferId } from "../ids.js";
+import type { Participant } from "../round/participant.js";
 import { playGoldenRound } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
-import type { GameState } from "./game.js";
 
 const A = golferId("ann");
 const B = golferId("bo");
@@ -16,24 +11,6 @@ const players: readonly Participant[] = [
   { golferId: B, name: "Bo", tee: "white", basis: { kind: "normally-shoots", overPar: 2 } },
 ];
 const game = { kind: "stableford", id: gameId("s1"), players: [A, B] } as const;
-
-// A minimal one-hole RoundState off scratch (every named golfer states even par) — no dots
-// to complicate a single-hole assertion about the SCORE alone. Mirrors singlesMatch.test.ts's
-// own stateWith (task-2): the shape scoreStableford consumes directly, hole 1 only.
-const stateWith = (results: Readonly<Record<string, HoleResult>>): RoundState => ({
-  id: roundId("r-conceded"),
-  status: "live",
-  card: fixtureLinks,
-  participants: Object.keys(results).map((name): RosterEntry => ({ golferId: golferId(name), name, tee: "white", basis: { kind: "normally-shoots", overPar: 0 }, strokes: 0 })),
-  games: [],
-  cells: Object.fromEntries(
-    Object.entries(results).map(([name, result], index) => [
-      cellKey(golferId(name), 1),
-      { result, recordedBy: golferId(name), hlc: { wallMs: index, counter: 0, deviceId: deviceId("stateWith") }, opId: opId(`op-${name}`) },
-    ]),
-  ),
-  terminatedGameIds: new Set(),
-});
 
 describe("stableford — golden cards", () => {
   it("standard points with a pickup scoring zero: Ann 10, Bo 17", () => {
@@ -132,15 +109,5 @@ describe("stableford — golden cards", () => {
       kind: "stableford", complete: true,
       lines: [{ golferId: B, thru: 9, points: 17 }, { golferId: C, thru: 9, points: 11 }],
     });
-  });
-
-  it("scores a conceded hole's Stableford points — a conceded par is worth its points, not zero", () => {
-    const config = { kind: "stableford", id: gameId("s-conceded"), players: [golferId("ann")] } as const;
-    // hole 1 is par 4 on fixtureLinks, no dots (scratch, and the lone player is the field's own
-    // anchor either way) — a conceded 4 nets 4, worth max(0, 2+4-4) = 2 points, not the 0 an
-    // outright pickup would score.
-    const state = stateWith({ ann: { kind: "conceded", strokes: 4 } });
-    const gameState = scoreStableford(config, state) as GameState & { kind: "stableford" };
-    expect(gameState.lines[0]!.points).toBe(2);
   });
 });

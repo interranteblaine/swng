@@ -14,14 +14,8 @@ import type { GameConfig, GameState } from "../game.js";
 // this hole": the deck emits no score-recorded event for it at all, letting a card leave a gap
 // anywhere (not just a dense unrecorded suffix) — the medal-family engines (stableford, stroke
 // play, skins) resolve a decided hole wherever its cell exists, unlike match play's sequential
-// decided-prefix.
-//
-// No "conceded" shorthand (task-2, spec §2d): a conceded hole now REQUIRES a strokes number
-// (HoleResult's conceded arm), so a bare string literal can no longer stand for one — inventing
-// a number here to keep the shorthand would fabricate a score no fixture ever specified. Every
-// deck that needs a conceded cell (this file's own callers today have none — see fieldDeck18)
-// builds the raw score-recorded RoundEvent directly and appends it to the log, the same way
-// every "cleared" cell already has to (that kind was never representable here either).
+// decided-prefix. A deck that needs a "cleared" cell builds the raw score-recorded RoundEvent
+// directly and appends it to the log — that kind was never representable through this shorthand.
 export type FixtureScores = Readonly<Record<string, ReadonlyArray<number | "picked-up" | null>>>;
 
 // A correction rewrites one already-recorded cell: the deck appends it as a raw

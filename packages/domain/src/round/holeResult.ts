@@ -1,17 +1,18 @@
-// "picked-up" and "conceded" are first-class scores, not errors (product.md §4).
-// Each game format decides what they mean; the cell just records the truth.
+// "picked-up" is a first-class score, not an error (product.md §4) — the player stopped, and
+// that fact is the truth the cell records.
+//
+// There is no "conceded" arm. A conceded hole IS a strokes cell: your opponent concedes your
+// next stroke, so your score is where you lay plus one — the score is never in doubt, so there
+// is nothing to ask the player (spec §7). The prior model gave a concession its own arm with a
+// required number so match rounds could feed the average, but once it carries a number it *is*
+// a score, and every engine, the card's totals, the record's distribution and the course record
+// already treated it exactly like `strokes` — two variants that must behave identically
+// everywhere are one variant.
 export type HoleResult =
   | { readonly kind: "strokes"; readonly strokes: number }
+  // The player stopped. There is NO number and nobody invents one — this is the only state that
+  // keeps a round out of the average (spec §7).
   | { readonly kind: "picked-up" }
-  // The hole was decided but the player would have finished it — the score the group says out
-  // loud. A CONCEDED HOLE IS A SCORED HOLE EVERYWHERE (spec §2d): every engine, the card's
-  // totals, your per-hole record at a course, your typical 18, the first-birdie/first-eagle
-  // milestones and the average all treat it exactly as a `strokes` cell, because you made the 4.
-  // Only HOLING OUT itself distinguishes it, and only three readers care: the card renders `5c`
-  // so you can see you didn't hole out, and `fullyHoledOut` excludes it — as does the `grossOf`
-  // sum that only ever runs behind that predicate (both in golfer/analytics.ts) — which together
-  // gate `Best` and the broke-100/90/80 milestones.
-  | { readonly kind: "conceded"; readonly strokes: number }
   // A mis-tap undone: the cell reads as unscored everywhere (engines, finalize, AGS).
   // The fold RETAINS cleared cells under HLC-latest — deleting would let a late-arriving
   // older write resurrect the score — and cellAt (round/state.ts) hides them from readers.
@@ -22,11 +23,10 @@ export type HoleResult =
 // built through cellAt (golfer/record.ts's holeResults) carry the truth in their type.
 export type DecidedHoleResult = Exclude<HoleResult, { kind: "cleared" }>;
 
-// The ONE accessor for "does this result carry a number, and what is it" (task-2, spec §2d): a
-// conceded hole is a scored hole everywhere, so it answers exactly like `strokes`; picked-up
-// (no number) and cleared (never reached through cellAt) answer undefined. This is a pure
-// structural accessor over the cell's own shape, not a golf computation — the same footing as
-// `cellAt` itself — so every engine (and the card) routes through it instead of hand-rolling
-// `kind === "strokes" || kind === "conceded"` (or its De Morgan negation) at each call site.
+// The ONE accessor for "does this result carry a number, and what is it": strokes answers its
+// own count; picked-up (no number) and cleared (never reached through cellAt) answer undefined.
+// This is a pure structural accessor over the cell's own shape, not a golf computation — the
+// same footing as `cellAt` itself — so every engine (and the card) routes through it instead of
+// hand-rolling `kind === "strokes"` at each call site.
 export const scoredStrokes = (result: HoleResult): number | undefined =>
-  result.kind === "strokes" || result.kind === "conceded" ? result.strokes : undefined;
+  result.kind === "strokes" ? result.strokes : undefined;

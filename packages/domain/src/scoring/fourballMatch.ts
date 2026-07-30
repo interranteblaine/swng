@@ -25,15 +25,14 @@ export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundStat
 
   const netFor = (golferId: GolferId, holeNumber: number): number | undefined => {
     const cell = cellAt(state.cells, golferId, holeNumber);
-    // A conceded score nets exactly like `strokes` (spec §2d — scoredStrokes answers both the
-    // same way); picked-up is the only kind with no number, so it's the only one truly out of the hole.
+    // Picked-up is the only kind with no number, so it's the only one truly out of the hole.
     const strokes = cell && scoredStrokes(cell.result);
     if (strokes === undefined) return undefined; // absent/picked-up
     return strokes - (allocation.get(golferId)?.get(holeNumber) ?? 0);
   };
 
   // A side's ball for the hole is the best (lowest) net among its players still in the hole;
-  // undefined only when both partners are out (picked up — a conceded partner still has a ball).
+  // undefined only when both partners are out (picked up).
   const sideBest = (side: readonly [GolferId, GolferId], holeNumber: number): number | undefined => {
     const nets = side.map((golferId) => netFor(golferId, holeNumber)).filter((net): net is number => net !== undefined);
     return nets.length > 0 ? Math.min(...nets) : undefined;
@@ -41,8 +40,7 @@ export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundStat
 
   const winners: (HoleWinner | undefined)[] = cardTeeSet.holes.map((hole): HoleWinner | undefined => {
     // A hole is decided once all four players have a recorded cell — picked-up still counts as
-    // recorded (it drops that player's ball, not the hole itself); a conceded cell is recorded
-    // AND keeps its ball (it nets like `strokes`, spec §2d).
+    // recorded (it drops that player's ball, not the hole itself).
     const allFourRecorded = golfers.every((golferId) => cellAt(state.cells, golferId, hole.number) !== undefined);
     if (!allFourRecorded) return undefined;
 

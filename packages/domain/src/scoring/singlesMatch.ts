@@ -23,8 +23,7 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
   const allocation = gameStrokeAllocation(config, state.participants, state.card);
 
   const netFor = (golferId: GolferId, cell: ScoreCell | undefined, holeNumber: number): number | undefined => {
-    // A conceded score nets exactly like `strokes` (spec §2d — scoredStrokes answers both the
-    // same way); picked-up is the only kind with no number, hence the only one that's truly absent.
+    // Picked-up is the only kind with no number, hence the only one that's truly absent.
     const strokes = cell && scoredStrokes(cell.result);
     if (strokes === undefined) return undefined; // absent/picked-up
     return strokes - (allocation.get(golferId)?.get(holeNumber) ?? 0);
@@ -42,8 +41,7 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
     const netA = netFor(config.a, cellA, hole.number);
     const netB = netFor(config.b, cellB, hole.number);
 
-    // picked-up (net undefined) loses the hole outright; both → halve. A conceded score is NOT
-    // this case — netFor resolves it to a real number, so it competes on net like any other.
+    // picked-up (net undefined) loses the hole outright; both → halve.
     if (netA !== undefined && (netB === undefined || netA < netB)) return "a";
     if (netB !== undefined && (netA === undefined || netB < netA)) return "b";
     return "halved";

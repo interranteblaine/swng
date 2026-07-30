@@ -162,11 +162,9 @@ export default [
                 // golfer metrics + per-round archive line
                 "golferMetrics",
                 "archiveGolferLine",
-                // analytics read folds — bests/milestones + the "fully holed out" definition
+                // analytics read folds — bests/milestones
                 "bestsOf",
                 "milestonesOf",
-                "fullyHoledOut",
-                "grossOf",
                 // course record — the per-course fold (its present.ts phrase formatters are
                 // fence-ALLOWED, the handicap/present.ts precedent, so they're deliberately absent here)
                 "courseRecord",

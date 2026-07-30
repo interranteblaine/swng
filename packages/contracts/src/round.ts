@@ -6,33 +6,14 @@ import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, 
 // domain type itself doesn't declare one) — the source of truth for "is this score
 // legal" is domain/M6's course-data validation, not the transport layer; the request
 // schemas in commands.ts own the stricter boundary checks (basis bounds, hole >= 1, …).
+// There is no "conceded" arm (task-1, spec §7) — a gimme is recorded at the score it made, so a
+// `strokes` cell already carries it. NOT additive: an already-stored `{ kind: "conceded",
+// strokes }` event no longer parses. Accepted because beta's round data is wiped at this arc's
+// close-out (no migration) — same disposition as this arc's other non-additive stored changes.
 export const holeResultSchema: z.ZodType<HoleResult> = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("strokes"), strokes: z.number() }),
   z.object({ kind: z.literal("picked-up") }),
-  // Required here (arc 2026-07-29 Task 2, spec §2d) — a DELIBERATE EXCEPTION to the stored-path
-  // placement rule (Arc A: a request bound never applies to an already-stored read), not an
-  // application of it. There is no honest default: skins' `scoring` field a few lines below
-  // gets `.default("net")` because that default reproduces exactly what a legacy event without
-  // the field always meant; a legacy bare `{ kind: "conceded" }` carries no number at all, and
-  // any invented default would fabricate a score the group never said — the skins precedent does
-  // not transfer.
-  //
-  // Its safety rests on ONE fact, not on tolerance: no such event exists to read. Beta's round
-  // data and snapshots are both wiped at this task's close-out (no migration), and prod was
-  // checked directly rather than reasoned about — `swng-rounds-prod` (4 rounds / 123
-  // score-recorded events) and `swng-snapshots-prod` (3 snapshots) hold ZERO conceded and ZERO
-  // picked-up cells as of 2026-07-29. If that ever stopped being true this field would make the
-  // affected round permanently unreadable: `holeResultSchema` backs roundEventSchema's
-  // score-recorded arm, which backs SIX response schemas carrying `events[]` — pull, WS
-  // broadcast, create, join, and (being a sealed log) the archive, forever.
-  //
-  // THIS IS WHY THE DEPLOY IS LAMBDA-FIRST, MANDATORY, NOT A PREFERENCE: web-first would have
-  // the NEW bundle posting `{ kind: "conceded", strokes: 5 }` to the OLD lambda — whose
-  // non-strict `z.object` silently STRIPS the unknown `strokes` key and writes a bare conceded
-  // event straight into a sealed log, manufacturing exactly the poison this comment exists to
-  // rule out. Lambda-first only ever 400s the Conceded button until the web republishes.
-  z.object({ kind: z.literal("conceded"), strokes: z.number() }),
-  // A mis-tap undone (task-1-brief): additive wire arm, mirroring domain's HoleResult.
+  // A mis-tap undone: the cell reads as unscored everywhere (engines, finalize, AGS).
   z.object({ kind: z.literal("cleared") }),
 ]);
 

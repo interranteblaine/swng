@@ -31,8 +31,7 @@ const FULL_CARD_GROSS = 79;
 const fullCard = Object.fromEntries(
   Object.entries(strokesByHole).map(([hole, strokes]) => [cellKey(G, Number(hole)), cell(Number(hole), strokes)]),
 );
-// The same complete card with ONE hole swapped — used to prove a conceded hole is a scored hole
-// (spec 2026-07-29 §2d) and a picked-up one is not.
+// The same complete card with ONE hole swapped — used to prove a picked-up hole omits the score.
 const fullCardWith = (hole: number, result: HoleResult): Readonly<Record<string, ScoreCell>> => ({
   ...fullCard,
   [cellKey(G, hole)]: cellOf(hole, result),
@@ -96,15 +95,6 @@ describe("archiveGolferLine", () => {
     expect(line.score! - line.par).toBe(7); // the same +7 the buckets sum to
   });
 
-  it("counts a conceded hole in the score — you made that number (spec §2d)", () => {
-    // h3 is par 3 and was scored 3; conceding it at 3 leaves the total untouched.
-    const conceded: RoundArchive = { ...baseArchive, cells: fullCardWith(3, { kind: "conceded", strokes: 3 }) };
-    const line = archiveGolferLine(conceded, G);
-    expect(line.score).toBe(FULL_CARD_GROSS);
-    // ...and it lands in the distribution too, so "your typical 18" can't disagree with the score.
-    expect(line.distribution).toEqual({ eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 });
-  });
-
   it("omits score when a hole was picked up — there is no score, and none is invented", () => {
     const pickedUp: RoundArchive = { ...baseArchive, cells: fullCardWith(3, { kind: "picked-up" }) };
     const line = archiveGolferLine(pickedUp, G);
@@ -117,18 +107,17 @@ describe("archiveGolferLine", () => {
     expect(line.score).toBeUndefined();
   });
 
-  it("counts conceded holes but not picked-up or unscored ones in the distribution", () => {
+  it("counts scored holes but not picked-up or unscored ones in the distribution", () => {
     const sparse: RoundArchive = {
       ...baseArchive,
       cells: {
         [cellKey(G, 1)]: cell(1, 4), // par 4 → a par
         [cellKey(G, 2)]: cellOf(2, { kind: "picked-up" }), // no number — excluded
-        [cellKey(G, 3)]: cellOf(3, { kind: "conceded", strokes: 4 }), // par 3 → a bogey, and it COUNTS (spec §2d)
-        // hole 4 onward: no cell at all — unscored, excluded.
+        // hole 3 onward: no cell at all — unscored, excluded.
       },
     };
     const line = archiveGolferLine(sparse, G);
-    expect(line.distribution).toEqual({ eagles: 0, birdies: 0, pars: 1, bogeys: 1, doublePlus: 0 });
+    expect(line.distribution).toEqual({ eagles: 0, birdies: 0, pars: 1, bogeys: 0, doublePlus: 0 });
     expect(line.score).toBeUndefined(); // a partial card carries no score
   });
 
@@ -171,8 +160,7 @@ describe("archiveGolferLine", () => {
       cells: {
         [cellKey(G, 1)]: cell(1, 5), // strokes
         [cellKey(G, 2)]: cellOf(2, { kind: "picked-up" }),
-        [cellKey(G, 3)]: cellOf(3, { kind: "conceded", strokes: 3 }),
-        // hole 4: no cell at all — unscored.
+        // hole 3: no cell at all — unscored.
         [cellKey(G, 5)]: cellOf(5, { kind: "cleared" }),
       },
     };
@@ -180,14 +168,13 @@ describe("archiveGolferLine", () => {
     expect(line.holeResults).toEqual([
       { hole: 1, par: 4, result: { kind: "strokes", strokes: 5 } },
       { hole: 2, par: 4, result: { kind: "picked-up" } },
-      { hole: 3, par: 3, result: { kind: "conceded", strokes: 3 } }, // a conceded par — holeResults passes the cell through verbatim
-      // hole 4 (silence) and hole 5 (cleared) are OMITTED — cellAt's own contract.
+      // hole 3 (silence) and hole 5 (cleared) are OMITTED — cellAt's own contract.
     ]);
   });
 
   it("holeResults and distribution agree — one walk, every numbered cell in a bucket", () => {
-    const line = archiveGolferLine({ ...baseArchive, cells: fullCardWith(3, { kind: "conceded", strokes: 3 }) }, G);
-    const numberedHoles = line.holeResults!.filter((h) => h.result.kind === "strokes" || h.result.kind === "conceded");
+    const line = archiveGolferLine({ ...baseArchive, cells: fullCardWith(3, { kind: "picked-up" }) }, G);
+    const numberedHoles = line.holeResults!.filter((h) => h.result.kind === "strokes");
     const bucketTotal =
       line.distribution.eagles + line.distribution.birdies + line.distribution.pars +
       line.distribution.bogeys + line.distribution.doublePlus;

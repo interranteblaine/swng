@@ -52,10 +52,6 @@ const glyphFor = (result: HoleResult): string => {
   switch (result.kind) {
     case "picked-up":
       return "PU";
-    // A conceded hole is a scored hole everywhere else (spec §2d) — the `c` suffix is the one
-    // place left on the card that still marks it as conceded rather than holed out.
-    case "conceded":
-      return `${result.strokes}c`;
     case "strokes":
       return String(result.strokes);
     case "cleared":
@@ -104,8 +100,6 @@ interface CellProps {
 // any column width — min-w alone shrink-wraps and hugs the column's left edge (owner field
 // report, 2026-07-20).
 function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
-  // A conceded hole is a scored hole everywhere but its glyph (spec §2d) — scoredStrokes reads
-  // its number exactly like a `strokes` cell, so net and the under-par ink below apply to it too.
   const gross = cell ? scoredStrokes(cell.result) : undefined;
   const net = gross !== undefined && dots !== 0 ? netStrokes(gross, dots) : undefined;
 
@@ -262,9 +256,8 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
       {selection && selectedParticipant && selectedHole && (
         // key forces a fresh ScorePad instance per (golfer, hole): without one, React reuses the
         // same instance across a `selection` change (the sheet has no scrim and cells above stay
-        // tappable), so ScorePad's own `conceding` state (useState, ScorePad.tsx) would survive a
-        // tap onto a DIFFERENT cell — posting a conceded score for the wrong player. The key
-        // fences off any future pad-local state the same way, not just this one bug.
+        // tappable), so any pad-local state would survive a tap onto a DIFFERENT cell. The key
+        // fences that off structurally, whatever state a future ScorePad revision adds.
         <ScorePad
           key={`${selection.golferId}-${selection.hole}`}
           golfer={selectedParticipant}

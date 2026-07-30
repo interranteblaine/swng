@@ -18,12 +18,10 @@ const scoreRecordedEvent: RoundEvent = {
 };
 
 describe("holeResultSchema", () => {
-  // A conceded hole carries the score you would have made (spec §2d) — required, unbounded on
-  // the stored/fold shape (see this schema's own comment); a bare `{ kind: "conceded" }` with no
-  // number is no longer representable.
-  it("requires a score on a conceded hole", () => {
-    expect(() => holeResultSchema.parse({ kind: "conceded" })).toThrow();
-    expect(holeResultSchema.parse({ kind: "conceded", strokes: 5 })).toEqual({ kind: "conceded", strokes: 5 });
+  // A gimme carries the score you would have made — there is no separate "conceded" state to
+  // ask the player about (task-1, spec §7). `strokes`/`picked-up`/`cleared` are the whole union.
+  it("rejects a conceded hole result — a gimme is recorded as its score", () => {
+    expect(() => holeResultSchema.parse({ kind: "conceded", strokes: 4 })).toThrow();
   });
 });
 

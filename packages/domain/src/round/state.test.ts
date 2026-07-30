@@ -96,12 +96,10 @@ describe("reduceRound", () => {
     expect(backward).toEqual(forward);
   });
 
-  it("records picked-up and conceded as first-class results", () => {
+  it("records picked-up as a first-class result", () => {
     const pu: RoundEvent = { ...base(11), kind: "score-recorded", golferId: A, hole: 1, result: { kind: "picked-up" } };
-    const cc: RoundEvent = { ...base(12), kind: "score-recorded", golferId: B, hole: 1, result: { kind: "conceded", strokes: 4 } };
-    const state = reduceRound([genesis, joinA, started, pu, cc]);
+    const state = reduceRound([genesis, joinA, started, pu]);
     expect(state.cells[cellKey(A, 1)]?.result.kind).toBe("picked-up");
-    expect(state.cells[cellKey(B, 1)]?.result).toEqual({ kind: "conceded", strokes: 4 });
   });
 
   it("audits recordedBy as the WRITE AUTHOR, not the score's subject (score-for-anyone means they differ)", () => {
@@ -477,11 +475,11 @@ describe("grossForHoles", () => {
   const holes = card.teeSets[0]!.holes; // 3 holes: par 4, par 4, par 3
   const cell = (result: HoleResult): ScoreCell => ({ result, recordedBy: A, hlc: at(1), opId: opId(`op-${op++}`) });
 
-  it("sums scoredStrokes across every hole when all three are decided — a conceded hole counts at its recorded score", () => {
+  it("sums scoredStrokes across every hole when all three are decided", () => {
     const cells: Record<string, ScoreCell> = {
       [cellKey(A, 1)]: cell({ kind: "strokes", strokes: 5 }),
       [cellKey(A, 2)]: cell({ kind: "strokes", strokes: 4 }),
-      [cellKey(A, 3)]: cell({ kind: "conceded", strokes: 3 }),
+      [cellKey(A, 3)]: cell({ kind: "strokes", strokes: 3 }),
     };
     expect(grossForHoles(cells, A, holes)).toBe(12);
   });

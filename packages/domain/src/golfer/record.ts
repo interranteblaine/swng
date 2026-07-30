@@ -31,10 +31,10 @@ export interface GolferRoundLine {
   // instead (spec §2a's second constructor). The assertion beside its consequence: `strokes` is
   // what the fold made of it against the rest of the field.
   readonly normallyShoots?: number;
-  // The round's own gross total, present iff every hole carries a number (`hasCompleteScore`,
-  // conceded holes included — spec §2d). LOAD-BEARING, not tidiness: `holeResults` never rides
-  // the wire, so without this a history row would have no score to render at all. Absent means
-  // the card has a pickup or a gap — there is no score, and none is invented.
+  // The round's own gross total, present iff every hole carries a number (`hasCompleteScore`).
+  // LOAD-BEARING, not tidiness: `holeResults` never rides the wire, so without this a history row
+  // would have no score to render at all. Absent means the card has a pickup or a gap — there is
+  // no score, and none is invented.
   readonly score?: number;
   readonly distribution: {
     readonly eagles: number;
@@ -56,11 +56,9 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
   if (!participant) throw new DomainError("unknown-participant", `no participant "${golferId}" in this archive`);
   const teeSet = findTeeSet(archive.card, participant.tee);
 
-  // Par-relative buckets over every DECIDED cell that carries a NUMBER — a stroke count or a
-  // conceded score (spec §2d: a conceded hole is a scored hole everywhere, so it goes in the
-  // buckets too). A picked-up hole has no number to compare against par at all, and an unscored
-  // hole is silence, not a zero; both stay out. Leaving conceded holes out — as this fold used to
-  // — would make "your typical 18" disagree with the average built from the same card.
+  // Par-relative buckets over every DECIDED cell that carries a NUMBER — a `strokes` cell. A
+  // picked-up hole has no number to compare against par at all, and an unscored hole is silence,
+  // not a zero; both stay out.
   const distribution = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 };
   const holeResults: GolferHoleLine[] = [];
   for (const hole of teeSet.holes) {

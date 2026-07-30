@@ -742,12 +742,6 @@ export const golferKeyFor = (name: string): GolferId => {
   return found.golferId;
 };
 
-// "conceded" dropped from this signature (task-2 fix round 1, fold-in): fieldDeck18 has no
-// conceded cell and no e2e spec anywhere calls enterScore/scoreFor with one — the branch was
-// unreachable and, after task-2, stale (conceded's button no longer posts on one tap, and its
-// glyph is no longer "CN"). Dropped rather than reworked to the new two-tap-disclosure protocol
-// since nothing exercises it; a future task adding e2e coverage of a conceded score builds that
-// path fresh against the real ScorePad disclosure rather than resurrecting this one.
 export const scoreFor = (name: string, hole: number): number | "picked-up" => {
   const value = fieldDeck18.scores[golferKeyFor(name)]?.[hole - 1];
   if (value === undefined || value === null) throw new Error(`fieldDeck18 has no hole ${hole} score for ${name}`);

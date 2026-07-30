@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
-import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
+import { deviceId, gameId, golferId, opId } from "../ids.js";
 import type { RoundEvent } from "../round/events.js";
 import type { Participant } from "../round/participant.js";
-import { cellKey, reduceRound } from "../round/state.js";
-import type { RoundState } from "../round/state.js";
+import { reduceRound } from "../round/state.js";
 import { scoreGame } from "./game.js";
-import { scoreStrokePlay } from "./strokePlay.js";
 import { playGoldenRound, playGoldenRoundLog } from "./golden/deck.js";
 import { fixtureLinks } from "./golden/fixtureCourse.js";
 import type { GameState } from "./game.js";
@@ -101,25 +99,6 @@ describe("stroke play — golden cards", () => {
     expect(state).toMatchObject({ kind: "stroke-play", complete: true, leaders: [A, B] });
   });
 
-  it("totals a conceded hole at its score and caps only a pickup", () => {
-    // A minimal one-hole state off scratch (no dots to complicate it): Ann conceded a 4 —
-    // that's her gross total outright, not a net-double-bogey-capped partial the way a genuine
-    // pickup (no number at all) would be.
-    const config = { kind: "stroke-play", id: gameId("g-conceded"), scoring: "gross", players: [A] } as const;
-    const state: RoundState = {
-      id: roundId("r-conceded"),
-      status: "live",
-      card: fixtureLinks,
-      participants: [{ golferId: A, name: "Ann", tee: "white", basis: { kind: "normally-shoots", overPar: 0 }, strokes: 0 }],
-      games: [],
-      cells: {
-        [cellKey(A, 1)]: { result: { kind: "conceded", strokes: 4 }, recordedBy: A, hlc: { wallMs: 0, counter: 0, deviceId: deviceId("d") }, opId: opId("op-a") },
-      },
-      terminatedGameIds: new Set(),
-    };
-    const gameState = scoreStrokePlay(config, state) as GameState & { kind: "stroke-play" };
-    expect(gameState.lines[0]!.gross.total).toBe(4);
-  });
 });
 
 describe("stroke play — properties", () => {

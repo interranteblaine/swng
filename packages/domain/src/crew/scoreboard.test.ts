@@ -8,7 +8,7 @@ import type { SeasonWindow, StoredLine } from "./scoreboard.js";
 const A = golferId("a");
 const B = golferId("b");
 
-// mkLine: n holes of {par, strokes} so grossOf/fullyHoledOut/hasCompleteScore operate on real
+// mkLine: n holes of {par, strokes} so hasCompleteScore/scoreOf operate on real
 // holeResults. Only the three par/holes combos the brief names are supported — par 72/18 → 18×4;
 // par 36/9 → 9×4; par 70/18 → 16×4 + 2×3 — so every hole's par really sums to line.par
 // (internally honest fixtures). First `overs` holes get strokes par+1 (bogey), the rest par, so

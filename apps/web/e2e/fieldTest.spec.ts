@@ -428,10 +428,10 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
     // The card's TOTALS ROWS (spec 2026-07-29 §4), on the only card in the suite that has both a
     // real multi-player spread of derived strokes AND a pickup — so this is where the two halves of
-    // §4's rule can be pinned together: conceded/scored holes count at their recorded score, and
-    // "a segment containing a pickup or an unscored hole shows `–` rather than a partial total"
-    // (the arc's own ruling: the headline and the card must never print two different numbers for
-    // one round). primaryPath.spec.ts pins the all-real case on a flat solo card.
+    // §4's rule can be pinned together: a scored hole counts at its recorded score, and "a segment
+    // containing a pickup or an unscored hole shows `–` rather than a partial total" (the arc's own
+    // ruling: the headline and the card must never print two different numbers for one round).
+    // primaryPath.spec.ts pins the all-real case on a flat solo card.
     //
     // DERIVED BY HAND from the frozen deck (fieldDeck18's scores + the h9 correction) and
     // fixtureLinks18's stroke indices. Strokes: Ann 6, Bo 0, Cal 13, Dee 3 (anchor Bo's +2).
@@ -610,12 +610,10 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
 
     // Quinn's net is undefined (picked-up) on every one of holes 1-10, so Pat wins every hole
     // outright regardless of his own score (singlesMatch.ts: "picked-up (net undefined) loses
-    // the hole outright" — a CONCEDED score would be a different case since task-2, spec §2d: it
-    // nets like `strokes` rather than losing outright, but Quinn here is genuinely picked up, not
-    // conceded) — 10 up thru 10, remaining 8, and 10 > 8 closes the match "10&8" (matchLadder.ts's
-    // own closeout rule). Hand-derived from the engine's own documented rules for this fresh
-    // throwaway scenario (not fieldDeck18-sourced) — a disagreement here is this test failing
-    // honestly, never something to relax.
+    // the hole outright") — 10 up thru 10, remaining 8, and 10 > 8 closes the match "10&8"
+    // (matchLadder.ts's own closeout rule). Hand-derived from the engine's own documented rules
+    // for this fresh throwaway scenario (not fieldDeck18-sourced) — a disagreement here is this
+    // test failing honestly, never something to relax.
     await expect(chip(page, "Match play")).toContainText("Pat wins 10&8");
 
     // Stableford needs EVERY configured player's EVERY hole decided to resolve

@@ -213,30 +213,9 @@ describe("recordScoreRequestSchema", () => {
     expect(() => parse(recordScoreRequestSchema, request)).toThrow(ContractError);
   });
 
-  // Conceded now carries the score the group says out loud (task-2, spec §2d), bounded the same
-  // way `strokes` is (commands.ts's scoreResultInputArms — mirrors the three cases above).
-  it("rejects a conceded strokes count above 30", () => {
-    const request = { ...base, hole: 5, result: { kind: "conceded", strokes: 31 } };
-    expect(() => parse(recordScoreRequestSchema, request)).toThrow(ContractError);
-  });
-
-  it("rejects a conceded strokes count of 0 (must be at least 1)", () => {
-    const request = { ...base, hole: 5, result: { kind: "conceded", strokes: 0 } };
-    expect(() => parse(recordScoreRequestSchema, request)).toThrow(ContractError);
-  });
-
-  it("accepts a conceded strokes count of exactly 30 (the boundary)", () => {
-    const request = { ...base, hole: 5, result: { kind: "conceded", strokes: 30 } };
-    expect(() => parse(recordScoreRequestSchema, request)).not.toThrow();
-  });
-
-  it("rejects a fractional conceded strokes count", () => {
-    const request = { ...base, hole: 5, result: { kind: "conceded", strokes: 4.5 } };
-    expect(() => parse(recordScoreRequestSchema, request)).toThrow(ContractError);
-  });
-
-  it("rejects a bare conceded result with no strokes number at all", () => {
-    const request = { ...base, hole: 5, result: { kind: "conceded" } };
+  // There is no "conceded" arm (task-1, spec §7) — a gimme is recorded as a plain `strokes` cell.
+  it("rejects a conceded result outright", () => {
+    const request = { ...base, hole: 5, result: { kind: "conceded", strokes: 4 } };
     expect(() => parse(recordScoreRequestSchema, request)).toThrow(ContractError);
   });
 });

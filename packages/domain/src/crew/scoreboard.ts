@@ -1,5 +1,5 @@
 import type { GolferId, RoundId } from "../ids.js";
-import { fullyHoledOut, grossOf } from "../golfer/analytics.js";
+import { hasCompleteScore, scoreOf } from "../golfer/analytics.js";
 import { averageOfValues, scoredOverPar, spreadOfValues } from "../golfer/average.js";
 import type { GolferRoundLine } from "../golfer/record.js";
 
@@ -49,12 +49,12 @@ export const crewScoreboard = (
   const rows = members.map(({ golferId, lines }) => {
     const windowed = lines.filter((line) => inWindow(window, line));
 
-    // Lowest gross over fully-holed-out in-window 18s; strict < keeps the EARLIER round on a
+    // Lowest gross over fully-scored in-window 18s; strict < keeps the EARLIER round on a
     // tie (lines arrive chronological — the bestsOf precedent).
     let best18: { gross: number; toPar: number } | undefined;
     for (const line of windowed) {
-      if (line.holes !== 18 || !fullyHoledOut(line)) continue;
-      const gross = grossOf(line);
+      if (line.holes !== 18 || !hasCompleteScore(line)) continue;
+      const gross = scoreOf(line);
       if (best18 === undefined || gross < best18.gross) best18 = { gross, toPar: gross - line.par };
     }
 

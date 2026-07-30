@@ -2,7 +2,7 @@ import type { CourseId } from "../ids.js";
 import { scoredStrokes } from "../round/holeResult.js";
 import { roundHalfUp } from "../scoring/strokes.js";
 import type { BestRound } from "./analytics.js";
-import { fullyHoledOut, grossOf } from "./analytics.js";
+import { hasCompleteScore, scoreOf } from "./analytics.js";
 import type { GolferRoundLine } from "./record.js";
 
 // "Your record here" — the per-course fold over a golfer's own lines (analytics spec 2026-07-21
@@ -33,16 +33,14 @@ const HOLE_INSIGHT_MIN_PLAYS = 3;
 const NEVER_BIRDIED_MIN = 1;
 const NEVER_BIRDIED_MAX = 3;
 
-// One hole's running aggregate, built from every cell that carries a NUMBER — a stroke count or a
-// conceded score (spec 2026-07-29 §2d: a conceded hole is a scored hole everywhere, the same
-// correction applied to archiveGolferLine's distribution; leaving it out would make a conceded par
-// vanish from your record at this course while it lifted your average from the same card). A
-// picked-up hole has no number and stays out. `par` tracks the MOST RECENT line's par for that
-// hole regardless of that line's result kind (a later card revision's par is the truth even for a
-// hole the golfer picked up on that round).
+// One hole's running aggregate, built from every cell that carries a NUMBER (a `strokes` cell —
+// spec §7: a gimme is recorded at its score, so it's already in there). A picked-up hole has no
+// number and stays out. `par` tracks the MOST RECENT line's par for that hole regardless of that
+// line's result kind (a later card revision's par is the truth even for a hole the golfer picked
+// up on that round).
 interface HoleAgg {
   par: number;
-  strokesPlays: number; // holes played to a number here (strokes or conceded)
+  strokesPlays: number; // holes played to a number here
   sumOverPar: number; // Σ(strokes − par) over those plays, unrounded — ranking uses this raw value
   doublePlus: number; // strokes ≥ par + 2
   parOrBetter: number; // strokes ≤ par
@@ -128,15 +126,15 @@ export const courseRecord = (lines: readonly GolferRoundLine[], courseId: Course
   const courseLines = lines.filter((line) => line.courseId === courseId);
   const rounds = courseLines.length;
 
-  const holedOut = courseLines.filter(fullyHoledOut);
+  const holedOut = courseLines.filter(hasCompleteScore);
   let best: BestRound | undefined;
   for (const line of holedOut) {
-    const gross = grossOf(line);
+    const gross = scoreOf(line);
     if (best === undefined || gross < best.gross) best = { roundId: line.roundId, gross, toPar: gross - line.par };
   }
 
   const scoringAverage =
-    holedOut.length > 0 ? roundHalfUp((holedOut.reduce((sum, line) => sum + grossOf(line), 0) / holedOut.length) * 10) / 10 : undefined;
+    holedOut.length > 0 ? roundHalfUp((holedOut.reduce((sum, line) => sum + scoreOf(line), 0) / holedOut.length) * 10) / 10 : undefined;
 
   const insights =
     rounds >= INSIGHTS_MIN_ROUNDS

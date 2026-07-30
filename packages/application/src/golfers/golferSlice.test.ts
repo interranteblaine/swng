@@ -348,9 +348,10 @@ describe("getMyCourseRecord", () => {
   it("round-trips a two-course line set: filters to just the requested course, ignoring the other course's lines entirely", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
-    // fullyHoledOut (analytics.ts) requires 18 strokes-kind holeResults summing to `gross` — the
-    // par-4-every-hole shape with the "over" strokes loaded onto the first N holes is arbitrary
-    // but sums correctly; courseRecord's best/scoringAverage only consume the sum + line par.
+    // hasCompleteScore (analytics.ts) requires 18 strokes-kind holeResults summing to `gross` —
+    // the par-4-every-hole shape with the "over" strokes loaded onto the first N holes is
+    // arbitrary but sums correctly; courseRecord's best/scoringAverage only consume the sum +
+    // line par.
     const holeResultsFor = (gross: number) => {
       const over = gross - 72;
       return Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: 4, result: { kind: "strokes" as const, strokes: 4 + (i < over ? 1 : 0) } }));

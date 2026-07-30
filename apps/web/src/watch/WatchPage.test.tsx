@@ -136,7 +136,7 @@ describe("WatchPage", () => {
     // Structural proof of "no score buttons": every rendered button is either the disabled
     // grid cells above or a StandingsHeader game-select CHIP (a disclosure toggle — the one
     // other button kind here carries aria-expanded) — never a ScorePad value button
-    // (1..12/"Picked up"/"Conceded"), never an "End game…" trigger (no onTerminate passed
+    // (1..12/"Picked up"), never an "End game…" trigger (no onTerminate passed
     // here at all), never "Finalize round"/"Add game"/"Add player" (SetupPanel/FinalizeControl
     // are never rendered by WatchPage in the first place).
     const buttons = screen.getAllByRole("button");

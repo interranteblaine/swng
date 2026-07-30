@@ -28,9 +28,8 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
       if (!cell) continue;
       thru += 1;
 
-      // A conceded hole is a scored hole (spec §2d — the number the group says out loud), so
-      // scoredStrokes answers it exactly like an ordinary score. Picked-up is the ONLY kind left
-      // with no number to use — that's the one net double bogey (par + 2) still caps.
+      // Picked-up is the ONLY kind with no number — that's the one net double bogey (par + 2)
+      // still caps.
       const strokes = scoredStrokes(cell.result);
       if (strokes !== undefined) {
         grossTotal += strokes;
@@ -50,10 +49,9 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
 
     const gross: RunningTotal = { total: grossTotal, pickups: grossPickups };
     // net.pickups is always 0, not tracked like gross.pickups: a pickup only makes the GROSS
-    // total partial. A conceded hole nets off its own number, same as `strokes` (spec §2d); net
-    // resolves a picked-up hole at net double bogey above — so a net total is never partial
-    // either way (WHS net double bogey exists precisely to give a picked-up hole a definite net
-    // score), not a field we forgot to populate.
+    // total partial — net resolves a picked-up hole at net double bogey above, so a net total
+    // is never partial (WHS net double bogey exists precisely to give a picked-up hole a
+    // definite net score), not a field we forgot to populate.
     const net: RunningTotal | undefined = config.scoring === "net" ? { total: netTotal, pickups: 0 } : undefined;
 
     // Par over the first `thru` holes of THIS player's own tee, in card order — not

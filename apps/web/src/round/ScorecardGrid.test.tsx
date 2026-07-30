@@ -101,36 +101,6 @@ describe("ScorecardGrid — two-tap entry", () => {
   });
 });
 
-// Regression (task-2 fix round 1, Important 1): the sheet is `fixed inset-x-0 bottom-0` with no
-// scrim, so the grid cells above it stay tappable while it's open — a mis-tap onto a DIFFERENT
-// cell mid-Conceded-disclosure must not carry that disclosure's local state onto the newly
-// selected player's pad. `ScorePad` had no `key`, so React reused the same component instance
-// across the `selection` change and its `conceding` useState (ScorePad.tsx) survived — the next
-// number tap posted a CONCEDED score for whoever's cell was now underneath, not a plain one.
-describe("ScorecardGrid — Conceded disclosure does not leak across a mid-sheet cell switch", () => {
-  it("tapping a different cell while Conceded is open resets to the plain strokes grid for the newly selected player", () => {
-    const recordScore = vi.fn<(golferId: GolferId, hole: number, result: HoleResult) => void>();
-    render(<ScorecardGrid state={twoPlayerState()} recordScore={recordScore} />);
-
-    fireEvent.click(cellButton("Ann", 5)); // tap 1: open the pad for Ann's hole 5
-    fireEvent.click(screen.getByRole("button", { name: "Conceded" })); // reveal Ann's number row
-    expect(recordScore).not.toHaveBeenCalled();
-    expect(screen.getByText("Conceded — what would you have made?")).toBeTruthy();
-
-    // A mis-tap onto Bo's hole-5 cell while the sheet is still open — no scrim blocks it.
-    fireEvent.click(cellButton("Bo", 5));
-    expect(screen.getByRole("dialog", { name: "Score for Bo, hole 5" })).toBeTruthy();
-    // Without the fix, the reused ScorePad instance's `conceding` state would still read true
-    // here, so this tap would hit the CONCEDED number row and post a concession Bo never asked
-    // for. A fresh instance per (golfer, hole) resets to the plain strokes grid.
-    expect(screen.queryByText("Conceded — what would you have made?")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "6" }));
-
-    expect(recordScore).toHaveBeenCalledTimes(1);
-    expect(recordScore).toHaveBeenCalledWith(BO, 5, { kind: "strokes", strokes: 6 });
-  });
-});
-
 // The standard card (spec 2026-07-19 §2a: the card never changes): dots are ALWAYS each player's
 // own ROUND strokes allocated by stroke index — no game, no chip selection.
 // `ScorecardGridProps` carries no game-typed prop at all; every test below passes only
@@ -240,44 +210,37 @@ describe("ScorecardGrid — readOnly (the archived card, Task 6)", () => {
   });
 });
 
-describe("ScorecardGrid — picked-up / conceded glyphs", () => {
-  it("a picked-up cell shows PU and a conceded cell shows its score with a 'c' suffix, not a bare numeric gross", () => {
-    // A conceded hole carries the score you would have made (task-2, spec §2d) — the `c` suffix
-    // is the one thing left on the card marking it as conceded rather than holed out.
+describe("ScorecardGrid — picked-up glyph", () => {
+  it("a picked-up cell shows PU, not a bare numeric gross", () => {
     const state = twoPlayerState({
       cells: {
         [cellKey(ANN, 1)]: scoreCell({ kind: "picked-up" }, ANN),
-        [cellKey(BO, 1)]: scoreCell({ kind: "conceded", strokes: 5 }, BO),
+        [cellKey(BO, 1)]: scoreCell({ kind: "strokes", strokes: 5 }, BO),
       },
     });
     render(<ScorecardGrid state={state} recordScore={vi.fn()} />);
 
     expect(within(cellButton("Ann", 1)).getByText("PU")).toBeTruthy();
-    expect(within(cellButton("Bo", 1)).getByText("5c")).toBeTruthy();
+    expect(within(cellButton("Bo", 1)).getByText("5")).toBeTruthy();
   });
 
-  // A conceded hole is a scored hole everywhere but its glyph (task-2 fix round 1, Important 2):
-  // the `c` suffix is the ONLY thing that should distinguish it — net and the under-par ink must
-  // both apply, exactly as they do for a `strokes` cell. Without this, the card would print "3c"
-  // while silently treating the 3 as though it doesn't exist (no net line, no oxblood ink) —
-  // failing the "only the glyph distinguishes it" rule on the very surface that rule names.
-  it("a conceded score renders its net sub-line and under-par ink exactly like a strokes cell", () => {
+  it("a scored hole renders its net sub-line and under-par ink together", () => {
     // The standard card is roundStrokeAllocation — each player's own DERIVED round strokes
     // allocated directly by stroke index, no differencing and no halving (that per-game rule is
     // gameStrokeAllocation's, not this one). Ann's 8 strokes land one dot on every hole except
     // fixtureWhite's easiest (SI 9, hole 3) — hole 2 is SI1, so Ann carries a dot there.
     const ann8 = participant(ANN, "Ann", "white", 8);
     const bo0 = participant(BO, "Bo", "white", 0);
-    // Hole 2 is par 4 (fixtureWhite) — a conceded 3 is a birdie gross AND nets to 2 (3 − 1 dot),
-    // also under par, so both inks are exercised, not just the number.
+    // Hole 2 is par 4 (fixtureWhite) — a 3 is a birdie gross AND nets to 2 (3 − 1 dot), also
+    // under par, so both inks are exercised, not just the number.
     const state = twoPlayerState({
       participants: [ann8, bo0],
-      cells: { [cellKey(ANN, 2)]: scoreCell({ kind: "conceded", strokes: 3 }, ANN) },
+      cells: { [cellKey(ANN, 2)]: scoreCell({ kind: "strokes", strokes: 3 }, ANN) },
     });
     render(<ScorecardGrid state={state} recordScore={vi.fn()} />);
 
     const cell = cellButton("Ann", 2);
-    const grossGlyph = within(cell).getByText("3c");
+    const grossGlyph = within(cell).getByText("3");
     expect(grossGlyph.className).toMatch(/text-oxblood/); // gross 3 is under par 4
     expect(within(cell).getByText("2")).toBeTruthy(); // net = 3 − 1 dot
     const netLine = within(cell).getByText("2");
@@ -288,7 +251,7 @@ describe("ScorecardGrid — picked-up / conceded glyphs", () => {
 describe("ScorecardGrid — cleared cells", () => {
   // A mis-tap undone: cellAt (round/state.ts) hides a cleared cell from every reader — the grid
   // renders it exactly like a genuinely-unscored cell, with no extra branch of its own.
-  it("a cleared cell renders identically to an unscored cell — no PU/CN/numeric glyph, just the placeholder", () => {
+  it("a cleared cell renders identically to an unscored cell — no PU/numeric glyph, just the placeholder", () => {
     const ann0 = participant(ANN, "Ann", "white", 0);
     const bo0 = participant(BO, "Bo", "white", 0);
     const state = twoPlayerState({ participants: [ann0, bo0], cells: { [cellKey(ANN, 1)]: scoreCell({ kind: "cleared" }, ANN) } });
@@ -298,7 +261,7 @@ describe("ScorecardGrid — cleared cells", () => {
     const unscoredCell = cellButton("Bo", 1); // Bo has no cell for hole 1 at all — the ground truth of "unscored"
     expect(clearedCell.textContent).toBe(unscoredCell.textContent);
     expect(within(clearedCell).getByText("–")).toBeTruthy();
-    expect(clearedCell.textContent).not.toMatch(/PU|CN/);
+    expect(clearedCell.textContent).not.toMatch(/PU/);
   });
 });
 
@@ -390,18 +353,6 @@ describe("ScorecardGrid — totals (OUT/IN/TOT)", () => {
     expect(tot.getByText("Par 72")).toBeTruthy();
     expect(tot.getByText("96")).toBeTruthy(); // Blaine gross
     expect(tot.getByText("76")).toBeTruthy(); // Blaine net
-  });
-
-  it("counts a conceded hole in the totals at its recorded score", () => {
-    // Spec §4: any other rule makes the finalized card disagree with the same round's line in
-    // the golfer's record, which reads conceded strokes. Hole 3 was already recorded as a plain
-    // 5 above; conceding that same 5 must leave every total unchanged.
-    const stateWithOneConcededFive: RoundState = {
-      ...stateWithFullCard,
-      cells: { ...fullCardCells, [cellKey(BLAINE, 3)]: scoreCell({ kind: "conceded", strokes: 5 }, BLAINE) },
-    };
-    render(<ScorecardGrid state={stateWithOneConcededFive} recordScore={() => {}} />);
-    expect(within(screen.getByRole("row", { name: "TOT" })).getByText("96")).toBeTruthy();
   });
 
   // Review fix (task-4 fix round 1): a picked-up (or otherwise undecided) hole must dash ONLY the

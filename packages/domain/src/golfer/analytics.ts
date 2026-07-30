@@ -2,40 +2,24 @@ import type { RoundId } from "../ids.js";
 import { scoredStrokes } from "../round/holeResult.js";
 import type { GolferRoundLine } from "./record.js";
 
-// "Fully holed out" (analytics spec 2026-07-21 §2, the shared definition every fold below
-// reuses): every hole of the tee set has a `strokes` result — no picked-up/conceded hole, and
-// no gap. `holeResults` is absent on lines written before the analytics arc (backfilled by one
-// `rebuildProjections` run); such a line is TOLERATED as never fully holed out, never counted
-// as a zero-gross round, never a throw.
-export const fullyHoledOut = (line: GolferRoundLine): boolean =>
-  line.holeResults !== undefined &&
-  line.holeResults.length === line.holes &&
-  line.holeResults.every((h) => h.result.kind === "strokes");
-
-// Sum of strokes over a fully holed-out line — call only when `fullyHoledOut(line)` (the
-// `holeResults!` below documents that precondition rather than re-checking it; a card with any
-// non-strokes hole has nothing meaningful to sum).
-export const grossOf = (line: GolferRoundLine): number =>
-  line.holeResults!.reduce((sum, h) => sum + (h.result.kind === "strokes" ? h.result.strokes : 0), 0);
-
-// Every hole has a NUMBER — a stroke count or a conceded score (spec 2026-07-29 §2d). Distinct
-// from fullyHoledOut above, which is stricter (a conceded putt means you did not hole out) and
-// still gates Best and the broke-100/90/80 milestones — but NOT first-birdie/first-eagle, which
-// scan holes rather than whole cards and count a conceded hole like any other (milestonesOf
-// below). This one gates the average, which is why match rounds
-// count. Both read the same `holeResults`, so the ONE thing that separates them is which hole
-// kinds carry a number — expressed here through `scoredStrokes`, the ONE accessor for exactly
-// that question (round/holeResult.ts), rather than a hand-rolled kind test that could drift from
-// it. `holeResults` absent (a line written before the analytics arc) is tolerated as "no score",
-// never a throw — the fullyHoledOut precedent.
+// Every hole has a NUMBER (analytics spec 2026-07-21 §2, the shared definition every fold below
+// reuses) — expressed through `scoredStrokes`, the ONE accessor for "does this cell carry a
+// stroke count" (round/holeResult.ts), rather than a hand-rolled kind test that could drift from
+// it. There used to be a stricter `fullyHoledOut` beside this (a conceded putt meant you didn't
+// hole out, so it gated Best and the broke-N milestones while this predicate gated the average)
+// — that distinction died with the `conceded` arm (task-1, spec §7): once a gimme is just a
+// `strokes` cell, "has a number" and "holed out" are the same question, so `fullyHoledOut` and
+// its `grossOf` sum are gone and every caller (Best, the broke-N milestones, the average, the
+// course record) reads this one predicate. `holeResults` is absent on lines written before the
+// analytics arc (backfilled by one `rebuildProjections` run); such a line is TOLERATED as
+// incomplete, never counted as a zero-gross round, never a throw.
 export const hasCompleteScore = (line: GolferRoundLine): boolean =>
   line.holeResults !== undefined &&
   line.holeResults.length === line.holes &&
   line.holeResults.every((h) => scoredStrokes(h.result) !== undefined);
 
 // Sum over a line with a complete score — call only when hasCompleteScore(line) (the
-// `holeResults!` documents that precondition rather than re-checking it, the grossOf precedent).
-// Unlike grossOf this counts a conceded hole at its recorded score, because you made that score.
+// `holeResults!` documents that precondition rather than re-checking it).
 export const scoreOf = (line: GolferRoundLine): number =>
   line.holeResults!.reduce((sum, h) => sum + (scoredStrokes(h.result) ?? 0), 0);
 
@@ -47,9 +31,10 @@ export interface BestRound {
   readonly toPar: number;
 }
 
-// Lowest gross among fully holed-out lines of that hole count, per hole count independently — a
+// Lowest gross among fully-scored lines of that hole count, per hole count independently — a
 // 9-hole scramble round never contends for the 18-hole record and vice versa. Absent when no
-// line of that hole count is fully holed out.
+// line of that hole count has a complete score. There is no holed-out gate: a 79 with two
+// gimmes is your best round (spec §7).
 export interface GolferBests {
   readonly best18?: BestRound;
   readonly best9?: BestRound;
@@ -71,8 +56,8 @@ export const bestsOf = (lines: readonly GolferRoundLine[]): GolferBests => {
   const bestFor = (holes: 9 | 18): BestRound | undefined => {
     let best: BestRound | undefined;
     for (const line of lines) {
-      if (line.holes !== holes || !fullyHoledOut(line)) continue;
-      const gross = grossOf(line);
+      if (line.holes !== holes || !hasCompleteScore(line)) continue;
+      const gross = scoreOf(line);
       if (best === undefined || gross < best.gross) best = { roundId: line.roundId, gross, toPar: gross - line.par };
     }
     return best;
@@ -86,14 +71,8 @@ export const bestsOf = (lines: readonly GolferRoundLine[]): GolferBests => {
 // order below (a stable wire order) — never chronological by achievement date, so an eagle shot
 // before a golfer's first birdie still lists "first-birdie" ahead of "first-eagle".
 export const milestonesOf = (lines: readonly GolferRoundLine[]): readonly Milestone[] => {
-  // A per-hole scan, so it goes through `scoredStrokes` — a conceded hole is a scored hole
-  // EVERYWHERE (spec 2026-07-29 §2d), and a conceded three-footer for a birdie is the most common
-  // concession there is in match play, swng's core case. Gating this on `fullyHoledOut` would be a
-  // different rule and a wrong one: the golfer would see the birdie counted in "your typical 18"
-  // and in "you've birdied this hole" at that course, while "First birdie" never fired — the same
-  // number disagreeing with itself on two screens, which is exactly what §2d exists to prevent.
-  // (The broke-N milestones below DO ride fullyHoledOut: breaking 90 is a claim about a whole card,
-  // and a card with a concession on it was not holed out.)
+  // A per-hole scan through `scoredStrokes`, the one accessor for "does this cell carry a
+  // stroke count" — a birdie is a birdie whether the ball dropped or the group called it good.
   const firstHole = (test: (underPar: number) => boolean): RoundId | undefined =>
     lines.find((line) =>
       line.holeResults?.some((h) => {
@@ -101,8 +80,10 @@ export const milestonesOf = (lines: readonly GolferRoundLine[]): readonly Milest
         return strokes !== undefined && test(h.par - strokes);
       }),
     )?.roundId;
+  // The broke-N milestones are a claim about a WHOLE CARD, so they ride hasCompleteScore/scoreOf
+  // — the same predicate/sum pair Best uses.
   const firstBroke = (threshold: number): RoundId | undefined =>
-    lines.find((line) => line.holes === 18 && fullyHoledOut(line) && grossOf(line) < threshold)?.roundId;
+    lines.find((line) => line.holes === 18 && hasCompleteScore(line) && scoreOf(line) < threshold)?.roundId;
   const found: { kind: MilestoneKind; roundId: RoundId | undefined }[] = [
     { kind: "first-birdie", roundId: firstHole((u) => u === 1) },
     { kind: "first-eagle", roundId: firstHole((u) => u >= 2) },

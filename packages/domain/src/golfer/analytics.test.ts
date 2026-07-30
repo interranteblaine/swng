@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { roundId } from "../ids.js";
 import type { GolferHoleLine, GolferRoundLine } from "./record.js";
-import { bestsOf, fullyHoledOut, milestonesOf } from "./analytics.js";
+import { bestsOf, hasCompleteScore, milestonesOf } from "./analytics.js";
 
 // A minimal 18-hole line — holeResults is the one field these folds read; the rest is filler
 // the analytics folds never touch (line fixtures are plain object literals, no archives needed —
@@ -19,7 +19,6 @@ const line = (over: Partial<GolferRoundLine>): GolferRoundLine => ({
 
 const stroke = (hole: number, par: number, strokes: number): GolferHoleLine => ({ hole, par, result: { kind: "strokes", strokes } });
 const pickedUp = (hole: number, par: number): GolferHoleLine => ({ hole, par, result: { kind: "picked-up" } });
-const conceded = (hole: number, par: number, strokes: number): GolferHoleLine => ({ hole, par, result: { kind: "conceded", strokes } });
 
 // Builds a fully holed-out line of `holes` (9 or 18, par 4 throughout) whose strokes sum to
 // exactly `gross` — the first hole absorbs whatever remainder the rest (all par) don't, so the
@@ -30,6 +29,16 @@ const roundOf = (id: string, holes: 9 | 18, gross: number): GolferRoundLine => {
   const holeResults = [stroke(1, 4, gross - 4 * rest), ...Array.from({ length: rest }, (_, i) => stroke(i + 2, 4, 4))];
   return line({ roundId: roundId(id), holes, par, holeResults });
 };
+
+// Every hole a plain strokes cell, all at the same score — a minimal input for the
+// no-holed-out-gate test below (task-1, spec §7).
+const lineWith = ({ holes, par, perHole }: { holes: 9 | 18; par: number; perHole: number }): GolferRoundLine =>
+  line({
+    roundId: roundId("r-gimme"),
+    holes,
+    par,
+    holeResults: Array.from({ length: holes }, (_, i) => stroke(i + 1, par / holes, perHole)),
+  });
 
 describe("bestsOf — lowest gross per hole count, fully holed-out lines only (analytics spec §3)", () => {
   it("(a) picks the lowest gross per hole count, ignoring a lower-raw-sum line that has a picked-up hole", () => {
@@ -57,16 +66,23 @@ describe("bestsOf — lowest gross per hole count, fully holed-out lines only (a
     expect(bestsOf([earlier, later])).toEqual({ best18: { roundId: roundId("r-b-earlier"), gross: 85, toPar: 13 } });
   });
 
-  it("(c) a line without holeResults is never fully holed out, and contributes to neither bests nor milestones", () => {
+  it("(c) a line without holeResults has no complete score, and contributes to neither bests nor milestones", () => {
     const noResults = line({ roundId: roundId("r-c-no-results"), holes: 18, par: 72 }); // holeResults left undefined
 
-    expect(fullyHoledOut(noResults)).toBe(false);
+    expect(hasCompleteScore(noResults)).toBe(false);
     expect(bestsOf([noResults])).toEqual({});
     expect(milestonesOf([noResults])).toEqual([]);
   });
 
   it("(g) empty lines yield {} bests", () => {
     expect(bestsOf([])).toEqual({});
+  });
+
+  // There is no holed-out gate (task-1, spec §7): a gimme is recorded at the score it made, so a
+  // fully-scored round is a Best 18 candidate outright — no separate "did every putt drop" check.
+  it("counts a fully-scored round as a Best — there is no holed-out gate", () => {
+    const full = lineWith({ holes: 18, par: 72, perHole: 4 }); // every hole a strokes cell
+    expect(bestsOf([full]).best18?.gross).toBe(72);
   });
 });
 
@@ -99,36 +115,5 @@ describe("milestonesOf — earliest qualifying line per kind, in fixed kind orde
 
   it("(g) empty lines yield [] milestones", () => {
     expect(milestonesOf([])).toEqual([]);
-  });
-
-  // A conceded hole is a scored hole EVERYWHERE (spec 2026-07-29 §2d), and a conceded three-footer
-  // is the most common concession in match play. Before the whole-branch fix this scan tested
-  // `kind === "strokes"` raw, so a golfer whose first birdie was conceded saw it counted in "your
-  // typical 18" and in their course record while "First birdie" never fired.
-  it("(h) a CONCEDED birdie earns first-birdie, and a conceded eagle earns first-eagle", () => {
-    const concededBirdie = line({ roundId: roundId("r-h-birdie"), holeResults: [conceded(1, 4, 3)] });
-    const concededEagle = line({ roundId: roundId("r-h-eagle"), holeResults: [conceded(1, 5, 3)] });
-
-    expect(milestonesOf([concededBirdie, concededEagle])).toEqual([
-      { kind: "first-birdie", roundId: roundId("r-h-birdie") },
-      { kind: "first-eagle", roundId: roundId("r-h-eagle") },
-    ]);
-  });
-
-  // The other half of the same rule: breaking 90 is a claim about a WHOLE CARD, so it still rides
-  // fullyHoledOut and a conceded hole disqualifies the card — deliberately asymmetric with (h).
-  it("(i) a conceded hole keeps a card out of the broke-N milestones and out of bests", () => {
-    const with85AndAConcession = line({
-      roundId: roundId("r-i"),
-      holes: 18,
-      par: 72,
-      holeResults: [conceded(1, 4, 4), ...Array.from({ length: 17 }, (_, i) => stroke(i + 2, 4, 4))], // gross 72
-    });
-
-    expect(fullyHoledOut(with85AndAConcession)).toBe(false);
-    expect(bestsOf([with85AndAConcession])).toEqual({});
-    // No under-par hole on this card either, so the per-hole milestones stay absent too — the
-    // ONLY reason the array is empty is fullyHoledOut, which is the point.
-    expect(milestonesOf([with85AndAConcession])).toEqual([]);
   });
 });

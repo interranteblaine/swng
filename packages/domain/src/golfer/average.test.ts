@@ -38,7 +38,7 @@ describe("averageOf", () => {
     expect(averageOf([{ ...base, holeResults: base.holeResults!.slice(1) }])).toBeUndefined();
   });
 
-  it("uses only the last 10 finished rounds", () => {
+  it("uses only the last 10 rounds with a score", () => {
     const lines = [...Array.from({ length: 10 }, (_, i) => line(`old${i}`, 18, 6)), ...Array.from({ length: 10 }, (_, i) => line(`new${i}`, 18, 5))];
     expect(averageOf(lines)).toBe(18); // the older +36 rounds fall out of the window
   });

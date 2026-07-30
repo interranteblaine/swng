@@ -54,7 +54,7 @@ worse than no name.
   never size or tidiness. Default to a folder in an existing package. Shallow packages
   (interface and build-graph cost, no isolation payoff) don't ship.
 - **Flat `src/`** — no `src/<pkgname>/` double-nesting.
-- **Group by concept, not technical kind** — `scoring/`, `golfer/`, `sync/`; never a
+- **Group by concept, not technical kind** — `scoring/`, `golfer/`, `round/`; never a
   `types/` or `utils/` dumping ground.
 - **One public barrel per package** (`src/index.ts`) is the package's interface. Consumers
   import `@swng/domain`, never a deep path; internal files use relative imports.

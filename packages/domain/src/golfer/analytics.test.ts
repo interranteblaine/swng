@@ -71,7 +71,7 @@ describe("bestsOf — lowest gross per hole count, fully holed-out lines only (a
 });
 
 describe("milestonesOf — earliest qualifying line per kind, in fixed kind order (analytics spec §3)", () => {
-  it("(d) first-birdie is the earliest strokes hole exactly 1-under-par; an eagle-only line does not satisfy it", () => {
+  it("(d) first-birdie is the earliest hole exactly 1-under-par; an eagle-only line does not satisfy it", () => {
     const parLine = line({ roundId: roundId("r-d-par"), holeResults: [stroke(1, 4, 4)] }); // even par
     const eagleLine = line({ roundId: roundId("r-d-eagle"), holeResults: [stroke(1, 4, 2)] }); // -2, eagle only
     const birdieLine = line({ roundId: roundId("r-d-birdie"), holeResults: [stroke(1, 4, 3)] }); // -1, birdie

@@ -369,7 +369,10 @@ tolerate-old-data machinery, no new migration script.
 **Courses are NOT wiped.** This arc does not touch the course model, and the hand-seeded real
 cards (Casa Verde GC, Sandy Hollow Nine) are the field-test fixtures. `scrapCourseAndRoundData.mjs`
 deletes every `COURSE#` item and strips `homeCourseId` from every golfer as its first pass — that
-pass must be **skipped**, not run. Use the script's rounds/snapshots/projections passes only.
+pass must be **skipped**, not run. Use the script's rounds/snapshots/projections passes only, via
+its `--keep-courses` flag (added by this arc's whole-branch fix wave: the flagless script made this
+paragraph unexecutable as written, and the field specs re-seed courses, so the loss would have been
+silent and permanent).
 
 **No prod deploy in this arc.**
 

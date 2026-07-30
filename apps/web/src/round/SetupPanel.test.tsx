@@ -465,4 +465,51 @@ describe("SetupPanel — mid-round basis correction (spec 2026-07-20)", () => {
     // Settled: Bo's Edit is enabled again.
     expect((within(boRow!).getByRole("button", { name: "Edit" }) as HTMLButtonElement).disabled).toBe(false);
   });
+
+  // The two constructors do not accept the same numbers (spec 2026-07-29 §2a): `overPar` is signed,
+  // `strokes` is bounded at zero. Before this pair, ONE /^-?\d+$/ gated both editors, so Save was
+  // enabled for "-3" under `Give strokes directly`, the request hit commands.ts's own min(0), and the
+  // golfer read "Could not update this player's strokes — try again" — an opaque failure for an
+  // illegal state the UI should never have offered.
+  it("Give strokes directly refuses a negative — Save stays disabled, nothing is posted, and the input floors at 0", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ participants: [participant(ANN, "Ann", "white", 8, 3)] });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetBasis: noopSetBasis });
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    await user.click(within(annRow!).getByRole("button", { name: "Give strokes directly" }));
+
+    const input = within(annRow!).getByRole("spinbutton", { name: "Strokes for Ann" });
+    expect(input.getAttribute("min")).toBe("0");
+
+    await user.type(input, "-3");
+    expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(annRow!).getByRole("button", { name: "Save" }));
+    expect(noopSetBasis).not.toHaveBeenCalled();
+
+    // 0 is legal — the floor is at zero, not above it (a scratch seat given nothing).
+    await user.clear(input);
+    await user.type(input, "0");
+    expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(within(annRow!).getByRole("button", { name: "Save" }));
+    expect(noopSetBasis).toHaveBeenCalledWith(ANN, { kind: "strokes", strokes: 0 });
+  });
+
+  it("Edit ACCEPTS a negative normal score — a golfer who shoots under par states -2, and no floor applies", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ participants: [participant(ANN, "Ann", "white", 8, 3)] });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetBasis: noopSetBasis });
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
+
+    const input = within(annRow!).getByRole("spinbutton", { name: "What Ann normally shoots, relative to par" });
+    expect(input.getAttribute("min")).toBeNull();
+
+    await user.clear(input);
+    await user.type(input, "-2");
+    expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(within(annRow!).getByRole("button", { name: "Save" }));
+    expect(noopSetBasis).toHaveBeenCalledWith(ANN, { kind: "normally-shoots", overPar: -2 });
+  });
 });

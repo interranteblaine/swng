@@ -25,7 +25,9 @@ import { useContainerWidth } from "../ui/useContainerWidth";
 // when BOTH ends have a date, the year appended only when the two ends cross a year boundary).
 // This component derives no golf result — it renders what the wire already computed. Below
 // AVERAGE_HISTORY_MIN_ROUNDS rounds the chart is GATED, not drawn — a 1-3 point sparkline is
-// noise, not a trend.
+// noise, not a trend. A second gate covers the case the first one misses: 8+ rounds played but
+// NO contributing round (every one contains a pickup), which would otherwise reach the plot as an
+// empty series and draw a blank svg with no reason given.
 const AVERAGE_HISTORY_MIN_ROUNDS = 8;
 const AVERAGE_CHART_WINDOW = 20; // slicing is honest: every point folds the whole career before it
 
@@ -84,6 +86,21 @@ function AverageOverTime({
             ? `Your average over time shows up at ${AVERAGE_HISTORY_MIN_ROUNDS} rounds — you've played ${roundsPlayed}. Keep going.`
             : `Their average over time shows up at ${AVERAGE_HISTORY_MIN_ROUNDS} rounds — they've played ${roundsPlayed}.`}
         </p>
+      </div>
+    );
+  }
+
+  // The gate above counts ROUNDS PLAYED; this one counts POINTS. They come apart for a golfer
+  // whose every round contains a pickup — 8+ rounds, no scored one, so `averageHistory` is empty
+  // (spec §5: a round with a pickup is not a data point). Without this branch an empty series
+  // reached the plot and drew a heading, an empty svg and "your last 0 rounds": no crash, no NaN,
+  // but nothing said WHY the chart was blank. Same register as the under-8 gate — say the honest
+  // reason.
+  if (points.length === 0) {
+    return (
+      <div className="flex flex-col gap-1">
+        <h3 className="text-base font-semibold">{heading}</h3>
+        <p className="text-sm text-fairway">No rounds with a score yet — a round needs every hole scored to plot a point.</p>
       </div>
     );
   }
@@ -287,9 +304,10 @@ export interface RecordSectionsProps {
   readonly historyLimit?: number;
   // Who the copy is addressed to — "your" (default, ProfilePage: your own record) or "their"
   // (GolferPage: a signed-in golfer reading someone ELSE's record). Defaults to "your" so
-  // ProfilePage's existing render/tests stay byte-identical. Mirrors indexSourcePhrase's own
-  // "your"/"their" convention (@swng/domain handicap/present.ts) — the finding this closes: this
-  // component previously rendered second-person copy verbatim on GolferPage.
+  // ProfilePage's existing render/tests stay byte-identical. Mirrors the "your"/"their" convention
+  // the deleted indexSourcePhrase established (@swng/domain handicap/present.ts, gone with the
+  // index — the convention outlived the function) — the finding this closes: this component
+  // previously rendered second-person copy verbatim on GolferPage.
   readonly person?: "your" | "their";
 }
 
@@ -302,13 +320,23 @@ export function RecordSections({ metrics, history, historyLimit, person = "your"
       {/* The headline (spec 2026-07-29 §5): ONE number, what the golfer normally shoots relative
           to par, with the sentence that says exactly how it was arrived at — so it can be checked
           against the rows below by hand. `—` when there is no scored round yet: absent is the
-          honest answer, never a 0 and never a guess. */}
+          honest answer, never a 0 and never a guess.
+
+          The subtitle names the set that is actually averaged: `averageOf` is
+          `scoredOverPar(lines).slice(-10)`, so it is the last ten rounds WITH A SCORE, not the last
+          ten rounds full stop (spec §2d — a round containing a pickup has no score and does not
+          feed it). §5's mock said "finished rounds", which for a golfer with pickups names a
+          different ten rows than the ones summed, and quietly breaks §5's own "you can add them up
+          yourself" promise; the spec carries a dated correction. This wording stays checkable
+          against the rows below, because a row with a pickup shows no score at all. */}
       <div className="flex flex-col gap-1">
         <div className="flex items-baseline justify-between gap-2">
           <h3 className="text-base font-semibold">{person === "your" ? "What you shoot" : "What they shoot"}</h3>
           <span className="text-3xl font-bold tabular-nums">{metrics.average !== undefined ? formatOverPar(metrics.average) : "—"}</span>
         </div>
-        <p className="text-sm text-fairway">{person === "your" ? "your last 10 finished rounds, score minus par" : "their last 10 finished rounds, score minus par"}</p>
+        <p className="text-sm text-fairway">
+          {person === "your" ? "your last 10 rounds with every hole scored, score minus par" : "their last 10 rounds with every hole scored, score minus par"}
+        </p>
       </div>
 
       <AverageOverTime points={metrics.averageHistory} roundsPlayed={history.length} person={person} history={history} />

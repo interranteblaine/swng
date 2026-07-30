@@ -90,7 +90,7 @@ describe("GolferPage", () => {
     // The ONE number about this golfer, third-person and served.
     expect(screen.getByRole("heading", { name: "What they shoot" })).toBeTruthy();
     expect(screen.getByText("+26")).toBeTruthy();
-    expect(screen.getByText("their last 10 finished rounds, score minus par")).toBeTruthy();
+    expect(screen.getByText("their last 10 rounds with every hole scored, score minus par")).toBeTruthy();
     // RecordSections rendered with the response's (empty) history.
     expect(screen.getByText("No rounds yet.")).toBeTruthy();
     // person="their" (whole-branch-review finding): GolferPage renders someone ELSE's record, so

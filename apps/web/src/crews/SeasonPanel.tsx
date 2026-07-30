@@ -76,7 +76,7 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
   }, [load]);
 
   // Spec 2026-07-22 §2: editing the end date IS the whole lifecycle — an organizer-only Edit
-  // (the roster-row edit idiom: SetupPanel.tsx's mid-round handicap correction) swaps the header
+  // (the roster-row edit idiom: SetupPanel.tsx's mid-round basis correction) swaps the header
   // for name + two date inputs + Save/Cancel. Save PUTs, then re-runs `load` (the SAME fetch the
   // initial mount uses) rather than trusting the response shape locally — one source of truth
   // for "what this season currently says."

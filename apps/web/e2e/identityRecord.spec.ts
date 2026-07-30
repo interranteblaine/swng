@@ -256,7 +256,7 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     // Playwright's strict mode. Exact matching pins the headline's own span, whose normalized text
     // is exactly "+13" (formatOverPar(13), RecordSections.tsx).
     await expect(page.getByText(`+${PINNED_AVERAGE}`, { exact: true })).toBeVisible();
-    await expect(page.getByText("your last 10 finished rounds, score minus par")).toBeVisible();
+    await expect(page.getByText("your last 10 rounds with every hole scored, score minus par")).toBeVisible();
     // The retired surface is pinned GONE, not merely unasserted — a stale bundle would fail here.
     await expect(page.getByText(/WHS index/)).toHaveCount(0);
     await expect(page.getByLabel("Your own number")).toHaveCount(0);

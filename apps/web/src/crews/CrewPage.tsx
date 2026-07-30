@@ -140,7 +140,7 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
   const [leaveError, setLeaveError] = useState<string | undefined>(undefined);
 
   // Spec 2026-07-22 §2: the crew name is editable — organizer-only, the roster-row edit idiom
-  // (SetupPanel.tsx's mid-round handicap correction: an Edit swaps the static text for an
+  // (SetupPanel.tsx's mid-round basis correction: an Edit swaps the static text for an
   // input + Save/Cancel, one PUT then the response replaces local state).
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");

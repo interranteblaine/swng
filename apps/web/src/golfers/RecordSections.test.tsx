@@ -52,7 +52,7 @@ describe("RecordSections", () => {
 
     expect(screen.getByRole("heading", { name: "What you shoot" })).toBeTruthy();
     expect(screen.getByText("+26")).toBeTruthy();
-    expect(screen.getByText("your last 10 finished rounds, score minus par")).toBeTruthy();
+    expect(screen.getByText("your last 10 rounds with every hole scored, score minus par")).toBeTruthy();
   });
 
   it("renders an UNDER-par average with its minus — one sign convention, no plus-handicap notation", () => {
@@ -78,6 +78,23 @@ describe("RecordSections", () => {
     expect(typicalLine.textContent).toContain("0 birdies");
     expect(typicalLine.textContent).not.toMatch(/eagle/); // 0 eagles: prefix omitted
     expect(screen.getByText("No rounds yet.")).toBeTruthy();
+  });
+
+  // 8+ rounds played, but every one of them contains a pickup, so `averageHistory` is empty (spec
+  // §5: a round with a pickup is not a data point) and `average` is absent. The roundsPlayed gate
+  // above lets this through; without a points gate the plot drew a heading, an EMPTY svg and "your
+  // last 0 rounds" — no crash, no NaN, but no reason given either.
+  it("8+ rounds but none with a score: the chart says why instead of drawing an empty plot", () => {
+    const history = Array.from({ length: 8 }, (_, i) => line(String(i + 1), { score: undefined }));
+    renderSections({ ...ZERO_METRICS, averageHistory: [] }, history);
+
+    expect(screen.getByText("No rounds with a score yet — a round needs every hole scored to plot a point.")).toBeTruthy();
+    expect(screen.queryByTestId("average-chart")).toBeNull();
+    expect(screen.queryByText(/last 0 rounds/)).toBeNull();
+    // The heading still renders — the section exists, it just has nothing to draw.
+    expect(screen.getByRole("heading", { name: "Your average over time" })).toBeTruthy();
+    // And the headline above it is honest too: no scored round means no average.
+    expect(screen.getByText("—")).toBeTruthy();
   });
 
   it("8+ rounds: renders the chart with ONE polyline — there is no second series", () => {
@@ -177,7 +194,7 @@ describe("RecordSections", () => {
     renderSectionsAs("their", { ...ZERO_METRICS, average: 26 }, []);
 
     expect(screen.getByRole("heading", { name: "What they shoot" })).toBeTruthy();
-    expect(screen.getByText("their last 10 finished rounds, score minus par")).toBeTruthy();
+    expect(screen.getByText("their last 10 rounds with every hole scored, score minus par")).toBeTruthy();
     expect(screen.getByText("Their average over time")).toBeTruthy();
     expect(screen.getByText("Their average over time shows up at 8 rounds — they've played 0.")).toBeTruthy();
     expect(screen.queryByText(/Keep going\./)).toBeNull();

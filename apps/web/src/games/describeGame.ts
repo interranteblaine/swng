@@ -44,8 +44,10 @@ const nameOf = (participants: readonly Participant[], golfer: GolferId): string 
 
 // A vs-par figure in parentheses, for the inline "Ann 74 (+2)" register a chip/panel line uses.
 // The SIGN itself is the model's one convention (`formatOverPar`, spec 2026-07-29 §4) — this adds
-// only the brackets, so the web holds no second copy of "how a signed number reads".
-export const vsPar = (relative: number): string => `(${formatOverPar(relative)})`;
+// only the brackets, so the web holds no second copy of "how a signed number reads". Named for
+// what it does, not for what it wraps: the deleted `ui/vsPar.ts` was the SIGN renderer, and reusing
+// that name for a paren-wrapper invites a reader to think this is it.
+export const inParens = (relative: number): string => `(${formatOverPar(relative)})`;
 
 type StrokePlay = Extract<GameState, { kind: "stroke-play" }>;
 
@@ -57,7 +59,7 @@ const describeStrokePlay = (game: StrokePlay, round: RoundState): string => {
       // Net is only present when the config scored net, and always populated in that case
       // (strokePlay.ts's own invariant) — the non-null assertion mirrors that contract.
       const total = game.scoring === "net" ? line.net!.total : line.gross.total;
-      return `${nameOf(round.participants, line.golferId)} ${total}${game.complete ? "" : ` thru ${line.thru}`} ${vsPar(line.relativeToPar)}`;
+      return `${nameOf(round.participants, line.golferId)} ${total}${game.complete ? "" : ` thru ${line.thru}`} ${inParens(line.relativeToPar)}`;
     })
     .join(" · ");
 };

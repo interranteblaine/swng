@@ -171,7 +171,7 @@ function ScrapControl({ onAbandon }: { readonly onAbandon: () => Promise<void> }
 
       {confirming && (
         <div role="dialog" aria-label="Confirm scrap" className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 border-t-2 border-forest bg-card p-4 shadow-2xl">
-          <p className="text-sm text-fairway">Scrap this round? It counts nowhere — no results, no handicap posting — and this can&apos;t be undone.</p>
+          <p className="text-sm text-fairway">Scrap this round? It counts nowhere — no results, nothing added to your record — and this can&apos;t be undone.</p>
           <button type="button" onClick={() => void scrapNow()} disabled={busy} className={`${btnDanger} min-h-14 disabled:opacity-50`}>
             {busy ? "Scrapping…" : "Scrap round"}
           </button>
@@ -258,7 +258,7 @@ function ScrappedRound() {
   return (
     <div role="status" className="flex min-h-screen flex-col items-center justify-center gap-2 p-6 text-center">
       <p className="text-lg font-semibold text-forest">This round was scrapped.</p>
-      <p className="max-w-sm text-sm text-fairway">It counts nowhere — no results, no handicap posting. Start a new round to play again.</p>
+      <p className="max-w-sm text-sm text-fairway">It counts nowhere — no results, nothing added to your record. Start a new round to play again.</p>
     </div>
   );
 }

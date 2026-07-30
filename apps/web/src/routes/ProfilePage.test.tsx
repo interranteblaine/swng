@@ -133,7 +133,7 @@ describe("ProfilePage — signed in", () => {
     // The headline: ONE number, served, with the sentence naming exactly how it was arrived at.
     expect(screen.getByRole("heading", { name: "What you shoot" })).toBeTruthy();
     expect(screen.getByText("+26")).toBeTruthy();
-    expect(screen.getByText("your last 10 finished rounds, score minus par")).toBeTruthy();
+    expect(screen.getByText("your last 10 rounds with every hole scored, score minus par")).toBeTruthy();
 
     // 3 rounds is under the 8-round chart gate — no chart yet.
     expect(screen.queryByTestId("average-chart")).toBeNull();

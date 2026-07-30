@@ -8,9 +8,18 @@ import { CopiedLinkLine } from "../ui/CopiedLinkLine";
 import { AddGameForm } from "./AddGameForm";
 
 // Mid-round basis correction (spec 2026-07-20): "-2" and "13" both parse fine via `parseInt`, but
-// `parseInt` also silently accepts "12.5" (→ 12) and "" (→ NaN, already guarded) — this is
+// `parseInt` also silently accepts "12.5" (→ 12) and "" (→ NaN, already guarded) — these are
 // stricter, the only shapes the basis wire fields (`z.number().int()`) accept.
-const isValidInt = (value: string): boolean => /^-?\d+$/.test(value.trim());
+//
+// PER KIND, because the two constructors do not accept the same numbers (spec 2026-07-29 §2a):
+// `overPar` is signed — a golfer who shoots two under par states -2 — while `strokes` is bounded
+// at zero, since under a relative model the anchor is the best player and nobody gives strokes
+// back. One shared /^-?\d+$/ let "-3" through the strokes editor, ENABLED Save, and bounced off
+// commands.ts's own `min(0)` as "Could not update this player's strokes — try again", which is not
+// the problem the golfer has. The truth lives in the model, so the editor declines to offer the
+// illegal state rather than reporting it after a round trip.
+const VALID_BY_KIND: Readonly<Record<StrokeBasis["kind"], RegExp>> = { "normally-shoots": /^-?\d+$/, strokes: /^\d+$/ };
+const isValidFor = (kind: StrokeBasis["kind"], value: string): boolean => VALID_BY_KIND[kind].test(value.trim());
 
 // Which of a StrokeBasis's two constructors (spec 2026-07-29 §2a) a row's open editor is writing.
 // "A group saying 'just give him 18' is the SECOND constructor, not a fudge of the first", so the
@@ -95,7 +104,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetBasis }: SetupPane
   };
 
   const save = async (golferId: GolferId, kind: EditKind) => {
-    if (!isValidInt(value)) return; // guarded by the disabled Save button too
+    if (!isValidFor(kind, value)) return; // guarded by the disabled Save button too
     const number = parseInt(value, 10);
     setSaving(true);
     setError(undefined);
@@ -160,6 +169,10 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetBasis }: SetupPane
                         <input
                           type="number"
                           inputMode="numeric"
+                          // The strokes arm floors at 0 (spec §2a) so the stepper and the browser's
+                          // own validation agree with isValidFor above; the normal-score arm has no
+                          // floor, because a golfer who shoots under par states a negative.
+                          min={open.kind === "strokes" ? 0 : undefined}
                           aria-label={EDITORS[open.kind].label(p.name)}
                           className={`${inputBox} w-16`}
                           value={value}
@@ -169,7 +182,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetBasis }: SetupPane
                             are visually oversized inside a text row) and never gold (review finding —
                             AddGameForm's "Add game" submit below is this SAME panel's one gold
                             action; the reskin rule, spec 2026-07-19). */}
-                        <button type="button" className={btnQuiet} disabled={saving || !isValidInt(value)} onClick={() => void save(p.golferId, open.kind)}>
+                        <button type="button" className={btnQuiet} disabled={saving || !isValidFor(open.kind, value)} onClick={() => void save(p.golferId, open.kind)}>
                           Save
                         </button>
                         <button type="button" className={btnQuiet} disabled={saving} onClick={cancelEdit}>

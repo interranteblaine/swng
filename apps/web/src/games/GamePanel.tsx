@@ -4,7 +4,7 @@ import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@
 import { strokesSummary } from "../round/dots";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnDanger, cardBox } from "../ui/classes";
-import { vsPar } from "./describeGame";
+import { inParens } from "./describeGame";
 
 export interface GamePanelProps {
   readonly game: GameState;
@@ -127,7 +127,7 @@ function StrokePlayBody({ game, state }: { game: Extract<GameState, { kind: "str
               </td>
               <td className="py-2 pr-2">{total(line)}</td>
               <td className="py-2 pr-2">{line.thru}</td>
-              <td className="py-2">{vsPar(line.relativeToPar)}</td>
+              <td className="py-2">{inParens(line.relativeToPar)}</td>
             </tr>
           ))}
         </tbody>

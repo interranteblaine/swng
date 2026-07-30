@@ -266,7 +266,7 @@ export const getMyCourseRecord = async (token: string, courseId: CourseId): Prom
 };
 
 // Navigation spec §6a: GET /golfers/{golferId} — any signed-in golfer may view any golfer's
-// record (handicaps are posted in every clubhouse, not private). Same requestJson + per-endpoint
+// record (scores are posted in every clubhouse, not private). Same requestJson + per-endpoint
 // idiom as getMyRecord above, "golfer"-gated the same way — the target golferId rides the path,
 // never a claims-derived self scope.
 export const getGolfer = async (token: string, id: GolferId): Promise<GetGolferResponse> => {

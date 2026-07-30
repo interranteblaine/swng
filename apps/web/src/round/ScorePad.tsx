@@ -8,7 +8,7 @@ import { btnDanger, btnSecondary, cardBox } from "../ui/classes";
 // Exported for its own direct test (product.md §9's "par±window" contract) rather than only
 // asserted indirectly through ScorePad's rendered button order.
 // Capped at 12, not the wire schema's unbounded gross score: gross 10-12 are routine for a
-// high-handicap golfer on a hard hole, so they must be one tap away like any other value, but
+// high-scoring golfer on a hard hole, so they must be one tap away like any other value, but
 // 12 is a pragmatic v1 UI cap — a triple-digit-adjacent score is rare enough, and a genuinely
 // worse hole is picked-up/conceded territory, not a bigger button grid.
 export const orderedStrokeValues = (par: number): readonly number[] => {

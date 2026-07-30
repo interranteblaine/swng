@@ -26,18 +26,156 @@ const NODE = {
   message: "This package also runs in the browser — no Node built-ins.",
 };
 
-// The re-derivation fence's own property list (task-5 fix round, spec 2026-07-30 §10 review) — ONE
-// place, interpolated into every selector branch below so the four can't drift apart. `average`/
-// `strokes`/`par` are the golfer-record fields task 5 named; `points`/`relativeToPar`/`skins` are
-// the GameState line fields I2's fix round added (GamePanel.tsx's stroke-play/stableford/skins
-// ranking, moved to @swng/domain) — added here so a re-derivation of THAT move is caught too; I1's
-// fence didn't cover I2's own move until this fix round.
-const GOLF_ARITHMETIC_PROPS = "average|strokes|par|points|relativeToPar|skins";
+// ---------------------------------------------------------------------------------------------
+// The re-derivation fence (see the `no-restricted-syntax` rule far below for what it defends and
+// why). Its selectors are GENERATED from three independent axes — which properties, which
+// operators, which value-transparent wrappers — rather than hand-enumerated, because four
+// consecutive attempts at a hand-enumerated branch list each shipped a hole on an axis the author
+// wasn't thinking about that round: round 1's regexes missed the `??`/`!` narrowing idioms, round
+// 2's Literal exclusion lost `h.par * 2` (the very rule the fence exists to protect), round 3
+// restored that but left `/` and `%` out of the operator set entirely — while its own comment
+// asserted a complete survey — and every round so far unwrapped `?.` only under `??`. Enumerating
+// one axis while holding the others fixed is the defect; the cross product is the fix. Adding a
+// property, an operator, or a wrapper below now covers every combination of the other two.
+// ---------------------------------------------------------------------------------------------
 
-// Shared message for every branch of the re-derivation fence below — one copy, not four drifting
-// copies naming slightly different things.
+// AXIS 1 — the served fields a golf rule gets re-derived over. Read off the wire schemas and the
+// domain shapes the web actually renders (contracts/{golfers,crews,round,courses}.ts,
+// scoring/game.ts, golfer/{record,metrics,analytics,courseRecord}.ts, crew/{scoreboard,ledger,
+// analytics}.ts), not from memory. The rule for what belongs: a number that IS a golf result (a
+// score, a margin, a tally, an average) or that a scoring/allocation rule reads as input.
+//
+// Fix round 4 found this axis was the widest hole of the three and the least examined — it had
+// never been revisited since the two leaks that motivated the fence. `score` alone made
+// `line.score * 2` invisible: that is the nine-hole doubling rule, the ONE rule this whole task
+// moved into the domain, spelled over the other operand. `thru` made the stroke-play sort's own
+// tiebreak invisible. Both are exactly the class of leak the fence exists for.
+//
+// DELIBERATELY ABSENT, and why (each is a false-positive risk that would earn the rule a deletion,
+// which is worse than the miss):
+// - `hole` and `number` (on `Hole`) are IDENTIFIERS that happen to be numbers. `hole.number - 1`
+//   as an array index and `entry.hole + 1` for display are ordinary plumbing, not golf.
+// - `yardage`, `rating`, `slope` are card metadata: printed because they are on the paper
+//   scorecard, computed from nowhere since the WHS pipeline was deleted. There is no rule over
+//   them left in the domain, so this rule's own "move it to @swng/domain" advice would be a lie.
+// - timestamps (`finalizedAt`, `createdAtMs`, `expiresAtMs`, `wallMs`, …) and sequence numbers
+//   (`seq`, `nextSeq`, `counter`) are plumbing; arithmetic over them is not golf.
+const GOLF_ARITHMETIC_PROPS = [
+  // scores and the numbers derived straight from them
+  "score", "par", "strokes", "gross", "net", "total", "toPar", "relativeToPar", "underPar",
+  // averages and spreads
+  "average", "scoringAverage", "avgOverPar", "sumOverPar", "spread",
+  // per-game results
+  "points", "skins", "pot", "carrying", "carriedOut", "up", "thru", "remaining",
+  // match/season tallies
+  "wins", "losses", "halves", "aWins", "bWins",
+  // scoring distribution buckets
+  "eagles", "birdies", "pars", "bogeys", "doublePlus", "parOrBetter",
+  // bests
+  "best18", "best9",
+  // allocation input and output
+  "strokeIndex", "dots",
+  // counts a golf fold gates on (the ≥3-round floors, the 9-vs-18 doubling, partial-total flags).
+  // These collide by NAME with arrays of the same word (`tee.holes`, `standings.rounds`) — that
+  // costs nothing, because arithmetic over an array reads `.length`, and `length` is not a name
+  // on this list.
+  "rounds", "holes", "holeCount", "holesDecided", "pickups", "plays", "strokesPlays",
+].join("|");
+
+// A READ of one of those fields — dotted (`line.par`) or computed (`line["par"]`). Both spell the
+// same access; only the first was covered before fix round 4.
+const GOLF_PROP =
+  `:matches(MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/],` +
+  `MemberExpression[computed=true][property.value=/^(${GOLF_ARITHMETIC_PROPS})$/])`;
+
+// AXIS 2 — arithmetic. All six JS arithmetic operators, in both their binary and compound-assign
+// forms. `/` and `%` are not decoration: division is the operator of every averaging rule the
+// `average` field exists for (`averageOf`'s mean, `metrics`' per-18 normalisation,
+// `courseRecord`'s avgOverPar) and of the nine-hole halving in `resolveStrokes`, and `/` with `%`
+// together are literally how `allocateStrokes` spells the base-dots rule
+// (`Math.floor(strokes / holes)`, `strokes % holes`). Leaving them out left the fence blind to the
+// shape it is most likely to meet. esquery's regex literals cannot contain `/` — even escaped, it
+// terminates the literal — so `/` and `/=` are spelled as their own `:matches` arms.
+const ARITH_BINARY = `:matches([operator=/^(\\*\\*|[-+*%])$/],[operator="/"])`;
+const ARITH_ASSIGN = `:matches([operator=/^(\\*\\*=|[-+*%]=)$/],[operator="/="])`;
+
+// AXIS 3 — value-transparent wrappers: nodes that sit between the arithmetic and the field read
+// without changing which number is being operated on. A wrapper is not a hiding place, so the
+// fence must see through them, and through several of them stacked. Each entry is the wrapper's
+// own node selector plus a `childGuard` constraining which of its children counts as the value it
+// wraps ("" = any child).
+const GOLF_VALUE_WRAPPERS = [
+  {
+    // The idioms TypeScript itself pushes you toward for an OPTIONAL served field — `rows[0]?.par`,
+    // `a.average!`, `a.average as number`, `a.average satisfies number`, `a.average ?? 0` — plus
+    // unary `+`/`-`. Every one of these is a developer working AROUND the type, not changing the
+    // number, so the fence looks straight through them.
+    node:
+      `:matches(ChainExpression,TSNonNullExpression,TSAsExpression,TSSatisfiesExpression,` +
+      `UnaryExpression[operator=/^[-+]$/],LogicalExpression[operator="??"])`,
+    childGuard: "",
+  },
+  {
+    // A ternary is transparent too, but ONLY through its two value arms. The guard is
+    // load-bearing: `total + (p.strokes > 0 ? 1 : 0)` reads a golf field in the ternary's TEST,
+    // which is a membership question rather than arithmetic — the guard covers
+    // `total - (useNet ? a.average : 0)` while leaving that legitimate shape alone.
+    node: "ConditionalExpression",
+    childGuard: ":matches(.consequent,.alternate)",
+  },
+];
+
+// How many wrappers may be stacked between the arithmetic and the field read. Three covers every
+// stacking anyone actually writes (`(a.average ?? 0)!`, `(rows[0]?.par as number)`); it is a
+// CHOSEN BOUND, not a closure, and it is a number here rather than three hand-written branches
+// precisely so raising it is a one-character change instead of another enumeration round.
+const GOLF_MAX_WRAPPER_DEPTH = 3;
+
+// Every path from an arithmetic node down to a golf field read: the cross product of axis 3 with
+// itself at each depth from 0 to GOLF_MAX_WRAPPER_DEPTH. A path is `> w1 > guard(w1) w2 > ... >
+// guard(wN) PROP` — each wrapper's guard constrains the node BELOW it, which is how the ternary's
+// arm restriction composes with everything else instead of needing its own hand-written branches.
+const GOLF_OPERAND_PATHS = (() => {
+  const paths = [`> ${GOLF_PROP}`];
+  let sequences = [[]];
+  for (let depth = 0; depth < GOLF_MAX_WRAPPER_DEPTH; depth += 1) {
+    sequences = sequences.flatMap((seq) => GOLF_VALUE_WRAPPERS.map((w) => [...seq, w]));
+    for (const seq of sequences) {
+      const steps = seq.map((w, i) => (i === 0 ? w.node : `${seq[i - 1].childGuard}${w.node}`));
+      paths.push(`> ${steps.join(" > ")} > ${seq[seq.length - 1].childGuard}${GOLF_PROP}`);
+    }
+  }
+  return paths;
+})();
+
+// `+` is the ONE operator whose meaning is ambiguous at the AST level: it overloads numeric
+// addition and string concatenation, and no type information is available here to tell them
+// apart. Excluding a Literal operand from `+` alone is what keeps `"Par " + hole.par` (display
+// concatenation) and `p.strokes + 1` (a UI stepper) out; every other operator matches a
+// Literal-adjacent field unconditionally, which is why `hole.par * 2` and `line.par / 2` are
+// caught. The cost is stated with the residuals below. The exclusion is scoped to the DIRECT
+// operand path only — a wrapped operand (`(h.par ?? 0) + 1`) is an optional-field narrowing
+// idiom, the signature of a rule rather than of a stepper, and stays covered.
+const NOT_PLUS_LITERAL = `:not([operator="+"][left.type="Literal"]):not([operator="+"][right.type="Literal"])`;
+const NOT_PLUS_EQUALS_LITERAL = `:not([operator="+="][right.type="Literal"])`;
+
+// The message says what the rule catches AND names its limits, because three fix rounds proved
+// that a fence describing itself as more complete than it is gets trusted past where it works.
 const NO_GOLF_ARITHMETIC_MESSAGE =
-  "This re-derives a golf rule inline over a served average/strokes/par/points/relativeToPar/skins field (however it's spelled — reversed operands, `!`, `?? 0`, or a `+=`/`-=` accumulator all match). Move the rule into @swng/domain and call it through @swng/client. If this is genuinely just display arithmetic over an already-served number (not a rule), it needs an eslint-disable-next-line with a comment stating why — there are currently ZERO such exemptions anywhere in apps/web/src (RecordSections.tsx's own two were closed by routing through scoring/present.ts's formatScoreVsPar), so a new one should be rare and heavily justified. Never delete or widen this rule just to go green.";
+  "This does arithmetic on a served golf number, which means a golf rule is being re-derived in the web. Move the rule into @swng/domain and call it through @swng/client. The fence catches all six arithmetic operators (+ - * / % **) and their compound-assign forms, either operand order, computed access (line[\"par\"]), up to three stacked value wrappers (?., !, as, satisfies, ?? 0, unary +/-), and a ternary's value arms. It does NOT catch: a value passed through an intermediate variable, a call wrapper (Number(x.par) - ...), a comparator-spelled ranking (a.points > b.points), or `+` between a golf number and a literal — those are listed as known residuals beside the rule in eslint.config.mjs and are misses, not permissions. If this really is display arithmetic over an already-served number rather than a rule, it needs an eslint-disable-next-line stating why; apps/web/src currently carries ZERO exemptions from THIS rule, so a new one should be rare and argued. Never delete or widen this rule just to go green.";
+
+// The generated branch list. One entry per (arithmetic node kind × operand path); the direct-
+// operand paths additionally carry the `+`-with-Literal exclusion explained above.
+const GOLF_ARITHMETIC_SELECTORS = [
+  ...GOLF_OPERAND_PATHS.map(
+    (path, i) =>
+      `BinaryExpression${ARITH_BINARY}${i === 0 ? NOT_PLUS_LITERAL : ""} ${path}`,
+  ),
+  ...GOLF_OPERAND_PATHS.map(
+    (path, i) =>
+      `AssignmentExpression${ARITH_ASSIGN}${i === 0 ? NOT_PLUS_EQUALS_LITERAL : ""} ${path}`,
+  ),
+].map((selector) => ({ selector, message: NO_GOLF_ARITHMETIC_MESSAGE }));
 
 export default [
   { ignores: ["**/dist", "**/node_modules", "**/cdk.out"] },
@@ -227,163 +365,91 @@ export default [
           ],
         },
       ],
-      // The RE-DERIVATION fence (task-5 fix round 1, spec 2026-07-30 §10 review I1; NARROWED in
-      // fix round 2, review I1-again/I2): the no-restricted-imports rule above only catches
-      // IMPORTING a banned compute name — it never noticed a rule being RETYPED inline instead,
-      // which is how two real leaks shipped (the crew board's `a.average - b.average`, deleted
-      // task 4; RecordSections.tsx's `(score - par) * 2`, moved into nineHoleContribution, task
-      // 5). A regex-based test file was tried first and fix round 1's review planted five
-      // re-derivations that all passed it clean — reversed operands (`2 * (a - b)`), a local
-      // variable (`const raw = a - b; raw * 2`), and the two idioms TypeScript itself pushes a
-      // developer toward for an `optional` served field (`a.average ?? 0`, `a.average!`) all
-      // defeat a regex. That regex file is deleted (apps/web/test/noGolfArithmetic.test.ts) — one
-      // mechanism, not two with different coverage.
+      // The RE-DERIVATION fence. The `no-restricted-imports` rule above only catches IMPORTING a
+      // banned compute name — it never noticed a rule being RETYPED inline instead, which is how
+      // two real leaks shipped: the crew board's `a.average - b.average` (deleted task 4) and
+      // RecordSections.tsx's `(score - par) * 2` (moved into `nineHoleContribution`, task 5). This
+      // rule closes that: golf arithmetic over a SERVED field is a rule being re-derived in the
+      // web, and the boundary says rules live in @swng/domain.
       //
-      // Fix round 2 NARROWED the single broad "any descendant" selector fix round 1 shipped, after
-      // the review proved it also fires on three plausible pieces of LEGITIMATE code: string
-      // concatenation for display (`"Par " + h.par`), a UI stepper (`p.strokes + 1`), and a golf
-      // property read nested inside a ternary's TEST rather than an operand of the arithmetic at
-      // all (`c + (p.strokes > 0 ? 1 : 0)`). Round 2 shipped branch (A) below with a Literal
-      // exclusion on BOTH sides for ANY of `-`/`+`/`*`, and its own comment claimed this cost
-      // nothing — WRONG, and corrected in fix round 3: excluding a Literal operand from `-`/`*`
-      // also hides `h.par * 2` and `2 * h.par` — the nine-hole doubling rule itself, the one rule
-      // this whole task exists to move — plus the fully-inlined form of `formatScoreVsPar`'s own
-      // call site (`l.score * 2 - l.par * 2`, i.e. deleting the two `nineHoleContribution` calls
-      // and spelling the doubling out by hand). Fix round 3's own review caught this by testing
-      // the CLAIM, not just the five named mutations, and fixed it by scoping the Literal
-      // exclusion to `operator="+"` only (see branch A below) — `-`/`*` regain full direct-operand
-      // coverage regardless of a Literal sibling, and the two `+`-shaped false positives
-      // (both literal-adjacent) stay excluded.
+      // A regex-based test file was tried first and lost — reversed operands, an intermediate
+      // local, and the `?? 0`/`!` narrowing idioms TypeScript pushes you toward for an optional
+      // field all defeat text matching. It is deleted; this is the one mechanism, so a green
+      // `pnpm lint` means one thing rather than two things with different coverage.
       //
-      // Fix round 3 ALSO added two more one-level unwrap branches while re-verifying the review's
-      // OWN claim that "every spelling is restored": `(a.average as number) - (b.average as
-      // number)` (TypeScript's third idiom for narrowing an optional field, peer to `??`/`!`) and
-      // `-l.par + l.score` (a unary-minus-wrapped operand) both still passed clean under the
-      // `operator="+"`-scoped exclusion ALONE — neither is a Literal-adjacency question at all,
-      // they are TWO MORE wrapper node types (`TSAsExpression`, `UnaryExpression`) the existing
-      // `??`/`!`/`ChainExpression` unwrap branches never covered. Branches (E)/(F) below close
-      // both, found and closed by executing the exact patterns named, not by trusting the prose
-      // that said they already worked.
+      // WHAT THE SELECTORS ARE MADE OF, and why they are generated rather than listed: see the
+      // three axes near the top of this file (`GOLF_ARITHMETIC_PROPS`, `ARITH_BINARY`/
+      // `ARITH_ASSIGN`, `GOLF_VALUE_WRAPPERS`). Every branch here is one cell of their cross
+      // product. Four hand-enumerated attempts each left a hole on whichever axis the author
+      // wasn't thinking about — the fourth found that `/` and `%` had never been in the operator
+      // set at all, which is the class this fence most needs to see (`averageOf`'s mean,
+      // `resolveStrokes`' nine-hole halving, and `allocateStrokes`' `Math.floor(strokes / holes)`
+      // base-dots rule are ALL division); that `rows[0]?.par * 2` was invisible because `?.` had
+      // only ever been unwrapped underneath `??`; and that the property axis had never been
+      // revisited at all, so `line.score * 2` — the nine-hole doubling rule, over the other
+      // operand — passed clean. Enumeration was the defect, not any particular missing entry.
       //
-      // Every branch below is EMPIRICALLY verified — a scratch fixture carrying all five original
-      // mutations + the accumulator + the three retyped `GamePanel` sorts + the four round-3
-      // regression spellings + all three false positives (18 patterns), run through
-      // `pnpm exec eslint` before and after each design change, on the scratch file AND
-      // individually re-planted into the real files (RecordSections.tsx, ResultsView.tsx,
-      // SeasonPanel.tsx, GamePanel.tsx) as a second, independent check:
+      // There is a FOURTH axis, and it is the one that fails silently and biggest: WHICH FILES the
+      // rule applies to. Narrowing this block's `files` glob from `*.{ts,tsx}` to `*.ts` — four
+      // deleted characters — turns the fence off for every React component in the app, which is
+      // most of `apps/web/src` and all four of the files whose leaks motivated the rule, with
+      // `pnpm lint` still green. So the check below lints its fixture at BOTH extensions and
+      // requires them to agree; covering one and not the other is itself a failure.
       //
-      // (A) direct-operand arithmetic. Literal exclusion applies ONLY when `operator="+"` — `-`/`*`
-      //     have NO exclusion at all and match a Literal-adjacent golf property unconditionally
-      //     (`h.par * 2`, `2 * h.par`, `l.par * 2` inside a larger `-` expression). The cost this
-      //     buys: a genuine `+`-shaped re-derivation between a golf property and a literal (e.g. a
-      //     hypothetical `x.strokes + 1` used as an actual RULE, not a display stepper) is
-      //     invisible — indistinguishable at the AST level from `p.strokes + 1`'s legitimate
-      //     stepper or `"Par " + h.par`'s legitimate string concat, since `+` overloads both
-      //     numeric addition and string concatenation and carries no type information here. This
-      //     is the accepted tradeoff, not a coincidence: no golf rule in this codebase adds a
-      //     served field to a literal (every real rule found — doubling, differences, sums —
-      //     uses `-`/`*` or another property as the other operand), so the cost is theoretical
-      //     today; if a `+`-with-literal rule is ever the real leak, that is exactly why this
-      //     branch misses it.
-      // (B) one level of `?? <anything>` unwrapping — catches `(a.average ?? 0) - (b.average ?? 0)`,
-      //     which (A) alone cannot: neither top-level operand of that subtraction is ITSELF a
-      //     MemberExpression, both are LogicalExpressions, so a naive "direct operand only"
-      //     narrowing would have silently dropped this exact planted mutation (confirmed by
-      //     execution, not assumed).
-      // (B2) the same one level of `??` unwrapping, through an optional-chaining `ChainExpression`
-      //      wrapper (`rows[0]?.average ?? 0` — self-discovered in fix round 2, arguably MORE
-      //      idiomatic TypeScript than the review's own plain-identifier example).
-      // (C) one level of `!` (TSNonNullExpression) unwrapping — the same reasoning for
-      //     `a.average! - b.average!`.
-      // (E) one level of `as` (TSAsExpression) unwrapping — TypeScript's THIRD idiom for narrowing
-      //     an optional field, peer to `??`/`!`: `(a.average as number) - (b.average as number)`.
-      // (F) one level of unary-minus (UnaryExpression) unwrapping — `-l.par + l.score`. Unlike
-      //     mutation 2's `2 * (line.score - line.par)`, which is caught via its own INNER
-      //     BinaryExpression node independently of the outer one, a plain `-l.par` has no inner
-      //     BinaryExpression at all for branch (A) to test against — it needs its own unwrap.
-      // (D) `+=`/`-=`/`*=` accumulators, direct-operand + Literal-excluded (both sides, all
-      //     operators — no `+`-only narrowing was requested or verified for assignments, and no
-      //     false positive was found requiring one) — an AssignmentExpression is a DIFFERENT node
-      //     type from BinaryExpression, so `let t = 0; for (...) t += h.par;` (the exact
-      //     hand-rolled-sum shape M5 folded into `parForHoles`/`dotsForHoles`) was previously
-      //     INVISIBLE to this fence no matter how (A) was written; this is new coverage.
+      // COVERAGE IS PROVEN BY MUTATION, NOT BY THIS COMMENT — and the proof is committed, not
+      // performed once and thrown away. `scripts/checkGolfArithmeticFence.mjs` lints a fixture of
+      // 90 spellings against THIS rule and fails if any FIRE line goes silent or any SILENT line
+      // fires; `pnpm lint` runs it. Round 2's regression (a Literal exclusion that stopped
+      // catching `hole.par * 2`) fails that check today, by execution, as does narrowing the glob
+      // above. If you change a selector, let the check tell you what you did; do not trust prose,
+      // including this paragraph.
       //
-      // `GOLF_ARITHMETIC_PROPS` above adds `points`/`relativeToPar`/`skins` (I2's GameState fields)
-      // to the original `average`/`strokes`/`par` — otherwise `[...lines].sort((a,b) =>
-      // b.points - a.points)` could be retyped straight back into GamePanel.tsx tomorrow with this
-      // whole fence green, since I1's selector never covered I2's own move.
-      //
-      // Known, accepted residuals (stated here, not solved — narrower branches trade some
-      // theoretical reach for killing real false positives, and this is the honest boundary of
-      // what static, non-dataflow AST matching can do):
-      // - A fully destructured local — `const { score, par } = line; const raw = score - par; raw
-      //   * 2;` — where NEITHER the property read nor the multiplication shares one expression
-      //   with the other. Unchanged from fix round 1: no branch below, or any AST selector without
-      //   dataflow analysis, can see through an intermediate variable.
-      // - A ternary/conditional VALUE (not test) that itself is a direct operand of the arithmetic
-      //   — e.g. `total + (useNet ? a.average! : 0)` — is invisible to every branch below the same
-      //   way `+=` was to fix round 1: a `ConditionalExpression` isn't unwrapped by any branch
-      //   here, only `??`/`!`/`as`/unary-minus. Add a branch if this shape is ever the real leak;
-      //   don't widen (A) back to "any descendant" to pre-empt it, since that is exactly what
-      //   reintroduces the string-concat/stepper false positives this narrowing exists to kill.
-      // - Double-wrapped forms (`(a.average ?? 0)!`, `a.average ?? b.average ?? 0`, etc.) are not
-      //   tested and may not match; the named idioms (single `??`, single `!`, single `as`, single
-      //   unary-minus) are what was actually observed being written, not an exhaustive closure.
-      // - A COMPARATOR-spelled ranking — `sort((a, b) => a.average! > b.average! ? 1 : -1)`,
-      //   `a.points > b.points ? -1 : 1` — is invisible: `<`/`>`/`<=`/`>=` are not in
-      //   `/^[-+*]$/`, and this is directly the class Important B is about (a ranking rule
-      //   re-derived in the web). DELIBERATELY NOT COVERED (fix round 3 ruling): adding
-      //   `<`/`>`/`<=`/`>=` branches was tried and tested against the real tree, and it produces
-      //   exactly one hit — `describeGame.ts`'s `lines.filter((l) => l.skins > 0)` — a genuine
-      //   false positive (a membership filter, not a ranking rule) with no clean way to exclude it
-      //   short of re-narrowing in a way that risks losing real coverage again. Covering this
-      //   residual is judged the wrong call; leaving it stated here, honestly, is the right one.
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector: `BinaryExpression[operator=/^[-+*]$/]:not([operator="+"][left.type="Literal"]):not([operator="+"][right.type="Literal"]) > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
-          message: NO_GOLF_ARITHMETIC_MESSAGE,
-        },
-        {
-          selector: `BinaryExpression[operator=/^[-+*]$/] > LogicalExpression[operator="??"] > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
-          message: NO_GOLF_ARITHMETIC_MESSAGE,
-        },
-        // Self-caught during verification, not in the review: `rows[0]?.average ?? 0` (optional
-        // chaining, arguably MORE idiomatic TypeScript than the plain `.average` form the review's
-        // own mutation 4 used) wraps the MemberExpression in a ChainExpression node, which sits
-        // BETWEEN the LogicalExpression and the MemberExpression — so the branch immediately above
-        // (a direct `>` child) does not reach it. Proven by a scratch probe
-        // (`(rows[0]?.average ?? 0) - (rows[1]?.average ?? 0)` passed clean before this branch
-        // existed); this branch drills through the extra ChainExpression wrapper.
-        {
-          selector: `BinaryExpression[operator=/^[-+*]$/] > LogicalExpression[operator="??"] > ChainExpression > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
-          message: NO_GOLF_ARITHMETIC_MESSAGE,
-        },
-        {
-          selector: `BinaryExpression[operator=/^[-+*]$/] > TSNonNullExpression > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
-          message: NO_GOLF_ARITHMETIC_MESSAGE,
-        },
-        // `as` is the third idiom TypeScript pushes for an optional field, peer to `??`/`!` above
-        // (`(a.average as number) - (b.average as number)`) — a TSAsExpression wraps the
-        // MemberExpression the same one level deep, so it needs its own unwrap branch.
-        {
-          selector: `BinaryExpression[operator=/^[-+*]$/] > TSAsExpression > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
-          message: NO_GOLF_ARITHMETIC_MESSAGE,
-        },
-        // A unary-minus-wrapped operand (`-l.par + l.score`) is a UnaryExpression, not a nested
-        // BinaryExpression — mutation 2's `2 * (line.score - line.par)` is caught via its own
-        // INNER BinaryExpression node independently of the outer one, but a plain unary negation
-        // has no such inner node for the direct-operand branch to test; this unwraps it the same
-        // one level as the `??`/`!`/`as` branches above.
-        {
-          selector: `BinaryExpression[operator=/^[-+*]$/] > UnaryExpression[operator="-"] > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
-          message: NO_GOLF_ARITHMETIC_MESSAGE,
-        },
-        {
-          selector: `AssignmentExpression[operator=/^(\\+=|-=|\\*=)$/]:not([left.type="Literal"]):not([right.type="Literal"]) > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
-          message: NO_GOLF_ARITHMETIC_MESSAGE,
-        },
-      ],
+      // Known, accepted residuals. These are the shapes this rule CANNOT see. Static AST matching
+      // without dataflow analysis has a real boundary, and stating it honestly is the point — an
+      // overclaiming comment teaches the next reader to trust coverage that isn't there, which is
+      // exactly how fix round 2's regression shipped:
+      // - AN INTERMEDIATE LOCAL. `const { score, par } = line; const raw = score - par; raw * 2;`
+      //   — neither the field read nor the multiplication shares an expression with the other. No
+      //   selector can follow a value through a variable. This is the big one, and it is why this
+      //   rule is a tripwire for accidents, not a defence against someone determined to route
+      //   around it.
+      // - A CALL WRAPPER. `Number(a.average) - Number(b.average)`, or a difference between two
+      //   sanctioned domain calls. DELIBERATELY not covered: `CallExpression` is the SANCTIONED
+      //   escape (call @swng/client), so treating it as transparent would flag the very pattern
+      //   this fence wants people to reach for.
+      // - A COMPARATOR-SPELLED RANKING. `sort((a, b) => a.points > b.points ? -1 : 1)`. DELIBERATELY
+      //   not covered, on evidence: adding `<`/`>`/`<=`/`>=` was tried against the real tree and
+      //   fires on `describeGame.ts`'s `lines.filter((l) => l.skins > 0)` — a membership filter,
+      //   not a ranking rule — with no clean way to separate the two. A false positive on real
+      //   code is how a fence gets deleted by the next person, so the miss is the better trade.
+      // - `+` WITH A LITERAL. `p.strokes + 1` is a stepper and `"Par " + hole.par` is display
+      //   concatenation; `+` overloads both meanings and the AST carries no types, so the Literal
+      //   exclusion on `+` (direct operands only — see `NOT_PLUS_LITERAL`) also hides a genuine
+      //   rule that ADDS a served field to a literal. Every other operator is unconditional.
+      //   The same tradeoff runs the other way for a WRAPPED operand: `"Par " + (hole.par ?? 0)`
+      //   DOES fire, because the exclusion is direct-operand-only. That is an over-fire on
+      //   display code, accepted deliberately — a `?? 0` participating in `+` is also exactly what
+      //   a hand-rolled accumulator looks like (`t += h.par ?? 0`), this app renders through
+      //   template literals rather than `+` so the shape does not occur here, and the message
+      //   tells you how to exempt it with an argument. Both halves are pinned in the fixture.
+      //   `hole.par += 1` is silent for the same `+` reason `hole.par + 1` is, while
+      //   `hole.par -= 1` fires: the asymmetry is the ambiguity of `+`, not an oversight.
+      // - TEST FILES ARE NOT FENCED AT ALL. This block's `ignores` exempts `*.test.ts(x)` — a
+      //   test legitimately computes its own expected values as an oracle. It is inherited from
+      //   the import-ban rule above and applies here too, so a re-derivation inside a `.test.tsx`
+      //   is invisible. Deliberate, but worth knowing before trusting a green run.
+      // - FOUR OR MORE STACKED WRAPPERS. `GOLF_MAX_WRAPPER_DEPTH` is 3, which covers every
+      //   stacking anyone writes; a fourth turn passes. It is a chosen bound, not a closure.
+      // - COMPUTED ACCESS THROUGH A VARIABLE. `line[key] * 2` — the field name isn't in the source,
+      //   so no selector can know which field it is. `line["par"]` (the literal form) IS caught.
+      // - AN INCREMENT. `hole.par++` is an `UpdateExpression`, not one of the arithmetic operators.
+      //   Left out on purpose: incrementing a served field is a mutation bug, not a rule being
+      //   re-derived, and it is not a shape any of this fence's real leaks took.
+      // - A GOLF FIELD UNDER A NAME NOT ON THE PROPERTY AXIS. The axis was read off the wire
+      //   schemas and domain shapes (see `GOLF_ARITHMETIC_PROPS`), but a served field added later
+      //   is uncovered until it is added there. That axis going stale is the most likely way this
+      //   rule quietly stops working; it is also the cheapest to fix.
+      "no-restricted-syntax": ["error", ...GOLF_ARITHMETIC_SELECTORS],
     },
   },
   {

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "pnpm -r test",
-    "lint": "eslint . --max-warnings 0",
+    "lint": "eslint . --max-warnings 0 && node scripts/checkGolfArithmeticFence.mjs",
     "build": "pnpm -r build",
     "validate": "pnpm lint && pnpm typecheck && pnpm build && pnpm test",
     "cdk:guard": "node -e \"if(!process.env.AWS_PROFILE){console.error('Set AWS_PROFILE before running CDK');process.exit(1)}\"",

@@ -501,6 +501,46 @@ describe("SeasonPanel — head-to-head strokes line", () => {
     expect(screen.queryByText(/Bo gets 20/)).toBeNull();
   });
 
+  // A golfer who shoots BETTER than par has a NEGATIVE average — the plain subtraction
+  // (`higher.average - lower.average`) is sign-agnostic, but this arc has already been through a
+  // whole plus-handicap correction once, and an unpinned sign path is exactly that defect's
+  // shape. Ann at -5 is still the anchor (lower/better); Bo at 3 is the one who gets strokes.
+  it("a negative average (better than par) is still the lower/anchor side, not a special case", async () => {
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValue({
+      ...baseStandings,
+      scoreboard: [
+        { golferId: ANN, name: "Ann", rounds: 5, average: -5 },
+        { golferId: BO, name: "Bo", rounds: 5, average: 3 },
+      ],
+    });
+
+    renderPanel();
+
+    expect(await screen.findByText("If you played tomorrow, Bo gets 8.")).toBeTruthy();
+  });
+
+  // Two equal gaps (0↔5 and 5↔10 are both 5 apart): the strict `<` in the scan never replaces an
+  // already-found closest pair with a merely EQUAL one, so the FIRST pair in ascending order
+  // wins — Ann/Bo (the lower pair), not Bo/Cy. Deterministic and chosen, not incidental; pinned
+  // so a future refactor can't silently flip which pair a real tie names.
+  it("two equally-close pairs: the first pair in ascending order wins the tie-break", async () => {
+    signInAsAnn();
+    mockedGetSeasonStandings.mockResolvedValue({
+      ...baseStandings,
+      scoreboard: [
+        { golferId: ANN, name: "Ann", rounds: 5, average: 0 },
+        { golferId: BO, name: "Bo", rounds: 5, average: 5 },
+        { golferId: golferId("cy-g"), name: "Cy", rounds: 5, average: 10 },
+      ],
+    });
+
+    renderPanel();
+
+    expect(await screen.findByText("If you played tomorrow, Bo gets 5.")).toBeTruthy();
+    expect(screen.queryByText(/Cy gets/)).toBeNull();
+  });
+
   // Decision (task 6 dispatch): a tied closest pair is a real, interesting answer to "what would
   // a match look like" — not suppressed, and not "X gets 0" (a nonsensical sentence once strokes
   // are a non-negative count: a zero-stroke player has never "gotten" anything). Rendered as its

@@ -166,7 +166,12 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
   // among members who both have one. Sorted ascending by average first (never assumed from wire
   // order — this is an internal lookup, not the visible table's own served-order row list) so
   // the minimum gap is always between some adjacent pair in that sorted list; scanning it once
-  // finds the closest pair without checking every one of the C(n,2) pairs.
+  // finds the closest pair without checking every one of the C(n,2) pairs. A golfer who shoots
+  // BETTER than par has a negative average, and the plain subtraction below is sign-agnostic —
+  // it still finds the true minimum gap and still names the higher (worse) side. On a tie
+  // between two gaps (e.g. averages 0/5/10, both adjacent gaps 5), the strict `<` below never
+  // replaces an already-found pair with an equally-close one, so the FIRST pair encountered in
+  // ascending order wins — deterministic, not incidental, and pinned by a test.
   //
   // Season averages are already whole numbers (averageOfValues rounds the mean before this ever
   // sees it), so the difference of any two is already an integer — there is no second rounding

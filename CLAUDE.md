@@ -1491,8 +1491,9 @@ recommendation — **request SES production access before announcing**. On local
 
 Strokes now come from what you shoot, not an index (2026-07-29/30, spec
 `docs/superpowers/specs/2026-07-29-relative-to-par-strokes-model-design.md`, plan
-`docs/superpowers/plans/2026-07-29-relative-to-par-strokes-model.md`, 6 SDD tasks + 5
-controller-verified fix rounds, commits `77fb675..ba1ee29`): the owner's field report — a group
+`docs/superpowers/plans/2026-07-29-relative-to-par-strokes-model.md`, 6 SDD tasks, each
+independently reviewed, seven fix-round dispatches across them (task 4 needed two), commits
+`77fb675..ba1ee29`): the owner's field report — a group
 settling strokes by asking each other "for an average round, how do you shoot relative to par?"
 and taking the difference — closed the entire WHS/swng-Index pipeline and replaced it with the
 number a first tee already speaks. **One number, stated, never converted:** a golfer's

@@ -1,27 +1,29 @@
 # swng — v1 Scope and the Release Arc
 
-> Status: **approved** (2026-07-07). Scopes the first shippable slice of `product.md` and the
-> order the rest lands. Product altitude only — see `architecture.md` for the domain and
-> backend design that carries this arc.
+> Status: **approved** (2026-07-07; vocabulary corrected 2026-07-30 to match the stroke/average
+> model that replaced the WHS index — see `CLAUDE.md`'s own arc record for the change itself;
+> scope and sequencing below are otherwise unchanged). Scopes the first shippable slice of
+> `product.md` and the order the rest lands. Product altitude only — see `architecture.md` for
+> the domain and backend design that carries this arc.
 
 ## The scoping principle
 
 v1 must prove the point of view, not ship a smaller scorecard. The irreducible claim of
-`product.md` is **everything counts**: format-aware, handicap-aware rounds that write
+`product.md` is **everything counts**: format-aware, stroke-aware rounds that write
 permanently to golfer and crew records. A v1 that is "the scorecard with more formats" fails
 exactly the way the old docs did. So the slice is chosen to make one real golf ritual
 completely true:
 
 > **The Saturday game.** A real crew plays its standing game in swng every week — the games
-> score themselves, the handicaps are settled before anyone tees off, and every round counts
-> toward the crew's ledger and each player's index, forever.
+> score themselves, the strokes are settled before anyone tees off, and every round counts
+> toward the crew's ledger and each player's average, forever.
 
 Why this slice and not another:
 
 - **It's the highest-frequency ritual in golf.** Weekly, not annual. It compounds: every
   Saturday deepens the ledger and the habit. A trip is a better demo; a standing game is a
   better product.
-- **It exercises the entire spine.** Round engine, handicap engine, crew, course data —
+- **It exercises the entire spine.** Round engine, the stroke model, crew, course data —
   nothing built for v1 is throwaway, and v2/v3 are configurations of this spine, not new
   systems.
 - **It recruits by itself.** Every round pulls the rest of the crew in through the join link —
@@ -38,8 +40,8 @@ Why this slice and not another:
   games of most crews. The menu grows later; the engine does not get rebuilt later —
   **concurrent games over one set of strokes is in v1** (a four-ball match *and* individual
   skins on the same card). That capability is the product's spine and cannot be retrofitted.
-- **Handicap-aware:** strokes allocated by stroke index (dots on the card), format-correct
-  allowances applied automatically, adjustable by the group.
+- **Stroke-aware:** strokes allocated by stroke index (dots on the card), from what each
+  player states they normally shoot relative to par — swng takes the difference.
 - **Scoring:** two taps; anyone can score for anyone (one person can keep the whole card);
   "picked up" and "conceded" are first-class scores.
 - **Game state, always:** current standing of every game at a glance, pulled up per game from
@@ -48,18 +50,17 @@ Why this slice and not another:
 - **Golf's realities:** offline-first (dead zones never block entry), join by the round's link
   or code (a first-timer signs up on the way in, once; owner call, 2026-07-13), 9-hole rounds
   first-class.
-- **After the round:** the card archives permanently, results write to the ledger, handicap
-  differentials post, and the round has a shareable link (spectator live view uses the same
+- **After the round:** the card archives permanently, results write to the ledger, your
+  average updates, and the round has a shareable link (spectator live view uses the same
   mechanism). Rendered card *images* for the group chat are v1.1.
 
 ### The Golfer
 
 - Account, profile, home course.
-- **The swng Index**, WHS-faithful: best 8 of last 20 differentials, rating/slope, net double
-  bogey adjustment, 9-hole handling. Bootstrap rule: a new golfer declares a starting index
-  (or enters their official one, which always wins if maintained); once swng has 54 holes of
-  scores, the computed swng Index takes over.
-- Round history (filter by course, crew, year), index trend, scoring distribution
+- **What you shoot:** your average — score minus par over your last 10 finished rounds, a
+  nine counting doubled. No bootstrap rule and no starting number to declare: your first
+  finished round already gives you one.
+- Round history (filter by course, crew, year), your average over time, scoring distribution
   (birdies/pars/bogeys/others).
 - **Not in v1:** the course book, milestones, per-hole stat tags, season recap.
 
@@ -74,7 +75,7 @@ Why this slice and not another:
   instead defines named seasons that count members' finalized rounds).
 - **The ledger, core cut:** every crew round recorded; head-to-head match records between any
   two members; season leaderboard (wins, points, skins).
-- **Not in v1:** the feed, partner records, crew handicap overrides.
+- **Not in v1:** the feed, partner records.
 
 ### The Course
 
@@ -83,7 +84,7 @@ Why this slice and not another:
   correctly; crew members can verify). Seeding from a licensed dataset is a separate
   buy-vs-build decision that must not block v1 — a crew that enters its two home courses is
   fully served.
-- Treated as a product surface: every dot, allowance, and differential depends on it.
+- Treated as a product surface: every dot and stroke depends on it.
 
 ### The v1 bar
 
@@ -91,7 +92,7 @@ v1 is done when this is true, not when the features exist:
 
 - A crew of 8 runs its standing game for a month with **zero paper and zero spreadsheet**.
 - The app earns **≤ 20 seconds per hole** and never makes the group wait.
-- Handicaps are trusted enough that **the first-tee negotiation actually ends**.
+- Strokes are trusted enough that **the first-tee negotiation actually ends**.
 - The member who'd never installed the app signs up once on the first tee (the join link is
   the funnel; owner call, 2026-07-13) and is **fully present** in every card and ledger from
   that round on.
@@ -101,8 +102,8 @@ v1 is done when this is true, not when the features exist:
 Pure configuration and polish on the v1 engine, shipped as they're ready: **Nassau with
 presses** (three concurrent matches plus press-from-the-card — configuration, not
 architecture), **junk tallies** (greenies, sandies, the snake), modified Stableford and
-quota, rendered card images for sharing, crew handicap overrides, optional per-hole stat tags
-(putts, fairways, GIR, penalties) so the data starts accruing.
+quota, rendered card images for sharing, optional per-hole stat tags (putts, fairways, GIR,
+penalties) so the data starts accruing.
 
 ## v2 — The Trip
 
@@ -115,8 +116,8 @@ Target: in golfers' hands **before peak buddies-trip season**.
 
 ## v3 — The League and the Outing
 
-- **Leagues:** season containers — divisions, generated schedules, 9-hole matches with league
-  handicaps, substitutes, points table, playoffs.
+- **Leagues:** season containers — divisions, generated schedules, 9-hole matches with the
+  same strokes model, substitutes, points table, playoffs.
 - **Outings:** one-day events — big fields, flights, banquet-projector leaderboard,
   closest-to-the-pin and long drive, instant results at dinner.
 - **Season in Golf** recap — ships once there's a full season of data to recap.

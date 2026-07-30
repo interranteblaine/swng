@@ -12,9 +12,19 @@
 // because it runs the rule — this is not a second fence with its own coverage (an earlier round
 // tried that and rightly deleted it), it is a regression pin on the only one.
 //
-// The fixture is linted as VIRTUAL text at a path inside `apps/web/src`, so it exercises the same
-// config block the real web files do without existing as a file that `eslint .` would then have to
-// report on.
+// The check has two halves, because a fence has two ways to fail:
+//
+//   1. WHICH FILES IT COVERS. Every real, non-test source file under `apps/web/src` must resolve a
+//      config that actually contains the rule. This half is enumerated FROM THE TREE, so a new file
+//      or directory is covered by construction rather than by a list someone has to remember to
+//      extend. It exists because the `files`/`ignores` globs turned out to be a whole axis of
+//      silent failure: `**/*.{ts,tsx}` → `*.{ts,tsx}` (three characters) drops 53 of 59 files, and
+//      widening `ignores` with `**/[A-Z]*.tsx` drops every React component — both with `pnpm lint`
+//      green, and both survive any check that only lints a fixture at one made-up path.
+//   2. WHAT IT CATCHES. The fixture below is linted as virtual TEXT at real file paths sampled from
+//      that same enumeration, and every marked line is checked against a FIRE/SILENT expectation.
+//      Using real paths (not an invented one) is what ties this half to the first: if a glob edit
+//      excludes real components, the sampled paths lose the rule and this half fails too.
 //
 // Run by `pnpm lint`. If it fails: a FIRE line that went silent is lost coverage — do not "fix" it
 // by editing the marker. A SILENT line that fired is a false positive, which is how a fence earns
@@ -22,13 +32,28 @@
 
 import { ESLint } from "eslint";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const WEB_SRC = "apps/web/src";
 
-// Linted at this virtual path (plus an extension, see EXTENSIONS below) so the `apps/web/src/**`
-// config block applies. No such file exists.
-const FIXTURE_PATH = "apps/web/src/__golfArithmeticFenceFixture__";
+// Every real source file the fence is supposed to govern, read off disk. Test files are exempt by
+// the config's own `ignores` (a test is an oracle that legitimately computes expected values), so
+// they are excluded here for the same reason.
+const webSourceFiles = (() => {
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(path.join(REPO_ROOT, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) walk(rel);
+      else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) found.push(rel);
+    }
+  };
+  walk(WEB_SRC);
+  return found.sort();
+})();
 
 const FIXTURE = `
 // Params are untyped on purpose: this file is parsed, never typechecked, and the fence matches
@@ -168,44 +193,103 @@ const firedLinesAt = async (filePath) => {
   );
 };
 
-// WHICH FILES THE RULE APPLIES TO IS A FOURTH AXIS, and it is the one that fails silently and
-// biggest. Narrowing the config block's `files` glob from `*.{ts,tsx}` to `*.ts` — four deleted
-// characters — turns the fence off for every React component in the app, which is 40 of the ~60
-// web source files and ALL FOUR of the files whose leaks motivated the rule
-// (RecordSections.tsx, GamePanel.tsx, SeasonPanel.tsx, ResultsView.tsx). `pnpm lint` stays green
-// throughout. So the fixture is linted at BOTH extensions and both must agree: covering one and
-// not the other is itself the failure.
-const EXTENSIONS = ["ts", "tsx"];
-const fired = Object.fromEntries(
-  await Promise.all(EXTENSIONS.map(async (ext) => [ext, await firedLinesAt(`${FIXTURE_PATH}.${ext}`)])),
-);
+// ---------------------------------------------------------------------------------------------
+// HALF ONE — is the rule switched ON for every file it is supposed to govern?
+// ---------------------------------------------------------------------------------------------
+// Asked of the config directly, per real file, so no glob edit can leave a file uncovered while
+// this check stays green. `calculateConfigForFile` answers exactly the question that matters:
+// "if ESLint linted THIS path, would the re-derivation rule be in effect?"
+const uncovered = [];
+for (const file of webSourceFiles) {
+  const config = await eslint.calculateConfigForFile(path.join(REPO_ROOT, file));
+  const entry = config.rules?.["no-restricted-syntax"];
+  const severity = Array.isArray(entry) ? entry[0] : entry;
+  const selectorCount = Array.isArray(entry) ? entry.length - 1 : 0;
+  if (severity !== "error" && severity !== 2) uncovered.push(`${file} — rule not in effect`);
+  else if (selectorCount === 0) uncovered.push(`${file} — rule present but has no selectors`);
+}
+
+if (webSourceFiles.length < 40) {
+  console.error(
+    `golf-arithmetic fence: only found ${webSourceFiles.length} source files under ${WEB_SRC}.` +
+      " The tree walk is broken, so the coverage half proved nothing.",
+  );
+  process.exit(1);
+}
+
+if (uncovered.length > 0) {
+  console.error(
+    `golf-arithmetic fence: ${uncovered.length} of ${webSourceFiles.length} files under ${WEB_SRC}` +
+      " are NOT covered by the re-derivation rule. Check the config block's `files`/`ignores`" +
+      " globs — a narrowed glob turns the fence off silently and `eslint .` stays green.\n" +
+      uncovered.map((u) => `  ${u}`).join("\n"),
+  );
+  process.exit(1);
+}
+
+// ---------------------------------------------------------------------------------------------
+// HALF TWO — does it catch the right things, at real paths?
+// ---------------------------------------------------------------------------------------------
+// The fixture text is linted AT REAL FILE PATHS (lintText never reads the file, so nothing is
+// touched). The sample is drawn from the enumeration above rather than hand-listed: one file per
+// (top-level directory × extension), which covers a newly added directory by construction. The
+// three paths the round-5 review named as minimums — a nested PascalCase component, a nested
+// camelCase module, and a top-level component — all fall out of that rule automatically.
+const SAMPLE_PATHS = (() => {
+  const bySlot = new Map();
+  for (const file of webSourceFiles) {
+    const rel = file.slice(WEB_SRC.length + 1);
+    const dir = rel.includes("/") ? rel.slice(0, rel.indexOf("/")) : "(root)";
+    const slot = `${dir}:${path.extname(file)}`;
+    // Prefer a PascalCase name where a directory has one — components are what the glob edits
+    // that motivated this half actually excluded.
+    const current = bySlot.get(slot);
+    const isPascal = /\/[A-Z]/.test(`/${path.basename(file)}`);
+    if (!current || (isPascal && !/\/[A-Z]/.test(`/${path.basename(current)}`))) bySlot.set(slot, file);
+  }
+  return [...bySlot.values()].sort();
+})();
+
+const fired = new Map();
+for (const p of SAMPLE_PATHS) fired.set(p, await firedLinesAt(p));
 
 const failures = [];
 let expectedFire = 0;
 let expectedSilent = 0;
+const markedCases = [];
 FIXTURE.split("\n").forEach((text, i) => {
   const marker = /\/\/ (FIRE|SILENT) (.*)$/.exec(text);
   if (!marker) return;
   const [, expected, why] = marker;
   if (expected === "FIRE") expectedFire += 1;
   else expectedSilent += 1;
-  for (const ext of EXTENSIONS) {
-    const didFire = fired[ext].has(i + 1);
+  markedCases.push(`${expected}|${text.trim()}`);
+  for (const p of SAMPLE_PATHS) {
+    const didFire = fired.get(p).has(i + 1);
     if (didFire === (expected === "FIRE")) continue;
     failures.push(
-      `  ${expected === "FIRE" ? "LOST COVERAGE" : "FALSE POSITIVE"} (.${ext} files): ` +
+      `  ${expected === "FIRE" ? "LOST COVERAGE" : "FALSE POSITIVE"} (at ${p}): ` +
         `${text.trim().split("//")[0].trim()}` +
         `\n      expected ${expected}, got ${didFire ? "FIRE" : "SILENT"} — ${why}`,
     );
   }
 });
 
-// A fixture that stops exercising the rule (a parser change, a config move) would otherwise pass
-// silently with zero cases. Pin the shape of the evidence, not just its verdict.
-if (expectedFire < 61 || expectedSilent < 29) {
+// The fixture's CONTENT is pinned, not merely its size. A floor ("at least N cases") is defeated
+// by the cheapest possible cheat: flip an inconvenient FIRE marker to SILENT and add a filler FIRE
+// line to keep the total. Hashing every marked case makes any edit — a flipped marker, a deleted
+// case, a quietly reworded one — fail until someone updates this constant, which is a diff a
+// reviewer sees and has to agree with. Cases here are add-only; if you are changing one, that is
+// the thing to argue for in the commit message.
+const FIXTURE_DIGEST = "87db6aa66f8ddbffc6edcff646fa3cda7be0881ec1347e8038a06cf21a981d57";
+const digest = createHash("sha256").update(markedCases.join("\n")).digest("hex");
+if (digest !== FIXTURE_DIGEST) {
   console.error(
-    `golf-arithmetic fence: the fixture shrank (${expectedFire} FIRE / ${expectedSilent} SILENT cases).` +
-      " Cases are only ever added here, never removed — if you deleted one, put it back.",
+    "golf-arithmetic fence: the fixture's cases changed.\n" +
+      `  expected digest ${FIXTURE_DIGEST}\n` +
+      `  actual digest   ${digest}   (${expectedFire} FIRE / ${expectedSilent} SILENT)\n` +
+      "  If you deliberately added a case, update FIXTURE_DIGEST and say why in the commit." +
+      " If you did not, something edited the evidence — check what.",
   );
   process.exit(1);
 }
@@ -219,6 +303,7 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `golf-arithmetic fence: ${expectedFire} re-derivation spellings caught, ${expectedSilent} legitimate shapes left alone,` +
-    ` in both .ts and .tsx files.`,
+  `golf-arithmetic fence: ${expectedFire} re-derivation spellings caught, ${expectedSilent} legitimate` +
+    ` shapes left alone, at ${SAMPLE_PATHS.length} real paths; rule in effect on all` +
+    ` ${webSourceFiles.length} files under ${WEB_SRC}.`,
 );

@@ -390,19 +390,24 @@ export default [
       // operand — passed clean. Enumeration was the defect, not any particular missing entry.
       //
       // There is a FOURTH axis, and it is the one that fails silently and biggest: WHICH FILES the
-      // rule applies to. Narrowing this block's `files` glob from `*.{ts,tsx}` to `*.ts` — four
-      // deleted characters — turns the fence off for every React component in the app, which is
-      // most of `apps/web/src` and all four of the files whose leaks motivated the rule, with
-      // `pnpm lint` still green. So the check below lints its fixture at BOTH extensions and
-      // requires them to agree; covering one and not the other is itself a failure.
+      // rule applies to — the `files` and `ignores` globs at the top of this block. Small edits to
+      // them switch the fence off wholesale while `pnpm lint` stays green: deleting `**/` (three
+      // characters) drops 53 of 60 web source files, narrowing `*.{ts,tsx}` to `*.ts` drops all 40
+      // React components, and one `[A-Z]*.tsx` added to `ignores` does the same. Every one of them
+      // takes out the four files whose leaks motivated this rule. So the check below does not lint
+      // a fixture at some invented path and call that coverage — it enumerates the real tree and
+      // asserts this rule is in effect for EVERY non-test file under `apps/web/src`, then lints its
+      // fixture at real paths sampled from that same enumeration. A new file or directory is
+      // covered by construction; a glob edit fails the gate.
       //
       // COVERAGE IS PROVEN BY MUTATION, NOT BY THIS COMMENT — and the proof is committed, not
       // performed once and thrown away. `scripts/checkGolfArithmeticFence.mjs` lints a fixture of
       // 90 spellings against THIS rule and fails if any FIRE line goes silent or any SILENT line
-      // fires; `pnpm lint` runs it. Round 2's regression (a Literal exclusion that stopped
-      // catching `hole.par * 2`) fails that check today, by execution, as does narrowing the glob
-      // above. If you change a selector, let the check tell you what you did; do not trust prose,
-      // including this paragraph.
+      // fires; `pnpm lint` runs it, and `apps/web/test/golfComputeFence.test.ts` fails if `pnpm
+      // lint` stops running it. Round 2's regression (a Literal exclusion that stopped catching
+      // `hole.par * 2`) fails that check today, by execution, as does every glob edit above. If you
+      // change a selector, let the check tell you what you did; do not trust prose, including this
+      // paragraph.
       //
       // Known, accepted residuals. These are the shapes this rule CANNOT see. Static AST matching
       // without dataflow analysis has a real boundary, and stating it honestly is the point — an
@@ -445,10 +450,21 @@ export default [
       // - AN INCREMENT. `hole.par++` is an `UpdateExpression`, not one of the arithmetic operators.
       //   Left out on purpose: incrementing a served field is a mutation bug, not a rule being
       //   re-derived, and it is not a shape any of this fence's real leaks took.
-      // - A GOLF FIELD UNDER A NAME NOT ON THE PROPERTY AXIS. The axis was read off the wire
-      //   schemas and domain shapes (see `GOLF_ARITHMETIC_PROPS`), but a served field added later
-      //   is uncovered until it is added there. That axis going stale is the most likely way this
-      //   rule quietly stops working; it is also the cheapest to fix.
+      // - A GOLF FIELD UNDER A NAME NOT ON THE PROPERTY AXIS. The axis is hand-maintained ON
+      //   PURPOSE and should stay that way: deriving it mechanically from "every numeric field on
+      //   the wire" would sweep in `createdAt`, `seq`, `counter`, `rating`, `slope`, `yardage`,
+      //   `hole`, `number` and `memberCount` — each excluded above precisely BECAUSE including it
+      //   makes this rule fire on legitimate code. That would swap a hand-maintained inclusion
+      //   list for a hand-maintained exclusion list and turn a quiet miss into a false positive,
+      //   which is the failure mode that actually gets a fence deleted. What IS pinned:
+      //   `apps/web/test/golfComputeFence.test.ts` fails the build if any `z.number` field in
+      //   `packages/contracts/src` is neither on this axis nor on an explicit, named exclusion
+      //   list — so a new served number cannot appear without someone classifying it, and the
+      //   judgment stays with a person and gets recorded. Worth knowing: `total` is the most
+      //   generic name on the axis, and the one place a future non-golf `.total` (a paging or
+      //   result count) could collide. Not a problem today — the only `.total` the web reads is a
+      //   game line's — but it is the entry to revisit first if this rule ever fires somewhere
+      //   surprising.
       "no-restricted-syntax": ["error", ...GOLF_ARITHMETIC_SELECTORS],
     },
   },

@@ -424,3 +424,24 @@ strokes is the same round as taking two from B. Every consumer of `strokeGrant`/
 (§2a), the whole `handicap/` directory and its convention are deleted (§7), `formatOverPar` moves
 to `scoring/present.ts`, and the word leaves the event log, the route table and the file names
 (§8).
+
+**Correction, 2026-07-29 (whole-branch review): §2d under-counted the violating folds — there
+were THREE, not two.** §2d enumerates `archiveGolferLine`'s par-relative buckets and
+`courseRecord.ts:35`'s per-hole insights. The third is `milestonesOf`'s first-birdie/first-eagle
+scan (`golfer/analytics.ts`), which tested `kind === "strokes"` raw. Because it is a per-hole
+scan and not gated by `fullyHoledOut`, leaving it out produced exactly the failure §2d exists to
+prevent: a golfer whose first birdie was a conceded three-footer — the most common concession
+there is, in match play, swng's core case — saw the birdie counted in "your typical 18" and in
+"you've birdied this hole" at that course, while **"First birdie" never fired**. All three folds
+now count a conceded hole at its recorded score. The broke-100/90/80 milestones are the
+deliberate exception and stay gated on `fullyHoledOut`: breaking 90 is a claim about a whole
+card, and a card with a concession on it was not holed out.
+
+**Correction, 2026-07-29 (whole-branch review): §5's headline copy named the wrong set.** The
+mock reads *"your last 10 finished rounds, score minus par"*, but the average is over the last ten
+rounds **with a score** (`scoredOverPar(lines).slice(-10)` — §2d's own rule: a round containing a
+pickup does not feed it). For a golfer with pickups the ten rows nearest the top of the history
+list are therefore not the ten rounds averaged, and §5's "you can add them up yourself" promise
+silently fails. The subtitle now names what is measured — *"your last 10 rounds with every hole
+scored, score minus par"* — which is checkable against the rows, since a row with a pickup shows no
+score at all.

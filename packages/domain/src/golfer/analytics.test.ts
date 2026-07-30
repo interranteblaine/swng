@@ -19,6 +19,7 @@ const line = (over: Partial<GolferRoundLine>): GolferRoundLine => ({
 
 const stroke = (hole: number, par: number, strokes: number): GolferHoleLine => ({ hole, par, result: { kind: "strokes", strokes } });
 const pickedUp = (hole: number, par: number): GolferHoleLine => ({ hole, par, result: { kind: "picked-up" } });
+const conceded = (hole: number, par: number, strokes: number): GolferHoleLine => ({ hole, par, result: { kind: "conceded", strokes } });
 
 // Builds a fully holed-out line of `holes` (9 or 18, par 4 throughout) whose strokes sum to
 // exactly `gross` — the first hole absorbs whatever remainder the rest (all par) don't, so the
@@ -98,5 +99,36 @@ describe("milestonesOf — earliest qualifying line per kind, in fixed kind orde
 
   it("(g) empty lines yield [] milestones", () => {
     expect(milestonesOf([])).toEqual([]);
+  });
+
+  // A conceded hole is a scored hole EVERYWHERE (spec 2026-07-29 §2d), and a conceded three-footer
+  // is the most common concession in match play. Before the whole-branch fix this scan tested
+  // `kind === "strokes"` raw, so a golfer whose first birdie was conceded saw it counted in "your
+  // typical 18" and in their course record while "First birdie" never fired.
+  it("(h) a CONCEDED birdie earns first-birdie, and a conceded eagle earns first-eagle", () => {
+    const concededBirdie = line({ roundId: roundId("r-h-birdie"), holeResults: [conceded(1, 4, 3)] });
+    const concededEagle = line({ roundId: roundId("r-h-eagle"), holeResults: [conceded(1, 5, 3)] });
+
+    expect(milestonesOf([concededBirdie, concededEagle])).toEqual([
+      { kind: "first-birdie", roundId: roundId("r-h-birdie") },
+      { kind: "first-eagle", roundId: roundId("r-h-eagle") },
+    ]);
+  });
+
+  // The other half of the same rule: breaking 90 is a claim about a WHOLE CARD, so it still rides
+  // fullyHoledOut and a conceded hole disqualifies the card — deliberately asymmetric with (h).
+  it("(i) a conceded hole keeps a card out of the broke-N milestones and out of bests", () => {
+    const with85AndAConcession = line({
+      roundId: roundId("r-i"),
+      holes: 18,
+      par: 72,
+      holeResults: [conceded(1, 4, 4), ...Array.from({ length: 17 }, (_, i) => stroke(i + 2, 4, 4))], // gross 72
+    });
+
+    expect(fullyHoledOut(with85AndAConcession)).toBe(false);
+    expect(bestsOf([with85AndAConcession])).toEqual({});
+    // No under-par hole on this card either, so the per-hole milestones stay absent too — the
+    // ONLY reason the array is empty is fullyHoledOut, which is the point.
+    expect(milestonesOf([with85AndAConcession])).toEqual([]);
   });
 });

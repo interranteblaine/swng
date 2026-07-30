@@ -21,6 +21,7 @@ const line = (over: Partial<GolferRoundLine>): GolferRoundLine => ({
 
 const stroke = (hole: number, par: number, strokes: number): GolferHoleLine => ({ hole, par, result: { kind: "strokes", strokes } });
 const pickedUp = (hole: number, par: number): GolferHoleLine => ({ hole, par, result: { kind: "picked-up" } });
+const conceded = (hole: number, par: number, strokes: number): GolferHoleLine => ({ hole, par, result: { kind: "conceded", strokes } });
 
 // A fully holed-out 18-hole line whose strokes sum to exactly `gross` (par 4 throughout, first
 // hole absorbs the remainder) — the analytics.test.ts `roundOf` precedent.
@@ -230,5 +231,53 @@ describe("courseRecord — neverBirdied (holes with ≥1 strokes-play and zero u
     const record = courseRecord([played, ...padding], COURSE);
 
     expect(record.insights?.neverBirdied).toEqual([1, 2, 3]);
+  });
+});
+
+// A CONCEDED HOLE IS A SCORED HOLE EVERYWHERE (spec 2026-07-29 §2d) — HoleAgg counts it at its
+// recorded score, so it reaches the ≥3-play threshold, feeds every mean and rate, and can birdie a
+// hole. A PICKED-UP hole still carries no number and stays out; each test below pins the pair
+// against each other so the two can never be conflated.
+describe("courseRecord — a conceded hole counts, a picked-up hole does not (spec 2026-07-29 §2d)", () => {
+  it("a conceded play reaches worstHole's ≥3-play threshold and its number feeds the mean", () => {
+    // Hole 1: two strokes-plays of 5 and one CONCEDED 6 on par 4. Counting only `strokes` cells
+    // leaves 2 plays and the hole never qualifies; counting the concession gives 3 plays and a
+    // mean of (1 + 1 + 2) / 3 = 1.33 → 1.3, with the 6 registering as the one doublePlus.
+    const lines = [oneHole("r-1", stroke(1, 4, 5)), oneHole("r-2", stroke(1, 4, 5)), oneHole("r-3", conceded(1, 4, 6)), noResults("r-4"), noResults("r-5")];
+
+    const record = courseRecord(lines, COURSE);
+
+    expect(record.rounds).toBe(5);
+    expect(record.insights?.worstHole).toEqual({ hole: 1, par: 4, plays: 3, avgOverPar: 1.3, doublePlus: 1 });
+  });
+
+  it("a conceded PAR counts toward scoringHole's par-or-better rate", () => {
+    const lines = [
+      oneHole("r-1", conceded(1, 4, 4)),
+      oneHole("r-2", conceded(1, 4, 4)),
+      oneHole("r-3", conceded(1, 4, 4)),
+      oneHole("r-4", stroke(2, 4, 5)),
+      oneHole("r-5", stroke(2, 4, 5)),
+      oneHole("r-6", stroke(2, 4, 5)),
+    ];
+
+    const record = courseRecord(lines, COURSE);
+
+    expect(record.insights?.scoringHole).toEqual({ hole: 1, par: 4, plays: 3, parOrBetter: 3 });
+  });
+
+  it("a CONCEDED birdie removes its hole from neverBirdied — a picked-up hole leaves it in", () => {
+    // Three holes played to a number, none under par → [1, 2, 3] remain never-birdied.
+    const played = line({ roundId: roundId("r-played"), holeResults: [stroke(1, 4, 4), stroke(2, 4, 5), stroke(3, 4, 4)] });
+    const padding = [0, 1, 2].map((i) => noResults(`r-pad-${i}`));
+
+    // A conceded 3 on hole 1 IS a birdie — the most common concession there is — so hole 1 leaves.
+    const withConcededBirdie = courseRecord([played, oneHole("r-later", conceded(1, 4, 3)), ...padding], COURSE);
+    expect(withConcededBirdie.rounds).toBe(5);
+    expect(withConcededBirdie.insights?.neverBirdied).toEqual([2, 3]);
+
+    // The same round with a pickup on hole 1 instead: no number, so nothing about hole 1 changes.
+    const withPickup = courseRecord([played, oneHole("r-later", pickedUp(1, 4)), ...padding], COURSE);
+    expect(withPickup.insights?.neverBirdied).toEqual([1, 2, 3]);
   });
 });

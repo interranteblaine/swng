@@ -20,7 +20,9 @@ export const grossOf = (line: GolferRoundLine): number =>
 
 // Every hole has a NUMBER — a stroke count or a conceded score (spec 2026-07-29 §2d). Distinct
 // from fullyHoledOut above, which is stricter (a conceded putt means you did not hole out) and
-// still gates Best and the milestones. This one gates the average, which is why match rounds
+// still gates Best and the broke-100/90/80 milestones — but NOT first-birdie/first-eagle, which
+// scan holes rather than whole cards and count a conceded hole like any other (milestonesOf
+// below). This one gates the average, which is why match rounds
 // count. Both read the same `holeResults`, so the ONE thing that separates them is which hole
 // kinds carry a number — expressed here through `scoredStrokes`, the ONE accessor for exactly
 // that question (round/holeResult.ts), rather than a hand-rolled kind test that could drift from
@@ -84,8 +86,21 @@ export const bestsOf = (lines: readonly GolferRoundLine[]): GolferBests => {
 // order below (a stable wire order) — never chronological by achievement date, so an eagle shot
 // before a golfer's first birdie still lists "first-birdie" ahead of "first-eagle".
 export const milestonesOf = (lines: readonly GolferRoundLine[]): readonly Milestone[] => {
+  // A per-hole scan, so it goes through `scoredStrokes` — a conceded hole is a scored hole
+  // EVERYWHERE (spec 2026-07-29 §2d), and a conceded three-footer for a birdie is the most common
+  // concession there is in match play, swng's core case. Gating this on `fullyHoledOut` would be a
+  // different rule and a wrong one: the golfer would see the birdie counted in "your typical 18"
+  // and in "you've birdied this hole" at that course, while "First birdie" never fired — the same
+  // number disagreeing with itself on two screens, which is exactly what §2d exists to prevent.
+  // (The broke-N milestones below DO ride fullyHoledOut: breaking 90 is a claim about a whole card,
+  // and a card with a concession on it was not holed out.)
   const firstHole = (test: (underPar: number) => boolean): RoundId | undefined =>
-    lines.find((line) => line.holeResults?.some((h) => h.result.kind === "strokes" && test(h.par - h.result.strokes)))?.roundId;
+    lines.find((line) =>
+      line.holeResults?.some((h) => {
+        const strokes = scoredStrokes(h.result);
+        return strokes !== undefined && test(h.par - strokes);
+      }),
+    )?.roundId;
   const firstBroke = (threshold: number): RoundId | undefined =>
     lines.find((line) => line.holes === 18 && fullyHoledOut(line) && grossOf(line) < threshold)?.roundId;
   const found: { kind: MilestoneKind; roundId: RoundId | undefined }[] = [

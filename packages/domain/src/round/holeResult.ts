@@ -5,9 +5,12 @@ export type HoleResult =
   | { readonly kind: "picked-up" }
   // The hole was decided but the player would have finished it — the score the group says out
   // loud. A CONCEDED HOLE IS A SCORED HOLE EVERYWHERE (spec §2d): every engine, the card's
-  // totals and the average treat it exactly as a `strokes` cell, because you made the 4. Only
-  // two places distinguish it — the card's `5c` glyph, and fullyHoledOut, which gates Best and
-  // the milestones and has always excluded it.
+  // totals, your per-hole record at a course, your typical 18, the first-birdie/first-eagle
+  // milestones and the average all treat it exactly as a `strokes` cell, because you made the 4.
+  // Only HOLING OUT itself distinguishes it, and only three readers care: the card renders `5c`
+  // so you can see you didn't hole out, and `fullyHoledOut` excludes it — as does the `grossOf`
+  // sum that only ever runs behind that predicate (both in golfer/analytics.ts) — which together
+  // gate `Best` and the broke-100/90/80 milestones.
   | { readonly kind: "conceded"; readonly strokes: number }
   // A mis-tap undone: the cell reads as unscored everywhere (engines, finalize, AGS).
   // The fold RETAINS cleared cells under HLC-latest — deleting would let a late-arriving

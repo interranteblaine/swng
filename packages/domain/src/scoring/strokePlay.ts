@@ -9,8 +9,9 @@ import { netDoubleBogey } from "./strokes.js";
 type StrokePlayConfig = Extract<GameConfig, { kind: "stroke-play" }>;
 
 export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): GameState => {
-  // The game's own field, off the ONE rule (spec §3) — computed once for the whole game, not per
-  // player and not per hole (see dotsByHole's doc comment). A gross game's allocation is EMPTY, so
+  // Stroke play is a MEDAL kind (spec 2026-07-30 §3): each player's own roster number, so a net
+  // game's dots always agree with the card. Computed once for the whole game, not per player and
+  // not per hole (see dotsByHole's doc comment). A gross game's allocation is EMPTY, so
   // `dots` below comes out undefined and no net is accumulated: the gross rule is decided in one
   // place (gameStrokeAllocation) rather than re-tested here.
   const allocation = gameStrokeAllocation(config, state.participants, state.card);

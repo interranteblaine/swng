@@ -13,9 +13,11 @@ import type { GameConfig } from "./game.js";
 import { gameMembers } from "./game.js";
 import { dotsByHole } from "./strokes.js";
 
-// Generic in the entry type so a lookup preserves what the caller passed: `gameStrokeAllocation`
-// reads `.departed` off the result, which only exists on a RosterEntry.
-const participantFor = <T extends Participant>(participants: readonly T[], id: GolferId): T => {
+// `Participant`, not `RosterEntry`: everything read off a seat here — `strokes` and `tee` — lives
+// on the narrower type. Nothing in this file reads `.departed` any more; a game's field is its own
+// frozen members, and every one of them is allocated against, present or departed alike (a player
+// who walked off after 12 holes still has those holes settled). The generic went with that read.
+const participantFor = (participants: readonly Participant[], id: GolferId): Participant => {
   const found = participants.find((p) => p.golferId === id);
   if (!found) throw new DomainError("unknown-participant", `no participant "${id}" joined this round`);
   return found;

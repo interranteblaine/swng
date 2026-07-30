@@ -1,16 +1,19 @@
 import { useState } from "react";
 import type { GameState, GolferId, RosterEntry, RoundState } from "@swng/domain";
+import { MAX_STROKES } from "@swng/contracts";
 import type { GameConfigInput } from "@swng/contracts";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnQuiet, cardBox, eyebrow, inputBox } from "../ui/classes";
 import { CopiedLinkLine } from "../ui/CopiedLinkLine";
 import { AddGameForm } from "./AddGameForm";
 
-// A strokes count is a whole non-negative number (spec 2026-07-30 §2, matching commands.ts's own
-// `int().min(0)`). `parseInt` alone would take "12.5" (→ 12) and "-3" (→ -3, which the wire then
-// rejects with a message that isn't the problem the golfer has), so the editor declines to offer
-// the illegal state rather than reporting it after a round trip.
-const isValidStrokes = (value: string): boolean => /^\d+$/.test(value.trim());
+// A strokes count is a whole number in [0, MAX_STROKES] — the SAME range commands.ts's
+// `strokesInputSchema` accepts, bound to it by the shared constant rather than by a second literal
+// that can drift. Every arm of this predicate is a shape the wire rejects: `parseInt` alone would
+// take "12.5" (→ 12) and "-3" (→ -3), and a bare `/^\d+$/` would take "60" — which enables Save,
+// POSTs, 400s, and shows a generic "try again" that can never succeed however many times it is
+// tried. The editor declines to OFFER an illegal state rather than reporting it after a round trip.
+const isValidStrokes = (value: string): boolean => /^\d+$/.test(value.trim()) && Number(value.trim()) <= MAX_STROKES;
 
 export interface SetupPanelProps {
   readonly state: RoundState;
@@ -157,9 +160,11 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes }: SetupPa
                       <input
                         type="number"
                         inputMode="numeric"
-                        // Floors at 0 (spec 2026-07-30 §2) so the stepper and the browser's own
-                        // validation agree with isValidStrokes above: nobody gives strokes back.
+                        // The stepper and the browser's own validation carry the SAME range
+                        // isValidStrokes and the wire do — floored at 0 because nobody gives
+                        // strokes back (spec 2026-07-30 §2), capped at the schema's own ceiling.
                         min={0}
+                        max={MAX_STROKES}
                         aria-label={`Strokes for ${p.name}`}
                         className={`${inputBox} w-16`}
                         value={value}
@@ -181,7 +186,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes }: SetupPa
                     )}
                   </div>
                 ) : (
-                  <p className="text-sm text-fairway">{`${p.tee} · ${p.strokes} strokes`}</p>
+                  <p className="text-sm text-fairway">{`${p.tee} · ${p.strokes} ${p.strokes === 1 ? "stroke" : "strokes"}`}</p>
                 )}
               </li>
             );

@@ -30,8 +30,8 @@ import type { AccountGolfer } from "./support.js";
 // Course: a throwaway 18-hole, all-par-4 (par 72) card at rating 71.6 / slope 128 — the
 // rating/slope pair is recorded on the card and read by NOTHING (spec 2026-07-29 §7), kept here
 // only because deleting it would change the fixture for no reason. This account plays its three
-// rounds ALONE, and strokes are the difference from the lowest in the field (spec §2b), so a lone
-// player is their own anchor and derives ZERO strokes no matter what they stated: every hole is
+// rounds ALONE, and nobody types a number onto a solo roster, so every seat sits on its default 0
+// strokes (spec 2026-07-30 §2): every hole is
 // scored at its raw gross, with no dots and no cap anywhere in the arithmetic (the net-double-bogey
 // cap now applies only to a picked-up hole, and this deck has none). The adjusted-gross-score step
 // that used to sit between the card and the record is deleted whole.

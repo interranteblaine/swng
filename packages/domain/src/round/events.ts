@@ -63,9 +63,10 @@ export type RoundEvent = RoundEventBase &
     // round data and snapshots are wiped at this arc's close-out, and there is nothing honest to
     // migrate — a stored `normally-shoots` assertion only became strokes by a rule that no longer
     // exists, so translating it would invent a number nobody typed. No tolerate-old-shape branch,
-    // no `.default()`, no migration. THE DEPLOY IS LAMBDA-FIRST: a stale bundle posting the old
-    // `basis` body gets a 400 until it refreshes, whereas web-first would have a new bundle's
-    // `strokes` integer silently stripped by the old lambda's non-strict parse and a meaningless
-    // event written into a sealed log.
+    // no `.default()`, no migration. THE DEPLOY IS LAMBDA-FIRST: the ROUTE moved too
+    // (`/rounds/{id}/basis` -> `/rounds/{id}/strokes`), so a stale bundle posting the old body
+    // gets a 404 until it refreshes — a clean, loud failure. Web-first would instead have a new
+    // bundle's `strokes` integer silently stripped by the old lambda's non-strict parse and a
+    // meaningless event written into a sealed log.
     | { readonly kind: "participant-strokes-set"; readonly golferId: GolferId; readonly strokes: number }
   );

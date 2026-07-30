@@ -76,8 +76,8 @@ describe("strokes preview", () => {
     await user.click(screen.getByRole("checkbox", { name: "Pat" }));
     await user.click(screen.getByRole("checkbox", { name: "Sam" }));
     expect(screen.getByText("Net — everyone plays off the lowest in this game")).toBeTruthy();
-    // Pat's 5 against Sam's 0, halved on a nine-hole card → "Pat 3 dots"; Sam is the lowest in
-    // the field, so he receives nothing and is omitted from the line.
+    // Skins is a MEDAL kind, so each member takes their own roster number: Pat's 3 → "Pat 3 dots";
+    // Sam is on 0, so he receives nothing and is omitted from the line.
     expect(screen.getByText(/Pat 3 dots/)).toBeTruthy();
     // No note under it: the treatment line already states this game's field, so a note would
     // render the same sentence twice.

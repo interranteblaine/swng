@@ -68,10 +68,10 @@ describe("settleRound — concurrency deck", () => {
   // `archive.handicapping` (per-participant adjusted gross score + differential) is DELETED with
   // the whole WHS pipeline (spec 2026-07-29 §7), and so is the hand-checked-AGS deck that pinned
   // it. What a settled round now says about each player's numbers is their frozen seat plus the
-  // cells themselves — asserted here in the terms that survive: the derived strokes on the roster.
-  it("freezes each participant's derived strokes onto the settled roster", () => {
+  // cells themselves — asserted here in the terms that survive: the strokes on the roster.
+  it("freezes each participant's strokes onto the settled roster", () => {
     const archive = settleRound(finalLog);
-    // Bo's +2 anchors the nine-hole field, so Ann gets (8-2)/2 = 3 and Cal (12-2)/2 = 5 (spec §2b).
+    // The numbers this file's own players3 fixture carries, frozen verbatim (spec 2026-07-30 §2).
     expect(archive.participants.map((p) => [p.golferId, p.strokes])).toEqual([
       [A, 3],
       [B, 0],

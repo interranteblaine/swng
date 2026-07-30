@@ -1021,20 +1021,23 @@ export const addStablefordGame = async (page: Page, names: readonly string[]): P
 // textContent-based matchers sidestep that.
 export const chip = (page: Page, titlePrefix: string) => page.getByRole("button").filter({ hasText: titlePrefix });
 
-// The one number a player states about themselves (spec 2026-07-29 §2/§9), on BOTH doors onto a
-// card: CreateRoundPage and JoinRoundPage render the identical label, because starting a round is
-// joining it as the host. Shared rather than inlined at each of its call sites for a reason this
-// arc learned the hard way: the label this replaced ("Strokes you get here") was hard-coded at
-// eight sites across four specs, and renaming it is invisible to `tsc` — every one of those
-// `getByLabel(...)` calls kept compiling and would have resolved NOTHING at the live gate. One
-// copy, checked against the JSX once.
 // The roster row's own strokes editor (SetupPanel.tsx, spec 2026-07-30 §8): tap Edit on a
 // player's row, type the number the group agreed, Save. There is no join/create-form question
 // about anyone's game any more, so this is the ONE place a browser spec types a stroke count.
+// Shared rather than inlined at each call site for a reason this suite learned the hard way: a
+// renamed label is invisible to `tsc`, so every hard-coded `getByLabel(...)` keeps compiling and
+// resolves NOTHING at the live gate. One copy, checked against the JSX once.
 export const setStrokesInBrowser = async (page: Page, name: string, strokes: number): Promise<void> => {
-  // `li` + hasText, the same locator every spec in this suite already uses for a roster row — the
-  // roster is the only <li> list on a live round page that carries a player's name next to an Edit
-  // button, and `.first()` pins the match even when an open game panel adds lists of its own.
+  // `li` + hasText + `.first()`, the same locator every spec in this suite uses for a roster row.
+  // `.first()` is NOT unambiguous in general: GamePanel's skins body renders name-bearing story
+  // <li>s ("Hole 4 — Alex takes 3"), and StandingsHeader precedes SetupPanel in the DOM
+  // (RoundPage.tsx), so an OPEN SKINS PANEL would make this resolve to a story row and the Edit
+  // lookup below would find nothing. It holds today because every call site runs before any game
+  // exists, or with only a stroke-play panel open (a table, no <li>). Scope it under the Roster
+  // heading — or add `has: page.getByRole("button", { name: "Edit" })` — before calling it after a
+  // skins panel opens. `hasText` is also a SUBSTRING match while the spinbutton lookup below is
+  // full-string, so two roster names where one prefixes the other ("Al"/"Alex") would click one
+  // row and then look for the other's input; no fixture in this suite has such a pair.
   const row = page.locator("li").filter({ hasText: name }).first();
   await row.getByRole("button", { name: "Edit" }).click();
   const input = page.getByRole("spinbutton", { name: `Strokes for ${name}` });

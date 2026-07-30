@@ -34,9 +34,8 @@ export { finalizeRound } from "./rounds/finalizeRound.js";
 export { abandonRound } from "./rounds/abandonRound.js";
 export { terminateGame } from "./rounds/terminateGame.js";
 export { leaveRound } from "./rounds/leaveRound.js";
-// spec 2026-07-20 (re-shaped by 2026-07-29): mid-round correction of what a player stated about
-// themselves — any participant corrects any participant, shaped like leaveRound's own
-// participant-append.
+// spec 2026-07-30 §2: any participant sets any participant's strokes — one number, no
+// self-assertion — shaped like leaveRound's own participant-append.
 export { setStrokes } from "./rounds/setStrokes.js";
 export { readEvents } from "./rounds/readEvents.js";
 export { peekRound } from "./rounds/peekRound.js";

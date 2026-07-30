@@ -161,8 +161,10 @@ describe("ScorecardGrid — round-stroke dots (the standard card)", () => {
 
   // The hollow ○ give-back test that stood here is DELETED WITH ITS BRANCH, exactly as its own
   // comment instructed (task 3 restored it deliberately, on the rule that live code gets a test).
-  // Strokes are non-negative by construction now (spec 2026-07-29 §2a/§2b) and ScorecardGrid draws
-  // `"●".repeat(dots)` — there is no give-back state left to cover, and `repeat` would throw on one.
+  // Nobody gives strokes back (spec 2026-07-30 §2) — the request schema bounds a roster number at
+  // 0 and a match subtracts the lowest of its own members — so there is no give-back state left to
+  // cover. The one value that could still arrive out of range is covered at the bottom of this
+  // file, where the render degrades rather than throwing.
 
   it("19 strokes get a second dot on the SI-1 hole of an 18-hole card, but only one on SI-18", () => {
     const ann0 = participant(ANN, "Ann", "white", 0);
@@ -222,9 +224,9 @@ describe("ScorecardGrid — picked-up glyph", () => {
   });
 
   it("a scored hole renders its net sub-line and under-par ink together", () => {
-    // The standard card is roundStrokeAllocation — each player's own DERIVED round strokes
-    // allocated directly by stroke index, no differencing and no halving (that per-game rule is
-    // gameStrokeAllocation's, not this one). Ann's 8 strokes land one dot on every hole except
+    // The standard card is roundStrokeAllocation — each player's own roster strokes allocated
+    // directly by stroke index, never a difference (that is a MATCH game's rule, and it lives in
+    // gameStrokeAllocation). Ann's 8 strokes land one dot on every hole except
     // fixtureWhite's easiest (SI 9, hole 3) — hole 2 is SI1, so Ann carries a dot there.
     const ann8 = participant(ANN, "Ann", "white", 8);
     const bo0 = participant(BO, "Bo", "white", 0);
@@ -432,5 +434,25 @@ describe("ScorecardGrid — current hole", () => {
     const row2 = screen.getByRole("row", { name: /^Hole 2/ });
     expect(row1.getAttribute("aria-current")).not.toBe("true");
     expect(row2.getAttribute("aria-current")).toBe("true");
+  });
+});
+
+// Review fix round 1 (Minor 10): the non-negative invariant has exactly ONE enforcement point,
+// `strokesInputSchema`'s `min(0)` at the request ingress — the stored/fold schema is deliberately
+// unbounded (Arc A's placement rule), so a value that cannot legitimately exist can still reach a
+// fold. This pins the degradation: the render draws no dot rather than throwing RangeError out of
+// `"●".repeat(-1)`, which would blank the entire card for every player.
+describe("ScorecardGrid — a negative strokes value degrades instead of blanking the card", () => {
+  it("renders the card, with no dot span, for a seat whose strokes are negative", () => {
+    const state = twoPlayerState({ participants: [participant(ANN, "Ann", "white", -3)] });
+
+    expect(() => render(<ScorecardGrid state={state} recordScore={vi.fn()} />)).not.toThrow();
+
+    // Hole 2 is fixtureLinks' SI 1 — the first hole any positive allocation would dot, so its
+    // silence is the strongest available evidence nothing was drawn.
+    expect(screen.getByRole("button", { name: "Ann hole 2" }).textContent).not.toMatch(/●/);
+    // ...and the card itself is still on screen for every player, which is what a thrown
+    // RangeError would have taken away.
+    expect(screen.getByRole("button", { name: "Ann hole 1" })).toBeTruthy();
   });
 });

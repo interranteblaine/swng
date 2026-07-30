@@ -15,11 +15,11 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
   // tee set supplies the sequence the ladder walks.
   const { teeSet: cardTeeSet } = playerTeeSet(state, config.a);
 
-  // The game's own field, off the ONE rule (spec §3) — the difference between the two, which for
-  // a two-player field means only the higher number receives dots and the lower receives none.
-  // "Plays off scratch" would be the wrong words for it: the anchor is whoever states the lower
-  // number, who may be a +20 that simply gets nothing here, not a scratch golfer. The higher/lower
-  // branch this replaced was that same arithmetic, spelled a second time.
+  // A singles match is a MATCH kind (spec 2026-07-30 §3): played off the DIFFERENCE, so only the
+  // higher number receives dots and the lower receives none — and those dots land on the HARDEST
+  // holes, which is what makes this deliberately unlike the card. "Plays off scratch" would be the
+  // wrong words for the lower side: they may be on 20 and simply get nothing here, not a scratch
+  // golfer. The higher/lower branch this replaced was that same arithmetic, spelled a second time.
   const allocation = gameStrokeAllocation(config, state.participants, state.card);
 
   const netFor = (golferId: GolferId, cell: ScoreCell | undefined, holeNumber: number): number | undefined => {

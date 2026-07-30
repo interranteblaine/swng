@@ -13,10 +13,11 @@ type FourballMatchConfig = Extract<GameConfig, { kind: "fourball-match" }>;
 export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundState): GameState => {
   const golfers: readonly GolferId[] = [...config.a, ...config.b];
 
-  // The game's own field, off the ONE rule (spec §3): all four play off the lowest of the four —
-  // the four-ball 90% discount is deleted with the rest of the allowance table, so this is now
-  // the full difference. The per-player playing-handicap-then-subtract-the-low walk this replaced
-  // was that same relative arithmetic, spelled a second time.
+  // Four-ball is a MATCH kind (spec 2026-07-30 §3): all four play off the lowest of the four, and
+  // the dots land on the hardest holes — deliberately unlike the card. The 90% discount is deleted
+  // with the rest of the allowance table, so this is the full difference. The per-player
+  // playing-handicap-then-subtract-the-low walk this replaced was that same relative arithmetic,
+  // spelled a second time.
   const allocation = gameStrokeAllocation(config, state.participants, state.card);
 
   // Course card order is shared; hole numbers, not tee choice, drive it.

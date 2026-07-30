@@ -8,8 +8,9 @@ import { allPlayersComplete, playerTeeSet } from "./players.js";
 type StablefordConfig = Extract<GameConfig, { kind: "stableford" }>;
 
 export const scoreStableford = (config: StablefordConfig, state: RoundState): GameState => {
-  // The game's own field, off the ONE rule (spec §3) — computed once for the whole game, not per
-  // player and not per hole (see dotsByHole's doc comment). Stableford is always net: it is a
+  // Stableford is a MEDAL kind (spec 2026-07-30 §3): each player's own roster number, so its dots
+  // always agree with the card. Computed once for the whole game, not per player and not per hole
+  // (see dotsByHole's doc comment). Stableford is always net: it is a
   // handicap format by construction, so it has no gross arm to choose.
   const allocation = gameStrokeAllocation(config, state.participants, state.card);
   const lines = config.players.map((golferId) => {

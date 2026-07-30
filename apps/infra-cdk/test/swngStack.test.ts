@@ -748,8 +748,7 @@ describe("SwngStack", () => {
         "POST /rounds/{roundId}/abandon",
         // accounts-only identity spec §4: a participant walks off (self-only, participant-gated).
         "POST /rounds/{roundId}/leave",
-        // spec 2026-07-20 (re-shaped by 2026-07-29): mid-round correction of what a player stated
-        // about themselves — any participant corrects any participant (score-for-anyone,
+        // spec 2026-07-30 §2: any participant sets any participant's strokes (score-for-anyone,
         // participant-gated).
         "POST /rounds/{roundId}/strokes",
         "GET /rounds/{roundId}/events",

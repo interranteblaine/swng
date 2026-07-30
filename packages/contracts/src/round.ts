@@ -74,8 +74,10 @@ export const participantSchema: z.ZodType<Participant> = z.object({
 // fields in `.readonly()` (frozen, matching the domain type's shape at game-added
 // time); GameConfigInput reuses these same field schemas unwrapped — mutable, as a
 // client request body should be — then adds `.strict()` on top.
-// No `allowance` on any arm: the handicap-allowance table is deleted (spec §3) — every kind takes
-// the difference from the lowest in its own field, so there is no percentage left to send or store.
+// No `allowance` on any arm: the handicap-allowance table is deleted (spec 2026-07-30 §3) and
+// nothing percentage-shaped replaced it. What a game DOES with strokes is not a wire concern at
+// all — it reads the roster's own numbers, medal kinds absolutely and match kinds off the lowest
+// of their own members (domain's gameStrokeAllocation) — so there is nothing left to send or store.
 export const gameConfigFields = {
   "stroke-play": {
     scoring: z.enum(["gross", "net"]),

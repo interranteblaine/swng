@@ -18,7 +18,7 @@ const finalizedEvent: RoundEvent = {
 const archive: RoundArchive = {
   roundId: roundId("r1"),
   card: fixtureLinks18,
-  // A lone seat is the field's own anchor, so the fold derives 0 strokes for it (spec 2026-07-29 §2b).
+  // A seat nobody typed a number onto sits on its default 0 strokes (spec 2026-07-30 §2).
   participants: [{ golferId: ann, name: "Ann", tee: "white", strokes: 0 } satisfies RosterEntry],
   games: [],
   cells: {},

@@ -8,8 +8,9 @@ import { allPlayersComplete, playerTeeSet } from "./players.js";
 type SkinsConfig = Extract<GameConfig, { kind: "skins" }>;
 
 export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState => {
-  // The game's own field, off the ONE rule (spec §3) — computed once for the whole game, not per
-  // player and not per hole (see dotsByHole's doc comment). A GROSS pot's allocation is EMPTY, so
+  // Skins is a MEDAL kind (spec 2026-07-30 §3): each player's own roster number, so a net pot's
+  // dots always agree with the card. Computed once for the whole game, not per player and not per
+  // hole (see dotsByHole's doc comment). A GROSS pot's allocation is EMPTY, so
   // `dots` below comes out undefined and every net reads the raw score: the gross rule is decided
   // in one place (gameStrokeAllocation) rather than re-tested here.
   const allocation = gameStrokeAllocation(config, state.participants, state.card);

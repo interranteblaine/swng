@@ -91,9 +91,10 @@ export interface UseCases {
   // accounts-only identity spec §4: a participant walks off — appends participant-left for the
   // token's OWN golferId (self-only, no body). "participant"-gated, same tier as the acts above.
   leaveRound: (claims: ParticipantClaims) => Promise<LeaveRoundResponse>;
-  // spec 2026-07-20 (re-shaped by 2026-07-29): mid-round correction of what a player stated about
-  // themselves — any participant corrects any participant (score-for-anyone), the SUBJECT golferId
-  // rides the body. "participant"-gated, same tier as the acts above.
+  // spec 2026-07-30 §2: any participant sets any participant's strokes (score-for-anyone), so the
+  // SUBJECT golferId rides the body while the author is the token's own. Nothing here is a
+  // statement about oneself — the event carries one number and cannot carry a name or a tee.
+  // "participant"-gated, same tier as the acts above.
   setStrokes: (claims: ParticipantClaims, request: SetStrokesRequest) => Promise<SetStrokesResponse>;
   readEvents: (id: RoundId, sinceSeq: number) => Promise<EventsResponse>;
   peekRound: (code: string) => Promise<PeekRoundResponse>;

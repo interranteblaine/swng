@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
+import { MAX_STROKES } from "@swng/contracts";
 import type { GameConfig, RosterEntry, RoundState } from "@swng/domain";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
@@ -96,6 +97,14 @@ describe("SetupPanel", () => {
     expect(screen.queryByText(/^Games/)).toBeNull();
   });
 
+  it("says `1 stroke`, not `1 strokes`", () => {
+    const state = baseState({ participants: [participant(BO, "Bo", "white", 1)] });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+
+    const boRow = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
+    expect(within(boRow!).getByText("white · 1 stroke")).toBeTruthy();
+  });
+
   it("shows a zero-stroke seat as `tee · 0 strokes` — the default every seat starts on", () => {
     renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
 
@@ -114,7 +123,7 @@ describe("SetupPanel", () => {
 
     const boRow = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
     expect(boRow).toBeTruthy(); // still on the roster, seat data intact
-    expect(within(boRow!).getByText("white · 1 strokes")).toBeTruthy();
+    expect(within(boRow!).getByText("white · 1 stroke")).toBeTruthy();
     expect(within(boRow!).getByText(/^left$/i)).toBeTruthy();
 
     // A present participant carries no such marker.
@@ -171,7 +180,7 @@ describe("SetupPanel", () => {
     // Bo has no game either — still gets an identity row, byte-identical shape.
     const boRows = screen.getAllByRole("listitem").filter((li) => /Bo/.test(li.textContent ?? ""));
     expect(boRows).toHaveLength(1);
-    expect(boRows[0]?.textContent).toMatch(/white · 1 strokes/);
+    expect(boRows[0]?.textContent).toMatch(/white · 1 stroke/);
   });
 });
 
@@ -428,6 +437,34 @@ describe("SetupPanel — setting a player's strokes", () => {
     expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
     await user.click(within(annRow!).getByRole("button", { name: "Save" }));
     expect(noopSetStrokes).toHaveBeenCalledWith(ANN, 0);
+  });
+
+  // The wire's ceiling reaches the control (review fix round 1): a bare digits-only predicate let
+  // "60" enable Save, which POSTed, 400'd, and showed a generic "try again" that could never
+  // succeed. Same defect class the prior arc caught here one bound over, on the floor.
+  it("refuses a number above the wire's ceiling — Save stays disabled at 55, enabled at 54", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ participants: [participant(ANN, "Ann", "white", 3)] });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
+
+    const input = within(annRow!).getByRole("spinbutton", { name: "Strokes for Ann" });
+    // The browser's own validation carries the same ceiling, not just the predicate.
+    expect(input.getAttribute("max")).toBe(String(MAX_STROKES));
+
+    await user.clear(input);
+    await user.type(input, "55");
+    expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(annRow!).getByRole("button", { name: "Save" }));
+    expect(noopSetStrokes).not.toHaveBeenCalled();
+
+    await user.clear(input);
+    await user.type(input, String(MAX_STROKES));
+    expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(within(annRow!).getByRole("button", { name: "Save" }));
+    expect(noopSetStrokes).toHaveBeenCalledWith(ANN, MAX_STROKES);
   });
 
   it("refuses a fractional number too — a stroke count is whole", async () => {

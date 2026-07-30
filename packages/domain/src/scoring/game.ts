@@ -10,9 +10,15 @@ import { scoreStrokePlay } from "./strokePlay.js";
 // The framework every game format plugs into: a GameConfig (frozen at game-added
 // time, replayed from the event log) scores against the folded RoundState to
 // produce a GameState — the thing views render and settlement consumes.
-// No `allowance` on any arm: the 95/90/100 table is deleted (spec §3). Every kind now applies
-// the ONE rule — strokes are the difference from the lowest in that game's own field — so there
-// is no percentage left to carry. `scoring` appears on the two kinds where gross/net is a real
+// No `allowance` on any arm: the 95/90/100 table is deleted (spec 2026-07-30 §3), and NOTHING
+// single-rule replaced it. A game reads the strokes already on the roster, TWO different ways:
+// MEDAL kinds (stroke play, Stableford, skins) take each player's OWN number, so they always
+// agree with the card; MATCH kinds (singles, four-ball) take the DIFFERENCE off the lowest of
+// that game's own members, from the hardest hole down. Both live in ONE function,
+// `gameStrokeAllocation` (scoring/allocation.ts). Do not collapse them: the shot COUNT is the
+// same either way and only the HOLES differ, so no test that counts dots can tell them apart —
+// allocation.test.ts's stroke-index assertion is the one that can.
+// `scoring` appears on the two kinds where gross/net is a real
 // choice a group makes: stroke play, and skins (gross skins is the most-played casual variant,
 // and a group routinely runs gross and net skins as two pots over the same card).
 export type GameConfig =

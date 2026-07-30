@@ -239,7 +239,7 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     course = await getCourseDirect(httpUrl, courseIdParam);
   });
 
-  test("2: a live round on the unrated tee — the standard card's dots come straight from stroke index + the DERIVED strokes, the Match play panel states the same, and two-tap scoring nets against the card", async () => {
+  test("2: a live round on the unrated tee — the standard card's dots come straight from stroke index + the roster's own strokes, the Match play panel states the same, and two-tap scoring nets against the card", async () => {
     // "Start a round here" preselects the course; Uma creates on the unrated white tee.
     await page.getByRole("link", { name: /^start a round here$/i }).click();
     await expect(page).toHaveURL(/\/create/);
@@ -280,9 +280,9 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
       expect(await dotsOn("Vic", hole), `Vic hole ${hole}`).toBe(EXPECTED_VIC_DOTS[hole - 1]);
     }
 
-    // The "singles-match dots" claim, re-anchored: the RELATIVE allocation (the arithmetic the
-    // grid used to carry) now lives in the Match play panel's own strokes line, opened with ONE
-    // chip tap — not the grid, which just proved it renders the standard card's dots above.
+    // A match is played off the DIFFERENCE (spec 2026-07-30 §3), stated in the Match play panel's
+    // own strokes line and opened with ONE chip tap — not on the grid, which just proved it renders
+    // each player's own roster strokes above. Vic is on 0, so the two happen to coincide here.
     const panel = await openGamePanel(page, "Match play");
     await expect(panel).toContainText(EXPECTED_MATCH_STROKES_LINE);
 

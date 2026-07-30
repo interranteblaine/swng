@@ -111,12 +111,19 @@ function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
       disabled={readOnly}
       className={`${cardBox} flex min-h-14 w-full min-w-14 flex-col items-center justify-center gap-0.5 px-1 py-1 active:bg-goldwash`}
     >
-      {/* Dots are strokes RECEIVED, always: a roster number is bounded at zero by the request
-          schema (spec 2026-07-30 §11) and a match subtracts the lowest of its own members, so the
-          hollow ○ give-back glyph a plus handicap used to draw has no reachable state and is
-          deleted with the convention. `repeat` throws RangeError on a negative, which is exactly
-          what makes that bound load-bearing rather than cosmetic. */}
-      {dots !== 0 && (
+      {/* Dots are strokes RECEIVED, always: the hollow ○ give-back glyph a plus handicap used to
+          draw has no reachable state and is deleted with the convention.
+
+          `> 0`, not `!== 0`, and that is the whole guard (review fix round 1). `strokes` is
+          non-negative by ONE enforcement point — `strokesInputSchema`'s `min(0)` at the request
+          ingress (contracts/commands.ts); the old `resolveStrokes` clamp went with the derivation
+          this arc deleted. That single point is the CORRECT placement, not a gap: the only other
+          candidate is the stored/fold schema, and a bound there rejects data already written,
+          bricking a legitimate round on a read path (Arc A's placement rule). So the render
+          degrades instead of trusting: a negative that cannot legitimately exist draws no dot
+          rather than throwing `RangeError` out of `"●".repeat(-1)`, which would blank the whole
+          card for every player over one bad cell. The number itself still shows. */}
+      {dots > 0 && (
         <span aria-hidden className="text-[10px] leading-none text-forest">
           {"●".repeat(dots)}
         </span>
@@ -151,10 +158,10 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
   const holes = canonicalHoles(state.card);
   const current = currentHoleNumber(holes, state.participants, state.cells);
 
-  // The STANDARD CARD's dots: each player's own ROUND strokes — the value the fold derived across
-  // the present roster (spec 2026-07-29 §2b) — allocated by stroke index, no game, computed once
-  // per render (spec 2026-07-19 §2a). Any concurrent game's own strokes (resolved off that game's
-  // own field) live in that game's own panel — this grid never re-derives them.
+  // The STANDARD CARD's dots: each player's own roster strokes — the number someone typed (spec
+  // 2026-07-30 §2) — allocated by stroke index, no game, computed once per render (spec
+  // 2026-07-19 §2a). A MEDAL game's dots agree with this by construction; a MATCH game's are the
+  // difference off its own lowest and deliberately do not, which its own panel states in words.
   const dotsByGolfer = roundStrokeAllocation(state.participants, state.card);
 
   // OUT (front nine) / IN (back nine) / TOT — the same rows any paper card totals, keyed off

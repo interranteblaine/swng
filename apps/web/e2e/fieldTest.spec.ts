@@ -355,10 +355,10 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     }
 
     // Ann & Bo 1 up thru 16 — NOT dormie (up 1, remaining 2) — with the h16 skin still riding
-    // into 17: the deck's own thru-16 pin, via the app's own describeGame. Both figures moved
-    // under the one stroke rule (spec 2026-07-29 §2b — Cal off 13 instead of a 90%-discounted
-    // own-handicap, Ann off 6, Bo off scratch); fieldDeck18's own `expected` block is the
-    // hand-verified oracle and fieldDeck18.test.ts pins it against the engines.
+    // into 17: the deck's own thru-16 pin, via the app's own describeGame, off the roster numbers
+    // typed in test 2 (Cal 13, Ann 6, Dee 3, Bo 0 — no allowance percentage anywhere);
+    // fieldDeck18's own `expected` block is the hand-verified oracle and fieldDeck18.test.ts pins
+    // it against the engines.
     //
     // The between-holes digest is DELETED (accounts-only
     // identity spec §6: standings are pullable via the chips, never a push-interruption), so
@@ -442,7 +442,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await expect(pageA.getByRole("button", { name: "Ann hole 1", exact: true })).toBeDisabled();
 
     // The card's TOTALS ROWS (spec 2026-07-29 §4), on the only card in the suite that has both a
-    // real multi-player spread of derived strokes AND a pickup — so this is where the two halves of
+    // real multi-player spread of strokes AND a pickup — so this is where the two halves of
     // §4's rule can be pinned together: a scored hole counts at its recorded score, and "a segment
     // containing a pickup or an unscored hole shows `–` rather than a partial total" (the arc's own
     // ruling: the headline and the card must never print two different numbers for one round).

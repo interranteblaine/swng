@@ -48,17 +48,28 @@ export const gameConfigInputSchema = z.discriminatedUnion("kind", [
 ]);
 export type GameConfigInput = z.infer<typeof gameConfigInputSchema>;
 
-// A player's strokes at the REQUEST ingress (spec 2026-07-30 §2): defined once here and used by
-// every command that takes one (start's host, join, set-strokes). Request ingress ONLY — the
-// stored event arm in round.ts stays unbounded, per Arc A's placement rule (a bound on a
-// stored/fold schema rejects already-stored data on a read path), the same input/stored split
+// The ceiling on a stroke count, shared so the wire and the roster editor can never drift apart:
+// `strokesInputSchema` below bounds the request with it, and apps/web's SetupPanel bounds its own
+// input and its Save-enabled predicate with the SAME constant. Two independent literals is exactly
+// how a control comes to accept a number the wire always rejects.
+export const MAX_STROKES = 54;
+
+// A player's strokes at the REQUEST ingress (spec 2026-07-30 §2). `setStrokesRequestSchema` is its
+// ONE consumer — start and join ask nothing about anyone's game (spec §9), so there is no other
+// command that takes a number. Request ingress ONLY: the stored `participant-joined` and
+// `participant-strokes-set` arms in round.ts stay unbounded, per Arc A's placement rule (a bound on
+// a stored/fold schema rejects already-stored data on a read path), the same input/stored split
 // `gameConfigInputSchema` and `scoreResultInputSchema` already follow.
 //
-// NOT signed: nobody gives strokes back, so min(0) makes a negative unrepresentable at the wire
-// — load-bearing, since the card renders dots as `"●".repeat(strokes)`. max(54) is a plausibility
-// limit with margin (three a hole on a nine, one a hole plus half again on an eighteen), there to
-// reject nonsense rather than a real player.
-export const strokesInputSchema = z.number().int().min(0).max(54);
+// This is therefore the SOLE enforcement point of the non-negative invariant — the old
+// `resolveStrokes` clamp went with the derivation. That is the correct placement, not a gap: the
+// alternative bounds a read path, which bricks a legitimate round on data already written. The
+// render site degrades instead of trusting (ScorecardGrid's dot span).
+//
+// NOT signed: nobody gives strokes back, so min(0) makes a negative unrepresentable at the wire.
+// MAX_STROKES is a plausibility limit with margin (three a hole on a nine, one a hole plus half
+// again on an eighteen), there to reject nonsense rather than a real player.
+export const strokesInputSchema = z.number().int().min(0).max(MAX_STROKES);
 
 // Accounts-only identity (spec §3): StartRound seats its creator ONLY, always as-self from the
 // caller's Bearer (application/src/golfers/ensureGolfer.ts resolves the account golfer by sub).

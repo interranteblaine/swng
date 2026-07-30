@@ -6,9 +6,9 @@
 // that disagrees with FROZEN_LINE below is a design bug in THIS file, never something adjusted
 // to match a live run (BLOCKED-don't-fudge, task-7-brief.md's own verbatim law).
 //
-// Course: 18 holes, all par 4 (par 72), one flat tee. Every player states +0 all season (brief),
-// so under the one stroke rule (spec 2026-07-29 §2b) the field's anchor is 0 and EVERY seat derives
-// 0 strokes — regardless of stroke index — so net === gross everywhere and stableford points
+// Course: 18 holes, all par 4 (par 72), one flat tee. Every seat carries 0 strokes all season
+// (the deck says so — nothing derives it, spec 2026-07-30 §2), regardless of stroke index, so
+// net === gross everywhere and stableford points
 // collapse to max(0, 2 + par - net) = max(0, 6 - gross). Same "flat tee keeps arithmetic
 // hand-verifiable" reasoning as identityRecord.spec.ts's own buildIdentityCourseCard.
 import type { GameConfigInput } from "@swng/contracts";
@@ -146,9 +146,9 @@ export const roundScoresByGolfer = (ids: SeasonGolferIds, roundNumber: number): 
 // The three season games, wire shape (id-less — POST /rounds/{roundId}/games's own
 // GameConfigInput) — singles Al-Bo, net 4-way skins (carryover is NOT a config knob — scoreSkins
 // always carries a tied/undecided hole's pot forward, packages/domain/src/scoring/skins.ts), 4-way
-// stableford. Every seat states +0 all season, so every game's strokes resolve to 0 dots (the
-// difference from the lowest in its own field is 0) and the deck's frozen numbers are untouched
-// by the stroke model — net skins here scores exactly as gross would.
+// stableford. Every seat carries 0 strokes all season, so every game allocates 0 dots — a medal
+// kind reads the seat's own 0, a match kind subtracts a lowest that is also 0 — and the deck's
+// frozen numbers are untouched by the stroke model: net skins here scores exactly as gross would.
 export const seasonGames = (
   ids: SeasonGolferIds,
 ): { readonly singles: GameConfigInput; readonly skins: GameConfigInput; readonly stableford: GameConfigInput } => ({

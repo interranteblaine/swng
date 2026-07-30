@@ -468,8 +468,9 @@ describe("GamePanel — header (spec §2c)", () => {
   });
 
   it("stableford and skins both render a strokes line", () => {
-    // Two players, not one: strokes are relative, so a lone player anchors his own field and gets
-    // nothing. Pat's 5 against Alex's 0, halved on this nine-hole card, is 3 dots.
+    // Stableford and skins are MEDAL kinds, so each player gets their own typed number straight
+    // off the roster (spec 2026-07-30 §3) — Pat's 3 dots are Pat's 3, not a difference from Alex.
+    // Alex at 0 is here so the line has someone to say "no strokes" about.
     const participants: readonly RosterEntry[] = [
       { golferId: PAT, name: "Pat", tee: "white", strokes: 3 },
       { golferId: ALEX, name: "Alex", tee: "white", strokes: 0 },

@@ -99,10 +99,11 @@ export const gameTreatment = (config: GameConfig, participants: readonly Partici
 // which side. The other three get nothing here on purpose — gameTreatment's own net line already
 // states their field, and a note repeating it would just be the same sentence twice.
 //
-// Neither arm says "plays off scratch" (controller ruling, post-task-1): that is the same
-// misleading register this arc deleted from dots.ts's "everyone plays off 0", which wrongly told
-// two equal +20 golfers they were scratch golfers. Under a relative model the anchor may be a +20
-// who simply receives nothing, and "scratch" is handicap-era vocabulary for playing to par.
+// Neither arm says "plays off scratch" (controller ruling, post-task-1). Receiving nothing in a
+// match is not the same as being a scratch golfer: two players who both typed 20 each carry 20
+// dots on the card and simply give each other none here, because the difference is zero. Getting
+// none in one game says nothing about how you play — and "scratch" is handicap-era vocabulary for
+// playing to par, which nothing in this model computes.
 export const strokesNote = (kind: GameKind): string | undefined => {
   switch (kind) {
     case "singles-match":

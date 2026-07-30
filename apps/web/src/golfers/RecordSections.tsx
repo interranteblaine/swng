@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { AveragePoint, BestRound, GolferMetrics, GolferRoundLine, Milestone, MilestoneKind, RoundId } from "@swng/domain";
 import { formatOverPar } from "@swng/domain";
+import { nineHoleContribution } from "@swng/client";
 import { cardBox, linkEntity } from "../ui/classes";
 import { useContainerWidth } from "../ui/useContainerWidth";
 
@@ -276,9 +277,12 @@ export function HistoryList({ history, historyLimit }: HistoryListProps) {
               DOUBLED (spec §2d), so a row showing only its un-doubled +16 would make the subtitle's
               whole promise — add the rows up and check the number — silently fail to reconcile for
               anyone who plays nines. The `· 9 holes` marker alone does not carry the missing
-              information; the doubled figure does. `score - par` and its doubling are presentation
-              arithmetic over two served numbers (the same figures the served average was folded
-              from), and `formatOverPar` is a formatter — no domain compute import. */}
+              information; the doubled figure does. `score - par` is presentation arithmetic over
+              two served numbers (the same figures the served average was folded from), and
+              `formatOverPar` is a formatter — but the DOUBLING is a model rule (spec §2d, same one
+              `golfer/average.ts`'s `overPar` applies), so it runs through `nineHoleContribution`
+              from @swng/client rather than being re-derived here as a second `* 2` (task 5: this
+              was exactly that second copy, closed). */}
           <Link
             to={`/rounds/${line.roundId}`}
             className={`${cardBox} block px-3 py-2 text-sm text-fairway underline decoration-fairway tabular-nums`}
@@ -286,7 +290,7 @@ export function HistoryList({ history, historyLimit }: HistoryListProps) {
             {line.courseName} · {line.tee}
             {line.score !== undefined && ` · ${line.score} (${formatOverPar(line.score - line.par)})`}
             {line.holes === 9 &&
-              (line.score !== undefined ? ` · 9 holes, counts ${formatOverPar((line.score - line.par) * 2)}` : " · 9 holes")}
+              (line.score !== undefined ? ` · 9 holes, counts ${formatOverPar(nineHoleContribution(line.score - line.par))}` : " · 9 holes")}
           </Link>
         </li>
       ))}

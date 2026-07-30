@@ -158,6 +158,13 @@ export default [
                 "averageHistory",
                 "scoredOverPar",
                 "overPar",
+                // nineHoleContribution (task 5, the last golf logic that had leaked into the web —
+                // RecordSections.tsx's history row re-derived `* 2` inline for a nine's "counts
+                // +32" line) IS re-exported through @swng/client, unlike its neighbors above: it's
+                // a small pure fact (a nine counts doubled), not the average fold itself, and the
+                // web still needs it to render over already-served score/par fields. Still banned
+                // straight from @swng/domain — the client re-export is the one sanctioned path.
+                "nineHoleContribution",
                 // golfer metrics + per-round archive line
                 "golferMetrics",
                 "archiveGolferLine",

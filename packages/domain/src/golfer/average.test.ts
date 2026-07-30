@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { averageOf, spreadOfValues } from "./average.js";
+import { averageOf, nineHoleContribution, spreadOfValues } from "./average.js";
 import type { GolferRoundLine } from "./record.js";
 
 // n holes of par 4; `perHole` is each hole's gross. 18 × 4 = par 72.
@@ -39,6 +39,16 @@ describe("averageOf", () => {
 
   it("is undefined with no rounds carrying a score", () => {
     expect(averageOf([])).toBeUndefined();
+  });
+});
+
+// The nine-hole doubling rule (spec 2026-07-29 §2d), extracted to its own tested function so it
+// has exactly one implementation — overPar below calls it, and so does RecordSections.tsx (via
+// @swng/client) instead of re-deriving `* 2` inline in the component.
+describe("nineHoleContribution", () => {
+  it("doubles a nine-hole round's contribution", () => {
+    expect(nineHoleContribution(11)).toBe(22);
+    expect(nineHoleContribution(-2)).toBe(-4);
   });
 });
 

@@ -35,9 +35,12 @@ export * from "./golfer/placeholderName.js";
 export * from "./golfer/record.js";
 // golfer/average.ts (spec 2026-07-29 §2c/§5): what you normally shoot relative to par — the fold
 // the record and the crew board both read, plus AveragePoint for the profile's chart. Banned onto
-// the web-side fence below like every other barrel-exported golf computation, and deliberately NOT
-// re-exported through @swng/client: the average is server-computed and served, so an on-device
-// copy would be fence-legal and boundary-wrong.
+// the web-side fence below like every other barrel-exported golf computation. Every member here is
+// deliberately NOT re-exported through @swng/client except one: `nineHoleContribution` (task 5) —
+// the average itself is server-computed and served, so an on-device copy of THAT fold would be
+// fence-legal and boundary-wrong, but the doubling rule alone is a small pure fact the web still
+// needs to render a history row's "counts +32" line over already-served score/par fields; it's
+// re-exported so that rendering doesn't re-derive `* 2` inline.
 export * from "./golfer/average.js";
 export * from "./golfer/metrics.js";
 export * from "./golfer/coursesPlayed.js";

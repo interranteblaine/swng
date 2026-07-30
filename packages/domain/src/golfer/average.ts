@@ -9,9 +9,15 @@ import type { GolferRoundLine } from "./record.js";
 export const AVERAGE_WINDOW = 10;
 const SPREAD_MIN_ROUNDS = 5;
 
+// A nine counts doubled (spec 2026-07-29 §2d). This is a model rule, not a rendering — it belongs
+// here, not in the component that happens to show it. `overPar` below is its only caller inside
+// this file; RecordSections.tsx (the history row's "counts +32" line) calls it too, through
+// @swng/client — the same rule, one implementation, instead of a second `* 2` re-derived in the web.
+export const nineHoleContribution = (overPar: number): number => overPar * 2;
+
 export const overPar = (line: GolferRoundLine): number => {
   const raw = scoreOf(line) - line.par;
-  return line.holes === 9 ? raw * 2 : raw;
+  return line.holes === 9 ? nineHoleContribution(raw) : raw;
 };
 
 // Only rounds with a score. A pickup means there is no score, so no number is invented for it.

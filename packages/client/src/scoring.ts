@@ -54,4 +54,9 @@ export const foldAndScore = (events: readonly RoundEvent[]): { state: RoundState
 // `averageOfValues`/`spreadOfValues` are deliberately NOT re-exported either: those numbers are
 // server-computed and served, so an on-device copy would be fence-legal and boundary-wrong. `formatOverPar` is a presentation
 // formatter the web imports straight from @swng/domain, exactly as `underPar` already does.
-export { gameStrokeAllocation, roundStrokeAllocation, netStrokes, totalDots, grossForHoles, unresolvedGames } from "@swng/domain";
+//
+// `nineHoleContribution` (task 5) IS re-exported, unlike its average.ts neighbors above: it's the
+// nine-hole-doubling rule alone (spec §2d), not the average fold, and RecordSections.tsx needs it
+// to render a history row's "counts +32" line over already-served score/par fields — the fix for
+// the last golf logic this arc found re-derived inline in the web (`(score - par) * 2`).
+export { gameStrokeAllocation, roundStrokeAllocation, netStrokes, totalDots, grossForHoles, unresolvedGames, nineHoleContribution } from "@swng/domain";

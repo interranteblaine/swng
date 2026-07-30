@@ -1489,6 +1489,80 @@ is byte-identical, proven by e2e:beta 17/17 incl. finalize golden numbers + e2e:
 Owner actions outstanding: **confirm the `swng-alarms-prod` SNS email** (PendingConfirmation) and — the
 recommendation — **request SES production access before announcing**. On local `main`, never pushed.
 
+Strokes now come from what you shoot, not an index (2026-07-29/30, spec
+`docs/superpowers/specs/2026-07-29-relative-to-par-strokes-model-design.md`, plan
+`docs/superpowers/plans/2026-07-29-relative-to-par-strokes-model.md`, 6 SDD tasks + 5
+controller-verified fix rounds, commits `77fb675..ba1ee29`): the owner's field report — a group
+settling strokes by asking each other "for an average round, how do you shoot relative to par?"
+and taking the difference — closed the entire WHS/swng-Index pipeline and replaced it with the
+number a first tee already speaks. **One number, stated, never converted:** a golfer's
+`StrokeBasis` (`scoring/strokeBasis.ts`) is either `{kind:"normally-shoots", overPar}` (a signed
+vs-par number) or `{kind:"strokes", strokes}` (a flat count, bounded at zero — under a relative
+model the best player is the anchor and plays off scratch, so nobody ever gives strokes back);
+stated at join, corrected mid-round by the same dedicated event 2026-07-20's
+`participant-handicap-set` already was — renamed `participant-basis-set`, not re-designed — and
+pre-filled (never floored) from the golfer's own average. **One rule derives strokes for everybody:** `resolveStrokes`/`anchorOf` — the difference from the
+lowest stated `normally-shoots` among a field's *present* members, clamped at zero, halved once on
+a nine — scoped independently to the round's whole roster (`roundStrokeAllocation`, renamed from
+`courseHandicapAllocation`) and to each game's own frozen field; a departed player is excluded
+from the anchor but still resolves their own strokes against it. **No format re-derives strokes
+from a percentage** — the whole allowance table is deleted; `skins` gains `scoring: "gross" |
+"net"` (a group routinely runs both as two pots); four-ball loses its 90% discount, a named and
+accepted deviation (a Saturday match now plays off the full difference); `allowancePhrase` is
+replaced by one `gameTreatment(config)` covering every kind, gross included.
+**A conceded hole now carries the score you would have made** — `HoleResult`'s `conceded` arm
+gains required `strokes` and is scored exactly like a `strokes` cell everywhere (every engine,
+the card's totals, the average) behind one accessor, `scoredStrokes` (`round/holeResult.ts`); only
+the card's `Nc` glyph and `fullyHoledOut` still distinguish it, and the net-double-bogey cap
+narrows to picked-up holes, the only kind left with no number to use. **The card reads like a
+scorecard**: OUT/IN/TOT totals rows (live and finalized), and the finished round now shows gross
+· strokes · net with no "adjusted score" line — both reading off ONE domain function,
+`grossForHoles` (`round/state.ts`, fence-banned, `@swng/client`-re-exported): the sum of a hole
+set's scores, or undefined if any lacks a decided one, in which case the card segment and the
+results headline dash together rather than disagreeing (a controller-caught defect in-arc: the
+first draft's Final totals treated a picked-up hole as a silent zero and printed a fabricated
+partial gross the grid correctly dashed two inches below — fixed same-task). `golfer/average.ts`
+replaces the whole handicap engine: `score − par` over a golfer's last 10 finished rounds with
+every hole scored (a round containing a pickup contributes nothing; a nine counts doubled), a
+read-time fold, never stored. `formatOverPar` (`scoring/present.ts`, absorbing the web's old
+`vsPar.ts`) is the one signed-number renderer tree-wide, now that the plus-handicap convention has
+no negative left to notate (minus simply means under par).
+**Deleted whole:** `packages/domain/src/handicap/` in its entirety — `whs.ts` (adjusted gross
+score, score differentials, the Rule 5.2a small-sample table, the 9-hole pairing, course-handicap
+conversion) and `present.ts` (`formatHandicapIndex`, `formatCourseHandicap`, `strokeGrant`,
+`indexSourcePhrase`), and every consumer of the plus-handicap convention it existed to render
+(the scorecard's hollow `○` give-back glyph, `allocateStrokes`' negative branch); `scoring/
+allowances.ts` (`defaultAllowance`, `playingHandicap`); `golfer.ts`'s `IndexSource`/
+`HandicapProfile`/`Golfer.handicap` and `resolveIndex`; `scoring/allocation.ts`'s
+`handicappingFor` and `RoundArchive.handicapping`/`FinalizeRoundResponse.handicapping`;
+`GolferRoundLine.ags`/`.differential` and the "Posted to handicaps" section; `metrics.ts`'s
+`whsIndex`/`swngIndex`/the two-line `IndexPoint`/`indexHistory`. Rating and slope stay recorded on
+the course card (they're printed on the real scorecard) but feed no calculation anywhere. The word
+"handicap" itself leaves the wire: `participant-handicap-set` → `participant-basis-set`,
+`POST /rounds/{roundId}/handicap` → `POST /rounds/{roundId}/basis`, `setHandicap.ts` →
+`setBasis.ts` — **not** an additive rename: an old stored event of that shape is unparseable
+against the new schema, accepted because beta's round data is wiped at close-out (a stored
+integer `courseHandicap` is semantically ambiguous under a relative model — some were absolute,
+some were already differences typed by hand — so there is nothing honest to migrate).
+**Crew:** the board becomes Rounds · Average · Spread · Best (was index/netPer18/indexDelta) — a
+distribution, not a point estimate, since a WHS-style index could never describe one. A
+controller ruling kept `spread` OFF the golfer's own profile/`GolferMetrics` wire even though both
+a task implementer and its independent reviewer proposed serving it there: the crew board's
+`spread` is a SEASON-window statistic (`spreadOfValues` inside `getSeasonStandings`), and a
+same-named rolling-10 number on the profile would recreate exactly the two-numbers-one-name
+confusion the crew board exists to prevent — `spreadOf` is deleted with its last caller,
+`spreadOfValues` stays. `SeasonPanel` also gains one line naming the strokes between two members
+who've never shared a card ("If you played tomorrow, Blaine gets 16" / a level-play sentence on a
+tie), computed as the same difference rule run over the board's own already-served averages — not
+a promise about what the round will actually produce. Each task (1–6) went implementer →
+independent review → controller-verified fix round, `pnpm
+validate` green at every commit (`task-N-validate.log`); `pnpm test:contract` 90 (task 3). Beta
+round data (rounds, snapshots, projections; golfers and crews kept, courses untouched) will be
+wiped at close-out per the spec — every stored `courseHandicap` is ambiguous under the new model,
+so there is nothing honest to migrate. **Beta only — no prod deploy in this arc.** E2E oracle
+re-derivation and locator reconciliation, the deploy, the wipe, and both e2e gates are the
+milestone's own remaining tasks. On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

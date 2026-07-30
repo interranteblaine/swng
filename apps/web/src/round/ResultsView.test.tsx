@@ -8,7 +8,6 @@ import {
   deviceId,
   fieldDeck18,
   fixtureLinks18,
-  fixtureWhite18,
   gameId,
   golferId,
   opId,
@@ -18,7 +17,7 @@ import {
   scoreGame,
   settleRound,
 } from "@swng/domain";
-import type { CourseCard, GameConfig, RoundState, ScoreCell } from "@swng/domain";
+import type { GameConfig, RoundState, ScoreCell } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
@@ -38,16 +37,36 @@ const render = (ui: ReactElement) =>
     </MemoryRouter>,
   );
 
-// The handicapping list's own rows, as plain text (GolferLink + literal suffix concatenated) —
+// The Final totals list's own rows, as plain text (GolferLink + literal suffix concatenated) —
 // scoped by the list's own aria-label since RTL's getByText can't bridge a nested <a> boundary,
 // but a located element's native .textContent always can (this codebase's own established idiom
 // for asserting rendered text that spans a link, e.g. SetupPanel's roster-row assertions).
-const handicappingTexts = (): readonly (string | null)[] => within(screen.getByRole("list", { name: "Posted to handicaps" })).getAllByRole("listitem").map((li) => li.textContent);
+const finalTotalsTexts = (): readonly (string | null)[] => within(screen.getByRole("list", { name: "Final totals" })).getAllByRole("listitem").map((li) => li.textContent);
+
+// Independent of ResultsView's own grossOf: walks a golden deck's raw scores + corrections
+// arrays directly (never cellAt/scoredStrokes) — a mismatch against what ResultsView renders is a
+// real bug in the component, not a restatement of its own arithmetic. A "picked-up" or never-
+// recorded (null) hole contributes nothing, same as ResultsView's own rule.
+const expectedGrossOf = (
+  scores: Readonly<Record<string, ReadonlyArray<number | "picked-up" | null>>>,
+  corrections: readonly { readonly golfer: string; readonly hole: number; readonly score: number | "picked-up" }[],
+  golferId: string,
+): number => {
+  const raw = [...scores[golferId]!];
+  for (const correction of corrections) if (correction.golfer === golferId) raw[correction.hole - 1] = correction.score;
+  return raw.reduce<number>((sum, entry) => sum + (typeof entry === "number" ? entry : 0), 0);
+};
+
+// strokes is non-negative by construction (spec §2a) — the exact rendering rule ResultsView's
+// own strokesLabel applies, restated here only to build an expected STRING, not to re-derive the
+// number itself (gross/strokes both come from independent oracles above/below).
+const expectedFinalTotalsLine = (name: string, gross: number, strokes: number): string =>
+  `${name} — ${gross} gross · ${strokes > 0 ? `−${strokes}` : "0"} · ${gross - strokes} net`;
 
 afterEach(() => cleanup());
 
 describe("ResultsView — the agreement assertion (brief-mandated)", () => {
-  const { players, fourball, skins, scores, corrections } = fieldDeck18;
+  const { players, fourball, skins, scores, corrections, expected } = fieldDeck18;
 
   // A full, finalized log for the M5 field deck — the same fixture fieldDeck18.test.ts pins
   // fourballFinal/skinsFinal against.
@@ -95,19 +114,19 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
     expect(screen.getByText("Bo 5 · Dee 10 · 3 carried out")).toBeTruthy();
   });
 
-  it("handicapping rows render the server's response verbatim — no local recomputation when a response exists", () => {
+  it("the Final totals list totals each player's whole round — gross, the deck's own strokes, and net", () => {
     render(<ResultsView state={state} games={localGames} response={response} />);
-    const texts = handicappingTexts();
-    for (const row of response.handicapping) {
-      if (row.kind !== "complete") continue;
-      const name = state.participants.find((p) => p.golferId === row.golferId)!.name;
-      expect(texts).toContain(`${name} — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`);
+    const texts = finalTotalsTexts();
+    for (const p of players) {
+      const gross = expectedGrossOf(scores, corrections, p.golferId);
+      const strokes = expected.strokes[p.golferId]!;
+      expect(texts).toContain(expectedFinalTotalsLine(p.name, gross, strokes));
     }
   });
 
   // The link sweep (navigation spec, task 6): every rendered noun's name is its address — both
-  // the roster and the handicapping list's own names link to /golfers/:golferId.
-  it("the link sweep: roster and handicapping-row names link to /golfers/:golferId", () => {
+  // the roster and the Final-totals list's own names link to /golfers/:golferId.
+  it("the link sweep: roster and Final-totals-row names link to /golfers/:golferId", () => {
     render(<ResultsView state={state} games={localGames} response={response} />);
 
     const ann = players[0]!;
@@ -115,9 +134,9 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
     const rosterLink = within(rosterList).getByRole("link", { name: ann.name });
     expect(rosterLink.getAttribute("href")).toBe(`/golfers/${ann.golferId}`);
 
-    const handicapList = screen.getByRole("list", { name: "Posted to handicaps" });
-    const handicapLink = within(handicapList).getByRole("link", { name: ann.name });
-    expect(handicapLink.getAttribute("href")).toBe(`/golfers/${ann.golferId}`);
+    const totalsList = screen.getByRole("list", { name: "Final totals" });
+    const totalsLink = within(totalsList).getByRole("link", { name: ann.name });
+    expect(totalsLink.getAttribute("href")).toBe(`/golfers/${ann.golferId}`);
   });
 
   it("the archived card reuses ScorecardGrid, read-only — a cell tap is inert", () => {
@@ -172,23 +191,19 @@ describe("ResultsView — share affordance (M9 Task 3)", () => {
 });
 
 describe("ResultsView — no response (WS-pushed final, brief's other tab)", () => {
-  it("derives handicapping locally, matching settleRound's own numbers for the identical log", () => {
-    const { players, fourball, skins, scores, corrections } = fieldDeck18;
+  it("renders the identical Final totals with no response at all — the section never depended on one", () => {
+    const { players, fourball, skins, scores, corrections, expected } = fieldDeck18;
     const events = playGoldenRoundLog(fixtureLinks18, players, [fourball, skins], scores, corrections, true);
     const state = reduceRound(events);
     const localGames = state.games.map((config) => scoreGame(config, state));
-    const archive = settleRound(events); // the true source — this tab never called finalize, only settleRound did (server-side)
 
     render(<ResultsView state={state} games={localGames} response={undefined} />);
 
-    const texts = handicappingTexts();
-    for (const row of archive.handicapping) {
-      const name = state.participants.find((p) => p.golferId === row.golferId)!.name;
-      if (row.kind === "complete") {
-        expect(texts).toContain(`${name} — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`);
-      } else {
-        expect(texts).toContain(`${name} — card incomplete, nothing posted`);
-      }
+    const texts = finalTotalsTexts();
+    for (const p of players) {
+      const gross = expectedGrossOf(scores, corrections, p.golferId);
+      const strokes = expected.strokes[p.golferId]!;
+      expect(texts).toContain(expectedFinalTotalsLine(p.name, gross, strokes));
     }
   });
 
@@ -237,9 +252,12 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     expect(screen.queryByRole("region")).toBeNull(); // nothing expanded by default
   });
 
-  it("a golfer with an undecided card (a pickup mid-round, no finalize response) shows 'incomplete', not a crash", () => {
+  it("an undecided card (one hole recorded, the rest never played) still renders a Final totals line — no crash, no completeness gate", () => {
     // A tiny hand-built round: one participant, one hole recorded, never finished — the round
     // is marked final anyway (mirrors the WS-push scenario: this tab just observes status).
+    // Unlike the deleted WHS-model incomplete/unrated kinds, Final totals is pure arithmetic: an
+    // unrecorded hole just contributes nothing to gross (spec: "the finished round stops
+    // speaking WHS" — there is no completeness gate left to fail).
     const ann = golferId("ann");
     const cellValue: ScoreCell = { result: { kind: "strokes", strokes: 5 }, recordedBy: ann, hlc: { wallMs: 1, counter: 0, deviceId: deviceId("d") }, opId: opId("op-1") };
     const state: RoundState = {
@@ -253,57 +271,7 @@ describe("ResultsView — no response (WS-pushed final, brief's other tab)", () 
     };
 
     render(<ResultsView state={state} games={[]} response={undefined} />);
-    expect(handicappingTexts()).toContain("Ann — card incomplete, nothing posted");
-  });
-});
-
-// unrated-courses arc: a round played on an unrated tee (no rating/slope) is fully scored and
-// has an AGS, but no differential to post to a handicap. Its handicapping row is a THIRD kind,
-// "unrated" — it must render its AGS and say it isn't posted, NEVER collapse into "incomplete"
-// (which means an undecided card, a different thing entirely).
-describe("ResultsView — unrated handicapping row", () => {
-  const ann = golferId("ann");
-
-  // An unrated 18-hole tee (fixtureWhite18's holes, with rating/slope stripped), fully scored at
-  // par by Ann — so adjustedGrossScore holds (the card is decided) but scoreDifferential is never
-  // reached (isRated is false). handicappingFor returns { kind: "unrated", ags }.
-  const unratedCard: CourseCard = { courseName: "Unrated GC", teeSets: [{ name: "white", holes: fixtureWhite18.holes }] };
-  const fullyScoredCells = (): Record<string, ScoreCell> => {
-    const cells: Record<string, ScoreCell> = {};
-    for (const hole of fixtureWhite18.holes) {
-      cells[cellKey(ann, hole.number)] = {
-        result: { kind: "strokes", strokes: hole.par },
-        recordedBy: ann,
-        hlc: { wallMs: hole.number, counter: 0, deviceId: deviceId("d") },
-        opId: opId(`op-${hole.number}`),
-      };
-    }
-    return cells;
-  };
-  const unratedState = (): RoundState => ({
-    id: roundId("r-unrated"),
-    status: "final",
-    card: unratedCard,
-    participants: [{ golferId: ann, name: "Ann", tee: "white", basis: { kind: "strokes", strokes: 8 }, strokes: 8 }],
-    games: [],
-    cells: fullyScoredCells(),
-    terminatedGameIds: new Set(),
-  });
-
-  it("derives an unrated row (no response) → renders its AGS and 'unrated (not posted)', not 'incomplete'", () => {
-    render(<ResultsView state={unratedState()} games={[]} response={undefined} />);
-
-    // par-72 card, all pars, no net-double-bogey adjustment → AGS 72.
-    expect(handicappingTexts()).toContain("Ann — adjusted score 72 · unrated course, not posted");
-    expect(screen.queryByText(/card incomplete/)).toBeNull();
-  });
-
-  it("renders a server response's own unrated row verbatim (the finalize-tab path)", () => {
-    const response: FinalizeRoundResponse = { results: [], handicapping: [{ golferId: ann, kind: "unrated", ags: 84 }] };
-    render(<ResultsView state={unratedState()} games={[]} response={response} />);
-
-    expect(handicappingTexts()).toContain("Ann — adjusted score 84 · unrated course, not posted");
-    expect(screen.queryByText(/card incomplete/)).toBeNull();
+    expect(finalTotalsTexts()).toContain(expectedFinalTotalsLine("Ann", 5, 8)); // "Ann — 5 gross · −8 · −3 net"
   });
 });
 

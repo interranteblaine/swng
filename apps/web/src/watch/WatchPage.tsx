@@ -89,7 +89,7 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
     // /courses/:courseId when the frozen card carries a source (plain text when absent — the
     // SAME split RoundRecordPage.tsx uses, `dateSuffix` sliced off `label` rather than
     // re-derived); every GOLFER name below it (live standings/trail/story AND the final
-    // ResultsView roster/handicapping) renders plain — a spectator's tree turns golfer links off
+    // ResultsView roster/Final totals) renders plain — a spectator's tree turns golfer links off
     // at the root via PlainNamesContext, spec §4c.2. Course links stay on: they're public.
     const courseName = view.state.card.courseName;
     const label = roundLabel({ courseName, createdAt: view.createdAt });

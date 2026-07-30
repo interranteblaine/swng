@@ -288,8 +288,10 @@ describe("ScorecardGrid — picked-up / conceded glyphs", () => {
   // while silently treating the 3 as though it doesn't exist (no net line, no oxblood ink) —
   // failing the "only the glyph distinguishes it" rule on the very surface that rule names.
   it("a conceded score renders its net sub-line and under-par ink exactly like a strokes cell", () => {
-    // Ann (CH8) against Bo (CH0, the anchor, 0 dots): the 8-stroke difference halves to 4 dots on
-    // fixtureWhite's SI 1..4 (holes 2, 4, 7, 8) — hole 2 is SI1, so Ann carries 1 dot there.
+    // The standard card is roundStrokeAllocation — each player's own DERIVED round strokes
+    // allocated directly by stroke index, no differencing and no halving (that per-game rule is
+    // gameStrokeAllocation's, not this one). Ann's 8 strokes land one dot on every hole except
+    // fixtureWhite's easiest (SI 9, hole 3) — hole 2 is SI1, so Ann carries a dot there.
     const ann8 = participant(ANN, "Ann", "white", 8);
     const bo0 = participant(BO, "Bo", "white", 0);
     // Hole 2 is par 4 (fixtureWhite) — a conceded 3 is a birdie gross AND nets to 2 (3 − 1 dot),
@@ -363,6 +365,65 @@ describe("ScorecardGrid — Clear score", () => {
 
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Clear score" })).toBeNull();
+  });
+});
+
+// The card totals like any paper scorecard: OUT (front nine), IN (back nine, omitted on a
+// 9-hole card) and TOT, each carrying the hole column's par sum and every player's own gross
+// over net.
+describe("ScorecardGrid — totals (OUT/IN/TOT)", () => {
+  const BLAINE = golferId("blaine");
+
+  // One 18-hole card, one participant ("Blaine"), 24 strokes over the card's 72 par (96 gross
+  // total) — the exact per-hole numbers don't matter beyond summing to 96/51/45; only the
+  // OUT/IN/TOT totals are under test. strokes: 20 gives a total-dots sum of 20 across the whole
+  // card (dotsByHole's own documented invariant: its allocation always sums exactly to its input
+  // strokes), so TOT net = 96 − 20 = 76.
+  const fullCardStrokes: Readonly<Record<number, number>> = {
+    1: 6, 2: 6, 3: 5, 4: 7, 5: 6, 6: 5, 7: 5, 8: 6, 9: 5, // OUT: par 36 + 15 = 51
+    10: 5, 11: 4, 12: 6, 13: 5, 14: 5, 15: 6, 16: 4, 17: 5, 18: 5, // IN: par 36 + 9 = 45
+  };
+  const fullCardCells: Record<string, ScoreCell> = Object.fromEntries(
+    Object.entries(fullCardStrokes).map(([hole, strokes]) => [cellKey(BLAINE, Number(hole)), scoreCell({ kind: "strokes", strokes }, BLAINE)]),
+  );
+  const stateWithFullCard: RoundState = {
+    id: roundId("round-totals"),
+    status: "live",
+    card: fixtureLinks18,
+    participants: [participant(BLAINE, "Blaine", "white", 20)],
+    games: [],
+    cells: fullCardCells,
+    terminatedGameIds: new Set(),
+  };
+
+  it("totals the card like a scorecard — OUT, IN and TOT, gross and net", () => {
+    render(<ScorecardGrid state={stateWithFullCard} recordScore={() => {}} />);
+    const tot = screen.getByRole("row", { name: /tot/i });
+    expect(within(tot).getByText("72")).toBeTruthy(); // par
+    expect(within(tot).getByText("96")).toBeTruthy(); // Blaine gross
+    expect(within(tot).getByText("76")).toBeTruthy(); // Blaine net
+  });
+
+  it("counts a conceded hole in the totals at its recorded score", () => {
+    // Spec §4: any other rule makes the finalized card disagree with the same round's line in
+    // the golfer's record, which reads conceded strokes. Hole 3 was already recorded as a plain
+    // 5 above; conceding that same 5 must leave every total unchanged.
+    const stateWithOneConcededFive: RoundState = {
+      ...stateWithFullCard,
+      cells: { ...fullCardCells, [cellKey(BLAINE, 3)]: scoreCell({ kind: "conceded", strokes: 5 }, BLAINE) },
+    };
+    render(<ScorecardGrid state={stateWithOneConcededFive} recordScore={() => {}} />);
+    expect(within(screen.getByRole("row", { name: /tot/i })).getByText("96")).toBeTruthy();
+  });
+
+  it("dashes a segment containing a pickup", () => {
+    // One picked-up hole is enough to prove it — no full card needed.
+    const stateWithOnePickup = twoPlayerState({
+      participants: [participant(ANN, "Ann", "white", 0)],
+      cells: { [cellKey(ANN, 1)]: scoreCell({ kind: "picked-up" }, ANN) },
+    });
+    render(<ScorecardGrid state={stateWithOnePickup} recordScore={() => {}} />);
+    expect(within(screen.getByRole("row", { name: /out/i })).getByText("–")).toBeTruthy();
   });
 });
 

@@ -1,17 +1,24 @@
-import { handicappingFor } from "@swng/client";
-import type { GameState, RoundState } from "@swng/domain";
+// cellAt/scoredStrokes are pure structural accessors, not golf compute (the same footing as
+// cellKey/findTeeSet — see the ESLint fence's own comment in eslint.config.mjs), so this file
+// reads them directly rather than through @swng/client.
+import { cellAt, scoredStrokes } from "@swng/domain";
+import type { GameState, RosterEntry, RoundState } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
 import { GolferLink } from "../ui/GolferLink";
-import { ScorecardGrid } from "./ScorecardGrid";
+import { canonicalHoles, ScorecardGrid } from "./ScorecardGrid";
 import { ShareButton } from "./ShareButton";
 import { StandingsHeader } from "./StandingsHeader";
 
 export interface ResultsViewProps {
   readonly state: RoundState; // caller's own contract: only ever rendered once state.status === "final"
   readonly games: readonly GameState[]; // the session's local games() — same domain, same log as any server response
-  // Present only on the tab that itself called finalizeRound (RoundPage's own contract) — a
-  // tab that only observes the status flip via WS (another participant finalized) never gets
-  // one. ResultsView must render fully either way: see the two why-comments below.
+  // Present only on the tab that itself called finalizeRound (RoundPage's own contract). Kept in
+  // the interface for that caller's shape, but no longer read here: "Final totals"/"Final card"
+  // below both compute straight off `state`, the same way for every tab, so nothing here ever
+  // needed a server-only value to show first (unlike the deleted differential, which had no local
+  // GameState equivalent). Left unused rather than deleted — Task 5 removes `handicapping` from
+  // the wire entirely, and re-plumbing RoundPage's/WatchPage's own prop is that task's job, not
+  // this narrow one.
   readonly response: FinalizeRoundResponse | undefined;
   // M9 Task 3 (share): the caller's OWN participant token, threaded through only so ShareButton
   // can mint a link — OPTIONAL and OMITTED by WatchPage's own reuse of this exact component for
@@ -22,19 +29,29 @@ export interface ResultsViewProps {
   readonly shareToken?: string;
 }
 
-type HandicappingRow = FinalizeRoundResponse["handicapping"][number];
+// strokes is non-negative by construction (resolveStrokes clamps both arms at zero, spec §2a) —
+// there is no give-back case left to render here, so this needs no formatter and no grant branch.
+// Do NOT reach for formatCourseHandicap: it writes a negative as "+N" (golf's plus-handicap
+// convention, a player who GIVES that many), which is exactly backwards for a receiver's own
+// strokes count. That convention — and formatCourseHandicap itself — is deleted in Task 5.
+const strokesLabel = (strokes: number): string => (strokes > 0 ? `−${strokes}` : "0");
 
-// A thin delegation to domain's own handicappingFor (packages/domain/src/scoring/
-// allocation.ts) — M6 Task 5 deleted this file's own hand-mirrored AGS/differential
-// arithmetic (byte-identical to the domain version, now a single source instead of two to
-// keep in sync). Still the only way a WS-pushed final ever shows a differential before this
-// tab's own finalize response (if it ever calls one) arrives — there is no local GameState
-// equivalent for a differential, unlike the per-game results below.
-const deriveHandicapping = (state: RoundState): readonly HandicappingRow[] =>
-  state.participants.map((participant) => handicappingFor(participant, state.card, state.cells));
+export function ResultsView({ state, games, shareToken }: ResultsViewProps) {
+  const holes = canonicalHoles(state.card);
+  const parTotal = holes.reduce((sum, hole) => sum + hole.par, 0);
 
-export function ResultsView({ state, games, response, shareToken }: ResultsViewProps) {
-  const handicapping = response?.handicapping ?? deriveHandicapping(state);
+  // Whole-round gross for the headline line below: sums every hole this participant has a
+  // decided, scored cell for. scoredStrokes reads a conceded hole exactly like a strokes cell
+  // (spec §4) — any other rule would make this line disagree with the same round's own line in
+  // the golfer's record, which reads conceded strokes too. A hole with no decided cell (never
+  // played, or picked up) contributes nothing; this headline is a summary, not a completeness
+  // gate — the full card right below already renders the honest per-segment "–" for anyone whose
+  // round isn't fully scored.
+  const grossOf = (p: RosterEntry): number =>
+    holes.reduce((sum, hole) => {
+      const cell = cellAt(state.cells, p.golferId, hole.number);
+      return sum + (cell ? (scoredStrokes(cell.result) ?? 0) : 0);
+    }, 0);
 
   return (
     <section className="flex flex-col gap-6 p-4">
@@ -52,18 +69,19 @@ export function ResultsView({ state, games, response, shareToken }: ResultsViewP
       </div>
 
       <div>
-        <h2 className="text-lg font-semibold text-forest">Posted to handicaps</h2>
-        <ul aria-label="Posted to handicaps" className="flex flex-col gap-1">
-          {handicapping.map((row) => {
-            const name = state.participants.find((p) => p.golferId === row.golferId)?.name ?? row.golferId;
+        <h2 className="text-lg font-semibold text-forest">Final totals</h2>
+        <p className="text-sm text-fairway">Par {parTotal}</p>
+        <ul aria-label="Final totals" className="flex flex-col gap-1">
+          {state.participants.map((p) => {
+            const gross = grossOf(p);
             return (
-              <li key={row.golferId} className="text-sm text-fairway">
-                <GolferLink golferId={row.golferId} name={name} />
-                {row.kind === "complete"
-                  ? ` — adjusted score ${row.ags} · posts ${row.differential.toFixed(1)}`
-                  : row.kind === "unrated"
-                    ? ` — adjusted score ${row.ags} · unrated course, not posted`
-                    : ` — card incomplete, nothing posted`}
+              <li key={p.golferId} className="text-sm text-fairway">
+                <GolferLink golferId={p.golferId} name={p.name} />
+                {/* No fourth "vs par" column: net already ranks each player against their own
+                    stated level (spec §4) — a scratch player's net IS their vs-par number, and a
+                    receiver's net already backed their strokes out, so a separate column would
+                    just repeat what net already says. */}
+                {` — ${gross} gross · ${strokesLabel(p.strokes)} · ${gross - p.strokes} net`}
               </li>
             );
           })}

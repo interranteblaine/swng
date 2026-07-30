@@ -23,7 +23,9 @@ interface Selection {
 // The canonical hole numbering/par/SI for the grid's rows. Real courses keep these identical
 // across every tee at a course (only yardage/rating/slope vary by tee) — the first tee set is
 // as good a source as any, so this doesn't force a "primary tee" concept onto the round.
-const canonicalHoles = (card: CourseCard): readonly Hole[] => card.teeSets[0]?.holes ?? [];
+// Exported: ResultsView's own "Final totals" headline reuses this SAME hole list rather than
+// re-deciding "which holes make up this card" a second way.
+export const canonicalHoles = (card: CourseCard): readonly Hole[] => card.teeSets[0]?.holes ?? [];
 
 // First hole where not every participant has a cell — the on-course "where are we" pointer
 // (brief: "current hole = first hole where not every participant has a cell"). Reads through
@@ -62,6 +64,36 @@ const glyphFor = (result: HoleResult): string => {
       // never runs on one) — kept only so the switch stays exhaustive over HoleResult's kind.
       return "";
   }
+};
+
+// A segment total (OUT/IN/TOT, the same three rows any paper card carries): the hole's own gross
+// over net, via the SAME netStrokes(gross, dots) every cell above already uses. scoredStrokes
+// reads a conceded hole exactly like a strokes cell (spec §4: any other rule would make this card
+// disagree with the same round's own line in the golfer's record, which reads conceded strokes
+// too), so a concession counts here at its recorded score. A picked-up or missing cell ANYWHERE
+// in the segment makes the whole segment unknown — there's no honest partial number for "some of
+// the front nine," so it dashes exactly the way a single missing hole would.
+interface SegmentTotal {
+  readonly gross: number;
+  readonly net: number;
+}
+
+const segmentTotalFor = (
+  golferId: GolferId,
+  segmentHoles: readonly Hole[],
+  cells: RoundState["cells"],
+  dots: ReadonlyMap<number, number> | undefined,
+): SegmentTotal | undefined => {
+  let gross = 0;
+  let dotsSum = 0;
+  for (const hole of segmentHoles) {
+    const cell = cellAt(cells, golferId, hole.number);
+    const strokes = cell && scoredStrokes(cell.result);
+    if (strokes === undefined) return undefined;
+    gross += strokes;
+    dotsSum += dots?.get(hole.number) ?? 0;
+  }
+  return { gross, net: netStrokes(gross, dotsSum) };
 };
 
 interface CellProps {
@@ -139,6 +171,17 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
   // own field) live in that game's own panel — this grid never re-derives them.
   const dotsByGolfer = roundStrokeAllocation(state.participants, state.card);
 
+  // OUT (front nine) / IN (back nine, omitted on a 9-hole card) / TOT — the same three rows
+  // any paper card totals, keyed off hole NUMBER rather than array position (every card in this
+  // codebase numbers holes 1..N, but this doesn't need to assume it).
+  const outHoles = holes.filter((h) => h.number <= 9);
+  const inHoles = holes.filter((h) => h.number > 9);
+  const segments: readonly { readonly label: string; readonly holes: readonly Hole[] }[] = [
+    { label: "OUT", holes: outHoles },
+    ...(inHoles.length > 0 ? [{ label: "IN", holes: inHoles }] : []),
+    { label: "TOT", holes },
+  ];
+
   const selectedParticipant = selection && state.participants.find((p) => p.golferId === selection.golferId);
   const selectedHole = selection && holes.find((h) => h.number === selection.hole);
   // The tapped cell's current result (if any) — read the same way every other cell is (cellAt,
@@ -193,6 +236,37 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
               );
             })}
           </tbody>
+          <tfoot>
+            {segments.map((segment) => (
+              <tr key={segment.label} aria-label={segment.label}>
+                <th scope="row" className="sticky left-0 z-10 bg-inherit px-2 text-left font-mono text-xs text-fairway">
+                  <div className="font-semibold">{segment.label}</div>
+                  {/* The par number lives in its OWN element, not concatenated into "Par 72" as
+                      one text run — the same isolation every rendered gross/net number below
+                      gets, so a test (or a screen reader stepping element-by-element) can find
+                      "72" on its own rather than only "Par 72". */}
+                  <div>
+                    Par <span>{segment.holes.reduce((sum, hole) => sum + hole.par, 0)}</span>
+                  </div>
+                </th>
+                {state.participants.map((p) => {
+                  const total = segmentTotalFor(p.golferId, segment.holes, state.cells, dotsByGolfer.get(p.golferId));
+                  return (
+                    <td key={p.golferId} className="text-center">
+                      {total ? (
+                        <>
+                          <div className="text-lg font-semibold tabular-nums text-forest">{total.gross}</div>
+                          <div className="text-[10px] leading-none text-fairway">{total.net}</div>
+                        </>
+                      ) : (
+                        <span className="text-fairway/50">–</span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tfoot>
         </table>
       </div>
 

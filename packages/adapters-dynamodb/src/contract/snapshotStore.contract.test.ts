@@ -119,6 +119,46 @@ describe("createDynamoSnapshotStore", () => {
         await expect(store.getMany([id])).rejects.toThrow(/stored-archive-invalid/);
       });
     });
+
+    // `page` is the door with the sharpest consequence, so it gets its own pin rather than riding
+    // on its two siblings. It parses a whole page EAGERLY, so one bad item takes down the good
+    // items ahead of it in that page AND the cursor never advances past it — a full cursor-driven
+    // walk cannot complete, which is precisely `rebuildProjections` bricked at whichever page the
+    // bad item lands on. That is the intended trade (loud beats projecting garbage into every
+    // golfer's permanent record), but it is a behaviour an operator has to be able to rely on, so
+    // it is pinned, not inferred.
+    it("page cannot complete a cursor walk while one corrupt snapshot is on the table", async () => {
+      const store = createDynamoSnapshotStore({ client: local.client, tableName: local.snapshotsTable, pageLimit: 2 });
+      // A `cells` map whose entry is not a ScoreCell at all — a third distinct corruption shape,
+      // so the three pins don't all rest on one missing field.
+      const corrupt = { roundId: "r-corrupt", card: fixtureLinks, participants: [], games: [], cells: { "ann#1": { result: "4" } }, events: [], results: [], terminatedGameIds: [] };
+
+      await withCorruptSnapshot(corrupt, async () => {
+        const walk = async (): Promise<number> => {
+          let cursor: string | undefined;
+          let seen = 0;
+          do {
+            const result = await store.page(cursor);
+            seen += result.snapshots.length;
+            cursor = result.cursor;
+          } while (cursor);
+          return seen;
+        };
+
+        // The walk throws somewhere in the scan — wherever the bad item sorts — and can never
+        // reach a `cursor === undefined` completion. Asserted over the whole walk rather than a
+        // single `page()` call, because WHICH page holds the bad item is not deterministic while
+        // the other tests' snapshots share this table, but "the walk cannot finish" always is.
+        await expect(walk()).rejects.toThrow(/stored-archive-invalid/);
+      });
+
+      // ...and once it's gone (withCorruptSnapshot's own cleanup), the walk completes again — so
+      // the failure is the item, not a store the test permanently poisoned.
+      let cursor: string | undefined;
+      do {
+        cursor = (await store.page(cursor)).cursor;
+      } while (cursor);
+    });
   });
 
   it("page walks every item exactly once across ≥3 pages (page size 2, cursor-driven)", async () => {

@@ -180,6 +180,13 @@ describe("roundEventSchema", () => {
     const backwardConfig: z.infer<typeof gameConfigSchemaImpl> = {} as GameConfig;
     const forwardResult: GameResult = {} as z.infer<typeof gameResultSchemaImpl>;
     const backwardResult: z.infer<typeof gameResultSchemaImpl> = {} as GameResult;
+    // The archive's own reach is NARROWER than the three above, and the difference is worth
+    // stating so nothing here is credited with work it isn't doing: `roundArchiveSchemaImpl` is
+    // unannotated, so a field dropped or renamed at the ARCHIVE level fails to compile — but four
+    // of its members (courseCardSchema, rosterEntrySchema, scoreCellSchema, and the annotated
+    // alias family) carry `z.ZodType<T>` annotations, which make z.infer equal T by declaration
+    // inside them. Drift WITHIN a member is invisible here. The `roundArchiveSchema` round-trip
+    // fixture below is the guard that actually bites for that.
     const forwardArchive: RoundArchive = {} as z.infer<typeof roundArchiveSchemaImpl>;
     const backwardArchive: z.infer<typeof roundArchiveSchemaImpl> = {} as RoundArchive;
     // These assignments above are the actual test — they only compile if z.infer and the

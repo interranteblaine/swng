@@ -1,3 +1,7 @@
+// Type-only, and zod is a devDependency of this package because of it: nothing here imports zod at
+// runtime (the schemas arrive from @swng/contracts), and neither exported signature below mentions
+// a zod type, so the emitted .d.ts carries no zod reference either. A runtime `dependencies` entry
+// would have claimed a coupling that doesn't exist.
 import type { ZodType } from "zod";
 import type { RoundArchive, RoundEvent } from "@swng/domain";
 import { DomainError } from "@swng/domain";

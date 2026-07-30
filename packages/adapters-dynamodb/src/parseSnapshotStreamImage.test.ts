@@ -38,14 +38,18 @@ describe("parseSnapshotStreamImage", () => {
     expect(parseSnapshotStreamImage(image)).toEqual(archive);
   });
 
+  // All three failure modes carry ONE named code (the function's own doc explains why) — pinned
+  // here so a future edit can't quietly reintroduce an anonymous `Error` beside a named one.
   it("throws when the image is undefined (a REMOVE event, or StreamViewType misconfigured)", () => {
     expect(() => parseSnapshotStreamImage(undefined)).toThrow(/NEW_IMAGE/);
+    expect(() => parseSnapshotStreamImage(undefined)).toThrow(/stored-archive-invalid/);
   });
 
   it("throws when the `archive` attribute is absent (not a snapshot item, or a corrupt one)", () => {
     const image = marshall({ pk: snapshotPk(archive.roundId), finalizedAt: 1_000 }, { removeUndefinedValues: true });
 
     expect(() => parseSnapshotStreamImage(image)).toThrow(/archive/);
+    expect(() => parseSnapshotStreamImage(image)).toThrow(/stored-archive-invalid/);
   });
 
   // Spec 2026-07-30 §10: the archive is PARSED now, not asserted. These two tests are the pair

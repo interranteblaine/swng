@@ -85,36 +85,40 @@ describe("searchCoursesResponseSchema", () => {
 });
 
 describe("peekRoundResponseSchema", () => {
-  it("round-trips a valid peek-round response carrying par + holes", () => {
+  it("round-trips a valid peek-round response — name + rating/slope per tee", () => {
     roundTrips(peekRoundResponseSchema, {
       courseName: "Casa Verde GC",
-      teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.2, slope: 128 }],
+      teeSets: [{ name: "white", rating: 71.2, slope: 128 }],
       createdAt: 1_700_000_000_000,
     });
   });
 
-  // unrated-courses arc: a peek of an unrated tee still names it, its par, and its hole count,
-  // just without rating/slope — the pair is optional here (§1); par and holes are always present.
-  // holes lets the join-side unrated estimate be hole-count-correct (round(index / 2) on 9).
-  it("round-trips a peek of an unrated 9-hole tee (rating/slope absent, par + holes present)", () => {
+  // unrated-courses arc: a peek of an unrated tee still NAMES it, just without numbers — the
+  // rating/slope pair is optional here (§1), and name alone is a complete tee.
+  it("round-trips a peek of an unrated tee (rating/slope absent)", () => {
     roundTrips(peekRoundResponseSchema, {
       courseName: "Casa Verde GC",
-      teeSets: [{ name: "white", par: 36, holes: 9 }],
+      teeSets: [{ name: "white" }],
       createdAt: 1_700_000_000_000,
     });
   });
 
-  it("rejects a tee missing par (par is required, unlike rating/slope)", () => {
-    expect(() =>
-      parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white", holes: 18, rating: 71.2, slope: 128 }], createdAt: 1 }),
-    ).toThrow(ContractError);
+  // A peek tee carries NO par and NO hole count (spec 2026-07-29 §7 — no dormant fields): the
+  // join-side strokes derivation that needed both is deleted, and JoinRoundPage's picker renders
+  // name + teeNumbers(tee), which reads rating/slope alone. Extra keys strip rather than throw
+  // (zod's default), so this pins the SHAPE the schema yields, which is what a reader sees.
+  it("strips par/holes rather than carrying them — the fields are gone, not optional", () => {
+    expect(
+      parse(peekRoundResponseSchema, {
+        courseName: "Casa Verde GC",
+        teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.2, slope: 128 }],
+        createdAt: 1,
+      }),
+    ).toEqual({ courseName: "Casa Verde GC", teeSets: [{ name: "white", rating: 71.2, slope: 128 }], createdAt: 1 });
   });
 
-  it("rejects a tee missing holes (holes is required, and must be 9 or 18)", () => {
-    expect(() => parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white", par: 72 }], createdAt: 1 })).toThrow(ContractError);
-    expect(() =>
-      parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white", par: 72, holes: 27 }], createdAt: 1 }),
-    ).toThrow(ContractError);
+  it("rejects a tee missing its name", () => {
+    expect(() => parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ rating: 71.2 }], createdAt: 1 })).toThrow(ContractError);
   });
 
   it("rejects a payload missing teeSets", () => {

@@ -8,6 +8,9 @@ import { loadRoundState } from "./loadRoundState.js";
 // committing to JoinRound. Deliberately minimal (capability discipline): the frozen card's
 // courseName and tee-rating summaries only, nothing about who's already in the round or how
 // it's being scored — see courses.ts' PeekRoundResponse doc comment for the exact contract.
+// A tee here is name + rating/slope: the join-side strokes derivation that once needed each
+// tee's par and hole count is deleted (spec 2026-07-29 §2b/§7 — no dormant fields), and the
+// picker renders `teeNumbers(tee)`, which reads rating/slope alone.
 //
 // Reuses loadRoundState (the same journal read + reduceRound every other round use case
 // goes through) rather than hand-rolling a genesis-only scan: RoundState.card IS the
@@ -32,13 +35,6 @@ export const peekRound =
       // conditionally so an unrated tee's peek omits the keys rather than carrying them as undefined.
       teeSets: state.card.teeSets.map((tee) => ({
         name: tee.name,
-        // `par` is the tee's summed hole pars — always present, even for an unrated tee, so the
-        // join-side course-handicap suggestion has something to work from when rating/slope don't.
-        par: tee.holes.reduce((sum, hole) => sum + hole.par, 0),
-        // `holes` is the tee's hole count — always 9 or 18 (validateCard guarantees it, same cast
-        // idiom used elsewhere). The join-side strokes derivation needs it to make the unrated
-        // estimate hole-count-correct (round(index) on 18, round(index / 2) on 9).
-        holes: tee.holes.length as 9 | 18,
         ...(tee.rating !== undefined ? { rating: tee.rating } : {}),
         ...(tee.slope !== undefined ? { slope: tee.slope } : {}),
       })),

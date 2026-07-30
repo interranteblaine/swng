@@ -210,8 +210,8 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
     mockedPeekRound.mockResolvedValue({
       courseName: "Fixture Links 18",
       teeSets: [
-        { name: "white", par: 72, holes: 18, rating: 71.6, slope: 128 },
-        { name: "blue", par: 72, holes: 18, rating: 74.0, slope: 140 },
+        { name: "white", rating: 71.6, slope: 128 },
+        { name: "blue", rating: 74.0, slope: 140 },
       ],
       createdAt: 1_700_000_000_000,
     });
@@ -265,7 +265,7 @@ describe("JoinRoundPage — what you normally shoot", () => {
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedPeekRound.mockResolvedValue({
       courseName: "Fixture Links 18",
-      teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.6, slope: 128 }],
+      teeSets: [{ name: "white", rating: 71.6, slope: 128 }],
       createdAt: 1_700_000_000_000,
     });
 
@@ -291,7 +291,7 @@ describe("JoinRoundPage — what you normally shoot", () => {
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
     mockedPeekRound.mockResolvedValue({
       courseName: "Fixture Links 18",
-      teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.6, slope: 128 }],
+      teeSets: [{ name: "white", rating: 71.6, slope: 128 }],
       createdAt: 1_700_000_000_000,
     });
 

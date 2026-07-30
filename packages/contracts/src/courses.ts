@@ -82,12 +82,14 @@ export const searchCoursesResponseSchema: z.ZodType<SearchCoursesResponse> = z.o
 // domain's TeeSet — a peek of an unrated tee still names it, just without numbers.
 export interface PeekRoundResponse {
   readonly courseName: string;
-  // `par` (each tee's summed hole pars) and `holes` (the tee's hole count, always 9 or 18) are
-  // always present — the join-side strokes derivation (handicap-model legibility arc) needs both
-  // even when a tee has no rating/slope: par feeds the rated conversion, and the hole count makes
-  // the unrated estimate hole-count-correct (`round(index)` on 18, `round(index / 2)` on 9). So
-  // neither is optional the way rating/slope are. rating/slope stay optional as a pair (§1).
-  readonly teeSets: readonly { readonly name: string; readonly par: number; readonly holes: 9 | 18; readonly rating?: number; readonly slope?: number }[];
+  // Name + rating/slope only. `par` and `holes` used to ride here for the join-side strokes
+  // derivation (the handicap-model legibility arc: par fed the rated conversion, the hole count
+  // made the unrated estimate hole-count-correct). That derivation is deleted — a player now
+  // states what they normally shoot and the fold takes the difference (spec 2026-07-29 §2b) — and
+  // §7 allows no dormant fields, so both are gone. The one reader of a peek tee is
+  // JoinRoundPage's picker, which renders `name` and `teeNumbers(tee)`; teeNumbers reads
+  // rating/slope alone.
+  readonly teeSets: readonly { readonly name: string; readonly rating?: number; readonly slope?: number }[];
   // accounts-only identity spec §5: the round-created event's own wall time, so the join-link
   // sign-up framing can render the round the SAME way ("Casa Verde GC · Sat, Jul 12") the home list
   // and archive do. Required — a peek always reads a live round, whose log always has round-created.
@@ -96,8 +98,6 @@ export interface PeekRoundResponse {
 
 export const peekRoundResponseSchema: z.ZodType<PeekRoundResponse> = z.object({
   courseName: z.string(),
-  teeSets: z
-    .array(z.object({ name: z.string(), par: z.number().int(), holes: z.union([z.literal(9), z.literal(18)]), rating: z.number().optional(), slope: z.number().optional() }))
-    .readonly(),
+  teeSets: z.array(z.object({ name: z.string(), rating: z.number().optional(), slope: z.number().optional() })).readonly(),
   createdAt: z.number().int(),
 });

@@ -292,20 +292,13 @@ describe("round use cases — golden path over in-memory ports", () => {
     // set keeps the next field from being added silently.
     expect(Object.keys(peeked).sort()).toEqual(["courseName", "createdAt", "teeSets"]);
     expect(peeked.courseName).toBe(fixtureLinks.courseName);
-    // Each tee now carries `par` (summed hole pars) and `holes` (the hole count) alongside its
-    // rating/slope summary — the join-side strokes derivation needs both even for an unrated tee
-    // (par feeds the rated conversion, holes makes the unrated estimate hole-count-correct).
-    expect(peeked.teeSets).toEqual(
-      fixtureLinks.teeSets.map((tee) => ({
-        name: tee.name,
-        par: tee.holes.reduce((sum, hole) => sum + hole.par, 0),
-        holes: tee.holes.length,
-        rating: tee.rating,
-        slope: tee.slope,
-      })),
-    );
+    // A tee is name + rating/slope, full stop. The `par`/`holes` pair that once rode here served
+    // the join-side strokes derivation, which is deleted (spec 2026-07-29 §2b) — and §7 allows no
+    // dormant fields, so neither survives. The per-tee key-set assertion below keeps the next field
+    // from being added silently, exactly as the response-level one above does.
+    expect(peeked.teeSets).toEqual(fixtureLinks.teeSets.map((tee) => ({ name: tee.name, rating: tee.rating, slope: tee.slope })));
     for (const teeSet of peeked.teeSets) {
-      expect(Object.keys(teeSet).sort()).toEqual(["holes", "name", "par", "rating", "slope"]);
+      expect(Object.keys(teeSet).sort()).toEqual(["name", "rating", "slope"]);
     }
     // The genesis event's own wall time (peekRound reads it off the round-created event).
     expect(typeof peeked.createdAt).toBe("number");

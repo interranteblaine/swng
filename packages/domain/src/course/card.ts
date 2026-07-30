@@ -19,10 +19,11 @@ export interface TeeSet {
   readonly holes: readonly Hole[]; // 9 or 18, in play order
 }
 
-// A tee is rated iff both its course rating and slope are set — the one predicate every
-// rating/slope-dependent path narrows through (unrated-courses spec §3).
-export const isRated = (tee: TeeSet): tee is TeeSet & { rating: number; slope: number } =>
-  tee.rating !== undefined && tee.slope !== undefined;
+// `isRated` (the narrowing predicate every rating/slope-dependent path used to go through) is
+// DELETED with the last thing that depended on a rating (spec 2026-07-29 §7): rating and slope are
+// still recorded here because they are printed on the real scorecard, and nothing computes from
+// them. `validateTeeSet` (course.ts) enforces the present-⇔-present pairing with its own explicit
+// checks, so no narrowing helper is needed to keep that invariant.
 
 // Which course record and exact card this value was frozen from — creation-time facts,
 // never dereferenced for rendering or math (spec §2: frozen values are the only inputs).

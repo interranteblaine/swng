@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { averageOf, spreadOf } from "./average.js";
+import { averageOf, spreadOfValues } from "./average.js";
 import type { GolferRoundLine } from "./record.js";
 
 // n holes of par 4; `perHole` is each hole's gross. 18 × 4 = par 72.
@@ -48,12 +48,21 @@ describe("averageOf", () => {
   });
 });
 
-describe("spreadOf", () => {
-  it("is undefined below five finished rounds", () => {
-    expect(spreadOf(Array.from({ length: 4 }, (_, i) => line(`r${i}`, 18, 5)))).toBeUndefined();
+// `spreadOfValues` is the crew board's own fold (spec §6) — it takes VALUES, not lines, because the
+// board scopes its own season window and must never inherit this file's rolling 10. There is no
+// line-taking `spreadOf`: spread appears on the board only (controller ruling — see average.ts).
+describe("spreadOfValues", () => {
+  it("is undefined below five rounds", () => {
+    expect(spreadOfValues([18, 18, 18, 18])).toBeUndefined();
   });
 
   it("is zero for five identical rounds", () => {
-    expect(spreadOf(Array.from({ length: 5 }, (_, i) => line(`r${i}`, 18, 5)))).toBe(0);
+    expect(spreadOfValues([18, 18, 18, 18, 18])).toBe(0);
+  });
+
+  it("is the population standard deviation, to one decimal", () => {
+    // mean(18,18,18,36,36) = 25.2; variance = ((-7.2)^2 x 3 + 10.8^2 x 2)/5 = 388.8/5 = 77.76;
+    // sd = 8.81816... -> roundHalfUp(88.1816)/10 = 8.8.
+    expect(spreadOfValues([18, 18, 18, 36, 36])).toBe(8.8);
   });
 });

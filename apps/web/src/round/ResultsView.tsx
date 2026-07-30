@@ -17,8 +17,8 @@ export interface ResultsViewProps {
   readonly shareToken?: string;
 }
 
-// U+2212, this codebase's own glyph for a negative number (SeasonPanel's index delta,
-// ScorecardGrid's dots) — never the ASCII hyphen a bare number interpolation gives a negative
+// U+2212, this codebase's own glyph for a negative number (ScorecardGrid's dots) — never the
+// ASCII hyphen a bare number interpolation gives a negative
 // value. Strokes and net are the two signed numbers on the Final-totals line and must never wear
 // two different minus signs on the same row.
 const signedNumber = (n: number): string => (n < 0 ? `−${-n}` : String(n));

@@ -26,11 +26,14 @@ const finalizedEvent = (wallMs: number): RoundEvent => ({
   authorId: ann,
 });
 
-// A minimal, hand-built finalized archive — no real scoring/handicap math involved (that's
-// domain's job, exhaustively tested elsewhere); `differential` is hand-pinned directly per
-// participant, same idiom as projectionSlice.test.ts's own archiveAt. Always 18 holes
-// (fixtureLinks18) — the 9-hole combining rule itself is domain's own unit-gated concern.
-const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: GolferId; differential?: number }[]): RoundArchive => ({
+// A minimal, hand-built finalized archive — no scoring math involved at all: `cells` is empty, so
+// every projected line honestly carries no `score`. That is enough for THIS file, whose subject is
+// the rebuild LOOP (paging, cursors, idempotence, no-wipe), never a derived number — the per-round
+// line's own contents are golfer/record.test.ts's concern and the average's are
+// golferSlice.test.ts's. The `differential?` parameter this helper used to take is gone with
+// RoundArchive.handicapping, the only thing it ever fed (spec 2026-07-29 §7): it had become an
+// argument every call site passed and nothing read. Always 18 holes (fixtureLinks18).
+const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: GolferId }[]): RoundArchive => ({
   roundId: roundId(id),
   card: fixtureLinks18,
   participants: entries.map((e): RosterEntry => ({ golferId: e.golferId, name: e.golferId, tee: "white", basis: { kind: "normally-shoots", overPar: 8 }, strokes: 0 })),
@@ -94,7 +97,7 @@ const createRecordingProjectionStore = (): ProjectionStore & { readonly writeCal
 describe("rebuildProjections", () => {
   it("processes every snapshot across ≥3 pages, in full", async () => {
     // 7 snapshots, alternating golfers, page size 3 -> pages of [3, 3, 1] = 3 pages.
-    const archives = Array.from({ length: 7 }, (_, i) => archiveAt(`r${i}`, 1_000 + i, [{ golferId: i % 2 === 0 ? ann : bo, differential: 8 + i }]));
+    const archives = Array.from({ length: 7 }, (_, i) => archiveAt(`r${i}`, 1_000 + i, [{ golferId: i % 2 === 0 ? ann : bo }]));
     const snapshots = createInMemorySnapshotStore({ pageSize: 3 });
     for (const archive of archives) snapshots.record(archive);
     const projectionStore = createInMemoryProjectionStore();
@@ -112,7 +115,7 @@ describe("rebuildProjections", () => {
 
   it("returns a cursor when maxSnapshots is hit mid-run; resuming from it processes the remainder exactly once", async () => {
     // 6 snapshots, page size 2 -> pages of [2, 2, 2]. maxSnapshots 4 stops after 2 pages.
-    const archives = Array.from({ length: 6 }, (_, i) => archiveAt(`r${i}`, 1_000 + i, [{ golferId: ann, differential: 8 + i }]));
+    const archives = Array.from({ length: 6 }, (_, i) => archiveAt(`r${i}`, 1_000 + i, [{ golferId: ann }]));
     const snapshots = createInMemorySnapshotStore({ pageSize: 2 });
     for (const archive of archives) snapshots.record(archive);
     const projectionStore = createInMemoryProjectionStore();
@@ -141,17 +144,17 @@ describe("rebuildProjections", () => {
   // deleteLive on a pointer that's already gone (a no-op, per its own port doc) — this test's
   // job is narrower than its name once was: prove the write surface is EXACTLY
   // {putLine, deleteLive}, nothing beyond what projectArchive itself does for every archive
-  // it's handed. putIndex is gone from that surface entirely (pre-prod hardening D4a): the
-  // index is computed at read time in getMyRecord.ts, so even the 3rd archive here — which
-  // crosses the bootstrap — writes nothing beyond its own line.
-  it("touches exactly {putLine, deleteLive} — no OTHER write surface (no destructive wipe, no index write)", async () => {
-    // 3 archives for the SAME golfer, ascending differentials — the 3rd crosses the bootstrap
-    // (computeIndexDetail needs 3+), which is exactly the case that USED to also fire putIndex;
-    // proving the write surface stays {putLine, deleteLive} here is the regression pin for that.
+  // it's handed. putIndex is gone from that surface entirely (pre-prod hardening D4a) and so is the
+  // index it wrote (spec 2026-07-29 §7): every derived number is computed at read time in
+  // getMyRecord.ts, so no count of archives can make the projector write anything but lines.
+  it("touches exactly {putLine, deleteLive} — no OTHER write surface (no destructive wipe, no derived-number write)", async () => {
+    // 3 archives for the SAME golfer — three was the count that USED to cross the WHS bootstrap and
+    // fire putIndex, so keeping three here keeps the regression pin aimed at the same case even
+    // though nothing about the number depends on it anymore.
     const archives = [
-      archiveAt("r1", 1_000, [{ golferId: ann, differential: 9.0 }]),
-      archiveAt("r2", 2_000, [{ golferId: ann, differential: 10.0 }]),
-      archiveAt("r3", 3_000, [{ golferId: ann, differential: 11.0 }]),
+      archiveAt("r1", 1_000, [{ golferId: ann }]),
+      archiveAt("r2", 2_000, [{ golferId: ann }]),
+      archiveAt("r3", 3_000, [{ golferId: ann }]),
     ];
     const snapshots = createInMemorySnapshotStore();
     for (const archive of archives) snapshots.record(archive);
@@ -167,11 +170,11 @@ describe("rebuildProjections", () => {
   it("replaying the same page(s) twice yields identical store state (idempotence — no wipe means a repeat pass is always safe)", async () => {
     const archives = [
       archiveAt("r1", 1_000, [
-        { golferId: ann, differential: 9.0 },
-        { golferId: bo, differential: 20.0 },
+        { golferId: ann },
+        { golferId: bo },
       ]),
-      archiveAt("r2", 2_000, [{ golferId: ann, differential: 10.0 }]),
-      archiveAt("r3", 3_000, [{ golferId: ann, differential: 11.0 }]),
+      archiveAt("r2", 2_000, [{ golferId: ann }]),
+      archiveAt("r3", 3_000, [{ golferId: ann }]),
     ];
     const snapshots = createInMemorySnapshotStore({ pageSize: 2 }); // ≥2 pages, so a replay re-walks a page boundary too
     for (const archive of archives) snapshots.record(archive);

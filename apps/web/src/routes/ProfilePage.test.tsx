@@ -114,7 +114,7 @@ describe("ProfilePage — signed in", () => {
   it("renders the pre-filled form, the served average as the headline, and newest-first history (chart gated at 3 rounds)", async () => {
     signIn();
     const history: GolferRoundLine[] = [lineWithScore("1", 98), lineWithScore("2", 100), lineWithScore("3", 103)]; // newest-first, per the wire contract
-    const metrics = { average: 26, spread: 4.2, ...emptyMetricsExtras };
+    const metrics = { average: 26, ...emptyMetricsExtras };
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -332,7 +332,7 @@ describe("ProfilePage — signed in", () => {
   // scans scores first, details second). A 9-hole round gets a marker. The differential column is
   // gone with the index (spec §7); vs par is the row's only derived figure, and the headline above
   // is the mean of exactly these numbers, so the subtraction is checkable by hand on one screen.
-  it("history rows lead with the score and its vs-par figure, with a 9-hole marker and no differential", async () => {
+  it("history rows lead with the score and its vs-par figure, a nine stating its doubled contribution, and no differential", async () => {
     signIn();
     const eighteen: GolferRoundLine = {
       roundId: roundId("round-18"),
@@ -374,7 +374,9 @@ describe("ProfilePage — signed in", () => {
     expect(eighteenLink.textContent).toBe("Casa Verde GC · white · 81 (+9)");
 
     const nineLink = screen.getByRole("link", { name: /47 \(\+11\)/ });
-    expect(nineLink.textContent).toBe("Sandy Hollow Nine · white · 47 (+11) · 9 holes");
+    // The nine states its DOUBLED contribution (spec §5's own register) — 47 on par 36 is +11 for
+    // the round and +22 into the average, so the rows reconcile with the headline by hand.
+    expect(nineLink.textContent).toBe("Sandy Hollow Nine · white · 47 (+11) · 9 holes, counts +22");
   });
 
   // The name/home Save is the WHOLE editable profile now (spec 2026-07-29 §5): this Save posts

@@ -154,7 +154,6 @@ export default [
                 // and boundary-wrong. formatOverPar is absent on purpose — a presentation
                 // formatter, like underPar (the handicap/present.ts precedent).
                 "averageOf",
-                "spreadOf",
                 "averageOfValues",
                 "spreadOfValues",
                 "averageHistory",

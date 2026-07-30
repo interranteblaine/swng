@@ -113,11 +113,11 @@ const DOMAIN_ERROR_STATUS: Record<string, number> = {
   // present together or both absent. A bad-body precondition the client can correct, same
   // 400 bucket as invalid-rating/invalid-slope above.
   "rating-slope-paired": 400,
-  // "tee-unrated" and "holes-undecided" are GONE from this table with the whole WHS pipeline
-  // (spec 2026-07-29 §7): both were thrown only by handicap/whs.ts's scoreDifferential/
-  // courseHandicapFor/adjustedGrossScore, and nothing computes from rating, slope, or a
-  // whole-card AGS anymore. An unrated tee is now indistinguishable from a rated one at every
-  // code path, so there is no error left to map.
+  // "tee-unrated" is GONE from this table with the whole WHS pipeline (spec 2026-07-29 §7): its
+  // only throwers were handicap/whs.ts's scoreDifferential/courseHandicapFor, and nothing computes
+  // from rating or slope anymore, so an unrated tee is indistinguishable from a rated one at every
+  // code path. ("holes-undecided", adjustedGrossScore's own partial-card throw, went with the same
+  // deletion — it was never in this table to begin with.)
   "invalid-hole-count": 400,
   "invalid-hole-numbering": 400,
   "invalid-par": 400,

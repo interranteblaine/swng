@@ -7,7 +7,7 @@ import { recordOf } from "./recordOf.js";
 // No get-or-create here (unlike getMyGolfer/updateMyGolfer) — viewing an obviously-empty
 // record for a sub that's never even signed in far enough to have a golfer row needs no item to
 // exist; recordOf([]) is already the honest answer (a zeroed typicalEighteen + empty
-// averageHistory alongside no average/spread).
+// averageHistory alongside no average).
 //
 // No Clock either (spec 2026-07-29 §7): the only reason this use case ever took one was the
 // read-time `computedAtMs` stamp on the wire whsIndex, and the index is deleted whole. This is now

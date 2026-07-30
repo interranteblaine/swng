@@ -61,8 +61,10 @@ export const crewScoreboard = (
     // Average + spread over EVERY finished round in the window — deliberately NOT the profile's
     // rolling last-10 (spec §6: `Rounds 12` beside an average of 10 of them would be a lie on the
     // same row). Hence `averageOfValues`/`spreadOfValues` over the season's own values rather than
-    // `averageOf`/`spreadOf`, which would silently re-slice to 10 on top of the window. The
-    // profile answers "what do you shoot"; the board answers "what did you shoot this season".
+    // `averageOf`, which would silently re-slice to 10 on top of the window. The profile answers
+    // "what do you shoot"; the board answers "what did you shoot this season" — and spread is THIS
+    // board's column alone (controller ruling), so there is no rolling-10 spread anywhere to
+    // disagree with the number on this row.
     const values = scoredOverPar(windowed);
     const average = averageOfValues(values);
     const spread = spreadOfValues(values);

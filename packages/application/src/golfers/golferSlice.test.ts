@@ -166,7 +166,7 @@ describe("updateMyGolfer", () => {
 });
 
 describe("getMyRecord", () => {
-  it("returns an empty record (no average/spread, zeroed typicalEighteen, empty averageHistory, empty history) for a sub with no golfer at all — no throw, no create", async () => {
+  it("returns an empty record (no average, zeroed typicalEighteen, empty averageHistory, empty history) for a sub with no golfer at all — no throw, no create", async () => {
     const ctx = setup();
     const record = await ctx.record({ sub: "sub-1" });
     expect(record).toEqual({
@@ -198,7 +198,7 @@ describe("getMyRecord", () => {
 
   // courseId (course-cards spec §4, the analytics join key): carried when the stored line has
   // it, omitted for a pre-scrap line without it — absent means ABSENT, never an explicit
-  // undefined key (toWireLine's conditional-spread idiom, same as ags/differential).
+  // undefined key (toWireLine's conditional-spread idiom, same as normallyShoots/score).
   // finalizedAt/createdAt (index-chart-polish spec §1.6, the chart's date anchors): finalizedAt
   // always equals the stored finalizedAtMs; createdAt carries only when the line has createdAtMs.
   it("carries courseId/finalizedAt/createdAt on a history line when the stored line has them, omitting courseId/createdAt for a line without", async () => {
@@ -363,8 +363,7 @@ describe("getMyCourseRecord", () => {
       holes: 18 as const,
       par: 72,
       strokes: 8,
-      ags: gross,
-      differential: gross - 72,
+      score: gross,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       holeResults: holeResultsFor(gross),
       finalizedAtMs: ms,

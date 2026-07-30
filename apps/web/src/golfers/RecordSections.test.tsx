@@ -111,11 +111,45 @@ describe("RecordSections", () => {
     expect(rowLink.getAttribute("href")).toBe(`/rounds/${withoutCourse.roundId}`);
   });
 
-  it("a 9-hole line renders the 9-hole marker beside its own score", () => {
+  // A nine states what it CONTRIBUTES, in spec §5's own register ("9 holes, counts +32"): the
+  // headline averages a nine DOUBLED (spec §2d), so without this the subtitle's promise — add the
+  // rows up and check the number — cannot be kept by anyone who plays nines.
+  it("a 9-hole line renders its own vs-par figure AND the doubled figure it contributes", () => {
     const nine = line("1", { holes: 9, par: 36, score: 47 });
     renderSections(ZERO_METRICS, [nine]);
 
-    expect(screen.getByRole("link", { name: /white · 47 \(\+11\) · 9 holes/ })).toBeTruthy();
+    // 47 on par 36 is +11 for the round; it contributes +22 to the average.
+    const row = screen.getByRole("link", { name: /white · 47 \(\+11\) · 9 holes, counts \+22/ });
+    expect(row.textContent).toBe("Pebble Beach · white · 47 (+11) · 9 holes, counts +22");
+  });
+
+  // The contribution is DOUBLED, not merely restated — a nine under par must read as a bigger
+  // negative, which is also where the retired plus-handicap notation would have inverted the sign.
+  it("doubles an UNDER-par nine's contribution too, keeping the minus", () => {
+    const nine = line("1", { holes: 9, par: 36, score: 34 });
+    renderSections(ZERO_METRICS, [nine]);
+
+    // 34 on par 36 is -2 for the round; it contributes -4.
+    expect(screen.getByRole("link", { name: /white · 34 \(-2\) · 9 holes, counts -4/ })).toBeTruthy();
+  });
+
+  // An 18 says nothing extra: its own figure IS its contribution, so a "counts" clause there would
+  // be noise repeating the number beside it.
+  it("an 18-hole line carries no contribution clause", () => {
+    renderSections(ZERO_METRICS, [line("1")]);
+
+    const row = screen.getByRole("link", { name: /Pebble Beach · white · 82/ });
+    expect(row.textContent).toBe("Pebble Beach · white · 82 (+10)");
+    expect(row.textContent).not.toMatch(/counts/);
+  });
+
+  // A nine with no score has no contribution to state either — the bare marker survives for it.
+  it("a 9-hole line with no score keeps the bare marker", () => {
+    const nine = line("1", { holes: 9, par: 36, score: undefined });
+    renderSections(ZERO_METRICS, [nine]);
+
+    const row = screen.getByRole("link", { name: /Pebble Beach · white · 9 holes/ });
+    expect(row.textContent).toBe("Pebble Beach · white · 9 holes");
   });
 
   // A round with a pickup carries no `score` (spec §2d) — the row still lists the round, it just has

@@ -2,7 +2,7 @@ import { roundHalfUp } from "../scoring/strokes.js";
 import type { GolferBests, Milestone } from "./analytics.js";
 import { bestsOf, milestonesOf } from "./analytics.js";
 import type { AveragePoint } from "./average.js";
-import { averageHistory, averageOf, spreadOf } from "./average.js";
+import { averageHistory, averageOf } from "./average.js";
 import type { GolferRoundLine } from "./record.js";
 
 // A scoring profile shaped like GolferRoundLine.distribution — used both per-round (there) and
@@ -22,9 +22,12 @@ const ZERO_SHAPE: ScoringShape = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, do
 //
 // `average` is what the golfer normally shoots relative to par over their last AVERAGE_WINDOW
 // FINISHED rounds (average.ts owns the arithmetic — score minus par, a nine doubled, a round
-// containing a pickup skipped whole because it has no score). `spread` is the standard deviation
-// over the same set, gated at five rounds. Both are OPTIONAL: absent is the honest answer for a
-// golfer with no round that carries a score, never a 0 and never an invented floor.
+// containing a pickup skipped whole because it has no score). OPTIONAL: absent is the honest answer
+// for a golfer with no round that carries a score, never a 0 and never an invented floor.
+//
+// There is deliberately NO `spread` here (controller ruling): spread lives on the crew board only,
+// over the SEASON window (spec §6). Serving a rolling-10 spread here too would put two
+// differently-windowed numbers under one name with neither labelled — see average.ts's own note.
 //
 // `typicalEighteen` and `averageHistory` are REQUIRED — always present, zeros/`[]` when there's
 // no data, unlike the two optional members above. `typicalEighteen` is the career scoring buckets
@@ -40,7 +43,6 @@ const ZERO_SHAPE: ScoringShape = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, do
 // on the wire.
 export interface GolferMetrics {
   readonly average?: number; // vs par per 18, over the last AVERAGE_WINDOW scored rounds
-  readonly spread?: number; // standard deviation over the same set, 1 decimal, gated at 5 rounds
   readonly typicalEighteen: ScoringShape; // per-18 rate (zeros when no decided holes)
   readonly averageHistory: readonly AveragePoint[]; // oldest → newest, contributing rounds only
   readonly bests: GolferBests;
@@ -72,10 +74,8 @@ const typicalEighteenOf = (lines: readonly GolferRoundLine[]): ScoringShape => {
 
 export const golferMetrics = (lines: readonly GolferRoundLine[]): GolferMetrics => {
   const average = averageOf(lines);
-  const spread = spreadOf(lines);
   return {
     ...(average !== undefined ? { average } : {}),
-    ...(spread !== undefined ? { spread } : {}),
     typicalEighteen: typicalEighteenOf(lines),
     averageHistory: averageHistory(lines),
     bests: bestsOf(lines),

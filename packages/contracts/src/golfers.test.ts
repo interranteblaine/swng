@@ -129,11 +129,10 @@ describe("getMyRecordResponseSchema", () => {
   // Both required (analytics spec §3): {} / [] unless a fixture asserts otherwise below.
   const zeroBestsMilestones = { bests: {}, milestones: [] };
 
-  it("round-trips a full record: average + spread, a typicalEighteen shape, an averageHistory, a best18, an achieved milestone, and mixed scored/unscored history lines", () => {
+  it("round-trips a full record: the average, a typicalEighteen shape, an averageHistory, a best18, an achieved milestone, and mixed scored/unscored history lines", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: {
         average: 26,
-        spread: 4.2,
         typicalEighteen: { eagles: 0, birdies: 3, pars: 20, bogeys: 12, doublePlus: 2 },
         averageHistory: [{ roundId: roundId("r1"), average: 26 }],
         bests: { best18: { roundId: roundId("r1"), gross: 82, toPar: 10 } },
@@ -143,18 +142,12 @@ describe("getMyRecordResponseSchema", () => {
     });
   });
 
-  // Below five scored rounds the spread is held back while the average still shows (spec §6's own
-  // floor, applied on the profile too) — the two are independently optional on the wire.
-  it("round-trips a record carrying an average but no spread", () => {
-    roundTrips(getMyRecordResponseSchema, {
-      metrics: {
-        average: 26,
-        typicalEighteen: zeroTypicalEighteen,
-        averageHistory: [{ roundId: roundId("r2"), average: 26 }],
-        ...zeroBestsMilestones,
-      },
-      history: [incompleteLine],
-    });
+  // Spread is the crew board's own column, over the SEASON window (spec §6, controller ruling): it
+  // must never appear on a golfer record response, where it would be a differently-windowed number
+  // under the same name. The non-strict response schema drops a legacy one rather than carrying it.
+  it("strips a spread rather than serving it", () => {
+    const metrics = { average: 26, typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones };
+    expect(parse(getMyRecordResponseSchema, { metrics: { ...metrics, spread: 4.2 }, history: [] })).toEqual({ metrics, history: [] });
   });
 
   // An UNDER-par average is a plain negative on the wire — there is one sign convention now

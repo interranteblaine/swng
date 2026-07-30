@@ -23,6 +23,12 @@ const meanOf = (values: readonly number[]): number => values.reduce((s, v) => s 
 // Exported so the crew board can average its OWN set (every finished round in the season
 // window) without re-deriving the arithmetic — the board must not silently apply this file's
 // rolling 10 on top of the season window (spec §6).
+//
+// `spreadOfValues` has NO rolling-10 sibling, deliberately (controller ruling): spread lives on the
+// crew board ONLY, over the SEASON window (spec §6). A second, differently-windowed spread on the
+// profile would put two numbers under one name with neither labelled by its window — `±4.2` on the
+// profile beside `±3.1` on the board, with no way to reconcile them — which is the confusion §6 was
+// written to prevent. The profile is one number and ten rows (spec §5, "No extra column").
 export const averageOfValues = (values: readonly number[]): number | undefined =>
   values.length === 0 ? undefined : roundHalfUp(meanOf(values));
 
@@ -34,9 +40,6 @@ export const spreadOfValues = (values: readonly number[]): number | undefined =>
 
 export const averageOf = (lines: readonly GolferRoundLine[]): number | undefined =>
   averageOfValues(scoredOverPar(lines).slice(-AVERAGE_WINDOW));
-
-export const spreadOf = (lines: readonly GolferRoundLine[]): number | undefined =>
-  spreadOfValues(scoredOverPar(lines).slice(-AVERAGE_WINDOW));
 
 export interface AveragePoint {
   readonly roundId: RoundId;

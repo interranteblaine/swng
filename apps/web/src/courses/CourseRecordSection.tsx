@@ -9,7 +9,6 @@ import { linkEntity } from "../ui/classes";
 
 const INSIGHTS_MIN_ROUNDS = 5;
 
-
 // "Your record here" (analytics read-folds spec 2026-07-21 §4): the caller's own rows at ONE
 // course — signed-in only (CoursePage itself is a public, "none"-auth page, so this section gates
 // itself rather than the whole page). Fetches on mount via the ignore-flag idiom

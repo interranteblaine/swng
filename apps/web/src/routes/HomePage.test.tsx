@@ -468,6 +468,9 @@ describe("HomePage — no crews section, in any auth state (spec §11a)", () => 
 // HistoryList — no second vs-par/score composition here), capped to 3, plus a quiet pointer to
 // the full record; the redundant body h1 "swng" is gone.
 describe("HomePage — the switchboard (Task 5)", () => {
+  // `score` is what makes this a SCORE-BEARING row (spec 2026-07-29 §8): it is the only number
+  // HistoryList renders, so a fixture without it exercises the empty-card branch instead — which is
+  // exactly what the retired `ags`/`differential` pair silently became when the wire changed.
   const historyLine = (suffix: string, finalizedAt: number) => ({
     roundId: roundId(`recent-${suffix}`),
     courseName: "Pebble Beach",
@@ -475,8 +478,7 @@ describe("HomePage — the switchboard (Task 5)", () => {
     holes: 18 as const,
     par: 72,
     strokes: 8,
-    ags: 82,
-    differential: 9.2,
+    score: 82,
     distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
     finalizedAt,
   });
@@ -491,8 +493,12 @@ describe("HomePage — the switchboard (Task 5)", () => {
 
     renderHome();
 
-    const rows = await screen.findAllByRole("link", { name: /white/ });
+    // Anchored on the SCORE, not merely the tee: this row's whole purpose is that it is the same
+    // score-first HistoryList row the profile renders, so the locator has to reach the number. (The
+    // old `/white/` locator kept passing against a row that had silently stopped rendering one.)
+    const rows = await screen.findAllByRole("link", { name: /Pebble Beach · white · 82 \(\+10\)/ });
     expect(rows).toHaveLength(3); // capped to the first 3, newest-first per the wire contract
+    expect(rows[0]!.textContent).toBe("Pebble Beach · white · 82 (+10)");
     const hrefs = rows.map((row) => row.getAttribute("href"));
     expect(hrefs).toEqual(["/rounds/recent-1", "/rounds/recent-2", "/rounds/recent-3"]);
     expect(hrefs.some((href) => href?.includes("/archive"))).toBe(false);

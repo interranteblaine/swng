@@ -252,15 +252,24 @@ export function HistoryList({ history, historyLimit }: HistoryListProps) {
               row's own numbers (spec 2026-07-29 §5: ten rows and one headline, and you can add
               them up yourself), so no extra column is needed — the subtraction is already on
               screen. A round with a pickup carries no `score` and shows none; the differential
-              column is gone with the index. `score - par` is presentation arithmetic over two
-              served numbers, and `formatOverPar` is a formatter — no domain compute import. */}
+              column is gone with the index.
+
+              A NINE states what it CONTRIBUTES, in spec §5's own register
+              ("52 +16 (9 holes, counts +32)"). That is not decoration: the headline averages a nine
+              DOUBLED (spec §2d), so a row showing only its un-doubled +16 would make the subtitle's
+              whole promise — add the rows up and check the number — silently fail to reconcile for
+              anyone who plays nines. The `· 9 holes` marker alone does not carry the missing
+              information; the doubled figure does. `score - par` and its doubling are presentation
+              arithmetic over two served numbers (the same figures the served average was folded
+              from), and `formatOverPar` is a formatter — no domain compute import. */}
           <Link
             to={`/rounds/${line.roundId}`}
             className={`${cardBox} block px-3 py-2 text-sm text-fairway underline decoration-fairway tabular-nums`}
           >
             {line.courseName} · {line.tee}
             {line.score !== undefined && ` · ${line.score} (${formatOverPar(line.score - line.par)})`}
-            {line.holes === 9 && " · 9 holes"}
+            {line.holes === 9 &&
+              (line.score !== undefined ? ` · 9 holes, counts ${formatOverPar((line.score - line.par) * 2)}` : " · 9 holes")}
           </Link>
         </li>
       ))}

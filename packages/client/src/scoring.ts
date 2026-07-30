@@ -50,8 +50,8 @@ export const foldAndScore = (events: readonly RoundEvent[]): { state: RoundState
 // The four handicap re-exports that stood here (handicappingFor, courseHandicapFor,
 // courseHandicapFromRatingSlopePar, unratedCourseHandicap) are DELETED with handicap/whs.ts itself
 // (spec 2026-07-29 §7): nothing converts an index into strokes anymore, because a player states
-// the number directly. Nothing replaces them — `averageOf`/`spreadOf` are deliberately NOT
-// re-exported either: the average is server-computed and served on the record responses, so an
-// on-device copy would be fence-legal and boundary-wrong. `formatOverPar` is a presentation
+// the number directly. Nothing replaces them — `averageOf` and the crew board's own
+// `averageOfValues`/`spreadOfValues` are deliberately NOT re-exported either: those numbers are
+// server-computed and served, so an on-device copy would be fence-legal and boundary-wrong. `formatOverPar` is a presentation
 // formatter the web imports straight from @swng/domain, exactly as `underPar` already does.
 export { gameStrokeAllocation, roundStrokeAllocation, netStrokes, totalDots, grossForHoles, unresolvedGames } from "@swng/domain";

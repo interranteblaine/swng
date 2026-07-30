@@ -89,10 +89,12 @@ const golferRoundLineFields = {
 
 // The metrics read projection (spec 2026-07-29 §5, domain/golfer/metrics.ts's golferMetrics):
 // every derived number in one place, computed at read time and never stored. REQUIRED object;
-// `average`/`spread` stay OPTIONAL — absent is the honest answer for a golfer with no round that
-// carries a score (a card with a pickup has none, spec §2d), never a 0 and never a floor.
-// `average` is what they normally shoot relative to par over their last ten scored rounds;
-// `spread` is the standard deviation over the same set, gated at five. `typicalEighteen` (career
+// `average` stays OPTIONAL — absent is the honest answer for a golfer with no round that carries a
+// score (a card with a pickup has none, spec §2d), never a 0 and never a floor — and it is what
+// they normally shoot relative to par over their last ten scored rounds. There is deliberately no
+// `spread` on this response (controller ruling): spread is the crew board's own column, over the
+// SEASON window (spec §6), and a rolling-10 spread here would be a second number under the same
+// name with neither labelled by its window. `typicalEighteen` (career
 // scoring buckets normalized to a per-18-hole rate) and `averageHistory` ("your average over
 // time" — one point per CONTRIBUTING round, oldest → newest, the headline being exactly its last
 // point) are REQUIRED, zeros/`[]` rather than absent. `bests`/`milestones` (analytics spec §3) are
@@ -122,7 +124,6 @@ const milestoneSchema: z.ZodType<Milestone> = z.object({
 
 const golferMetricsSchema: z.ZodType<GolferMetrics> = z.object({
   average: z.number().optional(),
-  spread: z.number().optional(),
   typicalEighteen: scoringShapeSchema,
   averageHistory: averageHistorySchema,
   bests: bestsSchema,

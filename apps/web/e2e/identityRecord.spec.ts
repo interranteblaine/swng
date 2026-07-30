@@ -65,7 +65,6 @@ const holeScoresFor = (bogeys: number): readonly number[] => Array.from({ length
 //   round 3: 16 bogeys -> gross 88 -> +16
 //
 // average  = roundHalfUp(mean(10, 13, 16)) = roundHalfUp(13) = 13
-// spread   = ABSENT: three scored rounds is below the 5-round floor (domain/golfer/average.ts)
 // averageHistory (one point per round, the rolling mean as of that round):
 //   after r1: mean(10)          = 10    -> 10
 //   after r2: mean(10, 13)      = 11.5  -> roundHalfUp -> 12
@@ -191,19 +190,20 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     expect(record.history[2]?.roundId).toBe(roundIds[0]);
 
     // The average, hand-derived from the deck's own scores above (see PINNED_AVERAGE's derivation):
-    // mean(+10, +13, +16) = 13. The spread is ABSENT at three rounds (its own 5-round floor), and
-    // averageHistory carries the rolling mean as of each round, oldest -> newest. If the live
+    // mean(+10, +13, +16) = 13, and averageHistory carries the rolling mean as of each round,
+    // oldest -> newest. This response carries no `spread` at all — spread is the crew board's own
+    // column, over the SEASON window (spec §6, controller ruling). If the live
     // system disagrees with any pinned number, this fails loudly rather than being adjusted to
     // match — the BLOCKED-don't-fudge instruction.
     expect(record.metrics.average).toBe(PINNED_AVERAGE);
-    expect(record.metrics.spread).toBeUndefined();
+    expect(record.metrics).not.toHaveProperty("spread"); // the board's column, never the profile's
     expect(record.metrics.averageHistory.map((point) => point.average)).toEqual([...PINNED_AVERAGE_HISTORY]);
     // averageHistory is oldest -> newest, the OPPOSITE of history's newest-first ordering.
     expect(record.metrics.averageHistory.map((point) => point.roundId)).toEqual(roundIds);
     // The headline IS the last point, by construction — pinned so the two can never drift.
     expect(record.metrics.average).toBe(record.metrics.averageHistory.at(-1)?.average);
     // Every retired index member is pinned absent on the wire.
-    for (const retired of ["whsIndex", "swngIndex", "indexHistory"]) expect(record.metrics).not.toHaveProperty(retired);
+    for (const retired of ["whsIndex", "swngIndex", "indexHistory", "spread"]) expect(record.metrics).not.toHaveProperty(retired);
 
     // Bests + milestones (analytics read-folds spec 2026-07-21 §3, packages/domain/src/golfer/
     // analytics.ts) — hand-derived BEFORE any live run from this deck's own pinned scores, never

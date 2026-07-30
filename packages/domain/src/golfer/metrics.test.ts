@@ -27,23 +27,25 @@ const scored = (id: string, perHole: number): GolferRoundLine =>
 
 // Three rounds at 90 (+18) then two at 108 (+36) — the whole block's fixture, hand-derived once:
 //   average = mean(18,18,18,36,36) = 126/5 = 25.2 → roundHalfUp → 25
-//   spread  = sqrt(((−7.2)²·3 + 10.8²·2)/5) = sqrt(388.8/5) = sqrt(77.76) = 8.81816… → 8.8
 const FIVE_ROUNDS = [scored("a", 5), scored("b", 5), scored("c", 5), scored("d", 6), scored("e", 6)];
 
 describe("golferMetrics — the read projection (spec 2026-07-29 §5)", () => {
-  it("serves the average and the spread over the golfer's scored lines", () => {
-    const metrics = golferMetrics(FIVE_ROUNDS);
-    expect(metrics.average).toBe(25);
-    expect(metrics.spread).toBe(8.8);
+  it("serves the average over the golfer's scored lines", () => {
+    expect(golferMetrics(FIVE_ROUNDS).average).toBe(25);
   });
 
-  it("holds the spread back below five scored rounds, while the average still shows", () => {
-    const metrics = golferMetrics(FIVE_ROUNDS.slice(0, 4));
-    expect(metrics.average).toBe(23); // mean(18,18,18,36) = 22.5 → roundHalfUp → 23
-    expect(metrics.spread).toBeUndefined();
+  it("averages however many scored rounds there are — no floor of its own", () => {
+    expect(golferMetrics(FIVE_ROUNDS.slice(0, 4)).average).toBe(23); // mean(18,18,18,36) = 22.5 → roundHalfUp → 23
+    expect(golferMetrics(FIVE_ROUNDS.slice(0, 1)).average).toBe(18); // one scored round is already an average
   });
 
-  it("a round containing a pickup has no score, so it moves neither number", () => {
+  // Spread is the CREW BOARD's column alone, over the season window (spec §6, controller ruling) —
+  // this projection must never grow a rolling-10 twin of it under the same name.
+  it("serves no spread", () => {
+    expect(golferMetrics(FIVE_ROUNDS)).not.toHaveProperty("spread");
+  });
+
+  it("a round containing a pickup has no score, so it does not move the average", () => {
     const withPickup = line({
       roundId: roundId("f"),
       holeResults: [
@@ -51,12 +53,10 @@ describe("golferMetrics — the read projection (spec 2026-07-29 §5)", () => {
         ...Array.from({ length: 17 }, (_, i) => ({ hole: i + 2, par: 4, result: { kind: "strokes" as const, strokes: 5 } })),
       ],
     });
-    const metrics = golferMetrics([...FIVE_ROUNDS, withPickup]);
-    expect(metrics.average).toBe(25);
-    expect(metrics.spread).toBe(8.8);
+    expect(golferMetrics([...FIVE_ROUNDS, withPickup]).average).toBe(25);
   });
 
-  it("an empty history yields no average/spread, an all-zero typicalEighteen, an empty averageHistory, and empty bests/milestones", () => {
+  it("an empty history yields no average, an all-zero typicalEighteen, an empty averageHistory, and empty bests/milestones", () => {
     const metrics = golferMetrics([]);
     expect(metrics).toEqual({
       typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },

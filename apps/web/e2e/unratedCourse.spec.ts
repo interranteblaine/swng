@@ -37,7 +37,7 @@ import type { AccountGolfer } from "./support.js";
 // machinery it described; ONE scored round is already an average.
 //
 // Every expected number below (the pars/SIs, the singles-match dots, the gross per round, and the
-// average/spread) is hand-pinned and derived BEFORE any live call, and asserted verbatim: a live
+// average) is hand-pinned and derived BEFORE any live call, and asserted verbatim: a live
 // disagreement is a BLOCKED finding to escalate, never a pin quietly adjusted to match observed
 // output (the run's-the-oracle inversion).
 //
@@ -67,27 +67,39 @@ const PAR_TOTAL = 36; // = sum of HOLES[*].par — the frozen tee's par, carried
 
 const DOT = "●"; // ScorecardGrid.tsx's own dot glyph (Cell's aria-hidden "●".repeat(dots) span)
 
-const UMA_CH = 13;
-const VIC_CH = 2;
+// What each player STATES at the tee (spec §2a) — a normal score relative to par, NOT a course
+// handicap. Named for what they are: the old UMA_CH/VIC_CH names invited exactly the mistake the
+// derivation below had to be corrected for (reading them as absolute handicaps to allocate
+// directly, skipping the relative rule AND the nine-hole halving).
+const UMA_OVER_PAR = 13;
+const VIC_OVER_PAR = 2;
 
-// The STANDARD CARD's dots (spec 2026-07-19 §2a: the card never changes) — ScorecardGrid always
-// renders roundStrokeAllocation (packages/domain/src/scoring/allocation.ts), EACH PLAYER'S
-// OWN round strokes allocated by stroke index, no game. allocateStrokes(13, 9
-// holes): base = floor(13/9) = 1, extra = 13 % 9 = 4 → every hole gets 1, and the four hardest
-// holes (stroke index 1-4 — holes 2, 6, 4, 8 in this card) get a 2nd. allocateStrokes(2, 9
-// holes): base = 0, extra = 2 → only stroke index 1 and 2 (holes 2 and 6) get a single dot,
-// everywhere else 0. The missing rating changes NONE of this: dots are pure stroke-index + strokes
-// arithmetic. Cross-checked against roundStrokeAllocation(participants, card) directly.
-const EXPECTED_UMA_DOTS = [1, 2, 1, 2, 1, 2, 1, 2, 1] as const; // holes 1..9
-const EXPECTED_VIC_DOTS = [0, 1, 0, 0, 0, 1, 0, 0, 0] as const; // holes 1..9
+// The STANDARD CARD's dots (spec 2026-07-19 §2a: the card never changes) — ScorecardGrid renders
+// roundStrokeAllocation (packages/domain/src/scoring/allocation.ts): each player's DERIVED round
+// strokes, allocated by stroke index, no game.
+//
+// RE-DERIVED BY HAND (spec 2026-07-29 §2b — this replaces an absolute-handicap derivation that was
+// wrong twice over once strokes became relative and halved on a nine):
+//   anchor = min(stated normal scores) = min(13, 2) = 2 (Vic, the better player)
+//   Vic:  difference 2 − 2 = 0  → 9 holes → roundHalfUp(0/2)  = 0 strokes
+//   Uma:  difference 13 − 2 = 11 → 9 holes → roundHalfUp(11/2) = roundHalfUp(5.5) = 6 strokes
+// allocateStrokes(6, 9 holes): base = floor(6/9) = 0, extra = 6 % 9 = 6 → every hole whose stroke
+// index is <= 6 gets exactly one dot. This card's stroke indices, holes 1..9, are
+// [5, 1, 9, 3, 7, 2, 8, 4, 6] → holes 1, 2, 4, 6, 8, 9 get a dot; holes 3 (SI 9), 5 (SI 7) and
+// 7 (SI 8) get none. Sum 6, as it must.
+// allocateStrokes(0, 9 holes) is all zeros — and that ZERO ROW is now the interesting half of the
+// assertion: under the retired absolute model the anchor still carried his own 2 dots, so "the best
+// player in the field receives nothing" is a real property this loop proves, not filler.
+// The missing rating changes NONE of this: dots are pure stroke-index + strokes arithmetic.
+const EXPECTED_UMA_DOTS = [1, 1, 0, 1, 0, 1, 0, 1, 1] as const; // holes 1..9 — sum 6
+const EXPECTED_VIC_DOTS = [0, 0, 0, 0, 0, 0, 0, 0, 0] as const; // holes 1..9 — the anchor receives nothing
 
-// The Match play PANEL'S own strokes line (relative, not each player's own CH) — moved here from
-// the grid, which now renders the standard card's dots above instead. gameStrokeAllocation:
-// singles-match is RELATIVE — only the higher-handicap player (Uma) receives any, the lower
-// (Vic) is the field's anchor and receives nothing. Under the ONE stroke rule (spec §2b) the
-// difference is |13 − 2| = 11 — exactly what strokesSummary (apps/web/src/round/dots.ts) states in
-// the panel; Vic is omitted from that line because his allocation is 0.
-const EXPECTED_MATCH_STROKES_LINE = "Uma 11 dots";
+// The Match play PANEL'S own strokes line. gameStrokeAllocation resolves the SAME one rule over the
+// GAME's own field (spec §2b), and here that field is the whole two-player roster — so the panel
+// states the same 6 the card shows. The two only diverge for a game played by a subset of the
+// roster; that is the case the general rule exists for, not this one. Vic is omitted from the line
+// because his allocation is 0 (strokesSummary, apps/web/src/round/dots.ts).
+const EXPECTED_MATCH_STROKES_LINE = "Uma 6 dots";
 
 // The six record-building rounds' hole-by-hole gross scores, oldest-first. Every hole carries a
 // stroke count (no pickup anywhere), which is what makes each card a SCORED card that feeds the
@@ -121,13 +133,13 @@ const PINNED_SCORES_OLDEST_FIRST = [39, 41, 40, 42, 38, 40] as const;
 //   vs par    +3   +5   +4   +6   +2   +4
 //   doubled   +6  +10   +8  +12   +4   +8
 //
-// after round 1: mean(6) = 6                      -> average 6; spread ABSENT (1 < 5 rounds)
-// after round 6: sum 48, mean 48/6 = 8            -> average 8
-//                population sd = sqrt(40/6) = 2.581989  -> spread 2.6
-//   (deviations from 8: -2, +2, 0, +4, -4, 0; squares 4+4+0+16+16+0 = 40)
+// after round 1: mean(6) = 6           -> average 6
+// after round 6: sum 48, mean 48/6 = 8  -> average 8
+//
+// No spread is pinned here: spread is the crew board's own column, over the SEASON window (spec §6,
+// controller ruling), and never appears on a golfer's record response.
 const PINNED_AVERAGE_AFTER_ONE = 6;
 const PINNED_AVERAGE_AFTER_SIX = 8;
-const PINNED_SPREAD_AFTER_SIX = 2.6;
 
 // AddCoursePage/HoleGrid own the keyboard-first grid (par default 4; yardage/SI blank). One
 // script-driven focus() lands on Hole 1's par, and every field-to-field move from there is a Tab
@@ -251,16 +263,16 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     await expect(page).toHaveURL(/\/create/);
     await expect(page.getByText(courseName, { exact: true })).toBeVisible();
     await expect(page.getByText("Playing as", { exact: true })).toBeVisible(); // no name field — the account's own record
-    await normallyShootsField(page).fill(String(UMA_CH));
+    await normallyShootsField(page).fill(String(UMA_OVER_PAR));
     await page.getByRole("button", { name: /^create round$/i }).click();
 
     await expect(page).toHaveURL(/\/round\//);
     const joinCode = await readJoinCode(page);
 
     // Vic joins as HIMSELF over a direct HTTP self-join (score-for-anyone makes his own browser
-    // unnecessary — the same precedent as courseEntry.spec.ts's Quinn), on the same unrated tee (ch 2).
+    // unnecessary — the same precedent as courseEntry.spec.ts's Quinn), on the same unrated tee, stating +2.
     const { httpUrl } = loadWebEnv();
-    await joinRoundDirect(httpUrl, vic, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: VIC_CH } });
+    await joinRoundDirect(httpUrl, vic, { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: VIC_OVER_PAR } });
     await waitForParticipant(page, "Vic");
 
     // Add the singles match (Uma vs Vic) via SetupPanel — one stroke rule, the difference between
@@ -268,12 +280,12 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     await addSinglesGame(page, "Uma", "Vic");
     await expect(chip(page, "Match play")).toBeVisible();
 
-    // The STANDARD CARD's dots, hole-by-hole against the hand-verified CH allocation — the CORE
-    // assertion: an unrated tee allocates dots identically to a rated one (stroke index + course
-    // handicap only), and the grid renders each player's OWN course handicap now, never the
-    // game's relative one (spec 2026-07-19 §2a — chip taps don't touch the grid). If this ever
-    // disagrees with EXPECTED_UMA_DOTS/EXPECTED_VIC_DOTS, that's the BLOCKED condition, not a
-    // pin this test may quietly re-derive.
+    // The STANDARD CARD's dots, hole-by-hole against the hand-verified allocation above — the CORE
+    // assertion: an unrated tee allocates dots identically to a rated one (stroke index + the
+    // DERIVED strokes only, nothing rating-shaped), and the grid renders each player's own ROUND
+    // strokes, never a game's own field (spec 2026-07-19 §2a — chip taps don't touch the grid). If
+    // this ever disagrees with EXPECTED_UMA_DOTS/EXPECTED_VIC_DOTS, that's the BLOCKED condition,
+    // not a pin this test may quietly re-derive.
     const dotsOn = async (golfer: string, hole: number): Promise<number> => {
       const cell = page.getByRole("button", { name: `${golfer} hole ${hole}`, exact: true });
       const text = await cell.innerText();
@@ -290,14 +302,16 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     const panel = await openGamePanel(page, "Match play");
     await expect(panel).toContainText(EXPECTED_MATCH_STROKES_LINE);
 
-    // Two-tap scoring renders net = gross − dots, exactly as on a rated course. Hole 1 (1 dot):
-    // gross 5 → net 4 → "●54". Hole 6 (2 dots): gross 6 → net 4 → "●●64". enterScore itself pins
-    // the two-tap contract (two clicks, pad closes on the second); the explicit cell text pins the
-    // net arithmetic.
+    // Two-tap scoring renders net = gross − dots, exactly as on a rated course. Both holes carry
+    // exactly ONE of Uma's six dots (SI 5 and SI 2, both <= 6): hole 1 gross 5 → net 4 → "●54";
+    // hole 6 gross 6 → net 5 → "●65". Hole 1's text is unchanged from the retired absolute
+    // derivation purely by coincidence (it happened to hold one dot either way); hole 6 previously
+    // held two and read "●●64". enterScore itself pins the two-tap contract (two clicks, pad closes
+    // on the second); the explicit cell text pins the net arithmetic.
     await enterScore(page, "Uma", 1, 5);
     await expect(page.getByRole("button", { name: "Uma hole 1", exact: true })).toHaveText(`${DOT}54`);
     await enterScore(page, "Uma", 6, 6);
-    await expect(page.getByRole("button", { name: "Uma hole 6", exact: true })).toHaveText(`${DOT}${DOT}64`);
+    await expect(page.getByRole("button", { name: "Uma hole 6", exact: true })).toHaveText(`${DOT}65`);
     // This live round is deliberately left unfinalized — it proves the live experience, and its
     // partial card carries no score at all, contributing nothing to Uma's record below.
   });
@@ -331,13 +345,12 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     // an ordinary round, so ONE of them already produces an average — 39 on par 36 is +3, doubled
     // to +6 for the nine.
     expect(record.metrics.average).toBe(PINNED_AVERAGE_AFTER_ONE);
-    expect(record.metrics.spread).toBeUndefined(); // one round is below the 5-round floor
     // The retired WHS/index members can never come back onto this wire.
     for (const retired of ["ags", "differential"]) expect(line).not.toHaveProperty(retired);
-    for (const retired of ["whsIndex", "swngIndex", "indexHistory"]) expect(record.metrics).not.toHaveProperty(retired);
+    for (const retired of ["whsIndex", "swngIndex", "indexHistory", "spread"]) expect(record.metrics).not.toHaveProperty(retired);
   });
 
-  test("4: six finalized unrated 9s average to +8 with a real spread — every nine counted double", async () => {
+  test("4: six finalized unrated 9s average to +8 — every nine counted double", async () => {
     test.setTimeout(240_000); // five more sequential API rounds + the projector catch-up poll
     const { httpUrl } = loadWebEnv();
 
@@ -367,10 +380,9 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     expect(record.history.map((line) => line.score)).toEqual([...PINNED_SCORES_OLDEST_FIRST].reverse());
 
     // THE GATE: six unrated nines, each contributing its vs-par figure DOUBLED — [6,10,8,12,4,8] —
-    // average to exactly +8, with a population spread of 2.6. Unrated play feeds the average like
-    // any other round; there is no second number and no bootstrap to cross.
+    // average to exactly +8. Unrated play feeds the average like any other round; there is no
+    // second number and no bootstrap to cross.
     expect(record.metrics.average).toBe(PINNED_AVERAGE_AFTER_SIX);
-    expect(record.metrics.spread).toBe(PINNED_SPREAD_AFTER_SIX);
     // averageHistory is oldest -> newest, one point per round, and its last point IS the headline.
     expect(record.metrics.averageHistory).toHaveLength(6);
     expect(record.metrics.averageHistory.at(-1)?.average).toBe(PINNED_AVERAGE_AFTER_SIX);

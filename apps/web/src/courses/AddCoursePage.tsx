@@ -207,8 +207,10 @@ export function AddCoursePage() {
         </div>
 
         {/* rating/slope are optional as a pair (unrated-courses arc): a card with no course
-            rating is entered by leaving both blank, and still gets a scorecard, dots, and
-            gross games — just no posted handicap differential. */}
+            rating is entered by leaving both blank, and plays exactly like a rated one — nothing
+            computes from rating or slope at all now (spec 2026-07-29 §7), so an unrated card's
+            rounds feed a golfer's average like any other. They stay on the card because they are
+            printed on the real scorecard. */}
         <p className="text-sm text-fairway">No course rating on the card? Leave these blank.</p>
 
         <HoleGrid holeCount={holeCount} onChangeHoleCount={changeHoleCount} holes={holes} onChangeHole={updateHole} error={errorFor("holes")} />

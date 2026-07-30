@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import type { AveragePoint, BestRound, GolferMetrics, GolferRoundLine, Milestone, MilestoneKind, RoundId } from "@swng/domain";
-import { formatOverPar } from "@swng/domain";
+import { formatOverPar, formatScoreVsPar } from "@swng/domain";
 import { nineHoleContribution } from "@swng/client";
 import { cardBox, linkEntity } from "../ui/classes";
 import { useContainerWidth } from "../ui/useContainerWidth";
@@ -277,29 +277,26 @@ export function HistoryList({ history, historyLimit }: HistoryListProps) {
               DOUBLED (spec §2d), so a row showing only its un-doubled +16 would make the subtitle's
               whole promise — add the rows up and check the number — silently fail to reconcile for
               anyone who plays nines. The `· 9 holes` marker alone does not carry the missing
-              information; the doubled figure does. `score - par` is presentation arithmetic over
-              two served numbers (the same figures the served average was folded from), and
-              `formatOverPar` is a formatter — but the DOUBLING is a model rule (spec §2d, same one
-              `golfer/average.ts`'s `overPar` applies), so it runs through `nineHoleContribution`
-              from @swng/client rather than being re-derived here as a second `* 2` (task 5: this
-              was exactly that second copy, closed). */}
+              information; the doubled figure does. Both figures render through `formatScoreVsPar`
+              (@swng/domain, scoring/present.ts) — a fence-allowed formatter over the raw (score,
+              par) pair, so the subtraction never sits in this file's own source at all (task-5 fix
+              round, spec 2026-07-30 §10 review: a bare `score - par` here had to carry an
+              eslint-disable exemption, which is exactly what let the ORIGINAL leak — the doubling
+              re-derived as `* 2` — be restored verbatim on that same line with lint still green).
+              The nine's DOUBLED figure feeds the SAME helper with each raw input pre-doubled via
+              `nineHoleContribution` (@swng/client) separately — see formatScoreVsPar's own comment
+              for why that's exactly equal to doubling the difference — so the doubling RULE still
+              runs through nineHoleContribution alone, never re-derived here as `* 2`. */}
           <Link
             to={`/rounds/${line.roundId}`}
             className={`${cardBox} block px-3 py-2 text-sm text-fairway underline decoration-fairway tabular-nums`}
           >
             {line.courseName} · {line.tee}
-            {/* eslint-disable-next-line no-restricted-syntax -- `score - par` here is DISPLAY
-                arithmetic over two already-served numbers, not a re-derived rule (see the block
-                comment above): it feeds formatOverPar for the row's own vs-par figure, the same
-                subtraction the served average was folded from. Only the DOUBLING below is a rule,
-                and that one goes through nineHoleContribution, not this line. */}
-            {line.score !== undefined && ` · ${line.score} (${formatOverPar(line.score - line.par)})`}
-            {line.holes === 9 && (
-              /* eslint-disable-next-line no-restricted-syntax -- same exemption as above: `score -
-                 par` is the raw display figure fed INTO nineHoleContribution, which is the actual
-                 rule (the multiplication happens inside that function, not here). */
-              line.score !== undefined ? ` · 9 holes, counts ${formatOverPar(nineHoleContribution(line.score - line.par))}` : " · 9 holes"
-            )}
+            {line.score !== undefined && ` · ${line.score} (${formatScoreVsPar(line.score, line.par)})`}
+            {line.holes === 9 &&
+              (line.score !== undefined
+                ? ` · 9 holes, counts ${formatScoreVsPar(nineHoleContribution(line.score), nineHoleContribution(line.par))}`
+                : " · 9 holes")}
           </Link>
         </li>
       ))}

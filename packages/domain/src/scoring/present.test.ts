@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { gameId, golferId } from "../ids.js";
 import type { GameConfig } from "./game.js";
 import type { Participant } from "../round/participant.js";
-import { gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, strokesNote, underPar } from "./present.js";
+import { nineHoleContribution } from "../golfer/average.js";
+import { formatOverPar, formatScoreVsPar, gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, strokesNote, underPar } from "./present.js";
 
 const A = golferId("a");
 const B = golferId("b");
@@ -116,5 +117,25 @@ describe("underPar", () => {
     expect(underPar(3, 4)).toBe(true);
     expect(underPar(4, 4)).toBe(false);
     expect(underPar(5, 4)).toBe(false);
+  });
+});
+
+// Task-5 fix round (spec 2026-07-30 §10 review): the one formatter for a raw (score, par) pair,
+// so RecordSections.tsx's history row never subtracts `score - par` inline again.
+describe("formatScoreVsPar", () => {
+  it("formats a raw (score, par) pair through formatOverPar", () => {
+    expect(formatScoreVsPar(76, 72)).toBe("+4");
+    expect(formatScoreVsPar(70, 72)).toBe("-2");
+    expect(formatScoreVsPar(72, 72)).toBe("E");
+  });
+
+  // The nine-hole "counts" line feeds THIS SAME helper with each input pre-doubled via
+  // nineHoleContribution separately, rather than doubling their difference — proving the
+  // distributivity the present.ts comment claims: nineHoleContribution(score) -
+  // nineHoleContribution(par) equals nineHoleContribution(score - par).
+  it("composes with nineHoleContribution applied per-input to match the doubled figure", () => {
+    const doubled = formatScoreVsPar(nineHoleContribution(47), nineHoleContribution(36));
+    expect(doubled).toBe(formatOverPar(nineHoleContribution(47 - 36)));
+    expect(doubled).toBe("+22");
   });
 });

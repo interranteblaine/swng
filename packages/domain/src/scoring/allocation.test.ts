@@ -183,7 +183,7 @@ describe("roundStrokeAllocation", () => {
 
 describe("totalDots", () => {
   it("sums a per-hole allocation to the total strokes it was built from", () => {
-    const perHole = dotsByHole(11, whiteTeeSet); // 18 holes: 11 wraps to 1 everywhere + extra on SI 1-11 — sums back to 11
+    const perHole = dotsByHole(11, whiteTeeSet); // 18 holes: 11 < 18, so base = 0 and there is no wrap — SI 1-11 get exactly 1 dot each, SI 12-18 get none; sums back to 11
     expect(totalDots(perHole)).toBe(11);
   });
   it("sums to zero for an empty allocation (e.g. gross stroke-play)", () => {
@@ -200,7 +200,7 @@ describe("totalDots", () => {
 
 describe("dotsForHoles", () => {
   it("sums only the requested holes' dots, not the whole allocation", () => {
-    const perHole = dotsByHole(11, whiteTeeSet); // 18 holes, 11 wraps: SI 1-11 get 1 extra, all get a base 1... (see totalDots' own fixture)
+    const perHole = dotsByHole(11, whiteTeeSet); // 18 holes: 11 < 18, so base = 0 and there is no wrap — SI 1-11 get exactly 1 dot each, SI 12-18 get none (same fixture as totalDots' own test above, now correctly described there too)
     const front9 = whiteTeeSet.holes.filter((h) => h.number <= 9);
     const back9 = whiteTeeSet.holes.filter((h) => h.number > 9);
     expect(dotsForHoles(perHole, front9) + dotsForHoles(perHole, back9)).toBe(totalDots(perHole));

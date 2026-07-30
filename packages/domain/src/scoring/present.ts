@@ -128,3 +128,23 @@ export const underPar = (score: number, par: number): boolean => score < par;
 // score has no such problem, so the notation evaporates with the index that required it.
 // Absorbs apps/web/src/ui/vsPar.ts so there is one copy.
 export const formatOverPar = (value: number): string => (value === 0 ? "E" : value > 0 ? `+${value}` : `${value}`);
+
+// The vs-par figure for a raw (score, par) pair, in one call. `score - par` is legitimate DISPLAY
+// arithmetic over two already-known facts (the same register as `underPar` above — a comparison
+// of stored inputs, not a rule), but it belongs in ONE formatter, not retyped at each call site:
+// RecordSections.tsx's history row used to do the subtraction inline (task-5 fix round, spec
+// 2026-07-30 §10 review) — which meant the fence's `no-restricted-syntax` selector had to carry
+// two `eslint-disable-next-line` exemptions to let it stay legal, and an exemption covers the
+// WHOLE line, so the original leak (`(score - par) * 2`) could be restored on that exact line
+// verbatim with lint still green. Routing the subtraction through this fence-allowed formatter
+// instead removes the arithmetic from apps/web/src entirely, so no exemption is needed and the
+// fence re-arms on the one line the leak actually lived on.
+//
+// A nine-hole round's DOUBLED contribution is fed through this SAME helper, never a second
+// formatter: `formatScoreVsPar(nineHoleContribution(score), nineHoleContribution(par))` equals
+// `formatScoreVsPar(2 * score, 2 * par)` equals `formatOverPar(2 * (score - par))` — i.e. exactly
+// `formatOverPar(nineHoleContribution(score - par))` by distributivity — so the DOUBLING RULE
+// still runs through `nineHoleContribution` alone (@swng/client), applied to each raw input
+// separately as a function argument rather than to their difference, which is what keeps the
+// multiplication out of any BinaryExpression the fence would otherwise need to see.
+export const formatScoreVsPar = (score: number, par: number): string => formatOverPar(score - par);

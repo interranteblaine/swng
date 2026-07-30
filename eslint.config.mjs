@@ -26,6 +26,19 @@ const NODE = {
   message: "This package also runs in the browser — no Node built-ins.",
 };
 
+// The re-derivation fence's own property list (task-5 fix round, spec 2026-07-30 §10 review) — ONE
+// place, interpolated into every selector branch below so the four can't drift apart. `average`/
+// `strokes`/`par` are the golfer-record fields task 5 named; `points`/`relativeToPar`/`skins` are
+// the GameState line fields I2's fix round added (GamePanel.tsx's stroke-play/stableford/skins
+// ranking, moved to @swng/domain) — added here so a re-derivation of THAT move is caught too; I1's
+// fence didn't cover I2's own move until this fix round.
+const GOLF_ARITHMETIC_PROPS = "average|strokes|par|points|relativeToPar|skins";
+
+// Shared message for every branch of the re-derivation fence below — one copy, not four drifting
+// copies naming slightly different things.
+const NO_GOLF_ARITHMETIC_MESSAGE =
+  "This re-derives a golf rule inline over a served average/strokes/par/points/relativeToPar/skins field (however it's spelled — reversed operands, `!`, `?? 0`, or a `+=`/`-=` accumulator all match). Move the rule into @swng/domain and call it through @swng/client. If this is genuinely just display arithmetic over an already-served number (not a rule), it needs an eslint-disable-next-line with a comment stating why — there are currently ZERO such exemptions anywhere in apps/web/src (RecordSections.tsx's own two were closed by routing through scoring/present.ts's formatScoreVsPar), so a new one should be rare and heavily justified. Never delete or widen this rule just to go green.";
+
 export default [
   { ignores: ["**/dist", "**/node_modules", "**/cdk.out"] },
   js.configs.recommended,
@@ -214,39 +227,93 @@ export default [
           ],
         },
       ],
-      // The RE-DERIVATION fence (task-5 fix round, spec 2026-07-30 §10 review I1): the
-      // no-restricted-imports rule above only catches IMPORTING a banned compute name — it never
-      // noticed a rule being RETYPED inline instead, which is how two real leaks shipped (the
-      // crew board's `a.average - b.average`, deleted task 4; RecordSections.tsx's
-      // `(score - par) * 2`, moved into nineHoleContribution above, task 5). A regex-based test
-      // file was tried first and the review planted five re-derivations that all passed it clean
-      // — reversed operands (`2 * (a - b)`), a local variable (`const raw = a - b; raw * 2`), and
-      // the two idioms TypeScript itself pushes a developer toward for an `optional` served field
-      // (`a.average ?? 0`, `a.average!`) all defeat a regex, but not an AST: a BinaryExpression
-      // touching a `.average`/`.strokes`/`.par` property is the same NODE shape regardless of
-      // operand order, whitespace, or the `!`/`??` wrapped around the property read. This selector
-      // subsumed the regex file entirely (deleted, apps/web/test/noGolfArithmetic.test.ts) — one
+      // The RE-DERIVATION fence (task-5 fix round 1, spec 2026-07-30 §10 review I1; NARROWED in
+      // fix round 2, review I1-again/I2): the no-restricted-imports rule above only catches
+      // IMPORTING a banned compute name — it never noticed a rule being RETYPED inline instead,
+      // which is how two real leaks shipped (the crew board's `a.average - b.average`, deleted
+      // task 4; RecordSections.tsx's `(score - par) * 2`, moved into nineHoleContribution, task
+      // 5). A regex-based test file was tried first and fix round 1's review planted five
+      // re-derivations that all passed it clean — reversed operands (`2 * (a - b)`), a local
+      // variable (`const raw = a - b; raw * 2`), and the two idioms TypeScript itself pushes a
+      // developer toward for an `optional` served field (`a.average ?? 0`, `a.average!`) all
+      // defeat a regex. That regex file is deleted (apps/web/test/noGolfArithmetic.test.ts) — one
       // mechanism, not two with different coverage.
       //
-      // `par` in the property list also flags RecordSections.tsx's own two legitimate
-      // `line.score - line.par` reads (feeding `formatOverPar` for on-screen display — the
-      // subtraction itself is not a rule, only the DOUBLING is, and that's `nineHoleContribution`'s
-      // job now) — the ONLY two sites in the tree this fires on that are correct as written; both
-      // carry a narrowly-scoped `eslint-disable-next-line` with this same reasoning inline, so
-      // nothing else may quietly claim the same exemption.
+      // Fix round 2 NARROWED the single broad "any descendant" selector fix round 1 shipped, after
+      // the review proved it also fires on three plausible pieces of LEGITIMATE code: string
+      // concatenation for display (`"Par " + h.par`), a UI stepper (`p.strokes + 1`), and a golf
+      // property read nested inside a ternary's TEST rather than an operand of the arithmetic at
+      // all (`c + (p.strokes > 0 ? 1 : 0)`). Four selector branches below replace it, each
+      // EMPIRICALLY verified (a scratch fixture carrying all five mutations + all three false
+      // positives + the `+=` case, run through `pnpm exec eslint`, before this design was kept):
       //
-      // Known, accepted residual (stated here, not solved): a re-derivation fully hidden behind an
-      // opaque local — `const { score, par } = line; const raw = score - par; raw * 2;`, where
-      // NEITHER the property read nor the multiplication shares a single expression — defeats this
-      // selector exactly as it would defeat any text- or AST-based fence with no dataflow
-      // analysis. If this rule ever fails to catch a real leak of that shape, that is why; add
-      // dataflow tooling or catch it in review, don't just widen this pattern by guesswork.
+      // (A) direct-operand arithmetic, EXCLUDING a Literal on either side — `x.par - y`/`y - x.par`
+      //     etc. The Literal exclusion is what kills the string-concat and stepper false positives
+      //     (`"Par " + h.par` has a string Literal operand; `p.strokes + 1` has a numeric Literal
+      //     operand) WITHOUT losing any planted mutation — none of the five has a Literal as a
+      //     direct operand of its matched BinaryExpression.
+      // (B) one level of `?? <anything>` unwrapping — catches `(a.average ?? 0) - (b.average ?? 0)`,
+      //     which (A) alone cannot: neither top-level operand of that subtraction is ITSELF a
+      //     MemberExpression, both are LogicalExpressions, so a naive "direct operand only"
+      //     narrowing would have silently dropped this exact planted mutation (confirmed by
+      //     execution, not assumed).
+      // (C) one level of `!` (TSNonNullExpression) unwrapping — the same reasoning for
+      //     `a.average! - b.average!`.
+      // (D) `+=`/`-=`/`*=` accumulators, direct-operand + Literal-excluded like (A) — an
+      //     AssignmentExpression is a DIFFERENT node type from BinaryExpression, so
+      //     `let t = 0; for (...) t += h.par;` (the exact hand-rolled-sum shape M5 folded into
+      //     `parForHoles`/`dotsForHoles`) was previously INVISIBLE to this fence no matter how (A)
+      //     was written; this is new coverage, not a narrowing of existing coverage.
+      //
+      // `GOLF_ARITHMETIC_PROPS` above adds `points`/`relativeToPar`/`skins` (I2's GameState fields)
+      // to the original `average`/`strokes`/`par` — otherwise `[...lines].sort((a,b) =>
+      // b.points - a.points)` could be retyped straight back into GamePanel.tsx tomorrow with this
+      // whole fence green, since I1's selector never covered I2's own move.
+      //
+      // Known, accepted residuals (stated here, not solved — narrower branches trade some
+      // theoretical reach for killing real false positives, and this is the honest boundary of
+      // what static, non-dataflow AST matching can do):
+      // - A fully destructured local — `const { score, par } = line; const raw = score - par; raw
+      //   * 2;` — where NEITHER the property read nor the multiplication shares one expression
+      //   with the other. Unchanged from fix round 1: no branch below, or any AST selector without
+      //   dataflow analysis, can see through an intermediate variable.
+      // - A ternary/conditional VALUE (not test) that itself is a direct operand of the arithmetic
+      //   — e.g. `total + (useNet ? a.average! : 0)` — is invisible to (A)/(B)/(C) the same way
+      //   `+=` was to fix round 1: a `ConditionalExpression` isn't unwrapped by any branch here,
+      //   only `??` and `!`. Add a branch if this shape is ever the real leak; don't widen (A)
+      //   back to "any descendant" to pre-empt it, since that is exactly what reintroduces the
+      //   string-concat/stepper false positives this narrowing exists to kill.
+      // - Double-wrapped forms (`(a.average ?? 0)!`, `a.average ?? b.average ?? 0`, etc.) are not
+      //   tested and may not match; the two named idioms (single `??`, single `!`) are what the
+      //   review actually observed TypeScript push developers toward for one optional field.
       "no-restricted-syntax": [
         "error",
         {
-          selector: "BinaryExpression[operator=/^[-+*]$/] MemberExpression[property.name=/^(average|strokes|par)$/]",
-          message:
-            "This re-derives a golf rule inline over a served average/strokes/par field (however it's spelled — reversed operands, `!`, `?? 0` all match). Move the rule into @swng/domain and call it through @swng/client. If this is genuinely just display arithmetic over an already-served number (not a rule), it needs an eslint-disable-next-line with a comment stating why — see RecordSections.tsx's two exemptions for the pattern. Never delete or widen this rule just to go green.",
+          selector: `BinaryExpression[operator=/^[-+*]$/]:not([left.type="Literal"]):not([right.type="Literal"]) > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
+          message: NO_GOLF_ARITHMETIC_MESSAGE,
+        },
+        {
+          selector: `BinaryExpression[operator=/^[-+*]$/] > LogicalExpression[operator="??"] > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
+          message: NO_GOLF_ARITHMETIC_MESSAGE,
+        },
+        // Self-caught during verification, not in the review: `rows[0]?.average ?? 0` (optional
+        // chaining, arguably MORE idiomatic TypeScript than the plain `.average` form the review's
+        // own mutation 4 used) wraps the MemberExpression in a ChainExpression node, which sits
+        // BETWEEN the LogicalExpression and the MemberExpression — so the branch immediately above
+        // (a direct `>` child) does not reach it. Proven by a scratch probe
+        // (`(rows[0]?.average ?? 0) - (rows[1]?.average ?? 0)` passed clean before this branch
+        // existed); this branch drills through the extra ChainExpression wrapper.
+        {
+          selector: `BinaryExpression[operator=/^[-+*]$/] > LogicalExpression[operator="??"] > ChainExpression > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
+          message: NO_GOLF_ARITHMETIC_MESSAGE,
+        },
+        {
+          selector: `BinaryExpression[operator=/^[-+*]$/] > TSNonNullExpression > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
+          message: NO_GOLF_ARITHMETIC_MESSAGE,
+        },
+        {
+          selector: `AssignmentExpression[operator=/^(\\+=|-=|\\*=)$/]:not([left.type="Literal"]):not([right.type="Literal"]) > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
+          message: NO_GOLF_ARITHMETIC_MESSAGE,
         },
       ],
     },

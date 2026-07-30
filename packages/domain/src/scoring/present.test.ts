@@ -132,10 +132,22 @@ describe("formatScoreVsPar", () => {
   // The nine-hole "counts" line feeds THIS SAME helper with each input pre-doubled via
   // nineHoleContribution separately, rather than doubling their difference — proving the
   // distributivity the present.ts comment claims: nineHoleContribution(score) -
-  // nineHoleContribution(par) equals nineHoleContribution(score - par).
+  // nineHoleContribution(par) equals nineHoleContribution(score - par). All three signed cases
+  // pinned (task-5 fix round 3 review) — over par, under par, and level — not just the positive
+  // one.
   it("composes with nineHoleContribution applied per-input to match the doubled figure", () => {
-    const doubled = formatScoreVsPar(nineHoleContribution(47), nineHoleContribution(36));
-    expect(doubled).toBe(formatOverPar(nineHoleContribution(47 - 36)));
-    expect(doubled).toBe("+22");
+    const doubled = (score: number, par: number) => formatScoreVsPar(nineHoleContribution(score), nineHoleContribution(par));
+
+    // Over par: 47 - 36 = +11, doubled = +22.
+    expect(doubled(47, 36)).toBe(formatOverPar(nineHoleContribution(47 - 36)));
+    expect(doubled(47, 36)).toBe("+22");
+
+    // Under par: 34 - 36 = -2, doubled = -4.
+    expect(doubled(34, 36)).toBe(formatOverPar(nineHoleContribution(34 - 36)));
+    expect(doubled(34, 36)).toBe("-4");
+
+    // Level: 36 - 36 = E, doubled = E.
+    expect(doubled(36, 36)).toBe(formatOverPar(nineHoleContribution(36 - 36)));
+    expect(doubled(36, 36)).toBe("E");
   });
 });

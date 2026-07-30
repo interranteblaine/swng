@@ -243,27 +243,70 @@ export default [
       // the review proved it also fires on three plausible pieces of LEGITIMATE code: string
       // concatenation for display (`"Par " + h.par`), a UI stepper (`p.strokes + 1`), and a golf
       // property read nested inside a ternary's TEST rather than an operand of the arithmetic at
-      // all (`c + (p.strokes > 0 ? 1 : 0)`). Four selector branches below replace it, each
-      // EMPIRICALLY verified (a scratch fixture carrying all five mutations + all three false
-      // positives + the `+=` case, run through `pnpm exec eslint`, before this design was kept):
+      // all (`c + (p.strokes > 0 ? 1 : 0)`). Round 2 shipped branch (A) below with a Literal
+      // exclusion on BOTH sides for ANY of `-`/`+`/`*`, and its own comment claimed this cost
+      // nothing — WRONG, and corrected in fix round 3: excluding a Literal operand from `-`/`*`
+      // also hides `h.par * 2` and `2 * h.par` — the nine-hole doubling rule itself, the one rule
+      // this whole task exists to move — plus the fully-inlined form of `formatScoreVsPar`'s own
+      // call site (`l.score * 2 - l.par * 2`, i.e. deleting the two `nineHoleContribution` calls
+      // and spelling the doubling out by hand). Fix round 3's own review caught this by testing
+      // the CLAIM, not just the five named mutations, and fixed it by scoping the Literal
+      // exclusion to `operator="+"` only (see branch A below) — `-`/`*` regain full direct-operand
+      // coverage regardless of a Literal sibling, and the two `+`-shaped false positives
+      // (both literal-adjacent) stay excluded.
       //
-      // (A) direct-operand arithmetic, EXCLUDING a Literal on either side — `x.par - y`/`y - x.par`
-      //     etc. The Literal exclusion is what kills the string-concat and stepper false positives
-      //     (`"Par " + h.par` has a string Literal operand; `p.strokes + 1` has a numeric Literal
-      //     operand) WITHOUT losing any planted mutation — none of the five has a Literal as a
-      //     direct operand of its matched BinaryExpression.
+      // Fix round 3 ALSO added two more one-level unwrap branches while re-verifying the review's
+      // OWN claim that "every spelling is restored": `(a.average as number) - (b.average as
+      // number)` (TypeScript's third idiom for narrowing an optional field, peer to `??`/`!`) and
+      // `-l.par + l.score` (a unary-minus-wrapped operand) both still passed clean under the
+      // `operator="+"`-scoped exclusion ALONE — neither is a Literal-adjacency question at all,
+      // they are TWO MORE wrapper node types (`TSAsExpression`, `UnaryExpression`) the existing
+      // `??`/`!`/`ChainExpression` unwrap branches never covered. Branches (E)/(F) below close
+      // both, found and closed by executing the exact patterns named, not by trusting the prose
+      // that said they already worked.
+      //
+      // Every branch below is EMPIRICALLY verified — a scratch fixture carrying all five original
+      // mutations + the accumulator + the three retyped `GamePanel` sorts + the four round-3
+      // regression spellings + all three false positives (18 patterns), run through
+      // `pnpm exec eslint` before and after each design change, on the scratch file AND
+      // individually re-planted into the real files (RecordSections.tsx, ResultsView.tsx,
+      // SeasonPanel.tsx, GamePanel.tsx) as a second, independent check:
+      //
+      // (A) direct-operand arithmetic. Literal exclusion applies ONLY when `operator="+"` — `-`/`*`
+      //     have NO exclusion at all and match a Literal-adjacent golf property unconditionally
+      //     (`h.par * 2`, `2 * h.par`, `l.par * 2` inside a larger `-` expression). The cost this
+      //     buys: a genuine `+`-shaped re-derivation between a golf property and a literal (e.g. a
+      //     hypothetical `x.strokes + 1` used as an actual RULE, not a display stepper) is
+      //     invisible — indistinguishable at the AST level from `p.strokes + 1`'s legitimate
+      //     stepper or `"Par " + h.par`'s legitimate string concat, since `+` overloads both
+      //     numeric addition and string concatenation and carries no type information here. This
+      //     is the accepted tradeoff, not a coincidence: no golf rule in this codebase adds a
+      //     served field to a literal (every real rule found — doubling, differences, sums —
+      //     uses `-`/`*` or another property as the other operand), so the cost is theoretical
+      //     today; if a `+`-with-literal rule is ever the real leak, that is exactly why this
+      //     branch misses it.
       // (B) one level of `?? <anything>` unwrapping — catches `(a.average ?? 0) - (b.average ?? 0)`,
       //     which (A) alone cannot: neither top-level operand of that subtraction is ITSELF a
       //     MemberExpression, both are LogicalExpressions, so a naive "direct operand only"
       //     narrowing would have silently dropped this exact planted mutation (confirmed by
       //     execution, not assumed).
+      // (B2) the same one level of `??` unwrapping, through an optional-chaining `ChainExpression`
+      //      wrapper (`rows[0]?.average ?? 0` — self-discovered in fix round 2, arguably MORE
+      //      idiomatic TypeScript than the review's own plain-identifier example).
       // (C) one level of `!` (TSNonNullExpression) unwrapping — the same reasoning for
       //     `a.average! - b.average!`.
-      // (D) `+=`/`-=`/`*=` accumulators, direct-operand + Literal-excluded like (A) — an
-      //     AssignmentExpression is a DIFFERENT node type from BinaryExpression, so
-      //     `let t = 0; for (...) t += h.par;` (the exact hand-rolled-sum shape M5 folded into
-      //     `parForHoles`/`dotsForHoles`) was previously INVISIBLE to this fence no matter how (A)
-      //     was written; this is new coverage, not a narrowing of existing coverage.
+      // (E) one level of `as` (TSAsExpression) unwrapping — TypeScript's THIRD idiom for narrowing
+      //     an optional field, peer to `??`/`!`: `(a.average as number) - (b.average as number)`.
+      // (F) one level of unary-minus (UnaryExpression) unwrapping — `-l.par + l.score`. Unlike
+      //     mutation 2's `2 * (line.score - line.par)`, which is caught via its own INNER
+      //     BinaryExpression node independently of the outer one, a plain `-l.par` has no inner
+      //     BinaryExpression at all for branch (A) to test against — it needs its own unwrap.
+      // (D) `+=`/`-=`/`*=` accumulators, direct-operand + Literal-excluded (both sides, all
+      //     operators — no `+`-only narrowing was requested or verified for assignments, and no
+      //     false positive was found requiring one) — an AssignmentExpression is a DIFFERENT node
+      //     type from BinaryExpression, so `let t = 0; for (...) t += h.par;` (the exact
+      //     hand-rolled-sum shape M5 folded into `parForHoles`/`dotsForHoles`) was previously
+      //     INVISIBLE to this fence no matter how (A) was written; this is new coverage.
       //
       // `GOLF_ARITHMETIC_PROPS` above adds `points`/`relativeToPar`/`skins` (I2's GameState fields)
       // to the original `average`/`strokes`/`par` — otherwise `[...lines].sort((a,b) =>
@@ -278,18 +321,27 @@ export default [
       //   with the other. Unchanged from fix round 1: no branch below, or any AST selector without
       //   dataflow analysis, can see through an intermediate variable.
       // - A ternary/conditional VALUE (not test) that itself is a direct operand of the arithmetic
-      //   — e.g. `total + (useNet ? a.average! : 0)` — is invisible to (A)/(B)/(C) the same way
-      //   `+=` was to fix round 1: a `ConditionalExpression` isn't unwrapped by any branch here,
-      //   only `??` and `!`. Add a branch if this shape is ever the real leak; don't widen (A)
-      //   back to "any descendant" to pre-empt it, since that is exactly what reintroduces the
-      //   string-concat/stepper false positives this narrowing exists to kill.
+      //   — e.g. `total + (useNet ? a.average! : 0)` — is invisible to every branch below the same
+      //   way `+=` was to fix round 1: a `ConditionalExpression` isn't unwrapped by any branch
+      //   here, only `??`/`!`/`as`/unary-minus. Add a branch if this shape is ever the real leak;
+      //   don't widen (A) back to "any descendant" to pre-empt it, since that is exactly what
+      //   reintroduces the string-concat/stepper false positives this narrowing exists to kill.
       // - Double-wrapped forms (`(a.average ?? 0)!`, `a.average ?? b.average ?? 0`, etc.) are not
-      //   tested and may not match; the two named idioms (single `??`, single `!`) are what the
-      //   review actually observed TypeScript push developers toward for one optional field.
+      //   tested and may not match; the named idioms (single `??`, single `!`, single `as`, single
+      //   unary-minus) are what was actually observed being written, not an exhaustive closure.
+      // - A COMPARATOR-spelled ranking — `sort((a, b) => a.average! > b.average! ? 1 : -1)`,
+      //   `a.points > b.points ? -1 : 1` — is invisible: `<`/`>`/`<=`/`>=` are not in
+      //   `/^[-+*]$/`, and this is directly the class Important B is about (a ranking rule
+      //   re-derived in the web). DELIBERATELY NOT COVERED (fix round 3 ruling): adding
+      //   `<`/`>`/`<=`/`>=` branches was tried and tested against the real tree, and it produces
+      //   exactly one hit — `describeGame.ts`'s `lines.filter((l) => l.skins > 0)` — a genuine
+      //   false positive (a membership filter, not a ranking rule) with no clean way to exclude it
+      //   short of re-narrowing in a way that risks losing real coverage again. Covering this
+      //   residual is judged the wrong call; leaving it stated here, honestly, is the right one.
       "no-restricted-syntax": [
         "error",
         {
-          selector: `BinaryExpression[operator=/^[-+*]$/]:not([left.type="Literal"]):not([right.type="Literal"]) > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
+          selector: `BinaryExpression[operator=/^[-+*]$/]:not([operator="+"][left.type="Literal"]):not([operator="+"][right.type="Literal"]) > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
           message: NO_GOLF_ARITHMETIC_MESSAGE,
         },
         {
@@ -309,6 +361,22 @@ export default [
         },
         {
           selector: `BinaryExpression[operator=/^[-+*]$/] > TSNonNullExpression > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
+          message: NO_GOLF_ARITHMETIC_MESSAGE,
+        },
+        // `as` is the third idiom TypeScript pushes for an optional field, peer to `??`/`!` above
+        // (`(a.average as number) - (b.average as number)`) — a TSAsExpression wraps the
+        // MemberExpression the same one level deep, so it needs its own unwrap branch.
+        {
+          selector: `BinaryExpression[operator=/^[-+*]$/] > TSAsExpression > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
+          message: NO_GOLF_ARITHMETIC_MESSAGE,
+        },
+        // A unary-minus-wrapped operand (`-l.par + l.score`) is a UnaryExpression, not a nested
+        // BinaryExpression — mutation 2's `2 * (line.score - line.par)` is caught via its own
+        // INNER BinaryExpression node independently of the outer one, but a plain unary negation
+        // has no such inner node for the direct-operand branch to test; this unwraps it the same
+        // one level as the `??`/`!`/`as` branches above.
+        {
+          selector: `BinaryExpression[operator=/^[-+*]$/] > UnaryExpression[operator="-"] > MemberExpression[property.name=/^(${GOLF_ARITHMETIC_PROPS})$/]`,
           message: NO_GOLF_ARITHMETIC_MESSAGE,
         },
         {

@@ -273,7 +273,7 @@ describe("deployed vertical slice: mid-round basis correction", () => {
 
   it("corrects what a player stated mid-round: events carry it, the fold and archive reflect it", async () => {
     // 1. Start a round (host normally shoots +8), join a second account (+2).
-    const host = await mintAccountGolfer(httpUrl, "handicap-host", "Host");
+    const host = await mintAccountGolfer(httpUrl, "basis-host", "Host");
     const course = await ensureCourse(httpUrl, fixtureLinks.courseName, fixtureLinks, host);
     const started = await post(rounds(), { course, host: { tee: "white", basis: { kind: "normally-shoots", overPar: 8 } } }, startRoundResponseSchema, host.idToken);
     const roundId = started.roundId;
@@ -281,14 +281,14 @@ describe("deployed vertical slice: mid-round basis correction", () => {
     const hostId = started.golferId;
     expect(hostId).toBe(host.golferId); // as-self: the host seat IS the account's own golfer
 
-    const guest = await mintAccountGolfer(httpUrl, "handicap-guest", "Guest");
+    const guest = await mintAccountGolfer(httpUrl, "basis-guest", "Guest");
     const joined = await post(rounds("/join"), { code: started.joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, joinRoundResponseSchema, guest.idToken);
     const guestToken = joined.token;
     const guestId = joined.golferId;
     expect(guestId).toBe(guest.golferId);
 
-    const hostOps = createClientOps("handicap-host-phone");
-    const guestOps = createClientOps("handicap-guest-phone");
+    const hostOps = createClientOps("basis-host-phone");
+    const guestOps = createClientOps("basis-guest-phone");
     const scoresUrl = rounds(`/${roundId}/scores`);
 
     // 2. Score hole 1 for both.

@@ -133,6 +133,28 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
     // with strokesLabel(0) === "0" (never "−0"). Scoped to the aria-labelled list because the
     // read-only card below it prints its own totals from the SAME grossForHoles.
     await expect(page.getByRole("list", { name: "Final totals" })).toContainText("72 gross · 0 · 72 net");
+
+    // ...and the CARD's own totals row, the other half of spec §4's "it gains a totals row". This
+    // is the ONE spec that plays a whole card with no pickup and no gap, so it is the only place
+    // OUT, IN and TOT can all carry real numbers rather than a dash (courseEntry scores one hole,
+    // basisCorrection two of nine, unratedCourse two of nine — every segment in all three dashes;
+    // fieldTest's own multi-player version, with a real pickup, is pinned in its test 9).
+    //
+    // DERIVED BY HAND from the same fixture: 18 holes of par 4 → OUT and IN are par 36 each and
+    // TOT is par 72; a flat 4 on every hole gives 36 / 36 / 72 gross; 0 derived strokes means 0
+    // dots, so each segment's net equals its gross (netStrokes(gross, 0)).
+    // ScorecardGrid.tsx renders a segment cell as two adjacent <div>s — gross then net — with no
+    // separator, so the cell's whole text is the two numbers concatenated: "3636", "7272".
+    // The row's own <th scope="row"> is a `rowheader`, not a `cell`, so getByRole("cell") yields
+    // exactly the one player column here (the same row/aria-label lookup ScorecardGrid.test.tsx's
+    // own totals tests use).
+    const totalsRow = (label: string) => page.getByRole("row", { name: label, exact: true });
+    await expect(totalsRow("OUT")).toContainText("Par 36");
+    await expect(totalsRow("OUT").getByRole("cell")).toHaveText("3636");
+    await expect(totalsRow("IN")).toContainText("Par 36");
+    await expect(totalsRow("IN").getByRole("cell")).toHaveText("3636");
+    await expect(totalsRow("TOT")).toContainText("Par 72");
+    await expect(totalsRow("TOT").getByRole("cell")).toHaveText("7272");
   });
 
   test("5: Profile shows the round's history line", async () => {

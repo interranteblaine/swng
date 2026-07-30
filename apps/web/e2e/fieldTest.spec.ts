@@ -425,6 +425,39 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
     // The archived card: entry locked, no pad ever opens.
     await expect(pageA.getByRole("button", { name: "Ann hole 1", exact: true })).toBeDisabled();
+
+    // The card's TOTALS ROWS (spec 2026-07-29 §4), on the only card in the suite that has both a
+    // real multi-player spread of derived strokes AND a pickup — so this is where the two halves of
+    // §4's rule can be pinned together: conceded/scored holes count at their recorded score, and
+    // "a segment containing a pickup or an unscored hole shows `–` rather than a partial total"
+    // (the arc's own ruling: the headline and the card must never print two different numbers for
+    // one round). primaryPath.spec.ts pins the all-real case on a flat solo card.
+    //
+    // DERIVED BY HAND from the frozen deck (fieldDeck18's scores + the h9 correction) and
+    // fixtureLinks18's stroke indices. Strokes: Ann 6, Bo 0, Cal 13, Dee 3 (anchor Bo's +2).
+    // Dots per segment — a hole gets one iff its SI <= the player's strokes:
+    //   front SIs 9,1,17,5,13,15,3,7,11 | back SIs 2,16,8,4,12,10,18,6,14
+    //   Ann (SI<=6):  front h2,h4,h7        = 3 | back h10,h13,h17               = 3
+    //   Bo  (0):      none                  = 0 | none                            = 0
+    //   Cal (SI<=13): front h1,h2,h4,h5,h7,h8,h9 = 7 | back h10,h12,h13,h14,h15,h17 = 6
+    //   Dee (SI<=3):  front h2,h7           = 2 | back h10                        = 1
+    // Grosses: Ann 43 front / picked up h17 so back and total are UNDEFINED; Bo 37/40/77;
+    // Cal 49/48/97 (with the corrected h9 5); Dee 40/42/82. Net = gross − that segment's dots.
+    //   OUT: Ann 43−3=40, Bo 37−0=37, Cal 49−7=42, Dee 40−2=38
+    //   IN : Ann dash,    Bo 40−0=40, Cal 48−6=42, Dee 42−1=41
+    //   TOT: Ann dash,    Bo 77,      Cal 97−13=84, Dee 82−3=79
+    // A cell renders gross then net as two adjacent <div>s with no separator, so its whole text is
+    // the pair concatenated ("4340"); a dashed segment renders the single en-dash span instead.
+    // Columns are the roster's own order — join order (reduceRound sorts seats by first-join HLC):
+    // Ann, Bo, Cal, Dee. The row's <th scope="row"> is a `rowheader`, so getByRole("cell") yields
+    // exactly the four player columns.
+    const archivedTotals = (label: string) => pageA.getByRole("row", { name: label, exact: true });
+    await expect(archivedTotals("OUT")).toContainText("Par 36");
+    await expect(archivedTotals("OUT").getByRole("cell")).toHaveText(["4340", "3737", "4942", "4038"]);
+    await expect(archivedTotals("IN")).toContainText("Par 36");
+    await expect(archivedTotals("IN").getByRole("cell")).toHaveText(["–", "4040", "4842", "4241"]);
+    await expect(archivedTotals("TOT")).toContainText("Par 72");
+    await expect(archivedTotals("TOT").getByRole("cell")).toHaveText(["–", "7777", "9784", "8279"]);
   });
 
   test("10: B opens Ann's golfer page from the results Roster; her record renders under her own name", async () => {

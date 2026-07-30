@@ -311,6 +311,11 @@ describe("ResultsView — WS-pushed final (this tab never called finalizeRound i
     };
 
     render(<ResultsView state={state} games={[]} />);
+    // Spec §4's own mock of this screen names "Par 72" as specified output, not an incidental
+    // detail — pinned here rather than left to render unasserted. Scoped to the <p> selector: the
+    // read-only ScorecardGrid rendered below (its own TOT row) prints the identical "Par 72" text
+    // in a <div>, so an unscoped getByText would match twice.
+    expect(screen.getByText("Par 72", { selector: "p" })).toBeTruthy();
     // par 72 + 18 (a bogey on every hole) = 90 gross; strokes 9 → net 81.
     expect(finalTotalsTexts()).toContain(expectedFinalTotalsLine("Ann", 90, 9)); // "Ann — 90 gross · −9 · 81 net"
   });

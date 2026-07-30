@@ -110,7 +110,7 @@ archive**: an abandoned round aggregates nowhere and is excluded from every down
 type RoundEvent =
   | RoundCreated | ParticipantJoined | ParticipantLeft | ParticipantStrokesSet
   | GameAdded | GameTerminated
-  | ScoreRecorded      // { golferId, hole, result: strokes | 'picked-up' | 'cleared', recordedBy, opId, hlc }
+  | ScoreRecorded      // { golferId, hole, result: strokes | 'picked-up' | 'cleared', authorId, opId, hlc }
   | RoundStarted | RoundFinalized | RoundReopened | RoundAbandoned
 // v1.1/v2 will extend the same union — e.g. PressOpened (Nassau), PartnerPicked (Wolf):
 // a game decision that is not a score lives in this log too. Nothing here is speculative

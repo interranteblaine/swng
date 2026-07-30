@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { BrowserContext, Page } from "@playwright/test";
 import { fixtureLinks } from "@swng/domain";
-import { ensureCourse, enterScore, expectOrRecover, injectAuthTokens, installWsProxy, mintAccountGolfer, waitForParticipant } from "./support.js";
+import { ensureCourse, enterScore, expectOrRecover, injectAuthTokens, installWsProxy, mintAccountGolfer, normallyShootsField, waitForParticipant } from "./support.js";
 import type { WsRouteHandle } from "./support.js";
 
 // M9 Task 4 (task-4-brief.md, Step 2 — reconnect QA): three named arms —
@@ -66,7 +66,7 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     await expect(result).toBeVisible();
     await result.click();
     // No name entry: the create form renders "Playing as Ann" from the account's own record.
-    await pageA.getByLabel("Strokes you get here").fill("8");
+    await normallyShootsField(pageA).fill("8");
     await pageA.getByRole("button", { name: "Create round" }).click();
     await expect(pageA).toHaveURL(/\/round\//);
 
@@ -81,7 +81,7 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     // prompt, no name field, "Playing as Bo" from the record.
     await expect(pageB.getByText(`Joining ${fixtureLinks.courseName}`)).toBeVisible();
     await pageB.getByLabel("Tee").selectOption("white");
-    await pageB.getByLabel("Strokes you get here").fill("4");
+    await normallyShootsField(pageB).fill("4");
     await pageB.getByRole("button", { name: "Join round" }).click();
     await expect(pageB).toHaveURL(/\/round\//);
 
@@ -172,7 +172,7 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     await expect(result).toBeVisible();
     await result.click();
     // No name entry: "Playing as Ann" comes from the account's own record.
-    await page.getByLabel("Strokes you get here").fill("8");
+    await normallyShootsField(page).fill("8");
     await page.getByRole("button", { name: "Create round" }).click();
     await expect(page).toHaveURL(/\/round\//);
 

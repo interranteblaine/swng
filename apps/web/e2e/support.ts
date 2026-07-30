@@ -1028,6 +1028,15 @@ export const addStablefordGame = async (page: Page, names: readonly string[]): P
 // textContent-based matchers sidestep that.
 export const chip = (page: Page, titlePrefix: string) => page.getByRole("button").filter({ hasText: titlePrefix });
 
+// The one number a player states about themselves (spec 2026-07-29 §2/§9), on BOTH doors onto a
+// card: CreateRoundPage and JoinRoundPage render the identical label, because starting a round is
+// joining it as the host. Shared rather than inlined at each of its call sites for a reason this
+// arc learned the hard way: the label this replaced ("Strokes you get here") was hard-coded at
+// eight sites across four specs, and renaming it is invisible to `tsc` — every one of those
+// `getByLabel(...)` calls kept compiling and would have resolved NOTHING at the live gate. One
+// copy, checked against the JSX once.
+export const normallyShootsField = (page: Page): Locator => page.getByLabel("What do you normally shoot, relative to par?", { exact: true });
+
 // Every game chip (StandingsHeader.tsx) carries `aria-expanded` — the ONE attribute that
 // distinguishes it from every other button on a round page (Add game/Sync now/Finalize
 // round/etc. carry none), the same discriminator apps/web/src/watch/WatchPage.test.tsx's own

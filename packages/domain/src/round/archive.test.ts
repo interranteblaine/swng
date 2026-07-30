@@ -37,13 +37,18 @@ const corrections = [{ golfer: A, hole: 9, score: 4 }] as const;
 
 const finalLog = playGoldenRoundLog(fixtureLinks, players3, [skins, stableford], cards, corrections);
 
-// Hand-checked against Rule 3.1b (net double bogey never caps here — every gross score on
-// every player's card is under their per-hole cap post-correction, so AGS = gross sum):
+// Hand-checked against Rule 3.1b (net double bogey never caps here — no gross score on any
+// player's card EXCEEDS their per-hole cap post-correction, so AGS = gross sum):
 // Ann 5+5+4+6+5+4+5+6+4 = 44, Bo 4+5+3+6+4+4+4+5+4 = 39, Cal 6+7+4+8+6+5+6+7+6 = 55.
-// Re-checked at the DERIVED strokes (spec 2026-07-29 §2b) rather than the stated numbers: Bo's
-// +2 anchors, so on this nine-hole card Ann gets (8−2)/2 = 3 and Cal (12−2)/2 = 5, tightening
-// every per-hole cap. Still nothing caps — Cal's worst holes (h2 7 vs cap 7, h4 8 vs cap 8) sit
-// exactly ON their caps, and every other score is under, so all three sums are unmoved.
+//
+// Re-checked hole by hole at the DERIVED strokes (spec 2026-07-29 §2b) rather than the stated
+// numbers: Bo's +2 anchors, so on this nine-hole card Ann gets (8−2)/2 = 3 and Cal (12−2)/2 = 5,
+// tightening every per-hole cap. All three sums are unmoved — but the margin is THIN, and the
+// honest record of that is: Ann (3 dots, on SI 1–3) and Bo (0 dots) are strictly under cap on all
+// nine holes, while **Cal sits exactly ON cap at five of his nine** — h2 (7 vs 7), h4 (8 vs 8),
+// h5 (6 vs 6), h6 (5 vs 5) and h9 (6 vs 6). Nothing caps, because "on cap" is not "over cap"; but
+// one stroke worse on ANY of those five, or one fewer derived stroke for Cal, and this fixture's
+// 55 moves. Re-derive rather than adjust if it ever does.
 const HAND_CHECKED_AGS: Readonly<Record<string, number>> = { [A]: 44, [B]: 39, [C]: 55 };
 
 describe("settleRound — concurrency deck", () => {

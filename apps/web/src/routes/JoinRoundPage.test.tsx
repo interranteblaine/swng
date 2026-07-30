@@ -18,7 +18,9 @@ vi.mock("../api", () => ({
   peekRound: vi.fn().mockRejectedValue(new Error("not stubbed")),
   getMe: vi.fn(),
   updateMe: vi.fn(),
-  // The suggested-course-handicap fetch (unrated-courses T5b) — defaulted to an empty record in
+  // NO getMyRecord key, deliberately (spec 2026-07-29 §2): nothing converts an index into strokes
+  // any more, so this page fetches no record at all. Task 5 re-adds both the key and the fetch when
+  // it wires the pre-fill from metrics.average.
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,

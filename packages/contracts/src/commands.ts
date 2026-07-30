@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { GameId, GameResult, GolferId, HoleResult, RoundArchive, RoundEvent, RoundId } from "@swng/domain";
+import type { GameId, GameResult, GolferId, HoleResult, RoundArchive, RoundEvent, RoundId, StrokeBasis } from "@swng/domain";
 import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
 import { gameConfigFields, gameResultSchema, roundEventSchema } from "./round.js";
 
@@ -57,7 +57,13 @@ export type GameConfigInput = z.infer<typeof gameConfigInputSchema>;
 // The bounds themselves are plausibility limits with margin, not golf rules — they exist only to
 // reject nonsense, never a real player. A century over par on 18 holes is already absurd; 20 under
 // is well past the best round ever played.
-export const strokeBasisInputSchema = z.discriminatedUnion("kind", [
+//
+// Built as an UNANNOTATED literal (`strokeBasisInputArms`) so the exhaustiveness check below can
+// read its own inferred literal-kind union — the same split, for the same empirically-verified
+// reason, as `scoreResultInputArms` further down this file; `strokeBasisInputSchema` re-applies the
+// z.ZodType<StrokeBasis> annotation on a separate binding so callers still get the field-shape and
+// extra-arm guarantee against the domain type.
+const strokeBasisInputArms = z.discriminatedUnion("kind", [
   // SIGNED: a golfer who shoots two under par states -2 (spec §2a).
   z.object({ kind: z.literal("normally-shoots"), overPar: z.number().int().min(-20).max(100) }),
   // NOT signed. Under a relative model the anchor is the best player at 0 and nobody gives strokes
@@ -67,6 +73,17 @@ export const strokeBasisInputSchema = z.discriminatedUnion("kind", [
   // path too, which this schema deliberately does not bound.
   z.object({ kind: z.literal("strokes"), strokes: z.number().int().min(0).max(100) }),
 ]);
+
+// Compile-time exhaustiveness: every StrokeBasis kind must have a request arm above. A third
+// constructor added to the domain type (or an arm dropped here) fails to typecheck until the two
+// match, rather than being silently unaccepted at the wire. Same one-tuple ([A] extends [B])
+// non-distributive form scoreResultInputArms' own check uses — see its comment for why the naked
+// `A extends B` is vacuous here (it distributes, so a missing member's `never` just vanishes).
+type _RequestCoversEveryStrokeBasisKind =
+  [StrokeBasis["kind"]] extends [z.infer<typeof strokeBasisInputArms>["kind"]] ? true : never;
+export const _strokeBasisExhaustive: _RequestCoversEveryStrokeBasisKind = true;
+
+export const strokeBasisInputSchema: z.ZodType<StrokeBasis> = strokeBasisInputArms;
 
 // Accounts-only identity (spec §3): StartRound seats its creator ONLY, always as-self from the
 // caller's Bearer (application/src/golfers/ensureGolfer.ts resolves the account golfer by sub).

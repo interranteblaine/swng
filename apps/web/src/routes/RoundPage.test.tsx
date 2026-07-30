@@ -235,18 +235,18 @@ describe("RoundPage", () => {
     // chip-selected. Hand-derived (spec 2026-07-29 §2b): Bo's stated +2 anchors the field, so Ann
     // takes (8 − 2) / 2 = 3 on this nine-hole card — dots on SI 1–3, and hole 2 is fixtureLinks'
     // SI 1. (Hole 1 is SI 5 and gets none, which is why this pins hole 2.)
-    const annHole1 = () => screen.getByRole("button", { name: "Ann hole 2" });
-    await waitFor(() => expect(annHole1().textContent).toMatch("●"));
+    const annHole2 = () => screen.getByRole("button", { name: "Ann hole 2" });
+    await waitFor(() => expect(annHole2().textContent).toMatch("●"));
 
     // Tapping the gross stroke-play chip only expands/collapses its own panel — the grid's
     // dot is unaffected (gross carries no allowance at all, but that's THAT game's own concern
     // now, never the card's).
     fireEvent.click(screen.getByRole("button", { name: /Stroke play \(gross\)/ }));
-    expect(annHole1().textContent).toMatch("●");
+    expect(annHole2().textContent).toMatch("●");
 
     // And back — still unaffected.
     fireEvent.click(screen.getByRole("button", { name: /Match play/ }));
-    expect(annHole1().textContent).toMatch("●");
+    expect(annHole2().textContent).toMatch("●");
   });
 
   // M7 Task 6 / spec 2026-07-19 §2b: a terminated game's chip stays (with an "Ended" badge) —

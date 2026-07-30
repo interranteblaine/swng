@@ -33,7 +33,10 @@ describe("gameDots", () => {
   // Ann 10, Bo 4 — a difference of 6, halved on this nine-hole card, so Ann gets 3 dots and Bo,
   // the lowest in the field, plays off scratch. The SAME numbers on every kind: no per-kind
   // convention and no allowance percentage survives to make two games disagree (spec §3).
-  const annAndBo = roster([participant(ANN, "Ann", 10), participant(BO, "Bo", 4)]);
+  // Kept as the STATED list so each card's fold starts from assertions — passing an already-folded
+  // roster back into roster() works (the spread overwrites `strokes`) but reads as a mistake.
+  const annAndBoStated: readonly Participant[] = [participant(ANN, "Ann", 10), participant(BO, "Bo", 4)];
+  const annAndBo = roster(annAndBoStated);
   const twoPlayerGames: readonly GameConfig[] = [
     { kind: "stableford", id: gameId("g"), players: [ANN, BO] },
     { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] },
@@ -51,7 +54,7 @@ describe("gameDots", () => {
 
   it("the same field on an eighteen-hole card gets the whole difference, unhalved", () => {
     for (const config of twoPlayerGames) {
-      const dots = gameDots(config, roster(annAndBo, fixtureLinks18), fixtureLinks18);
+      const dots = gameDots(config, roster(annAndBoStated, fixtureLinks18), fixtureLinks18);
       expect(totalDots(dots.get(ANN)!)).toBe(6);
       expect(totalDots(dots.get(BO)!)).toBe(0);
     }

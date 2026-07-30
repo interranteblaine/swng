@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { addSinglesGame, chip, injectAuthTokens, joinRoundDirect, loadWebEnv, mintAccountGolfer, openGamePanel, readJoinCode, waitForParticipant } from "./support.js";
+import { addSinglesGame, chip, injectAuthTokens, joinRoundDirect, loadWebEnv, mintAccountGolfer, normallyShootsField, openGamePanel, readJoinCode, waitForParticipant } from "./support.js";
 import type { AccountGolfer } from "./support.js";
 
 // The M6 gate (docs/implementation-plan.md M6; docs/superpowers/plans/2026-07-09-m6-courses.md
@@ -203,7 +203,7 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     // No name entry here: CreateRoundPage renders "Playing as Pat" from the signed-in account's
     // own record — the create form has no name field to fill anymore.
     await expect(page.getByText("Playing as", { exact: true })).toBeVisible();
-    await page.getByLabel("Strokes you get here", { exact: true }).fill("21");
+    await normallyShootsField(page).fill("21");
     await page.getByRole("button", { name: /^create round$/i }).click();
 
     await expect(page).toHaveURL(/\/round\//);

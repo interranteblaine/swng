@@ -17,9 +17,9 @@ vi.mock("../api", () => ({
   getCourse: vi.fn(),
   searchCourses: vi.fn(),
   getMe: vi.fn(),
-  // The suggested-course-handicap fetch (unrated-courses T5b) — defaulted to an empty record in
-  // beforeEach so the pre-existing cases (no declared, no metrics) show no suggestion and their
-  // manual handicap entry is unaffected; the suggestion cases below stub a real metric.
+  // NO getMyRecord key, deliberately (spec 2026-07-29 §2): nothing converts an index into strokes
+  // any more, so this page fetches no record at all. Its ABSENCE from this factory is what makes
+  // the "fetches no record" test below true — an accidental call would throw here, not pass.
   ApiError: class ApiError extends Error {
     constructor(
       readonly code: string,
@@ -273,19 +273,26 @@ describe("CreateRoundPage — what you normally shoot", () => {
     expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(false);
   });
 
-  it("renders no index/course-handicap derivation at all, and fetches no record for one", async () => {
+  // The "no record fetch" half of this is enforced STRUCTURALLY, not by an assertion here:
+  // `getMyRecord` is absent from this file's `vi.mock("../api", …)` factory, so a page that called
+  // it would throw on an undefined export rather than quietly pass. Said out loud because the
+  // title used to claim a fetch check that no line in the body performed.
+  it("renders no index/course-handicap derivation at all — a declared index changes nothing on this page", async () => {
     signIn();
+    // A golfer with a real declared index: the input that USED to drive the whole derivation.
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G", indexSource: { kind: "declared", value: 12.4 } } });
     mockedGetCourse.mockResolvedValue({ course: courseView });
 
     renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
     await screen.findByText(/playing as/i);
 
-    // Every retired vocabulary item, in one gate (spec §9's language rule).
+    // Every retired vocabulary item, in one gate (spec §9's language rule) — including the index's
+    // own value, which no longer reaches this page at all.
     expect(screen.queryByLabelText(/strokes you get here/i)).toBeNull();
     expect(screen.queryByText(/from your index/i)).toBeNull();
     expect(screen.queryByText(/handicap/i)).toBeNull();
     expect(screen.queryByText(/index/i)).toBeNull();
+    expect(screen.queryByText(/12\.4/)).toBeNull();
   });
 });
 

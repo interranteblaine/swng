@@ -29,11 +29,15 @@ import type { AccountGolfer } from "./support.js";
 // needs one", the same precedent as fieldTest.spec.ts's Cal/Dee).
 //
 // Course: a throwaway 18-hole, all-par-4 (par 72) card at rating 71.6 / slope 128 — chosen so
-// every hole's net-double-bogey cap (par+2, or par+3 on the 8 stroke-index-1..8 holes where
-// the account's ch-8 strokes land) sits comfortably above the worst score this deck ever
-// posts (bogey, +1), so AGS == gross exactly regardless of which specific holes land the
-// "extra" strokes. A single flat tee keeps the composition arithmetic (bogeys × (par+1) +
-// pars × par) trivial to hand-verify against the pinned table.
+// every hole's net-double-bogey cap sits comfortably above the worst score this deck ever posts
+// (bogey, +1), so AGS == gross exactly. That cap is now par+2 on EVERY hole, with no par+3 holes
+// at all: this account plays its three rounds alone, and strokes are the difference from the
+// lowest in the field (spec 2026-07-29 §2b), so a lone player is their own anchor and derives
+// ZERO strokes no matter what they stated. The oracle is unaffected — a bogey clears a par+2 cap
+// with a stroke to spare — but the arithmetic the comment used to describe (8 strokes landing on
+// SI 1–8, lifting those holes to par+3) is arithmetic the code no longer performs.
+// A single flat tee keeps the composition arithmetic (bogeys × (par+1) + pars × par) trivial to
+// hand-verify against the pinned table.
 const buildIdentityCourseCard = (courseName: string): CourseCard => ({
   courseName,
   teeSets: [

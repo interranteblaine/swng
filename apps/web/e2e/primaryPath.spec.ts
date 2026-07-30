@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import type { CourseCard } from "@swng/domain";
 import type { AuthTokens } from "../src/auth/tokenStore.js";
-import { enterScore, ensureCourse, injectAuthTokens, mintAccountGolfer, mintThrowawayUser, screenshotPath } from "./support.js";
+import { enterScore, ensureCourse, injectAuthTokens, mintAccountGolfer, mintThrowawayUser, normallyShootsField, screenshotPath } from "./support.js";
 
 // The primary path, accounts-only (the original M8 headline, rewritten for the wall): a fresh
 // golfer signs in, names themselves ONCE at the funnel's own prompt, and plays a round as
@@ -96,7 +96,16 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
 
     await page.screenshot({ path: screenshotPath("primary-path-playing-as.png"), fullPage: true });
 
-    await page.getByRole("button", { name: /^create round$/i }).click();
+    // Required, not optional (spec 2026-07-29 §2): the one number a player states about themselves
+    // has no default, because "0" would assert "I shoot par" — a real claim — so CreateRoundPage
+    // starts it BLANK and keeps Create round disabled until it parses. This step used to lean on
+    // the old field's "0" default and never touch it; a primary path that submits nothing this
+    // form requires is not the primary path.
+    await normallyShootsField(page).fill("18");
+
+    const create = page.getByRole("button", { name: /^create round$/i });
+    await expect(create).toBeEnabled();
+    await create.click();
     await expect(page).toHaveURL(/\/round\//);
   });
 

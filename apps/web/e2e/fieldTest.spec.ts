@@ -21,6 +21,7 @@ import {
   loadWebEnv,
   mintAccountGolfer,
   mintThrowawayUser,
+  normallyShootsField,
   PLAYER_NAMES,
   readJoinCode,
   screenshotPath,
@@ -120,7 +121,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // No name entry: the create form renders "Playing as Ann" from the account's own record —
     // there is no name field to fill anymore.
     await expect(pageA.getByText("Playing as", { exact: true })).toBeVisible();
-    await pageA.getByLabel("Strokes you get here").fill("8");
+    await normallyShootsField(pageA).fill("8");
     await pageA.getByRole("button", { name: "Create round" }).click();
 
     await expect(pageA).toHaveURL(/\/round\//);
@@ -170,7 +171,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await expect(pageB.getByText(`Joining ${fixtureLinks18.courseName}`)).toBeVisible();
     await pageB.getByLabel("Tee").selectOption("white");
 
-    await pageB.getByLabel("Strokes you get here").fill("2");
+    await normallyShootsField(pageB).fill("2");
     await pageB.getByRole("button", { name: "Join round" }).click();
     await expect(pageB).toHaveURL(/\/round\//);
 
@@ -501,7 +502,7 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
     await expect(result).toBeVisible();
     await result.click();
     // No name entry: "Playing as Pat" renders from the account's own record.
-    await page.getByLabel("Strokes you get here").fill("0");
+    await normallyShootsField(page).fill("0");
     await page.getByRole("button", { name: "Create round" }).click();
 
     await expect(page).toHaveURL(/\/round\//);

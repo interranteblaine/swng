@@ -331,8 +331,7 @@ describe("reduceRound — derived strokes", () => {
   const RAVI = golferId("ravi");
   const STRAY = golferId("stray");
   // Local builders (not the file's joinA/base) so each event's hlc is explicit — the anchor and
-  // the departed-exclusion rules both turn on HLC ordering.
-  const shoots = (overPar: number): StrokeBasis => ({ kind: "normally-shoots", overPar });
+  // the departed-exclusion rules both turn on HLC ordering. `shoots` is the FILE-level helper.
   const joined = (golfer: GolferId, basis: StrokeBasis, wallMs: number): RoundEvent => ({
     ...base(wallMs),
     kind: "participant-joined",
@@ -385,6 +384,27 @@ describe("reduceRound — derived strokes", () => {
     expect(seatOf(state, BLAINE)?.basis).toEqual({ kind: "strokes", strokes: 18 });
     // Ravi is now the only stated normal score in the field, so he anchors against himself.
     expect(seatOf(state, RAVI)?.strokes).toBe(0);
+  });
+
+  it("an ALL-DEPARTED roster has no anchor at all, so every seat resolves to 0", () => {
+    // The far edge of the rule: anchorOf([]) is undefined (nobody present stated a normal score),
+    // and resolveStrokes has NO fallback of its own — deliberately, so it can never quietly
+    // re-admit a departed player as the anchor (strokeBasis.ts's own doc comment). The two
+    // requirements meet here: with the present field empty, every seat gets 0 rather than
+    // resolving against each other. Their scored holes still settle; nobody receives a stroke.
+    const state = reduceRound([
+      genesis,
+      joined(BLAINE, shoots(30), 2),
+      joined(RAVI, shoots(10), 3),
+      left(BLAINE, 4),
+      left(RAVI, 5),
+    ]);
+    expect(state.participants.map((p) => p.departed)).toEqual([true, true]);
+    expect(seatOf(state, BLAINE)?.strokes).toBe(0);
+    expect(seatOf(state, RAVI)?.strokes).toBe(0);
+    // NOT 20: were the anchor computed over the whole roster instead of the present field, Blaine
+    // would still be taking strokes off a player who has walked off.
+    expect(seatOf(state, BLAINE)?.basis).toEqual(shoots(30)); // the assertion itself is untouched
   });
 });
 

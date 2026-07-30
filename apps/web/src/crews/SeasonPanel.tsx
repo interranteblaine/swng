@@ -151,54 +151,6 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
   // dayCollisionChecker, over exactly the rounds this list renders.
   const roundCollidesOnDay = dayCollisionChecker(standings.rounds);
 
-  // The head-to-head strokes line (spec 2026-07-29 §6): comparing two crew-mates who have never
-  // necessarily played together applies the same difference a group does on the first tee, here
-  // to the board's own season averages. A subtraction of two already-SERVED numbers is not a golf
-  // result, so this stays a component computation, not a @swng/domain export (the compute fence
-  // exempts it). It is NOT a promise about what an actual round will produce — a round's strokes
-  // are whatever the group agrees and types onto its roster (spec 2026-07-30 §2), which may be
-  // something else entirely — which is exactly why the copy says "if you played tomorrow" rather
-  // than naming the season. (Spec 2026-07-30 §6 deletes this line whole; Task 4 does that.)
-  //
-  // One line, not all C(n,2) pairs (a 12-member crew has 66) — the CLOSEST pair by average,
-  // among members who both have one. Sorted ascending by average first (never assumed from wire
-  // order — this is an internal lookup, not the visible table's own served-order row list) so
-  // the minimum gap is always between some adjacent pair in that sorted list; scanning it once
-  // finds the closest pair without checking every one of the C(n,2) pairs. A golfer who shoots
-  // BETTER than par has a negative average, and the plain subtraction below is sign-agnostic —
-  // it still finds the true minimum gap and still names the higher (worse) side. On a tie
-  // between two gaps (e.g. averages 0/5/10, both adjacent gaps 5), the strict `<` below never
-  // replaces an already-found pair with an equally-close one, so the FIRST pair encountered in
-  // ascending order wins — deterministic, not incidental, and pinned by a test.
-  //
-  // Season averages are already whole numbers (averageOfValues rounds the mean before this ever
-  // sees it), so the difference of any two is already an integer — there is no second rounding
-  // rule to invent here.
-  // `.filter` already returns a fresh array, so sorting it in place here never touches
-  // `standings.scoreboard`'s own served order (still rendered untouched by the table above).
-  const rankedByAverage = standings.scoreboard
-    .filter((row): row is typeof row & { average: number } => row.average !== undefined)
-    .sort((a, b) => a.average - b.average);
-  let closestPair: { lower: string; higher: string; strokes: number } | undefined;
-  for (let i = 0; i + 1 < rankedByAverage.length; i++) {
-    const lower = rankedByAverage[i]!;
-    const higher = rankedByAverage[i + 1]!;
-    const strokes = higher.average - lower.average; // non-negative: rankedByAverage is ascending
-    if (closestPair === undefined || strokes < closestPair.strokes) {
-      closestPair = { lower: lower.name, higher: higher.name, strokes };
-    }
-  }
-  // A tied closest pair is a real, interesting answer — not suppressed, and not "X gets 0" (a
-  // nonsensical sentence once strokes are a non-negative count: nobody has ever "gotten" zero).
-  // Its own sentence in the same register, naming both and the fact that neither gives strokes —
-  // "plays level" mirrors dots.ts's own strokesSummary idiom for the identical zero-strokes case.
-  const strokesHeadline =
-    closestPair === undefined
-      ? undefined
-      : closestPair.strokes === 0
-        ? `If you played tomorrow, ${closestPair.lower} and ${closestPair.higher} play level — nobody gets strokes.`
-        : `If you played tomorrow, ${closestPair.higher} gets ${closestPair.strokes}.`;
-
   return (
     <div className={`${cardBox} flex flex-col gap-4 p-4`}>
       <div className="flex flex-col gap-1">
@@ -316,7 +268,6 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
           lowest gross of a fully-scored round.
         </p>
         {scoreboardEmpty && <p className="text-fairway">Rounds appear here automatically when members finalize them.</p>}
-        {strokesHeadline && <p className="text-forest">{strokesHeadline}</p>}
       </div>
 
       {/* Spec 2026-07-22 §5: a VISIBLE `<h4>Games together` heading — the game ledger, renamed

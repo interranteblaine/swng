@@ -430,11 +430,12 @@ describe("SeasonPanel — scoreboard", () => {
   });
 });
 
-// Spec 2026-07-29 §6: comparing two crew-mates who never played together is the difference of
-// their season averages — the SAME rule a round applies at join, applied to the board's own
-// numbers. One line, the CLOSEST pair by average among members who both have one.
-describe("SeasonPanel — head-to-head strokes line", () => {
-  it("names the strokes between two members who have both played", async () => {
+// Spec 2026-07-30 §6: deleted whole. Both averages are already on the board, so the line only
+// performed a subtraction the reader can see; it named one pair by a rule that was never visible;
+// and it asserted a hypothetical about a round nobody is playing, which the round itself would
+// override anyway.
+describe("SeasonPanel — no head-to-head hypothetical", () => {
+  it("names no hypothetical match-up — the board already shows both averages", async () => {
     signInAsAnn();
     mockedGetSeasonStandings.mockResolvedValue({
       ...baseStandings,
@@ -446,120 +447,8 @@ describe("SeasonPanel — head-to-head strokes line", () => {
 
     renderPanel();
 
-    expect(await screen.findByText("If you played tomorrow, Blaine gets 16.")).toBeTruthy();
-  });
-
-  it("says nothing about a pair where either has no average", async () => {
-    signInAsAnn();
-    mockedGetSeasonStandings.mockResolvedValue({
-      ...baseStandings,
-      scoreboard: [
-        { golferId: ANN, name: "Ann", rounds: 2 }, // no scored round yet — no average
-        { golferId: BO, name: "Bo", rounds: 5, average: 10 },
-      ],
-    });
-
-    renderPanel();
-
     await screen.findByRole("table", { name: "Standings" });
     expect(screen.queryByText(/If you played tomorrow/)).toBeNull();
-  });
-
-  // Only one member (or zero) ever has an average yet: there is no PAIR to compare, so nothing
-  // renders — same as the no-average-on-one-side case above, just the other way a pair fails to
-  // exist.
-  it("fewer than two members with an average: no line", async () => {
-    signInAsAnn();
-    mockedGetSeasonStandings.mockResolvedValue({
-      ...baseStandings,
-      scoreboard: [{ golferId: ANN, name: "Ann", rounds: 5, average: 10 }],
-    });
-
-    renderPanel();
-
-    await screen.findByRole("table", { name: "Standings" });
-    expect(screen.queryByText(/If you played tomorrow/)).toBeNull();
-  });
-
-  // Three-plus members: the CLOSEST pair, not the first pair encountered in served order — Ann
-  // (0) and Bo (20) are 20 apart; Bo (20) and Cy (22) are only 2 apart, so Cy's line renders and
-  // Bo-vs-Ann's 20 does not.
-  it("more than two members: names the CLOSEST pair by average, not the first pair encountered", async () => {
-    signInAsAnn();
-    mockedGetSeasonStandings.mockResolvedValue({
-      ...baseStandings,
-      scoreboard: [
-        { golferId: ANN, name: "Ann", rounds: 5, average: 0 },
-        { golferId: BO, name: "Bo", rounds: 5, average: 20 },
-        { golferId: golferId("cy-g"), name: "Cy", rounds: 5, average: 22 },
-      ],
-    });
-
-    renderPanel();
-
-    expect(await screen.findByText("If you played tomorrow, Cy gets 2.")).toBeTruthy();
-    expect(screen.queryByText(/Bo gets 20/)).toBeNull();
-  });
-
-  // A golfer who shoots BETTER than par has a NEGATIVE average — the plain subtraction
-  // (`higher.average - lower.average`) is sign-agnostic, but this arc has already been through a
-  // whole plus-handicap correction once, and an unpinned sign path is exactly that defect's
-  // shape. Ann at -5 is still the anchor (lower/better); Bo at 3 is the one who gets strokes.
-  it("a negative average (better than par) is still the lower/anchor side, not a special case", async () => {
-    signInAsAnn();
-    mockedGetSeasonStandings.mockResolvedValue({
-      ...baseStandings,
-      scoreboard: [
-        { golferId: ANN, name: "Ann", rounds: 5, average: -5 },
-        { golferId: BO, name: "Bo", rounds: 5, average: 3 },
-      ],
-    });
-
-    renderPanel();
-
-    expect(await screen.findByText("If you played tomorrow, Bo gets 8.")).toBeTruthy();
-  });
-
-  // Two equal gaps (0↔5 and 5↔10 are both 5 apart): the strict `<` in the scan never replaces an
-  // already-found closest pair with a merely EQUAL one, so the FIRST pair in ascending order
-  // wins — Ann/Bo (the lower pair), not Bo/Cy. Deterministic and chosen, not incidental; pinned
-  // so a future refactor can't silently flip which pair a real tie names.
-  it("two equally-close pairs: the first pair in ascending order wins the tie-break", async () => {
-    signInAsAnn();
-    mockedGetSeasonStandings.mockResolvedValue({
-      ...baseStandings,
-      scoreboard: [
-        { golferId: ANN, name: "Ann", rounds: 5, average: 0 },
-        { golferId: BO, name: "Bo", rounds: 5, average: 5 },
-        { golferId: golferId("cy-g"), name: "Cy", rounds: 5, average: 10 },
-      ],
-    });
-
-    renderPanel();
-
-    expect(await screen.findByText("If you played tomorrow, Bo gets 5.")).toBeTruthy();
-    expect(screen.queryByText(/Cy gets/)).toBeNull();
-  });
-
-  // Decision (task 6 dispatch): a tied closest pair is a real, interesting answer to "what would
-  // a match look like" — not suppressed, and not "X gets 0" (a nonsensical sentence once strokes
-  // are a non-negative count: a zero-stroke player has never "gotten" anything). Rendered as its
-  // own sentence in the same register, naming both golfers and the fact that neither gives
-  // strokes — mirroring dots.ts's own "everyone in this game plays level" idiom for the identical
-  // zero-strokes case.
-  it("the closest pair is tied: names both and says neither gives strokes, rather than suppressing the line or printing zero", async () => {
-    signInAsAnn();
-    mockedGetSeasonStandings.mockResolvedValue({
-      ...baseStandings,
-      scoreboard: [
-        { golferId: ANN, name: "Ann", rounds: 5, average: 10 },
-        { golferId: BO, name: "Bo", rounds: 5, average: 10 },
-      ],
-    });
-
-    renderPanel();
-
-    expect(await screen.findByText("If you played tomorrow, Ann and Bo play level — nobody gets strokes.")).toBeTruthy();
   });
 });
 

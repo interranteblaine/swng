@@ -64,8 +64,10 @@ export function JoinRoundPage() {
   // The round-created wall time from the peek — feeds roundLabel so the join-link framing carries
   // the SAME designation (course + date) as home/archive/watch (accounts-only identity spec §5).
   const [createdAt, setCreatedAt] = useState<number | undefined>(undefined);
-  // The peek's full tee sets (name + par + rating/slope), not just names — the picker shows each
-  // tee's rating/slope via teeNumbers.
+  // The peek's tee sets (name + rating/slope), not just names — the picker shows each tee's
+  // rating/slope via teeNumbers. The peek carried `par` and `holes` too until the strokes model
+  // stopped deriving anything from an index; nothing reads them now, so they are gone (spec §7,
+  // no dormant fields).
   const [peekTees, setPeekTees] = useState<readonly PeekTee[] | undefined>(undefined);
   // Only ever true after a peek actually rejected — gates the fallback NOTE (not the fallback
   // input itself, which is simply whatever renders whenever peekTees is absent).

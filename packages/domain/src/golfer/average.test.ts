@@ -11,7 +11,7 @@ const line = (id: string, holes: 9 | 18, perHole: number): GolferRoundLine => ({
 });
 
 describe("averageOf", () => {
-  it("averages score minus par over finished rounds", () => {
+  it("averages score minus par over rounds with a score", () => {
     // 5/hole → 90 (+18); 6/hole → 108 (+36). Mean 27.
     expect(averageOf([line("a", 18, 5), line("b", 18, 6)])).toBe(27);
   });
@@ -43,7 +43,7 @@ describe("averageOf", () => {
     expect(averageOf(lines)).toBe(18); // the older +36 rounds fall out of the window
   });
 
-  it("is undefined with no finished rounds", () => {
+  it("is undefined with no rounds carrying a score", () => {
     expect(averageOf([])).toBeUndefined();
   });
 });

@@ -140,7 +140,10 @@ and the code already keeps them apart:
   `{ kind: "conceded"; strokes: number }`, and **a conceded hole is a scored hole everywhere** —
   every engine, the card's totals, and the average treat it exactly as a `strokes` cell. Two
   places still distinguish it: the card renders `5c` so you can see you didn't hole out, and
-  `fullyHoledOut` — which gates `Best` and the milestones — excludes it, as it always has.
+  `fullyHoledOut` — which gates `Best` and the **broke-100/90/80** milestones — excludes it, as it
+  always has. Note the limit of that second carve-out: the *first-birdie* and *first-eagle*
+  milestones are a per-hole scan, NOT gated by `fullyHoledOut`, so they count a conceded hole like
+  any other scored one. A conceded three-footer for a birdie is a birdie.
 
   This is simpler than "engines ignore the number", and it is also the only correct rule. A
   conceded putt for a 4 beats a 5 in the match, wins the skin, and scores its Stableford points,
@@ -148,12 +151,13 @@ and the code already keeps them apart:
   net double bogey (`strokePlay.ts:40`) — that cap now applies to a picked-up hole only, which is
   the only kind with no number to use.
 
-  **"Everywhere" is literal, and two existing folds currently violate it.**
-  `archiveGolferLine`'s par-relative buckets (`record.ts:52-56`) and `courseRecord.ts:35`'s
-  per-hole insights both count `strokes` cells only. Both now count conceded cells too, at their
-  recorded score — otherwise a conceded par would win the skin and lift the average but vanish
-  from "your typical 18" and your record at that course, which is the same number disagreeing
-  with itself on two screens.
+  **"Everywhere" is literal, and three existing folds currently violate it.**
+  `archiveGolferLine`'s par-relative buckets (`record.ts:52-56`), `courseRecord.ts:35`'s per-hole
+  insights, and `milestonesOf`'s first-birdie/first-eagle scan (`analytics.ts`'s `firstHole`) all
+  count `strokes` cells only. All three now count conceded cells too, at their recorded score —
+  otherwise a conceded par would win the skin and lift the average but vanish from "your typical
+  18" and your record at that course, which is the same number disagreeing with itself on two
+  screens. (This enumeration said "two" until the whole-branch review found the third; see §11.)
 - **Picked up** — you stopped. There is no number and nobody pretends otherwise. A round
   containing one does not feed the average, and it cannot set a `Best` either (`fullyHoledOut`
   requires every hole be a stroke count, and always has). It still appears in your history.

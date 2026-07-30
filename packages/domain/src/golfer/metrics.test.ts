@@ -78,7 +78,7 @@ describe("golferMetrics — the read projection (spec 2026-07-29 §5)", () => {
 
   // bests/milestones (analytics spec 2026-07-21 §3): golferMetrics wires straight through to
   // analytics.ts's own bestsOf/milestonesOf over the same lines — this pins that the wiring
-  // exists and lands one hand-computed value (a fully holed-out 18 with a birdie hole sets both
+  // exists and lands one hand-computed value (a fully-scored 18 with a birdie hole sets both
   // best18 and fires first-birdie/broke-100/broke-90, not broke-80).
   it("wires bests/milestones from a line's holeResults", () => {
     const holeResults = [

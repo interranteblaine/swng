@@ -129,8 +129,11 @@ describe("describeGame — singles-match", () => {
   });
 
   it("a match that ends all square renders 'Match halved'", () => {
-    // Ann's h9 (a worse score than Bo's) still levels the match on hole count, not by any
-    // automatic-loss rule — see singlesMatch.test.ts for the hole-by-hole derivation.
+    // Hole-by-hole (Ann's dots on 1,2,4,7,8,9 — SI 1-6 of fixtureWhite's 5,1,9,3,7,8,2,4,6):
+    // h1 halve (net 4/4), h2 Ann (4/6), h3 Bo (4/3), h4 Ann (5/6), h5 halve (4/4), h6 halve
+    // (4/4), h7 halve (4/4), h8 halve (5/5), h9 Bo (6/5) — Ann 2 wins, Bo 2 wins, five halves:
+    // level after all 9 holes, so the match is halved on its own merits, not by any
+    // automatic-loss rule for a worse score.
     const { round, states } = playRound(fixtureLinks, matchPlayers, [match], {
       [A]: [5, 5, 4, 6, 4, 4, 5, 6, 7],
       [B]: [4, 6, 3, 6, 4, 4, 4, 5, 5],

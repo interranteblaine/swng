@@ -49,6 +49,18 @@ describe("singles match — golden cards", () => {
     expect(state).toMatchObject({ outcome: { winner: A, closing: "1 up" } });
   });
 
+  it("a match that ends level renders outcome: { halved: true }", () => {
+    // h1 halve (net 4/4), h2 Ann (4/6), h3 Bo (4/3), h4 Ann (5/6), h5 halve (4/4), h6 halve
+    // (4/4), h7 halve (4/4), h8 halve (5/5), h9 Bo (6/5) — Ann 2 wins, Bo 2 wins, five halves:
+    // level after all 9 holes (describeGame.test.ts's own "Match halved" chip-line test plays
+    // this exact card).
+    const [state] = playGoldenRound(fixtureLinks, players, [match], {
+      [A]: [5, 5, 4, 6, 4, 4, 5, 6, 7],
+      [B]: [4, 6, 3, 6, 4, 4, 4, 5, 5],
+    });
+    expect(state).toMatchObject({ kind: "singles-match", up: 0, thru: 9, remaining: 0, outcome: { halved: true } });
+  });
+
   it("exposes the decided hole trail the ladder consumed — and nothing past the closeout", () => {
     // Same card as the 3&2 test: h1 halve, h2 A, h3 A, h4 halve, h5 A, h6 B, h7 A → closed 3&2.
     const [state] = playGoldenRound(fixtureLinks, players, [match], {

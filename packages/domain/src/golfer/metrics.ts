@@ -37,8 +37,8 @@ const ZERO_SHAPE: ScoringShape = { eagles: 0, birdies: 0, pars: 0, bogeys: 0, do
 // contract), each the rolling average as of that round; the headline `average` above is exactly
 // averageHistory's own last point. `bests`/`milestones` (analytics spec 2026-07-21 §3) are read
 // over the same lines' `holeResults` via analytics.ts's `bestsOf`/`milestonesOf` — REQUIRED the
-// same way (an empty `{}`/`[]` is the honest answer for a golfer with no fully holed-out lines
-// yet, never absent). Grows to N members when a surface needs them — adding a metric is adding a
+// same way (an empty `{}`/`[]` is the honest answer for a golfer with no fully-scored round yet,
+// never absent). Grows to N members when a surface needs them — adding a metric is adding a
 // field here, not carving a new pathway. The fold is pure (no clock); the application stamps time
 // on the wire.
 export interface GolferMetrics {

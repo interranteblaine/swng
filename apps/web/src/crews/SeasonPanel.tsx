@@ -316,7 +316,7 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
         </div>
         <p className="font-serif text-xs text-fairway">
           Average — score minus par over this season&apos;s rounds, a nine counting double · Spread — how much those rounds vary; builds at 5 rounds · Best 18 —
-          lowest gross, fully holed out.
+          lowest gross of a fully-scored round.
         </p>
         {scoreboardEmpty && <p className="text-fairway">Rounds appear here automatically when members finalize them.</p>}
         {strokesHeadline && <p className="text-forest">{strokesHeadline}</p>}

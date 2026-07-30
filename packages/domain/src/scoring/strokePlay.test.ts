@@ -98,7 +98,6 @@ describe("stroke play — golden cards", () => {
     });
     expect(state).toMatchObject({ kind: "stroke-play", complete: true, leaders: [A, B] });
   });
-
 });
 
 describe("stroke play — properties", () => {

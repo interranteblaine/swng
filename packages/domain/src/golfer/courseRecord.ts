@@ -20,7 +20,7 @@ export interface CourseHoleInsight {
 export interface CourseRecord {
   readonly rounds: number; // lines at this course, any state
   readonly best?: BestRound;
-  readonly scoringAverage?: number; // mean gross over fully holed-out lines, 1 decimal
+  readonly scoringAverage?: number; // mean gross over fully-scored lines, 1 decimal
   readonly insights?: {
     readonly worstHole?: CourseHoleInsight & { readonly avgOverPar: number; readonly doublePlus: number };
     readonly scoringHole?: CourseHoleInsight & { readonly parOrBetter: number };
@@ -126,15 +126,15 @@ export const courseRecord = (lines: readonly GolferRoundLine[], courseId: Course
   const courseLines = lines.filter((line) => line.courseId === courseId);
   const rounds = courseLines.length;
 
-  const holedOut = courseLines.filter(hasCompleteScore);
+  const fullyScored = courseLines.filter(hasCompleteScore);
   let best: BestRound | undefined;
-  for (const line of holedOut) {
+  for (const line of fullyScored) {
     const gross = scoreOf(line);
     if (best === undefined || gross < best.gross) best = { roundId: line.roundId, gross, toPar: gross - line.par };
   }
 
   const scoringAverage =
-    holedOut.length > 0 ? roundHalfUp((holedOut.reduce((sum, line) => sum + scoreOf(line), 0) / holedOut.length) * 10) / 10 : undefined;
+    fullyScored.length > 0 ? roundHalfUp((fullyScored.reduce((sum, line) => sum + scoreOf(line), 0) / fullyScored.length) * 10) / 10 : undefined;
 
   const insights =
     rounds >= INSIGHTS_MIN_ROUNDS

@@ -10,6 +10,10 @@ import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, 
 // `strokes` cell already carries it. NOT additive: an already-stored `{ kind: "conceded",
 // strokes }` event no longer parses. Accepted because beta's round data is wiped at this arc's
 // close-out (no migration) — same disposition as this arc's other non-additive stored changes.
+// Checked directly rather than reasoned about: `swng-rounds-prod` (4 rounds / 123
+// score-recorded events) and `swng-snapshots-prod` (3 snapshots) held ZERO conceded and ZERO
+// picked-up cells as of 2026-07-29, so the deletion is safe beyond beta too even though there is
+// no prod deploy in this arc.
 export const holeResultSchema: z.ZodType<HoleResult> = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("strokes"), strokes: z.number() }),
   z.object({ kind: z.literal("picked-up") }),

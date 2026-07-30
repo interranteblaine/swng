@@ -392,7 +392,7 @@ describe("SeasonPanel — scoreboard", () => {
 
     expect(
       await screen.findByText(
-        "Average — score minus par over this season's rounds, a nine counting double · Spread — how much those rounds vary; builds at 5 rounds · Best 18 — lowest gross, fully holed out.",
+        "Average — score minus par over this season's rounds, a nine counting double · Spread — how much those rounds vary; builds at 5 rounds · Best 18 — lowest gross of a fully-scored round.",
       ),
     ).toBeTruthy();
   });

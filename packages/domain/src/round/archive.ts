@@ -81,8 +81,8 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
 
   // Departure rule (accounts-only identity spec §4), applied additively on top of the ordinary
   // settle. "Leaving stops the future and never rewrites the past": a departed participant's
-  // played holes and resolved games (concessions included) count exactly as scored — the
-  // `departed: true` flag is already on the folded roster entry and simply rides along. The one
+  // played holes and resolved games count exactly as scored — the `departed: true` flag is
+  // already on the folded roster entry and simply rides along. The one
   // extra rule is the empty case: a departed participant with NO scored holes AND membership in
   // NO game is omitted from the archive entirely — no participant entry at all — so they appear
   // nowhere downstream. That is settle deciding once, not a reader filtering:

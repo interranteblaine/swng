@@ -211,7 +211,7 @@ test.describe.serial("identity/record gate — one account, three rounds as self
 
     // Bests + milestones (analytics read-folds spec 2026-07-21 §3, packages/domain/src/golfer/
     // analytics.ts) — hand-derived BEFORE any live run from this deck's own pinned scores, never
-    // read back off the system (BLOCKED-don't-fudge). All three rounds are fully holed out
+    // read back off the system (BLOCKED-don't-fudge). All three rounds are fully-scored
     // (every hole a strokes cell) 18-hole cards on the par-72 all-par-4 course, so:
     //
     //   round 1 (10 bogeys): gross 82, toPar 82 - 72 = 10   <- LOWEST gross
@@ -229,7 +229,7 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     // broke-100, broke-90, broke-80 — milestonesOf), each the earliest qualifying round.
     //   - first-birdie / first-eagle: this deck NEVER scores below par (every hole is a 4 or a
     //     bogey 5 on a par-4 card), so no under-par hole exists -> BOTH absent.
-    //   - broke-100: first fully holed-out 18 under 100 -> round 1 (82 < 100).
+    //   - broke-100: first fully-scored 18 under 100 -> round 1 (82 < 100).
     //   - broke-90:  first under 90 -> round 1 (82 < 90).
     //   - broke-80:  none under 80 (82/85/88 all >= 80) -> absent.
     // So exactly [broke-100 @ r1, broke-90 @ r1], in that fixed order.

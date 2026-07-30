@@ -150,7 +150,7 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     expect(scoreboard).toEqual(frozenScoreboardExpectation(placeholderIds));
 
     // Expected shape (spec 2026-07-29 §6, verified rather than assumed): 12 rounds each, with
-    // best18/average/spread ALL present — every deck round is fully holed out (so best18 exists)
+    // best18/average/spread ALL present — every deck round is fully scored (so best18 exists)
     // and carries a score on every hole (so it feeds the average), and 12 rounds clears the
     // 5-round spread floor. The retired index/indexDelta/netPer18 keys are pinned ABSENT, not
     // merely unasserted.

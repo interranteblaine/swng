@@ -14,7 +14,7 @@ const B = golferId("b");
 // (internally honest fixtures). First `overs` holes get strokes par+1 (bogey), the rest par, so
 // gross = par + overs and the line's vs-par figure is exactly `overs` (doubled on a nine, per
 // spec 2026-07-29 §2d). `pickedUpHole` swaps that hole's result for a picked-up arm — never fully
-// holed out, and never a scored card at all, so it feeds neither best18 nor the average.
+// scored, and never a scored card at all, so it feeds neither best18 nor the average.
 const mkLine = (opts: {
   roundId: string;
   holes: 9 | 18;
@@ -145,7 +145,7 @@ describe("crewScoreboard — best18 (spec §7 case 3-4)", () => {
     expect(rows[0]!.best18).toEqual({ gross: 80, toPar: 10 });
   });
 
-  it("excludes a 9-hole line and a not-fully-holed-out 18 (picked-up hole)", () => {
+  it("excludes a 9-hole line and a not-fully-scored 18 (picked-up hole)", () => {
     const lines = [
       mkLine({ roundId: "r1", holes: 9, par: 36, strokes: 10, finalizedAtMs: 1000 }),
       mkLine({ roundId: "r2", holes: 18, par: 72, strokes: 10, overs: 5, pickedUpHole: 3, finalizedAtMs: 2000 }),

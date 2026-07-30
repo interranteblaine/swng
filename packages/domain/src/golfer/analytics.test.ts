@@ -20,7 +20,7 @@ const line = (over: Partial<GolferRoundLine>): GolferRoundLine => ({
 const stroke = (hole: number, par: number, strokes: number): GolferHoleLine => ({ hole, par, result: { kind: "strokes", strokes } });
 const pickedUp = (hole: number, par: number): GolferHoleLine => ({ hole, par, result: { kind: "picked-up" } });
 
-// Builds a fully holed-out line of `holes` (9 or 18, par 4 throughout) whose strokes sum to
+// Builds a fully-scored line of `holes` (9 or 18, par 4 throughout) whose strokes sum to
 // exactly `gross` — the first hole absorbs whatever remainder the rest (all par) don't, so the
 // per-hole numbers aren't meant to be plausible golf, just a fold input with a pinned total.
 const roundOf = (id: string, holes: 9 | 18, gross: number): GolferRoundLine => {
@@ -30,21 +30,23 @@ const roundOf = (id: string, holes: 9 | 18, gross: number): GolferRoundLine => {
   return line({ roundId: roundId(id), holes, par, holeResults });
 };
 
-// Every hole a plain strokes cell, all at the same score — a minimal input for the
-// no-holed-out-gate test below (task-1, spec §7).
-const lineWith = ({ holes, par, perHole }: { holes: 9 | 18; par: number; perHole: number }): GolferRoundLine =>
+// Every hole a plain strokes cell, all at the same score, on a uniform-par card — a minimal
+// input for the no-holed-out-gate test below (task-1, spec §7). Takes `holePar` (never `par`
+// itself) and MULTIPLIES to get the line's total — `par / holes` would silently go fractional
+// for any non-uniform card, whereas `holePar * holes` cannot.
+const lineWith = ({ holes, holePar, perHole }: { holes: 9 | 18; holePar: number; perHole: number }): GolferRoundLine =>
   line({
     roundId: roundId("r-gimme"),
     holes,
-    par,
-    holeResults: Array.from({ length: holes }, (_, i) => stroke(i + 1, par / holes, perHole)),
+    par: holePar * holes,
+    holeResults: Array.from({ length: holes }, (_, i) => stroke(i + 1, holePar, perHole)),
   });
 
-describe("bestsOf — lowest gross per hole count, fully holed-out lines only (analytics spec §3)", () => {
+describe("bestsOf — lowest gross per hole count, over fully-scored lines (analytics spec §3)", () => {
   it("(a) picks the lowest gross per hole count, ignoring a lower-raw-sum line that has a picked-up hole", () => {
-    const full = roundOf("r-a-full", 18, 90); // fully holed out, gross 90
+    const full = roundOf("r-a-full", 18, 90); // fully scored, gross 90
     // 17 holes at 4 strokes (raw sum 68, LOWER than full's 90) plus one picked-up hole — NOT
-    // fully holed out despite the deceptively lower stroke sum.
+    // fully scored despite the deceptively lower stroke sum.
     const pickedUpLine = line({
       roundId: roundId("r-a-pickedup"),
       holes: 18,
@@ -81,7 +83,7 @@ describe("bestsOf — lowest gross per hole count, fully holed-out lines only (a
   // There is no holed-out gate (task-1, spec §7): a gimme is recorded at the score it made, so a
   // fully-scored round is a Best 18 candidate outright — no separate "did every putt drop" check.
   it("counts a fully-scored round as a Best — there is no holed-out gate", () => {
-    const full = lineWith({ holes: 18, par: 72, perHole: 4 }); // every hole a strokes cell
+    const full = lineWith({ holes: 18, holePar: 4, perHole: 4 }); // every hole a strokes cell
     expect(bestsOf([full]).best18?.gross).toBe(72);
   });
 });

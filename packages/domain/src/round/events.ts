@@ -68,6 +68,8 @@ export type RoundEvent = RoundEventBase &
     // shape branch, no `.default()`, no migration. THE DEPLOY IS LAMBDA-FIRST: a stale bundle
     // posting the old integer body gets a 400 until it refreshes, whereas web-first would have a
     // new bundle's `basis` object silently stripped by the old lambda's non-strict parse and a
-    // meaningless event written into a sealed log (the conceded-arm precedent, round.ts).
+    // meaningless event written into a sealed log — the same class of mistake a non-additive
+    // stored-schema change always risks (task-1's `conceded` arm deletion carried the identical
+    // deploy-order argument, on the theory that beta's data is wiped rather than migrated).
     | { readonly kind: "participant-basis-set"; readonly golferId: GolferId; readonly basis: StrokeBasis }
   );

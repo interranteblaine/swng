@@ -22,7 +22,7 @@ const line = (over: Partial<GolferRoundLine>): GolferRoundLine => ({
 const stroke = (hole: number, par: number, strokes: number): GolferHoleLine => ({ hole, par, result: { kind: "strokes", strokes } });
 const pickedUp = (hole: number, par: number): GolferHoleLine => ({ hole, par, result: { kind: "picked-up" } });
 
-// A fully holed-out 18-hole line whose strokes sum to exactly `gross` (par 4 throughout, first
+// A fully-scored 18-hole line whose strokes sum to exactly `gross` (par 4 throughout, first
 // hole absorbs the remainder) — the analytics.test.ts `roundOf` precedent.
 const roundOf = (id: string, gross: number): GolferRoundLine => {
   const rest = 17;
@@ -31,7 +31,7 @@ const roundOf = (id: string, gross: number): GolferRoundLine => {
 };
 
 // A line contributing a single decided hole — used to build precise per-hole aggregates without
-// needing a full 18-hole card; not fully holed out (irrelevant to the hole-level folds, which
+// needing a full 18-hole card; not fully scored (irrelevant to the hole-level folds, which
 // read raw holeResults regardless of round completeness — spec §4's "all decided plays").
 const oneHole = (id: string, entry: GolferHoleLine): GolferRoundLine => line({ roundId: roundId(id), holeResults: [entry] });
 
@@ -59,7 +59,7 @@ describe("courseRecord — rounds/best/scoringAverage (always present from the 1
     expect(record.rounds).toBe(2);
   });
 
-  it("best is the lowest gross among fully holed-out lines; a tie goes to the earlier line (strict <, oldest→newest)", () => {
+  it("best is the lowest gross among fully-scored lines; a tie goes to the earlier line (strict <, oldest→newest)", () => {
     const earlier = roundOf("r-earlier", 85);
     const later = roundOf("r-later", 85);
     const worse = roundOf("r-worse", 90);
@@ -70,7 +70,7 @@ describe("courseRecord — rounds/best/scoringAverage (always present from the 1
   });
 
   it("a line without holeResults counts toward rounds but contributes NO hole stats and can never hold best", () => {
-    // 4 fully-holed-out lines all touching hole 1 with a doubled hole (overPar 2, so ≥3-plays
+    // 4 fully-scored lines all touching hole 1 with a doubled hole (overPar 2, so ≥3-plays
     // threshold is met) plus a 5th line with no holeResults — rounds reaches the insights gate,
     // but the 5th line must be invisible to best AND to hole 1's aggregation.
     const holed = [90, 95, 100, 80].map((gross, i) => roundOf(`r-holed-${i}`, gross));
@@ -86,11 +86,12 @@ describe("courseRecord — rounds/best/scoringAverage (always present from the 1
     expect(record.insights?.worstHole?.plays).toBe(4);
   });
 
-  it("scoringAverage is the mean gross over fully holed-out lines only, rounded to 1 decimal (roundHalfUp) — excludes a picked-up line", () => {
+  it("scoringAverage is the mean gross over fully-scored lines only, rounded to 1 decimal (roundHalfUp) — excludes a picked-up line", () => {
     const a = roundOf("r-a", 90);
     const b = roundOf("r-b", 91);
-    // A picked-up hole means NOT fully holed out, even though its raw stroke sum (17×4 + 1 = 69)
-    // is far lower than a/b's — if wrongly included this would drag the average down hard.
+    // A picked-up hole means the line is NOT fully scored, even though its raw stroke sum
+    // (17×4 + 1 = 69) is far lower than a/b's — if wrongly included this would drag the average
+    // down hard.
     const pickedUpLine = line({
       roundId: roundId("r-pickedup"),
       holeResults: [...Array.from({ length: 17 }, (_, i) => stroke(i + 1, 4, 4)), pickedUp(18, 4)],
@@ -102,7 +103,7 @@ describe("courseRecord — rounds/best/scoringAverage (always present from the 1
     expect(record.scoringAverage).toBe(90.5);
   });
 
-  it("scoringAverage is absent when no line is fully holed out", () => {
+  it("scoringAverage is absent when no line is fully scored", () => {
     const record = courseRecord([noResults("r-a")], COURSE);
 
     expect(record.scoringAverage).toBeUndefined();
@@ -230,5 +231,18 @@ describe("courseRecord — neverBirdied (holes with ≥1 strokes-play and zero u
     const record = courseRecord([played, ...padding], COURSE);
 
     expect(record.insights?.neverBirdied).toEqual([1, 2, 3]);
+  });
+
+  // aggregateHoles' `if (strokes !== undefined)` guard (courseRecord.ts) — a picked-up hole has no
+  // number and must not be counted as a play at all, let alone a birdie. Proven by mutation: scoring
+  // a pickup as 0 strokes (a 4-under "birdie" on this par 4) would drop hole 1 out of neverBirdied.
+  it("a picked-up hole does not count toward neverBirdied — no number, no play, nothing changes", () => {
+    const holes: GolferHoleLine[] = [stroke(3, 4, 4), stroke(1, 4, 5), stroke(2, 4, 4)];
+    const played = line({ roundId: roundId("r-played"), holeResults: holes });
+    const padding = [0, 1, 2].map((i) => noResults(`r-pad-${i}`));
+
+    const withPickup = courseRecord([played, oneHole("r-later", pickedUp(1, 4)), ...padding], COURSE);
+    expect(withPickup.rounds).toBe(5);
+    expect(withPickup.insights?.neverBirdied).toEqual([1, 2, 3]);
   });
 });

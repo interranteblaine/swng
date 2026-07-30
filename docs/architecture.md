@@ -18,7 +18,9 @@ scoreGame(config: GameConfig, state: RoundState): GameState   // state = reduceR
 ```
 
 Games never store mutable state. A score correction is a new event and every game simply
-recomputes; a press or a concession is itself an event in the same log. This is what makes
+recomputes; a game decision that is not a score — a press, a Wolf partner pick — is itself an
+event in the same log. (A conceded stroke is not one of them: it leaves the score in no doubt,
+so it is recorded as the score. See the Round section.) This is what makes
 "concurrent games over one card" cheap in v1 and "Nassau is configuration, not architecture"
 literally true — and it is the conventions' *derive, don't store* applied at system scale.
 
@@ -104,11 +106,15 @@ archive**: an abandoned round aggregates nowhere and is excluded from every down
 (presence, projections, a crew season's window). No null states.
 
 ```ts
+// Shipped:
 type RoundEvent =
-  | RoundCreated | ParticipantJoined | ParticipantLeft | ParticipantStrokesSet | GameAdded
+  | RoundCreated | ParticipantJoined | ParticipantLeft | ParticipantStrokesSet
+  | GameAdded | GameTerminated
   | ScoreRecorded      // { golferId, hole, result: strokes | 'picked-up' | 'cleared', recordedBy, opId, hlc }
-  | PressOpened | PartnerPicked                     // game decisions live in the same log
-  | GameTerminated | RoundFinalized | RoundReopened | RoundAbandoned
+  | RoundStarted | RoundFinalized | RoundReopened | RoundAbandoned
+// v1.1/v2 will extend the same union — e.g. PressOpened (Nassau), PartnerPicked (Wolf):
+// a game decision that is not a score lives in this log too. Nothing here is speculative
+// unless this comment says so.
 ```
 
 A hole result has exactly one numeric arm. **A gimme is a score** (2026-07-30 §7): conceding
@@ -304,9 +310,11 @@ DynamoDB:  rounds │ snapshots │ core │ projections │ connections
 
 ### Identity & access
 
-- Cognito (email + social sign-in) behind a JWT authorizer, contributing a `sub` and nothing
-  else. **`GolferId` ≠ Cognito sub** — an identity mapping (the sub-binding row) links them,
-  minted get-or-create on first authenticated touch.
+- Cognito (email sign-in; Hosted UI + PKCE) contributing a `sub` and nothing else. Bearer ID
+  tokens are **verified in the dispatcher, never by an API Gateway authorizer** (M7 ruling —
+  one auth path, one place to reason about, and the participant/spectator capability tokens
+  ride the same dispatcher). **`GolferId` ≠ Cognito sub** — an identity mapping (the
+  sub-binding row) links them, minted get-or-create on first authenticated touch.
 - Join is always yourself: `POST /rounds` and `POST /rounds/join` are golfer-authed (there is
   no anonymous round path); a successful join yields the round-scoped participant token that
   scores. Any participant scores for any participant — delegation is capability inside the

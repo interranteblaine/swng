@@ -32,8 +32,8 @@ Print it, or pull it up on a phone before you leave the house — either works.
   phone, or one person keeps the whole card — both are supported; test both if the crew is
   big enough to split across two rounds.
 - **A real course.** Search for it first. If it's not in swng yet, budget the course-entry
-  flow before you tee off — `roadmap.md`'s own M6 gate is "enter a real course from its paper
-  scorecard in under 10 minutes," so bring the paper card (or a phone photo of it) and time
+  flow before you tee off — `implementation-plan.md`'s own M6 gate is "enter a real course from
+  its paper scorecard in under 10 minutes," so bring the paper card (or a phone photo of it) and time
   yourself. There is no verify-it-afterwards step: you are transcribing a paper card, and any
   member can correct the whole card later if a number is wrong. Doing this the night before is
   fine; doing it live on the first tee is the harder, more honest test.

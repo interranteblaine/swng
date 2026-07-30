@@ -1604,9 +1604,9 @@ pass. Close-out was CONTROLLER-RUN in the whole-branch review's CORRECTED order 
 
 Strokes are typed, not derived — the group does the subtraction and the app writes it down
 (2026-07-30, spec `docs/superpowers/specs/2026-07-30-strokes-are-typed-design.md`, plan
-`docs/superpowers/plans/2026-07-30-strokes-are-typed.md`, 7 SDD tasks, 8 dispatched fix rounds
-across them plus three controller-direct fixes, code commits `8d9fef4..0e592ef`, base
-`54bfcb8`): the owner's own field report, read a
+`docs/superpowers/plans/2026-07-30-strokes-are-typed.md`, **8 planned SDD tasks — 7 landed, the
+8th is the controller-run beta close-out**, 8 dispatched fix rounds across them plus three
+controller-direct fixes, code commits `8d9fef4..0e592ef`, base `54bfcb8`): the owner's own field report, read a
 second time, was the evidence against the arc that shipped the day before. A group settled
 strokes by asking each other *"for an average round, how do you shoot relative to par?"* — `+30`
 and `+10` — and then **did the subtraction in their heads and typed 20 and 0.** The conversation
@@ -1747,14 +1747,19 @@ has actually run. It is recorded here rather than in the arc narrative above bec
 operational gate on an instrument, and this is the section a person planning a prod deploy
 opens.
 
-Prod holds a small number of rounds and snapshots created under the pre-2026-07-30 model. Two
-facts compound:
+Prod holds a small number of rounds and snapshots that **predate BOTH July 2026 strokes arcs**.
+Prod has been on the Arc C (2026-07-24) code since launch and never received the 2026-07-29
+relative-to-par arc, so **its participants carry `courseHandicap` — NOT `basis`, which is a
+beta-only shape that existed for one day.** Do not check this gate by grepping prod for `basis`:
+you will find zero and conclude wrongly. Check for participants lacking `strokes`. Task 6
+recorded the counts as 4 rounds / 123 `score-recorded` events on `swng-rounds-prod` and 3
+snapshots on `swng-snapshots-prod`; re-read them before acting rather than trusting that number.
+Two facts compound:
 
-1. **They no longer parse.** `Participant` requires `strokes`; those rounds carry a `basis`
-   object and no `strokes`, and since Task 6 the read paths parse rather than cast, so they are
-   refused with `stored-event-invalid` / `stored-archive-invalid` instead of being silently
-   misread. Refusal is correct — the alternative is a two-armed assertion reinterpreted as the
-   nearest surviving arm — but it is refusal.
+1. **They no longer parse.** `Participant` requires `strokes`, those rounds have none, and since
+   Task 6 the read paths parse rather than cast — so they are refused with
+   `stored-event-invalid` / `stored-archive-invalid` instead of being silently misread as the
+   nearest surviving shape. Refusal is correct, but it is refusal.
 2. **`snapshotStore.page()` parses a page eagerly**, in one `.map` before returning. One
    unparseable item therefore takes down the good items *ahead of* it in the same page, and the
    cursor never advances past it.
@@ -1772,6 +1777,12 @@ run without an explicit `--keep-courses` / `--wipe-courses`; dry-run first and c
 a deploy-then-wipe window serves record bodies neither bundle can parse. Prod is a launched
 environment: the wipe is an owner decision, not a controller one, and the item counts should be
 read first.
+
+**Retire this section the moment the wipe has run** — whoever runs it deletes these paragraphs in
+the same commit that records the prod deploy, replacing them with one line in that arc's own
+record. It is a gate on one transition, not a standing fact about the system; left in place after
+it is discharged it becomes another paragraph everyone learns to skip, which is how the next real
+precondition gets missed.
 
 ## Code Authoring
 

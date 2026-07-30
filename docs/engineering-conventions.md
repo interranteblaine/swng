@@ -112,9 +112,11 @@ worse than no name.
 
 ## 5. Testing
 
-- **Weight tests toward the deep modules** — the scoring engines, the stroke rule, the
-  golfer's own folds, and the merge logic, not another router happy-path. Test where the
-  complexity hides.
+- **Weight tests toward the deep modules** — the scoring engines, the two stroke-allocation
+  behaviours, the golfer's own folds, and the merge logic, not another router happy-path. Test
+  where the complexity hides. The allocation arms are the standing example of *where*: they
+  differ only in which holes the dots land on, so a test that counts dots passes either way
+  and only a stroke-index assertion is worth anything.
 - **The architecture's test benches are binding**, and the list is exactly
   `architecture.md` §4's: golden cards, property tests, the multi-device convergence
   simulation, settlement determinism (including projection-rebuild equivalence), and adapter

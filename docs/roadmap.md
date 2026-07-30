@@ -73,16 +73,20 @@ Why this slice and not another:
 
 ### The Crew
 
-- Named persistent crew with a roster of **full accounts only** (owner call, 2026-07-13: a
-  crew is a grouping of accounts; ghosts play inside rounds and are never added to a crew).
-  The holdout signs up once through a round's join link and is fully present from that round
-  on.
+- Named persistent crew with a roster of **full accounts only** — as is every card in swng
+  (owner call, 2026-07-13, the accounts-only wall: ghost profiles and claim-later identity are
+  deleted outright; nobody plays a round who is not a signed-in account). Members join by
+  invite link; nobody is added by someone else. The holdout signs up once through a round's
+  join link and is fully present from that round on.
 - **The crew's games are chosen fresh each round** (owner call, 2026-07-13: a crew is a
-  grouping, not a preset — there is no saved standing game and no "play the usual"; the crew
-  instead defines named seasons that count members' finalized rounds).
-- **The ledger, core cut:** every crew round recorded; head-to-head match records between any
-  two members; season leaderboard (wins, points, skins).
-- **Not in v1:** the feed, partner records.
+  grouping, not a preset — there is no saved standing game and no "play the usual").
+- **The ledger, core cut:** **the crew watches; members just play** (owner-approved,
+  2026-07-21/22) — a season is a time window with chosen dates, and a member's finished round
+  is in it automatically if its played date falls inside. Nothing is filed, counted, or
+  recorded with the crew. From that window: a per-member scoreboard, head-to-head match
+  records and four-ball partner records between members who shared a round, and season
+  standings (wins, points, skins).
+- **Not in v1:** the feed.
 
 ### The Course
 

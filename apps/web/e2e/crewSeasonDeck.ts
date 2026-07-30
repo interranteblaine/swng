@@ -6,11 +6,11 @@
 // that disagrees with FROZEN_LINE below is a design bug in THIS file, never something adjusted
 // to match a live run (BLOCKED-don't-fudge, task-7-brief.md's own verbatim law).
 //
-// Course: 18 holes, all par 4 (par 72), one flat tee. Every player's course handicap is 0 for
-// the whole season (brief) — a field where everyone states 0 allocates 0 strokes, regardless of
-// stroke index, so net === gross everywhere and stableford points collapse to
-// max(0, 2 + par - net) = max(0, 6 - gross). Same "flat tee keeps arithmetic hand-verifiable"
-// reasoning as identityRecord.spec.ts's own buildIdentityCourseCard.
+// Course: 18 holes, all par 4 (par 72), one flat tee. Every player states +0 all season (brief),
+// so under the one stroke rule (spec 2026-07-29 §2b) the field's anchor is 0 and EVERY seat derives
+// 0 strokes — regardless of stroke index — so net === gross everywhere and stableford points
+// collapse to max(0, 2 + par - net) = max(0, 6 - gross). Same "flat tee keeps arithmetic
+// hand-verifiable" reasoning as identityRecord.spec.ts's own buildIdentityCourseCard.
 import type { GameConfigInput } from "@swng/contracts";
 import {
   aggregateSeason,
@@ -146,8 +146,8 @@ export const roundScoresByGolfer = (ids: SeasonGolferIds, roundNumber: number): 
 // The three season games, wire shape (id-less — POST /rounds/{roundId}/games's own
 // GameConfigInput) — singles Al-Bo, net 4-way skins (carryover is NOT a config knob — scoreSkins
 // always carries a tied/undecided hole's pot forward, packages/domain/src/scoring/skins.ts), 4-way
-// stableford. Every course handicap is 0 all season, so every game's strokes resolve to 0 dots
-// (the difference from the lowest in the field is 0) and the deck's frozen numbers are untouched
+// stableford. Every seat states +0 all season, so every game's strokes resolve to 0 dots (the
+// difference from the lowest in its own field is 0) and the deck's frozen numbers are untouched
 // by the stroke model — net skins here scores exactly as gross would.
 export const seasonGames = (
   ids: SeasonGolferIds,
@@ -237,8 +237,8 @@ export const frozenSeasonExpectation = (
 // archiveGolferLine + synthetic chronology — the exact construction crewSeason.spec.ts's own
 // test 1 repeats) and reading the printed output — the test-1 discipline (BLOCKED-don't-fudge):
 // a mismatch here is a bug in this file or in scoreboard.ts, never something adjusted to match a
-// live run. Every role's row is independent of which real golferId it lands on: course handicap
-// is 0 for everyone all season (this file's header), so best18/average/spread differ only by the
+// live run. Every role's row is independent of which real golferId it lands on: every seat derives
+// 0 strokes all season (this file's header), so best18/average/spread differ only by the
 // H2H holes ROUND_PLAN gives Al/Bo (never Cy/Dee, who only ever move off par to win hole 18's
 // skins pot). best18 71 (-1) for all four: the lowest 18-hole gross anyone ever cards is a flat
 // par-71 with hole 18 birdied (3), which happens for whoever is that round's hole18Winner —

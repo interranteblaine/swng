@@ -115,10 +115,24 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
     }
   });
 
-  test("4: finalize through the real confirm dialog", async () => {
+  test("4: finalize through the real confirm dialog; the finished round states gross, strokes and net", async () => {
     await page.getByRole("button", { name: "Finalize round" }).click();
     await page.getByRole("dialog", { name: "Confirm finalize" }).getByRole("button", { name: /^finalize$/i }).click();
     await expect(page.getByRole("heading", { name: "Final results" })).toBeVisible();
+
+    // ADDED BY TASK 8 (beyond the brief's own locator sweep): "the finished round stops speaking
+    // WHS" (spec 2026-07-29 §4) replaced ResultsView's "Posted to handicaps" section with a
+    // "Final totals" list of gross · strokes · net, and NOTHING in the live suites asserted the new
+    // surface — the exact blind spot this task exists to close. The primary path is where it
+    // belongs: this is the one all-browser gate that plays a whole round and finalizes it.
+    //
+    // DERIVED BY HAND from this file's own fixture: the card is 18 holes of par 4 (par 72) and
+    // test 3 scored a flat 4 on every hole, so gross = 72. This golfer plays ALONE, so they are
+    // their own anchor and the stated +18 derives 0 strokes (spec §2b) — net = 72 − 0 = 72.
+    // ResultsView.tsx renders the row as `{name} — {gross} gross · {strokesLabel} · {net} net`,
+    // with strokesLabel(0) === "0" (never "−0"). Scoped to the aria-labelled list because the
+    // read-only card below it prints its own totals from the SAME grossForHoles.
+    await expect(page.getByRole("list", { name: "Final totals" })).toContainText("72 gross · 0 · 72 net");
   });
 
   test("5: Profile shows the round's history line", async () => {

@@ -331,14 +331,19 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
 
     // Date exclusion, proven live: every one of Al's 12 rounds finalized moments ago in test 3,
     // well outside 2020 — crewScoreboard.ts still returns a row per roster member (Al alone,
-    // here) but with zero in-window lines, so `rounds: 0` and neither best18 nor netPer18 (both
-    // window-scoped). `index` is deliberately NOT asserted here — it folds the golfer's WHOLE
-    // career regardless of window (scoreboard.ts's own rule), so it's real even on an empty
-    // window; asserting it absent would be asserting something false about the model.
+    // here) but with zero in-window lines, so `rounds: 0` and EVERY other column absent.
+    // Under spec 2026-07-29 §6 that is now the whole row: `average` and `spread` fold the SEASON
+    // WINDOW (deliberately not the profile's rolling 10), so an empty window leaves both undefined
+    // exactly as it leaves best18 — asserting all three absent is the honest, complete pin.
+    // (This replaces a carve-out for the retired career-scoped `index`, which was real even on an
+    // empty window and therefore could not be asserted absent; nothing on this row is
+    // career-scoped anymore. `netPer18` is pinned absent as a deleted-field tombstone.)
     const excluded = await getSeasonStandingsDirect(httpUrl, al.tokens.idToken, crewId, pastSeasonId);
     expect(excluded.scoreboard).toHaveLength(1);
     expect(excluded.scoreboard[0]).toMatchObject({ golferId: ids.al, name: "Al", rounds: 0 });
     expect(excluded.scoreboard[0]).not.toHaveProperty("best18");
+    expect(excluded.scoreboard[0]).not.toHaveProperty("average");
+    expect(excluded.scoreboard[0]).not.toHaveProperty("spread");
     expect(excluded.scoreboard[0]).not.toHaveProperty("netPer18");
     // "Played together" and the together-folds need >=2 CURRENT roster members regardless of
     // window (test 5's own finding) — Al is still alone here, so these stay empty for that

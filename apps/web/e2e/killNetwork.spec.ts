@@ -66,7 +66,9 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     await expect(result).toBeVisible();
     await result.click();
     // No name entry: the create form renders "Playing as Ann" from the account's own record.
-    await normallyShootsField(pageA).fill("8");
+    // Ann states the LOWER number of the two on purpose — see the stated-numbers note on Bo's own
+    // fill() below; the dedup pin in test 3 needs Bo to be the one receiving a stroke.
+    await normallyShootsField(pageA).fill("4");
     await pageA.getByRole("button", { name: "Create round" }).click();
     await expect(pageA).toHaveURL(/\/round\//);
 
@@ -81,7 +83,15 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     // prompt, no name field, "Playing as Bo" from the record.
     await expect(pageB.getByText(`Joining ${fixtureLinks.courseName}`)).toBeVisible();
     await pageB.getByLabel("Tee").selectOption("white");
-    await normallyShootsField(pageB).fill("4");
+    // The two stated numbers are HARNESS INPUTS, not a frozen deck — nothing in this file is a
+    // scoring oracle (its whole point is the reconnect seam) — but which of the two is LOWER is
+    // load-bearing for test 3's exact-string dedup pin. Under the one stroke rule (spec 2026-07-29
+    // §2b) exactly one player in a two-player round receives anything: the anchor is the lower
+    // stated number and gets zero. Bo therefore states the HIGHER number so his cell carries dots
+    // + gross + net, keeping test 3's "●65" pin covering all three spans of a Cell's render. (Before
+    // this arc both players carried their own absolute number and both drew dots, so either order
+    // produced a three-span cell; that is no longer true.)
+    await normallyShootsField(pageB).fill("8");
     await pageB.getByRole("button", { name: "Join round" }).click();
     await expect(pageB).toHaveURL(/\/round\//);
 
@@ -132,9 +142,11 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     // pulled back by that SAME Sync-now HTTP fetch (push-then-pull, both inside one doSync()
     // pass — session.ts) — the client's confirmed-vs-outbox/opId reconciliation must fold the
     // pulled-back copy as the SAME event as the still-pending local one, not a second
-    // application. Exact full-text pin: the standard card renders Bo's cell as ● + gross 6 +
-    // net 5 (his CH 4 dots hole 2, SI ≤ 4 on the white nine — dots draw with no game now), and
-    // any concatenated/duplicated fold (e.g. "●665") corrupts this exact string.
+    // application. Exact full-text pin, RE-DERIVED for the one stroke rule (spec 2026-07-29 §2b):
+    // Ann stated +4 and Bo +8, so the anchor is 4, Ann derives 0 and Bo derives
+    // roundHalfUp((8 − 4)/2) = 2 on this nine-hole card. allocateStrokes(2, 9 holes) puts a single
+    // dot on the two lowest-SI holes only — hole 2 is SI 1, so Bo's cell renders ● + gross 6 +
+    // net 6−1=5, and any concatenated/duplicated fold (e.g. "●665") corrupts this exact string.
     await expect(pageB.getByRole("button", { name: "Bo hole 2", exact: true })).toHaveText("●65");
     await expect(pageB.getByRole("status", { name: /couldn.t be saved/i })).not.toBeVisible(); // no rejected-op toast either
 

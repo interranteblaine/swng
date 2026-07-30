@@ -105,7 +105,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await contextB?.close();
   });
 
-  test("1: context A, signed in as Ann, creates the round on fixtureLinks18 (white, ch 8); reads the join code from SetupPanel", async () => {
+  test("1: context A, signed in as Ann, creates the round on fixtureLinks18 (white, stating +8); reads the join code from SetupPanel", async () => {
     await pageA.goto("/create");
     // M6: CourseSearch replaced the old fixture <select> — search by name (ensureCourse above
     // guarantees exactly one real course record answers to it) and tap the one result.
@@ -229,10 +229,14 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
       }
     }
 
-    // The deck's pinned pre-correction snapshot: Cal 5 thru 9 (his as-entered h9 4 nets 3 on
-    // his SI-4 dot, taking the pot h5-h9 carried). B only ever learns holes 1-9 via WS
-    // broadcast from A — cross-context, WS-dependent — so this is wrapped for announced
-    // recovery.
+    // The deck's pinned pre-correction snapshot, RE-DERIVED for the one stroke rule (spec
+    // 2026-07-29 §2b): the four state +8/+2/+15/+5, so the anchor is Bo's 2 and the field derives
+    // Ann 6 / Bo 0 / Cal 13 / Dee 3 — Cal's dots now cover SI 1–13, including hole 9 (SI 11),
+    // which the retired 100%-of-your-own-handicap skins convention also gave him. His as-entered
+    // h9 4 therefore still nets 3, uniquely lowest, taking the pot every hole from h1 carried:
+    // "Cal 9" (nine holes' worth, not the old five — no hole before it is won under the new
+    // allocation either). B only ever learns holes 1-9 via WS broadcast from A — cross-context,
+    // WS-dependent — so this is wrapped for announced recovery.
     const expectedThru9 = describeSkinsAt(9, false);
     await expectOrRecover(pageB, "B's pre-correction Skins snapshot (step 4)", () => expect(chip(pageB, "Skins")).toContainText(expectedThru9), bRoute);
   });
@@ -287,8 +291,11 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
     await expect(pageB.getByText(/scores? syncing/)).not.toBeVisible();
 
-    // The correction moved the pot: Cal's skins go to 0, Dee's h10 pot swells to 6 (2 -> 8). B's
-    // own refold is from ITS OWN Sync-now pull just above (HTTP, not WS) — not cross-context
+    // The correction moved the pot, re-derived: Cal's corrected h9 5 nets 4, which TIES Bo's and
+    // Dee's 4 — so hole 9 carries instead of paying, Cal's 9 skins go to 0, and the whole
+    // nine-hole pot rolls into hole 10, where Dee's 4 on his own SI-2 dot nets 3 and takes all
+    // TEN. Thru 12 then reads "Dee 10 · carrying 2 into 13" (h11 and h12 both tie). B's own
+    // refold is from ITS OWN Sync-now pull just above (HTTP, not WS) — not cross-context
     // WS-dependent, so this one stays bare.
     const refoldedSkins = describeSkinsAt(12, true);
     await expect(chip(pageB, "Skins")).toContainText(refoldedSkins);
@@ -314,7 +321,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // separate confirm step. Every other entry in this spec goes through enterScore() (the
     // same two clicks), so this one entry stands in for all of them, per the brief.
     const cell = pageA.getByRole("button", { name: "Ann hole 13", exact: true });
-    await expect(cell).toContainText("–"); // idle placeholder (dots may already show — the standard card's own course-handicap dots, not a game: Ann's CH 8 gets a dot on hole 13, SI 4)
+    await expect(cell).toContainText("–"); // idle placeholder (dots may already show — the standard card's own DERIVED round strokes, not a game: Ann's 6 = 8 − Bo's anchor 2 covers SI 1–6, and hole 13 is SI 4)
     await cell.click(); // click 1 of 2
     const dialog = pageA.getByRole("dialog", { name: "Score for Ann, hole 13", exact: true });
     await expect(dialog).toBeVisible();
@@ -332,8 +339,13 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
       }
     }
 
-    // Dormie at 16, fourball 2 up; the h16 skin still riding into 17 — the deck's own thru-16
-    // pin, via the app's own describeGame. The between-holes digest is DELETED (accounts-only
+    // Ann & Bo 1 up thru 16 — NOT dormie (up 1, remaining 2) — with the h16 skin still riding
+    // into 17: the deck's own thru-16 pin, via the app's own describeGame. Both figures moved
+    // under the one stroke rule (spec 2026-07-29 §2b — Cal off 13 instead of a 90%-discounted
+    // own-handicap, Ann off 6, Bo off scratch); fieldDeck18's own `expected` block is the
+    // hand-verified oracle and fieldDeck18.test.ts pins it against the engines.
+    //
+    // The between-holes digest is DELETED (accounts-only
     // identity spec §6: standings are pullable via the chips, never a push-interruption), so
     // the same cross-context thru-16 convergence this step used to read off the digest is
     // asserted on the chips themselves — the very surface a real golfer now checks between
@@ -349,7 +361,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await expectOrRecover(pageB, "B's Skins thru 16 (step 7)", () => expect(chip(pageB, "Skins")).toContainText(expectedSkins), bRoute);
   });
 
-  test("8: A scores hole 17 (Ann picked up; Bo/Cal/Dee strokes) and hole 18 for all four; fourball closes 2&1", async () => {
+  test("8: A scores hole 17 (Ann picked up; Bo/Cal/Dee strokes) and hole 18 for all four; the fourball goes the distance, 1 up", async () => {
     test.setTimeout(60_000);
     for (const name of PLAYER_NAMES) {
       await enterScore(pageA, name, 17, scoreFor(name, 17));
@@ -358,8 +370,8 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
       await enterScore(pageA, name, 18, scoreFor(name, 18));
     }
 
-    const expectedFourballFinal = describeFourballAt(18, true); // "Ann & Bo win 2&1"
-    const expectedSkinsFinal = describeSkinsAt(18, true); // "Bo 7 · Dee 8 · 3 carried out"
+    const expectedFourballFinal = describeFourballAt(18, true); // "Ann & Bo win 1 up"
+    const expectedSkinsFinal = describeSkinsAt(18, true); // "Bo 5 · Dee 10 · 3 carried out"
 
     // A scored holes 17-18 itself — same-page local state (its own optimistic fold), not
     // WS-dependent, so these stay bare.
@@ -367,9 +379,10 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await expect(chip(pageA, "Skins")).toContainText(expectedSkinsFinal);
 
     // B only ever learns holes 17-18 via WS broadcast from A — cross-context, WS-dependent.
-    // Skins (unlike fourball) only settles once hole 18 itself is decided — asserting it here
-    // proves B actually received every one of hole 18's four scores, not just enough of them
-    // for fourball's already-closed 2&1 to read correctly.
+    // The fourball no longer closes early (it did at 2&1 under the retired 90% four-ball
+    // allowance), so hole 18 is genuinely played out and BOTH chips now need every one of its four
+    // scores — where before, only skins did. That makes this pair a STRICTLY stronger delivery
+    // proof than it was: neither chip can read correctly on a partially-received hole 18.
     await expectOrRecover(pageB, "B's Fourball final (step 8)", () => expect(chip(pageB, "Four-ball")).toContainText(expectedFourballFinal), bRoute);
     await expectOrRecover(pageB, "B's Skins final (step 8)", () => expect(chip(pageB, "Skins")).toContainText(expectedSkinsFinal), bRoute);
   });
@@ -387,8 +400,8 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // not a hidden retry of the assertion itself.
     await waitForFinalOrRecover(pageB, bRoute);
 
-    const expectedFourballFinal = describeFourballAt(18, true); // "Ann & Bo win 2&1"
-    const expectedSkinsFinal = describeSkinsAt(18, true); // "Bo 7 · Dee 8 · 3 carried out"
+    const expectedFourballFinal = describeFourballAt(18, true); // "Ann & Bo win 1 up"
+    const expectedSkinsFinal = describeSkinsAt(18, true); // "Bo 5 · Dee 10 · 3 carried out"
 
     // ResultsView.tsx renders the archived card through the SAME StandingsHeader a live round
     // uses ("the archive gets the same card as a live round"). spec 2026-07-19 §2a/§2b dropped

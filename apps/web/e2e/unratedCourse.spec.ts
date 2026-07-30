@@ -67,10 +67,10 @@ const PAR_TOTAL = 36; // = sum of HOLES[*].par — the frozen tee's par, carried
 
 const DOT = "●"; // ScorecardGrid.tsx's own dot glyph (Cell's aria-hidden "●".repeat(dots) span)
 
-// What each player STATES at the tee (spec §2a) — a normal score relative to par, NOT a course
-// handicap. Named for what they are: the old UMA_CH/VIC_CH names invited exactly the mistake the
-// derivation below had to be corrected for (reading them as absolute handicaps to allocate
-// directly, skipping the relative rule AND the nine-hole halving).
+// What each player STATES at the tee (spec §2a) — a normal score relative to par, never the
+// strokes they receive. Named for what they are: the old UMA_CH/VIC_CH names invited exactly the
+// mistake the derivation below had to be corrected for (reading them as absolute numbers to
+// allocate directly, skipping the relative rule AND the nine-hole halving).
 const UMA_OVER_PAR = 13;
 const VIC_OVER_PAR = 2;
 
@@ -257,8 +257,8 @@ test.describe.serial("unrated-course gate — a 9-hole course with no rating pla
     course = await getCourseDirect(httpUrl, courseIdParam);
   });
 
-  test("2: a live round on the unrated tee — the standard card's dots come straight from stroke index + course handicap, the Match play panel states the relative strokes, and two-tap scoring nets against the card", async () => {
-    // "Start a round here" preselects the course; Uma creates on the unrated white tee (ch 13).
+  test("2: a live round on the unrated tee — the standard card's dots come straight from stroke index + the DERIVED strokes, the Match play panel states the same, and two-tap scoring nets against the card", async () => {
+    // "Start a round here" preselects the course; Uma creates on the unrated white tee, stating +13.
     await page.getByRole("link", { name: /^start a round here$/i }).click();
     await expect(page).toHaveURL(/\/create/);
     await expect(page.getByText(courseName, { exact: true })).toBeVisible();

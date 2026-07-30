@@ -191,7 +191,7 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     await expect(teeSelect.locator("option").nth(1)).toHaveText(/^blue — /);
   });
 
-  test("5: 'Start a round here' preselects the course; Pat creates the round on white (ch 21); Quinn joins as himself over a direct HTTP fetch (ch 2)", async () => {
+  test("5: 'Start a round here' preselects the course; Pat creates the round on white stating +21; Quinn joins as himself over a direct HTTP fetch stating +2", async () => {
     await page.getByRole("link", { name: /^start a round here$/i }).click();
     await expect(page).toHaveURL(/\/create/);
 
@@ -218,32 +218,40 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
   });
 
   test("6: the singles match (Pat vs Quinn) is added via SetupPanel", async () => {
-    // Match play defaults to 100% allowance (AddGameForm's changeKind re-anchor) — exactly
-    // the brief's own allowance, so nothing here overrides it.
+    // No allowance to set: the percentage table is deleted (spec 2026-07-29 §3) — a match's
+    // strokes are the difference between the two players' stated numbers, full stop, so
+    // AddGameForm's match-play arm offers only the two player pickers addSinglesGame drives.
     await addSinglesGame(page, "Pat", "Quinn");
 
     await expect(chip(page, "Match play")).toBeVisible();
   });
 
-  test("7: the STANDARD CARD's dots match the hand-verified expectations exactly — each player's own course handicap (Pat 21, Quinn 2), no allowance, no game", async () => {
+  test("7: the STANDARD CARD's dots match the hand-verified expectations exactly — each player's DERIVED round strokes (Pat 19, Quinn 0), no game", async () => {
     // spec 2026-07-19 §2a: the card never changes — ScorecardGrid always renders
-    // courseHandicapAllocation (packages/domain/src/scoring/allocation.ts), each player's OWN
-    // course handicap allocated by stroke index, no allowance, no game (chip taps no longer
-    // touch the grid). allocateStrokes(21, 18 holes): base = floor(21/18) = 1, extra = 21 % 18 =
-    // 3, so every hole gets 1 dot and the THREE hardest holes (stroke index 1, 2, 3 — holes 3,
-    // 10, 2 respectively on this card) get a 2nd, for 2. allocateStrokes(2, 18 holes): base =
-    // floor(2/18) = 0, extra = 2, so only stroke index 1 and 2 (holes 3 and 10) get a single
-    // dot; every other hole gets 0. If this ever disagrees with what the grid actually renders,
-    // that's the plan's own BLOCKED condition — not something this test may quietly re-derive or
-    // relax.
+    // roundStrokeAllocation (packages/domain/src/scoring/allocation.ts), each player's own
+    // DERIVED round strokes allocated by stroke index, no game (chip taps don't touch the grid).
+    //
+    // RE-DERIVED BY HAND for spec 2026-07-29 §2b (strokes are the difference from the lowest in
+    // the field, never the number a player stated). Pat stated +21 and Quinn +2, both present,
+    // on an 18-hole card:
+    //   anchor = min(21, 2) = 2 (Quinn, the better player)
+    //   Pat:   21 − 2 = 19 strokes (18 holes — no halving; that is the nine-hole rule)
+    //   Quinn:  2 − 2 =  0 strokes — the anchor receives nothing
+    // allocateStrokes(19, 18 holes): base = floor(19/18) = 1, extra = 19 % 18 = 1 → EVERY hole
+    // gets 1 dot and the single hardest hole (stroke index 1 = hole 3 on this card) gets a 2nd.
+    // allocateStrokes(0, 18 holes) is all zeros — and that ZERO ROW is the interesting half of
+    // the assertion now: under the retired absolute model Quinn still carried his own 2 dots, so
+    // "the best player in the field receives nothing" is a real property this loop proves.
+    // If this ever disagrees with what the grid actually renders, that's the plan's own BLOCKED
+    // condition — not something this test may quietly re-derive or relax.
     const dotsOn = async (golfer: string, hole: number): Promise<number> => {
       const cell = page.getByRole("button", { name: `${golfer} hole ${hole}`, exact: true });
       const text = await cell.innerText();
       return (text.match(new RegExp(DOT, "g")) ?? []).length;
     };
 
-    const PAT_TWO_DOT_HOLES = new Set([2, 3, 10]); // stroke index 3, 1, 2 — CH 21's "extra" holes
-    const QUINN_ONE_DOT_HOLES = new Set([3, 10]); // stroke index 1, 2 — CH 2's "extra" holes
+    const PAT_TWO_DOT_HOLES = new Set([3]); // stroke index 1 — the one "extra" hole of Pat's 19
+    const QUINN_ONE_DOT_HOLES = new Set<number>(); // Quinn is the anchor: 0 strokes, no dot anywhere
 
     for (let hole = 1; hole <= 18; hole += 1) {
       const expectedPatDots = PAT_TWO_DOT_HOLES.has(hole) ? 2 : 1;
@@ -253,17 +261,15 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     }
   });
 
-  test("8: the Match play PANEL states the singles-difference strokes — relative, not each player's own CH — opened with ONE chip tap", async () => {
-    // gameStrokeAllocation (packages/domain/src/scoring/allocation.ts): singles-match strokes
-    // are RELATIVE, not each player's own course handicap — only the higher-handicap player
-    // receives any, the lower plays scratch. chA (Pat) = 21, chB (Quinn) = 2, allowance 1 (100%,
-    // AddGameForm's own singles-match default) -> diff = playingHandicap(19, 1) = 19. That 19 is
-    // exactly what the panel's own strokes line states (strokesSummary, apps/web/src/round/
-    // dots.ts) — Quinn is omitted entirely (his relative allocation is 0, strokeGrant "none").
-    // This is the arithmetic test 7's own grid dots used to carry when a single active game
-    // drove the whole card; the panel is its new home now, not the grid (spec 2026-07-19
-    // §2a/§2b) — relocated, not deleted. If this ever disagrees with what the panel actually
-    // renders, that's the plan's own BLOCKED condition too.
+  test("8: the Match play PANEL states the match's own strokes — resolved off the GAME's field — opened with ONE chip tap", async () => {
+    // gameStrokeAllocation (packages/domain/src/scoring/allocation.ts) applies the SAME one rule
+    // as the card, over the GAME's own field (spec 2026-07-29 §2b/§3) — there is no allowance
+    // percentage and no per-kind convention left. This match's field is the whole two-player
+    // roster, so it resolves the identical anchor test 7 derived: Pat 21 − 2 = 19, Quinn 0. The
+    // two would diverge only for a game played by a SUBSET of the roster (the case the general
+    // rule exists for); that this one agrees is a property of the field, not of the kind.
+    // strokesSummary (apps/web/src/round/dots.ts) omits Quinn entirely — a member with zero
+    // strokes is left off the line rather than printed as "Quinn 0 dots".
     const panel = await openGamePanel(page, "Match play");
     await expect(panel).toContainText("Pat 19 dots");
   });

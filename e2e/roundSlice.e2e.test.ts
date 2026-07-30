@@ -99,7 +99,7 @@ describe("deployed vertical slice: the M2 concurrency deck over the wire", () =>
 
     const bo = await post(rounds("/join"), { code: joinCode, tee: "white", basis: { kind: "normally-shoots", overPar: 2 } }, joinRoundResponseSchema, boAccount.idToken);
     // The join response echoes the canonical code (spec 2026-07-20: token implies code); the
-    // re-mint arm of the same invariant is proven in the browser (handicapCorrection.spec).
+    // re-mint arm of the same invariant is proven in the browser (basisCorrection.spec).
     expect(bo.joinCode).toBe(joinCode);
     token2 = bo.token;
     boId = bo.golferId;

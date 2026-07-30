@@ -20,21 +20,21 @@ import type { AccountGolfer } from "./support.js";
 // The record gate, rewritten accounts-only (accounts-only identity spec §1-2): the old
 // play-as-ghost-then-claim arc is DELETED, not stubbed — nothing exists to claim anymore, so
 // the story is the product's own instead: one account signs up, names itself once, plays
-// three rounds AS ITSELF, and its history/index accrue live; then a projections rebuild
+// three rounds AS ITSELF, and its history/average accrue live; then a projections rebuild
 // reproduces the identical record. The oracle discipline is unchanged from the M7 original:
 // every expected number below was hand-pinned BEFORE any live call, never computed from the
 // system under test (BLOCKED-don't-fudge). Everything is API-driven except test 3 —
 // ProfilePage is real UI, so it gets the one browser step ("browser only where the story
 // needs one", the same precedent as fieldTest.spec.ts's Cal/Dee).
 //
-// Course: a throwaway 18-hole, all-par-4 (par 72) card at rating 71.6 / slope 128 — chosen so
-// every hole's net-double-bogey cap sits comfortably above the worst score this deck ever posts
-// (bogey, +1), so AGS == gross exactly. That cap is now par+2 on EVERY hole, with no par+3 holes
-// at all: this account plays its three rounds alone, and strokes are the difference from the
-// lowest in the field (spec 2026-07-29 §2b), so a lone player is their own anchor and derives
-// ZERO strokes no matter what they stated. The oracle is unaffected — a bogey clears a par+2 cap
-// with a stroke to spare — but the arithmetic the comment used to describe (8 strokes landing on
-// SI 1–8, lifting those holes to par+3) is arithmetic the code no longer performs.
+// Course: a throwaway 18-hole, all-par-4 (par 72) card at rating 71.6 / slope 128 — the
+// rating/slope pair is recorded on the card and read by NOTHING (spec 2026-07-29 §7), kept here
+// only because deleting it would change the fixture for no reason. This account plays its three
+// rounds ALONE, and strokes are the difference from the lowest in the field (spec §2b), so a lone
+// player is their own anchor and derives ZERO strokes no matter what they stated: every hole is
+// scored at its raw gross, with no dots and no cap anywhere in the arithmetic (the net-double-bogey
+// cap now applies only to a picked-up hole, and this deck has none). The adjusted-gross-score step
+// that used to sit between the card and the record is deleted whole.
 // A single flat tee keeps the composition arithmetic (bogeys × (par+1) + pars × par) trivial to
 // hand-verify against the pinned table.
 const buildIdentityCourseCard = (courseName: string): CourseCard => ({
@@ -159,7 +159,7 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     roundIds.push(await playRecordRound(httpUrl, account, course, "r3", 16));
   });
 
-  test("2: /me/record settles to 3 lines and the pinned index, live", async () => {
+  test("2: /me/record settles to 3 lines and the pinned average, live", async () => {
     test.setTimeout(90_000);
     const { httpUrl } = loadWebEnv();
     const record = await pollRecord(httpUrl, account.tokens.idToken, 3);
@@ -177,9 +177,13 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     // `score - par` is exactly what a history row renders beside the score (spec §5), and it is the
     // per-round figure the headline average is the mean of — pinned so the two can never disagree.
     expect(record.history.map((line) => line.score! - line.par)).toEqual([PINNED_OVER_PAR[2], PINNED_OVER_PAR[1], PINNED_OVER_PAR[0]]);
-    // Every line carries the strokes the fold derived: a lone player is their own anchor, so a
-    // stated +0 resolves to 0 strokes for all three rounds (spec §2b).
+    // Every line carries the strokes the fold derived: a lone player is their own anchor, so
+    // playRecordRound's stated +8 resolves to 8 − 8 = 0 strokes for all three rounds (spec §2b).
+    // Stated as a NON-ZERO number on purpose — the assertion would be vacuous if the deck had
+    // stated +0, since 0 is also what a fold that confused the assertion with the derived value
+    // would print.
     expect(record.history.map((line) => line.strokes)).toEqual([0, 0, 0]);
+    expect(record.history.map((line) => line.normallyShoots)).toEqual([8, 8, 8]);
     // The retired columns are pinned ABSENT, not merely unasserted.
     for (const line of record.history) {
       for (const retired of ["ags", "differential"]) expect(line).not.toHaveProperty(retired);
@@ -246,7 +250,12 @@ test.describe.serial("identity/record gate — one account, three rounds as self
     // (record.metrics.average === PINNED_AVERAGE) has its direct on-screen analog in
     // RecordSections' own headline: "What you shoot" over the average rendered vs par.
     await expect(page.getByRole("heading", { name: "What you shoot" })).toBeVisible();
-    await expect(page.getByText(`+${PINNED_AVERAGE}`)).toBeVisible();
+    // exact: true is LOAD-BEARING, not tidiness: round 2's own history row renders
+    // "…· white · 85 (+13)" (85 − 72 = 13 — HistoryList's own vs-par segment), so a substring
+    // match on "+13" resolves to TWO elements (the headline <span> and that <a>) and fails
+    // Playwright's strict mode. Exact matching pins the headline's own span, whose normalized text
+    // is exactly "+13" (formatOverPar(13), RecordSections.tsx).
+    await expect(page.getByText(`+${PINNED_AVERAGE}`, { exact: true })).toBeVisible();
     await expect(page.getByText("your last 10 finished rounds, score minus par")).toBeVisible();
     // The retired surface is pinned GONE, not merely unasserted — a stale bundle would fail here.
     await expect(page.getByText(/WHS index/)).toHaveCount(0);

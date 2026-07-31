@@ -1,25 +1,33 @@
 // The total parse gate for a stage's stored data (spec 2026-07-31 §6.6: "the gate is total, not a
-// spot check"). READ-ONLY — it scans all four tables and reads nothing else; the only DynamoDB
-// command it imports is ScanCommand, so there is no code path here that can write or delete.
+// spot check"). READ-ONLY — the only DynamoDB command it imports is ScanCommand, so there is no
+// code path here that can write or delete.
 //
 // It runs BEFORE the migration, where it must FAIL on exactly the 15 known records, and again
 // AFTER, where 100% must pass. A gate that has never been seen to fail is not a gate — it is a
 // green light of unknown provenance.
 //
-// Every item lands in exactly one bucket and every bucket is printed, including the ones nothing
-// parses (OPID# tombstones, round pointers, presence rows, the whole core table). A gate that
-// quietly skips a category is how a green check ends up covering unexamined data, so the counts
-// are reconciled against each table's raw item count and a mismatch is itself a failure.
+// SCOPE — four of the stage's five tables. `swng-<stage>-rounds`, `-snapshots`, `-projections` and
+// `-core` are scanned in full. `swng-connections-<stage>` is DELIBERATELY OUT OF SCOPE: it holds
+// ephemeral WebSocket connection registrations that no schema reads, that no round or record is
+// derived from, and that spec §6.1 leaves out of the export for the same reason. It is named here
+// and in the summary rather than left to be inferred, because an unnamed skipped table would be a
+// stronger version of the exact "a gate that quietly skips a category" failure this file exists to
+// refuse. Every verdict this script prints says four tables, never "every table".
+//
+// Within those four, every item lands in exactly one bucket and every bucket is printed, including
+// the ones nothing parses (OPID# tombstones, round pointers, presence rows, the whole core table).
 //
 // What reads what, at HEAD:
 //
 //   rounds      items carrying an `event`   -> roundEventSchema     (createDynamoEventJournal.read)
 //   snapshots   the `archive` attribute     -> roundArchiveSchema   (createDynamoSnapshotStore)
-//   projections items carrying a `line`     -> `typeof line.strokes === "number"`
-//                                              (createDynamoProjectionStore.listLines CASTS rather
-//                                               than parses, so a bad line is silently wrong at
-//                                               HEAD rather than refused — which is exactly why
-//                                               this gate checks the field by hand)
+//   projections items carrying a `line`     -> every field GolferRoundLine REQUIRES, checked by
+//                                              hand. createDynamoProjectionStore.listLines CASTS
+//                                              `item.line` rather than parsing it, so a malformed
+//                                              line is silently wrong at HEAD rather than refused —
+//                                              this gate is the only thing standing between such a
+//                                              line and a wrong stat, so it checks the whole
+//                                              required set, not just the field this arc renames.
 //   rounds      items with no `event`, and every core-table item: nothing reads them through a
 //               schema. Counted and reported as NOT PARSED, never omitted.
 //
@@ -38,7 +46,21 @@ const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 // in a comment.
 const { DynamoDBDocumentClient, ScanCommand } = require("@aws-sdk/lib-dynamodb");
 
-const stage = process.argv.includes("--stage") ? process.argv[process.argv.indexOf("--stage") + 1] : "prod";
+// A flag's VALUE is guarded, not just its presence: `--stage` with nothing after it yields
+// `undefined` and would build table names like `swng-rounds-undefined`, and `--stage --write`
+// would take the next flag as a stage name. Both fail eventually as a nonexistent-table error
+// several seconds later, which is a worse way to learn you typed it wrong.
+const flagValue = (name) => {
+  if (!process.argv.includes(name)) return undefined;
+  const value = process.argv[process.argv.indexOf(name) + 1];
+  if (value === undefined || value.startsWith("--")) {
+    console.error(`error: ${name} needs a value (e.g. \`${name} prod\`).`);
+    process.exit(1);
+  }
+  return value;
+};
+
+const stage = flagValue("--stage") ?? "prod";
 
 // HEAD's own schemas, from the built dist — the same objects the lambda parses with. Loaded
 // dynamically so a missing build produces an instruction instead of a module-resolution stack
@@ -169,13 +191,38 @@ if (rosterLines.length > 0) console.log(`    rosters (resolved strokes):\n${rost
 console.log("");
 
 // --- projections table ------------------------------------------------------------------------
-// listLines CASTS `item.line` rather than parsing it, so a line whose `strokes` is missing is not
-// refused at HEAD — it reads `undefined` and quietly poisons a golfer's stats. That is the whole
-// reason this gate checks the field itself instead of trusting a parse that never happens.
+// listLines CASTS `item.line` rather than parsing it, so a malformed line is not refused at HEAD —
+// it is read as though it were fine and quietly poisons a golfer's stats. This gate is therefore
+// the ONLY thing standing between a bad line and a wrong number on someone's profile, which is why
+// it checks every field GolferRoundLine requires rather than only the one this arc renames.
+
+// GolferRoundLine (packages/domain/src/golfer/record.ts), required members only. `courseId`,
+// `score` and `holeResults` are legitimately optional — `score` is ABSENT on a round with a pickup
+// (there is no gross to record), so its absence must never be a failure. It is counted and
+// reported below instead, because spec §9.5 reads history rows and a line with no `score` renders
+// none.
+const REQUIRED_LINE_FIELDS = [
+  ["roundId", (v) => typeof v === "string" && v !== ""],
+  ["courseName", (v) => typeof v === "string" && v !== ""],
+  ["tee", (v) => typeof v === "string" && v !== ""],
+  ["holes", (v) => v === 9 || v === 18],
+  ["par", (v) => typeof v === "number"],
+  ["strokes", (v) => typeof v === "number"],
+  ["distribution", (v) => v !== null && typeof v === "object" && ["eagles", "birdies", "pars", "bogeys", "doublePlus"].every((k) => typeof v[k] === "number")],
+];
+
+// Retired by the strokes arcs. Spec §9.6 requires them GONE once the projector re-derives each
+// line from its migrated snapshot — putLine writes the whole item, so a re-derived line cannot
+// keep them. A survivor therefore means the line was NOT re-derived, which is a real failure of
+// the migration's central claim, so it is one here rather than a note inside an otherwise-green
+// run. Informational output in a PASS is not a check; a run that passes has to have proven this.
+const RETIRED_LINE_FIELDS = ["ags", "differential", "courseHandicap"];
 
 const projectionItems = await scanAll(projectionsTable);
 let linesOk = 0;
 let linesFailed = 0;
+let linesWithScore = 0;
+let linesWithRetired = 0;
 const unparsedProjections = new Map();
 const lineNotes = [];
 
@@ -186,23 +233,30 @@ for (const item of projectionItems) {
     continue;
   }
   const key = `${item.pk} ${item.sk}`;
-  if (typeof item.line.strokes !== "number") {
+  const line = item.line;
+  const problems = REQUIRED_LINE_FIELDS.filter(([field, ok]) => !ok(line[field])).map(([field]) => `line.${field} is ${JSON.stringify(line[field])}`);
+  const retired = RETIRED_LINE_FIELDS.filter((field) => line[field] !== undefined);
+  if (retired.length > 0) {
+    linesWithRetired += 1;
+    problems.push(`line still carries retired key(s) ${retired.join(", ")} — the projector did not re-derive this line`);
+  }
+  if (problems.length > 0) {
     linesFailed += 1;
-    fail(projectionsTable, key, `line.strokes is ${typeof item.line.strokes} (${JSON.stringify(item.line.strokes)}), expected number`);
+    fail(projectionsTable, key, problems.join("; "));
     continue;
   }
   linesOk += 1;
-  // Informational, never a failure: spec §9.6 expects these retired keys to be gone once the
-  // projector re-derives each line from the migrated snapshot. Reported so that is visible
-  // rather than assumed.
-  const retired = ["ags", "differential", "courseHandicap"].filter((k) => item.line[k] !== undefined);
-  lineNotes.push(`      ${short(String(item.pk).replace("GOLFER#", ""))}  ${String(item.sk)}  strokes=${item.line.strokes}${retired.length > 0 ? `  [retired keys still present: ${retired.join(", ")}]` : ""}`);
+  if (typeof line.score === "number") linesWithScore += 1;
+  lineNotes.push(`      ${short(String(item.pk).replace("GOLFER#", ""))}  ${String(item.sk)}  strokes=${line.strokes}  par=${line.par}  ${typeof line.score === "number" ? `score=${line.score}` : "score absent (a pickup — legitimately no gross)"}`);
 }
 
+const lineCount = linesOk + linesFailed;
 console.log(`${projectionsTable} — ${projectionItems.length} item(s)`);
-console.log(`  checked \`typeof line.strokes === "number"\`: ${linesOk + linesFailed} record line(s) — ${linesOk} ok, ${linesFailed} FAILED`);
+console.log(`  checked every field GolferRoundLine requires: ${lineCount} record line(s) — ${linesOk} ok, ${linesFailed} FAILED`);
+console.log(`  retired keys (${RETIRED_LINE_FIELDS.join("/")}) — spec §9.6: ${linesWithRetired === 0 ? "none present on any line" : `${linesWithRetired} line(s) STILL CARRY THEM (counted in the failures above)`}`);
+console.log(`  \`score\` present on ${linesWithScore} of ${lineCount} line(s) — optional by design; absent means that round has a pickup and renders no gross`);
 if (lineNotes.length > 0) console.log(lineNotes.sort().join("\n"));
-console.log(`  NOT PARSED — nothing at HEAD reads these through a schema: ${projectionItems.length - linesOk - linesFailed} item(s)`);
+console.log(`  NOT PARSED — nothing at HEAD reads these through a schema: ${projectionItems.length - lineCount} item(s)`);
 if (unparsedProjections.size > 0) console.log(tallyLines(unparsedProjections).join("\n"));
 console.log("");
 
@@ -225,8 +279,11 @@ console.log(tallyLines(coreKinds).join("\n"));
 console.log("");
 
 // --- verdict ----------------------------------------------------------------------------------
-// The reconciliation is part of the gate: if the buckets above do not add up to what the scans
-// actually returned, the summary is lying and that is a failure in its own right.
+// The reconciliation below is honest about what it is: every loop above tallies in every branch,
+// so this cannot be false without an edit to a loop body. That edit — a `continue` added without
+// a matching tally — is exactly the realistic regression, so the check is worth keeping; it just
+// guards against that one future mistake rather than standing as a live guard against a summary
+// that lies today.
 
 const accountedFor =
   roundsItems.length === eventsOk + eventsFailed + [...unparsedRounds.values()].reduce((a, b) => a + b, 0) &&
@@ -237,7 +294,8 @@ const accountedFor =
 const totalItems = roundsItems.length + snapshotItems.length + projectionItems.length + coreItems.length;
 const totalChecked = eventsOk + eventsFailed + archivesOk + archivesFailed + linesOk + linesFailed;
 
-console.log(`SUMMARY — ${totalItems} item(s) scanned across 4 table(s); ${totalChecked} checked against HEAD, ${totalItems - totalChecked} carry no schema at HEAD (named above)`);
+console.log(`SUMMARY — ${totalItems} item(s) scanned across the 4 in-scope table(s); ${totalChecked} checked against HEAD, ${totalItems - totalChecked} carry no schema at HEAD (named above)`);
+console.log(`          OUT OF SCOPE, deliberately: swng-connections-${stage} — ephemeral WebSocket registrations, no schema reads them, no round or record derives from them (spec §6.1 leaves them out of the export for the same reason)`);
 
 if (!accountedFor) {
   console.error("\nFAIL: the per-category counts do not reconcile with the raw scan counts — some item was neither checked nor named.");
@@ -252,4 +310,6 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`\nPASS — every item in every ${stage} table is readable by HEAD.`);
+// The claim is exactly as wide as the scan: four tables, named. This line gets cited as the
+// evidence for done-means §9.4, so it must not say "every table" while a fifth sits unscanned.
+console.log(`\nPASS — every item in all 4 in-scope ${stage} tables is readable by HEAD, and no record line carries a retired key.`);

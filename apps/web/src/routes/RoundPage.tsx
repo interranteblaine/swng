@@ -21,11 +21,22 @@ import { usePageTitle } from "../ui/usePageTitle";
 
 type UseRoundSession = (roundId: RoundId) => RoundSessionView;
 
+// What a finalize ATTEMPT can come back as. `round-finalized` is terminal, so a score still
+// sitting in this device's outbox when it lands is refused by the server and dropped for good —
+// which is why "the queue wouldn't drain" is a first-class outcome here rather than an error:
+// nothing was attempted, nothing was lost, and the golfer needs to be told exactly that.
+type FinalizeOutcome = { readonly ok: true } | { readonly ok: false; readonly unsent: number };
+
 interface FinalizeControlProps {
   readonly state: RoundState;
   readonly games: readonly GameState[];
-  readonly onFinalize: () => Promise<void>;
-  readonly onTerminate: (gameId: GameId) => Promise<void>;
+  // Outbox depth, for the dialog's own honesty about what hasn't sent yet. Only ever read at
+  // render time — the ACTING count comes back from onFinalize, which reads it live (a snapshot
+  // taken before an await can't be trusted afterwards; session/useRoundSession.ts's flush()).
+  readonly pending: number;
+  // Ends `endFirst` (in order) and finalizes, but only after this device's outbox is confirmed
+  // empty — see RoundPageContent's own implementation for the ordering rule.
+  readonly onFinalize: (endFirst?: readonly GameId[]) => Promise<FinalizeOutcome>;
 }
 
 // Any participant may finalize (brief) — the confirm dialog here is a SEPARATE affordance
@@ -37,43 +48,37 @@ interface FinalizeControlProps {
 // reads "Stableford — holes 2–18 unscored for Pat" BEFORE the server ever gets to 409, and
 // "End unfinished games & finalize" (terminate each, then the existing finalize — the plan's
 // fixed composition, not a new lifecycle state) resolves it in one tap.
-function FinalizeControl({ state, games, onFinalize, onTerminate }: FinalizeControlProps) {
+function FinalizeControl({ state, games, pending, onFinalize }: FinalizeControlProps) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [unsent, setUnsent] = useState<number | undefined>(undefined);
 
   // Recomputed from the fold on every render — a score or termination landing mid-dialog (via
   // sync) updates the list live, and after a failed attempt this same recomputation IS the
   // structured explanation the brief demands in place of the old raw caught.message.
   const unresolved = unresolvedGames(state, games);
 
-  const finalizeNow = async () => {
+  // Both buttons below are the SAME guarded attempt, differing only in which games it ends on
+  // the way through — so the drain-first rule can't be true of one path and forgotten on the
+  // other.
+  const attemptFinalize = async (endFirst: readonly GameId[]) => {
     setBusy(true);
     setError(undefined);
+    setUnsent(undefined);
     try {
-      await onFinalize();
+      const outcome = await onFinalize(endFirst);
       // No local "done" state to set on success: onFinalize's own session.sync() (RoundPage's
       // implementation below) is what flips session.state.status to "final", which swaps this
       // whole subtree for ResultsView in the parent — this component just stops rendering,
       // matching SetupPanel's own "no optimistic insert, let the fold do it" precedent.
+      if (outcome.ok) return;
+      setUnsent(outcome.unsent);
+      setBusy(false);
     } catch {
       // NEVER caught.message (papercut 1): the raw server line names games by uuid. The dialog
       // stays open — its unresolved list, recomputed from the fold above, is the real
       // explanation; this line only says the attempt itself failed.
-      setError("Could not finalize the round — try again.");
-      setBusy(false);
-    }
-  };
-
-  const endUnfinishedAndFinalize = async () => {
-    setBusy(true);
-    setError(undefined);
-    try {
-      // Terminate each unresolved game FIRST, then the ordinary finalize — strictly in this
-      // order, or the finalize still lands on an unresolved game and 409s.
-      for (const game of unresolved) await onTerminate(game.gameId);
-      await onFinalize();
-    } catch {
       setError("Could not finalize the round — try again.");
       setBusy(false);
     }
@@ -85,6 +90,7 @@ function FinalizeControl({ state, games, onFinalize, onTerminate }: FinalizeCont
         type="button"
         onClick={() => {
           setError(undefined);
+          setUnsent(undefined);
           setConfirming(true);
         }}
         className={`${btnDanger} min-h-14 w-full`}
@@ -94,10 +100,18 @@ function FinalizeControl({ state, games, onFinalize, onTerminate }: FinalizeCont
 
       {confirming && (
         <div role="dialog" aria-label="Confirm finalize" className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-3 border-t-2 border-forest bg-card p-4 shadow-2xl">
+          {/* Stated before the tap, not discovered after it: "locks in every score" below is only
+              true because the attempt sends what's queued first, so the dialog says so out loud
+              whenever there is anything to send. */}
+          {pending > 0 && (
+            <p className="text-sm text-fairway">
+              {pending} score{pending === 1 ? "" : "s"} {pending === 1 ? "hasn't" : "haven't"} sent yet — finalizing sends {pending === 1 ? "it" : "them"} first.
+            </p>
+          )}
           {unresolved.length === 0 ? (
             <>
               <p className="text-sm text-fairway">Finalize the round? This locks in every score — no more edits.</p>
-              <button type="button" onClick={() => void finalizeNow()} disabled={busy} className={`${btnPrimary} min-h-14 disabled:opacity-50`}>
+              <button type="button" onClick={() => void attemptFinalize([])} disabled={busy} className={`${btnPrimary} min-h-14 disabled:opacity-50`}>
                 {busy ? "Finalizing…" : "Finalize"}
               </button>
             </>
@@ -112,7 +126,12 @@ function FinalizeControl({ state, games, onFinalize, onTerminate }: FinalizeCont
                 ))}
               </ul>
               <p className="text-sm text-fairway">Ending them stops their scoring — they won&apos;t appear in the final results.</p>
-              <button type="button" onClick={() => void endUnfinishedAndFinalize()} disabled={busy} className={`${btnDangerSolid} min-h-14 disabled:opacity-50`}>
+              <button
+                type="button"
+                onClick={() => void attemptFinalize(unresolved.map((game) => game.gameId))}
+                disabled={busy}
+                className={`${btnDangerSolid} min-h-14 disabled:opacity-50`}
+              >
                 {busy ? "Finalizing…" : "End unfinished games & finalize"}
               </button>
             </>
@@ -120,6 +139,12 @@ function FinalizeControl({ state, games, onFinalize, onTerminate }: FinalizeCont
           <button type="button" onClick={() => setConfirming(false)} disabled={busy} className={`${btnSecondary} min-h-14 disabled:opacity-50`}>
             Cancel
           </button>
+          {unsent !== undefined && (
+            <p role="alert" className="text-oxblood">
+              Nothing was finalized — {unsent} score{unsent === 1 ? "" : "s"} {unsent === 1 ? "hasn't" : "haven't"} sent yet. No score is lost; check your signal, then finalize
+              again.
+            </p>
+          )}
           {error && (
             <p role="alert" className="text-oxblood">
               {error}
@@ -267,12 +292,13 @@ interface LiveRoundProps {
   readonly state: RoundState; // status !== "final" — RoundPageContent's own contract below
   readonly games: readonly GameState[];
   readonly recordScore: (golferId: GolferId, hole: number, result: HoleResult) => void;
+  readonly pending: number;
   readonly joinCode: string;
   // M9 Task 3 (share): the caller's own participant token — ShareButton's only other input
   // beyond state.id, same "credential.token" this page already threads to every write call.
   readonly token: string;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
-  readonly onFinalize: () => Promise<void>;
+  readonly onFinalize: (endFirst?: readonly GameId[]) => Promise<FinalizeOutcome>;
   readonly onTerminate: (gameId: GameId) => Promise<void>;
   readonly onAbandon: () => Promise<void>;
   readonly onLeave: () => Promise<void>;
@@ -284,7 +310,7 @@ interface LiveRoundProps {
 // StandingsHeader no longer needs an active-game selection threaded down to it at all (its own
 // chips are pure disclosure toggles now), so this component's only remaining job is composing
 // the live-only chrome that unmounts once status flips to "final".
-function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave, onSetStrokes }: LiveRoundProps) {
+function LiveRound({ state, games, recordScore, pending, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave, onSetStrokes }: LiveRoundProps) {
   // Order is the owner's ruling (spec 2026-07-20 §1): the card and its setup first, then
   // Finalize (the round's one big action), then the personal/destructive pair, then Share —
   // the least-used affordance — dead last.
@@ -293,7 +319,7 @@ function LiveRound({ state, games, recordScore, joinCode, token, onAddGame, onFi
       <StandingsHeader state={state} games={games} onTerminate={onTerminate} />
       <ScorecardGrid state={state} recordScore={recordScore} />
       <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} onSetStrokes={onSetStrokes} />
-      <FinalizeControl state={state} games={games} onFinalize={onFinalize} onTerminate={onTerminate} />
+      <FinalizeControl state={state} games={games} pending={pending} onFinalize={onFinalize} />
       <LeaveControl onLeave={onLeave} />
       <ScrapControl onAbandon={onAbandon} />
       <ShareButton roundId={state.id} token={token} />
@@ -312,7 +338,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     // Destructured so useCallback's deps list a stable function reference (sync's own
     // useCallback([]) in useRoundSession.ts) rather than the whole `session` object, which is
     // a fresh literal every render (snapshot spread) and would defeat memoization entirely.
-    const { sync, connect } = session;
+    const { sync, connect, flush } = session;
 
     const onAddGame = useCallback(
       async (game: GameConfigInput) => {
@@ -340,14 +366,32 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
       [roundId, credential.token, sync],
     );
 
-    const onFinalize = useCallback(async () => {
-      await finalizeRound(roundId, credential.token);
-      // The call has already landed server-side, but session.state.status hasn't necessarily
-      // folded the resulting round-finalized event yet (it arrives via this tab's own pull/WS,
-      // same as any other event) — sync() pulls it now instead of waiting for the next natural
-      // tick, so the live→ResultsView swap below follows almost immediately.
-      await sync();
-    }, [roundId, credential.token, sync]);
+    // THE finalize boundary — the one place the endpoint is called, so the drain-first rule
+    // below cannot be bypassed by adding another button. Scoring is offline-first: a tap folds
+    // optimistically and queues, and the sync loop pushes on its own schedule. `round-finalized`
+    // is terminal, so a score still queued when it lands is permanently refused by the server —
+    // it was entered, it renders locally, and it silently never existed. So: push the outbox and
+    // wait, and if anything is STILL queued afterwards, do nothing at all and say so. Nothing
+    // after this line runs on a refusal — not the terminations either — so a tap that can't
+    // succeed leaves the round exactly as the golfer left it, with every score still safely
+    // queued on the device.
+    const onFinalize = useCallback(
+      async (endFirst: readonly GameId[] = []): Promise<FinalizeOutcome> => {
+        const stillQueued = await flush();
+        if (stillQueued > 0) return { ok: false, unsent: stillQueued };
+        // Strictly before the finalize, or it lands on an unresolved game and 409s. No per-game
+        // sync(): the one below covers every append this call made.
+        for (const targetGameId of endFirst) await terminateGame(roundId, credential.token, targetGameId);
+        await finalizeRound(roundId, credential.token);
+        // The call has already landed server-side, but session.state.status hasn't necessarily
+        // folded the resulting round-finalized event yet (it arrives via this tab's own pull/WS,
+        // same as any other event) — sync() pulls it now instead of waiting for the next natural
+        // tick, so the live→ResultsView swap below follows almost immediately.
+        await sync();
+        return { ok: true };
+      },
+      [roundId, credential.token, flush, sync],
+    );
 
     const onTerminate = useCallback(
       async (targetGameId: GameId) => {
@@ -439,6 +483,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
             state={session.state}
             games={session.games}
             recordScore={session.recordScore}
+            pending={session.pending}
             joinCode={credential.joinCode}
             token={credential.token}
             onAddGame={onAddGame}

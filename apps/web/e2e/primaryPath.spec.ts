@@ -105,6 +105,12 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
     await expect(page).toHaveURL(/\/round\//);
   });
 
+  // Scored as fast as the UI accepts, DELIBERATELY: enterScore waits for the optimistic cell
+  // render and returns, so this loop enters holes faster than the sync loop pushes them and taps
+  // Finalize with a real queue still outstanding — which is exactly the state that lost half this
+  // round's scores before the finalize boundary drained the outbox first (2026-07-30). Making
+  // enterScore wait for each push would remove the stress and stop this gate proving anything;
+  // test 4's own hand-derived totals are what turn "a score went missing" into a failure.
   test("3: 18 holes are scored on the real grid", async () => {
     for (let hole = 1; hole <= 18; hole += 1) {
       await enterScore(page, GOLFER_NAME, hole, 4);
@@ -114,7 +120,11 @@ test.describe.serial("primary path — sign in, one name at the funnel prompt, a
   test("4: finalize through the real confirm dialog; the finished round states gross, strokes and net", async () => {
     await page.getByRole("button", { name: "Finalize round" }).click();
     await page.getByRole("dialog", { name: "Confirm finalize" }).getByRole("button", { name: /^finalize$/i }).click();
-    await expect(page.getByRole("heading", { name: "Final results" })).toBeVisible();
+    // Headroom beyond the 10s default (playwright.config.ts): this tap now pushes whatever test 3
+    // left queued — up to a whole card's worth of one-event-per-request pushes, oldest-first —
+    // BEFORE the finalize request goes out at all. That serialized drain is the fix, so the wait
+    // for it belongs here rather than being hidden inside enterScore.
+    await expect(page.getByRole("heading", { name: "Final results" })).toBeVisible({ timeout: 60_000 });
 
     // ADDED BY TASK 8 (beyond the brief's own locator sweep): "the finished round stops speaking
     // WHS" (spec 2026-07-29 §4) replaced ResultsView's "Posted to handicaps" section with a

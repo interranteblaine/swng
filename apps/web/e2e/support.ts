@@ -766,6 +766,15 @@ const scoreButtonText = (score: number | "picked-up"): string => (score === "pic
 // just the one the spec calls out explicitly. (The between-holes digest overlay this helper
 // once had to dismiss before every entry is deleted outright — accounts-only identity spec §6
 // — so nothing can sit above the grid between taps anymore.)
+//
+// It waits for the OPTIMISTIC render and returns — deliberately, and do not "fix" this into
+// waiting for the push. Scoring is offline-first, so a caller that enters holes back to back
+// leaves a real queue outstanding, which is precisely the state a finalize has to survive
+// (2026-07-30: it didn't, and every still-queued score was silently dropped by the terminal
+// `round-finalized`). Draining here would make every spec quiescent and stop any of them
+// exercising that boundary. A caller that genuinely needs a quiesced device before doing
+// something else — killNetwork's arm 2, before it forces the context offline — waits on
+// StatusChrome's own "N scores syncing" line instead, at the one point that needs it.
 export const enterScore = async (page: Page, golferName: string, hole: number, score: number | "picked-up"): Promise<void> => {
   // exact: true throughout — "hole 1" is a substring of "hole 10".."hole 18" (and the dialog's
   // "hole 1" likewise), so a non-exact name match would resolve to every one of them at once.

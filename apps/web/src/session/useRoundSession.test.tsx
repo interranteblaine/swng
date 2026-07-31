@@ -116,9 +116,12 @@ describe("useRoundSession", () => {
     const { result } = renderHook(() => useRoundSession(ROUND_ID));
 
     expect(result.current).toMatchObject({ hydrated: false, state: undefined, games: [], pending: 0, rejected: [], connected: false });
-    // recordScore/sync/connect on an idle view must be safe no-ops, never throw.
+    // recordScore/sync/flush/connect on an idle view must be safe no-ops, never throw.
     expect(() => result.current.recordScore(ANN_ID, 1, { kind: "strokes", strokes: 4 })).not.toThrow();
     await expect(result.current.sync()).resolves.toBeUndefined();
+    // 0, not a throw and not an undefined: no session means no outbox, and the finalize
+    // boundary reads this answer as "nothing queued" — the honest reading here.
+    await expect(result.current.flush()).resolves.toBe(0);
     expect(() => result.current.connect()).not.toThrow();
   });
 

@@ -14,6 +14,13 @@ export interface RoundSessionView {
   readonly connected: boolean;
   recordScore(golferId: GolferId, hole: number, result: HoleResult): void;
   sync(): Promise<void>;
+  // Pushes whatever is queued and answers "how much is STILL queued?" — read from the live
+  // session rather than from `pending` above. Every caller is an async handler, and a render
+  // snapshot's `pending` is stale the moment that handler awaits anything; a caller that has
+  // to ACT on the answer (the finalize boundary — round-finalized is terminal, so a score
+  // that hasn't landed by then is refused forever) therefore cannot use the snapshot.
+  // 0 on an idle view: no session means no outbox, which is honestly nothing queued.
+  flush(): Promise<number>;
   // Re-opens the socket (idempotent; a no-op if already connected) and fires an immediate
   // catch-up sync — the client SDK has no reconnect timer ("a caller that wants to reconnect
   // calls connect() again," session.ts's own doc comment), so this is the only thing that
@@ -153,11 +160,23 @@ export const createUseRoundSession = (resolveSessionConfig: ResolveSessionConfig
 
     const sync = useCallback(() => sessionRef.current?.sync() ?? Promise.resolve(), []);
 
+    // sync() then a LIVE read of the depth, in that order — not `snapshot.pending`, which this
+    // callback would have captured at its own render and which the await above is exactly what
+    // invalidates. sync() resolves (never rejects) on a transport failure — offline is an
+    // outcome, not an error, @swng/client's own doSync() — so a non-zero answer here means
+    // "genuinely still queued," not "the attempt blew up."
+    const flush = useCallback(async () => {
+      const session = sessionRef.current;
+      if (!session) return 0;
+      await session.sync();
+      return session.pending();
+    }, []);
+
     // Safe no-op on an idle view (no session yet/no credential) — same idle-tolerance
     // precedent as recordScore/sync above.
     const connect = useCallback(() => sessionRef.current?.connect(), []);
 
-    return { ...snapshot, recordScore, sync, connect };
+    return { ...snapshot, recordScore, sync, flush, connect };
   };
 };
 

@@ -219,21 +219,27 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     await expect(page.getByText(/^1 score syncing/)).toBeVisible();
   });
 
-  test("3: a finalize ATTEMPT while still offline fails with the honest fallback line — never a raw network error, dialog stays open, the queue survives", async () => {
+  test("3: a finalize ATTEMPT while still offline is REFUSED, in words — the round is never sealed over the queued score", async () => {
     await page.getByRole("button", { name: "Finalize round" }).click();
-    await expect(page.getByRole("dialog", { name: "Confirm finalize" })).toBeVisible();
+    const dialog = page.getByRole("dialog", { name: "Confirm finalize" });
+    await expect(dialog).toBeVisible();
+    // Stated before the tap, not discovered after it (2026-07-30): the dialog's own
+    // "locks in every score" promise is only true because the attempt sends what's queued first.
+    await expect(dialog).toContainText("1 score hasn't sent yet — finalizing sends it first.");
     await page.getByRole("button", { name: /^finalize$/i }).click();
 
-    // Same honest, never-raw-text fallback RoundPage.test.tsx's own component-level pin already
-    // asserts for a REJECTED finalize — this is the same code path hit by a REAL failed fetch
-    // (offline) instead of a mocked 409, proving it holds end to end, not just against a
-    // hand-built response.
+    // The finalize boundary drains the outbox and REFUSES rather than sealing over it —
+    // `round-finalized` is terminal, so a score that hasn't landed by then is refused by the
+    // server and dropped for good. Offline, the drain can't finish, so nothing at all is
+    // attempted: this is deliberately NOT the generic "could not finalize" line any more (that
+    // line belongs to an attempt the server actually rejected — RoundPage.test.tsx's own 409 pin
+    // still covers it), because nothing was attempted here and nothing is at risk.
     const alert = page.getByRole("alert");
-    await expect(alert).toHaveText("Could not finalize the round — try again.");
-    await expect(page.getByRole("dialog", { name: "Confirm finalize" })).toBeVisible(); // stays open — retry is one tap away
+    await expect(alert).toHaveText("Nothing was finalized — 1 score hasn't sent yet. No score is lost; check your signal, then finalize again.");
+    await expect(dialog).toBeVisible(); // stays open — retry is one tap away
     await expect(page.getByRole("heading", { name: "Final results" })).not.toBeVisible(); // never a silent/false finalize
 
-    // The queued hole-2 score from step 2 is untouched by the failed finalize attempt — still
+    // The queued hole-2 score from step 2 is untouched by the refused finalize attempt — still
     // honestly pending, not lost and not double-counted.
     await expect(page.getByText(/^1 score syncing/)).toBeVisible();
     await page.getByRole("button", { name: "Cancel" }).click();

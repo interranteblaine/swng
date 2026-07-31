@@ -779,6 +779,144 @@ describe("RoundPage", () => {
     expect(calls).toEqual(["terminate:single-1", "terminate:gross-1", "finalize"]);
   });
 
+  // The finalize boundary's own invariant (2026-07-30): scoring is offline-first, and
+  // `round-finalized` is TERMINAL — so a score still queued when the seal lands is refused by
+  // the server and dropped for good. Pre-fix, finalize was a bare POST with no regard for the
+  // outbox: score fast, tap Finalize, and half the round vanished silently. This pins the fix's
+  // ORDER — every queued score is in the server's log BEFORE the finalize call goes out.
+  it("finalize pushes the outbox first: a queued score reaches the server log BEFORE the round is sealed", async () => {
+    const id = roundId("round-finalize-drains");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-drain", golferId: ann, name: "Ann", joinCode: "DRN001" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    // Captured INSIDE the finalize handler, which is the only moment the question means
+    // anything: asserting after the fact would pass even if the push had landed second.
+    let scoreWasInLogWhenFinalized: boolean | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(String(url)).toBe(`https://api.example.test/rounds/${id}/finalize`);
+        scoreWasInLogWhenFinalized = transport.log.some((event) => event.kind === "score-recorded");
+        (transport.log as RoundEvent[]).push({
+          kind: "round-finalized",
+          authorId: ann,
+          opId: opId("srv-finalize"),
+          hlc: { wallMs: 9_999, counter: 0, deviceId: SERVER_DEVICE },
+          seq: transport.log.length + 1,
+        });
+        return { ok: true, status: 200, json: async () => ({ results: [] }) } as unknown as Response;
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("DRN001")).toBeTruthy());
+
+    // Score with the transport refusing pushes, so the event is stuck in the outbox exactly the
+    // way a real device's is between the tap and the round trip — the state the pre-fix finalize
+    // sealed straight over.
+    transport.offline = true;
+    fireEvent.click(screen.getByRole("button", { name: "Ann hole 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "5" }));
+    await waitFor(() => expect(screen.getByText(/^1 score syncing/)).toBeTruthy());
+    expect(transport.log.some((event) => event.kind === "score-recorded")).toBe(false);
+
+    // Pushes work again, but NOTHING re-syncs on its own (no timer in the SDK — session.ts) —
+    // the drain has to come from the finalize attempt itself.
+    transport.offline = false;
+
+    fireEvent.click(screen.getByRole("button", { name: "Finalize round" }));
+    // The dialog says so before the tap, rather than the golfer finding out afterwards.
+    expect(screen.getByRole("dialog", { name: "Confirm finalize" }).textContent).toMatch(/1 score hasn't sent yet — finalizing sends it first\./);
+    fireEvent.click(screen.getByRole("button", { name: "Finalize" }));
+
+    await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
+    expect(scoreWasInLogWhenFinalized).toBe(true);
+  });
+
+  // The other half of the same invariant: when the queue CANNOT drain (offline), the honest
+  // answer is to refuse. Sealing would trade a delay the golfer can wait out for scores nobody
+  // can ever get back — so nothing is attempted, and the dialog says exactly that.
+  it("finalize refuses while a score is still queued — the endpoint is never called, the queue survives, and it finalizes once the queue drains", async () => {
+    const id = roundId("round-finalize-refuses");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-refuse", golferId: ann, name: "Ann", joinCode: "RFS001" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    let finalizeCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        finalizeCalls += 1;
+        (transport.log as RoundEvent[]).push({
+          kind: "round-finalized",
+          authorId: ann,
+          opId: opId("srv-finalize"),
+          hlc: { wallMs: 9_999, counter: 0, deviceId: SERVER_DEVICE },
+          seq: transport.log.length + 1,
+        });
+        return { ok: true, status: 200, json: async () => ({ results: [] }) } as unknown as Response;
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("RFS001")).toBeTruthy());
+
+    transport.offline = true;
+    fireEvent.click(screen.getByRole("button", { name: "Ann hole 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "5" }));
+    await waitFor(() => expect(screen.getByText(/^1 score syncing/)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Finalize round" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finalize" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(screen.getByRole("alert").textContent).toMatch(/^Nothing was finalized — 1 score hasn't sent yet\./);
+    // The whole point: no seal was attempted, so there is nothing for the server to reject.
+    expect(finalizeCalls).toBe(0);
+    expect(screen.getByRole("dialog", { name: "Confirm finalize" })).toBeTruthy(); // stays open — retry is one tap away
+    expect(screen.queryByText("Final results")).toBeNull();
+    expect(screen.getByText(/^1 score syncing/)).toBeTruthy(); // the score is still queued, not lost
+
+    // Signal returns: the SAME tap now drains and then seals.
+    transport.offline = false;
+    fireEvent.click(screen.getByRole("button", { name: "Finalize" }));
+
+    await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
+    expect(finalizeCalls).toBe(1);
+    expect(transport.log.some((event) => event.kind === "score-recorded")).toBe(true);
+  });
+
   // Papercut 1's other half: the raw-uuid catch is gone — a finalize rejection renders a
   // human line (and the dialog's own structured list), never caught.message verbatim.
   it("a finalize rejection never renders the raw server message", async () => {

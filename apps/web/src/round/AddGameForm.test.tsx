@@ -141,7 +141,26 @@ describe("strokes preview", () => {
     await user.selectOptions(within(team2).getByRole("combobox", { name: "First player" }), "Sam");
     await user.selectOptions(within(team2).getByRole("combobox", { name: "Second player" }), "Dana");
     expect(screen.getByText("Played off the difference — everyone off the lowest of the four")).toBeTruthy();
-    expect(screen.getByText("Only the three higher numbers get strokes — the lowest gets none.")).toBeTruthy();
+    // A RULE, not a count (whole-branch review I1): this fixture happens to have three above the
+    // lowest, but at 20/20/10/10 only two receive, so the sentence can't name a number.
+    expect(screen.getByText("Only the numbers above the lowest get strokes — the lowest gets none.")).toBeTruthy();
+  });
+
+  // The default state of every new round: nobody has typed a number, so nobody is receiving. The
+  // preview says so once (the strokes line) and adds no note claiming otherwise.
+  it("a four-ball of all-level players previews the level line and NO note", async () => {
+    const user = userEvent.setup();
+    const level = participants.map((p) => ({ ...p, strokes: 0 }));
+    render(<AddGameForm participants={level} card={card} onAddGame={vi.fn()} />);
+    await user.click(screen.getByRole("radio", { name: "Four-ball" }));
+    const team1 = screen.getByRole("group", { name: "Team 1" });
+    const team2 = screen.getByRole("group", { name: "Team 2" });
+    await user.selectOptions(within(team1).getByRole("combobox", { name: "First player" }), "Pat");
+    await user.selectOptions(within(team1).getByRole("combobox", { name: "Second player" }), "Alex");
+    await user.selectOptions(within(team2).getByRole("combobox", { name: "First player" }), "Sam");
+    await user.selectOptions(within(team2).getByRole("combobox", { name: "Second player" }), "Dana");
+    expect(screen.getByText("No strokes — everyone in this game plays level.")).toBeTruthy();
+    expect(screen.queryByText(/gets none\./)).toBeNull();
   });
 });
 

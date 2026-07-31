@@ -3,15 +3,17 @@ import { gameId, golferId } from "../ids.js";
 import type { GameConfig } from "./game.js";
 import type { Participant } from "../round/participant.js";
 import { nineHoleContribution } from "../golfer/average.js";
+import { gameStrokeAllocation, totalDots } from "./allocation.js";
+import { fixtureLinks18 } from "./golden/fixtureCourse.js";
 import { formatOverPar, formatScoreVsPar, gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, strokesNote, underPar } from "./present.js";
 
 const A = golferId("a");
 const B = golferId("b");
 const C = golferId("c");
 const D = golferId("d");
-// One config per kind — gameTreatment reads a whole config now, not a bare kind, because whether a
-// game allocates at all is the config's own `scoring` choice. (strokesNote still takes a kind: the
-// two kinds it speaks for have no gross arm.)
+// One config per kind — both sentences read a whole config, not a bare kind: whether a game
+// allocates at all is the config's own `scoring` choice, and whose numbers are compared is its own
+// field.
 const strokePlay = (scoring: "gross" | "net"): GameConfig => ({ kind: "stroke-play", id: gameId("sp"), scoring, players: [A, B] });
 const skins = (scoring: "gross" | "net"): GameConfig => ({ kind: "skins", id: gameId("sk"), scoring, players: [A, B] });
 const stableford: GameConfig = { kind: "stableford", id: gameId("st"), players: [A, B] };
@@ -58,24 +60,24 @@ describe("gameTreatment", () => {
   // roster number, so their line names the CARD; a match uses the difference, so its line names
   // the DIFFERENCE.
   it("says a medal game uses the strokes on the card", () => {
-    expect(gameTreatment({ kind: "skins", id: gameId("g"), scoring: "net", players: [] })).toBe("Net — uses the strokes on the card");
+    expect(gameTreatment({ kind: "skins", id: gameId("g"), scoring: "net", players: [] }, [])).toBe("Net — uses the strokes on the card");
   });
   it("states the medal treatment identically across every net kind — one sentence, not per-kind drift", () => {
-    expect(gameTreatment(strokePlay("net"))).toBe("Net — uses the strokes on the card");
-    expect(gameTreatment(skins("net"))).toBe("Net — uses the strokes on the card");
-    expect(gameTreatment(stableford)).toBe("Net — uses the strokes on the card");
+    expect(gameTreatment(strokePlay("net"), [])).toBe("Net — uses the strokes on the card");
+    expect(gameTreatment(skins("net"), [])).toBe("Net — uses the strokes on the card");
+    expect(gameTreatment(stableford, [])).toBe("Net — uses the strokes on the card");
   });
   it("gross has no strokes at all, by definition — on either kind that offers the choice", () => {
-    expect(gameTreatment(strokePlay("gross"))).toBe("Gross — raw scores, no strokes");
-    expect(gameTreatment(skins("gross"))).toBe("Gross — raw scores, no strokes");
+    expect(gameTreatment(strokePlay("gross"), [])).toBe("Gross — raw scores, no strokes");
+    expect(gameTreatment(skins("gross"), [])).toBe("Gross — raw scores, no strokes");
   });
   it("says a match is played off the difference", () => {
     // `a`/`b` are 2-tuples on FourballOutcome's own GameConfig arm, not bare arrays — filled with
     // placeholder ids here since this line reads no roster at all (it's fixed by kind alone).
-    expect(gameTreatment({ kind: "fourball-match", id: gameId("f"), a: [A, B], b: [C, D] })).toBe("Played off the difference — everyone off the lowest of the four");
+    expect(gameTreatment({ kind: "fourball-match", id: gameId("f"), a: [A, B], b: [C, D] }, [])).toBe("Played off the difference — everyone off the lowest of the four");
   });
   it("four-ball names the fixed rule from the config alone — no roster needed, unlike singles", () => {
-    expect(gameTreatment(fourball)).toBe("Played off the difference — everyone off the lowest of the four");
+    expect(gameTreatment(fourball, [])).toBe("Played off the difference — everyone off the lowest of the four");
   });
   it("singles names who receives and how many, from the roster's own strokes", () => {
     const participants = [participant(A, "Ann", 6), participant(B, "Bo", 2)];
@@ -91,8 +93,10 @@ describe("gameTreatment", () => {
     const participants = [participant(A, "Ann", 5), participant(B, "Bo", 5)];
     expect(gameTreatment(singles, participants)).toBe("Played off the difference — level, nobody receives");
   });
-  it("degrades to the level line rather than crashing when no roster is supplied at all", () => {
-    expect(gameTreatment(singles)).toBe("Played off the difference — level, nobody receives");
+  // The roster is a REQUIRED argument now (whole-branch review Minor 5), so an empty one is a
+  // deliberate statement by the caller rather than something a forgotten argument produces.
+  it("degrades to the level line rather than crashing when the roster handed in is empty", () => {
+    expect(gameTreatment(singles, [])).toBe("Played off the difference — level, nobody receives");
   });
 });
 
@@ -100,15 +104,52 @@ describe("strokesNote", () => {
   it("states the general RULE for the two match kinds — gameTreatment's own singles arm names the concrete instance instead", () => {
     // Neither says "plays off scratch" (controller ruling, post-task-1): handicap-era vocabulary
     // for playing to par, and false about a golfer who is simply the lowest in the field.
-    expect(strokesNote("singles-match")).toBe("Only the higher number gets strokes — the lower gets none.");
-    expect(strokesNote("fourball-match")).toBe("Only the three higher numbers get strokes — the lowest gets none.");
+    const pair = [participant(A, "Ann", 6), participant(B, "Bo", 2)];
+    expect(strokesNote(singles, pair)).toBe("Only the higher number gets strokes — the lower gets none.");
+    const four = [participant(A, "Ann", 20), participant(B, "Bo", 10), participant(C, "Cy", 5), participant(D, "Dee", 0)];
+    expect(strokesNote(fourball, four)).toBe("Only the numbers above the lowest get strokes — the lowest gets none.");
   });
+
+  // Whole-branch review I1. Every seat starts on 0 (spec 2026-07-30 §2), so this IS the state of
+  // every four-ball the moment it is added — and the old sentence ("only the three higher numbers
+  // get strokes") asserted that three people were receiving when nobody was, directly under a
+  // strokes line saying everyone plays level. Nothing to say is the honest answer.
+  it("says NOTHING when every member is level — including the all-zeros default of a fresh round", () => {
+    const level = [participant(A, "Ann", 0), participant(B, "Bo", 0), participant(C, "Cy", 0), participant(D, "Dee", 0)];
+    expect(strokesNote(fourball, level)).toBeUndefined();
+    expect(strokesNote(singles, level)).toBeUndefined();
+    // Level at a real number is the same answer: two players who both typed 20 give each other none.
+    const both20 = [participant(A, "Ann", 20), participant(B, "Bo", 20)];
+    expect(strokesNote(singles, both20)).toBeUndefined();
+  });
+
+  // The four-ball wording states a RULE, never a count, because a bottom TIE is ordinary: at
+  // 20/20/10/10 exactly two of the four receive, so "the three higher numbers" was false.
+  it("stays true for a four-ball tied at the bottom, where only two of the four receive", () => {
+    const tied = [participant(A, "Ann", 20), participant(B, "Bo", 20), participant(C, "Cy", 10), participant(D, "Dee", 10)];
+    expect(strokesNote(fourball, tied)).toBe("Only the numbers above the lowest get strokes — the lowest gets none.");
+  });
+
+  // The reuse proof (the unresolvedGames precedent): the sentence claims exactly the set
+  // gameStrokeAllocation actually gives dots to. Run the REAL allocation over the same tied field
+  // and check the two agree — so a change to the allocation rule can't leave the copy behind.
+  it("names exactly the players gameStrokeAllocation gives dots to — the copy can't drift from the dots", () => {
+    const tied = [participant(A, "Ann", 20), participant(B, "Bo", 20), participant(C, "Cy", 10), participant(D, "Dee", 10)];
+    const allocation = gameStrokeAllocation(fourball, tied, fixtureLinks18);
+    const receiving = tied.filter((p) => totalDots(allocation.get(p.golferId) ?? new Map()) > 0).map((p) => p.golferId);
+    expect(receiving).toEqual([A, B]); // two, not three — the count the old sentence asserted
+    const lowest = Math.min(...tied.map((p) => p.strokes));
+    expect(tied.filter((p) => p.strokes > lowest).map((p) => p.golferId)).toEqual(receiving);
+    expect(strokesNote(fourball, tied)).toBeDefined(); // somebody receives, so there is something to say
+  });
+
   it("stays undefined for the three kinds whose treatment line already states their field", () => {
     // The net treatment line IS "Net — uses the strokes on the card" — a note repeating it would
     // render the same sentence twice under the same heading.
-    expect(strokesNote("stroke-play")).toBeUndefined();
-    expect(strokesNote("stableford")).toBeUndefined();
-    expect(strokesNote("skins")).toBeUndefined();
+    const two = [participant(A, "Ann", 6), participant(B, "Bo", 2)];
+    expect(strokesNote(strokePlay("net"), two)).toBeUndefined();
+    expect(strokesNote(stableford, two)).toBeUndefined();
+    expect(strokesNote(skins("net"), two)).toBeUndefined();
   });
 });
 

@@ -393,13 +393,13 @@ describe("GamePanel — the link sweep (every visible name links to /golfers/:go
 // title, then the treatment line, then the strokes line, then a per-kind note — and the rules
 // blurb (picker-only teaching copy) never repeats here.
 describe("GamePanel — header (spec §2c)", () => {
-  const singlesFixture = (): { config: GameConfig; game: GameState; state: RoundState } => {
-    // Both at 0 strokes — pins the all-zero/level copy in the same fixture that proves header
-    // ORDER, since neither strokesSummary's dot count nor gameTreatment's own singles arm needs
-    // any real computation here (0 vs 0 is a tie either way).
+  // Parametrized by the two seats' numbers (whole-branch review I1): the header's copy now depends
+  // on whether anyone is above the lowest, so the level case and the receiving case are different
+  // fixtures rather than one. Defaults to the all-zero state a fresh round actually starts in.
+  const singlesFixture = (patStrokes = 0, alexStrokes = 0): { config: GameConfig; game: GameState; state: RoundState } => {
     const participants: readonly RosterEntry[] = [
-      { golferId: PAT, name: "Pat", tee: "white", strokes: 0 },
-      { golferId: ALEX, name: "Alex", tee: "white", strokes: 0 },
+      { golferId: PAT, name: "Pat", tee: "white", strokes: patStrokes },
+      { golferId: ALEX, name: "Alex", tee: "white", strokes: alexStrokes },
     ];
     const config: GameConfig = { kind: "singles-match", id: gameId("m-header"), a: PAT, b: ALEX };
     const game: GameState = { kind: "singles-match", id: config.id, up: 0, leader: undefined, thru: 0, remaining: 18, dormie: false, holes: [] };
@@ -424,14 +424,17 @@ describe("GamePanel — header (spec §2c)", () => {
   });
 
   it("orders title, treatment line, strokes line, then note — and drops the rules blurb entirely", () => {
-    const { game, state } = singlesFixture();
+    // Pat 3 against Alex 1, so all four lines are present: the note only renders when somebody in
+    // the game is above the lowest (whole-branch review I1). Pat receives the difference, 2 — on
+    // fixtureLinks' 9-hole white tee that is one dot on each of SI 1-2, hence "Pat 2 dots".
+    const { game, state } = singlesFixture(3, 1);
     render(<GamePanel game={game} state={state} />);
 
     const region = screen.getByRole("region", { name: "Match play standings" });
     const text = region.textContent ?? "";
     const titleAt = text.indexOf("Match play");
-    const treatmentAt = text.indexOf("Played off the difference — level, nobody receives");
-    const strokesAt = text.indexOf("No strokes — everyone in this game plays level.");
+    const treatmentAt = text.indexOf("Played off the difference — Pat gets 2");
+    const strokesAt = text.indexOf("Pat 2 dots");
     const noteAt = text.indexOf("Only the higher number gets strokes — the lower gets none.");
 
     expect(titleAt).toBeGreaterThanOrEqual(0);
@@ -441,6 +444,20 @@ describe("GamePanel — header (spec §2c)", () => {
 
     // The rules blurb is picker-only now — teaching copy never repeats in the panel.
     expect(screen.queryByText(gameKindBlurb("singles-match"))).toBeNull();
+  });
+
+  // Whole-branch review I1: a match where nobody is above the lowest — the state EVERY round
+  // starts in, since joining asks for no number (spec 2026-07-30 §2) — states the level truth
+  // once and stops. The old note asserted somebody was receiving directly under a line saying
+  // nobody was.
+  it("says nobody is receiving ONCE when the match is level, with no note contradicting it", () => {
+    const { game, state } = singlesFixture(0, 0);
+    render(<GamePanel game={game} state={state} />);
+
+    const region = screen.getByRole("region", { name: "Match play standings" });
+    expect(within(region).getByText("Played off the difference — level, nobody receives")).toBeTruthy();
+    expect(within(region).getByText("No strokes — everyone in this game plays level.")).toBeTruthy();
+    expect(within(region).queryByText(/gets none\./)).toBeNull();
   });
 
   it("stroke-play NET states the treatment as the game's own field", () => {
@@ -489,7 +506,7 @@ describe("GamePanel — header (spec §2c)", () => {
   });
 
   it("the singles note reads verbatim", () => {
-    const { game, state } = singlesFixture();
+    const { game, state } = singlesFixture(3, 1);
     render(<GamePanel game={game} state={state} />);
     expect(screen.getByText("Only the higher number gets strokes — the lower gets none.")).toBeTruthy();
   });

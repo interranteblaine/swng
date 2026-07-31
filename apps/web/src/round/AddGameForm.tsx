@@ -78,7 +78,11 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
   // strokesSummary reads the config, so a gross game (either kind that offers the choice) renders
   // its own "no strokes" treatment line and no strokes preview at all — one place decides that.
   const preview = previewConfig && strokesSummary(previewConfig, participants, card);
-  const note = strokesNote(kind);
+  // Same config + roster the preview line above uses (whole-branch review I1) — it only renders
+  // when a match's picked players are NOT all level, so the preview can never claim someone gets
+  // nothing while the line above it says nobody is getting any. Only ever shown alongside a real
+  // preview anyway (the whole block below is gated on previewConfig).
+  const note = previewConfig && strokesNote(previewConfig, participants);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

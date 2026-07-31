@@ -72,7 +72,11 @@ export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanel
   // dot, so there is nothing to summarize.
   const strokes = config && strokesSummary(config, state.participants, state.card);
 
-  const note = strokesNote(game.kind);
+  // Reads the config + roster, not a bare kind (whole-branch review I1): the note is a claim about
+  // somebody getting nothing BECAUSE somebody else gets some, so it renders nothing at all when
+  // every member of this game is level — which is every game's state until numbers are typed. The
+  // strokes line above already states that case in words.
+  const note = config && strokesNote(config, state.participants);
 
   return (
     <section role="region" aria-label={`${title} standings`} className={`${cardBox} flex flex-col gap-3 p-4 text-forest`}>

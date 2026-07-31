@@ -1,4 +1,6 @@
 import type { GameConfig } from "./game.js";
+import { gameMembers } from "./game.js";
+import type { GolferId } from "../ids.js";
 import type { Participant } from "../round/participant.js";
 
 // The games' human meaning as domain truth — names, one-line rules, who a game fits, and how its
@@ -68,11 +70,16 @@ export const gameKindFits = (kind: GameKind): string => {
 //
 // Match kinds use the DIFFERENCE off the lowest of the game's own field. Four-ball's completion
 // ("everyone off the lowest of the four") is a fixed structural fact, true regardless of the actual
-// numbers, so it needs no roster. Singles' completion genuinely varies per pairing, so it is the
-// one arm that reads `participants` — optional so a caller with no roster in scope (or a config
-// alone, as every OTHER arm allows) still gets a true statement rather than a crash: absent data
-// resolves to a 0-vs-0 tie, which is exactly the honest "level" line below.
-export const gameTreatment = (config: GameConfig, participants: readonly Participant[] = []): string => {
+// numbers, so its arm ignores the roster. Singles' completion genuinely varies per pairing, so it
+// reads `participants` — REQUIRED (whole-branch review Minor 5): the argument used to default to
+// `[]`, which silently resolved a real singles pairing to a 0-vs-0 tie and printed "level, nobody
+// receives" about two players who are nothing of the sort. A caller with no roster in scope has to
+// pass `[]` and say so; the degradation is still honest, it just can't happen by omission.
+// One seat's asserted number, or 0 if that golfer isn't on the roster handed in. Shared by the two
+// sentences below so they can never disagree about what a seat holds.
+const strokesOn = (participants: readonly Participant[], id: GolferId): number => participants.find((p) => p.golferId === id)?.strokes ?? 0;
+
+export const gameTreatment = (config: GameConfig, participants: readonly Participant[]): string => {
   if ("scoring" in config && config.scoring === "gross") return "Gross — raw scores, no strokes";
   switch (config.kind) {
     case "stroke-play":
@@ -82,7 +89,7 @@ export const gameTreatment = (config: GameConfig, participants: readonly Partici
     case "fourball-match":
       return "Played off the difference — everyone off the lowest of the four";
     case "singles-match": {
-      const strokesOf = (id: typeof config.a): number => participants.find((p) => p.golferId === id)?.strokes ?? 0;
+      const strokesOf = (id: GolferId): number => strokesOn(participants, id);
       const diff = strokesOf(config.a) - strokesOf(config.b);
       // Not "{name} gets 0" (the SeasonPanel precedent, crews/SeasonPanel.tsx): a tie is a real,
       // honest answer once strokes are a plain count, not a nonsensical sentence to suppress.
@@ -94,26 +101,52 @@ export const gameTreatment = (config: GameConfig, participants: readonly Partici
   }
 };
 
-// The sentence under the treatment line, for the two kinds where WHO RECEIVES is worth saying out
-// loud: strokes are relative now, so in a match somebody receives nothing and it is worth naming
-// which side. The other three get nothing here on purpose — gameTreatment's own net line already
-// states their field, and a note repeating it would just be the same sentence twice.
+// The sentence under the treatment line, for the two kinds where WHO GETS NOTHING is worth saying
+// out loud: strokes are relative now, so in a match somebody receives nothing and the rule that
+// decides it is worth stating. The other three kinds get nothing here on purpose — gameTreatment's
+// own net line already states their field, and a note repeating it would just be the same sentence
+// twice.
+//
+// It reads the game's own field for ONE reason: to know whether there is anything to say at all.
+// "The lowest gets none" is a claim about somebody ELSE getting some, so it is FALSE when nobody
+// is above the lowest — including all-zeros, which this arc made the default state of every new
+// round (spec 2026-07-30 §2, whole-branch review I1). In that case the strokes line printed
+// directly above it already says the true thing ("No strokes — everyone in this game plays
+// level.", apps/web/src/round/dots.ts), so this returns nothing rather than contradicting it, for
+// the same reason the three medal kinds return nothing: one sentence, once.
+//
+// Four-ball's wording is a rule, not a COUNT. "Only the three higher numbers" was false whenever
+// two members tied at the bottom — at 20/20/10/10 the match arm gives strokes to TWO of the four,
+// not three — and ties are ordinary, not exotic. Singles keeps its concrete wording because with
+// two members and someone above the lowest there is exactly one higher and one lower, always.
+//
+// The comparison is the same register as gameTreatment's singles arm above — already-stored roster
+// numbers, ranked — not a second copy of gameStrokeAllocation's per-hole placement rule. It agrees
+// with that function by construction (its match arm allocates `strokes - lowest`, positive for
+// exactly the members named here), and present.test.ts pins that agreement against the real
+// allocation so the sentence can't quietly drift from the dots.
 //
 // Neither arm says "plays off scratch" (controller ruling, post-task-1). Receiving nothing in a
 // match is not the same as being a scratch golfer: two players who both typed 20 each carry 20
 // dots on the card and simply give each other none here, because the difference is zero. Getting
 // none in one game says nothing about how you play — and "scratch" is handicap-era vocabulary for
 // playing to par, which nothing in this model computes.
-export const strokesNote = (kind: GameKind): string | undefined => {
-  switch (kind) {
-    case "singles-match":
-      return "Only the higher number gets strokes — the lower gets none.";
-    case "fourball-match":
-      return "Only the three higher numbers get strokes — the lowest gets none.";
+export const strokesNote = (config: GameConfig, participants: readonly Participant[]): string | undefined => {
+  switch (config.kind) {
     case "stroke-play":
     case "stableford":
     case "skins":
       return undefined;
+    case "singles-match":
+    case "fourball-match": {
+      // Never empty for a match kind: singles carries two required ids and four-ball two pairs.
+      const numbers = gameMembers(config).map((id) => strokesOn(participants, id));
+      const lowest = Math.min(...numbers);
+      if (!numbers.some((strokes) => strokes > lowest)) return undefined;
+      return config.kind === "singles-match"
+        ? "Only the higher number gets strokes — the lower gets none."
+        : "Only the numbers above the lowest get strokes — the lowest gets none.";
+    }
   }
 };
 

@@ -6,8 +6,10 @@
 // AFTER, where 100% must pass. A gate that has never been seen to fail is not a gate — it is a
 // green light of unknown provenance.
 //
-// SCOPE — four of the stage's five tables. `swng-<stage>-rounds`, `-snapshots`, `-projections` and
-// `-core` are scanned in full. `swng-connections-<stage>` is DELIBERATELY OUT OF SCOPE: it holds
+// SCOPE — four of the stage's five tables. `swng-rounds-<stage>`, `swng-snapshots-<stage>`,
+// `swng-projections-<stage>` and `swng-core-<stage>` are scanned in full (the table names are
+// spelled out rather than abbreviated because a comment naming a resource that does not exist is
+// the kind of thing someone trusts at 2am). `swng-connections-<stage>` is DELIBERATELY OUT OF SCOPE: it holds
 // ephemeral WebSocket connection registrations that no schema reads, that no round or record is
 // derived from, and that spec §6.1 leaves out of the export for the same reason. It is named here
 // and in the summary rather than left to be inferred, because an unnamed skipped table would be a
@@ -197,10 +199,13 @@ console.log("");
 // it checks every field GolferRoundLine requires rather than only the one this arc renames.
 
 // GolferRoundLine (packages/domain/src/golfer/record.ts), required members only. `courseId`,
-// `score` and `holeResults` are legitimately optional — `score` is ABSENT on a round with a pickup
-// (there is no gross to record), so its absence must never be a failure. It is counted and
-// reported below instead, because spec §9.5 reads history rows and a line with no `score` renders
-// none.
+// `score` and `holeResults` are legitimately optional, so their absence must never be a failure —
+// but `score`'s absence has TWO live causes and this gate cannot tell them apart from the item
+// alone: either the round has a hole with no number (a pickup, so there is no gross to record), or
+// the line was written before the field existed. Both are true of this stage right now — prod's 8
+// pre-migration lines carry the retired `ags` and no `score` at all — which is why the summary
+// below states both rather than asserting one. It is counted and reported because spec §9.5 reads
+// history rows, and a line with no `score` renders none.
 const REQUIRED_LINE_FIELDS = [
   ["roundId", (v) => typeof v === "string" && v !== ""],
   ["courseName", (v) => typeof v === "string" && v !== ""],
@@ -247,14 +252,14 @@ for (const item of projectionItems) {
   }
   linesOk += 1;
   if (typeof line.score === "number") linesWithScore += 1;
-  lineNotes.push(`      ${short(String(item.pk).replace("GOLFER#", ""))}  ${String(item.sk)}  strokes=${line.strokes}  par=${line.par}  ${typeof line.score === "number" ? `score=${line.score}` : "score absent (a pickup — legitimately no gross)"}`);
+  lineNotes.push(`      ${short(String(item.pk).replace("GOLFER#", ""))}  ${String(item.sk)}  strokes=${line.strokes}  par=${line.par}  ${typeof line.score === "number" ? `score=${line.score}` : "score absent (a hole with no number, or a line older than the field)"}`);
 }
 
 const lineCount = linesOk + linesFailed;
 console.log(`${projectionsTable} — ${projectionItems.length} item(s)`);
 console.log(`  checked every field GolferRoundLine requires: ${lineCount} record line(s) — ${linesOk} ok, ${linesFailed} FAILED`);
 console.log(`  retired keys (${RETIRED_LINE_FIELDS.join("/")}) — spec §9.6: ${linesWithRetired === 0 ? "none present on any line" : `${linesWithRetired} line(s) STILL CARRY THEM (counted in the failures above)`}`);
-console.log(`  \`score\` present on ${linesWithScore} of ${lineCount} line(s) — optional by design; absent means that round has a pickup and renders no gross`);
+console.log(`  \`score\` present on ${linesWithScore} of ${lineCount} line(s) — optional by design; absent means either the round has a hole with no number, or the line predates the field. Either way that history row renders no gross`);
 if (lineNotes.length > 0) console.log(lineNotes.sort().join("\n"));
 console.log(`  NOT PARSED — nothing at HEAD reads these through a schema: ${projectionItems.length - lineCount} item(s)`);
 if (unparsedProjections.size > 0) console.log(tallyLines(unparsedProjections).join("\n"));

@@ -18,6 +18,26 @@ const source = (name) => readFileSync(new URL(name, import.meta.url), "utf8");
 const check = source("checkProdParses.mjs");
 const migrate = source("migrateProdStrokes.mjs");
 
+// Both files document themselves heavily, so a pin that merely greps for a word can be satisfied by
+// the HEADER COMMENT while the behaviour it names is gone. Two of this file's pins were exactly
+// that until a re-review mutation-tested them. These two helpers are the fix: `emitted` looks only
+// at `console.log(` call sites, and `blockOf` extracts a guard's body so a pin can assert the guard
+// actually refuses rather than merely that its `if` line exists.
+
+// Lines that PRINT the given text at runtime. A comment mentioning it does not count.
+const emitted = (text, needle) => text.split("\n").filter((line) => line.includes("console.log(") && line.includes(needle));
+
+// The body of a brace block, from its opening line to the closing brace at the same indentation.
+// Used so "this guard refuses" is asserted against the guard's own statements.
+const blockOf = (text, header) => {
+  const start = text.indexOf(header);
+  expect(start, `expected to find \`${header}\` — the pin below is meaningless without it`).toBeGreaterThan(-1);
+  const indent = " ".repeat(header.length - header.trimStart().length);
+  const end = text.indexOf(`\n${indent}}`, start);
+  expect(end, `expected \`${header}\` to be a closed block`).toBeGreaterThan(start);
+  return text.slice(start, end);
+};
+
 // The names destructured out of a `require("<pkg>")` — the complete set of SDK commands the file
 // can call, since a name that was never bound cannot be invoked.
 const imported = (text, pkg) => {
@@ -85,19 +105,34 @@ describe("the ordering trap is an exit code, not prose", () => {
   // the old shape back onto the record lines, and a re-run afterwards CANNOT repair it — the
   // transform is idempotent, so nothing is written and the snapshot stream never re-fires. The
   // refusal is the whole defence, so it is pinned rather than left to a header nobody re-reads.
+  // The condition AND the refusal. Asserting the `if` line alone would stay green if the body were
+  // softened to a warning that carried on — the same class of hollow pin the two below were caught
+  // in. `restoreFile === undefined` is load-bearing in its own right: it keeps the break-glass
+  // rollback out of a guard about deploy order.
   it("refuses a migration --write without --after-deploy", () => {
-    expect(migrate).toContain("if (write && restoreFile === undefined && !afterDeploy) {");
+    const guard = blockOf(migrate, "if (write && restoreFile === undefined && !afterDeploy) {");
+    expect(guard).toContain("process.exit(1)");
   });
 
-  // A restore is the break-glass rollback and has nothing to do with deploy order, so the guard
-  // must stay scoped to a migration write — pinned by the `restoreFile === undefined` clause above.
+  // "in its own OUTPUT" is the whole point — an operator staring at a terminal does not read the
+  // header. So this asserts `console.log(` call sites, not the presence of the word: the header
+  // mentions `rebuildProjections` twice, and an earlier version of this pin passed with all three
+  // printed lines deleted. Three sites, each a state that can be mistaken for success or for a
+  // problem this script can fix: the nothing-to-do path, the post-write path, and the restore.
   it("names rebuildProjections as the recovery in its own output, not only in a doc", () => {
-    expect(migrate).toContain("rebuildProjections");
-    expect(migrate).toContain("RebuildFunction");
+    expect(emitted(migrate, "rebuildProjections")).toHaveLength(3);
+    expect(emitted(migrate, "RebuildFunction")).toHaveLength(3);
   });
 
-  it("asserts the write set against the inventory spec §4 enumerated", () => {
+  // Asserts the REFUSAL, not the constant. An earlier version of this pin checked only that
+  // `EXPECTED_RECORDS = 15` was declared, so deleting the entire guard left it green — the
+  // declaration is the input to the property, never the property.
+  it("asserts the write set against the inventory spec §4 enumerated, and refuses on a mismatch", () => {
     expect(migrate).toContain("const EXPECTED_RECORDS = 15;");
+    const guard = blockOf(migrate, "if (records.length !== expected) {");
+    expect(guard).toContain("if (write)");
+    expect(guard).toContain("REFUSING TO WRITE");
+    expect(guard).toContain("process.exit(1)");
   });
 });
 
@@ -105,8 +140,11 @@ describe("--restore undoes the migration, not the day", () => {
   // Restoring all four tables verbatim would revert the ~335 items this arc never touched — every
   // round, golfer and course created since the export. The export stays complete as the forensic
   // artifact; the restore is scoped to the keys the run recorded.
+  // Same treatment: the guard must EXIT, not merely exist. A softened body here would fall through
+  // into the restore loop, which is the exact wholesale-revert this finding exists to prevent.
   it("refuses an export that records no key list rather than restoring everything", () => {
-    expect(migrate).toContain("if (!Array.isArray(backup.migrated)) {");
+    const guard = blockOf(migrate, "  if (!Array.isArray(backup.migrated)) {");
+    expect(guard).toContain("process.exit(1)");
   });
 
   it("records the changed keys in the export", () => {
@@ -114,8 +152,17 @@ describe("--restore undoes the migration, not the day", () => {
   });
 
   // The break-glass path must not need a working build of a package it never parses with.
+  //
+  // Both positions are asserted FOUND before they are compared. `indexOf` answers -1 for a string
+  // that is absent, and -1 is less than every real index — so the naive form of this pin passed
+  // when the restore branch was deleted outright, which is the opposite of what it claims. Found by
+  // mutation-testing this file's own pins after a re-review caught two others in the same class.
   it("sits above the schema load", () => {
-    expect(migrate.indexOf("if (restoreFile !== undefined) {")).toBeLessThan(migrate.indexOf("await import(\"../packages/contracts/dist/index.js\")"));
+    const restore = migrate.indexOf("if (restoreFile !== undefined) {");
+    const schemaLoad = migrate.indexOf('await import("../packages/contracts/dist/index.js")');
+    expect(restore, "the restore branch is gone").toBeGreaterThan(-1);
+    expect(schemaLoad, "the schema load is gone").toBeGreaterThan(-1);
+    expect(restore).toBeLessThan(schemaLoad);
   });
 });
 

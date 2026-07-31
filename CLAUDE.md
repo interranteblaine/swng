@@ -1725,6 +1725,57 @@ by hand, both dead since 2026-07-15 (verification deleted whole; `addCrewMember`
 invite links) — which is the same class the previous arc's review caught once already: **docs
 describing deleted behaviour are found by checking docs against the code, not by grepping for
 the words this arc happened to delete.**
+The whole-branch review earned the process outright: it found a **Critical no scoped review could
+see because it lived in the seam between two tasks** — `joinRound` wrote `strokes: 0` on every
+join while the fold applies a strokes-set only if HLC-later than that golfer's LATEST join, so
+leaving and rejoining silently discarded a typed correction, retroactively across the whole round
+and sealed at finalize, on a path the Leave confirm advertises ("You can rejoin anytime with the
+round code"). Root cause was the arc's own residue: before it, a join carried `basis`, so a rejoin
+re-asserted a number and the rule was correct; Task 2 deleted the field and left the rule that
+existed because of it. Fixed by carrying the seat's current number into the rejoin event (NOT by
+changing the fold — an event must not assert a value the fold deliberately ignores, since this log
+is replayed independently by the client, the projector and `settleRound`). Its review also
+overturned a controller deferral: `MAX_STROKES` had been narrowed back to 54, the handicap-era
+number Arc A had already widened to 100 *because* 54 rejects legitimate values, under a comment
+whose own arithmetic yields 27 — and the failure was **silent** (`max=` does not clamp typed text;
+the alert line only fires on a save failure, which never happens for a value Save refuses to send).
+Close-out was CONTROLLER-RUN in the whole-branch review's order — **wipe → deploy lambda → publish
+web** (wipe first because Task 6 made the read paths PARSE: pre-arc rounds carry `courseHandicap`
+and no `strokes`, so a deploy-then-wipe window 500s every existing round and, sharply, leaves
+`rebuildProjections` bricked at page 1 — `page()` parses eagerly, so the repair instrument is
+disabled by the data it would repair; web-first is not a smaller window but a total outage, since
+the base bundle's create AND join schemas both required `basis`): `validate` 0 + `test:contract`
+96 + fence check 0 → the courses-preserving wipe (3,096 rounds / 35 snapshots / 91 projections
+deleted; **292 COURSE#, 1,327 GOLFER#, 502 CREW# verified byte-unchanged before AND after**) →
+`cdk diff` showing only the predicted route swap, nothing stateful → `deploy:beta` ✅ 26.71s with
+**39 HTTP routes** live and `/basis` gone → `publish:web:beta` curl-confirmed as served, its
+deployed bundle grepping clean of every retired term (the only "handicap" left is the physical-card
+label "the Handicap/HDCP row on your scorecard") → `e2e:beta` **17/17 ×2** → `e2e:field` **67
+passed / 1 skipped**. The field gate did its job twice over: it caught a **test** defect (the
+roster-row locator identified a row by "it has an Edit button", but the row being edited hides that
+button by design, and Playwright locators are lazy — fixed by naming the roster list, a real a11y
+improvement rather than a test hook) and, underneath it, a **pre-existing product data-loss path**
+outside this arc's scope — **finalize had no guard against a non-empty outbox**, measured on beta
+as 19 score posts landing 9 events, the rest rejected as terminal and dropped silently under a
+dialog promising "This locks in every score". Ruled fix-don't-ship: finalize now flushes the queue
+and, if anything is still unsent, appends **nothing at all** and says so; the card locks while a
+finalize is in flight (a pad already open is gated too — disabling cells alone is not enough).
+**Recorded, not patched: the cross-device gap** — the guard protects the finalizing device only, so
+a second phone offline with queued scores still loses them; recommendation is to accept and surface
+it rather than open the terminal-event model, since a grace window is the only true fix and it costs
+the terminality settle, snapshots and the projector are all built on. The adversarial USE pass on
+DEPLOYED `beta.swng.golf` used a course with a **deliberately scrambled stroke index** (SI 1 = hole
+4, SI 2 = hole 13) so "the hardest ten" could never be confused with "the first ten": Ann's typed 20
+drew exactly 20 dots, one per hole plus a second on holes 4 and 13; Bo's 10 drew exactly SI 1–10;
+setting one never moved the other; **both allocation arms rendered side by side in one round** —
+match play "Played off the difference — Ann Walker gets 10" (10/0) against net skins "Net — uses the
+strokes on the card — Ann 20 dots · Bo 10 dots" (20/10), which a collapse would have made identical;
+the ScorePad offered 1–12, Picked up and Cancel with **no Conceded control anywhere**; typing 150
+into the strokes editor disabled Save *and said why*; and the Critical was proven **on the wire**,
+the stored log's three `participant-joined` events reading `strokes: 0`, `strokes: 0`, **`strokes:
+10`** — the rejoin carrying the typed number forward. Profile shows "What you shoot" read-only with
+no input and zero banned vocabulary. Throwaway Cognito users deleted. **NO prod deploy.** On local
+`main`, never pushed.
 
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.

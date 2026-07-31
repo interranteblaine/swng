@@ -51,16 +51,32 @@ export const joinRound =
     const golferRecord = await ensureGolfer({ golferStore: deps.golferStore, idGenerator: deps.ids, metrics: deps.metrics })(claims);
     const golfer: GolferId = golferRecord.id;
 
+    // The seat this golfer already holds on this round, if any — either a still-seated re-tap
+    // (rejected immediately below) or a departed seat coming back.
+    const seated = state.participants.find((participant) => participant.golferId === golfer);
+
     // UX guard: re-tapping join while STILL SEATED is a surprising no-op (the fold's
     // last-write-wins on golferId would silently rewrite the caller's own seat), so it's rejected
     // here. A DEPARTED golfer is NOT blocked — rejoining after leaving is just joining again
     // (spec §4), and the fold clears `departed` on the new participant-joined.
-    if (state.participants.some((participant) => participant.golferId === golfer && participant.departed !== true)) {
+    if (seated && seated.departed !== true) {
       throw new ApplicationError("golfer-already-in-round", `golfer ${golfer} is already a participant in this round`);
     }
 
-    // Strokes start at 0 (spec 2026-07-30 §2): joining asks no question about your game.
-    const participant: Participant = { golferId: golfer, name: golferRecord.name, tee: command.tee, strokes: 0 };
+    // A first join starts at 0 strokes (spec 2026-07-30 §2: joining asks no question about your
+    // game); a REJOIN carries the seat's current number forward. That is not a nicety — the fold
+    // seats the LATEST join's payload (round/state.ts step 4), so a rejoin writing a fresh 0 would
+    // silently erase a number the group typed, retroactively across every dot, every standing and
+    // the archive the finalize seals. Nothing re-asks for it at the door (the join body is
+    // {code, tee}), so the event states what is true right now instead of asserting a 0 nobody
+    // entered. Carrying it is the writer's job, deliberately, not the fold's: presence and strokes
+    // stay orthogonal registers, and a later participant-strokes-set still wins.
+    //
+    // `state` was read at the top of this handler, so a participant-strokes-set that commits
+    // between that read and this append loses to this join on HLC — a lost update bounded by one
+    // request, plainly visible on the roster row and retypable. Conditioning this append on the
+    // head seq instead would fail a legitimate join for any concurrent score, which is worse.
+    const participant: Participant = { golferId: golfer, name: golferRecord.name, tee: command.tee, strokes: seated?.strokes ?? 0 };
 
     const hlc = createServerHlcSource(deps.clock);
     const result = await deps.journal.append(id, [{ kind: "participant-joined", participant, ...serverEnvelope({ hlc, ids: deps.ids }, golfer) }]);

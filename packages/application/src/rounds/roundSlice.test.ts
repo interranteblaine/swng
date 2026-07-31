@@ -477,6 +477,34 @@ describe("JoinRound — as-self only", () => {
     expect(events.filter((event) => event.kind === "participant-joined" && event.participant.golferId === BO.id)).toHaveLength(2);
     expect(reduceRound(events).participants.find((participant) => participant.golferId === BO.id)?.departed).not.toBe(true);
   });
+
+  // The rejoin's other half (whole-branch review C1). Joining asks nothing about anyone's game
+  // (spec §9), and the fold seats the LATEST join's payload (domain/round/state.ts step 4) — so a
+  // rejoin writing a fresh 0 would silently erase a typed correction across every dot, every
+  // standing and the sealed archive. The product advertises the flow it would break: RoundPage's
+  // Leave confirm says "You can rejoin anytime with the round code."
+  it("a rejoin carries the typed strokes forward — leaving and coming back never resets the seat to 0", async () => {
+    const round = await freshLiveRound();
+    const annClaims: ParticipantClaims = { roundId: round.host.roundId, golferId: round.host.golferId };
+    const boClaims: ParticipantClaims = { roundId: round.host.roundId, golferId: round.bo.golferId };
+
+    await round.setStrokes(annClaims, { golferId: BO.id, strokes: 16 });
+    await round.leave(boClaims);
+    await round.join({ code: round.host.joinCode, tee: "white" }, { sub: BO.sub });
+
+    const events = (await round.events(round.host.roundId, 0)).events;
+    // The EVENT states it, not just the fold: an event asserts what is true when it is written, so
+    // the log stays self-contained and a replay anywhere (client, projector, archive) agrees.
+    const boJoins = events.filter((event) => event.kind === "participant-joined" && event.participant.golferId === BO.id);
+    expect(boJoins).toHaveLength(2);
+    expect(boJoins.at(-1)).toMatchObject({ kind: "participant-joined", participant: { golferId: BO.id, strokes: 16 } });
+
+    const seat = reduceRound(events).participants.find((participant) => participant.golferId === BO.id);
+    expect(seat?.strokes).toBe(16);
+    expect(seat?.departed).not.toBe(true);
+    // Ann never left and never had a number typed — hers is untouched at the joining default.
+    expect(reduceRound(events).participants.find((participant) => participant.golferId === ANN.id)?.strokes).toBe(0);
+  });
 });
 
 // Presence (projection-realignment spec §5, Task 13): StartRound/JoinRound each write a LIVE

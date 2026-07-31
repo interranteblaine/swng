@@ -198,9 +198,9 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
   const seatByGolfer = new Map<GolferId, { participant: Participant; latestJoinHlc: Hlc; firstHlc: Hlc }>();
   const leavesByGolfer = new Map<GolferId, Hlc>();
   // Strokes corrections (spec 2026-07-30 §2): latest set per golfer by the same HLC total order.
-  // Applied below iff strictly later than that golfer's latest join — a rejoin's freshly-typed
-  // number supersedes an older correction. A set with no folded join waits here harmlessly (no
-  // seat to apply to), exactly like a leave-before-join: what keeps the fold commutative.
+  // Applied below iff strictly later than that golfer's latest join — the seat is whatever its
+  // latest join asserted, until a later set corrects it. A set with no folded join waits here
+  // harmlessly (no seat to apply to), like a leave-before-join: what keeps the fold commutative.
   const strokesSetsByGolfer = new Map<GolferId, { strokes: number; hlc: Hlc }>();
   for (const event of deduped) {
     if (event.kind === "participant-joined") {
@@ -223,7 +223,14 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
       const set = strokesSetsByGolfer.get(participant.golferId);
       // Seat data stays the join's own payload; ONLY `strokes` is correctable, and only by a set
       // strictly later than the latest join (presence and strokes are separate concerns — a set
-      // never clears `departed`, and a rejoin always re-asserts its own number).
+      // never clears `departed`).
+      //
+      // The latest join's payload IS the seat, so whoever WRITES a participant-joined owes the
+      // number it replaces: nothing asks for one at the door any more (the join body is
+      // {code, tee} — spec 2026-07-30 §9), so a rejoin hard-coding a fresh 0 would silently erase
+      // a typed correction across the whole round. joinRound.ts (application) carries the seat's
+      // current strokes into the event for exactly that reason; the fold stays one pass that reads
+      // nothing but the log, which is what keeps it commutative and presence-blind.
       const seat = set !== undefined && compareHlc(set.hlc, latestJoinHlc) > 0 ? { ...participant, strokes: set.strokes } : participant;
       const leaveHlc = leavesByGolfer.get(participant.golferId);
       const departed = leaveHlc !== undefined && compareHlc(leaveHlc, latestJoinHlc) > 0;

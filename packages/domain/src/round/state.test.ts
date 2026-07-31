@@ -391,12 +391,28 @@ describe("participant-strokes-set", () => {
     expect(state.participants.find((p) => p.golferId === A)?.strokes).toBe(2);
   });
 
+  // The latest join's payload IS the seat — so a rejoin decides the number, whatever it carries.
+  // That makes carrying the RIGHT number the writer's obligation, pinned by its other half below.
   it("a REJOIN later than a set wins — the fresh join's number applies", () => {
     const leave: RoundEvent = { ...base(11), kind: "participant-left", golferId: A };
     const rejoin: RoundEvent = { ...base(12), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", strokes: 20 } };
     const state = reduceRound([genesis, joinA, started, setA(10, 13), leave, rejoin]);
     const seat = state.participants.find((p) => p.golferId === A);
     expect(seat?.strokes).toBe(20);
+    expect(seat?.departed).toBeUndefined();
+  });
+
+  // The obligation the rule above creates, and the shape joinRound (application/src/rounds/
+  // joinRound.ts) actually emits: nothing asks for a number at the door any more (the join body is
+  // {code, tee} — spec §9), so a rejoin carries the seat's CURRENT strokes forward. Fold it and the
+  // correction survives leaving and coming back; a rejoin hard-coding a fresh 0 would erase it
+  // retroactively across the whole round, which is the defect this pair exists to keep dead.
+  it("a rejoin that carries the seat's current number forward keeps the correction", () => {
+    const leave: RoundEvent = { ...base(11), kind: "participant-left", golferId: A };
+    const rejoin: RoundEvent = { ...base(12), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", strokes: 13 } };
+    const state = reduceRound([genesis, joinA, started, setA(10, 13), leave, rejoin]);
+    const seat = state.participants.find((p) => p.golferId === A);
+    expect(seat?.strokes).toBe(13);
     expect(seat?.departed).toBeUndefined();
   });
 

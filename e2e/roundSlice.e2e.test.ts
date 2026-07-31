@@ -5,6 +5,7 @@ import {
   finalizeRoundResponseSchema,
   getRoundArchiveResponseSchema,
   joinRoundResponseSchema,
+  leaveRoundResponseSchema,
   recordScoreResponseSchema,
   setStrokesResponseSchema,
   startRoundResponseSchema,
@@ -291,7 +292,7 @@ describe("deployed vertical slice: setting a player's strokes mid-round", () => 
 
     const guest = await mintAccountGolfer(httpUrl, "strokes-guest", "Guest");
     const joined = await post(rounds("/join"), { code: started.joinCode, tee: "white" }, joinRoundResponseSchema, guest.idToken);
-    const guestToken = joined.token;
+    let guestToken = joined.token;
     const guestId = joined.golferId;
     expect(guestId).toBe(guest.golferId);
 
@@ -325,8 +326,26 @@ describe("deployed vertical slice: setting a player's strokes mid-round", () => 
     expect(guestSeatMidRound.name).toBe(guest.name);
     expect(guestSeatMidRound.tee).toBe("white");
 
+    // 4b. LEAVE and REJOIN, on the wire (whole-branch review C1). Joining asks nothing about
+    //     anyone's game (spec §9) and the fold seats the LATEST join's payload, so the rejoin has
+    //     to carry the typed number forward — otherwise a flow the product openly advertises
+    //     ("You can rejoin anytime with the round code", RoundPage's Leave confirm) would silently
+    //     reset the seat to a 0 nobody entered, retroactively, and seal it below at finalize.
+    //     The guest holds a fresh round-scoped token after rejoining, exactly as a real client does.
+    await post(rounds(`/${roundId}/leave`), undefined, leaveRoundResponseSchema, guestToken);
+    const rejoined = await post(rounds("/join"), { code: started.joinCode, tee: "white" }, joinRoundResponseSchema, guest.idToken);
+    expect(rejoined.golferId).toBe(guestId);
+    guestToken = rejoined.token;
+
+    const afterRejoinEvents = await get(rounds(`/${roundId}/events?since=0`), eventsResponseSchema, hostToken);
+    const afterRejoinState = reduceRound(afterRejoinEvents.events);
+    const guestSeatAfterRejoin = afterRejoinState.participants.find((p) => p.golferId === guestId);
+    expect(guestSeatAfterRejoin?.strokes).toBe(13);
+    expect(guestSeatAfterRejoin?.departed).toBeUndefined(); // the rejoin cleared the departure
+    expect(afterRejoinState.participants.find((p) => p.golferId === hostId)?.strokes).toBe(0);
+
     // 5. Score remaining holes, finalize, GET /rounds/{roundId}/archive → participants carry the
-    //    number that was set (a sealed snapshot freezes it).
+    //    number that was set (a sealed snapshot freezes it), through the leave/rejoin above.
     for (let hole = 2; hole <= holeCount; hole += 1) {
       await post(scoresUrl, { golferId: hostId, hole, result: { kind: "strokes", strokes: 5 }, ...hostOps.next() }, recordScoreResponseSchema, hostToken);
       await post(scoresUrl, { golferId: guestId, hole, result: { kind: "strokes", strokes: 5 }, ...guestOps.next() }, recordScoreResponseSchema, guestToken);

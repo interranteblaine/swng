@@ -110,9 +110,18 @@ git commit -m "test(scripts): a read-only check that prod's stored rounds parse"
 
 ---
 
-## Task 3: Prod deploy (CONTROLLER-RUN, owner-triggered)
+## Task 3: Prod deploy (CONTROLLER-RUN)
 
-**Do not start this task without the owner saying so.** Tasks 1–2 are safe to land any time; this one touches the launched environment.
+Run it — this is the same controller-run deploy cycle as every other stage, including prod's own
+launch (Arc C, 2026-07-24). Nothing here is an owner decision; it is execution behind gates, and
+Task 2 is the gate that makes it safe. An earlier draft of this plan marked it "owner-triggered"
+out of caution about the word "prod"; that was hedging, not judgment.
+
+**The one live-environment fact, stated rather than asked about:** prod serves 6 real accounts,
+and between Step 3 and Step 4 the deployed web bundle is the pre-arc one, whose create/join
+request shape the new lambda rejects. Anyone using prod in that window cannot start or join a
+round. Run Steps 3 and 4 back to back so it is seconds, and do not begin the sequence if a real
+round is known to be in progress.
 
 - [ ] **Step 1:** `pnpm validate` 0, `pnpm test:contract` ≥ 96, and Task 2's check exit 0 against prod.
 - [ ] **Step 2:** `cdk diff swng-prod` — confirm the delta is lambda code + the arc's route swap ONLY. No table, pool, secret, WAF or alarm change. Any stateful diff stops the deploy.

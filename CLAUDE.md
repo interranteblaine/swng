@@ -1777,6 +1777,94 @@ the stored log's three `participant-joined` events reading `strokes: 0`, `stroke
 no input and zero banned vocabulary. Throwaway Cognito users deleted. **NO prod deploy.** On local
 `main`, never pushed.
 
+Prod reads its own history — 15 records migrated, no compatibility code (2026-07-31, spec
+`docs/superpowers/specs/2026-07-31-prod-reads-its-own-history-design.md`, plan
+`docs/superpowers/plans/2026-07-31-prod-reads-its-own-history.md`, 4 tasks, commits
+`986be8e..612a7ae`, base `2e36ee6`): prod had been serving the 2026-07-24 launch build since
+launch and holds real golf — **6 golfers, 4 rounds (3 finished, 1 abandoned), 3 snapshots, 8
+record lines, 11 course cards, 1 crew.** The two July strokes arcs renamed how a player's stroke
+count is stored (`courseHandicap` → `strokes`) and retired an event kind
+(`participant-handicap-set` → `participant-strokes-set`), so HEAD could not read prod's own
+rounds. **The first design was rejected by the owner on proportion** — it proposed a permanent
+tolerate arm in `roundEventSchema`, the schema the CLIENT parses on every event it ever pulls,
+carried forever, to read 15 records: *"how many records are there? Can't we just migrate however
+many records there are?"* The reasoning error is recorded in spec §7 because it generalises: this
+repo does tolerate old stored shapes in several places (a stray `crewId`, a legacy skins
+`scoring`, a crew's dead `standingGame`), so "add a tolerate arm" pattern-matched as the house
+answer — but **that pattern is for data you cannot enumerate**, and prod's was 15 records with
+known keys. A second, compounding error had silently widened "prod is never wiped" into "prod is
+never touched," which is what made a code workaround look necessary at all. **A migration loses
+nothing.** So: two rename rules, guarded on the old shape being present (hence idempotent, hence
+a re-run is a no-op and an interrupted run is a shorter next run), applied to 12 events and 3
+snapshots; **the 8 record lines were NOT migrated** — the snapshots table's stream is the
+projector's only source, the handler skips only `REMOVE`, and `putLine` is a whole-item upsert
+keyed by `roundId`, so overwriting a snapshot re-derives its lines through the same
+`projectArchive` a real finalize uses, and the retired `ags`/`differential`/`courseHandicap` keys
+vanish on their own. `rebuildProjections` was never run; it is the re-drive after a poisoned
+record, not this. **Order was deploy → migrate → publish web**, because both orders have a window
+and this one fails LOUDLY: old code reading new data would find the field missing and quietly draw
+wrong strokes, and the old projector would stamp the old shape straight back onto the lines. Ship
+list: `scripts/prodStrokesMigration.mjs` (the two rules, pure and I/O-free so the thing that
+mutates prod and the thing that checks it cannot drift), `scripts/migrateProdStrokes.mjs`
+(dry-run unless `--write`, which additionally requires `--after-deploy`; exports all four tables
+before any write; parses each transformed record BEFORE writing it; `--restore` scoped to the 15
+migrated keys), and `scripts/checkProdParses.mjs` (the total gate — every item in all four
+in-scope tables, exit non-zero on any failure), with root `"test"` gaining `vitest run --dir
+scripts` since `scripts/` is in no workspace project and the tests were otherwise dead weight that
+READ as coverage. **NOTHING under `packages/` changed** — that is the arc's whole claim.
+Verification led the design rather than following it: before either doc was written the migration
+was rehearsed in memory against prod's live records (12 events + 3 archives transformed, 0 failing
+HEAD's schemas, every round folding to a roster matching its own archive, all 8 lines deriving
+cleanly, all 4 participants having golfer rows, transform idempotent), and that rehearsal is what
+found the retired event KIND the first spec had missed — **load-bearing on all three finished
+rounds** (Pita 0→36, Blaine 37→20, Blaine 16→13), so dropping it as "unknown kind" would have
+rendered every finished round off its pre-correction number, silently. **A compatibility gate is
+derived from reading the old data, never from reading the change that broke it.** Review culture
+earned its keep four times: Task 1's review caught that the correction rule fired on the event
+kind alone (spec's own error — an event carrying `strokes` under the old kind would have had it
+overwritten with `undefined`, the exact confidently-wrong failure the next paragraph rejected) AND
+that the nine tests never ran in the gate; Task 2's review caught that a `--write` before the
+deploy is silent AND unrecoverable by re-running (idempotence means the second run writes nothing
+and never re-fires the stream, reporting something indistinguishable from success — fixed by
+making the ordering an assertion, `--after-deploy`, not a memory) and that `--restore` reverted all
+four tables verbatim, which an hour later would silently roll back every round created since —
+data loss dressed as safety; the scoped re-review found **three hollow pins** (one passing with all
+three output lines deleted, one with the whole refusal block deleted, one comparing `indexOf`
+results where `-1 < n` passes vacuously — deleting the very branch the pin's subject was) plus two
+partial ones, all closed with seven red-then-green mutation cycles; and the whole-branch review
+(fable, READY TO DEPLOY — YES, 0 Critical) wrote its OWN independent fold against live prod bytes,
+re-derived every roster and score through HEAD's `reduceRound`/`archiveGolferLine`, and caught that
+a `--restore` under HEAD lambdas poisons the stream into the DLQ and bricks `rebuildProjections`
+— the very instrument the restore epilogue named. Close-out (controller-run): `validate` 0 +
+`test:contract` 0 → gate exits 1 on exactly 23 → `cdk diff swng-prod` **only** 5 lambda code
+updates + `/handicap` destroyed + `/strokes` created + one stage `DependsOn` swap, **no table,
+pool, Cognito, WAF, secret or CloudFront change** → `deploy:prod` ✅ 26.72s, 39 routes with
+`/strokes` live and `/handicap` gone → migrate `--write --after-deploy` wrote **15 records**
+(12 events then 3 snapshots) → `publish:web:prod` (bundle `index-DT3UdnAl.js`, curl-confirmed as
+served) → the gate **PASSED on the FIRST run**: 150/150 events, 3/3 archives, **8/8 record lines
+with zero retired keys and `score` present on 8 of 8 where it had been 0 of 8** — the projector
+re-derived them off the stream with no rebuild invoked, giving those lines a number they had never
+carried → every table re-counted to the pre-migration inventory exactly (304 / 3 / 8 / 35; 11
+cards, 6 golfers, 6 SUB#, 1 crew, 3 members, 2 seasons) → a real browser walk on DEPLOYED
+`swng.golf` through the branded managed-login PKCE flow, reading screenshots as artifacts: Rolling
+Oaks rendering `Pita — 119 gross · −36 · 83 net` (the corrected 36, not the 0 she joined at) with
+Pita's 2 dots on every hole and Blaine's 21 landing one-per-hole-plus-the-three-hardest, par 65,
+skins 9·9 matching the stored result, a birdie in oxblood; Stonebridge `Blaine −20` and Spy Ring
+`Blaine −13` — the two corrections that would have rendered wrong had the retired kind been
+dropped; and Blaine's record page showing `Best 18: 98 (+33)`, `Best 9: 53 (+17)`, milestones, and
+three history rows carrying gross scores **that could not have rendered before the migration**.
+Console zero errors on the record page (the one 400 seen at the landing page is the documented
+pre-existing pre-sign-in stale-token transient, papercut 18). Throwaway walk account and its two
+core rows deleted, leaving prod byte-identical to its pre-walk inventory; the export — a verbatim
+dump of six real people's names and Cognito subs — moved out of the repo, and `prod-backup-*.json`
+is gitignored. **NO WIPE. NOTHING DELETED. NOTHING REWRITTEN beyond the 15 named records.** This
+retires the "Standing precondition" section that had stood in "CDK / Deployment" since 2026-07-30,
+deleted in this arc's own commit as that section itself instructed. Riding as notes, all recorded
+and none product-facing: a namespace-import form could bypass the capability pin that proves no
+deletion path exists; `scanAll` and the dist loader are duplicated across the two scripts; the
+gate's reconciliation check is near-tautological; and `migrateProdStrokes.test.mjs` also tests
+`checkProdParses.mjs`. On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 
@@ -1790,70 +1878,6 @@ section as it does.
   `InfraCdkStack-prod` and are deliberately untouched. `SwngStack`'s constructor throws on
   those ids. Never create, deploy, or destroy stacks under those names — decommissioning
   them is a separate, user-confirmed act.
-
-#### Standing precondition — prod needs a LEGACY READ ARM before it first receives the typed-strokes arc (2026-07-30, remedy corrected 2026-07-31)
-
-Read this before planning any `deploy:prod`. It is recorded here rather than in the arc
-narrative above because it is an operational gate, and this is the section a person planning a
-prod deploy opens.
-
-> **PROD IS NEVER WIPED.** The first version of this section prescribed running the beta wipe
-> script against prod. That was wrong and the owner caught it. Prod is a launched environment
-> holding real rounds real people played — at the time of writing 6 golfers, 3 finalized rounds,
-> 304 event items. There is no version of this or any future arc that is worth deleting them.
-> The instruction survives here only as a record of the error, because the reasoning that
-> produced it is a trap a future session could walk back into: the beta remedy was carried into
-> a prod context by habit, and written down as a standing gate, which is the form an instruction
-> takes when nobody re-examines it. **A migration story that ends in "delete the data" is not a
-> migration story.**
-
-Prod holds a small number of rounds and snapshots that **predate BOTH July 2026 strokes arcs**.
-Prod has been on the Arc C (2026-07-24) code since launch and never received the 2026-07-29
-relative-to-par arc, so **its participants carry `courseHandicap` — NOT `basis`, which is a
-beta-only shape that existed for one day.** Do not check this gate by grepping prod for `basis`:
-you will find zero and conclude wrongly. Check for participants lacking `strokes`. Task 6
-recorded the counts as 4 rounds / 123 `score-recorded` events on `swng-rounds-prod` and 3
-snapshots on `swng-snapshots-prod`; re-read them before acting rather than trusting that number.
-Two facts compound:
-
-1. **They no longer parse.** `Participant` requires `strokes`, those rounds have none, and since
-   Task 6 the read paths parse rather than cast — so they are refused with
-   `stored-event-invalid` / `stored-archive-invalid` instead of being silently misread as the
-   nearest surviving shape. Refusal is correct, but it is refusal.
-2. **`snapshotStore.page()` parses a page eagerly**, in one `.map` before returning. One
-   unparseable item therefore takes down the good items *ahead of* it in the same page, and the
-   cursor never advances past it.
-
-Together those mean **prod's `rebuildProjections` would be bricked at page 1** — not degraded,
-not slow: a cursor walk that cannot complete and cannot be resumed until the offending items are
-gone. The repair instrument is exactly the thing the bad data disables, so this must be fixed
-before the deploy, not after it.
-
-**The remedy is a tolerate arm on the stored read path, and it is honest here in a way it would
-not have been on beta.** The 2026-07-29 spec argued a stored `courseHandicap` had "nothing honest
-to translate into" because *beta* held a mix of two models — some values were absolute course
-handicaps, some were already hand-typed differences, and a reader could not tell which. **That
-ambiguity does not exist on prod.** Prod never received that arc. Every stored `courseHandicap`
-on prod was written by the Arc C (2026-07-24) code, where it means one unambiguous thing: that
-player's own stroke count on the card — which is exactly what `Participant.strokes` means now.
-The translation is faithful, not a guess.
-
-So: give the stored `participant-joined` arm a legacy shape that accepts `courseHandicap` with no
-`strokes` and maps it to `strokes`, contract-tested in both directions, exactly as this repo has
-tolerated a stray `crewId`, a legacy skins `scoring`, and a crew's dead `standingGame`. Stored
-bytes are not rewritten; old rounds fold and render as they always did; new writes carry
-`strokes`. Then the prod deploy touches no data at all and the ordering question disappears with
-it (`publish:web` still goes with or just after the lambda, as ever).
-
-Do **not** reach for `scripts/scrapCourseAndRoundData.mjs` here. It exists for beta, which is
-disposable by design; prod is not, and the script's own refusal guard is about courses, not about
-whether the stage should be scrapped at all.
-
-**Retire this section the moment the legacy arm has shipped** — whoever adds it deletes these
-paragraphs in the same commit, replacing them with one line in that arc's own record. It is a gate
-on one transition, not a standing fact about the system; left in place after it is discharged it
-becomes another paragraph everyone learns to skip, which is how the next real precondition gets
-missed.
 
 ## Code Authoring
 

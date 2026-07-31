@@ -1028,21 +1028,20 @@ export const chip = (page: Page, titlePrefix: string) => page.getByRole("button"
 // renamed label is invisible to `tsc`, so every hard-coded `getByLabel(...)` keeps compiling and
 // resolves NOTHING at the live gate. One copy, checked against the JSX once.
 export const setStrokesInBrowser = async (page: Page, name: string, strokes: number): Promise<void> => {
-  // `li` + hasText, narrowed by the Edit button the row is about to be driven through. That
-  // second filter is what makes it a ROSTER row rather than "some <li> mentioning this name":
-  // GamePanel's skins body renders name-bearing story <li>s ("Hole 4 — Alex takes 3") and
-  // StandingsHeader precedes SetupPanel in the DOM (RoundPage.tsx), so with a skins panel open a
-  // bare hasText + `.first()` resolved to a story row and the Edit lookup below found nothing.
-  // Only a SetupPanel roster row carries an Edit button (SetupPanel.tsx), and it carries one
-  // whenever it is not already being edited — which is the precondition of this helper anyway.
-  // `.first()` stays as the tie-break. `hasText` is still a SUBSTRING match while the spinbutton
-  // lookup below is full-string, so two roster names where one prefixes the other ("Al"/"Alex")
-  // would click one row and then look for the other's input; no fixture in this suite has such a
-  // pair, and the row-level assertions each spec makes afterwards would catch it loudly.
-  const row = page
-    .locator("li")
-    .filter({ hasText: name, has: page.getByRole("button", { name: "Edit" }) })
-    .first();
+  // Scoped to the roster list by its accessible name, NOT by "an <li> that has an Edit button".
+  // That earlier filter was correct about the precondition and wrong about the postcondition, and
+  // it cost this suite a full live gate: SetupPanel hides the open row's own Edit button while it
+  // is being edited, and a Playwright locator is lazy — so the instant the click below lands, the
+  // row stops matching its own filter and the Save lookup times out against nothing. The Edit
+  // filter was there to avoid GamePanel's name-bearing skins story <li>s ("Hole 4 — Alex takes
+  // 3"), which precede SetupPanel in the DOM (RoundPage.tsx); scoping to the roster list excludes
+  // those by construction and holds in BOTH states.
+  //
+  // `hasText` is a SUBSTRING match while the spinbutton lookup below is full-string, so two roster
+  // names where one prefixes the other ("Al"/"Alex") would click one row and then look for the
+  // other's input; no fixture in this suite has such a pair, and the row-level assertions each
+  // spec makes afterwards would catch it loudly.
+  const row = page.getByRole("list", { name: "Roster" }).locator("li").filter({ hasText: name }).first();
   await row.getByRole("button", { name: "Edit" }).click();
   const input = page.getByRole("spinbutton", { name: `Strokes for ${name}` });
   await input.fill(String(strokes));

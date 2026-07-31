@@ -144,7 +144,12 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes }: SetupPa
             TYPE had two arms, which let the model's shape leak into the UI as a choice the user
             had to make. Per-game strokes are that game's own concern (its panel states them in
             words), never a roster badge. */}
-        <ul className="flex flex-col gap-2">
+        {/* Named so the list is addressable as a list — a screen reader announces "Roster" on
+            entry instead of an anonymous group, and it gives the roster rows a stable ancestor.
+            The rows themselves are NOT stably identifiable: the row being edited drops its own
+            Edit button (below), so "the li with an Edit button" — which is how the browser gate
+            used to find one — stops matching the instant you click it. */}
+        <ul aria-label="Roster" className="flex flex-col gap-2">
           {state.participants.map((p) => {
             const open = editing === p.golferId;
             return (

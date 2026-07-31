@@ -96,8 +96,8 @@ const seat = (p) =>
 
 const migrateEvent = (e) => {
   if (e.kind === "participant-joined") return { ...e, participant: seat(e.participant) };
-  if (e.kind === "participant-handicap-set") {
-    const { courseHandicap, kind, ...rest } = e;
+  if (e.kind === "participant-handicap-set" && e.courseHandicap !== undefined && e.strokes === undefined) {
+    const { courseHandicap, ...rest } = e;
     return { ...rest, kind: "participant-strokes-set", strokes: courseHandicap };
   }
   return e;
@@ -109,6 +109,14 @@ const migrateArchive = (a) => ({ ...a, participants: a.participants.map(seat), e
 Both rules are **guarded on the old shape being present**, which makes the transform idempotent:
 an already-migrated record passes through untouched, so a re-run is a no-op and a partial run is
 simply a shorter next run.
+
+> **Corrected 2026-07-31, after Task 1's review.** This spec's first draft guarded rule 2 on the
+> event *kind* alone. An event carrying `strokes` under the old kind would then have had that
+> value overwritten with `undefined` — the exact "confidently wrong beats unreadable" failure the
+> paragraph below rejects, written into the rule that rejects it. The condition above is the fix:
+> an event failing the guard passes through completely untouched, kind included, so the parse gate
+> refuses it loudly. Unreachable on the measured 15 records, but the rule is now what it claims to
+> be.
 
 **The translation is faithful, not a guess.** Prod has only ever run one version of this code. Its
 `courseHandicap` means one thing — that player's own stroke count on the card — which is exactly

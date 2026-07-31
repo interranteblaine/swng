@@ -121,7 +121,9 @@ describe("migrateArchive", () => {
 Run: `pnpm exec vitest run scripts/prodStrokesMigration.test.mjs`
 Expected: FAIL — cannot resolve `./prodStrokesMigration.mjs`.
 
-If vitest's root config does not pick up `scripts/`, add that directory to the root vitest `include` rather than moving the files — these are operational scripts and they belong in `scripts/`.
+**`scripts/` is in no workspace project**, so nothing runs these tests by default: `pnpm validate` ends in `pnpm test` → `pnpm -r test`, which runs each project's own `test` script, and `pnpm-workspace.yaml` lists only `apps/*`, `packages/*`, `e2e`. (`apps/web/scripts/webEnv.test.mjs` runs solely because it sits inside `apps/web`.) There is no root vitest invocation to configure, so an `include` does not help.
+
+Wire the run into the gate instead. `vitest` is already a root devDependency, and the repo has the exact precedent: `"lint": "eslint . --max-warnings 0 && node scripts/checkGolfArithmeticFence.mjs"` chains a root-level check into a gate script. Follow that shape, confirm root `test` calling `pnpm -r test` does not recurse into the root package, and **prove the wiring bites** by breaking a test on purpose, watching `pnpm validate` go red, and restoring it. A test that guards a live production mutation and never runs is worse than no test, because it reads as coverage.
 
 - [ ] **Step 3: Write the transform**
 

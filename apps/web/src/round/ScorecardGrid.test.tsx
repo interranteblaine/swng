@@ -207,6 +207,24 @@ describe("ScorecardGrid — readOnly (the archived card, Task 6)", () => {
     render(<ScorecardGrid state={twoPlayerState()} recordScore={vi.fn()} />);
     expect(cellButton("Ann", 1).hasAttribute("disabled")).toBe(false);
   });
+
+  // A pad opened while the card was live is still mounted — and still posts — when readOnly is
+  // raised UNDER it. Disabling the cells alone leaves that hole open, which matters for the live
+  // caller that raises the flag mid-session: RoundPage locks the card for the duration of a
+  // finalize attempt, and a score posted from a pad that survived the lock would push after
+  // `round-finalized` and be refused forever.
+  it("an already-open pad closes when readOnly is raised under it — the flag covers the pad, not just the cells", () => {
+    const recordScore = vi.fn();
+    const { rerender } = render(<ScorecardGrid state={twoPlayerState()} recordScore={recordScore} />);
+
+    fireEvent.click(cellButton("Ann", 1));
+    expect(screen.getByRole("dialog", { name: "Score for Ann, hole 1" })).toBeTruthy();
+
+    rerender(<ScorecardGrid state={twoPlayerState()} recordScore={recordScore} readOnly />);
+
+    expect(screen.queryByRole("dialog", { name: "Score for Ann, hole 1" })).toBeNull();
+    expect(recordScore).not.toHaveBeenCalled();
+  });
 });
 
 describe("ScorecardGrid — picked-up glyph", () => {

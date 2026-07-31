@@ -34,6 +34,11 @@ interface FinalizeControlProps {
   // render time — the ACTING count comes back from onFinalize, which reads it live (a snapshot
   // taken before an await can't be trusted afterwards; session/useRoundSession.ts's flush()).
   readonly pending: number;
+  // True for exactly as long as a finalize attempt is in flight. LiveRound owns it because the
+  // CARD has to lock on the very same flag (see its own comment), so this component only reads
+  // it — one flag, and the buttons and the card can never disagree about whether an attempt is
+  // running.
+  readonly busy: boolean;
   // Ends `endFirst` (in order) and finalizes, but only after this device's outbox is confirmed
   // empty — see RoundPageContent's own implementation for the ordering rule.
   readonly onFinalize: (endFirst?: readonly GameId[]) => Promise<FinalizeOutcome>;
@@ -48,9 +53,8 @@ interface FinalizeControlProps {
 // reads "Stableford — holes 2–18 unscored for Pat" BEFORE the server ever gets to 409, and
 // "End unfinished games & finalize" (terminate each, then the existing finalize — the plan's
 // fixed composition, not a new lifecycle state) resolves it in one tap.
-function FinalizeControl({ state, games, pending, onFinalize }: FinalizeControlProps) {
+function FinalizeControl({ state, games, pending, busy, onFinalize }: FinalizeControlProps) {
   const [confirming, setConfirming] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [unsent, setUnsent] = useState<number | undefined>(undefined);
 
@@ -63,7 +67,6 @@ function FinalizeControl({ state, games, pending, onFinalize }: FinalizeControlP
   // the way through — so the drain-first rule can't be true of one path and forgotten on the
   // other.
   const attemptFinalize = async (endFirst: readonly GameId[]) => {
-    setBusy(true);
     setError(undefined);
     setUnsent(undefined);
     try {
@@ -74,13 +77,11 @@ function FinalizeControl({ state, games, pending, onFinalize }: FinalizeControlP
       // matching SetupPanel's own "no optimistic insert, let the fold do it" precedent.
       if (outcome.ok) return;
       setUnsent(outcome.unsent);
-      setBusy(false);
     } catch {
       // NEVER caught.message (papercut 1): the raw server line names games by uuid. The dialog
       // stays open — its unresolved list, recomputed from the fold above, is the real
       // explanation; this line only says the attempt itself failed.
       setError("Could not finalize the round — try again.");
-      setBusy(false);
     }
   };
 
@@ -311,15 +312,38 @@ interface LiveRoundProps {
 // chips are pure disclosure toggles now), so this component's only remaining job is composing
 // the live-only chrome that unmounts once status flips to "final".
 function LiveRound({ state, games, recordScore, pending, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave, onSetStrokes }: LiveRoundProps) {
+  // The card locks for exactly as long as a finalize attempt is in flight, and not a moment
+  // longer. onFinalize drains the outbox and only then seals — but a score tapped INSIDE that
+  // window joins the outbox too late for the drain that already ran, so it pushes after
+  // `round-finalized` and is refused forever: the same silent loss the drain-first rule exists
+  // to prevent, in a narrower window. The dialog is a bottom sheet with no scrim, so the grid
+  // behind it stays tappable; locking the card is what closes it.
+  //
+  // Keyed to the ATTEMPT, not to the dialog being open: a golfer reading the confirm, one who
+  // cancels it, and one whose offline attempt was refused all keep a fully live card.
+  const [finalizing, setFinalizing] = useState(false);
+
+  const attemptFinalize = useCallback(
+    async (endFirst?: readonly GameId[]) => {
+      setFinalizing(true);
+      try {
+        return await onFinalize(endFirst);
+      } finally {
+        setFinalizing(false);
+      }
+    },
+    [onFinalize],
+  );
+
   // Order is the owner's ruling (spec 2026-07-20 §1): the card and its setup first, then
   // Finalize (the round's one big action), then the personal/destructive pair, then Share —
   // the least-used affordance — dead last.
   return (
     <>
       <StandingsHeader state={state} games={games} onTerminate={onTerminate} />
-      <ScorecardGrid state={state} recordScore={recordScore} />
+      <ScorecardGrid state={state} recordScore={recordScore} readOnly={finalizing} />
       <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} onSetStrokes={onSetStrokes} />
-      <FinalizeControl state={state} games={games} pending={pending} onFinalize={onFinalize} />
+      <FinalizeControl state={state} games={games} pending={pending} busy={finalizing} onFinalize={attemptFinalize} />
       <LeaveControl onLeave={onLeave} />
       <ScrapControl onAbandon={onAbandon} />
       <ShareButton roundId={state.id} token={token} />

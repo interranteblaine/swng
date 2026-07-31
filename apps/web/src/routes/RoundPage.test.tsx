@@ -917,6 +917,77 @@ describe("RoundPage", () => {
     expect(transport.log.some((event) => event.kind === "score-recorded")).toBe(true);
   });
 
+  // The last hole in the drain-first rule: the confirm dialog is a bottom sheet with NO scrim, so
+  // the grid behind it stays tappable while the attempt runs. A score entered between "the outbox
+  // drained" and "the seal landed" joins the outbox too late for the drain that already ran — it
+  // would push after `round-finalized` and be refused forever, the same silent loss in a narrower
+  // window. The card locks for the duration of the attempt and no longer.
+  it("the card is locked while a finalize is in flight — a tap can't queue a score the seal would miss", async () => {
+    const id = roundId("round-finalize-locks-card");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-lock", golferId: ann, name: "Ann", joinCode: "LCK001" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    // The finalize request HANGS until released — holding open the exact window a real network
+    // round trip opens, which is otherwise too short to aim a tap at.
+    let releaseFinalize: (() => void) | undefined;
+    const finalizeInFlight = new Promise<void>((resolve) => {
+      releaseFinalize = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        await finalizeInFlight;
+        (transport.log as RoundEvent[]).push({
+          kind: "round-finalized",
+          authorId: ann,
+          opId: opId("srv-finalize"),
+          hlc: { wallMs: 9_999, counter: 0, deviceId: SERVER_DEVICE },
+          seq: transport.log.length + 1,
+        });
+        return { ok: true, status: 200, json: async () => ({ results: [] }) } as unknown as Response;
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("LCK001")).toBeTruthy());
+
+    // Live before the attempt: the same cell opens the pad normally, and cancelling leaves the
+    // round exactly as it was. This is the "don't make the page feel locked" half of the rule —
+    // without it, the assertion below would pass just as well on a card that is ALWAYS locked.
+    fireEvent.click(screen.getByRole("button", { name: "Ann hole 1" }));
+    expect(screen.getByRole("dialog", { name: "Score for Ann, hole 1" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Finalize round" }));
+    fireEvent.click(screen.getByRole("button", { name: "Finalize" }));
+
+    const cell = () => screen.getByRole("button", { name: "Ann hole 1" });
+    await waitFor(() => expect(cell().hasAttribute("disabled")).toBe(true));
+    fireEvent.click(cell());
+    expect(screen.queryByRole("dialog", { name: "Score for Ann, hole 1" })).toBeNull(); // the pad never opens
+
+    act(() => releaseFinalize?.());
+    await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
+    // The whole point: the tap produced no event at all, so there is nothing the seal missed.
+    expect(transport.log.some((event) => event.kind === "score-recorded")).toBe(false);
+  });
+
   // Papercut 1's other half: the raw-uuid catch is gone — a finalize rejection renders a
   // human line (and the dialog's own structured list), never caught.message verbatim.
   it("a finalize rejection never renders the raw server message", async () => {

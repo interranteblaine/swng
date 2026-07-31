@@ -12,6 +12,11 @@ export interface ScorecardGridProps {
   // with every cell's tap made inert (native `disabled`, not merely "recordScore is a no-op")
   // — the brief's "the pad NEVER opens" is about the tap itself, not just where its result
   // goes. Defaults false so every existing (live) call site is unaffected.
+  //
+  // Also raised for as long as a finalize attempt is in flight (RoundPage's LiveRound): a score
+  // entered in that window would push AFTER the seal and be refused forever. Same meaning in both
+  // cases — "this card cannot take a score right now" — so it's the same one flag, and it covers
+  // an already-open pad too (below), not just the cells.
   readonly readOnly?: boolean;
 }
 
@@ -265,7 +270,13 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
         </table>
       </div>
 
-      {selection && selectedParticipant && selectedHole && (
+      {/* `!readOnly` closes the one hole a disabled cell leaves open: a pad opened while the card
+          was live is still mounted, and still posts, when readOnly is raised under it. Unreachable
+          for the archived caller (readOnly is true before any selection can be made) and the whole
+          point for the finalize-in-flight one. `selection` is deliberately NOT cleared with it —
+          if the attempt is refused (offline) the round is still live, so restoring the golfer's
+          own half-finished tap is the least surprising resumption. */}
+      {!readOnly && selection && selectedParticipant && selectedHole && (
         // key forces a fresh ScorePad instance per (golfer, hole): without one, React reuses the
         // same instance across a `selection` change (the sheet has no scrim and cells above stay
         // tappable), so any pad-local state would survive a tap onto a DIFFERENT cell. The key

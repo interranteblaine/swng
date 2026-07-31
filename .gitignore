@@ -43,3 +43,7 @@ cdk.context.json
 
 # Superpowers scratch (ledger, briefs, review packages)
 .superpowers/
+
+# Table exports taken by scripts/migrateProdStrokes.mjs before it writes — a verbatim dump of a
+# live stage, real golfer names and Cognito subs included. It is a restore path, never an artifact.
+prod-backup-*.json

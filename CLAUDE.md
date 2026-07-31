@@ -1791,12 +1791,21 @@ section as it does.
   those ids. Never create, deploy, or destroy stacks under those names — decommissioning
   them is a separate, user-confirmed act.
 
-#### Standing precondition — wipe prod round data BEFORE prod first receives the typed-strokes arc (2026-07-30)
+#### Standing precondition — prod needs a LEGACY READ ARM before it first receives the typed-strokes arc (2026-07-30, remedy corrected 2026-07-31)
 
-Read this before planning any `deploy:prod`, and do not treat it as satisfied until the wipe
-has actually run. It is recorded here rather than in the arc narrative above because it is an
-operational gate on an instrument, and this is the section a person planning a prod deploy
-opens.
+Read this before planning any `deploy:prod`. It is recorded here rather than in the arc
+narrative above because it is an operational gate, and this is the section a person planning a
+prod deploy opens.
+
+> **PROD IS NEVER WIPED.** The first version of this section prescribed running the beta wipe
+> script against prod. That was wrong and the owner caught it. Prod is a launched environment
+> holding real rounds real people played — at the time of writing 6 golfers, 3 finalized rounds,
+> 304 event items. There is no version of this or any future arc that is worth deleting them.
+> The instruction survives here only as a record of the error, because the reasoning that
+> produced it is a trap a future session could walk back into: the beta remedy was carried into
+> a prod context by habit, and written down as a standing gate, which is the form an instruction
+> takes when nobody re-examines it. **A migration story that ends in "delete the data" is not a
+> migration story.**
 
 Prod holds a small number of rounds and snapshots that **predate BOTH July 2026 strokes arcs**.
 Prod has been on the Arc C (2026-07-24) code since launch and never received the 2026-07-29
@@ -1818,22 +1827,33 @@ Two facts compound:
 Together those mean **prod's `rebuildProjections` would be bricked at page 1** — not degraded,
 not slow: a cursor walk that cannot complete and cannot be resumed until the offending items are
 gone. The repair instrument is exactly the thing the bad data disables, so this must be fixed
-before the deploy, not after it. That is a far stronger reason for the wipe than "a few reads
-would 500," which is how it was first described.
+before the deploy, not after it.
 
-The remedy is the same one beta got:
-`node scripts/scrapCourseAndRoundData.mjs --stage prod --keep-courses` (the script refuses to
-run without an explicit `--keep-courses` / `--wipe-courses`; dry-run first and confirm the
-`SKIPPED the swng-core-prod course pass` line). Deploy order is **wipe, then lambda, then web** —
-a deploy-then-wipe window serves record bodies neither bundle can parse. Prod is a launched
-environment: the wipe is an owner decision, not a controller one, and the item counts should be
-read first.
+**The remedy is a tolerate arm on the stored read path, and it is honest here in a way it would
+not have been on beta.** The 2026-07-29 spec argued a stored `courseHandicap` had "nothing honest
+to translate into" because *beta* held a mix of two models — some values were absolute course
+handicaps, some were already hand-typed differences, and a reader could not tell which. **That
+ambiguity does not exist on prod.** Prod never received that arc. Every stored `courseHandicap`
+on prod was written by the Arc C (2026-07-24) code, where it means one unambiguous thing: that
+player's own stroke count on the card — which is exactly what `Participant.strokes` means now.
+The translation is faithful, not a guess.
 
-**Retire this section the moment the wipe has run** — whoever runs it deletes these paragraphs in
-the same commit that records the prod deploy, replacing them with one line in that arc's own
-record. It is a gate on one transition, not a standing fact about the system; left in place after
-it is discharged it becomes another paragraph everyone learns to skip, which is how the next real
-precondition gets missed.
+So: give the stored `participant-joined` arm a legacy shape that accepts `courseHandicap` with no
+`strokes` and maps it to `strokes`, contract-tested in both directions, exactly as this repo has
+tolerated a stray `crewId`, a legacy skins `scoring`, and a crew's dead `standingGame`. Stored
+bytes are not rewritten; old rounds fold and render as they always did; new writes carry
+`strokes`. Then the prod deploy touches no data at all and the ordering question disappears with
+it (`publish:web` still goes with or just after the lambda, as ever).
+
+Do **not** reach for `scripts/scrapCourseAndRoundData.mjs` here. It exists for beta, which is
+disposable by design; prod is not, and the script's own refusal guard is about courses, not about
+whether the stage should be scrapped at all.
+
+**Retire this section the moment the legacy arm has shipped** — whoever adds it deletes these
+paragraphs in the same commit, replacing them with one line in that arc's own record. It is a gate
+on one transition, not a standing fact about the system; left in place after it is discharged it
+becomes another paragraph everyone learns to skip, which is how the next real precondition gets
+missed.
 
 ## Code Authoring
 

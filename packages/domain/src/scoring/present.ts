@@ -57,6 +57,10 @@ export const gameKindFits = (kind: GameKind): string => {
   }
 };
 
+// One seat's asserted number, or 0 if that golfer isn't on the roster handed in. Shared by the two
+// sentences below so they can never disagree about what a seat holds.
+const strokesOn = (participants: readonly Participant[], id: GolferId): number => participants.find((p) => p.golferId === id)?.strokes ?? 0;
+
 // One treatment line for every kind, gross included — the ONE copy every panel and the add-game
 // preview render through. A card is absolute, a match is relative (spec 2026-07-30 §3): there are
 // two behaviours, so there are two sentences, not one softened to cover both (the prior arc's own
@@ -75,10 +79,6 @@ export const gameKindFits = (kind: GameKind): string => {
 // `[]`, which silently resolved a real singles pairing to a 0-vs-0 tie and printed "level, nobody
 // receives" about two players who are nothing of the sort. A caller with no roster in scope has to
 // pass `[]` and say so; the degradation is still honest, it just can't happen by omission.
-// One seat's asserted number, or 0 if that golfer isn't on the roster handed in. Shared by the two
-// sentences below so they can never disagree about what a seat holds.
-const strokesOn = (participants: readonly Participant[], id: GolferId): number => participants.find((p) => p.golferId === id)?.strokes ?? 0;
-
 export const gameTreatment = (config: GameConfig, participants: readonly Participant[]): string => {
   if ("scoring" in config && config.scoring === "gross") return "Gross — raw scores, no strokes";
   switch (config.kind) {

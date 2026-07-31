@@ -28,6 +28,16 @@ export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentCl
     // so this is a plain begins_with Query with no ScanIndexForward promise. Every caller sorts
     // by the `finalizedAtMs` each line carries itself (projections/projectArchive.ts's
     // sortLines).
+    //
+    // `item.line as Line` still CASTS where the round-event and snapshot reads now parse (spec
+    // 2026-07-30 §10 / task 6). Surveyed and deliberately left, with the reason here rather than
+    // only in a task report: `Line` is a domain shape with no wire schema for its STORED form, so
+    // closing this needs a new schema rather than a reuse, and a bad line's blast radius is one
+    // golfer's read-time stats (their average, typical 18, bests, milestones) — never a settled
+    // or sealed number, which is the class the parse boundary exists to protect. It is NOT
+    // justified by "a rebuild would regenerate it": task 6's own finding is that unparseable
+    // stored data bricks `rebuildProjections` at page 1, so rebuild is exactly what you do not
+    // have when you need it. Recommended next, on that basis.
     listLines: (golferId: GolferId): Promise<readonly Line[]> =>
       queryAllPages(
         client,

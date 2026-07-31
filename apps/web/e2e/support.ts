@@ -1028,17 +1028,21 @@ export const chip = (page: Page, titlePrefix: string) => page.getByRole("button"
 // renamed label is invisible to `tsc`, so every hard-coded `getByLabel(...)` keeps compiling and
 // resolves NOTHING at the live gate. One copy, checked against the JSX once.
 export const setStrokesInBrowser = async (page: Page, name: string, strokes: number): Promise<void> => {
-  // `li` + hasText + `.first()`, the same locator every spec in this suite uses for a roster row.
-  // `.first()` is NOT unambiguous in general: GamePanel's skins body renders name-bearing story
-  // <li>s ("Hole 4 — Alex takes 3"), and StandingsHeader precedes SetupPanel in the DOM
-  // (RoundPage.tsx), so an OPEN SKINS PANEL would make this resolve to a story row and the Edit
-  // lookup below would find nothing. It holds today because every call site runs before any game
-  // exists, or with only a stroke-play panel open (a table, no <li>). Scope it under the Roster
-  // heading — or add `has: page.getByRole("button", { name: "Edit" })` — before calling it after a
-  // skins panel opens. `hasText` is also a SUBSTRING match while the spinbutton lookup below is
-  // full-string, so two roster names where one prefixes the other ("Al"/"Alex") would click one
-  // row and then look for the other's input; no fixture in this suite has such a pair.
-  const row = page.locator("li").filter({ hasText: name }).first();
+  // `li` + hasText, narrowed by the Edit button the row is about to be driven through. That
+  // second filter is what makes it a ROSTER row rather than "some <li> mentioning this name":
+  // GamePanel's skins body renders name-bearing story <li>s ("Hole 4 — Alex takes 3") and
+  // StandingsHeader precedes SetupPanel in the DOM (RoundPage.tsx), so with a skins panel open a
+  // bare hasText + `.first()` resolved to a story row and the Edit lookup below found nothing.
+  // Only a SetupPanel roster row carries an Edit button (SetupPanel.tsx), and it carries one
+  // whenever it is not already being edited — which is the precondition of this helper anyway.
+  // `.first()` stays as the tie-break. `hasText` is still a SUBSTRING match while the spinbutton
+  // lookup below is full-string, so two roster names where one prefixes the other ("Al"/"Alex")
+  // would click one row and then look for the other's input; no fixture in this suite has such a
+  // pair, and the row-level assertions each spec makes afterwards would catch it loudly.
+  const row = page
+    .locator("li")
+    .filter({ hasText: name, has: page.getByRole("button", { name: "Edit" }) })
+    .first();
   await row.getByRole("button", { name: "Edit" }).click();
   const input = page.getByRole("spinbutton", { name: `Strokes for ${name}` });
   await input.fill(String(strokes));

@@ -117,10 +117,13 @@ describe("the ordering trap is an exit code, not prose", () => {
   // "in its own OUTPUT" is the whole point — an operator staring at a terminal does not read the
   // header. So this asserts `console.log(` call sites, not the presence of the word: the header
   // mentions `rebuildProjections` twice, and an earlier version of this pin passed with all three
-  // printed lines deleted. Three sites, each a state that can be mistaken for success or for a
-  // problem this script can fix: the nothing-to-do path, the post-write path, and the restore.
+  // printed lines deleted. Three states can be mistaken for success or for a problem this script
+  // can fix — the nothing-to-do path, the post-write path, and the restore — and the restore says
+  // it twice, because there it is both the thing you must NOT rely on until the lambdas are rolled
+  // back and the thing you use once they are. The counts are exact on purpose: a range would let a
+  // deleted line pass, which is precisely how the earlier version of this pin went hollow.
   it("names rebuildProjections as the recovery in its own output, not only in a doc", () => {
-    expect(emitted(migrate, "rebuildProjections")).toHaveLength(3);
+    expect(emitted(migrate, "rebuildProjections")).toHaveLength(4);
     expect(emitted(migrate, "RebuildFunction")).toHaveLength(3);
   });
 

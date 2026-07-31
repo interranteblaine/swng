@@ -8,7 +8,7 @@
     "pnpm": ">=9.5.0"
   },
   "scripts": {
-    "test": "pnpm -r test",
+    "test": "pnpm -r test && vitest run scripts",
     "lint": "eslint . --max-warnings 0 && node scripts/checkGolfArithmeticFence.mjs",
     "build": "pnpm -r build",
     "validate": "pnpm lint && pnpm typecheck && pnpm build && pnpm test",

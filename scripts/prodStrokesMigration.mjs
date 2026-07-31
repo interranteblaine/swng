@@ -17,7 +17,12 @@ export const seat = (p) =>
 
 export const migrateEvent = (e) => {
   if (e.kind === "participant-joined") return { ...e, participant: seat(e.participant) };
-  if (e.kind === "participant-handicap-set") {
+  // Guarded the same way `seat` is guarded: a "participant-handicap-set" that doesn't actually
+  // carry the old field (or already carries `strokes`) is NOT this rule's business, and is
+  // returned completely untouched — kind included — rather than renamed on a guess. An event
+  // in that shape is an anomaly a stored-event parse should refuse loudly, not something this
+  // transform should paper over.
+  if (e.kind === "participant-handicap-set" && e.courseHandicap !== undefined && e.strokes === undefined) {
     // Not destructuring `kind` out here: the explicit `kind:` below already overrides
     // whatever `rest` carries (object literals let a later key win), and destructuring it
     // only to discard it left a var eslint's no-unused-vars correctly flagged.

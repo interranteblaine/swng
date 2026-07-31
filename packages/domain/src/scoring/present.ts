@@ -59,6 +59,17 @@ export const gameKindFits = (kind: GameKind): string => {
 
 // One seat's asserted number, or 0 if that golfer isn't on the roster handed in. Shared by the two
 // sentences below so they can never disagree about what a seat holds.
+//
+// That `?? 0` is a DELIBERATE disagreement with `gameStrokeAllocation`, which throws
+// `unknown-participant` on the identical input (allocation.ts's `participantFor`), and the split is
+// the right way round: a formatter degrades, a computation refuses. Inventing a 0 to say a sentence
+// with is recoverable; inventing a 0 to place DOTS with would put wrong strokes on a real card.
+// Both are unreachable through the API anyway — `addGame` rejects a game naming a non-participant
+// (unknown-golfer-in-game) — and in the two places both are rendered, the refusal happens FIRST and
+// wins: `strokesSummary` (which goes through the allocation) is computed above the note in both
+// GamePanel.tsx and AddGameForm.tsx, and for the two match kinds these sentences speak for it
+// always computes dots, so a bad member takes the whole panel down rather than showing a degraded
+// sentence beside a computed one. The two can never be seen contradicting each other on screen.
 const strokesOn = (participants: readonly Participant[], id: GolferId): number => participants.find((p) => p.golferId === id)?.strokes ?? 0;
 
 // One treatment line for every kind, gross included — the ONE copy every panel and the add-game

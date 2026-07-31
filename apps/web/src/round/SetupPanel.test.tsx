@@ -441,8 +441,10 @@ describe("SetupPanel — setting a player's strokes", () => {
 
   // The wire's ceiling reaches the control (review fix round 1): a bare digits-only predicate let
   // "60" enable Save, which POSTed, 400'd, and showed a generic "try again" that could never
-  // succeed. Same defect class the prior arc caught here one bound over, on the floor.
-  it("refuses a number above the wire's ceiling — Save stays disabled at 55, enabled at 54", async () => {
+  // succeed. Same defect class the prior arc caught here one bound over, on the floor. Written
+  // against MAX_STROKES rather than literals so the control and the wire cannot drift apart when
+  // the ceiling moves (it moved from 54 to 100 in the whole-branch fix wave, Minor 7).
+  it("refuses a number above the wire's ceiling — Save stays disabled one over, enabled at the ceiling", async () => {
     const user = userEvent.setup();
     const state = baseState({ participants: [participant(ANN, "Ann", "white", 3)] });
     renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
@@ -455,7 +457,7 @@ describe("SetupPanel — setting a player's strokes", () => {
     expect(input.getAttribute("max")).toBe(String(MAX_STROKES));
 
     await user.clear(input);
-    await user.type(input, "55");
+    await user.type(input, String(MAX_STROKES + 1));
     expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(within(annRow!).getByRole("button", { name: "Save" }));
     expect(noopSetStrokes).not.toHaveBeenCalled();
@@ -465,6 +467,45 @@ describe("SetupPanel — setting a player's strokes", () => {
     expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
     await user.click(within(annRow!).getByRole("button", { name: "Save" }));
     expect(noopSetStrokes).toHaveBeenCalledWith(ANN, MAX_STROKES);
+  });
+
+  // The defect behind Minor 7: refusing the value was right, refusing it SILENTLY was not. Save
+  // going dead with nothing on screen is a dead end — the golfer cannot tell a rejected value from
+  // a broken button. One sentence, stating the whole legal range, for every illegal shape.
+  it("says WHY Save is disabled while the field holds an illegal value, and stops once it is legal", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ participants: [participant(ANN, "Ann", "white", 3)] });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+
+    const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
+    await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
+    const input = within(annRow!).getByRole("spinbutton", { name: "Strokes for Ann" });
+    const reason = `Enter a whole number from 0 to ${MAX_STROKES}.`;
+
+    // Seeded with the seat's own legal number: nothing to say yet.
+    expect(within(annRow!).queryByText(reason)).toBeNull();
+
+    // Over the ceiling, fractional, and negative all get the same true sentence — it states the
+    // range rather than guessing which of the three mistakes was made.
+    for (const illegal of [String(MAX_STROKES + 1), "12.5", "-3"]) {
+      await user.clear(input);
+      await user.type(input, illegal);
+      expect(within(annRow!).getByText(reason)).toBeTruthy();
+      expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+      // The input names it as its own constraint (a11y), rather than firing an alert per keystroke.
+      expect(input.getAttribute("aria-describedby")).toBe(within(annRow!).getByText(reason).id);
+    }
+
+    // An EMPTY field mid-edit is not a mistake to scold — Save is still disabled, silently.
+    await user.clear(input);
+    expect(within(annRow!).queryByText(reason)).toBeNull();
+    expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+
+    // Legal again: the reason goes away and the control comes back.
+    await user.type(input, "12");
+    expect(within(annRow!).queryByText(reason)).toBeNull();
+    expect(input.getAttribute("aria-describedby")).toBeNull();
+    expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("refuses a fractional number too — a stroke count is whole", async () => {

@@ -50,9 +50,18 @@ export type GameConfigInput = z.infer<typeof gameConfigInputSchema>;
 
 // The ceiling on a stroke count, shared so the wire and the roster editor can never drift apart:
 // `strokesInputSchema` below bounds the request with it, and apps/web's SetupPanel bounds its own
-// input and its Save-enabled predicate with the SAME constant. Two independent literals is exactly
-// how a control comes to accept a number the wire always rejects.
-export const MAX_STROKES = 54;
+// input, its Save-enabled predicate AND the sentence it shows when Save is off with the SAME
+// constant. Two independent literals is exactly how a control comes to accept a number the wire
+// always rejects.
+//
+// 100 — the value Arc A (2026-07-23) already ratified for this class of bound when it widened
+// `courseHandicap` from `[-10,54]` on the finding that 54 rejects legitimate play, "exactly the
+// anti-pattern the arc's own placement rule forbids." A typed stroke count is a raw DIFFERENCE
+// between two players (spec 2026-07-30 §2/§3), so nothing caps it at a course handicap: a beginner
+// who shoots +58 playing off a scratch anchor is a real pairing that 54 refuses outright. This is a
+// nonsense filter — 100 is more than five shots a hole over eighteen — never a statement about how
+// many strokes a group is allowed to give.
+export const MAX_STROKES = 100;
 
 // A player's strokes at the REQUEST ingress (spec 2026-07-30 §2). `setStrokesRequestSchema` is its
 // ONE consumer — start and join ask nothing about anyone's game (spec §9), so there is no other
@@ -67,8 +76,9 @@ export const MAX_STROKES = 54;
 // render site degrades instead of trusting (ScorecardGrid's dot span).
 //
 // NOT signed: nobody gives strokes back, so min(0) makes a negative unrepresentable at the wire.
-// MAX_STROKES is a plausibility limit with margin (three a hole on a nine, one a hole plus half
-// again on an eighteen), there to reject nonsense rather than a real player.
+// MAX_STROKES is a plausibility limit with real margin (see its own comment above), there to reject
+// nonsense rather than a real player — a bound that refuses a pairing somebody actually plays is
+// worse than no bound at all.
 export const strokesInputSchema = z.number().int().min(0).max(MAX_STROKES);
 
 // Accounts-only identity (spec §3): StartRound seats its creator ONLY, always as-self from the

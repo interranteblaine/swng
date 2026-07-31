@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { deviceId, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { CourseCard, GameConfig, GameResult, RoundArchive, RoundEvent } from "@swng/domain";
+import { MAX_STROKES } from "./commands.js";
 import { ContractError, parse } from "./parse.js";
 import {
   gameConfigSchemaImpl,
@@ -91,13 +92,15 @@ describe("roundEventSchema", () => {
   });
 
   // The STORED arm is deliberately unbounded (round.ts's own comment, Arc A's placement rule):
-  // the request copy in commands.ts bounds `strokes` to [0, 54], but an already-stored value
-  // outside that must still PARSE — a schema rejection on a read path would make the whole round
-  // unreadable forever.
+  // the request copy in commands.ts bounds `strokes` to [0, MAX_STROKES], but an already-stored
+  // value outside that must still PARSE — a schema rejection on a read path would make the whole
+  // round unreadable forever. Both fixtures are outside the request bounds BY CONSTRUCTION
+  // (MAX_STROKES + 1 and a negative), so widening or narrowing that ceiling can never quietly turn
+  // this into a test of an in-bounds value.
   it("parses a stored strokes value outside the request bounds, on both the set and the join", () => {
     const set = {
       opId: "op-2", hlc: { wallMs: 6, counter: 0, deviceId: "d1" }, authorId: "g-author",
-      kind: "participant-strokes-set", golferId: "g-subject", strokes: 99,
+      kind: "participant-strokes-set", golferId: "g-subject", strokes: MAX_STROKES + 1,
     };
     expect(roundEventSchema.parse(set)).toEqual(set);
     const join = {

@@ -402,18 +402,32 @@ describe("participant-strokes-set", () => {
     expect(seat?.departed).toBeUndefined();
   });
 
-  // The obligation the rule above creates, and the shape joinRound (application/src/rounds/
-  // joinRound.ts) actually emits: nothing asks for a number at the door any more (the join body is
-  // {code, tee} — spec §9), so a rejoin carries the seat's CURRENT strokes forward. Fold it and the
-  // correction survives leaving and coming back; a rejoin hard-coding a fresh 0 would erase it
-  // retroactively across the whole round, which is the defect this pair exists to keep dead.
-  it("a rejoin that carries the seat's current number forward keeps the correction", () => {
+  // The obligation the rule above creates, pinned as a PAIR so it discriminates. Nothing asks for a
+  // number at the door any more (the join body is {code, tee} — spec §9), so a rejoin carries the
+  // seat's CURRENT strokes forward (application/src/rounds/joinRound.ts) and the correction
+  // survives; a rejoin hard-coding a fresh 0 erases it across the whole round, which is the defect
+  // (whole-branch review C1) and, in the fold, correct behaviour — the payload decides.
+  //
+  // Both legs are needed. A fixture where the set and the rejoin carry the SAME number folds to
+  // that number under every rule ("a set always wins", "a set never applies", and the real one), so
+  // it documents without discriminating. With all three legs this test fails if a set stops
+  // applying (leg 1) and fails if a set starts outranking a later join (leg 3).
+  it("the seat is the LATEST join's payload — a rejoin carrying the number keeps it, a rejoin carrying 0 loses it", () => {
     const leave: RoundEvent = { ...base(11), kind: "participant-left", golferId: A };
-    const rejoin: RoundEvent = { ...base(12), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", strokes: 13 } };
-    const state = reduceRound([genesis, joinA, started, setA(10, 13), leave, rejoin]);
-    const seat = state.participants.find((p) => p.golferId === A);
-    expect(seat?.strokes).toBe(13);
-    expect(seat?.departed).toBeUndefined();
+    const rejoinWith = (strokes: number): RoundEvent => ({ ...base(12), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", strokes } });
+    const seatOf = (events: readonly RoundEvent[]) => reduceRound(events).participants.find((p) => p.golferId === A);
+
+    // 1. No rejoin: the correction applies at all.
+    expect(seatOf([genesis, joinA, started, setA(10, 13)])?.strokes).toBe(13);
+
+    // 2. The shape joinRound emits — the correction survives leaving and coming back.
+    const carried = seatOf([genesis, joinA, started, setA(10, 13), leave, rejoinWith(13)]);
+    expect(carried?.strokes).toBe(13);
+    expect(carried?.departed).toBeUndefined();
+
+    // 3. The defect's own shape: a rejoin asserting 0 seats 0. The fold is not wrong here — this is
+    // why the number must be carried by the writer, and why nobody should "fix" it here instead.
+    expect(seatOf([genesis, joinA, started, setA(10, 13), leave, rejoinWith(0)])?.strokes).toBe(0);
   });
 
   it("a set earlier than the latest join loses to that join", () => {

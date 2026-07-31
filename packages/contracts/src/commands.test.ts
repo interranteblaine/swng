@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { CourseCard } from "@swng/domain";
 import { ContractError, parse } from "./parse.js";
 import {
+  MAX_STROKES,
   addGameRequestSchema,
   finalizeRoundResponseSchema,
   gameConfigInputSchema,
@@ -184,11 +185,16 @@ describe("setStrokesRequestSchema", () => {
     expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: -1 })).toThrow(ContractError);
   });
 
-  // max(54) is a plausibility limit with margin, not a golf rule.
-  it("rejects a strokes count above 54 and accepts the boundary", () => {
-    expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: 55 })).toThrow(ContractError);
-    expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: 54 })).not.toThrow();
+  // MAX_STROKES is a plausibility limit with real margin, not a golf rule — a nonsense filter that
+  // must not refuse a pairing somebody actually plays (whole-branch review Minor 7: it was 54,
+  // which rejects a beginner off a scratch anchor, the exact anti-pattern Arc A corrected on the
+  // same number). Written against the constant so the ceiling and its pin can never drift.
+  it("rejects a strokes count above MAX_STROKES and accepts the boundary", () => {
+    expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: MAX_STROKES + 1 })).toThrow(ContractError);
+    expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: MAX_STROKES })).not.toThrow();
     expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: 0 })).not.toThrow();
+    // The value the ceiling exists to admit: a raw difference bigger than any course handicap.
+    expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: 58 })).not.toThrow();
   });
 });
 

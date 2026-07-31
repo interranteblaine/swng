@@ -15,6 +15,19 @@ import { AddGameForm } from "./AddGameForm";
 // tried. The editor declines to OFFER an illegal state rather than reporting it after a round trip.
 const isValidStrokes = (value: string): boolean => /^\d+$/.test(value.trim()) && Number(value.trim()) <= MAX_STROKES;
 
+// WHY Save is dead, said out loud (whole-branch review Minor 7). `isValidStrokes` decides whether
+// the control is offered; without this the editor just went quiet — a typed "150" left Save
+// disabled with nothing on screen explaining it, and the row's own `role="alert"` line is populated
+// only by a save FAILURE, which by definition never happens for a value Save won't send. A silent
+// dead end on the flagship control of an arc about legibility.
+//
+// One sentence for every illegal shape (negative, fractional, non-numeric, over the ceiling): it
+// states the whole legal range, which answers all four rather than guessing which mistake was made.
+// An EMPTY field is not "invalid" here — a mid-edit blank has nothing to correct yet, so it is not
+// scolded; Save is still disabled by the predicate.
+const strokesReasonFor = (value: string): string | undefined =>
+  value.trim() === "" || isValidStrokes(value) ? undefined : `Enter a whole number from 0 to ${MAX_STROKES}.`;
+
 export interface SetupPanelProps {
   readonly state: RoundState;
   // Task 5/6 seam: live per-game standings (up/thru, points, skins won) render from here once
@@ -44,6 +57,11 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes }: SetupPa
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+
+  // At most one editor is open at a time (see `editing` above), so one derived reason and one id
+  // serve the whole roster — no per-row state to keep in step.
+  const strokesReason = strokesReasonFor(value);
+  const strokesReasonId = "strokes-reason";
 
   const [inviteUrl, setInviteUrl] = useState<string | undefined>(undefined);
   const [inviteCopied, setInviteCopied] = useState(false);
@@ -166,6 +184,11 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes }: SetupPa
                         min={0}
                         max={MAX_STROKES}
                         aria-label={`Strokes for ${p.name}`}
+                        // Describes the input rather than shouting: the reason appears the moment
+                        // the field goes illegal, but a screen reader hears it as this control's
+                        // own constraint, not as an interruption on every keystroke (role="alert"
+                        // below stays for the one thing that IS an interruption, a failed save).
+                        aria-describedby={strokesReason ? strokesReasonId : undefined}
                         className={`${inputBox} w-16`}
                         value={value}
                         onChange={(event) => setValue(event.target.value)}
@@ -178,6 +201,14 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes }: SetupPa
                         Cancel
                       </button>
                     </span>
+                    {/* Oxblood, the careful-action ink (brand reskin): this is a correction to
+                        make, not a fact about the round. Sits directly under the control it
+                        explains, above the teaching line, so the eye meets the reason first. */}
+                    {strokesReason && (
+                      <span id={strokesReasonId} className="text-sm text-oxblood">
+                        {strokesReason}
+                      </span>
+                    )}
                     <span className="text-sm text-fairway">Strokes apply to the whole round — dots and games update everywhere.</span>
                     {error && (
                       <p role="alert" className="text-oxblood">

@@ -733,5 +733,22 @@ Not a task — the controller executes this. **The order is load-bearing (spec �
 5. `pnpm deploy:beta`, then `pnpm publish:web:beta`
 6. Invoke `RebuildFunction` on beta until the cursor is exhausted
 7. `pnpm e2e:beta` ×2, `pnpm e2e:field`
+
+**Three operational facts, so nothing red gets misread as a failure:**
+
+- **Between step 5 and step 6, `checkProdParses.mjs` FAILS on that stage, by design.** Its
+  `REQUIRED_LINE_FIELDS` now includes `playedAtMs`, and the projection lines do not carry it
+  until the rebuild stamps them. That red *is* the gate working; it means step 6 is pending, not
+  that something broke. It must go green after the rebuild — if it doesn't, that is a real
+  failure.
+- **A round can reappear in the pending list after being migrated, and it is not a failed
+  write.** The pre-deploy lambda strips `playedAtMs` when it parses a stored event, and
+  `settleRound` builds `archive.events` from those parsed events — so a round finalized by the
+  OLD lambda after its genesis was migrated writes a fresh un-migrated snapshot. The remedy is
+  the same either way: re-run until a dry run reports zero pending.
+- **A round created between the last dry run and the deploy must be migrated after it**, which
+  is the one legitimate post-deploy run. It asserts `--straggler-after-deploy` instead of
+  `--before-deploy`; the two are refused together. Migrating is never unsafe in either order —
+  the flag records which side of the deploy you are on, it does not grant permission.
 8. Adversarial USE pass on deployed `beta.swng.golf`: enter a real paper round dated several days back, finalize it, and confirm it reads as that day everywhere — home, profile history, the crew board's season
 9. Only then `pnpm deploy:prod` → `publish:web:prod` → prod `RebuildFunction` → a browser walk on `swng.golf` confirming the existing rounds still read with their original dates (the migration is lossless; this is the proof)

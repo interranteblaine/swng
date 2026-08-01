@@ -466,9 +466,14 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // The deferred ⚠️ (task-3 review): `standings.rounds` — "played together" — is now POPULATED
     // with >=2 CURRENT roster members sharing a line on every one of the 12 deck rounds. Asserted
     // as an actual SET (not merely a length) against the roundIds test 3 minted, in the wire's
-    // `{roundId, finalizedAt, courseName, createdAt?}` shape (grown by spec 2026-07-22 §3 so the
-    // "Played together" list renders the canonical roundLabel), newest-first by finalizedAt
-    // (getSeasonStandings.ts's own sort) — a real ordering property, not just "some rounds came back."
+    // `{roundId, finalizedAt, courseName, createdAt?, playedAt}` shape (finalizedAt/courseName/
+    // createdAt grown by spec 2026-07-22 §3; playedAt added REQUIRED by round-played-date spec
+    // 2026-08-01 §4c — SeasonPanel.tsx's own "Played together" list renders roundLabel off THIS
+    // field, browser-side, out of this API-only file's own scope per its header comment). This
+    // list's own ORDER is untouched by that arc: it stays newest-first by finalizedAt
+    // (getSeasonStandings.ts's own sort) — round-played-date spec §4's table names the history
+    // sort and the crew season WINDOW as the two things that move onto playedAt; "played
+    // together" order is neither — a real ordering property, not just "some rounds came back."
     expect(standings.rounds).toHaveLength(SEASON_ROUNDS);
     expect([...standings.rounds.map((round) => round.roundId)].sort()).toEqual([...roundIds].sort());
     for (let i = 1; i < standings.rounds.length; i += 1) {

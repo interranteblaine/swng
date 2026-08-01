@@ -1,6 +1,23 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { addSinglesGame, chip, injectAuthTokens, joinRoundDirect, loadWebEnv, mintAccountGolfer, openGamePanel, readJoinCode, setStrokesInBrowser, waitForParticipant } from "./support.js";
+import { fixtureLinks18 } from "@swng/domain";
+import { roundLabel } from "../src/roundLabel.js";
+import {
+  addSinglesGame,
+  chip,
+  ensureCourse,
+  enterScore,
+  getMyRecordDirect,
+  injectAuthTokens,
+  joinRoundDirect,
+  loadWebEnv,
+  mintAccountGolfer,
+  openGamePanel,
+  pollUntil,
+  readJoinCode,
+  setStrokesInBrowser,
+  waitForParticipant,
+} from "./support.js";
 import type { AccountGolfer } from "./support.js";
 
 // The M6 gate (docs/implementation-plan.md M6; docs/superpowers/plans/2026-07-09-m6-courses.md
@@ -46,6 +63,17 @@ const CASA_VERDE_HOLES: readonly { readonly par: number; readonly yardage: numbe
 ];
 
 const DOT = "●"; // "●" — ScorecardGrid.tsx's own dot glyph (Cell's aria-hidden span)
+
+// A datetime-local input's value is a LOCAL wall-clock string with no zone, e.g.
+// "2026-07-29T14:05" — the same algorithm CreateRoundPage.tsx's own (unexported)
+// toDatetimeLocalValue uses to seed the field, duplicated here rather than imported (that file
+// pulls in react-router and can't be loaded outside a Vite build, the same reason every other
+// *Direct helper in support.ts hand-rolls its own fetch instead of reusing api.ts). Round-trips
+// through `new Date(value).getTime()` — the exact parse CreateRoundPage.tsx's submit handler
+// applies — to get the instant this test expects to see stored and rendered.
+const pad = (n: number): string => String(n).padStart(2, "0");
+const toDatetimeLocalValue = (date: Date): string =>
+  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 
 // The strokes the group agreed for Pat, typed onto the roster in test 5 (spec 2026-07-30 §2).
 // Quinn stays on the default 0. 19 on an 18-hole card is deliberately just over a full lap, so
@@ -284,5 +312,116 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
     await expect(dialog).toBeHidden(); // pad closes on the posting tap — no confirm step
 
     await expect(cell).toHaveText(`${DOT}54`); // 1 dot, gross 5, net 5 - 1 = 4, concatenated with no separators
+  });
+});
+
+// --- The round-played-date beat (spec 2026-08-01, plan Task 9 Step 2) -----------------------
+// A round dated through the real "When did you play?" field on CreateRoundPage reads as that
+// day everywhere the played date surfaces: the projection line served to GET /me/record and the
+// canonical roundLabel rendered on the round's own permanent address. THREE DAYS BACK,
+// deliberately, not a few seconds — this arc's own spec (§9) names by number the mistake of
+// shipping a beat whose played instant and creation instant render identically on a
+// day-granular label, which can never fail. This is a fresh, small describe block (own account,
+// own throwaway round, its own fixtureLinks18 round rather than a hand-typed card) instead of a
+// tenth test folded into the M6 gate above: that block's own Pat/Quinn round is mid-narrative
+// (a singles match, one hole scored) this beat has no business touching or depending on — it
+// shares only this file's "drives CreateRoundPage's real form" home, the same precedent
+// fieldTest.spec.ts already sets with its own second, independent describe block below the M5
+// field test.
+test.describe.serial("round-played-date gate — a round entered three days late reads as three days late", () => {
+  let page: Page;
+  let account: AccountGolfer;
+
+  test.beforeAll(async ({ browser }) => {
+    account = await mintAccountGolfer("playedat-golfer", "Retro");
+    // fixtureLinks18 (shared across specs, idempotently re-seeded by ensureCourse) — this beat
+    // is about the played date, not course entry, so there's no reason to type an 18-hole card
+    // by hand a second time in this file.
+    await ensureCourse(fixtureLinks18.courseName, fixtureLinks18, account);
+    const context = await browser.newContext();
+    page = await context.newPage();
+    await injectAuthTokens(page, account.tokens);
+  });
+
+  test.afterAll(async () => {
+    await page?.context().close();
+  });
+
+  test("10: created three days back through the real form; the history row's playedAt and the round's own roundLabel both name that day", async () => {
+    test.setTimeout(90_000);
+    const { httpUrl } = loadWebEnv();
+
+    // A calendar day, not a few seconds (binding constraint, spec §9): three days back
+    // guarantees a different weekday under roundLabel's "Sat, Jul 12" day-granular rendering no
+    // matter what time of day this suite happens to run.
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const playedAtInput = toDatetimeLocalValue(threeDaysAgo);
+    // Parsed back through the SAME "no zone -> local time" rule CreateRoundPage.tsx's own submit
+    // handler applies (`new Date(playedAt).getTime()`) — not threeDaysAgo.getTime() directly,
+    // since a datetime-local field carries no seconds and would silently truncate them.
+    const expectedPlayedAtMs = new Date(playedAtInput).getTime();
+
+    await page.goto("/create");
+    await page.getByLabel("Course", { exact: true }).fill(fixtureLinks18.courseName);
+    // Full "name · N holes" accessible name (CourseSearch.tsx) — the precedent every other spec
+    // searching this exact fixture already uses (fieldTest.spec.ts, its own M7 describe block).
+    const result = page
+      .getByRole("button", { name: `${fixtureLinks18.courseName} · ${fixtureLinks18.teeSets[0]!.holes.length} holes`, exact: true })
+      .first();
+    await expect(result).toBeVisible();
+    await result.click();
+
+    // "When did you play?" (round-played-date spec §5) — always visible, defaulting to now;
+    // overwritten with the exact instant this test expects to see stored and rendered.
+    await page.getByLabel("When did you play?", { exact: true }).fill(playedAtInput);
+
+    await page.getByRole("button", { name: "Create round" }).click();
+    await expect(page).toHaveURL(/\/round\//);
+    const roundId = new URL(page.url()).pathname.split("/").pop() ?? "";
+    expect(roundId).not.toBe("");
+
+    // No games on this round, so finalize is unblocked the moment scoring stops
+    // (unresolvedGames returns nothing for a gameless round) — two holes is enough to prove the
+    // form -> sealed-snapshot path without re-typing an 18-hole card (same precedent as
+    // strokesCorrection.spec.ts's two-of-nine, unratedCourse.spec.ts's two-of-nine).
+    await enterScore(page, "Retro", 1, 4);
+    await enterScore(page, "Retro", 2, 5);
+
+    await page.getByRole("button", { name: "Finalize round" }).click();
+    await page
+      .getByRole("dialog", { name: "Confirm finalize" })
+      .getByRole("button", { name: /^finalize$/i })
+      .click();
+    await expect(page.getByRole("heading", { name: "Final results" })).toBeVisible({ timeout: 60_000 });
+
+    // The projection: GET /me/record's history line carries the exact instant typed into the
+    // form (round-played-date spec §4), not the moment the record was actually created a few
+    // seconds before this line runs — the DynamoDB Streams projector is asynchronous relative to
+    // finalize's own HTTP response, so this polls the same way every other record-after-finalize
+    // beat in this suite does (unratedCourse.spec.ts, identityRecord.spec.ts).
+    const record = await pollUntil(
+      () => getMyRecordDirect(httpUrl, account.tokens.idToken),
+      (r) => r.history.some((line) => line.roundId === roundId),
+      60_000,
+      "GET /me/record carries the new round",
+    );
+    const line = record.history.find((entry) => entry.roundId === roundId);
+    expect(line?.playedAt).toBe(expectedPlayedAtMs);
+
+    // The screen: the round's own permanent address (RoundRecordPage, navigation spec §7) reads
+    // the archive directly (no projector lag) and renders roundLabel over the SAME played
+    // instant — course + the day three days back, never today. Scoped to the ONE `font-serif`
+    // paragraph this page renders (RoundRecordPage.tsx's own heading line — verified against no
+    // other element on this render tree carrying that class) because the course-name half wears
+    // a link here (ensureCourse's card carries a real source, navigation spec's link sweep) —
+    // `toHaveText` reads the whole element's text content, link included, so the split doesn't
+    // matter the way a bare `getByText(exact)` lookup would.
+    await page.goto(`/rounds/${roundId}`);
+    await expect(page.getByRole("heading", { name: "Final results" })).toBeVisible();
+    const expectedLabel = roundLabel({ courseName: fixtureLinks18.courseName, playedAt: expectedPlayedAtMs });
+    await expect(page.locator("p.font-serif")).toHaveText(expectedLabel);
+    // usePageTitle's own " · swng" suffix (apps/web/src/ui/usePageTitle.ts) — the SAME roundLabel
+    // string, doubly pinned via the browser tab title.
+    await expect(page).toHaveTitle(`${expectedLabel} · swng`);
   });
 });

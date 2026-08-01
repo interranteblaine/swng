@@ -168,15 +168,27 @@ describe("season + standings schemas", () => {
     });
   });
 
-  it("sharedRoundViewSchema round-trips courseName and an optional createdAt", () => {
-    const withDate = { roundId: "r1", finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC", createdAt: 1_699_000_000_000 };
+  it("sharedRoundViewSchema round-trips courseName, a required playedAt, and an optional createdAt", () => {
+    const withDate = {
+      roundId: "r1",
+      finalizedAt: 1_700_000_000_000,
+      courseName: "Casa Verde GC",
+      createdAt: 1_699_000_000_000,
+      playedAt: 1_699_000_000_000,
+    };
     expect(sharedRoundViewSchema.parse(withDate)).toEqual(withDate);
-    const noDate = { roundId: "r2", finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC" };
+    const noDate = { roundId: "r2", finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC", playedAt: 1_698_000_000_000 };
     expect(sharedRoundViewSchema.parse(noDate)).toEqual(noDate);
   });
 
   it("sharedRoundViewSchema rejects a missing courseName", () => {
-    expect(() => sharedRoundViewSchema.parse({ roundId: "r1", finalizedAt: 1, createdAt: 1 })).toThrow();
+    expect(() => sharedRoundViewSchema.parse({ roundId: "r1", finalizedAt: 1, createdAt: 1, playedAt: 1 })).toThrow();
+  });
+
+  // playedAt (spec 2026-08-01 §4c) is REQUIRED, unlike the createdAt beside it — every projection
+  // line carries a real playedAtMs, so there is no legacy-line case to tolerate.
+  it("sharedRoundViewSchema rejects a missing playedAt", () => {
+    expect(() => sharedRoundViewSchema.parse({ roundId: "r1", finalizedAt: 1, courseName: "Casa Verde GC" })).toThrow();
   });
 
   it("seasonStandingsResponseSchema round-trips scoreboard + ledger (with name) + head-to-head + rounds, partners empty", () => {
@@ -186,7 +198,9 @@ describe("season + standings schemas", () => {
       startsAt: "2026-01-01",
       endsAt: "2026-12-31",
       scoreboard: [{ golferId: golferId("ann"), name: "Ann", rounds: 1 }],
-      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC", createdAt: 1_699_000_000_000 }],
+      rounds: [
+        { roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC", createdAt: 1_699_000_000_000, playedAt: 1_699_000_000_000 },
+      ],
       ledger: [{ golferId: golferId("ann"), rounds: 1, wins: 1, losses: 0, halves: 0, points: 0, skins: 0, name: "Ann" }],
       headToHead: [{ a: golferId("ann"), b: golferId("bo"), aWins: 1, bWins: 0, halves: 0 }],
       partners: [],

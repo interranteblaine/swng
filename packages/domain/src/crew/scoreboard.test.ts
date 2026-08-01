@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { golferId, roundId } from "../ids.js";
 import type { GolferId } from "../ids.js";
 import type { GolferHoleLine } from "../golfer/record.js";
-import { crewScoreboard, inWindow, playedAtMs, sharedRoundIds } from "./scoreboard.js";
+import { crewScoreboard, inWindow, sharedRoundIds } from "./scoreboard.js";
 import type { SeasonWindow, StoredLine } from "./scoreboard.js";
 
 const A = golferId("a");
@@ -23,7 +23,10 @@ const mkLine = (opts: {
   overs?: number;
   pickedUpHole?: number;
   finalizedAtMs: number;
-  createdAtMs?: number;
+  // playedAtMs (spec 2026-08-01 §4c, task 5) — defaults to finalizedAtMs so every EXISTING
+  // fixture below (which never cared about the played/finalized distinction) is unaffected;
+  // pass a distinct value only in the tests that exist to prove the distinction matters.
+  playedAtMs?: number;
 }): StoredLine => {
   const overs = opts.overs ?? 0;
   let holePars: number[];
@@ -60,7 +63,7 @@ const mkLine = (opts: {
     distribution,
     holeResults,
     finalizedAtMs: opts.finalizedAtMs,
-    ...(opts.createdAtMs !== undefined ? { createdAtMs: opts.createdAtMs } : {}),
+    playedAtMs: opts.playedAtMs ?? opts.finalizedAtMs,
   };
 };
 
@@ -174,8 +177,28 @@ describe("inWindow — edges (spec §7 case 5)", () => {
     expect(inWindow(window, mkLine({ roundId: "r1", holes: 18, par: 72, strokes: 10, finalizedAtMs: 2001 }))).toBe(false);
   });
 
-  it("createdAtMs outside but finalizedAtMs inside is OUT — created wins", () => {
-    const line = mkLine({ roundId: "r1", holes: 18, par: 72, strokes: 10, finalizedAtMs: 1500, createdAtMs: 2500 });
+  // TASK 5 — the point of the whole task (spec 2026-08-01 §4c). A round counts in the season it
+  // was PLAYED in, never the one its paperwork happens to land in. Built with NO createdAtMs, so
+  // today's pre-task-5 `playedAtMs(line) = createdAtMs ?? finalizedAtMs` falls through to
+  // finalizedAtMs (Aug 1 — outside this window) and reads OUT; only reading `line.playedAtMs`
+  // directly reads it correctly as March 15 — IN.
+  it("counts a back-dated round in the season window containing its played date, even after that season's end date has passed", () => {
+    const marchToJune: SeasonWindow = { startMs: Date.UTC(2026, 0, 1), endMs: Date.UTC(2026, 5, 30, 23, 59, 59, 999) }; // 2026-01-01..2026-06-30
+    const line = mkLine({
+      roundId: "r1",
+      holes: 18,
+      par: 72,
+      strokes: 10,
+      playedAtMs: Date.UTC(2026, 2, 15), // played 2026-03-15 — inside the window
+      finalizedAtMs: Date.UTC(2026, 7, 1), // finalized 2026-08-01 — a month after the window closed
+    });
+    expect(inWindow(marchToJune, line)).toBe(true);
+  });
+
+  // The symmetric case: a round played OUTSIDE the window but finalized (or otherwise recorded)
+  // inside it must stay OUT — playedAtMs wins in both directions, not just the back-dated one.
+  it("playedAtMs outside the window but finalizedAtMs inside is OUT — played wins, not finalized", () => {
+    const line = mkLine({ roundId: "r1", holes: 18, par: 72, strokes: 10, finalizedAtMs: 1500, playedAtMs: 2500 });
     expect(inWindow(window, line)).toBe(false);
   });
 });
@@ -195,7 +218,7 @@ describe("crewScoreboard — window scoping (spec §7 case 7's replacement)", ()
     const withHistory = crewScoreboard([{ golferId: A, lines: [preWindow, ...inSeason] }], window)[0]!;
     const withoutHistory = crewScoreboard([{ golferId: A, lines: inSeason }], window)[0]!;
 
-    expect(playedAtMs(preWindow)).toBeLessThan(window.startMs); // fixture sanity
+    expect(preWindow.playedAtMs).toBeLessThan(window.startMs); // fixture sanity
     expect(withHistory).toEqual(withoutHistory);
     expect(withHistory.rounds).toBe(2);
     expect(withHistory.average).toBe(4);

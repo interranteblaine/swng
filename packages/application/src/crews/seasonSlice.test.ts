@@ -103,26 +103,27 @@ const recordPlayed = async (
   archive: RoundArchive,
   wallMs: number,
   golferIds?: readonly GolferId[],
-  // The round's played instant — optional, matching the real line's `createdAtMs?`. When set it
-  // seeds the line's createdAtMs (the canonical-label input the standings wire now carries); the
-  // window fold reads `createdAtMs ?? finalizedAtMs`, so setting it to wallMs is behavior-neutral.
+  // `createdAtMs` seeds the line's own createdAtMs — an AUDIT fact (when this projection line
+  // was written), matching the real line's optional field. It rides the standings wire as
+  // `rounds[].createdAt` and has NO effect on season-window membership: that decision belongs to
+  // `playedAtMs` alone (spec 2026-08-01 §4c, task 5 — the old `createdAtMs ?? finalizedAtMs`
+  // guess this comment used to describe is deleted).
   createdAtMs?: number,
+  // `playedAtMs` (spec 2026-08-01 §4a/§4c) is the ONE fact `inWindow` reads — WHEN THE GOLF
+  // HAPPENED, domain's playedAtMsOf in the real pipeline. Defaults to `wallMs` (most fixtures
+  // below don't need the played/finalized distinction — sortLines' own sort key IS playedAtMs,
+  // so leaving it at wallMs keeps chronological order identical to finalizedAtMs order too);
+  // pass a distinct value to model a round finalized long after it was played — the back-dated
+  // shape this task exists to fix.
+  playedAtMs?: number,
 ): Promise<void> => {
   ctx.snapshots.record(archive);
   const ids = golferIds ?? archive.participants.map((p) => p.golferId);
   for (const golfer of ids) {
-    // playedAtMs (spec 2026-08-01 §4a) is REQUIRED on the port now, and IS read here: sortLines'
-    // sort key is playedAtMs (projectArchive.ts), and getSeasonStandings.ts:60 sorts every
-    // member's lines through it before crewScoreboard ever sees them. This fixture is unaffected
-    // by that only because playedAtMs === finalizedAtMs === wallMs here, so sorting by playedAtMs
-    // lands the exact same order sorting by finalizedAtMs would — a true statement, unlike "never
-    // read by anything in this file" (a task-3-review fix; the window-fold subject itself,
-    // `createdAtMs ?? finalizedAtMs` on getSeasonStandings.ts, is a separate and still-untouched
-    // fact).
     await ctx.projectionStore.putLine(golfer, {
       ...archiveGolferLine(archive, golfer),
       finalizedAtMs: wallMs,
-      playedAtMs: wallMs,
+      playedAtMs: playedAtMs ?? wallMs,
       ...(createdAtMs !== undefined ? { createdAtMs } : {}),
     });
   }
@@ -303,17 +304,20 @@ describe("getSeasonStandings", () => {
     const ctx = setup();
     const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
     await recordPlayed(ctx, singlesArchive("r1", 5_000, ann, bo, ann, {}), 5_000); // Ann beats Bo (no createdAtMs)
-    await recordPlayed(ctx, singlesArchive("r2", 9_000, ann, bo, bo, {}), 9_000, undefined, 8_900); // Bo beats Ann; played 8_900
+    await recordPlayed(ctx, singlesArchive("r2", 9_000, ann, bo, bo, {}), 9_000, undefined, 8_900); // Bo beats Ann; record created 8_900
 
     const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
 
     expect(standings).toMatchObject({ seasonId, name: "2026", startsAt: WIDE_WINDOW.startsAt, endsAt: WIDE_WINDOW.endsAt });
     expect(standings.rounds.map((r) => r.roundId)).toEqual([roundId("r2"), roundId("r1")]); // newest-first
-    // The canonical-label inputs ride the wire (spec 2026-07-22 §3): courseName (from the frozen
-    // card) is REQUIRED; createdAt (the played instant) rides when the line carries one, and is
-    // absent otherwise (r1 had no createdAtMs → renders as the bare course name).
-    expect(standings.rounds[0]).toMatchObject({ roundId: roundId("r2"), courseName: "Fixture Links 18", createdAt: 8_900 });
-    expect(standings.rounds[1]).toMatchObject({ roundId: roundId("r1"), courseName: "Fixture Links 18" });
+    // The canonical-label inputs ride the wire (spec 2026-07-22 §3, extended 2026-08-01 §4c):
+    // courseName (from the frozen card) and playedAt (WHEN THE GOLF HAPPENED, domain's
+    // playedAtMsOf via the line's own playedAtMs) are BOTH REQUIRED — every line carries a real
+    // playedAt. createdAt stays exactly the audit fact it always was (when this projection line
+    // was written): it rides when the line carries one, absent otherwise (r1 had no createdAtMs →
+    // renders as the bare course name, but still carries a real playedAt of its own).
+    expect(standings.rounds[0]).toMatchObject({ roundId: roundId("r2"), courseName: "Fixture Links 18", createdAt: 8_900, playedAt: 9_000 });
+    expect(standings.rounds[1]).toMatchObject({ roundId: roundId("r1"), courseName: "Fixture Links 18", playedAt: 5_000 });
     expect(standings.rounds[1]!.createdAt).toBeUndefined();
     expect(standings.ledger).toEqual(
       expect.arrayContaining([
@@ -463,6 +467,31 @@ describe("getSeasonStandings", () => {
     expect(widened.rounds.map((r) => r.roundId).sort()).toEqual([roundId("r1"), roundId("r2")].sort());
     expect(widened.scoreboard.find((row) => row.golferId === ann)?.rounds).toBe(2);
   });
+
+  // Task 5's own point (spec 2026-08-01 §4c), proven through the real wire rather than just
+  // domain's own inWindow (scoreboard.test.ts): a round counts in the season it was PLAYED in,
+  // never the one its recording happens to land in. Here the round is played on day 5 — inside a
+  // window already narrowed to day 1-10 — but not RECORDED (wallMs, i.e. finalizedAtMs) until day
+  // 20, well after that window closed. It still counts, and the wire's own `playedAt`/`finalizedAt`
+  // pair proves which fact did the work.
+  it("a round played inside the window but recorded (finalized) long after it narrows still counts — playedAt wins, not finalizedAt", async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const ctx = setup();
+    const ann = await seedGolfer(ctx, "ann", "Ann");
+    const bo = await seedGolfer(ctx, "bo", "Bo");
+    const created = await ctx.create(asClaims("ann"), { name: "Sunday Skins" });
+    const invite = await ctx.mint(asClaims("ann"), created.crew.crewId);
+    await ctx.join(asClaims("bo"), { token: invite.token });
+    const season = await ctx.createSeason(asClaims("ann"), created.crew.crewId, { name: "Q1", startsAt: "1970-01-01", endsAt: "1970-01-10" });
+
+    // wallMs (finalizedAtMs) is day 20 — outside the window; playedAtMs is day 5 — inside it.
+    await recordPlayed(ctx, singlesArchive("r1", 20 * day, ann, bo, ann, {}), 20 * day, undefined, undefined, 5 * day);
+
+    const standings = await ctx.standings(asClaims("ann"), created.crew.crewId, season.season.seasonId);
+    expect(standings.rounds.map((r) => r.roundId)).toEqual([roundId("r1")]);
+    expect(standings.rounds[0]).toMatchObject({ playedAt: 5 * day, finalizedAt: 20 * day });
+    expect(standings.scoreboard.find((row) => row.golferId === ann)?.rounds).toBe(1);
+  });
 });
 
 // Crew-scoreboard spec §3a: the per-member scoreboard SeasonPanel leads with — a reuse proof
@@ -490,12 +519,13 @@ describe("getSeasonStandings — scoreboard", () => {
       distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
       holeResults: Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: 4, result: { kind: "strokes" as const, strokes: perHole } })),
       finalizedAtMs: ms,
-      // playedAtMs (spec 2026-08-01 §4a) is REQUIRED on the port now, and IS read: sortLines' sort
-      // key is playedAtMs (projectArchive.ts, applied at getSeasonStandings.ts:60 before
-      // crewScoreboard sees these lines). This fixture is unaffected only because
-      // playedAtMs === finalizedAtMs === ms here, so sorting by playedAtMs matches sorting by
-      // finalizedAtMs exactly — a task-3-review fix; crewScoreboard's OWN window fold still reads
-      // createdAtMs ?? finalizedAtMs, untouched by that arc.
+      // playedAtMs (spec 2026-08-01 §4a) is REQUIRED on the port now, and IS read TWICE over:
+      // sortLines' own sort key is playedAtMs (projectArchive.ts, applied before crewScoreboard
+      // sees these lines), AND crewScoreboard's own window fold (`inWindow`) reads it directly
+      // too as of task 5 (spec 2026-08-01 §4c — the old `createdAtMs ?? finalizedAtMs` guess is
+      // deleted). This fixture sets playedAtMs === ms === finalizedAtMs throughout, so neither
+      // rule's own numbers move — it exists to pin the WIRING (which lines, roster names, order),
+      // not the played/finalized distinction (scoreboard.test.ts owns that).
       playedAtMs: ms,
     });
     const annLines = [annLine("a1", 1_000, 6), annLine("a2", 2_000, 5), annLine("a3", 3_000, 5)];

@@ -4,9 +4,10 @@ import { inWindow } from "./scoreboard.js";
 import type { StoredLine } from "./scoreboard.js";
 import { seasonWindowOf } from "./seasonWindow.js";
 
-// Minimal StoredLine fixture — only finalizedAtMs/createdAtMs (playedAtMs's own inputs)
-// vary across these tests; every other field is a fixed, unexamined placeholder.
-const mkLine = (finalizedAtMs: number, createdAtMs?: number): StoredLine => ({
+// Minimal StoredLine fixture — only playedAtMs (the one fact inWindow reads, spec 2026-08-01
+// §4c) varies across these tests; every other field, including finalizedAtMs, is a fixed,
+// unexamined placeholder.
+const mkLine = (playedAtMs: number): StoredLine => ({
   roundId: roundId("r1"),
   courseName: "Fixture",
   tee: "white",
@@ -14,8 +15,8 @@ const mkLine = (finalizedAtMs: number, createdAtMs?: number): StoredLine => ({
   par: 72,
   strokes: 10,
   distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
-  finalizedAtMs,
-  ...(createdAtMs !== undefined ? { createdAtMs } : {}),
+  finalizedAtMs: 0,
+  playedAtMs,
 });
 
 describe("seasonWindowOf", () => {

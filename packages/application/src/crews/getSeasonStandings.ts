@@ -79,14 +79,21 @@ export const getSeasonStandings =
     }));
 
     // Shared rounds newest-first by finalizedAtMs; any holder's line is authoritative for a given
-    // roundId (a round finalizes once — same finalizedAt, frozen courseName, createdAt on every
-    // participant's line), so the first holder found supplies the canonical designation (spec §3).
-    const lineByRound = new Map<RoundId, StoredLine>();
+    // roundId (a round finalizes once — same finalizedAt, frozen courseName, createdAt/playedAt on
+    // every participant's line), so the first holder found supplies the canonical designation
+    // (spec §3, extended 2026-08-01 §4c for playedAt).
+    //
+    // `StoredLine` (domain, crew/scoreboard.ts) deliberately DROPS `createdAtMs` — crewScoreboard/
+    // inWindow never read it, so it has no reason to ride the narrower type crewScoreboard itself
+    // consumes. This file still needs it for the wire's own `rounds[].createdAt` passthrough below,
+    // so the map's value type widens back to it locally rather than reintroducing the field onto
+    // domain's own type for a fact only this one wire response reads.
+    const lineByRound = new Map<RoundId, StoredLine & { readonly createdAtMs?: number }>();
     for (const { lines } of members) for (const line of lines) if (!lineByRound.has(line.roundId)) lineByRound.set(line.roundId, line);
     const rounds = shared
       .map((roundId) => {
         const line = lineByRound.get(roundId)!;
-        return { roundId, finalizedAt: line.finalizedAtMs, courseName: line.courseName, createdAt: line.createdAtMs };
+        return { roundId, finalizedAt: line.finalizedAtMs, playedAt: line.playedAtMs, courseName: line.courseName, createdAt: line.createdAtMs };
       })
       .sort((a, b) => b.finalizedAt - a.finalizedAt);
 

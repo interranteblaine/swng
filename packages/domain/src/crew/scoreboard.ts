@@ -8,22 +8,30 @@ import type { GolferRoundLine } from "../golfer/record.js";
 // `lines` per member is the FULL career in chronological order (application sorts via sortLines —
 // golferMetrics' own contract); the fold windows to the season internally.
 
-export type StoredLine = GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number };
+// `playedAtMs` (spec 2026-08-01 §4a/§4c) is REQUIRED, not derived here — domain's ONE
+// played-date rule (`playedAtMsOf`, round/playedAt.ts) is computed once by projectArchive and
+// stamped onto every projection line (ports/projectionStore.ts), so by the time a line reaches
+// this fold it already carries the real fact. There used to be a SECOND, overloaded rule living
+// in this file (`createdAtMs ?? finalizedAtMs` — "guess the played date from when the record was
+// made, or failing that from when it was sealed") that this arc exists to delete. `finalizedAtMs`
+// stays on `StoredLine` too, but nothing in THIS file reads it (best18's tie-break walk relies on
+// array order, which the application layer sorts by playedAtMs via sortLines, not finalizedAtMs)
+// — it rides along only because getSeasonStandings.ts pulls it off these SAME line objects for
+// the wire's own audit `finalizedAt`.
+export type StoredLine = GolferRoundLine & { readonly finalizedAtMs: number; readonly playedAtMs: number };
 
 export interface SeasonWindow {
   readonly startMs: number;
   readonly endMs?: number; // absent = open season
 }
 
-// The ONE played-date rule (spec §2): the round's created (played) time first, its finalize
-// time when older lines predate createdAtMs — the roundLabel/chart-anchor precedent.
-export const playedAtMs = (line: { readonly finalizedAtMs: number; readonly createdAtMs?: number }): number =>
-  line.createdAtMs ?? line.finalizedAtMs;
-
 // Inclusive at BOTH ends: a round played at the very instant of a close belongs to the
-// season that was closing (spec §2).
+// season that was closing (spec §2). A round counts in the season it was PLAYED in, never the
+// one its paperwork (creation or finalize) happens to land in — spec 2026-08-01 §4c: a round
+// played 2026-03-15 but finalized months later, after a season's endsAt has already passed,
+// still belongs to that earlier season.
 export const inWindow = (window: SeasonWindow, line: StoredLine): boolean => {
-  const at = playedAtMs(line);
+  const at = line.playedAtMs;
   return at >= window.startMs && (window.endMs === undefined || at <= window.endMs);
 };
 

@@ -257,12 +257,20 @@ export interface SharedRoundView {
   // the golfer-record history line — a pre-createdAtMs line renders as its bare course name.
   readonly courseName: string;
   readonly createdAt?: number;
+  // `playedAt` (spec 2026-08-01 §4c): WHEN THE GOLF HAPPENED — domain's playedAtMsOf via the
+  // projection line's own `playedAtMs`, the field the crew's own season-window fold now reads
+  // (crewScoreboard's `inWindow`). REQUIRED, unlike `createdAt` beside it: every projection line
+  // carries a real playedAtMs (projectArchive always stamps one), so there is no legacy-line case
+  // to tolerate the way there is for createdAt. `finalizedAt`/`createdAt` stay exactly the audit
+  // facts they are — this is the one Task 6's "Played together" list renders from.
+  readonly playedAt: number;
 }
 export const sharedRoundViewSchema: z.ZodType<SharedRoundView> = z.object({
   roundId: roundIdSchema,
   finalizedAt: z.number().int(),
   courseName: z.string(),
   createdAt: z.number().int().optional(),
+  playedAt: z.number().int(),
 });
 
 // Standings are computed on read (crew-scoreboard spec §3/§4; window bounds per spec

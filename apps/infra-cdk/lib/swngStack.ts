@@ -816,7 +816,6 @@ export class SwngStack extends Stack {
     };
 
     const FIVE_MINUTES = Duration.minutes(5);
-    const FIFTEEN_MINUTES = Duration.minutes(15);
 
     // Non-transient 5xx: sustained server errors, not a single deploy blip. 2 of the last 3
     // five-minute windows each at >= 10 5xx. OK-notifying so the owner learns when it recovers.
@@ -954,23 +953,6 @@ export class SwngStack extends Stack {
         threshold: 50,
         evaluationPeriods: 1,
         comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData: TreatMissingData.NOT_BREACHING,
-      }),
-    );
-    paged(
-      new Alarm(this, "LateScoreRefusedAlarm", {
-        alarmDescription: "A score was refused because its round had already finalized — a played score that is not in the settled archive. Expected to be zero; any occurrence names a round worth looking at.",
-        metric: new Metric({
-          namespace: "swng",
-          metricName: "LateScoreRefused",
-          dimensionsMap: { Stage: stage },
-          period: FIFTEEN_MINUTES,
-          statistic: "Sum",
-        }),
-        threshold: 1,
-        evaluationPeriods: 1,
-        comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        // Not an M-of-N transient: this is a discrete "go look" event, not a blip to ride out.
         treatMissingData: TreatMissingData.NOT_BREACHING,
       }),
     );

@@ -860,6 +860,8 @@ git commit -m "feat(web): the status chrome describes the queue, not the socket"
 
 With Task 2's guard in place, a refusal against a `final` round is a genuinely unrecorded score. Count exactly that, so the decision to build anything more for the multi-device case is earned by data.
 
+**Post-close correction:** Steps 6–7 below shipped an alarm the owner never asked for and later ruled out — removed; the metric stays dashboard-only (see the design doc's post-close note).
+
 **Files:**
 - Modify: `packages/application/src/rounds/recordScore.ts`, `packages/lambda/src/compositionRoot.ts:324`, `apps/infra-cdk/lib/swngStack.ts`
 - Test: `packages/application/src/rounds/roundSlice.test.ts`, `apps/infra-cdk/test/swngStack.test.ts`

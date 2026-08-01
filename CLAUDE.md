@@ -1888,11 +1888,14 @@ wake signals as pure accelerators — **cadence in the SDK, latency in the app**
 stops describing the socket ("Offline" was a claim about our plumbing that a golfer with full bars
 read as a claim about their phone): `N scores saved on this phone — syncing…`, escalating to
 `… — can't reach swng yet. They're safe here.` with the **count preserved in both states**, silence
-when healthy. `LateScoreRefused` (EMF, `final`-only, after the duplicate guard) + a ≥1-in-15min
-alarm is what earns the right to build for the multi-device finalize hole — deliberately NOT built
-here (no grace period, no HLC acceptance window, no mutable snapshots, no device acks; A cannot see
-B's outbox, and the metric decides whether that ever needs a mechanism). Reviews earned their keep
-at every level: task reviewers found a `close()` that left a live timer **reopening a closed
+when healthy. `LateScoreRefused` (EMF, `final`-only, after the duplicate guard, read on the ops
+dashboard) is what earns the right to build for the multi-device finalize hole — deliberately NOT
+built here (no grace period, no HLC acceptance window, no mutable snapshots, no device acks; A
+cannot see B's outbox, and the metric decides whether that ever needs a mechanism). This task also
+shipped a ≥1-in-15min alarm on that metric beyond what the owner asked for; owner-ruled out same
+day and removed (alarms on near-zero metrics page on noise, the same reasoning behind Arc B's own
+10-blip-pager deletion) — the metric and dashboard series stand, the alarm doesn't. Reviews earned
+their keep at every level: task reviewers found a `close()` that left a live timer **reopening a closed
 session's socket**, a non-`TransportError` mid-pass that escaped before the retry was armed, and
 **four plan-authored tests that could not fail** (a cleanup asserted through an effect another
 teardown already suppressed; a jest-dom matcher this repo lacks; a negative metrics assertion with

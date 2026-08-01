@@ -149,6 +149,10 @@ score. Emit `deps.metrics?.count("LateScoreRefused")` on exactly that arm — `f
 `swng-ops-${stage}` dashboard and an alarm at ≥1 over 15 minutes: this should be near-zero, so
 any occurrence is a "go look at that roundId" signal, not a transient to M-of-N away.
 
+**Post-close correction:** the alarm was owner-ruled out and removed — alarms on near-zero
+metrics page on noise, exactly what Arc B's 10-blip-pager deletion was for; the deliberately
+small alarm set stays untouched, and this metric is read on the dashboard only.
+
 ## 3. What this deliberately does not build
 
 The multi-device hole stays open, knowingly: device A cannot see device B's outbox, so A's

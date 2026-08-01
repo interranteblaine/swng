@@ -156,6 +156,19 @@ describe("useRoundSession", () => {
 });
 
 describe("useRoundSession — wake signals", () => {
+  // Runs turns until the pull count stops moving: "nothing more is in flight", without a
+  // sleep-and-hope delay. Termination is guaranteed — the session only pulls when something
+  // triggers it, and this triggers nothing.
+  const settlePulls = async (transport: ScriptedTransport): Promise<void> => {
+    let previous = -1;
+    while (previous !== transport.pullCalls) {
+      previous = transport.pullCalls;
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+  };
+
   const liveHook = (transport: ScriptedTransport) => {
     const resolveSessionConfig: ResolveSessionConfig = () => ({
       transport,
@@ -215,15 +228,23 @@ describe("useRoundSession — wake signals", () => {
     const transport = createScriptedTransport(buildServerLog());
     const { result, unmount } = liveHook(transport);
     await waitFor(() => expect(result.current.hydrated).toBe(true));
+    // Quiesce BEFORE capturing the baseline: connect() fires two triggers of its own (the
+    // immediate catch-up and the socket's onOpen), which coalesce into a trailing pass that can
+    // still land after hydration. Reading pullsBefore inside that window makes this negative
+    // fail for a reason that has nothing to do with visibility.
+    await settlePulls(transport);
     const pullsBefore = transport.pullCalls;
 
     const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-    // No wait needed: the guard reads visibilityState synchronously and returns without ever
-    // calling sync() when hidden, so there's no async work in flight to wait out — a fixed
-    // setTimeout here would just be an arbitrary "prove nothing happened" delay.
     act(() => {
       document.dispatchEvent(new Event("visibilitychange"));
     });
+    // ...and a turn AFTER it, before asserting. The guard returns synchronously, but the pull a
+    // missing guard would cause rides a microtask behind sync()'s own first await — so an
+    // assertion made in the same tick as the dispatch passes just as happily with the guard
+    // deleted, which is no test at all.
+    await settlePulls(transport);
+
     expect(transport.pullCalls).toBe(pullsBefore);
 
     visibilitySpy.mockRestore();

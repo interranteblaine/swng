@@ -53,9 +53,17 @@ export interface SessionConfig {
 }
 
 // A transient push failure (offline, or the server having a bad moment) must never lose
-// or reject an op — it just stays queued for the next sync(). Only a real 4xx (the server
-// deliberately refusing this op, e.g. a finalized round) is permanent.
-const isTransientPushFailure = (error: TransportError): boolean => error.kind === "network" || (error.status !== undefined && error.status >= 500);
+// or reject an op — it just stays queued for the next sync(). Only a real SEMANTIC refusal
+// (the server deliberately refusing this op, e.g. a finalized round) is permanent.
+//
+// 408 and 429 are transient despite being 4xx, and deliberately so: 429 is what this app's own
+// API Gateway stage throttle answers with under load, and 408 is a request the edge timed out.
+// Neither says anything about the score — they both say "try again". A rejected op is kept on
+// the device but never retried, so for a queue whose whole thesis is that a lost score is
+// recoverable by nothing, retry-forever beats refuse for anything short of a real refusal.
+const TRANSIENT_HTTP_STATUSES = new Set([408, 429]);
+const isTransientPushFailure = (error: TransportError): boolean =>
+  error.kind === "network" || (error.status !== undefined && (error.status >= 500 || TRANSIENT_HTTP_STATUSES.has(error.status)));
 
 // Retry cadence for the self-draining outbox. The SDK owns this deliberately: M4 deferred
 // "retry cadence" to the UI and no UI ever claimed it, so the policy existed nowhere and a
@@ -106,6 +114,20 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   // session which never connects never makes a request on its own.
   let wantsConnection = false;
   let retryDelayMs = RETRY_BASE_MS;
+  // Consecutive socket failures with no intervening open — the reconnect arm's OWN ladder,
+  // separate from retryDelayMs because the two fail for different reasons. retryDelayMs is keyed
+  // on a sync PASS settling badly; a socket that cannot stay up while HTTPS is perfectly fine (a
+  // captive/hotel network blocking WS upgrades, a proxy killing the upgrade, a server-side close
+  // right after accept) fails no pass at all — every catch-up pull succeeds and resets that
+  // ladder to its base, so the reconnect would sit at the 2s floor for the rest of the round,
+  // paying a $connect invocation and a connection-registry write every two seconds.
+  let socketFailures = 0;
+  // Whether the LAST settled pass succeeded — read only to spot the transition below.
+  let lastPassOk = true;
+  // A pure function of the count, so BOTH arming sites (the socket's own close handler and
+  // onPassSettled, which re-arms after the catch-up pull that follows it) compute the same
+  // delay for the same cycle instead of racing each other to a different one.
+  const reconnectDelayMs = (): number => Math.min(RETRY_BASE_MS * 2 ** Math.max(0, socketFailures - 1), RETRY_MAX_MS);
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let stalledFlag = false;
   let closedFlag = false;
@@ -297,11 +319,28 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   // forever. Delay sequence on consecutive failures: 2s, 4s, 8s, 16s, then the 30s cap, which is
   // what stalled() reports.
   const onPassSettled = (ok: boolean): void => {
+    // A pass that succeeds after one that FAILED is evidence the network itself came back, so the
+    // socket failures counted during the outage no longer predict anything and the reconnect
+    // starts fresh. Without this, a phone that walks out of a dead zone drains its queue at once
+    // (the online/focus wake calls sync()) and then waits out the dead network's 30s cap before
+    // its socket returns — the very delay this arm removed from the OTHER direction. A pass that
+    // merely keeps succeeding is deliberately NOT evidence: that is exactly the blocked-upgrade
+    // case, where every catch-up pull succeeds while no socket ever opens.
+    if (ok && !lastPassOk) socketFailures = 0;
+    lastPassOk = ok;
+
     // Read BEFORE the mutation below: the first retry after a failure must fire at the current
     // delay, not the one this pass just doubled to. (Swapping these two lines is invisible to
     // every other assertion in the suite — it just doubles the first wait — so it has its own
     // regression test.)
-    const delayMs = ok ? RETRY_BASE_MS : retryDelayMs;
+    //
+    // A pass that SUCCEEDED leaves exactly one reason to still be dirty per isDirty(): either a
+    // queue that survived a healthy round trip (momentary — the base delay is right), or a
+    // socket that isn't up, which is the reconnect arm's business and must be armed from ITS
+    // ladder. Handing the socket case RETRY_BASE_MS here is what kept the reconnect pinned at
+    // the 2s floor: the pull it fires on every attempt succeeds, so this branch reset the delay
+    // the close handler had just chosen.
+    const delayMs = ok ? (connectedFlag ? RETRY_BASE_MS : reconnectDelayMs()) : retryDelayMs;
     retryDelayMs = ok ? RETRY_BASE_MS : Math.min(retryDelayMs * 2, RETRY_MAX_MS);
 
     // Cleared before arming, never left in place: scheduleRetry declines while a timer is
@@ -384,27 +423,59 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
     });
   };
 
+  // The socket is down — whether it closed after being accepted, or was never constructed at
+  // all. connectedFlag going stale-true is the hazard both paths share: the retry timer reads it
+  // to choose between reconnecting and merely re-syncing, so a session that wrongly believes it
+  // holds a socket never opens another one.
+  const onSocketDown = (): void => {
+    connectedFlag = false;
+    closeSocket = undefined;
+    notify();
+    // A socket the caller shut down deliberately (disconnect()/close(), whose own close fires
+    // this handler on a real WebSocket) never failed at anything, so it must not push the ladder
+    // along — wantsConnection is precisely "the caller still wants a socket".
+    if (!wantsConnection) return;
+    socketFailures += 1;
+    // The socket dropping is itself a dirty state: reconnection rides a backoff of its own, so
+    // there is no reachable state in which the session has stopped trying — and no state in
+    // which it retries at a fixed floor forever either.
+    scheduleRetry(reconnectDelayMs());
+  };
+
   const doConnect = (): void => {
+    // A closed session stays closed: without this, connect() after close() re-licenses the loop
+    // (wantsConnection = true) while closedFlag makes every scheduleRetry decline — a session
+    // that claims to be connected and can never retry, with no way out.
+    if (closedFlag) return;
     if (connectedFlag) return; // idempotent
     wantsConnection = true; // licenses the retry loop
     connectedFlag = true;
-    closeSocket = transport.openSocket(
-      (events) => ingest(events), // socket events carry no nextSeq — the cursor never moves through them
-      () => {
-        connectedFlag = false;
-        closeSocket = undefined;
-        notify();
-        // The socket dropping is itself a dirty state: reconnection rides the same backoff as
-        // a stuck push, so there is no reachable state in which the session has stopped trying.
-        scheduleRetry(retryDelayMs);
-      },
-      // The REAL trigger for the catch-up sync: a real WebSocket is CONNECTING (not
-      // OPEN) for a while after openSocket() returns, and events landing in that gap
-      // reach neither the pull just below (already ran) nor the socket (not open yet)
-      // unless something re-syncs exactly when it opens. Through the same serialized gate as
-      // every other trigger; warn-and-drop, see requestSyncInBackground()'s comment.
-      () => requestSyncInBackground(),
-    );
+    try {
+      closeSocket = transport.openSocket(
+        (events) => ingest(events), // socket events carry no nextSeq — the cursor never moves through them
+        onSocketDown,
+        // The REAL trigger for the catch-up sync: a real WebSocket is CONNECTING (not
+        // OPEN) for a while after openSocket() returns, and events landing in that gap
+        // reach neither the pull just below (already ran) nor the socket (not open yet)
+        // unless something re-syncs exactly when it opens. Through the same serialized gate as
+        // every other trigger; warn-and-drop, see requestSyncInBackground()'s comment.
+        () => {
+          // A socket that actually REACHED open is the only thing that clears the reconnect
+          // ladder — "openSocket() was called" is not evidence of anything, which is exactly
+          // the failure mode the ladder exists for.
+          socketFailures = 0;
+          requestSyncInBackground();
+        },
+      );
+    } catch (error) {
+      // Effectively unreachable today (the URL is fixed for the session's life), but the state
+      // it would otherwise leave is not self-correcting. Swallowed rather than rethrown — this
+      // runs from the retry timer as well as from connect(), where an escaping throw would be an
+      // uncaught error rather than something a caller could act on. Same log-and-drop precedent
+      // as persistInBackground().
+      console.warn(`swng client: failed to open the round socket for ${config.roundId}`, error);
+      onSocketDown();
+    }
     notify();
     // Also fire a sync immediately, without waiting for the real open: this is what
     // catches up a session that's constructed and connected while already offline (the
@@ -425,8 +496,11 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
     setStalled(false); // nothing is trying any more, so stalled() must not outlive the loop
     // A user-initiated reconnect deserves a fresh attempt, not the dead network's leftover
     // patience: without this, stall → disconnect() → connect() re-raises stalled() on the very
-    // first failure and then waits the full 30s cap before trying again.
+    // first failure and then waits the full 30s cap before trying again. Both ladders, for the
+    // same reason.
     retryDelayMs = RETRY_BASE_MS;
+    socketFailures = 0;
+    lastPassOk = true;
     if (!connectedFlag) return;
     closeSocket?.();
     closeSocket = undefined;

@@ -837,8 +837,10 @@ describe("RoundPage", () => {
     await waitFor(() => expect(screen.getByText(/^1 score saved on this phone — syncing/)).toBeTruthy());
     expect(transport.log.some((event) => event.kind === "score-recorded")).toBe(false);
 
-    // Pushes work again, but NOTHING re-syncs on its own (no timer in the SDK — session.ts) —
-    // the drain has to come from the finalize attempt itself.
+    // Pushes work again. The SDK's own backoff loop WOULD drain this eventually (session.ts,
+    // 2026-08-01), but its first retry is 2s out and nothing here advances a clock or waits —
+    // so at the tap below the score is still queued, and the drain under test is the finalize
+    // attempt's own, exactly as it is for a golfer who taps Finalize the moment signal returns.
     transport.offline = false;
 
     fireEvent.click(screen.getByRole("button", { name: "Finalize round" }));

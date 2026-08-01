@@ -141,7 +141,8 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
 
     // The drain, unattended: whatever briefly queued clears on its own, and B picks up the missed
     // push (Ann's hole 2) via the backoff-driven reconnect's own catch-up pull — give it room for
-    // the base retry delay plus a real reconnect + pull round trip against deployed beta.
+    // the base retry delay plus a real reconnect + pull round trip against deployed beta. The
+    // count appears in the escalated banner too, so this negative can only mean drained.
     await expect(pageB.getByText(/saved on this phone/)).not.toBeVisible({ timeout: 20_000 });
     await expect(pageB.getByRole("button", { name: "Ann hole 2", exact: true })).toHaveText(/^\D*3/);
 
@@ -225,9 +226,11 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
   test("2: goes offline; a second score QUEUES honestly (pending count, not silently dropped or double-posted)", async () => {
     await context.setOffline(true);
     await route.current?.close().catch(() => {});
-    // Nothing renders yet at this exact instant — pending is still 0 (nothing queued) and the
-    // backoff loop needs four consecutive failed passes (up to its 30s cap) before it escalates to
-    // the "Can't reach swng" state, so there is no chrome to assert here. Straight to the write.
+    // Nothing renders yet at this exact instant — pending is still 0 (nothing queued), so there is
+    // no chrome to assert here regardless of what the loop is doing. Straight to the write. (The
+    // escalated wording arrives once the backoff reaches its cap on the fourth consecutive failed
+    // pass — 2s+4s+8s, so t≈14s, not the 30s the cap's own value suggests — which is why the
+    // assertions below pin the COUNT, which both states state identically, and not the suffix.)
 
     // Entering while offline still renders instantly (the optimistic local fold — the same
     // property arm 1's B relied on) but the PUSH itself can't reach the server: the queue IS
@@ -242,7 +245,7 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     await expect(dialog).toBeHidden();
     await expect(cell).toHaveText(/^\D*5/); // shown locally at once, queued for the server
 
-    await expect(page.getByText(/^1 score saved on this phone — syncing/)).toBeVisible();
+    await expect(page.getByText(/^1 score saved on this phone/)).toBeVisible();
   });
 
   test("3: a finalize ATTEMPT while still offline is REFUSED, in words — the round is never sealed over the queued score", async () => {
@@ -266,8 +269,10 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     await expect(page.getByRole("heading", { name: "Final results" })).not.toBeVisible(); // never a silent/false finalize
 
     // The queued hole-2 score from step 2 is untouched by the refused finalize attempt — still
-    // honestly pending, not lost and not double-counted.
-    await expect(page.getByText(/^1 score saved on this phone — syncing/)).toBeVisible();
+    // honestly pending, not lost and not double-counted. (This page has been offline since test
+    // 2, so by now the chrome has almost certainly escalated — the count reads the same either
+    // way, which is exactly what makes it the right thing to assert.)
+    await expect(page.getByText(/^1 score saved on this phone/)).toBeVisible();
     await page.getByRole("button", { name: "Cancel" }).click();
   });
 
@@ -278,6 +283,9 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     // without that listener the SDK's own backoff loop — already retrying on its own the whole
     // time this context was offline — would pick this up unattended; the wake signal only
     // collapses the wait. Room for the round trip against deployed beta, not the file's 10s default.
+    // This negative means DRAINED, unambiguously: the count now appears in the escalated banner
+    // too, so it can no longer disappear because the news got worse rather than because the queue
+    // emptied — which is exactly what it would have done here, having been offline since test 2.
     await expect(page.getByText(/saved on this phone/)).not.toBeVisible({ timeout: 20_000 });
 
     await page.getByRole("button", { name: "Finalize round" }).click();

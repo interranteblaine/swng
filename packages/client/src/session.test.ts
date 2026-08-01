@@ -480,6 +480,38 @@ describe("createRoundSession — sync + reconnect", () => {
     expect(session.state().cells[cellKey(ANN_ID, 2)]).toBeUndefined(); // the rejected score never landed
   });
 
+  // The mirror of (e), and the boundary it depends on: a status that is NOT a semantic refusal
+  // must never take (e)'s path. A 429 is what this app's own API Gateway stage throttle answers
+  // with under load (apps/infra-cdk pins 50 rps / 5 rps on the anonymous routes), and a 408 is a
+  // request the edge timed out — both mean "try again", not "this score is invalid". Either one
+  // classified as permanent moves the golfer's ONLY copy of that score into rejected(), which
+  // nothing ever retries: for a queue whose whole thesis is that a lost score is recoverable by
+  // nothing, retry-forever beats refuse for anything short of a definitive semantic refusal.
+  it.each([408, 429])("keeps a score the server answered %i to queued, and drains it once the condition clears — never rejected", async (status) => {
+    const transport = createScriptedTransport(buildServerLog());
+    const realPush = transport.push.bind(transport);
+    let failing = true;
+    transport.push = async (event) => {
+      if (failing) throw new TransportError("server", status); // API Gateway's own throttle/timeout body isn't JSON, so no `code`
+      return realPush(event);
+    };
+    const session = await createRoundSession({ transport, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("ann-phone") });
+    await session.sync();
+
+    session.recordScore(ANN_ID, 1, toResult(4));
+    await session.sync();
+
+    expect(session.rejected()).toEqual([]); // not a refusal...
+    expect(session.pending()).toBe(1); // ...just still queued, still on the device
+
+    failing = false;
+    await session.sync();
+
+    expect(session.pending()).toBe(0);
+    expect(session.rejected()).toEqual([]);
+    expect(session.state().cells[cellKey(ANN_ID, 1)]).toBeDefined(); // the score landed for real
+  });
+
   it("(g) restart HLC floor: a persisted pending event's hlc, far ahead of the restarted session's clock, still loses to a post-restart correction to the SAME cell", async () => {
     const deviceIdValue = deviceId("ann-phone");
     const store = createMemoryOutboxStore();
@@ -1006,6 +1038,25 @@ describe("createRoundSession — the outbox drains itself", () => {
     expect(session.connected()).toBe(false); // a closed session never re-opens its own socket
   });
 
+  // The same rule from the other direction: connect() AFTER close() used to re-license the loop
+  // (wantsConnection = true, a socket opened) on a session whose closedFlag makes scheduleRetry
+  // decline forever — a session that claims to be connected and can never retry, with no way
+  // out. Unreachable from apps/web today (the hook closes on unmount and never touches that
+  // session again), so this closes the door rather than fixing an observed bug.
+  it("connect() after close() does nothing at all — a closed session is closed for good", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await liveSession(transport);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    await session.close();
+
+    session.connect();
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(session.connected()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   // onPassSettled reads its delay BEFORE doubling retryDelayMs. Swapping those two lines leaves
   // every other test in this file green — it merely doubles the first wait — so this is the one
   // assertion standing between that ordering and a silent regression.
@@ -1034,6 +1085,225 @@ describe("createRoundSession — the outbox drains itself", () => {
 
     await vi.advanceTimersByTimeAsync(1);
     expect(pushAttempts).toBe(2); // fired at exactly 2s: the base delay, not the doubled 4s
+  });
+
+  // The SHAPE of the ladder, not just its first rung. Everything else here pins an endpoint —
+  // the base delay above, the cap indirectly via stalled() — so a regression that flattened the
+  // curve (2s then straight to the 30s cap, or 2s forever) passed the whole suite. Both halves
+  // matter on a course: too flat and a dead radio costs a handshake every two seconds for the
+  // rest of the round; too steep and a golfer waits out a cap after signal is already back.
+  // This also pins the arithmetic the chrome's escalation inherits — the FOURTH failure is the
+  // one that reaches the cap, and it lands at t≈14s (2+4+8), not at t≈30s.
+  it("widens each retry — 2s, 4s, 8s, 16s, then the 30s cap — rather than hammering at one delay", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    let pushAttempts = 0;
+    const realPush = transport.push.bind(transport);
+    transport.push = async (event) => {
+      pushAttempts += 1;
+      return realPush(event);
+    };
+
+    const session = await liveSession(transport);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(0); // connect()'s own triggers settle clean, backoff at its base
+
+    transport.offline = true;
+    session.recordScore(ANN_ID, 1, toResult(4)); // attempt 1, at t≈0
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pushAttempts).toBe(1);
+
+    // Each rung is asserted on both sides — one millisecond short (nothing fired yet) and then
+    // on the tick itself — so a delay that is merely LONGER than expected fails just as loudly
+    // as one that is shorter.
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(pushAttempts).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pushAttempts).toBe(2); // +2s (t=2s)
+
+    await vi.advanceTimersByTimeAsync(3_999);
+    expect(pushAttempts).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pushAttempts).toBe(3); // +4s (t=6s)
+
+    await vi.advanceTimersByTimeAsync(7_999);
+    expect(pushAttempts).toBe(3);
+    expect(session.stalled()).toBe(false); // three failures in: still climbing, not yet at the cap
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pushAttempts).toBe(4); // +8s (t=14s)
+    expect(session.stalled()).toBe(true); // the fourth failure is the one that reaches the cap — t≈14s
+
+    await vi.advanceTimersByTimeAsync(15_999);
+    expect(pushAttempts).toBe(4);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pushAttempts).toBe(5); // +16s (t=30s)
+
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(pushAttempts).toBe(5);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pushAttempts).toBe(6); // +30s: the cap (t=60s)
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(pushAttempts).toBe(7); // and it HOLDS at the cap rather than climbing past it
+  });
+
+  // The reconnect arm has its own ladder, because it fails for its own reason. The push backoff
+  // is keyed on a sync PASS settling badly; a socket that can't stay up while HTTPS is perfectly
+  // fine (a hotel/captive network blocking WS upgrades, a proxy killing the upgrade, a
+  // server-side close right after accept) fails no pass at all — every catch-up pull SUCCEEDS
+  // and resets that ladder to its base. Without a ladder of its own, the session re-handshakes
+  // every 2s for the rest of the round: a $connect Lambda invocation and a connection-registry
+  // write, each time, forever.
+  it("widens the gap between reconnect attempts while the socket keeps closing without ever opening", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    let openAttempts = 0;
+    transport.openSocket = (_onEvents, onClose) => {
+      openAttempts += 1;
+      // Accepted, then dropped before it ever reaches OPEN: onOpen is deliberately never
+      // called, which is exactly what the reconnect ladder keys on. HTTP stays healthy
+      // throughout (transport.offline is never set here). A microtask rather than a 0ms
+      // setTimeout because a fake-clock timer scheduled DURING a tick lands on the next
+      // millisecond, which would drift every rung of the ladder below by 1ms per cycle —
+      // an artifact of the harness, not of the delay under test.
+      queueMicrotask(onClose);
+      return () => {};
+    };
+
+    const session = await liveSession(transport);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(openAttempts).toBe(1); // connect()'s own attempt
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(openAttempts).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(openAttempts).toBe(2); // +2s: the base
+
+    await vi.advanceTimersByTimeAsync(3_999);
+    expect(openAttempts).toBe(2); // NOT another 2s — the ladder widens because no socket ever opened
+    await vi.advanceTimersByTimeAsync(1);
+    expect(openAttempts).toBe(3); // +4s
+
+    await vi.advanceTimersByTimeAsync(7_999);
+    expect(openAttempts).toBe(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(openAttempts).toBe(4); // +8s
+  });
+
+  // ...and the other half of that ladder: a socket that actually OPENS resets it, so one
+  // flap-and-recover doesn't leave the next real drop waiting out a long delay it didn't earn.
+  it("resets the reconnect ladder once a socket actually opens", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    let openAttempts = 0;
+    let socketOpens = false; // flipped once the network is willing to carry a real socket
+    // Held so the test can drop the LIVE socket itself — this stand-in never registers with the
+    // scripted transport, so its own triggerSocketClose() would have nothing to fire.
+    let dropSocket: (() => void) | undefined;
+    transport.openSocket = (_onEvents, onClose, onOpen) => {
+      openAttempts += 1;
+      dropSocket = onClose;
+      if (socketOpens) onOpen?.();
+      else queueMicrotask(onClose); // see the test above for why this isn't a 0ms timer
+      return () => {};
+    };
+
+    const session = await liveSession(transport);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(20_000); // several failed upgrades: the ladder climbs
+    const attemptsWhileFailing = openAttempts;
+    expect(attemptsWhileFailing).toBeGreaterThan(2);
+
+    socketOpens = true;
+    await vi.advanceTimersByTimeAsync(60_000); // the next attempt opens for real
+    expect(session.connected()).toBe(true);
+
+    // Now drop that healthy socket. The very next attempt must come at the 2s base — if the
+    // ladder had survived the open, this drop would sit out the climbed delay instead.
+    socketOpens = false;
+    const attemptsBeforeDrop = openAttempts;
+    dropSocket?.();
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(openAttempts).toBe(attemptsBeforeDrop);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(openAttempts).toBe(attemptsBeforeDrop + 1);
+  });
+
+  // The ladder must not outlive the outage that built it. A phone in a dead zone fails
+  // everything — pulls AND socket upgrades — so the reconnect climbs to its 30s cap; when signal
+  // returns, the browser's own `online` event has apps/web call sync(), which drains the queue at
+  // once. If that success left the socket ladder alone, the socket itself would then sit out a
+  // 30s wait the dead network earned, and other players' scores would keep arriving late for half
+  // a minute after everything was working again.
+  it("comes back on the base delay after a full outage ends, rather than sitting out the cap the dead network earned", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    let openAttempts = 0;
+    let networkUp = true;
+    let dropSocket: (() => void) | undefined;
+    transport.openSocket = (_onEvents, onClose, onOpen) => {
+      openAttempts += 1;
+      dropSocket = onClose;
+      if (networkUp) onOpen?.();
+      else queueMicrotask(onClose);
+      return () => {};
+    };
+
+    const session = await liveSession(transport);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(session.connected()).toBe(true);
+
+    // The radio dies: HTTP and the socket go with it, and a score is entered into the dark.
+    networkUp = false;
+    transport.offline = true;
+    dropSocket?.();
+    session.recordScore(ANN_ID, 1, toResult(4));
+    await vi.advanceTimersByTimeAsync(300_000); // five minutes in a dead zone: both ladders cap out
+    expect(session.connected()).toBe(false);
+    expect(session.stalled()).toBe(true);
+
+    // Signal returns, and the wake signal fires the exact call apps/web's `online` listener makes.
+    networkUp = true;
+    transport.offline = false;
+    const attemptsBeforeReturn = openAttempts;
+    await session.sync();
+    expect(session.pending()).toBe(0); // the queue is away over HTTP immediately
+
+    await vi.advanceTimersByTimeAsync(2_000); // the base delay — NOT the 30s cap
+
+    expect(openAttempts).toBe(attemptsBeforeReturn + 1);
+    expect(session.connected()).toBe(true);
+    expect(session.stalled()).toBe(false);
+  });
+
+  // openSocket throwing is effectively unreachable today (the URL is fixed for the session's
+  // life), but the state it USED to leave is not self-correcting: connectedFlag stayed true, so
+  // the session believed it held a socket forever and every retry took the sync branch instead
+  // of reconnecting — no socket, no live delivery, for the rest of the round.
+  it("recovers when openSocket itself throws — never claims a socket it doesn't have, and reconnects on the next retry", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const transport = createScriptedTransport(buildServerLog());
+      const realOpenSocket = transport.openSocket.bind(transport);
+      let failNextOpen = true;
+      transport.openSocket = (onEvents, onClose, onOpen) => {
+        if (failNextOpen) {
+          failNextOpen = false;
+          throw new Error("WebSocket construction failed");
+        }
+        return realOpenSocket(onEvents, onClose, onOpen);
+      };
+
+      const session = await liveSession(transport);
+      session.connect();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(session.connected()).toBe(false); // the claim matches reality
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(session.connected()).toBe(true); // ...and the loop actually reconnected
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   // A pass can die on something that is NOT a TransportError — a contract-parse failure under

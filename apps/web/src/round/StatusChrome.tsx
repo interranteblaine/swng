@@ -10,17 +10,17 @@ export interface StatusChromeProps {
   // is still not working.
   readonly stalled: boolean;
   readonly pending: number;
-  // rejected() is IN-MEMORY ONLY (M4 handoff note in useRoundSession.ts / session.ts) — a
-  // permanently-rejected op is forgotten on reload. Persisting this list across restarts is
-  // deliberately deferred to M9; this component just renders whatever the session currently
-  // holds.
+  // rejected() is DURABLE (2026-08-01): a permanently-refused op is the only copy of that score
+  // anywhere, so the session persists it alongside the outbox and re-seeds it on restart. This
+  // component just renders whatever the session currently holds — but what it holds now survives
+  // a reload, which is what makes the row below worth reading rather than a notice that expires
+  // with the tab.
   readonly rejected: readonly RejectedOp[];
   readonly participants: readonly Participant[];
-  // Re-triggers the session's connect()+sync() (session/useRoundSession.ts's own doc comment:
-  // the client SDK has no reconnect timer — a caller that wants to reconnect calls connect()
-  // again). The outbox drains itself on its own backoff loop now — this is no longer the only
-  // way to resume, just a backstop: it appears only inside the escalated (`stalled`) state, for
-  // a golfer who wants to give the queue a manual nudge rather than wait out the backoff.
+  // Re-triggers the session's connect()+sync() (session/useRoundSession.ts's `connect`). The
+  // outbox drains and reconnects on its own backoff loop, so this is not how a session resumes —
+  // just a backstop: it appears only inside the escalated (`stalled`) state, for a golfer who
+  // wants to give the queue a manual nudge rather than wait out the backoff.
   readonly onReconnect: () => void;
 }
 
@@ -35,11 +35,17 @@ const describeRejection = (participants: readonly Participant[], rejected: Rejec
   return event.kind;
 };
 
+// How much is safely on this phone, in the SAME words in both states — so the escalation can
+// never delete the count (it used to: the two states were a ternary, and a golfer walking behind
+// a stand of trees lost the most reassuring fact on the screen at exactly the moment they needed
+// it), and so one locator matches either state.
+const queuedCount = (pending: number): string | undefined => (pending > 0 ? `${pending} score${pending === 1 ? "" : "s"} saved on this phone` : undefined);
+
 // Queue chrome around the scorecard (brief): the subject is the outbox, not the socket — a
 // quiet syncing line while it drains (the queue IS the feature, not an error state), an
 // escalated banner only once the backoff loop is `stalled` (with a manual "Try now" backstop),
 // and rejected ops surfaced twice — a dismissible toast (so it doesn't nag forever) plus a
-// persistent row per op (so a rejection is never silently lost while it's still in memory).
+// persistent row per op (so a rejection is never silently lost).
 export function StatusChrome({ stalled, pending, rejected, participants, onReconnect }: StatusChromeProps) {
   const [toastDismissed, setToastDismissed] = useState(false);
   const seenCountRef = useRef(rejected.length);
@@ -51,19 +57,23 @@ export function StatusChrome({ stalled, pending, rejected, participants, onRecon
     seenCountRef.current = rejected.length;
   }, [rejected.length]);
 
+  const queued = queuedCount(pending);
+
   return (
     <div className="flex flex-col gap-2 p-3">
       {stalled ? (
         <div role="status" className="flex items-center justify-between gap-2 border border-gold bg-goldwash px-3 py-2 text-sm text-forest">
-          <p>Can&apos;t reach swng — your scores are safe here.</p>
+          {/* The count leads when there is one; with an empty queue there is no count to state,
+              so the banner says only the part that is true. */}
+          <p>{queued ? `${queued} — can't reach swng yet. They're safe here.` : "Can't reach swng — your scores are safe here."}</p>
           <button type="button" onClick={onReconnect} className="min-h-8 shrink-0 border border-forest px-2 text-xs font-medium text-forest">
             Try now
           </button>
         </div>
       ) : (
-        pending > 0 && (
+        queued && (
           <p role="status" className="text-xs text-fairway">
-            {pending} score{pending === 1 ? "" : "s"} saved on this phone — syncing…
+            {queued} — syncing…
           </p>
         )
       )}

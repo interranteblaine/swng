@@ -42,10 +42,39 @@ describe("StatusChrome — the queue is the subject", () => {
     const onReconnect = vi.fn();
     render(<StatusChrome stalled pending={2} rejected={[]} participants={participants} onReconnect={onReconnect} />);
 
-    expect(screen.getByRole("status").textContent).toContain("Can't reach swng — your scores are safe here.");
+    expect(screen.getByRole("status").textContent).toContain("can't reach swng");
     fireEvent.click(screen.getByRole("button", { name: "Try now" }));
 
     expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  // The escalation used to REPLACE the queue line, so a golfer who walked behind a stand of
+  // trees lost the count telling them how much was safely on their phone — the single most
+  // reassuring fact on the screen — at exactly the moment they most needed it. The count leads
+  // in both states now, so it can never be deleted by the news getting worse.
+  it("keeps the count on screen when it escalates — the reassuring fact is never replaced by the bad news", () => {
+    render(<StatusChrome stalled pending={12} rejected={[]} participants={participants} onReconnect={NOOP} />);
+
+    const status = screen.getByRole("status");
+    expect(status.textContent).toMatch(/^12 scores saved on this phone/);
+    expect(status.textContent).toContain("can't reach swng");
+    expect(status.textContent).toMatch(/safe/i); // ...and it still says plainly that they're safe there
+  });
+
+  it("still escalates with nothing queued — there is no count to state, so it says only the part that is true", () => {
+    render(<StatusChrome stalled pending={0} rejected={[]} participants={participants} onReconnect={NOOP} />);
+
+    expect(screen.getByRole("status").textContent).toContain("Can't reach swng — your scores are safe here.");
+    expect(screen.getByRole("status").textContent).not.toMatch(/saved on this phone/);
+  });
+
+  it("uses the same count phrase in both states, so one locator matches either", () => {
+    const { unmount } = render(<StatusChrome stalled={false} pending={1} rejected={[]} participants={participants} onReconnect={NOOP} />);
+    expect(screen.getByRole("status").textContent).toMatch(/^1 score saved on this phone/);
+    unmount();
+
+    render(<StatusChrome stalled pending={1} rejected={[]} participants={participants} onReconnect={NOOP} />);
+    expect(screen.getByRole("status").textContent).toMatch(/^1 score saved on this phone/); // singular, and the same words
   });
 });
 

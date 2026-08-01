@@ -774,8 +774,9 @@ const scoreButtonText = (score: number | "picked-up"): string => (score === "pic
 // `round-finalized`). Draining here would make every spec quiescent and stop any of them
 // exercising that boundary. A caller that genuinely needs a quiesced device before doing
 // something else — killNetwork's arm 2, before it forces the context offline — waits on
-// StatusChrome's own "N score(s) saved on this phone — syncing…" line instead, at the one point
-// that needs it.
+// StatusChrome's own "N score(s) saved on this phone" count line instead (that phrase is
+// state-independent: the escalated banner leads with the same words), at the one point that
+// needs it.
 export const enterScore = async (page: Page, golferName: string, hole: number, score: number | "picked-up"): Promise<void> => {
   // exact: true throughout — "hole 1" is a substring of "hole 10".."hole 18" (and the dialog's
   // "hole 1" likewise), so a non-exact name match would resolve to every one of them at once.

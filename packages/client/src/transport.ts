@@ -51,32 +51,56 @@ const REQUEST_TIMEOUT_MS = 15_000;
 // with the server's error code when the body actually parses as one — one place instead of
 // push and pull each re-deriving the same mapping.
 const requestJson = async (fetchImpl: typeof fetch, url: string, token: string, init?: RequestInit): Promise<unknown> => {
-  let response: Response;
+  // An AbortController plus a plain setTimeout, NOT AbortSignal.timeout(): that one-liner needs
+  // Safari 16 / Chrome 103, while this app's own floor is ~Safari 15.4 (identity.ts's
+  // crypto.randomUUID) — the terminal iOS for an iPhone 6s/7/SE. On an older phone the missing
+  // method throws a TypeError that lands in the catch below as TransportError("network"), so
+  // EVERY push and pull would fail for the whole round with "can't reach swng" and no clue why.
+  // Vite's build target is safari14 and Playwright drives bundled Chromium, so nothing in the
+  // pipeline would have caught it. The pair below is universally supported and behaves
+  // identically. The timer is cleared in the finally so a fast response leaves nothing armed.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    // The abort lands in the catch below as TransportError("network") — the transient arm, so
-    // a timed-out push leaves its event queued rather than rejecting it.
-    response = await fetchImpl(url, { ...init, headers: { ...init?.headers, authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-  } catch {
-    throw new TransportError("network");
-  }
-
-  if (!response.ok) {
-    // API Gateway itself (not the Lambda behind it) emits a non-JSON body — HTML, plain
-    // text — for a Lambda timeout, a throttle, or its own edge 5xx (502/503/429). Parsing
-    // `code` off that body is therefore best-effort: a SyntaxError here must not escape as
-    // some other error type, or an explicit sync() would REJECT instead of resolving with
-    // the queue intact — breaking "offline is not an error" during exactly the outage the
-    // queue exists to survive.
-    let code: string | undefined;
+    let response: Response;
     try {
-      const errorBody = errorResponseSchema.safeParse(await response.json());
-      if (errorBody.success) code = errorBody.data.code;
+      // The abort lands in the catch below as TransportError("network") — the transient arm, so
+      // a timed-out push leaves its event queued rather than rejecting it.
+      response = await fetchImpl(url, { ...init, headers: { ...init?.headers, authorization: `Bearer ${token}` }, signal: controller.signal });
     } catch {
-      // non-JSON error body: code stays undefined, status alone still carries the failure.
+      throw new TransportError("network");
     }
-    throw new TransportError("server", response.status, code);
+
+    if (!response.ok) {
+      // API Gateway itself (not the Lambda behind it) emits a non-JSON body — HTML, plain
+      // text — for a Lambda timeout, a throttle, or its own edge 5xx (502/503/429). Parsing
+      // `code` off that body is therefore best-effort: a SyntaxError here must not escape as
+      // some other error type, or an explicit sync() would REJECT instead of resolving with
+      // the queue intact — breaking "offline is not an error" during exactly the outage the
+      // queue exists to survive.
+      let code: string | undefined;
+      try {
+        const errorBody = errorResponseSchema.safeParse(await response.json());
+        if (errorBody.success) code = errorBody.data.code;
+      } catch {
+        // non-JSON error body: code stays undefined, status alone still carries the failure.
+      }
+      throw new TransportError("server", response.status, code);
+    }
+
+    // The body read is INSIDE the mapping for the same reason the error-body read above is: an
+    // abort (or a severed connection) landing after the headers but mid-stream rejects with a
+    // DOMException, and an unmapped throw here escapes as a non-TransportError — making an
+    // explicit sync() reject rather than resolve with the queue intact. A timeout is an
+    // ordinary transient wherever it lands.
+    try {
+      return await response.json();
+    } catch {
+      throw new TransportError("network");
+    }
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return response.json();
 };
 
 export const createHttpTransport = (config: HttpTransportConfig): RoundTransport => {

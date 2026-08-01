@@ -97,10 +97,10 @@ describe("createHttpTransport", () => {
     });
 
     // A hung request is the sync loop's worst failure mode: it settles neither arm of doSync, so
-    // no retry arms and stalled() never flips. Two properties close it, tested separately
+    // no retry arms and stalled() never flips. Three properties close it, tested separately
     // because REQUEST_TIMEOUT_MS is a module constant with no injection seam (deliberately —
-    // the loop's own cadence is likewise un-injectable) and AbortSignal.timeout's internal
-    // timer is not one vitest's fake timers can advance.
+    // the loop's own cadence is likewise un-injectable), so the timing one has to drive the
+    // real 15s on a fake clock.
     //
     // (1) every request carries a timeout signal at all, so none CAN hang forever...
     it("passes an abort signal on every request, so no call can hang forever", async () => {
@@ -136,6 +136,83 @@ describe("createHttpTransport", () => {
 
       expect(error).toBeInstanceOf(TransportError);
       expect((error as TransportError).kind).toBe("network"); // transient — the event stays queued
+    });
+
+    // ...and (3) the timeout actually FIRES, at the bound the module claims. This is only
+    // testable at all because the timeout is an AbortController plus a plain setTimeout —
+    // AbortSignal.timeout()'s internal timer is not one vitest's fake timers can advance, so
+    // this test doubles as the structural guard on that: reverting to the one-liner (which
+    // needs Safari 16 / Chrome 103, above this app's own ~Safari 15.4 floor — identity.ts's
+    // crypto.randomUUID — and would make every request on an older phone fail permanently)
+    // hangs this test rather than passing it.
+    it("aborts a request that never settles, at the timeout it claims — a silent hang becomes an ordinary transient", async () => {
+      vi.useFakeTimers();
+      try {
+        // Never resolves on its own: only the abort can end it, exactly like a dead radio or a
+        // captive portal holding the socket open.
+        const fetchImpl = ((_url: string | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted", "AbortError")));
+          })) as unknown as typeof fetch;
+        const transport = createHttpTransport({ httpUrl: HTTP_URL, wsUrl: WS_URL, roundId: ROUND_ID, token: TOKEN, fetchImpl });
+
+        let settled = false;
+        const pushed = transport.push(SCORE_EVENT).catch((error: unknown) => {
+          settled = true;
+          return error;
+        });
+
+        await vi.advanceTimersByTimeAsync(14_999);
+        expect(settled).toBe(false); // not a hair-trigger: still waiting at 14.999s
+
+        await vi.advanceTimersByTimeAsync(1);
+        const error = await pushed;
+
+        expect(settled).toBe(true);
+        expect(error).toBeInstanceOf(TransportError);
+        expect((error as TransportError).kind).toBe("network"); // transient — the event stays queued
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // The other half of owning the timer: a response that comes back fast must not leave one
+    // armed. Every score entered on a good connection would otherwise hold a 15s timer alive,
+    // and close() would have a pending timer behind it for every call it ever made.
+    it("clears its timeout once the response lands, so a fast call leaves no timer pending", async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchImpl = (async () => fakeResponse(200, { seq: 1, duplicate: false })) as unknown as typeof fetch;
+        const transport = createHttpTransport({ httpUrl: HTTP_URL, wsUrl: WS_URL, roundId: ROUND_ID, token: TOKEN, fetchImpl });
+
+        await transport.push(SCORE_EVENT);
+
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // A timeout can land AFTER the headers, while the body is still streaming — the body read
+    // then rejects with a DOMException. Left outside the mapping, that escapes as a
+    // non-TransportError, so an explicit sync() REJECTS instead of resolving with the queue
+    // intact: the same "offline is not an error" breakage the non-JSON error-body case above
+    // closes, on the success path.
+    it("surfaces a body read that fails after the headers as the transient TransportError(network), not a raw DOMException", async () => {
+      const fetchImpl = (async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => {
+            throw new DOMException("The operation was aborted", "AbortError");
+          },
+        }) as unknown as Response) as unknown as typeof fetch;
+      const transport = createHttpTransport({ httpUrl: HTTP_URL, wsUrl: WS_URL, roundId: ROUND_ID, token: TOKEN, fetchImpl });
+
+      const error = await transport.push(SCORE_EVENT).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(TransportError);
+      expect((error as TransportError).kind).toBe("network"); // transient — the score stays queued
     });
 
     it("surfaces a non-JSON 502 body (API Gateway's own error page, not the Lambda's) as TransportError(server, 502, undefined), not a raw SyntaxError", async () => {

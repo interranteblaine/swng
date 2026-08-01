@@ -23,10 +23,9 @@ export interface RoundSessionView {
   // 0 on an idle view: no session means no outbox, which is honestly nothing queued.
   flush(): Promise<number>;
   // Re-opens the socket (idempotent; a no-op if already connected) and fires an immediate
-  // catch-up sync — the client SDK has no reconnect timer ("a caller that wants to reconnect
-  // calls connect() again," session.ts's own doc comment), so this is the only thing that
-  // resumes a session after connected flips false (e.g. StatusChrome's "Sync now" button,
-  // wired after the device's network comes back).
+  // catch-up sync. NOT the only thing that resumes a session any more (2026-08-01): the SDK
+  // drains and reconnects on its own backoff loop, so this is a manual nudge that collapses the
+  // wait — StatusChrome's "Try now" backstop, offered only once that loop reports `stalled`.
   connect(): void;
 }
 

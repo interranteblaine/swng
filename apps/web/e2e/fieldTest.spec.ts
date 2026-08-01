@@ -289,7 +289,12 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // 12 queued scores: holes 10-12 × 4 players, none of them pushed yet — genuinely stable here
     // (unlike killNetwork.spec.ts's arm 1), since contextB.setOffline(true) blocks HTTP itself, not
     // just the socket, so no backoff pass can succeed until test 6 brings the context back online.
-    await expect(pageB.getByText(/^12 scores saved on this phone — syncing/)).toBeVisible();
+    // The COUNT is what's pinned, not the state it's said in: StatusChrome renders the same
+    // "N scores saved on this phone" phrase whether the loop is quietly retrying ("… — syncing…")
+    // or has escalated ("… — can't reach swng yet."), and by the time twelve holes have been
+    // entered by hand the backoff has long since reached its cap (four failures, t≈14s). Pinning
+    // the "— syncing" suffix here made this assertion a race against the wall clock.
+    await expect(pageB.getByText(/^12 scores saved on this phone/)).toBeVisible();
 
     // Offline is not an error — and B's stale state is the POST-CLEAR one: it saw the clear
     // live (asserted above) but went dark before A's re-entry, so its fold still has Cal's h9
@@ -309,6 +314,9 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // wake listener (apps/web, 2026-08-01) turns that straight into an immediate sync() call. Even
     // without that listener the SDK's own backoff loop — already retrying on its own the whole
     // time B was dark — would pick this up unattended; the wake signal only collapses the wait.
+    // This negative means DRAINED, unambiguously: the count now appears in the escalated banner
+    // too, so it can no longer disappear because the news got worse rather than because the
+    // queue emptied.
     await expect(pageB.getByText(/saved on this phone/)).not.toBeVisible({ timeout: 20_000 });
 
     // The correction moved the pot, re-derived: Cal's corrected h9 5 nets 4, which TIES Bo's and

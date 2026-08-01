@@ -1946,3 +1946,87 @@ section as it does.
 ## Code Authoring
 
 - Write code that's easy for you to understand
+
+A round has one date — when you played it (2026-08-01, spec
+`docs/superpowers/specs/2026-08-01-round-played-date-design.md`, plan
+`docs/superpowers/plans/2026-08-01-round-played-date.md`, 9 SDD tasks + 8 fix waves, commits
+`1a7b30a..7440ae0`, base `35d2c4a`): the owner's field report — he and a friend played nine holes
+on a Friday, kept score on paper because pushing carts made phone-in-and-out-of-the-bag scoring
+absurd, and wanted that round in their history. The path already worked (start a round, type the
+scores, add no games, finalize — `unresolvedGames` returns nothing when a round has none); **the
+round was simply dated when you tapped the button**. Two further owner asks were re-derived and
+DROPPED rather than built: "add him retroactively" and "remove a round someone added me to." The
+escape hatch was the tell that the primitive was wrong — this repo already ruled on that exact
+shape when `addCrewMember` was deleted whole and replaced by invite links ("nobody is
+conscripted"), and a round writes to a permanent scoring record, so the argument is stronger, not
+weaker. Removal is worse than it sounds: a history line is derived from a sealed snapshot by the
+projector, so "removed" becomes durable suppression state or a rebuild resurrects it, and a hidden
+round makes your average lie. **So a retroactive round is a solo round** — each player enters their
+own card, losing only the games (settled in person on Friday; re-litigating them in the app
+produces nothing) and the crew's "Played together" row, while the crew board still counts both.
+**The defect underneath was bigger than the feature.** `createdAtMs` was doing two jobs — *when the
+record was made* and *when the golf happened* — and `sortLines` was the same bug in a second place,
+ordering a golfer's history by `finalizedAtMs`, which only ever looked right because you finalize
+the round you just played. Both were latently wrong before this arc; back-dating is what made them
+visible. The model now: **three fields, each meaning exactly one thing** — `playedAt` (when the golf
+happened, set by the golfer, the only date the product shows, groups, or sorts by), `createdAt`
+(when the record was made, audit only, rendered nowhere) and `finalizedAt` (when it was sealed).
+The simplification is not fewer fields; it is that no field does two jobs. `createdAt` gets MORE
+useful, not less: identical to `playedAt` on every round in existence until now, its gap from
+`playedAt` is henceforth the "hand-entered from paper" signal, which has nowhere else to live.
+Mechanically: `round-created` gains **required** `playedAtMs` (no fallback arm anywhere — a
+fallback would be a permanent read branch serving a handful of enumerable records, the reflex the
+2026-07-31 prod-migration spec rejected on proportion); `round-played-at-set` corrects it while
+live (the `participant-strokes-set` template minus the subject, latest-HLC-wins, any participant,
+`POST /rounds/{roundId}/played-at`, 39→40 HTTP routes); and ONE domain function `playedAtMsOf(events)`
+(`round/playedAt.ts`) answers "when was this played" for `reduceRound` and the projector both, so a
+live round and its own archive can never disagree. The create form asks **"When did you play?"** —
+a `datetime-local` defaulting to now, always visible, no disclosure and no second mode, showing the
+exact instant that will be stored: two earlier drafts inferred the time (local noon, then the entry
+clock) by a hidden rule and the owner rejected both, and future dates are deliberately allowed
+(setting up Saturday's round on Thursday is the same round entered early). Bounds live on request
+schemas ONLY (Arc A's placement rule). A back-dated round counts in the season it was PLAYED in,
+even one already reading FINAL — crew standings are a read fold, nothing precomputed, so a March
+round belongs to March. **Review culture earned the process outright.** The whole-branch review
+found the arc's own thesis case unpinned (swapping `SeasonPanel`'s played date for the finalize
+date left the whole 640-test web suite green) and that **half the feature had no coverage at any
+level** (deleting the correction's API call so Save posted nothing was also green) — plus
+"Played together" was labelled by played date and *ordered* by finalize date, the exact latent
+shape the spec exists to remove. This branch shipped **four** tests that could not fail, each
+caught, in escalating subtlety: equal fixtures; then values differing by seconds where a
+day-granular label renders identically (**divergence must cross a calendar day**); then a repro a
+DOM sanitizer neutralized; then the thesis case. A task review also found a live `DeleteCommand`
+could be added to the prod-writing migration through a namespace import with the suite still
+green — the exact riding note the 2026-07-31 arc left open, inherited while being reported closed —
+and that the migration's header pointed operators at `prod-backup-*`, the *strokes* migration's
+export name, which `--restore` could not tell apart (following it would have rolled prod back to
+its pre-strokes shape past every guard; fixed with a provenance stamp, not just a filename).
+**Every stored round was migrated, both stages** (`scripts/roundPlayedAtMigration.mjs` pure +
+`scripts/migrateRoundPlayedAt.mjs` I/O, the 2026-07-31 split); the transform writes each
+`round-created`'s own `hlc.wallMs`, lossless by definition since that is exactly what the deleted
+fallback computed, guarded on absence so it is idempotent. **Order is migrate → deploy →
+stragglers → rebuildProjections → publish web**, asserted not remembered (`--before-deploy`,
+inverting the strokes migration's own flag): the deployed schema is not `.strict()` so migrating
+first is invisible, while **web-first would silently strip `playedAtMs` and date every back-dated
+round "now."** Four states are red *by design* and are documented so none is misread — most
+sharply, in the deploy→rebuild window the crew board silently reports `rounds: 0`, the arc's only
+silent failure, which is why the web publishes after the rebuild. Close-out (controller-run):
+validate 0 + test:contract 97 + scripts 108 → **beta** migrate 193 records (4199 events / 89
+archives parse-clean, precondition met) → deploy 50.3s, 40 routes → 0 stragglers → rebuild
+`{processed:89}` → parse gate flips to PASS → publish (`index-DNPXOjMW.js`) → e2e:beta 17/17 ×2 →
+**e2e:field 67 passed / 1 documented skip on the FIRST run** (66→67, the new three-days-back beat)
+→ an adversarial USE pass on deployed beta.swng.golf driving **both** beats, the correction
+included because the review proved it had no other gate: a round back-dated to Jul 25 titled
+"Sat, Jul 25" instantly, then corrected live to Jul 22 → the title flipped to "Wed, Jul 22", with
+the stored log carrying `round-created` @ Jul 25 12:15Z and `round-played-at-set` @ Jul 22 18:30Z
+— both exactly the instants the fields displayed, genesis never rewritten — and after nine holes
+through the real pad and a real finalize, `GET /me/rounds` returned the whole arc in one response:
+`playedAt` Jul 22, `finalizedAt` and `createdAt` Aug 1, **nine days apart**; console zero errors,
+throwaway user deleted → **prod** fresh dry run 7 records → deploy 50.41s, 40 routes → rebuild
+`{processed:3}` → parse gate PASS → publish (`index-BFJwaoYI.js`, curl 200) → losslessness proven
+READ-ONLY with no test data created in prod: all 8 projection lines carry played dates equal to
+their original genesis clocks (Jul 25/26/27), each sitting hours BEFORE its own finalize time,
+exactly right for a live-scored morning round. **NO WIPE, nothing deleted, 15 prod records
+rewritten.** Recorded, not scheduled: nine holes played on an 18-hole card still records as
+half-finished and counts nowhere (spec §2, a separate design question about a round declaring a
+subset of its card's holes). On local `main`, never pushed.

@@ -32,7 +32,9 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
   // fieldTest.spec.ts's own drop (which combines setOffline + a WS close to simulate "no
   // network at all") — a flaky/dropped WS with HTTP still reachable is its own real-world case:
   // the client's own writes (always HTTP, never WS — architecture.md §3) keep succeeding
-  // immediately, but live pushes from OTHER participants stop arriving until "Sync now."
+  // immediately, but live pushes from OTHER participants stop arriving until the socket comes
+  // back — which now happens on its own, via the outbox's own backoff loop (2026-08-01, "the
+  // outbox drains itself"), not a "Sync now" tap.
   const aRoute: WsRouteHandle = { current: undefined };
   const bRoute: WsRouteHandle = { current: undefined };
 
@@ -105,47 +107,67 @@ test.describe.serial("M9 reconnect QA — arm 1: a socket-only WS drop mid-scori
     await expectOrRecover(pageA, "A sees Bo's hole 1 (baseline)", () => expect(pageA.getByRole("button", { name: "Bo hole 1", exact: true })).toHaveText(/^\D*5/), aRoute);
   });
 
-  test("2: B's socket is force-closed (network otherwise fine) — StatusChrome flips Offline; B's OWN new score renders locally and QUEUES (no reconnect timer — nothing pushes it until Sync now)", async () => {
+  // Tests 2 and 3 used to be split at a "B's score stays queued" checkpoint — under the
+  // pre-2026-08-01 SDK that state was stable forever (nothing pushed it until a tap), so it was
+  // safe to assert as a persisted fact between two separate `test()` blocks. It no longer is: HTTP
+  // is fully reachable in this arm (only the socket died), and the self-draining outbox attempts
+  // every push regardless of the socket, so B's own write clears on its own almost immediately,
+  // and the missed live push (Ann's hole 2) arrives on its own once the backoff loop's reconnect
+  // lands (base 2s). Splitting at that midpoint would mean asserting a state that may already have
+  // resolved by the time a second `test()` block starts running — so this stays ONE test, and the
+  // honest claim is the whole arc: B's socket dies, B scores, and the queue drains on its own with
+  // nobody tapping anything.
+  test("2: B's socket is force-closed (network otherwise fine) — B's OWN new score renders locally, and the whole queue drains on its own with nobody tapping anything", async () => {
     await bRoute.current?.close().catch(() => {}); // sever ONLY the socket — contextB.setOffline is never called in this arm
-    await expect(pageB.getByRole("status").filter({ hasText: "Offline" })).toBeVisible();
 
     // A scores hole 2 while B's socket is dead — B has no live delivery path for it right now
     // (no periodic poll; WS is the only "for free" delivery — architecture.md §3), so B's own
-    // grid must NOT show it yet.
+    // grid must NOT show it yet. This window is bounded by the backoff loop's own base delay
+    // (2s) before its first reconnect attempt, so it holds only if this assertion runs promptly
+    // after the close — which it does, with nothing slower than two clicks in between.
     await enterScore(pageA, "Ann", 2, 3);
     await expect(pageB.getByRole("button", { name: "Ann hole 2", exact: true })).not.toHaveText(/^\D*3/);
 
     // B's OWN write still renders instantly (the optimistic local fold — recordScore() always
-    // appends to the outbox and folds it in synchronously, session.ts) but the PUSH itself does
-    // NOT happen automatically here: recordScore() only opportunistically triggers a push
-    // `if (connectedFlag)` (session.ts) — the socket is dead, so connectedFlag is false, and
-    // there is no reconnect/retry timer in the SDK at all (session.ts's own doc comment: "a
-    // caller that wants to reconnect calls connect() again"). So this queues in the outbox
-    // exactly like arm 2's full offline case below, even though HTTP itself is perfectly
-    // reachable — the gate is the socket flag, not the network.
+    // appends to the outbox and folds it in synchronously, session.ts) and it now ALWAYS attempts
+    // a push: the old `if (connectedFlag)` gate that let a dead socket block the push outright
+    // from ever being tried is gone (session.ts, 2026-08-01) — recordScore fires a sync attempt
+    // regardless of the socket. The socket is the ONLY thing that died in this arm, so that push
+    // reaches the server over plain HTTP same as always; what's actually delayed is B's LIVE
+    // delivery path, which needs the socket itself back before anything more can arrive over it —
+    // and reconnecting THAT rides the SDK's own backoff loop (base 2s, doubling to a 30s cap).
+    // Nobody taps anything for either half of this.
     await enterScore(pageB, "Bo", 2, 6);
-    await expect(pageB.getByText(/^1 score syncing/)).toBeVisible();
-  });
 
-  test("3: B reconnects via Sync now — pushes its own queued hole 2 and receives Ann's missed hole 2, exactly once each (no dupes); A receives Bo's hole 2 over its own live WS", async () => {
-    await pageB.getByRole("button", { name: "Sync now" }).click();
-    await expect(pageB.getByRole("status").filter({ hasText: "Offline" })).not.toBeVisible();
-    await expect(pageB.getByText(/scores? syncing/)).not.toBeVisible(); // the queue drains: Bo's hole 2 is finally pushed
-
-    // The missed push (Ann's hole 2) arrives via Sync now's own HTTP pull.
+    // The drain, unattended: whatever briefly queued clears on its own, and B picks up the missed
+    // push (Ann's hole 2) via the backoff-driven reconnect's own catch-up pull — give it room for
+    // the base retry delay plus a real reconnect + pull round trip against deployed beta.
+    await expect(pageB.getByText(/saved on this phone/)).not.toBeVisible({ timeout: 20_000 });
     await expect(pageB.getByRole("button", { name: "Ann hole 2", exact: true })).toHaveText(/^\D*3/);
 
-    // The "no dupes" pin: B's OWN hole 2 (queued since step 2, never pushed while the socket
-    // was dead) is pushed for the first time by Sync-now's own push phase, then immediately
-    // pulled back by that SAME Sync-now HTTP fetch (push-then-pull, both inside one doSync()
-    // pass — session.ts) — the client's confirmed-vs-outbox/opId reconciliation must fold the
-    // pulled-back copy as the SAME event as the still-pending local one, not a second
-    // application. Exact full-text pin, derived from the number typed in test 1: Bo is on 2
-    // strokes. allocateStrokes(2, 9 holes) puts a single dot on the two lowest-SI holes only —
-    // hole 2 is SI 1, so Bo's cell renders ● + gross 6 + net 6−1=5, and any concatenated/
-    // duplicated fold (e.g. "●665") corrupts this exact string.
+    // The "no dupes" pin: B's OWN hole 2 (queued the instant it was entered) is pushed once by the
+    // SDK's own sync pass, then immediately pulled back by that SAME pass (push-then-pull, both
+    // inside one doSync() call — session.ts) — the client's confirmed-vs-outbox/opId
+    // reconciliation must fold the pulled-back copy as the SAME event as the still-pending local
+    // one, not a second application. Exact full-text pin, derived from the number typed in test 1:
+    // Bo is on 2 strokes. allocateStrokes(2, 9 holes) puts a single dot on the two lowest-SI holes
+    // only — hole 2 is SI 1, so Bo's cell renders ● + gross 6 + net 6−1=5, and any concatenated/
+    // duplicated fold (e.g. "●665") corrupts this exact string. Unaffected by HOW the sync was
+    // triggered — this pin is about the fold, not the recovery mechanism.
     await expect(pageB.getByRole("button", { name: "Bo hole 2", exact: true })).toHaveText("●65");
-    await expect(pageB.getByRole("status", { name: /couldn.t be saved/i })).not.toBeVisible(); // no rejected-op toast either
+    // Was role="status" — StatusChrome's rejected-op toast is actually role="alert"
+    // (StatusChrome.tsx:72), so the old query matched nothing and this assertion passed
+    // vacuously. Fixed to the real role; `.filter({ hasText })` replaces the `name` option
+    // deliberately, not just cosmetically — role="alert" is not one of the roles whose
+    // accessible name is computed from its own text content (ARIA's "name from content" list is
+    // things like button/link/heading, not alert/status), so `{ name: /.../ }` would still not
+    // have matched even with the role corrected. `.filter({ hasText })` is this codebase's own
+    // established idiom for matching a live-region role by its text (see e.g. this file's own
+    // former "Offline" banner locator, and support.ts's roster-row filters). This is now a REAL
+    // check, not a vacuous one: if a rejected-op toast genuinely renders at this point in a live
+    // run, this assertion will fail — that would be a true finding about Task 1's rejected-op
+    // durability, not a reconciliation defect, so read it as a watch item on the first live run.
+    await expect(pageB.getByRole("alert").filter({ hasText: /couldn.t be saved/i })).not.toBeVisible(); // no rejected-op toast either
 
     // A (never dropped) receives Bo's hole 2 purely over its own still-live WS — full
     // convergence, both directions.
@@ -197,17 +219,21 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     // had a chance to race a cross-context write (unlike fieldTest.spec.ts's pageB, which goes
     // offline having never written anything itself), so quiescing here is what fieldTest gets
     // for free from its own scenario shape.
-    await expect(page.getByText(/scores? syncing/)).not.toBeVisible();
+    await expect(page.getByText(/saved on this phone/)).not.toBeVisible();
   });
 
   test("2: goes offline; a second score QUEUES honestly (pending count, not silently dropped or double-posted)", async () => {
     await context.setOffline(true);
     await route.current?.close().catch(() => {});
-    await expect(page.getByRole("status").filter({ hasText: "Offline" })).toBeVisible();
+    // Nothing renders yet at this exact instant — pending is still 0 (nothing queued) and the
+    // backoff loop needs four consecutive failed passes (up to its 30s cap) before it escalates to
+    // the "Can't reach swng" state, so there is no chrome to assert here. Straight to the write.
 
     // Entering while offline still renders instantly (the optimistic local fold — the same
     // property arm 1's B relied on) but the PUSH itself can't reach the server: the queue IS
-    // the feature (StatusChrome's own doc comment), not an error.
+    // the feature (StatusChrome's own doc comment), not an error. Unlike arm 1, HTTP itself is
+    // genuinely blocked here (context.setOffline), so — unlike arm 1's B — this queue is stable:
+    // no backoff pass can succeed until the context comes back online in test 4 below.
     const cell = page.getByRole("button", { name: "Ann hole 2", exact: true });
     await cell.click();
     const dialog = page.getByRole("dialog", { name: "Score for Ann, hole 2", exact: true });
@@ -216,7 +242,7 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     await expect(dialog).toBeHidden();
     await expect(cell).toHaveText(/^\D*5/); // shown locally at once, queued for the server
 
-    await expect(page.getByText(/^1 score syncing/)).toBeVisible();
+    await expect(page.getByText(/^1 score saved on this phone — syncing/)).toBeVisible();
   });
 
   test("3: a finalize ATTEMPT while still offline is REFUSED, in words — the round is never sealed over the queued score", async () => {
@@ -241,15 +267,18 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
 
     // The queued hole-2 score from step 2 is untouched by the refused finalize attempt — still
     // honestly pending, not lost and not double-counted.
-    await expect(page.getByText(/^1 score syncing/)).toBeVisible();
+    await expect(page.getByText(/^1 score saved on this phone — syncing/)).toBeVisible();
     await page.getByRole("button", { name: "Cancel" }).click();
   });
 
-  test("4: back online — Sync now drains the queue, then Finalize succeeds for real", async () => {
+  test("4: back online — the queue drains on its own via the browser's own online event, then Finalize succeeds for real", async () => {
     await context.setOffline(false);
-    await page.getByRole("button", { name: "Sync now" }).click();
-    await expect(page.getByText(/scores? syncing/)).not.toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: "Offline" })).not.toBeVisible();
+    // No tap: coming back online fires the browser's own `online` event, and useRoundSession's
+    // wake listener (apps/web, 2026-08-01) turns that straight into an immediate sync() call. Even
+    // without that listener the SDK's own backoff loop — already retrying on its own the whole
+    // time this context was offline — would pick this up unattended; the wake signal only
+    // collapses the wait. Room for the round trip against deployed beta, not the file's 10s default.
+    await expect(page.getByText(/saved on this phone/)).not.toBeVisible({ timeout: 20_000 });
 
     await page.getByRole("button", { name: "Finalize round" }).click();
     await expect(page.getByRole("dialog", { name: "Confirm finalize" })).toBeVisible();

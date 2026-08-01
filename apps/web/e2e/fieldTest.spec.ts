@@ -230,10 +230,10 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // pageA's own chip count is same-context (A added both games itself — its own optimistic
     // fold), so it stays bare. pageB only learns of A's game-adds via WS broadcast —
     // cross-context, WS-dependent, the exact seam expectOrRecover exists for (see support.ts's
-    // own doc comment) — so it gets the announced force-close + Sync-now recovery instead of a
-    // bare wait that can hang to the suite's 120s test timeout on a silently-lost push.
+    // own doc comment) — so it gets the announced force-close + backoff-driven recovery instead
+    // of a bare wait that can hang to the suite's 120s test timeout on a silently-lost push.
     // gameChips (not a bare getByRole("button")) — chips are plain buttons now (Task 3: no more
-    // tablist), so a bare button role would also match Add game/Sync now/Finalize round etc.
+    // tablist), so a bare button role would also match Add game/Try now/Finalize round etc.
     await expect(gameChips(pageA)).toHaveCount(2);
     await expectOrRecover(pageB, "B sees both game chips (test 3)", () => expect(gameChips(pageB)).toHaveCount(2), bRoute);
   });
@@ -275,7 +275,8 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
 
     await contextB.setOffline(true); // blocks B's future push/pull fetches
     await bRoute.current?.close().catch(() => {}); // actually severs B's socket — see beforeAll's own note
-    await expect(pageB.getByRole("status").filter({ hasText: "Offline" })).toBeVisible();
+    // Nothing renders yet at this exact instant — B hasn't queued anything (that's the loop
+    // below), so pending is still 0 and there's no chrome to assert here.
 
     await enterScore(pageA, "Cal", 9, correctedScore("Cal", 9));
 
@@ -285,8 +286,10 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
       }
     }
 
-    // 12 queued scores: holes 10-12 × 4 players, none of them pushed yet.
-    await expect(pageB.getByText(/^12 scores syncing/)).toBeVisible();
+    // 12 queued scores: holes 10-12 × 4 players, none of them pushed yet — genuinely stable here
+    // (unlike killNetwork.spec.ts's arm 1), since contextB.setOffline(true) blocks HTTP itself, not
+    // just the socket, so no backoff pass can succeed until test 6 brings the context back online.
+    await expect(pageB.getByText(/^12 scores saved on this phone — syncing/)).toBeVisible();
 
     // Offline is not an error — and B's stale state is the POST-CLEAR one: it saw the clear
     // live (asserted above) but went dark before A's re-entry, so its fold still has Cal's h9
@@ -299,18 +302,20 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     await expect(chip(pageB, "Skins")).toContainText(staleSkins);
   });
 
-  test("6: B reconnects via the UI's Sync now affordance; drains to pending 0, refolds skins, and A sees B's holes 10-12", async () => {
+  test("6: B comes back online; the queue drains on its own — pending 0, skins refolds, and A sees B's holes 10-12", async () => {
     test.setTimeout(60_000);
     await contextB.setOffline(false);
-    await pageB.getByRole("button", { name: "Sync now" }).click();
-
-    await expect(pageB.getByText(/scores? syncing/)).not.toBeVisible();
+    // No tap: coming back online fires the browser's own `online` event, and useRoundSession's
+    // wake listener (apps/web, 2026-08-01) turns that straight into an immediate sync() call. Even
+    // without that listener the SDK's own backoff loop — already retrying on its own the whole
+    // time B was dark — would pick this up unattended; the wake signal only collapses the wait.
+    await expect(pageB.getByText(/saved on this phone/)).not.toBeVisible({ timeout: 20_000 });
 
     // The correction moved the pot, re-derived: Cal's corrected h9 5 nets 4, which TIES Bo's and
     // Dee's 4 — so hole 9 carries instead of paying, Cal's 9 skins go to 0, and the whole
     // nine-hole pot rolls into hole 10, where Dee's 4 on his own SI-2 dot nets 3 and takes all
     // TEN. Thru 12 then reads "Dee 10 · carrying 2 into 13" (h11 and h12 both tie). B's own
-    // refold is from ITS OWN Sync-now pull just above (HTTP, not WS) — not cross-context
+    // refold is from ITS OWN auto-drain pull just above (HTTP, not WS) — not cross-context
     // WS-dependent, so this one stays bare.
     const refoldedSkins = describeSkinsAt(12, true);
     await expect(chip(pageB, "Skins")).toContainText(refoldedSkins);
@@ -319,7 +324,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // downstream refold — purely over its own WS push from the server. This is exactly the
     // cross-context WS-dependent pair m6-gate-field-2.log caught pageA's real socket silently
     // failing on, so both are wrapped for announced recovery.
-    await expectOrRecover(pageA, "A's Skins refold after B's Sync now (step 6)", () => expect(chip(pageA, "Skins")).toContainText(refoldedSkins), aRoute);
+    await expectOrRecover(pageA, "A's Skins refold after B reconnects (step 6)", () => expect(chip(pageA, "Skins")).toContainText(refoldedSkins), aRoute);
     await expectOrRecover(
       pageA,
       "A sees Dee's hole 11 from B (step 6)",
@@ -366,7 +371,7 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // asserted on the chips themselves — the very surface a real golfer now checks between
     // holes. A's own entries are same-page local state (its optimistic fold) and stay bare;
     // B only learns holes 13-16 via WS broadcast from A — cross-context, WS-dependent — so
-    // B's pair gets the announced force-close + Sync-now recovery, same as steps 4/6/8.
+    // B's pair gets the announced force-close + backoff-driven recovery, same as steps 4/6/8.
     const expectedFourball = describeFourballAt(16, true);
     const expectedSkins = describeSkinsAt(16, true);
 
@@ -411,8 +416,9 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // finalize's WS broadcast fires after settleRound + the archive write (finalizeRound.ts) —
     // strictly more backend work, and more elapsed real time, than a plain score's broadcast.
     // waitForFinalOrRecover force-closes B's own proxied socket on a timeout (deterministic, not
-    // banner-gated) and taps B's own "Sync now" affordance — the same recovery a real golfer has,
-    // not a hidden retry of the assertion itself.
+    // banner-gated) and lets the outbox's own backoff loop reconnect and pull on its own — the
+    // same recovery a real golfer gets automatically now, not a hidden retry of the assertion
+    // itself.
     await waitForFinalOrRecover(pageB, bRoute);
 
     const expectedFourballFinal = describeFourballAt(18, true); // "Ann & Bo win 1 up"
@@ -577,8 +583,8 @@ test.describe.serial("M7 termination coverage — end an unresolved game, finali
     await joinRoundDirect(httpUrl, quinnAccount, { code: joinCode, tee: "white" });
     // Quinn's join is a direct HTTP fetch, not a browser — Pat's page only ever learns of it via
     // WS broadcast/pull, cross-context and WS-dependent (same seam as the M5 describe's own
-    // waitForParticipant loop), so it gets the announced force-close + Sync-now recovery instead
-    // of a bare wait that can hang to the suite's 120s test timeout on a silently-lost push.
+    // waitForParticipant loop), so it gets the announced force-close + backoff-driven recovery
+    // instead of a bare wait that can hang to the suite's 120s test timeout on a silently-lost push.
     await expectOrRecover(page, "Pat sees Quinn's join (test 1)", () => waitForParticipant(page, "Quinn"), route);
   });
 

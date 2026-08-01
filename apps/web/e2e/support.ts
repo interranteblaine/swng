@@ -774,7 +774,8 @@ const scoreButtonText = (score: number | "picked-up"): string => (score === "pic
 // `round-finalized`). Draining here would make every spec quiescent and stop any of them
 // exercising that boundary. A caller that genuinely needs a quiesced device before doing
 // something else — killNetwork's arm 2, before it forces the context offline — waits on
-// StatusChrome's own "N scores syncing" line instead, at the one point that needs it.
+// StatusChrome's own "N score(s) saved on this phone — syncing…" line instead, at the one point
+// that needs it.
 export const enterScore = async (page: Page, golferName: string, hole: number, score: number | "picked-up"): Promise<void> => {
   // exact: true throughout — "hole 1" is a substring of "hole 10".."hole 18" (and the dialog's
   // "hole 1" likewise), so a non-exact name match would resolve to every one of them at once.
@@ -898,21 +899,27 @@ export const installWsProxy = async (context: BrowserContext, handle: WsRouteHan
 // exposed to a WS push silently never arriving (delivery loss, not a product bug — see the WS
 // proxy note above). Recovery here is deterministic, not inferred: on an assertion timeout, this
 // FORCES the page's own proxied socket closed via `routeHandle` — no banner-gating, no guessing
-// whether the client has "noticed" yet — which reliably flips connected() false and renders the
-// Offline banner + Sync-now button (StatusChrome.tsx renders that button only inside its
-// `!connected` block), then clicks Sync-now (the same recovery a real golfer has: a full HTTP
-// pull, the sole cursor authority) and re-asserts the SAME `expect(...)` the caller built — same
-// locator, same expected value; nothing about assertion strength changes.
+// whether the client has "noticed" yet — which reliably flips connected() false. That is now the
+// WHOLE recovery: there is no button to wait for or click any more (2026-08-01, "the outbox
+// drains itself") — a wanted-but-closed socket is exactly the "dirty" state the SDK's own backoff
+// loop (base 2s, doubling to a 30s cap) watches for, and it reconnects + pulls entirely on its
+// own. This just gives that loop room to land, then re-asserts the SAME `expect(...)` the caller
+// built — same locator, same expected value; nothing about assertion strength changes.
 //
-// Bounded retry: up to two announced force-close+Sync-now cycles. A Sync-now pull is idempotent
-// and authoritative, so repeated pulls converge on server truth — a genuine product mismatch
-// still fails truthfully after both cycles (nothing here can paper over a real defect), while a
+// Bounded retry: up to two announced force-close cycles. A drained pull is idempotent and
+// authoritative, so repeated pulls converge on server truth — a genuine product mismatch still
+// fails truthfully after both cycles (nothing here can paper over a real defect), while a
 // transient race (e.g. a pull landing before the other page's own in-flight POST) gets a second
 // chance to resolve. The announcement (console.log + a "ws-fallback" annotation) is pushed BEFORE
 // each force-close, matching this suite's existing precedent. After the final cycle, a failure is
 // rethrown as a labeled error (with the original assertion failure preserved via `cause`) instead
 // of a bare, unrelated-looking locator timeout.
 const MAX_RECOVERY_ATTEMPTS = 2;
+// Room for the backoff's own base retry (2s) plus a real reconnect + catch-up pull round trip
+// against deployed beta, BEFORE `assert()` gets re-invoked and starts its own (separately timed)
+// poll — the same total headroom the old button-wait gave, just spent on the timer instead of a
+// click.
+const RECOVERY_SETTLE_MS = 4_000;
 
 export const expectOrRecover = async (page: Page, label: string, assert: () => Promise<void>, routeHandle: WsRouteHandle): Promise<void> => {
   let lastError: unknown;
@@ -925,29 +932,28 @@ export const expectOrRecover = async (page: Page, label: string, assert: () => P
       if (attempt === MAX_RECOVERY_ATTEMPTS) break; // recovery cycles exhausted
 
       console.log(
-        `[fieldTest] ${label}: assertion did not arrive — force-closing the socket and recovering via Sync now (cycle ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`,
+        `[fieldTest] ${label}: assertion did not arrive — force-closing the socket and letting the backoff loop recover (cycle ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`,
       );
       test.info().annotations.push({
         type: "ws-fallback",
-        description: `${label}: recovery cycle ${attempt + 1} — forced socket close + Sync-now`,
+        description: `${label}: recovery cycle ${attempt + 1} — forced socket close, backoff-driven reconnect+pull`,
       });
 
-      await routeHandle.current?.close().catch(() => {}); // deterministically flips connected() false
-      const syncNow = page.getByRole("button", { name: "Sync now" });
-      await expect(syncNow).toBeVisible({ timeout: 15_000 });
-      await syncNow.click();
+      await routeHandle.current?.close().catch(() => {}); // deterministically flips connected() false; the SDK's own backoff loop takes it from here, unattended
+      await page.waitForTimeout(RECOVERY_SETTLE_MS);
     }
   }
 
-  throw new Error(`${label}: assertion still failing after ${MAX_RECOVERY_ATTEMPTS} force-close+Sync-now recovery cycles`, { cause: lastError });
+  throw new Error(`${label}: assertion still failing after ${MAX_RECOVERY_ATTEMPTS} force-close recovery cycles`, { cause: lastError });
 };
 
 // WS is delivery sugar, not the correctness path (architecture.md §3) — this session has no
-// periodic pull, so if a push is ever silently lost, the ONLY thing that recovers a live tab is
-// the same user-visible "Sync now" affordance StatusChrome ships (session/useRoundSession.ts's
-// own connect()+sync()). Used for the round's finalize — the one WS-arrival wait in this spec
-// with enough elapsed real time and backend work (settleRound + the archive write) for a rare
-// delivery hiccup to matter.
+// periodic pull, so if a push is ever silently lost, what recovers a live tab is the outbox's own
+// backoff loop (2026-08-01, "the outbox drains itself"), same as everywhere else — not a special
+// "Sync now" affordance any more (session/useRoundSession.ts's wake listeners are a pure
+// accelerator on top, not the mechanism). Used for the round's finalize — the one WS-arrival wait
+// in this spec with enough elapsed real time and backend work (settleRound + the archive write)
+// for a rare delivery hiccup to matter.
 export const waitForFinalOrRecover = async (page: Page, routeHandle: WsRouteHandle): Promise<void> => {
   const finalHeading = page.getByRole("heading", { name: "Final results" });
   await expectOrRecover(page, "Final results", () => expect(finalHeading).toBeVisible({ timeout: 45_000 }), routeHandle);
@@ -1059,7 +1065,7 @@ export const setStrokesInBrowser = async (page: Page, name: string, strokes: num
 };
 
 // Every game chip (StandingsHeader.tsx) carries `aria-expanded` — the ONE attribute that
-// distinguishes it from every other button on a round page (Add game/Sync now/Finalize
+// distinguishes it from every other button on a round page (Add game/Try now/Finalize
 // round/etc. carry none), the same discriminator apps/web/src/watch/WatchPage.test.tsx's own
 // component test already uses (`button.hasAttribute("aria-expanded")`) to tell "a game chip"
 // apart from any other button structurally. Used where a spec needs to count chips rather than

@@ -22,7 +22,9 @@ const at = (wallMs: number, device = "d1", counter = 0): Hlc => ({ wallMs, count
 let op = 0;
 const base = (wallMs: number, device?: string) => ({ opId: opId(`op-${op++}`), hlc: at(wallMs, device), authorId: A });
 
-const genesis: RoundEvent = { ...base(1), kind: "round-created", roundId: roundId("r1"), card };
+// playedAtMs is set equal to genesis's own hlc.wallMs (1) so every existing assertion's meaning
+// stays byte-identical — this fixture predates playedAtMs and none of these tests are ABOUT it.
+const genesis: RoundEvent = { ...base(1), kind: "round-created", roundId: roundId("r1"), card, playedAtMs: 1 };
 const joinA: RoundEvent = { ...base(2), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", strokes: 8 } };
 const started: RoundEvent = { ...base(3), kind: "round-started" };
 

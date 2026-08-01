@@ -54,8 +54,12 @@ const buildGoldenLog = (
   const toResult = (score: number | "picked-up"): HoleResult =>
     score === "picked-up" ? { kind: score } : { kind: "strokes", strokes: score };
 
+  // playedAtMs is set equal to genesis's own hlc.wallMs (captured, not hardcoded, so it tracks
+  // nextHlc's actual first value) — a golden deck asserts nothing about playedAtMs, so every
+  // existing hand-derived expectation over these decks stays byte-identical.
+  const genesisHlc = nextHlc();
   const events: RoundEvent[] = [
-    { kind: "round-created", roundId: roundId("golden"), card, opId: nextOpId(), hlc: nextHlc(), authorId: RECORDER },
+    { kind: "round-created", roundId: roundId("golden"), card, playedAtMs: genesisHlc.wallMs, opId: nextOpId(), hlc: genesisHlc, authorId: RECORDER },
     ...participants.map(
       (participant): RoundEvent => ({ kind: "participant-joined", participant, opId: nextOpId(), hlc: nextHlc(), authorId: participant.golferId }),
     ),

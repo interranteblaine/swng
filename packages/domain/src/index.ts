@@ -7,6 +7,7 @@ export * from "./round/participant.js";
 export * from "./round/holeResult.js";
 export * from "./round/events.js";
 export * from "./round/state.js";
+export * from "./round/playedAt.js";
 export * from "./round/archive.js";
 export * from "./scoring/strokes.js";
 // scoring/allowances.js and scoring/strokeBasis.js are both deleted: the 95/90/100 allowance

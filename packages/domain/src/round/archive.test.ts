@@ -418,12 +418,15 @@ describe("round is a sealed leaf — no crewId on state or archive", () => {
   // An old stored genesis carrying a stray crewId JSON key. The current RoundEvent type has no
   // such field, so the key is injected through an unknown-cast — exactly the shape a log
   // written under M8's schema deserializes into today.
+  // playedAtMs is set equal to this fixture's own genesis hlc.wallMs (1) — this fixture is about
+  // the stray crewId key, not playedAtMs, so its meaning stays byte-identical.
   const legacyGenesisWithStrayCrewId = (): RoundEvent =>
     ({
       kind: "round-created",
       roundId: roundId("r-legacy"),
       card: fixtureLinks,
       crewId: "saturday-boys", // the stray key an M8-era log still carries
+      playedAtMs: 1,
       opId: opId("op-created"),
       hlc: at(1),
       authorId: recorder,

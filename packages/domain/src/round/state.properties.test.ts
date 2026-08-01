@@ -17,8 +17,10 @@ const card: CourseCard = {
 // exercises a roster wider than "everyone always joins."
 const golfers = [golferId("a"), golferId("b"), golferId("c")];
 
+// playedAtMs is set equal to genesis's own hlc.wallMs (0) so this fixture's meaning stays
+// byte-identical — none of the property tests below are about playedAtMs.
 const genesis: RoundEvent = {
-  kind: "round-created", roundId: roundId("r1"), card,
+  kind: "round-created", roundId: roundId("r1"), card, playedAtMs: 0,
   opId: opId("genesis"), hlc: { wallMs: 0, counter: 0, deviceId: deviceId("d0") }, authorId: golfers[0]!,
 };
 

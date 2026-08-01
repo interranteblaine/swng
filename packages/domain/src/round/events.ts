@@ -25,7 +25,15 @@ export type RoundEvent = RoundEventBase &
     // still carries a stray `crewId` JSON key keep parsing and folding (the wire schema strips
     // it, the fold ignores it) — the event log is append-only, so we tolerate the extra key,
     // never reject the data.
-    | { readonly kind: "round-created"; readonly roundId: RoundId; readonly card: CourseCard }
+    //
+    // `playedAtMs` (spec 2026-08-01 §3a) — WHEN THE GOLF HAPPENED, which is not the same fact as
+    // when this record was created. The genesis event's own `hlc.wallMs` still records the
+    // latter (it is the log's audit trail, untouched); this field is what every product surface
+    // reads for a date. REQUIRED, deliberately: a fallback arm would be a permanent read branch
+    // existing to serve a handful of enumerable stored rounds, which is the reflex the
+    // 2026-07-31 prod-migration spec rejected on proportion. Every stored round is migrated
+    // (scripts/migrateRoundPlayedAt.mjs) and the branch never exists.
+    | { readonly kind: "round-created"; readonly roundId: RoundId; readonly card: CourseCard; readonly playedAtMs: number }
     | { readonly kind: "participant-joined"; readonly participant: Participant }
     | { readonly kind: "game-added"; readonly config: GameConfig }
     | { readonly kind: "round-started" }
@@ -69,4 +77,9 @@ export type RoundEvent = RoundEventBase &
     // bundle's `strokes` integer silently stripped by the old lambda's non-strict parse and a
     // meaningless event written into a sealed log.
     | { readonly kind: "participant-strokes-set"; readonly golferId: GolferId; readonly strokes: number }
+    // The played date, corrected (spec 2026-08-01 §3b): the participant-strokes-set template
+    // minus the subject — a round-level fact, so there is no golferId. Latest-HLC-wins;
+    // `authorId` (the envelope) records who changed it. Any participant may set it (the
+    // score-for-anyone trust model), enforced at the API layer, not here.
+    | { readonly kind: "round-played-at-set"; readonly playedAtMs: number }
   );

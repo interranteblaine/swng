@@ -6,6 +6,7 @@ import type { HoleResult } from "./holeResult.js";
 import { scoredStrokes } from "./holeResult.js";
 import type { Participant, RosterEntry } from "./participant.js";
 import type { GameConfig, RoundEvent } from "./events.js";
+import { playedAtMsOf } from "./playedAt.js";
 
 // "abandoned" is a TERMINAL status like "final", but for a scrapped round rather than a settled
 // one (task-15): unlike "final" (which round-reopened can flip back to "live"), nothing ever
@@ -24,6 +25,9 @@ export interface RoundState {
   readonly id: RoundId;
   readonly status: RoundStatus;
   readonly card: CourseCard;
+  // When the golf happened (spec 2026-08-01 §3): the round's ONE date, set at creation and
+  // correctable while live. Derived by playedAtMsOf — this fold does not re-implement the rule.
+  readonly playedAtMs: number;
   readonly participants: readonly RosterEntry[];
   readonly games: readonly GameConfig[];
   readonly cells: Readonly<Record<string, ScoreCell>>;
@@ -155,6 +159,12 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
     if (event.kind === "round-created") genesis = event;
   }
   if (!genesis) throw new DomainError("round-log-missing-genesis");
+
+  // 2b. Played date: delegated to playedAtMsOf over the SAME deduped list — one rule, one
+  //     implementation, called from here (so a live round shows and edits it) and from the
+  //     projector (application/src/projections/projectArchive.ts, so every participant's line is
+  //     stamped with the same instant). Never re-derived inline.
+  const playedAtMs = playedAtMsOf(deduped);
 
   // 3. Status: among lifecycle events pick highest hlc (last in canonical order).
   let status: RoundStatus = LIFECYCLE_STATUS["round-created"];
@@ -290,6 +300,7 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
     id: genesis.roundId,
     status,
     card: genesis.card,
+    playedAtMs,
     // No crewId register: a round is a sealed leaf, so `genesis` never contributes an
     // outbound crew reference. An old genesis that still carries a stray `crewId` JSON key is
     // simply ignored here (it's not read into state) — the fold tolerates the extra key rather

@@ -20,8 +20,9 @@ export interface RoundSession {
   connect(): void; // open socket (idempotent); socket open triggers sync()
   disconnect(): void;
   connected(): boolean;
-  // True once consecutive failed sync passes have driven the retry backoff to its cap (four
-  // failures) and the loop is still running — which includes the stretch while a retry pass is
+  // True once a sync pass has failed having ALREADY waited out the backoff's 30s cap (the fifth
+  // consecutive failure, t≈30s — the fourth merely sets the cap) and the loop is still running —
+  // which includes the stretch while a retry pass is
   // actually in flight, when no timer is armed. The chrome's escalation signal — "we are still trying
   // and it is still not working" — as distinct from connected(), which only ever described the
   // socket. Both halves are load-bearing: it never reports stalled on a session that has
@@ -323,8 +324,9 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   // The one place that decides whether the loop is making progress. A pass counts as a success
   // only if it BOTH drained the push queue without a transient failure AND completed its pull —
   // otherwise a permanently-stuck push under a healthy pull would hold the backoff at its floor
-  // forever. Delay sequence on consecutive failures: 2s, 4s, 8s, 16s, then the 30s cap, which is
-  // what stalled() reports.
+  // forever. Delay sequence on consecutive failures: 2s, 4s, 8s, 16s, then the 30s cap; the first
+  // failure to arrive having already waited that cap out — the fifth, at t≈30s — is what
+  // stalled() reports.
   const onPassSettled = (ok: boolean): void => {
     // A pass that succeeds after one that FAILED is evidence the network itself came back, so the
     // socket failures counted during the outage no longer predict anything and the reconnect
@@ -348,6 +350,13 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
     // the 2s floor: the pull it fires on every attempt succeeds, so this branch reset the delay
     // the close handler had just chosen.
     const delayMs = ok ? (connectedFlag ? RETRY_BASE_MS : reconnectDelayMs()) : retryDelayMs;
+    // Read before the doubling too, and for its own reason: this asks whether the failure that
+    // just landed had ALREADY waited out the full cap, which is the escalation signal below. The
+    // fourth consecutive failure is the one that SETS the cap, and it lands at t≈14s — far too
+    // early to call trouble, since fourteen seconds of failed syncs is ordinary play on a course
+    // (a stand of trees, a valley). The fifth is the first to fail having waited the whole 30s,
+    // and 30s is a real dead zone rather than a walk past some trees.
+    const failedAtTheCap = !ok && retryDelayMs >= RETRY_MAX_MS;
     retryDelayMs = ok ? RETRY_BASE_MS : Math.min(retryDelayMs * 2, RETRY_MAX_MS);
 
     // Cleared before arming, never left in place: scheduleRetry declines while a timer is
@@ -362,7 +371,7 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
     // trying and it is still not working" — on a session that is NOT retrying (one that never
     // connected, so failing sync() calls are the caller's own business) the first half of that
     // sentence would be a lie.
-    setStalled(retrying && !ok && retryDelayMs >= RETRY_MAX_MS);
+    setStalled(retrying && failedAtTheCap);
   };
 
   // Serializes the whole sync loop. sync(), recordScore's opportunistic push, and

@@ -291,9 +291,9 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
     // just the socket, so no backoff pass can succeed until test 6 brings the context back online.
     // The COUNT is what's pinned, not the state it's said in: StatusChrome renders the same
     // "N scores saved on this phone" phrase whether the loop is quietly retrying ("… — syncing…")
-    // or has escalated ("… — can't reach swng yet."), and by the time twelve holes have been
-    // entered by hand the backoff has long since reached its cap (four failures, t≈14s). Pinning
-    // the "— syncing" suffix here made this assertion a race against the wall clock.
+    // or has escalated ("… — can't reach swng yet."), and entering twelve holes by hand takes long
+    // enough that the loop has almost certainly escalated by now (the fifth consecutive failure,
+    // t≈30s). Pinning the "— syncing" suffix here made this a race against the wall clock.
     await expect(pageB.getByText(/^12 scores saved on this phone/)).toBeVisible();
 
     // Offline is not an error — and B's stale state is the POST-CLEAR one: it saw the clear

@@ -228,9 +228,9 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     await route.current?.close().catch(() => {});
     // Nothing renders yet at this exact instant — pending is still 0 (nothing queued), so there is
     // no chrome to assert here regardless of what the loop is doing. Straight to the write. (The
-    // escalated wording arrives once the backoff reaches its cap on the fourth consecutive failed
-    // pass — 2s+4s+8s, so t≈14s, not the 30s the cap's own value suggests — which is why the
-    // assertions below pin the COUNT, which both states state identically, and not the suffix.)
+    // escalated wording arrives on the fifth consecutive failed pass — the first to fail having
+    // already waited out the 30s cap, so t≈30s — which is why the assertions below pin the COUNT,
+    // which both states state identically, and not the suffix.)
 
     // Entering while offline still renders instantly (the optimistic local fold — the same
     // property arm 1's B relied on) but the PUSH itself can't reach the server: the queue IS

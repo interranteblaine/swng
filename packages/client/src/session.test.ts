@@ -964,10 +964,11 @@ describe("createRoundSession — the outbox drains itself", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(session.stalled()).toBe(false);
 
-    // Four consecutive failures drive the delay 2s → 4s → 8s → 16s → the 30s cap, which is what
-    // stalled() reports. Advanced well past the point where that lands rather than up to it:
-    // connect() fires two triggers of its own, so the exact wall-clock arrival depends on how
-    // many passes coalesce — which is not what this test is pinning.
+    // Consecutive failures drive the delay 2s → 4s → 8s → 16s → the 30s cap, and the first
+    // failure to arrive having already waited that cap out (the fifth, t≈30s) is what stalled()
+    // reports. Advanced well past the point where that lands rather than up to it: connect()
+    // fires two triggers of its own, so the exact wall-clock arrival depends on how many passes
+    // coalesce — which is not what this test is pinning.
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(session.stalled()).toBe(true);
@@ -1092,8 +1093,9 @@ describe("createRoundSession — the outbox drains itself", () => {
   // curve (2s then straight to the 30s cap, or 2s forever) passed the whole suite. Both halves
   // matter on a course: too flat and a dead radio costs a handshake every two seconds for the
   // rest of the round; too steep and a golfer waits out a cap after signal is already back.
-  // This also pins the arithmetic the chrome's escalation inherits — the FOURTH failure is the
-  // one that reaches the cap, and it lands at t≈14s (2+4+8), not at t≈30s.
+  // This also pins the arithmetic the chrome's escalation is drawn from: the fourth failure (t≈14s)
+  // SETS the cap and stays quiet; the fifth (t≈30s), which is the first to fail having already
+  // waited the cap out, is the one that escalates.
   it("widens each retry — 2s, 4s, 8s, 16s, then the 30s cap — rather than hammering at one delay", async () => {
     const transport = createScriptedTransport(buildServerLog());
     let pushAttempts = 0;
@@ -1130,12 +1132,19 @@ describe("createRoundSession — the outbox drains itself", () => {
     expect(session.stalled()).toBe(false); // three failures in: still climbing, not yet at the cap
     await vi.advanceTimersByTimeAsync(1);
     expect(pushAttempts).toBe(4); // +8s (t=14s)
-    expect(session.stalled()).toBe(true); // the fourth failure is the one that reaches the cap — t≈14s
+    // The fourth failure only SETS the cap. Fourteen seconds of failed syncs is ordinary play on a
+    // golf course — a stand of trees, a valley — and a banner that fires during ordinary play is a
+    // banner golfers learn to ignore, which destroys the only job the escalated state has.
+    expect(session.stalled()).toBe(false);
 
     await vi.advanceTimersByTimeAsync(15_999);
     expect(pushAttempts).toBe(4);
+    expect(session.stalled()).toBe(false); // still quiet through the whole 16s wait
     await vi.advanceTimersByTimeAsync(1);
     expect(pushAttempts).toBe(5); // +16s (t=30s)
+    // ...and the FIFTH failure — the first one that arrives having already waited out the full cap
+    // — is the one that escalates, at t≈30s. That is what the chrome's copy has always claimed.
+    expect(session.stalled()).toBe(true);
 
     await vi.advanceTimersByTimeAsync(29_999);
     expect(pushAttempts).toBe(5);
@@ -1404,10 +1413,13 @@ describe("createRoundSession — the outbox drains itself", () => {
     const session = await liveSession(transport);
     transport.offline = true;
 
-    // Four failed passes — enough to drive the backoff to its cap — driven by explicit sync()
+    // FIVE failed passes — one more than reaches the cap, so the last of them is a failure at the
+    // cap, which is the exact condition stalled() reports. Four would leave this test passing even
+    // with the `retrying &&` guard deleted (the flag would be false for the ordinary reason that
+    // nothing had escalated yet), which is no test of the guard at all. Driven by explicit sync()
     // calls on a session that never connected, so no loop was ever licensed.
     session.recordScore(ANN_ID, 1, toResult(4));
-    for (let pass = 0; pass < 4; pass += 1) await session.sync();
+    for (let pass = 0; pass < 5; pass += 1) await session.sync();
 
     expect(session.stalled()).toBe(false);
     expect(vi.getTimerCount()).toBe(0); // and indeed nothing is trying

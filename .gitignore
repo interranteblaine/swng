@@ -44,6 +44,10 @@ cdk.context.json
 # Superpowers scratch (ledger, briefs, review packages)
 .superpowers/
 
-# Table exports taken by scripts/migrateProdStrokes.mjs before it writes — a verbatim dump of a
-# live stage, real golfer names and Cognito subs included. It is a restore path, never an artifact.
+# Table exports taken by the migration scripts before they write — a verbatim dump of a live
+# stage, real golfer names and Cognito subs included. It is a restore path, never an artifact.
+# `prod-backup-` is scripts/migrateProdStrokes.mjs; `swng-backup-` is
+# scripts/migrateRoundPlayedAt.mjs, which migrates beta as well as prod and so does not call every
+# export "prod". Both prefixes are pinned to these rules by scripts/migrateRoundPlayedAt.test.mjs.
 prod-backup-*.json
+swng-backup-*.json

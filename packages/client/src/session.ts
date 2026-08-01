@@ -15,11 +15,19 @@ export interface RoundSession {
   games(): readonly GameState[]; // scoreGame over state().games filtered to known kinds; THROWS until hydrated().
   // identity-stable — same array reference until the underlying state changes (required for
   // useSyncExternalStore, which treats a fresh reference as "store changed" and loops)
-  recordScore(golferId: GolferId, hole: number, result: HoleResult): void; // optimistic; opportunistic push when connected
+  recordScore(golferId: GolferId, hole: number, result: HoleResult): void; // optimistic; opportunistic push once connect() has been called (see wantsConnection)
   sync(): Promise<void>; // push outbox oldest-first, then pull since lastSeq
   connect(): void; // open socket (idempotent); socket open triggers sync()
   disconnect(): void;
   connected(): boolean;
+  // True once consecutive failed sync passes have driven the retry backoff to its cap (four
+  // failures) and the loop is still running — which includes the stretch while a retry pass is
+  // actually in flight, when no timer is armed. The chrome's escalation signal — "we are still trying
+  // and it is still not working" — as distinct from connected(), which only ever described the
+  // socket. Both halves are load-bearing: it never reports stalled on a session that has
+  // stopped retrying (one that never connected, or has been disconnected/closed), because the
+  // chrome built on it would then be claiming an effort that isn't happening.
+  stalled(): boolean;
   pending(): number; // outbox depth (UI badge)
   rejected(): readonly RejectedOp[]; // permanently rejected ops (UI surfacing)
   onChange(listener: () => void): () => void;
@@ -48,6 +56,14 @@ export interface SessionConfig {
 // or reject an op — it just stays queued for the next sync(). Only a real 4xx (the server
 // deliberately refusing this op, e.g. a finalized round) is permanent.
 const isTransientPushFailure = (error: TransportError): boolean => error.kind === "network" || (error.status !== undefined && error.status >= 500);
+
+// Retry cadence for the self-draining outbox. The SDK owns this deliberately: M4 deferred
+// "retry cadence" to the UI and no UI ever claimed it, so the policy existed nowhere and a
+// dropped socket meant a golfer had to press a button to make a queued score leave the phone.
+// Correctness lives here; apps/web's wake signals (online/visibilitychange/focus) are pure
+// accelerators on top.
+const RETRY_BASE_MS = 2_000;
+const RETRY_MAX_MS = 30_000;
 
 export const createRoundSession = async (config: SessionConfig): Promise<RoundSession> => {
   const { transport } = config;
@@ -85,6 +101,14 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   // survives the restart exactly as `pending` does.
   let rejectedOps: readonly RejectedOp[] = persisted?.rejected ?? [];
   let connectedFlag = false;
+  // connect() was called and no disconnect()/close() has happened since. This — not the socket
+  // flag — is what licenses the loop to touch the network, preserving M4's contract that a
+  // session which never connects never makes a request on its own.
+  let wantsConnection = false;
+  let retryDelayMs = RETRY_BASE_MS;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let stalledFlag = false;
+  let closedFlag = false;
   let closeSocket: (() => void) | undefined;
   let cachedState: RoundState | undefined;
   let cachedGames: readonly GameState[] | undefined; // invalidated in lockstep with cachedState — see invalidateCache()
@@ -195,7 +219,7 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   // an error, the queue IS the feature. A permanent rejection drops that one entry into
   // rejected() and continues with the rest, so one bad op (e.g. scoring a finalized round)
   // can never wedge the whole queue.
-  const pushPending = async (): Promise<void> => {
+  const pushPending = async (): Promise<boolean> => {
     const toPush = [...pending];
     for (const event of toPush) {
       try {
@@ -207,7 +231,7 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
         // score between "pushed" and "pulled back".
       } catch (error) {
         if (!(error instanceof TransportError)) throw error;
-        if (isTransientPushFailure(error)) return;
+        if (isTransientPushFailure(error)) return false;
         rejectedOps = [...rejectedOps, { event, code: error.code ?? `http-${error.status ?? "unknown"}` }];
         pending = pending.filter((pendingEvent) => pendingEvent.opId !== event.opId);
         invalidateCache();
@@ -215,17 +239,84 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
         notify();
       }
     }
+    return true;
   };
 
+  // pushPending() is INSIDE the try deliberately: its own non-TransportError rethrow would
+  // otherwise escape before any settling could happen, exactly as the pull path's did.
   const doSync = async (): Promise<void> => {
-    await pushPending();
     try {
+      const pushOk = await pushPending();
       const { events, nextSeq } = await transport.pull(lastSeq);
       ingest(events, nextSeq);
+      onPassSettled(pushOk);
     } catch (error) {
+      // Settle FIRST, whatever the failure: a pass that dies on a non-transport error
+      // (a contract-parse failure under deploy skew, a bug in ingest) must still leave the
+      // retry loop armed while the session is dirty. The spec's invariant is that no state
+      // exists in which the queue has stopped trying.
+      onPassSettled(false);
       if (!(error instanceof TransportError)) throw error;
       // Offline: sync() resolves without throwing — the queue IS the feature.
     }
+  };
+
+  // Dirty = a retry has something to accomplish: an outbox to drain, or a socket to re-open.
+  // Gated on wantsConnection so a session constructed offline and never connected stays exactly
+  // as inert as it was before this loop existed.
+  const isDirty = (): boolean => wantsConnection && (pending.length > 0 || !connectedFlag);
+
+  const clearRetry = (): void => {
+    if (retryTimer === undefined) return;
+    clearTimeout(retryTimer);
+    retryTimer = undefined;
+  };
+
+  // Assign-and-notify in one place, so the flag can never change without the chrome hearing
+  // about it — and so every site that stops the loop also drops the claim that it is running.
+  const setStalled = (next: boolean): void => {
+    if (stalledFlag === next) return;
+    stalledFlag = next;
+    notify();
+  };
+
+  const scheduleRetry = (delayMs: number): void => {
+    if (closedFlag || retryTimer !== undefined || !isDirty()) return;
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      // A dead socket is re-opened rather than merely re-synced: doConnect fires its own
+      // catch-up sync, so this covers both halves of "dirty" in one branch.
+      if (wantsConnection && !connectedFlag) doConnect();
+      else requestSyncInBackground();
+    }, delayMs);
+  };
+
+  // The one place that decides whether the loop is making progress. A pass counts as a success
+  // only if it BOTH drained the push queue without a transient failure AND completed its pull —
+  // otherwise a permanently-stuck push under a healthy pull would hold the backoff at its floor
+  // forever. Delay sequence on consecutive failures: 2s, 4s, 8s, 16s, then the 30s cap, which is
+  // what stalled() reports.
+  const onPassSettled = (ok: boolean): void => {
+    // Read BEFORE the mutation below: the first retry after a failure must fire at the current
+    // delay, not the one this pass just doubled to. (Swapping these two lines is invisible to
+    // every other assertion in the suite — it just doubles the first wait — so it has its own
+    // regression test.)
+    const delayMs = ok ? RETRY_BASE_MS : retryDelayMs;
+    retryDelayMs = ok ? RETRY_BASE_MS : Math.min(retryDelayMs * 2, RETRY_MAX_MS);
+
+    // Cleared before arming, never left in place: scheduleRetry declines while a timer is
+    // already pending, so without this a freshly-computed (shorter) delay would be silently
+    // discarded — a session stalled at the 30s cap that then has ONE good pass would still sit
+    // out the old 30s wait before reconnecting.
+    clearRetry();
+    const retrying = isDirty();
+    if (retrying) scheduleRetry(delayMs);
+
+    // Only ever true while a retry is actually armed. stalled() is the chrome's "we are still
+    // trying and it is still not working" — on a session that is NOT retrying (one that never
+    // connected, so failing sync() calls are the caller's own business) the first half of that
+    // sentence would be a lie.
+    setStalled(retrying && !ok && retryDelayMs >= RETRY_MAX_MS);
   };
 
   // Serializes the whole sync loop. sync(), recordScore's opportunistic push, and
@@ -293,7 +384,49 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
     });
   };
 
+  const doConnect = (): void => {
+    if (connectedFlag) return; // idempotent
+    wantsConnection = true; // licenses the retry loop
+    connectedFlag = true;
+    closeSocket = transport.openSocket(
+      (events) => ingest(events), // socket events carry no nextSeq — the cursor never moves through them
+      () => {
+        connectedFlag = false;
+        closeSocket = undefined;
+        notify();
+        // The socket dropping is itself a dirty state: reconnection rides the same backoff as
+        // a stuck push, so there is no reachable state in which the session has stopped trying.
+        scheduleRetry(retryDelayMs);
+      },
+      // The REAL trigger for the catch-up sync: a real WebSocket is CONNECTING (not
+      // OPEN) for a while after openSocket() returns, and events landing in that gap
+      // reach neither the pull just below (already ran) nor the socket (not open yet)
+      // unless something re-syncs exactly when it opens. Through the same serialized gate as
+      // every other trigger; warn-and-drop, see requestSyncInBackground()'s comment.
+      () => requestSyncInBackground(),
+    );
+    notify();
+    // Also fire a sync immediately, without waiting for the real open: this is what
+    // catches up a session that's constructed and connected while already offline (the
+    // socket may never open, or take a long time to fail), and it's free — the onOpen
+    // sync above just coalesces onto it (or vice versa) through the same gate rather than
+    // running twice.
+    requestSyncInBackground();
+  };
+
   const doDisconnect = (): void => {
+    // Stopping the loop is unconditional, ABOVE the already-disconnected guard: the socket
+    // dropping schedules a retry while connectedFlag is already false, so a guard-first order
+    // would let close()/disconnect() skip these two lines entirely and leave a live timer whose
+    // callback re-opens the socket (`wantsConnection && !connectedFlag` → doConnect()) on a
+    // session the caller has finished with. Pinned by the close()-after-drop test.
+    wantsConnection = false;
+    clearRetry();
+    setStalled(false); // nothing is trying any more, so stalled() must not outlive the loop
+    // A user-initiated reconnect deserves a fresh attempt, not the dead network's leftover
+    // patience: without this, stall → disconnect() → connect() re-raises stalled() on the very
+    // first failure and then waits the full 30s cap before trying again.
+    retryDelayMs = RETRY_BASE_MS;
     if (!connectedFlag) return;
     closeSocket?.();
     closeSocket = undefined;
@@ -340,44 +473,22 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
       // full push+pull loop), not a bare push, so it shares the same serialization gate as
       // every other trigger — see requestSync()'s comment. Warn-and-drop, not `void`
       // directly — see requestSyncInBackground()'s comment.
-      if (connectedFlag) requestSyncInBackground();
+      // Gated on wantsConnection, NOT connectedFlag: a live socket is not what makes an HTTP
+      // push possible, and binding the attempt to it is what made a silently-dead socket
+      // unrecoverable (no banner, so no "Sync now" button, so nothing left to press). If this
+      // attempt fails, onPassSettled schedules the retry that finishes the job.
+      if (wantsConnection) requestSyncInBackground();
     },
 
     sync: () => requestSync(),
 
-    connect: () => {
-      if (connectedFlag) return; // idempotent
-      connectedFlag = true;
-      closeSocket = transport.openSocket(
-        (events) => ingest(events), // socket events carry no nextSeq — the cursor never moves through them
-        () => {
-          connectedFlag = false;
-          closeSocket = undefined;
-          notify();
-          // No auto-reconnect timer in v1: the UI owns retry cadence (backoff policy,
-          // offline-banner UX, etc. are presentation concerns, not sync-loop concerns).
-          // A caller that wants to reconnect calls connect() again.
-        },
-        // The REAL trigger for the catch-up sync: a real WebSocket is CONNECTING (not
-        // OPEN) for a while after openSocket() returns, and events landing in that gap
-        // reach neither the pull just below (already ran) nor the socket (not open yet)
-        // unless something re-syncs exactly when it opens — v1 has no timer to catch it
-        // otherwise. Through the same serialized gate as every other trigger; warn-and-drop,
-        // see requestSyncInBackground()'s comment.
-        () => requestSyncInBackground(),
-      );
-      notify();
-      // Also fire a sync immediately, without waiting for the real open: this is what
-      // catches up a session that's constructed and connected while already offline (the
-      // socket may never open, or take a long time to fail), and it's free — the onOpen
-      // sync above just coalesces onto it (or vice versa) through the same gate rather than
-      // running twice.
-      requestSyncInBackground();
-    },
+    connect: () => doConnect(),
 
     disconnect: () => doDisconnect(),
 
     connected: () => connectedFlag,
+
+    stalled: () => stalledFlag,
 
     pending: () => pending.length,
 
@@ -391,9 +502,11 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
     hydrated: () => hydratedFlag,
 
     close: async () => {
+      closedFlag = true;
       doDisconnect();
       // Await whatever sync pass is currently in flight BEFORE the final persist — a
-      // pass always settles promptly (offline is a resolved outcome, not a hang), so this
+      // pass is bounded by the transport's own REQUEST_TIMEOUT_MS (offline is a resolved
+      // outcome, and a hung connection is aborted rather than waited on forever), so this
       // never turns close() into a hang. Swallowed here deliberately: the pass's own
       // caller (an explicit sync(), or requestSyncInBackground()'s warn-and-drop) already
       // owns reporting that rejection — close() rejecting is reserved for its OWN final

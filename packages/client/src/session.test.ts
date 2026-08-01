@@ -893,3 +893,234 @@ describe("createRoundSession — rejected ops are durable", () => {
     expect(session.rejected()).toEqual([]);
   });
 });
+
+describe("createRoundSession — the outbox drains itself", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const liveSession = async (transport: ScriptedTransport) =>
+    createRoundSession({ transport, store: createMemoryOutboxStore(), roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("device-a") });
+
+  it("drains a queue built while offline once the network returns — with no sync() call and no button", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await liveSession(transport);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(0);
+
+    transport.offline = true;
+    session.recordScore(ANN_ID, 1, toResult(4));
+    session.recordScore(ANN_ID, 2, toResult(5));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(session.pending()).toBe(2); // still offline: the queue holds
+
+    transport.offline = false;
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(session.pending()).toBe(0);
+  });
+
+  it("backs off on consecutive failures and reports stalled() at the cap", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await liveSession(transport);
+    transport.offline = true;
+    session.connect();
+    // A queued score is what makes the session dirty, and it is the defect this whole arc
+    // closes: an outbox with something in it that cannot leave the phone. Without it there is
+    // nothing a retry could accomplish (isDirty() is false), so no timer is scheduled and no
+    // backoff climbs — correctly, since an empty outbox under a live socket is not stuck.
+    session.recordScore(ANN_ID, 1, toResult(4));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(session.stalled()).toBe(false);
+
+    // Four consecutive failures drive the delay 2s → 4s → 8s → 16s → the 30s cap, which is what
+    // stalled() reports. Advanced well past the point where that lands rather than up to it:
+    // connect() fires two triggers of its own, so the exact wall-clock arrival depends on how
+    // many passes coalesce — which is not what this test is pinning.
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(session.stalled()).toBe(true);
+  });
+
+  it("a successful pass resets the backoff and clears stalled()", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await liveSession(transport);
+    transport.offline = true;
+    session.connect();
+    session.recordScore(ANN_ID, 1, toResult(4)); // the queued score that makes the session dirty — see the test above
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(session.stalled()).toBe(true);
+
+    transport.offline = false;
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(session.stalled()).toBe(false);
+    expect(session.pending()).toBe(0); // the successful pass that cleared stalled() also drained the queue
+  });
+
+  it("schedules no timer at all when the session is clean — zero background cost on the happy path", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await liveSession(transport);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(session.pending()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("close() cancels the retry timer", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await liveSession(transport);
+    transport.offline = true;
+    session.connect();
+    session.recordScore(ANN_ID, 1, toResult(4));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    await session.close();
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // The sequence this task itself makes reachable: the new onClose handler schedules a retry,
+  // so a session can hold a live timer while connectedFlag is already false. If doDisconnect's
+  // `if (!connectedFlag) return;` guard ran BEFORE the loop was stopped, close() would skip both
+  // `wantsConnection = false` and clearRetry() — and the surviving timer's own callback
+  // (`wantsConnection && !connectedFlag` → doConnect()) would re-open the socket on a closed
+  // session and sync forever. disconnect() shares the guard and is fixed by the same hoist.
+  it("close() cancels the retry timer even when the socket had ALREADY dropped, and never reopens it", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await liveSession(transport);
+    session.connect();
+    session.recordScore(ANN_ID, 1, toResult(4));
+    await vi.advanceTimersByTimeAsync(0);
+
+    transport.offline = true;
+    transport.triggerSocketClose(); // connectedFlag goes false; onClose schedules the retry
+    expect(session.connected()).toBe(false);
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+    await session.close();
+
+    expect(vi.getTimerCount()).toBe(0); // the loop is stopped, not merely disconnected
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(session.connected()).toBe(false); // a closed session never re-opens its own socket
+  });
+
+  // onPassSettled reads its delay BEFORE doubling retryDelayMs. Swapping those two lines leaves
+  // every other test in this file green — it merely doubles the first wait — so this is the one
+  // assertion standing between that ordering and a silent regression.
+  it("arms the FIRST retry at the 2s base, not the delay this pass just doubled to", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    let pushAttempts = 0;
+    const realPush = transport.push.bind(transport);
+    transport.push = async (event) => {
+      pushAttempts += 1; // counts attempts, including the ones that throw while offline
+      return realPush(event);
+    };
+
+    const session = await liveSession(transport);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(0); // a clean pass: backoff at its base, no timer armed
+
+    // Exactly ONE failed pass — connect()'s own double trigger has already settled above, so
+    // this recordScore is the only thing driving the loop.
+    transport.offline = true;
+    session.recordScore(ANN_ID, 1, toResult(4));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pushAttempts).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(pushAttempts).toBe(1); // not yet — the retry is armed for 2s, not 1.999s
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pushAttempts).toBe(2); // fired at exactly 2s: the base delay, not the doubled 4s
+  });
+
+  // A pass can die on something that is NOT a TransportError — a contract-parse failure under
+  // deploy skew, or a bug in ingest/reduceRound/hlcSource.observe. That must still leave the
+  // loop armed: a dirty session whose retry is dead is exactly the state the spec forbids ("no
+  // state in which the queue has stopped trying"), and it is worse than useless downstream —
+  // the chrome would claim "syncing…" forever while nothing syncs.
+  it("keeps retrying after a pass dies on a non-transport error, and drains once the failure clears", async () => {
+    // Restored in a finally: an assertion failing mid-test would otherwise leave console.warn
+    // stubbed for every later test in this file — silencing warnings exactly when they matter.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const transport = createScriptedTransport(buildServerLog());
+      const session = await liveSession(transport);
+      session.connect();
+      await vi.advanceTimersByTimeAsync(0);
+
+      // The server starts answering with a body that fails contract parsing: a plain Error, so
+      // every TransportError-shaped path in the sync loop is bypassed.
+      const workingPull = transport.pull.bind(transport);
+      transport.pull = async () => {
+        throw new Error("malformed server response");
+      };
+
+      session.recordScore(ANN_ID, 1, toResult(4));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(session.pending()).toBe(1); // dirty: the score is queued and unsent
+      expect(vi.getTimerCount()).toBeGreaterThan(0); // ...and the loop is still armed
+
+      // The real point: a scheduled timer that never drains would satisfy the assertion above
+      // on its own. Recovery is the contract.
+      transport.pull = workingPull;
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(session.pending()).toBe(0);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("never touches the network for a session that never called connect()", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await liveSession(transport);
+
+    session.recordScore(ANN_ID, 1, toResult(4));
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(transport.pushedOpIds).toEqual([]);
+    expect(session.pending()).toBe(1);
+  });
+
+  // stalled() is consumed as "we are still trying and it is still not working". On a session
+  // with no retry loop behind it, the first half is false — so the flag must stay down no
+  // matter how many passes fail, or the chrome asserts an effort that isn't happening.
+  it("never reports stalled() on a session that isn't retrying", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await liveSession(transport);
+    transport.offline = true;
+
+    // Four failed passes — enough to drive the backoff to its cap — driven by explicit sync()
+    // calls on a session that never connected, so no loop was ever licensed.
+    session.recordScore(ANN_ID, 1, toResult(4));
+    for (let pass = 0; pass < 4; pass += 1) await session.sync();
+
+    expect(session.stalled()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0); // and indeed nothing is trying
+
+    // Same claim on the way out: a session stalled with a live loop must drop the claim when
+    // the loop stops, not carry it past disconnect().
+    const connected = await liveSession(transport);
+    connected.connect();
+    connected.recordScore(ANN_ID, 1, toResult(4));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(connected.stalled()).toBe(true);
+
+    connected.disconnect();
+
+    expect(connected.stalled()).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+
+    // And a user-initiated reconnect starts fresh rather than inheriting the dead network's
+    // patience: if disconnect() left the backoff at its 30s cap, the very first failure after
+    // reconnecting would re-raise stalled() immediately.
+    connected.connect();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(connected.stalled()).toBe(false);
+  });
+});

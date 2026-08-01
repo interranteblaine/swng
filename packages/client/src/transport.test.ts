@@ -96,6 +96,48 @@ describe("createHttpTransport", () => {
       expect((error as TransportError).kind).toBe("network");
     });
 
+    // A hung request is the sync loop's worst failure mode: it settles neither arm of doSync, so
+    // no retry arms and stalled() never flips. Two properties close it, tested separately
+    // because REQUEST_TIMEOUT_MS is a module constant with no injection seam (deliberately —
+    // the loop's own cadence is likewise un-injectable) and AbortSignal.timeout's internal
+    // timer is not one vitest's fake timers can advance.
+    //
+    // (1) every request carries a timeout signal at all, so none CAN hang forever...
+    it("passes an abort signal on every request, so no call can hang forever", async () => {
+      const calls: RequestInit[] = [];
+      const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+        calls.push(init!);
+        return String(url).includes("/events") ? fakeResponse(200, { events: [], nextSeq: 0 }) : fakeResponse(200, { seq: 1, duplicate: false });
+      }) as unknown as typeof fetch;
+      const transport = createHttpTransport({ httpUrl: HTTP_URL, wsUrl: WS_URL, roundId: ROUND_ID, token: TOKEN, fetchImpl });
+
+      await transport.push(SCORE_EVENT);
+      await transport.pull(0);
+
+      expect(calls).toHaveLength(2); // push and pull both go through the one requestJson chokepoint
+      for (const init of calls) expect(init.signal).toBeInstanceOf(AbortSignal);
+      // A FRESH signal per request. Without this, both an inert `new AbortController().signal`
+      // and a module-level signal hoisted out of requestJson satisfy the check above — and the
+      // hoisted one is worse than no timeout at all, since every request after the app's first
+      // 15 seconds would abort instantly.
+      expect(calls[0]!.signal).not.toBe(calls[1]!.signal);
+    });
+
+    // ...and (2) when that signal fires, the rejection it produces surfaces as the TRANSIENT
+    // kind. This is the half that matters for data safety: a timed-out push mapped to a
+    // permanent refusal would drop the golfer's score into rejected() instead of requeueing it.
+    it("surfaces an abort rejection as the transient TransportError(network), not a permanent refusal", async () => {
+      const fetchImpl = (async () => {
+        throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      }) as unknown as typeof fetch;
+      const transport = createHttpTransport({ httpUrl: HTTP_URL, wsUrl: WS_URL, roundId: ROUND_ID, token: TOKEN, fetchImpl });
+
+      const error = await transport.push(SCORE_EVENT).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(TransportError);
+      expect((error as TransportError).kind).toBe("network"); // transient — the event stays queued
+    });
+
     it("surfaces a non-JSON 502 body (API Gateway's own error page, not the Lambda's) as TransportError(server, 502, undefined), not a raw SyntaxError", async () => {
       const fetchImpl = (async () => fakeNonJsonErrorResponse(502)) as unknown as typeof fetch;
       const transport = createHttpTransport({ httpUrl: HTTP_URL, wsUrl: WS_URL, roundId: ROUND_ID, token: TOKEN, fetchImpl });

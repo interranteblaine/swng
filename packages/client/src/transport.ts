@@ -38,14 +38,24 @@ export interface HttpTransportConfig {
   webSocketCtor?: new (url: string) => WebSocket; // injectable likewise
 }
 
-// Every HTTP call shares this: attach the bearer token, turn a rejected fetch into
-// TransportError("network"), and turn a non-2xx response into TransportError("server", ...)
+// A request that never settles is worse than one that fails: the sync loop's retry is armed by
+// a pass SETTLING, so a fetch left pending forever (dead radio, captive portal — the exact
+// conditions this client exists for) disarms the loop entirely, and a recordScore during the
+// hang just coalesces onto the stuck pass. A timeout turns that silent hang into an ordinary
+// transient the loop already knows how to retry. Generous for these JSON payloads on bad
+// signal; an over-eager abort costs only a retry, which opId dedupe makes free.
+const REQUEST_TIMEOUT_MS = 15_000;
+
+// Every HTTP call shares this: attach the bearer token, bound the wait, turn a rejected fetch
+// into TransportError("network"), and turn a non-2xx response into TransportError("server", ...)
 // with the server's error code when the body actually parses as one — one place instead of
 // push and pull each re-deriving the same mapping.
 const requestJson = async (fetchImpl: typeof fetch, url: string, token: string, init?: RequestInit): Promise<unknown> => {
   let response: Response;
   try {
-    response = await fetchImpl(url, { ...init, headers: { ...init?.headers, authorization: `Bearer ${token}` } });
+    // The abort lands in the catch below as TransportError("network") — the transient arm, so
+    // a timed-out push leaves its event queued rather than rejecting it.
+    response = await fetchImpl(url, { ...init, headers: { ...init?.headers, authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   } catch {
     throw new TransportError("network");
   }

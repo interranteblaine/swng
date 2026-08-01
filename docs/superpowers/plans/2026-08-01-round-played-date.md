@@ -724,17 +724,30 @@ git commit -m "test(e2e): a round entered three days late reads as three days la
 
 ## Close-out (controller-run, after the whole-branch review)
 
-Not a task — the controller executes this. **The order is load-bearing (spec §8):**
+Not a task — the controller executes this. **The order is load-bearing (spec §8), and the
+whole-branch review amended it in three places — each amendment is required, not tidiness.**
 
 1. `pnpm validate` (exit 0) + `pnpm test:contract`
-2. `node scripts/migrateRoundPlayedAt.mjs --stage beta --dry-run`, read it, then `--write --before-deploy`
-3. Same against `--stage prod`: dry run, read it, then `--write --before-deploy`
+2. **Beta migrate:** `--stage beta --dry-run`, read it, then `--write --before-deploy`. Then
+   `node scripts/checkProdParses.mjs --stage beta` and require **zero event/archive failures**
+   — projection-line failures are the documented expected red below. This gate, not the
+   migration's own "Nothing to do" line, is the precondition for deploying: the script's
+   decision logic reports on itself, and a self-report is not a check.
+3. **Prod migrate:** the same two commands against `--stage prod`.
 4. `cdk diff` — expect exactly one new route + lambda code updates, nothing stateful
-5. `pnpm deploy:beta`, then `pnpm publish:web:beta`
-6. Invoke `RebuildFunction` on beta until the cursor is exhausted
-7. `pnpm e2e:beta` ×2, `pnpm e2e:field`
+5. `pnpm deploy:beta`
+6. **Beta stragglers:** `--write --straggler-after-deploy`, then a dry run that must report
+   **0 pending**. Not optional: `SnapshotStore.page()` parses eagerly, so a single un-migrated
+   snapshot **hard-stops `rebuildProjections` at that page** — and fact (b) below makes an
+   un-migrated snapshot the expected state after a deploy, not the exception.
+7. Invoke `RebuildFunction` on beta **until the cursor is exhausted**
+8. `pnpm publish:web:beta` — **after** the rebuild, deliberately. See the fourth expected-red
+   below: publishing before it gives every golfer a silent "No rounds yet" for the whole
+   window, because `ProfilePage`/`HomePage` swallow the parse failure with `.catch(() => {})`.
+   Rebuild-then-publish removes that window at zero cost.
+9. `pnpm e2e:beta` ×2, `pnpm e2e:field`
 
-**Three operational facts, so nothing red gets misread as a failure:**
+**Four operational facts, so nothing red gets misread as a failure:**
 
 - **Between step 5 and step 6, `checkProdParses.mjs` FAILS on that stage, by design.** Its
   `REQUIRED_LINE_FIELDS` now includes `playedAtMs`, and the projection lines do not carry it
@@ -750,5 +763,23 @@ Not a task — the controller executes this. **The order is load-bearing (spec �
   is the one legitimate post-deploy run. It asserts `--straggler-after-deploy` instead of
   `--before-deploy`; the two are refused together. Migrating is never unsafe in either order —
   the flag records which side of the deploy you are on, it does not grant permission.
-8. Adversarial USE pass on deployed `beta.swng.golf`: enter a real paper round dated several days back, finalize it, and confirm it reads as that day everywhere — home, profile history, the crew board's season
-9. Only then `pnpm deploy:prod` → `publish:web:prod` → prod `RebuildFunction` → a browser walk on `swng.golf` confirming the existing rounds still read with their original dates (the migration is lossless; this is the proof)
+- **In the deploy→rebuild window the crew board silently reports `rounds: 0` for every
+  member.** `inWindow` on a line with no `playedAtMs` is `false`, so the round is dropped
+  rather than erroring — proven by execution. Server-side, both bundles, unavoidable. It is
+  the one failure in this arc that is silent rather than loud, which is the whole reason step
+  8 publishes the web after the rebuild instead of before.
+
+10. **Adversarial USE pass on deployed `beta.swng.golf`.** Two beats, both required:
+    (a) enter a real paper round dated several days back, finalize it, and confirm it reads as
+    that day everywhere — home, profile history, the crew board's season; and
+    (b) **correct a live round's date through the round-page editor** and confirm the change
+    lands. Beat (b) is not optional: the mid-round correction is half the shipped feature
+    (spec §3b) and the whole-branch review found it had no automated coverage at any level, so
+    a human driving it is the only gate it has ever had.
+11. **Prod, and only after beta is green.** A **fresh** `--stage prod --dry-run` immediately
+    before deploying — steps 4–10 can span days, prod is live at `swng.golf` with real
+    golfers, and any prod round created in that window goes unreadable the instant prod
+    deploys. Then `deploy:prod` → `--write --straggler-after-deploy` + a 0-pending dry run →
+    prod `RebuildFunction` **until the cursor is exhausted** → `publish:web:prod` → a browser
+    walk on `swng.golf` confirming the existing rounds still read with their original dates
+    (the migration is lossless; this is the proof).

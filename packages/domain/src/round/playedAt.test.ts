@@ -52,6 +52,21 @@ describe("playedAtMsOf", () => {
     expect(reversed).toBe(5_000);
   });
 
+  it("dedupes by opId like reduceRound — a same-opId, same-hlc duplicate pair does not disagree with the fold", () => {
+    // The reviewer's exact repro (fix-wave finding 2): two round-played-at-set events sharing
+    // opId "dup" and an identical hlc, payloads 5_000 and 9_000. reduceRound dedupes by opId
+    // (keeping the FIRST occurrence in canonical order) before ever asking "what's the played
+    // date", so it resolves to 5_000; a direct playedAtMsOf call over the same UNdeduped log
+    // must agree — settleRound (archive.ts) sorts its events but never dedupes them, and a
+    // later projector calls this function directly on archived events, not through reduceRound.
+    const sharedHlc = at(2_000);
+    const dupA: RoundEvent = { kind: "round-played-at-set", playedAtMs: 5_000, opId: opId("dup"), hlc: sharedHlc, authorId: A };
+    const dupB: RoundEvent = { kind: "round-played-at-set", playedAtMs: 9_000, opId: opId("dup"), hlc: sharedHlc, authorId: A };
+    const events = [genesis(1_000, 1), dupA, dupB];
+    expect(reduceRound(events).playedAtMs).toBe(5_000);
+    expect(playedAtMsOf(events)).toBe(reduceRound(events).playedAtMs);
+  });
+
   it("throws on a log with no round-created", () => {
     // A round-played-at-set with no genesis at all — not just an empty log. This is the
     // stronger case: it pins that presence of genesis is checked explicitly, not inferred from
@@ -63,7 +78,12 @@ describe("playedAtMsOf", () => {
 
 describe("reduceRound", () => {
   it("state.playedAtMs equals playedAtMsOf for the same log — the one-rule pin", () => {
-    // Fails the moment reduceRound grows its own copy of the rule instead of delegating.
+    // A same-ANSWER pin, not a same-implementation one (fix-wave finding 1): it would still pass
+    // if reduceRound inlined a behaviourally-correct copy of the rule instead of delegating —
+    // mutation-tested, a copy that recomputes "latest round-played-at-set by hlc, else genesis"
+    // passes all six playedAtMsOf tests plus this one. What it DOES fail the moment reduceRound
+    // does is disagree on the ANSWER for this log — e.g. an inlined `genesis.playedAtMs` that
+    // ignores the correction below and returns 1_000 instead of 5_000.
     const events = [genesis(1_000, 1), playedAtSet(5_000, 10)];
     expect(reduceRound(events).playedAtMs).toBe(playedAtMsOf(events));
   });

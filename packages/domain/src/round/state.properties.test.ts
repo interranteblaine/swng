@@ -110,12 +110,29 @@ const participantStrokesSetEvent = fc
     opId: opId(`set-${op}`), hlc: { wallMs, counter, deviceId: deviceId(device) }, authorId: golfer,
   }));
 
-// The shuffled pool every convergence property draws from — mixing all five
+// A played-date correction (spec 2026-08-01 §3b): a round-level LWW register with no golferId,
+// resolved by playedAtMsOf (delegated from reduceRound — playedAt.ts's own convergence claim),
+// alongside every other register this property suite already shuffles.
+const roundPlayedAtSetEvent = fc
+  .record({
+    playedAtMs: fc.integer({ min: 0, max: 1_000 }),
+    wallMs: fc.integer({ min: 1, max: 1_000 }),
+    counter: fc.integer({ min: 0, max: 3 }),
+    device: fc.constantFrom("d1", "d2", "d3"),
+    op: fc.integer({ min: 0, max: 500 }),
+  })
+  .map(({ playedAtMs, wallMs, counter, device, op }): RoundEvent => ({
+    kind: "round-played-at-set",
+    playedAtMs,
+    opId: opId(`playedat-${op}`), hlc: { wallMs, counter, deviceId: deviceId(device) }, authorId: golfers[0]!,
+  }));
+
+// The shuffled pool every convergence property draws from — mixing all six
 // event kinds means a shuffle also reorders roster joins, game adds,
-// terminations, and strokes corrections relative to scores, exercising
-// firstHlc ordering (state.ts #4/#5) and the terminated-set union alongside
-// the cell LWW logic scoreEvent alone already covered.
-const anyEvent = fc.oneof(scoreEvent, participantJoinedEvent, gameAddedEvent, gameTerminatedEvent, participantStrokesSetEvent);
+// terminations, strokes corrections, and played-date corrections relative to
+// scores, exercising firstHlc ordering (state.ts #4/#5) and the terminated-set
+// union alongside the cell LWW logic scoreEvent alone already covered.
+const anyEvent = fc.oneof(scoreEvent, participantJoinedEvent, gameAddedEvent, gameTerminatedEvent, participantStrokesSetEvent, roundPlayedAtSetEvent);
 
 describe("reduceRound convergence", () => {
   it("is order-independent: any shuffle of the same events folds to the same state", () => {

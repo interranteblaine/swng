@@ -109,7 +109,7 @@ The snapshot is a sealed leaf. No editing after; this arc adds no reopen path.
 | crew season `inWindow` / `playedAtMs(line)` | `createdAtMs ?? finalizedAtMs` | `playedAtMs` (required — the `??` arm is deleted) |
 | profile chart date anchors | `createdAt ?? finalizedAt` | `playedAt` |
 | watch page's own client-side derivation | `round-created`'s `hlc.wallMs` | the §3c function, via `@swng/client` |
-| home's live-round pointer | `createdAt?` on `LIVE#` | `playedAtMs`, written at join from the round's own state |
+| home's live-round list | `createdAt?`, derived at read time from the genesis event | the §3c function over the same events (`putLive` is unchanged — the pointer never carried this) |
 
 `createdAt` stays on the projection line and on the wire, untouched, now honestly meaning only
 what its name says. Nothing renders it. Removing it would be a wire deletion with no benefit.

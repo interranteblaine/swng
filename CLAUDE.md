@@ -1912,8 +1912,17 @@ scores queued offline, the escalated banner reading `3 scores saved on this phon
 swng yet. They're safe here.`, then **signal restored with nothing tapped and the queue drained on
 its own** — plus an accept-then-die socket producing 5 attempts in 45s at gaps 2.1/4.1/8.1/16.1s
 (a 2s hammer would be ~22), the one behaviour no unit test can prove against a real WebSocket.
-NO wipe. Riding: the escalation fires at t≈14s (failures arm 2/4/8/16, so the 4th — which sets the
-cap — lands there), pinned by test and left as an **owner tuning call**; a silently-dead socket
+NO wipe. A follow-up (`738e305`, web-only) moved the escalation from the 4th failed pass to the
+5th: the ladder arms 2/4/8/16, so the 4th — which sets the cap — lands at t≈14s, and fourteen
+seconds of failed syncs is a stand of trees, not a dead zone. A banner that fires during ordinary
+play gets ignored, which destroys the only job the escalated state has. `stalled` now flips when a
+pass fails having ALREADY waited the cap out (no new counter — the ladder carries the state),
+which is t≈30s and makes the copy honest against the spec's own sentence. Verified live on the
+deployed bundle: calm `syncing…` at t+20s, escalated at t+29s, then drained untouched. The move
+would have silently broken one test — `never reports stalled() on a session that isn't retrying`
+drove exactly four failures, which under the new rule never reach the escalation condition at all,
+so it would have passed with its guard deleted (a fifth unfalsifiable test, found by looking).
+Riding: a silently-dead socket
 with an empty outbox stops pulling until a wake signal (no data at risk); frequent wake syncs push
 the reconnect countdown out. On local `main`, never pushed.
 

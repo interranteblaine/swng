@@ -321,7 +321,7 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
     startRound: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore, metrics }),
     joinRound: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, metrics }),
     addGame: addGame({ journal, broadcast, clock, ids }),
-    recordScore: recordScore({ journal, broadcast }),
+    recordScore: recordScore({ journal, broadcast, metrics }),
     finalizeRound: finalizeRound({ journal, snapshots, broadcast, clock, ids, metrics }),
     // projectionStore/logger (task-15): abandon clears each participant's LIVE presence pointer
     // itself — no snapshot is written, so the projector never runs the finalize-time deleteLive

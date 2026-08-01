@@ -7,6 +7,7 @@ import type { SnapshotStore } from "../ports/snapshotStore.js";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
+  createCapturingMetrics,
   createFixedClock,
   createInMemoryCardStore,
   createInMemoryGolferStore,
@@ -66,6 +67,7 @@ const setup = async (overrides?: { journal?: EventJournal; store?: RoundStore; s
   const cardStore = createInMemoryCardStore();
   const cardRecord = await seedCard(cardStore, courseId("course-1"), cardId("card-1"), fixtureLinks);
   const course = { courseId: cardRecord.courseId, cardId: cardRecord.cardId };
+  const metrics = createCapturingMetrics();
 
   return {
     journal,
@@ -73,10 +75,11 @@ const setup = async (overrides?: { journal?: EventJournal; store?: RoundStore; s
     broadcast,
     projectionStore,
     course,
+    metrics,
     start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
-    record: recordScore({ journal, broadcast }),
+    record: recordScore({ journal, broadcast, metrics }),
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
     abandon: abandonRound({ journal, broadcast, clock, ids, projectionStore, logger }),
     events: readEvents({ journal }),
@@ -164,7 +167,7 @@ describe("abandonRound — rejected after finalize", () => {
 });
 
 describe("abandonRound — closes the round to further appends", () => {
-  it("a score after abandon is rejected by the live-status guard (round-not-live)", async () => {
+  it("a score after abandon is rejected by the live-status guard (round-not-live), and counts nothing — an abandoned round settles nothing, so a refused score loses nothing", async () => {
     const round = await freshLiveRoundWithGame();
     await round.abandon(round.hostClaims);
 
@@ -172,6 +175,8 @@ describe("abandonRound — closes the round to further appends", () => {
     await expect(
       round.record(round.hostClaims, { golferId: round.host.golferId, hole: 1, result: { kind: "strokes", strokes: 4 }, ...annPhone() }),
     ).rejects.toMatchObject({ code: "round-not-live" });
+
+    expect(round.metrics.calls).toEqual([]);
   });
 
   it("adding a game after abandon is rejected by the live-status guard (round-not-live)", async () => {
@@ -321,5 +326,27 @@ describe("abandonRound — carry: head-seq conditional append (task-15 fix)", ()
     const fullLog = await inner.read(round.host.roundId, 0);
     expect(fullLog.filter((event) => event.kind === "round-abandoned")).toHaveLength(1);
     expect(reduceRound(fullLog).status).toBe("abandoned");
+  });
+});
+
+// The positive control the abandoned-round negative above needs: without this, a future edit
+// that dropped `metrics` from this file's OWN `setup()` wiring (recordScore's `metrics` is
+// optional, so that would still type-check) could pass every test in this file, because the
+// abandoned-round path never calls count() either way. This test drives recordScore into the
+// OTHER terminal status — `final` — where a refusal genuinely IS counted, proving this file's
+// own harness wiring is live (mirrors roundSlice.test.ts's "recordScore — metrics" positive
+// case, same reasoning).
+describe("recordScore on a finalized round — metrics", () => {
+  it("counts LateScoreRefused when a NEW score is refused by a finalized round", async () => {
+    const round = await freshLiveRoundWithGame();
+    await scoreAll(round);
+    await round.finalize(round.hostClaims);
+
+    const annPhone = createClientOps("ann-late");
+    await expect(
+      round.record(round.hostClaims, { golferId: round.host.golferId, hole: 1, result: { kind: "strokes", strokes: 4 }, ...annPhone() }),
+    ).rejects.toMatchObject({ code: "round-not-live" });
+
+    expect(round.metrics.calls).toEqual(["LateScoreRefused"]);
   });
 });

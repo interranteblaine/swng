@@ -903,10 +903,11 @@ describe("SwngStack", () => {
   // suite checks the count once and the topic-wiring once across every alarm found, rather than
   // repeating the same AlarmActions assertion by hand for all of them. Prod-readiness Arc B
   // Task 4 reworked the set (3 retained: IteratorAge + DLQ depth + Rebuild duration; reshaped:
-  // HTTP 5xx; added: HTTP p95 latency + WAF blocked + signup spike).
+  // HTTP 5xx; added: HTTP p95 latency + WAF blocked + signup spike). Task 6 (outbox-drain arc)
+  // added an 8th: LateScoreRefused.
   describe("alarms (M9 Task 5, D4b, Arc B Task 4)", () => {
-    it("has exactly 7 CloudWatch alarms (3 retained: IteratorAge + DLQ depth + Rebuild duration; reshaped: HTTP 5xx; added: HTTP p95 latency + WAF blocked + signup spike)", () => {
-      template.resourceCountIs("AWS::CloudWatch::Alarm", 7);
+    it("has exactly 8 CloudWatch alarms (3 retained: IteratorAge + DLQ depth + Rebuild duration; reshaped: HTTP 5xx; added: HTTP p95 latency + WAF blocked + signup spike + late score refused)", () => {
+      template.resourceCountIs("AWS::CloudWatch::Alarm", 8);
     });
 
     it("every alarm's AlarmActions targets the one AlarmsTopic (no alarm silently rings nowhere)", () => {
@@ -916,7 +917,7 @@ describe("SwngStack", () => {
 
       const alarms = template.findResources("AWS::CloudWatch::Alarm");
       const alarmEntries = Object.entries(alarms);
-      expect(alarmEntries.length).toBe(7);
+      expect(alarmEntries.length).toBe(8);
       for (const [, alarm] of alarmEntries) {
         expect(alarm.Properties.AlarmActions).toEqual([{ Ref: topicLogicalId }]);
       }
@@ -984,6 +985,18 @@ describe("SwngStack", () => {
         Statistic: "Maximum",
         Threshold: 240_000,
         ComparisonOperator: "GreaterThanThreshold",
+      });
+    });
+
+    it("alarms on any late score refused — a played score missing from a settled archive", () => {
+      template.hasResourceProperties("AWS::CloudWatch::Alarm", {
+        Namespace: "swng",
+        MetricName: "LateScoreRefused",
+        Statistic: "Sum",
+        Period: 900,
+        Threshold: 1,
+        EvaluationPeriods: 1,
+        ComparisonOperator: "GreaterThanOrEqualToThreshold",
       });
     });
 

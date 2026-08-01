@@ -2,6 +2,7 @@ import type { RecordScoreRequest, RecordScoreResponse } from "@swng/contracts";
 import { ApplicationError } from "../errors.js";
 import type { Broadcast } from "../ports/broadcast.js";
 import type { EventJournal } from "../ports/eventJournal.js";
+import type { Metrics } from "../ports/metrics.js";
 import type { ParticipantClaims } from "../ports/tokenIssuer.js";
 import { mayScore, requireParticipant } from "../scoringPolicy.js";
 import { loadRoundState } from "./loadRoundState.js";
@@ -11,7 +12,7 @@ import { loadRoundState } from "./loadRoundState.js";
 // client can score for someone else (score-for-anyone) but can never claim to BE someone
 // else (M3 plan, Global Constraints).
 export const recordScore =
-  (deps: { journal: EventJournal; broadcast: Broadcast }) =>
+  (deps: { journal: EventJournal; broadcast: Broadcast; metrics?: Metrics }) =>
   async (claims: ParticipantClaims, command: RecordScoreRequest): Promise<RecordScoreResponse> => {
     const { events, state } = await loadRoundState(deps.journal, claims.roundId);
     requireParticipant(state, claims.golferId);
@@ -23,7 +24,15 @@ export const recordScore =
     // check (the status is exactly what must not matter here). No extra read: loadRoundState
     // already returned the events.
     if (events.some((event) => event.opId === command.opId)) return { duplicate: true };
-    if (state.status !== "live") throw new ApplicationError("round-not-live");
+    if (state.status !== "live") {
+      // `final` ONLY. A score refused by a finalized round is a real, unrecorded score: it was
+      // played, it is on someone's phone, and the settled archive does not contain it. An
+      // abandoned round settles nothing and counts nowhere, so refusing it loses nothing. This
+      // sits AFTER the duplicate guard above deliberately — without it, a device re-pushing a
+      // score that is already stored would inflate this metric with losses that never happened.
+      if (state.status === "final") deps.metrics?.count("LateScoreRefused");
+      throw new ApplicationError("round-not-live");
+    }
     // v1's only ScoringPolicy member requires both author and subject to be participants;
     // the author half is already covered by requireParticipant above, so this call's real
     // job is gating the subject.

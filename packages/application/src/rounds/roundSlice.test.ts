@@ -90,6 +90,7 @@ const setup = async (clock: Clock = createFixedClock(1_000)) => {
   const logger = createNullLogger();
   const cardStore = createInMemoryCardStore();
   const cardRecord = await seedCard(cardStore, CARD_REF.courseId, CARD_REF.cardId, fixtureLinks);
+  const metrics = createCapturingMetrics();
 
   return {
     broadcast,
@@ -99,12 +100,13 @@ const setup = async (clock: Clock = createFixedClock(1_000)) => {
     projectionStore,
     cardStore,
     cardRecord,
+    metrics,
     course: CARD_REF,
     start: startRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger, cardStore }),
     join: joinRound({ journal, store, broadcast, tokens, clock, ids, golferStore, projectionStore, logger }),
     leave: leaveRound({ journal, broadcast, clock, ids }),
     addStableford: addGame({ journal, broadcast, clock, ids }),
-    record: recordScore({ journal, broadcast }),
+    record: recordScore({ journal, broadcast, metrics }),
     setStrokes: setStrokes({ journal, broadcast, clock, ids }),
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
     events: readEvents({ journal }),
@@ -627,5 +629,33 @@ describe("StartRound — metrics", () => {
 
     expect(host.roundId).toBeDefined();
     expect(metrics.calls).toEqual(["RoundsCreated"]);
+  });
+});
+
+describe("recordScore — metrics", () => {
+  it("counts LateScoreRefused when a NEW score is refused by a finalized round", async () => {
+    const round = await freshLiveRound();
+    const hostClaims: ParticipantClaims = { roundId: round.host.roundId, golferId: round.host.golferId };
+    await round.finalize(hostClaims);
+    const annPhone = createClientOps("ann-phone");
+
+    await expect(round.record(hostClaims, { golferId: round.host.golferId, hole: 1, result: toResult(4), ...annPhone() })).rejects.toMatchObject({
+      code: "round-not-live",
+    });
+
+    expect(round.metrics.calls).toEqual(["LateScoreRefused"]);
+  });
+
+  it("counts nothing for a RE-push of an already-recorded score — that score is not lost", async () => {
+    const round = await freshLiveRound();
+    const hostClaims: ParticipantClaims = { roundId: round.host.roundId, golferId: round.host.golferId };
+    const annPhone = createClientOps("ann-phone");
+    const op = annPhone();
+    await round.record(hostClaims, { golferId: round.host.golferId, hole: 1, result: toResult(4), ...op });
+    await round.finalize(hostClaims);
+
+    await expect(round.record(hostClaims, { golferId: round.host.golferId, hole: 1, result: toResult(4), ...op })).resolves.toEqual({ duplicate: true });
+
+    expect(round.metrics.calls).toEqual([]);
   });
 });

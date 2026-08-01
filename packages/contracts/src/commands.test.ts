@@ -91,6 +91,19 @@ describe("startRoundRequestSchema", () => {
     expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white" }, playedAtMs: farFuture })).toThrow(ContractError);
   });
 
+  // Both bounds are INCLUSIVE, pinned at the exact values rather than only from outside. The
+  // reject-side tests above pass equally under an off-by-one that quietly narrows the accepted
+  // range by a millisecond at either end; only these catch that.
+  it("accepts a playedAtMs at exactly each bound", () => {
+    const request = (playedAtMs: number) => ({ course, host: { tee: "white" }, playedAtMs });
+    const minPlayedAtMs = Date.UTC(2000, 0, 1);
+    const ceiling = Date.now() + 2 * 365 * 24 * 60 * 60 * 1_000;
+    expect(parse(startRoundRequestSchema, request(minPlayedAtMs))).toEqual(request(minPlayedAtMs));
+    // One second inside the rolling ceiling, not exactly on it: `Date.now()` advances between
+    // this line and the refine's own read, so an exact-ceiling literal would be a flake.
+    expect(parse(startRoundRequestSchema, request(ceiling - 1_000))).toEqual(request(ceiling - 1_000));
+  });
+
   // The absent case: setting up Saturday's round on Thursday is still typing nothing here — the
   // application layer defaults to "now" (a later task), and the wire itself must accept the omission.
   it("accepts a startRound with no playedAtMs", () => {

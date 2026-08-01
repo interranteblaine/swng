@@ -9,8 +9,8 @@ import { sortLines } from "../projections/projectArchive.js";
 // projection store's internal `finalizedAtMs`) — same field-by-field wire-shaping discipline
 // as getMyRecord.ts's own toWireLine (never spreads the store's internal shape as-is).
 const toWireLine = (
-  line: GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number },
-): GolferRoundLine & { readonly finalizedAt: number; readonly createdAt?: number } => ({
+  line: GolferRoundLine & { readonly finalizedAtMs: number; readonly playedAtMs: number; readonly createdAtMs?: number },
+): GolferRoundLine & { readonly finalizedAt: number; readonly playedAt: number; readonly createdAt?: number } => ({
   roundId: line.roundId,
   courseName: line.courseName,
   // courseId (course-cards spec §4, the analytics join key) — omitted for pre-scrap lines
@@ -23,6 +23,9 @@ const toWireLine = (
   ...(line.score !== undefined ? { score: line.score } : {}),
   distribution: line.distribution,
   finalizedAt: line.finalizedAtMs,
+  // playedAt (spec 2026-08-01 §4b): WHEN THE GOLF HAPPENED — the wire name for the store's
+  // playedAtMs, REQUIRED (unlike createdAt below): projectArchive always provides it.
+  playedAt: line.playedAtMs,
   // createdAt (spec §5, the "course + date" designation) — omitted for lines written before the
   // field existed (tolerated as absent, no migration; a rebuild backfills it).
   ...(line.createdAtMs !== undefined ? { createdAt: line.createdAtMs } : {}),

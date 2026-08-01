@@ -111,7 +111,16 @@ const recordPlayed = async (
   ctx.snapshots.record(archive);
   const ids = golferIds ?? archive.participants.map((p) => p.golferId);
   for (const golfer of ids) {
-    await ctx.projectionStore.putLine(golfer, { ...archiveGolferLine(archive, golfer), finalizedAtMs: wallMs, ...(createdAtMs !== undefined ? { createdAtMs } : {}) });
+    // playedAtMs (spec 2026-08-01 §4a) is REQUIRED on the port now; this file's own window-fold
+    // subject is `createdAtMs ?? finalizedAtMs` (getSeasonStandings.ts, untouched by that arc), so
+    // playedAtMs here is a type-satisfying value only — mirroring wallMs like finalizedAtMs, never
+    // read by anything in this file.
+    await ctx.projectionStore.putLine(golfer, {
+      ...archiveGolferLine(archive, golfer),
+      finalizedAtMs: wallMs,
+      playedAtMs: wallMs,
+      ...(createdAtMs !== undefined ? { createdAtMs } : {}),
+    });
   }
 };
 
@@ -466,7 +475,7 @@ describe("getSeasonStandings — scoreboard", () => {
     // "absent last" rule).
     // Real holeResults so hasCompleteScore holds and the line reaches the average (spec §2d):
     // 18 holes of par 4 at `perHole` strokes, i.e. gross 18 x perHole against par 72.
-    const annLine = (id: string, ms: number, perHole: number): GolferRoundLine & { finalizedAtMs: number } => ({
+    const annLine = (id: string, ms: number, perHole: number): GolferRoundLine & { finalizedAtMs: number; playedAtMs: number } => ({
       roundId: roundId(id),
       courseName: "Casa Verde GC",
       tee: "white",
@@ -477,6 +486,10 @@ describe("getSeasonStandings — scoreboard", () => {
       distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
       holeResults: Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: 4, result: { kind: "strokes" as const, strokes: perHole } })),
       finalizedAtMs: ms,
+      // playedAtMs (spec 2026-08-01 §4a) is REQUIRED on the port now — a type-satisfying value
+      // only, unread by this test (crewScoreboard's own window reads createdAtMs ?? finalizedAtMs,
+      // untouched by that arc).
+      playedAtMs: ms,
     });
     const annLines = [annLine("a1", 1_000, 6), annLine("a2", 2_000, 5), annLine("a3", 3_000, 5)];
     for (const line of annLines) await ctx.projectionStore.putLine(ann, line);

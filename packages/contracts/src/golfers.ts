@@ -62,8 +62,8 @@ export type UpdateMeRequest = z.infer<typeof updateMeRequestSchema>;
 // The wire mirror of domain's GolferRoundLine (golfer/record.ts) — structurally identical,
 // same as round.ts's participantSchema mirroring Participant. Field object, not just a
 // finished schema, so GetMyRecordResponse/GetGolferResponse/GetMyRoundsResponse below can each
-// extend it with `finalizedAt`/`createdAt` (same "shared fields object" idiom as round.ts's
-// gameConfigFields) rather than duplicating the field declarations a second/third time.
+// extend it with `finalizedAt`/`playedAt`/`createdAt` (same "shared fields object" idiom as
+// round.ts's gameConfigFields) rather than duplicating the field declarations a second/third time.
 const golferRoundLineFields = {
   roundId: roundIdSchema,
   courseName: z.string(),
@@ -134,12 +134,17 @@ export interface GetMyRecordResponse {
   // polish spec §1.6, the chart's date anchors) mirror GetMyRounds' own rename discipline
   // (finalizedAtMs/createdAtMs -> finalizedAt/createdAt). Optional on the wire so a new bundle
   // against an old lambda still parses; always present in practice for finalizedAt.
-  readonly history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number })[];
+  // `playedAt` (spec 2026-08-01 §4b): WHEN THE GOLF HAPPENED — REQUIRED, unlike the two above:
+  // projectArchive always provides it (domain's playedAtMsOf never produces undefined for a
+  // real archive), so there is no legacy-line case to tolerate the way createdAt has one.
+  readonly history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly playedAt: number; readonly createdAt?: number })[];
 }
 
 export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.object({
   metrics: golferMetricsSchema,
-  history: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int().optional(), createdAt: z.number().int().optional() })).readonly(),
+  history: z
+    .array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int().optional(), playedAt: z.number().int(), createdAt: z.number().int().optional() }))
+    .readonly(),
 });
 
 // GET /me/courses/{courseId}/record (analytics spec 2026-07-21 §4): "Your record here" — the
@@ -184,14 +189,17 @@ export interface GetGolferResponse {
   readonly name: string;
   readonly metrics: GolferMetrics;
   // finalizedAt/createdAt (index-chart-polish spec §1.6) — same rename discipline and
-  // old-lambda tolerance as GetMyRecordResponse's own history above.
-  readonly history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number })[];
+  // old-lambda tolerance as GetMyRecordResponse's own history above. `playedAt` (spec
+  // 2026-08-01 §4b) is REQUIRED for the same reason it is there — see that comment.
+  readonly history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly playedAt: number; readonly createdAt?: number })[];
 }
 
 export const getGolferResponseSchema: z.ZodType<GetGolferResponse> = z.object({
   name: z.string(),
   metrics: golferMetricsSchema,
-  history: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int().optional(), createdAt: z.number().int().optional() })).readonly(),
+  history: z
+    .array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int().optional(), playedAt: z.number().int(), createdAt: z.number().int().optional() }))
+    .readonly(),
 });
 
 // GET /me/rounds (projection-realignment Task 6): "list my rounds" — every finalized round
@@ -207,12 +215,14 @@ export const getGolferResponseSchema: z.ZodType<GetGolferResponse> = z.object({
 // home list, the archive, and the join link. OPTIONAL: old projection lines (written before this
 // task) carry no created-at, tolerated on read as absent — a rebuild backfills it, never a
 // migration.
+// `playedAt` (spec 2026-08-01 §4b): WHEN THE GOLF HAPPENED — REQUIRED like `finalizedAt`,
+// unlike `createdAt`: projectArchive always provides it.
 export interface GetMyRoundsResponse {
-  readonly rounds: readonly (GolferRoundLine & { readonly finalizedAt: number; readonly createdAt?: number })[];
+  readonly rounds: readonly (GolferRoundLine & { readonly finalizedAt: number; readonly playedAt: number; readonly createdAt?: number })[];
 }
 
 export const getMyRoundsResponseSchema: z.ZodType<GetMyRoundsResponse> = z.object({
-  rounds: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int(), createdAt: z.number().int().optional() })).readonly(),
+  rounds: z.array(z.object({ ...golferRoundLineFields, finalizedAt: z.number().int(), playedAt: z.number().int(), createdAt: z.number().int().optional() })).readonly(),
 });
 
 // GET /me/rounds/live (projection-realignment Task 13): "your rounds, right now" — presence
@@ -222,15 +232,19 @@ export const getMyRoundsResponseSchema: z.ZodType<GetMyRoundsResponse> = z.objec
 // (that one is finalized-round HISTORY). `joinedAt` is the wire name for the projection
 // store's own `joinedAtMs` (same rename discipline as GetMyRoundsResponse's `finalizedAt`).
 // Sorted newest-joined first (application/src/golfers/getMyLiveRounds.ts).
-// `createdAt` (accounts-only identity spec §5, the derived "course + date" designation): the
-// round-created event's own wall time, so the home list can render a live round the SAME way the
-// archive/join-link render it ("Casa Verde GC · Sat, Jul 12") — a round-level fact, unlike the
-// per-golfer `joinedAt`. OPTIONAL: best-effort at read time (getMyLiveRounds derives it from the
-// round's genesis), omitted if that lookup can't resolve it.
+// `playedAt` (spec 2026-08-01 §4b): WHEN THE GOLF HAPPENED — domain's playedAtMsOf, via
+// getMyLiveRounds.ts's own journal read, so the home list can render a live round the SAME way
+// the archive/join-link render it ("Casa Verde GC · Sat, Jul 12") — a round-level fact, unlike the
+// per-golfer `joinedAt`. REPLACES the old `createdAt` outright rather than adding beside it:
+// neither field was ever an audit surface on this response the way finalizedAt/createdAt are on
+// GetMyRoundsResponse's finalized HISTORY — a second date here would be one nobody reads.
+// REQUIRED (unlike the old createdAt, which was best-effort): a genuinely live round's log always
+// has a genesis, so playedAtMsOf never fails for one — getMyLiveRounds.ts drops any entry whose
+// presence pointer outlived its own round rather than serving a fact-free stub.
 export interface GetMyLiveRoundsResponse {
-  readonly rounds: readonly { readonly roundId: RoundId; readonly courseName: string; readonly joinedAt: number; readonly createdAt?: number }[];
+  readonly rounds: readonly { readonly roundId: RoundId; readonly courseName: string; readonly joinedAt: number; readonly playedAt: number }[];
 }
 
 export const getMyLiveRoundsResponseSchema: z.ZodType<GetMyLiveRoundsResponse> = z.object({
-  rounds: z.array(z.object({ roundId: roundIdSchema, courseName: z.string(), joinedAt: z.number().int(), createdAt: z.number().int().optional() })).readonly(),
+  rounds: z.array(z.object({ roundId: roundIdSchema, courseName: z.string(), joinedAt: z.number().int(), playedAt: z.number().int() })).readonly(),
 });

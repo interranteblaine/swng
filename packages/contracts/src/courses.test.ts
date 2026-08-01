@@ -89,7 +89,7 @@ describe("peekRoundResponseSchema", () => {
     roundTrips(peekRoundResponseSchema, {
       courseName: "Casa Verde GC",
       teeSets: [{ name: "white", rating: 71.2, slope: 128 }],
-      createdAt: 1_700_000_000_000,
+      playedAt: 1_700_000_000_000,
     });
   });
 
@@ -99,7 +99,7 @@ describe("peekRoundResponseSchema", () => {
     roundTrips(peekRoundResponseSchema, {
       courseName: "Casa Verde GC",
       teeSets: [{ name: "white" }],
-      createdAt: 1_700_000_000_000,
+      playedAt: 1_700_000_000_000,
     });
   });
 
@@ -112,17 +112,22 @@ describe("peekRoundResponseSchema", () => {
       parse(peekRoundResponseSchema, {
         courseName: "Casa Verde GC",
         teeSets: [{ name: "white", par: 72, holes: 18, rating: 71.2, slope: 128 }],
-        createdAt: 1,
+        playedAt: 1,
       }),
-    ).toEqual({ courseName: "Casa Verde GC", teeSets: [{ name: "white", rating: 71.2, slope: 128 }], createdAt: 1 });
+    ).toEqual({ courseName: "Casa Verde GC", teeSets: [{ name: "white", rating: 71.2, slope: 128 }], playedAt: 1 });
   });
 
   it("rejects a tee missing its name", () => {
-    expect(() => parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ rating: 71.2 }], createdAt: 1 })).toThrow(ContractError);
+    expect(() => parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ rating: 71.2 }], playedAt: 1 })).toThrow(ContractError);
   });
 
   it("rejects a payload missing teeSets", () => {
     expect(() => parse(peekRoundResponseSchema, { courseName: "Casa Verde GC" })).toThrow(ContractError);
+  });
+
+  // playedAt (spec 2026-08-01 §4b) REPLACED createdAt outright — required, not tolerated absent.
+  it("rejects a payload missing playedAt", () => {
+    expect(() => parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white" }] })).toThrow(ContractError);
   });
 });
 

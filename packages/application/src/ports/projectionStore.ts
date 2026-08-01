@@ -27,8 +27,14 @@ export interface ProjectionStore {
   // on the line so getMyRounds can render the "course + date" designation without re-reading each
   // round's log. OPTIONAL: lines written before the field existed carry no created-at (tolerated on
   // read as absent — a rebuild backfills it, never a migration); projectArchive always provides it.
-  putLine(golferId: GolferId, line: GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number }): Promise<void>;
-  listLines(golferId: GolferId): Promise<readonly (GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number })[]>;
+  //
+  // `playedAtMs` (spec 2026-08-01 §4a): WHEN THE GOLF HAPPENED — domain's playedAtMsOf, the ONE
+  // rule, projected onto every line so sortLines (projections/projectArchive.ts) can order a
+  // golfer's history by it. REQUIRED, unlike createdAtMs: projectArchive is the only writer and it
+  // always has a real value (playedAtMsOf throws on a genuinely corrupt log, never produces
+  // undefined) — there is no legacy-line case to tolerate the way there is for createdAtMs.
+  putLine(golferId: GolferId, line: GolferRoundLine & { readonly finalizedAtMs: number; readonly playedAtMs: number; readonly createdAtMs?: number }): Promise<void>;
+  listLines(golferId: GolferId): Promise<readonly (GolferRoundLine & { readonly finalizedAtMs: number; readonly playedAtMs: number; readonly createdAtMs?: number })[]>;
 
   // Presence (spec §5). Implemented here — ahead of any real writer — so the store's shape
   // rewrites exactly once rather than growing a second time when realignment Task 13 (the

@@ -305,14 +305,14 @@ describe("round use cases — golden path over in-memory ports", () => {
   // rating/slope summaries — nothing about the round's identity, participants, or scoring.
   // Asserting the exact key set (not just "has these fields") is what pins that a field
   // can't be silently added later without this test catching it.
-  it("peekRound returns courseName + tee summaries + createdAt and nothing else", async () => {
+  it("peekRound returns courseName + tee summaries + playedAt and nothing else", async () => {
     const round = await freshLiveRound();
     const peeked = await round.peek(round.host.joinCode);
 
-    // createdAt (accounts-only identity spec §5, the "course + date" designation) joins the set —
-    // still nothing about the round's identity, participants, or scoring. Asserting the exact key
-    // set keeps the next field from being added silently.
-    expect(Object.keys(peeked).sort()).toEqual(["courseName", "createdAt", "teeSets"]);
+    // playedAt (spec 2026-08-01 §4b, WHEN THE GOLF HAPPENED) joins the set, replacing the old
+    // createdAt outright — still nothing about the round's identity, participants, or scoring.
+    // Asserting the exact key set keeps the next field from being added silently.
+    expect(Object.keys(peeked).sort()).toEqual(["courseName", "playedAt", "teeSets"]);
     expect(peeked.courseName).toBe(fixtureLinks.courseName);
     // A tee is name + rating/slope, full stop. The `par`/`holes` pair that once rode here served
     // the join-side strokes derivation, which is deleted (spec 2026-07-29 §2b) — and §7 allows no
@@ -322,8 +322,8 @@ describe("round use cases — golden path over in-memory ports", () => {
     for (const teeSet of peeked.teeSets) {
       expect(Object.keys(teeSet).sort()).toEqual(["name", "rating", "slope"]);
     }
-    // The genesis event's own wall time (peekRound reads it off the round-created event).
-    expect(typeof peeked.createdAt).toBe("number");
+    // playedAtMsOf(events) over the round's log (peekRound never re-derives it inline).
+    expect(typeof peeked.playedAt).toBe("number");
   });
 
   it("rejects peekRound with an unknown join code — bad-join-code, same shape as join's", async () => {

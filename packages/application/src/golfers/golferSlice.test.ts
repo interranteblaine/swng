@@ -12,6 +12,10 @@ import { updateMyGolfer } from "./updateMyGolfer.js";
 
 // A scored 18 on a par-72 card: every hole a stroke count, so `hasCompleteScore` holds and the
 // line feeds the average (spec 2026-07-29 §2d). gross = 18 x perHole, so vs-par = gross - 72.
+// playedAtMs (spec 2026-08-01 §4a) mirrors finalizedAtMs here — no test in this file needs the
+// two to diverge (that distinction is projectionSlice.test.ts's own "stamps the line's
+// playedAtMs" pin), so the same ascending sequence every caller already passes for
+// finalizedAtMs orders correctly under sortLines' new playedAtMs key too.
 const scoredLine = (id: string, finalizedAtMs: number, perHole: number) => ({
   roundId: roundId(id),
   courseName: "Casa Verde GC",
@@ -23,6 +27,7 @@ const scoredLine = (id: string, finalizedAtMs: number, perHole: number) => ({
   distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
   holeResults: Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: 4, result: { kind: "strokes" as const, strokes: perHole } })),
   finalizedAtMs,
+  playedAtMs: finalizedAtMs,
 });
 
 // Accounts-only identity (spec §1): there are no ghosts and nothing to claim, so this file's
@@ -188,6 +193,7 @@ describe("getMyRecord", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
+      playedAtMs: 1_000,
     });
 
     const record = await ctx.record({ sub: "sub-1" });
@@ -214,6 +220,7 @@ describe("getMyRecord", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 2_000,
+      playedAtMs: 2_000,
       createdAtMs: 1_900,
     });
     // A pre-scrap line: no courseId, no createdAtMs at all (frozen before cards carried a source).
@@ -226,6 +233,7 @@ describe("getMyRecord", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
+      playedAtMs: 1_000,
     });
 
     const record = await ctx.record({ sub: "sub-1" });
@@ -316,6 +324,7 @@ describe("getMyRecord", () => {
         strokes: 8,
         distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
         finalizedAtMs: 4_000,
+        playedAtMs: 4_000,
       },
     ];
     for (const l of stored) await ctx.projectionStore.putLine(golfer.golferId, l);
@@ -368,6 +377,7 @@ describe("getMyCourseRecord", () => {
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       holeResults: holeResultsFor(gross),
       finalizedAtMs: ms,
+      playedAtMs: ms,
     });
     const courseA = { id: "course-1", name: "Casa Verde GC" };
     const courseB = { id: "course-2", name: "Pebble Municipal" };
@@ -400,6 +410,7 @@ describe("getMyCourseRecord", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
+      playedAtMs: 1_000,
     });
 
     const record = await ctx.courseRecord({ sub: "sub-1" }, courseId("course-1"));
@@ -428,6 +439,7 @@ describe("getMyRounds", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
+      playedAtMs: 1_000,
     });
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r2"),
@@ -438,6 +450,7 @@ describe("getMyRounds", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 5, bogeys: 13, doublePlus: 0 },
       finalizedAtMs: 2_000,
+      playedAtMs: 2_000,
     });
 
     const result = await ctx.myRounds({ sub: "sub-1" });
@@ -461,6 +474,7 @@ describe("getMyRounds", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 2_000,
+      playedAtMs: 2_000,
       createdAtMs: 1_500,
     });
     // A legacy line: no createdAtMs at all (an older projection write).
@@ -473,6 +487,7 @@ describe("getMyRounds", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
+      playedAtMs: 1_000,
     });
 
     const result = await ctx.myRounds({ sub: "sub-1" });
@@ -496,6 +511,7 @@ describe("getMyRounds", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 2_000,
+      playedAtMs: 2_000,
     });
     // A pre-scrap line: no courseId at all (frozen before cards carried a source).
     await ctx.projectionStore.putLine(golfer.golferId, {
@@ -507,6 +523,7 @@ describe("getMyRounds", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
+      playedAtMs: 1_000,
     });
 
     const result = await ctx.myRounds({ sub: "sub-1" });
@@ -529,6 +546,7 @@ describe("getMyRounds", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
+      playedAtMs: 1_000,
     });
     await ctx.projectionStore.putLine(golfer.golferId, {
       roundId: roundId("r2"),
@@ -539,6 +557,7 @@ describe("getMyRounds", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 5, bogeys: 13, doublePlus: 0 },
       finalizedAtMs: 2_000,
+      playedAtMs: 2_000,
     });
 
     const record = await ctx.record({ sub: "sub-1" });
@@ -548,10 +567,12 @@ describe("getMyRounds", () => {
 });
 
 // GET /me/rounds/live (projection-realignment Task 13): "your rounds, right now" — presence,
-// not finalized history (getMyRounds above). Same get-or-nothing discipline; the store is
-// exercised directly via putLive (not through startRound/joinRound — those are covered in
-// rounds/roundSlice.test.ts's own presence suite) since this file's setup has no round
-// journal at all.
+// not finalized history (getMyRounds above). The store's own presence half is exercised
+// directly via putLive (not through startRound/joinRound — those are covered in
+// rounds/roundSlice.test.ts's own presence suite); playedAt (spec 2026-08-01 §4b) is REQUIRED
+// on the wire now, so any test whose entries should actually render needs a real round genesis
+// on `ctx.journal` too — journal.read returning [] for a roundId with no round in it is exactly
+// how the "stale pointer" case below is built.
 describe("getMyLiveRounds", () => {
   it("returns an empty list for a sub with no golfer row at all — no throw, no create", async () => {
     const ctx = setup();
@@ -564,39 +585,45 @@ describe("getMyLiveRounds", () => {
     expect(await ctx.myLiveRounds({ sub: "sub-1" })).toEqual({ rounds: [] });
   });
 
-  it("lists live rounds newest-joined first, each carrying courseName + joinedAt (the wire name for joinedAtMs)", async () => {
+  it("lists live rounds newest-joined first, each carrying courseName + joinedAt (the wire name for joinedAtMs) and playedAt (the round's own log, via playedAtMsOf)", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
+    await ctx.journal.append(roundId("r1"), [
+      { kind: "round-created", roundId: roundId("r1"), card: fixtureLinks, playedAtMs: 500, opId: opId("g1"), hlc: { wallMs: 500, counter: 0, deviceId: deviceId("test") }, authorId: golferId("author") },
+    ]);
+    await ctx.journal.append(roundId("r2"), [
+      { kind: "round-created", roundId: roundId("r2"), card: fixtureLinks, playedAtMs: 1_500, opId: opId("g2"), hlc: { wallMs: 1_500, counter: 0, deviceId: deviceId("test") }, authorId: golferId("author") },
+    ]);
     await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
     await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r2"), courseName: "Pebble Municipal", joinedAtMs: 2_000, expiresAtSec: 9_999_999_999 });
 
     const result = await ctx.myLiveRounds({ sub: "sub-1" });
     expect(result.rounds).toEqual([
-      { roundId: roundId("r2"), courseName: "Pebble Municipal", joinedAt: 2_000 },
-      { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000 },
+      { roundId: roundId("r2"), courseName: "Pebble Municipal", joinedAt: 2_000, playedAt: 1_500 },
+      { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000, playedAt: 500 },
     ]);
     // Never the store's own internal field name leaking onto the wire.
     expect(result.rounds.every((entry) => !("joinedAtMs" in entry))).toBe(true);
   });
 
-  // createdAt (accounts-only identity spec §5): derived at read time from the round's genesis, a
-  // round-level fact — carried when the round exists, omitted for a stale pointer (the 36h TTL
-  // backstop outliving a vanished round).
-  it("carries createdAt derived from the round's genesis, omitting it for a stale pointer with no round behind it", async () => {
+  // playedAt (spec 2026-08-01 §4b): derived at read time from the round's own log (domain's
+  // playedAtMsOf), a round-level fact — carried when the round exists. REQUIRED on the wire
+  // (unlike the old best-effort createdAt), so a stale presence pointer (the 36h TTL backstop
+  // outliving a round that vanished) drops that ENTRY entirely rather than serving one with a
+  // missing required field.
+  it("carries playedAt derived from the round's own log, dropping the entry entirely for a stale pointer with no round behind it", async () => {
     const ctx = setup();
     const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
-    // A real live round's genesis on the journal (wall time 7_777).
+    // A real live round's genesis on the journal (playedAtMs 7_777).
     await ctx.journal.append(roundId("r1"), [
-      { kind: "round-created", roundId: roundId("r1"), card: fixtureLinks, opId: opId("g1"), hlc: { wallMs: 7_777, counter: 0, deviceId: deviceId("test") }, authorId: golferId("author") },
+      { kind: "round-created", roundId: roundId("r1"), card: fixtureLinks, playedAtMs: 7_777, opId: opId("g1"), hlc: { wallMs: 7_777, counter: 0, deviceId: deviceId("test") }, authorId: golferId("author") },
     ]);
     await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
-    // A stale presence pointer whose round never existed / has vanished.
+    // A stale presence pointer whose round never existed / has vanished — journal.read returns
+    // [] for it, so playedAt can never resolve.
     await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r2"), courseName: "Ghost Course", joinedAtMs: 2_000, expiresAtSec: 9_999_999_999 });
 
     const result = await ctx.myLiveRounds({ sub: "sub-1" });
-    const r1 = result.rounds.find((entry) => entry.roundId === roundId("r1"))!;
-    const r2 = result.rounds.find((entry) => entry.roundId === roundId("r2"))!;
-    expect(r1.createdAt).toBe(7_777);
-    expect(r2).not.toHaveProperty("createdAt");
+    expect(result.rounds).toEqual([{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000, playedAt: 7_777 }]);
   });
 });

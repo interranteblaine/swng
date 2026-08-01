@@ -6,8 +6,8 @@ import { sortLines } from "../projections/projectArchive.js";
 // (finalizedAt/createdAt) — the index chart's date anchors need them (index-chart-polish
 // spec §1.6). Optional on the wire; always present in practice for finalizedAt.
 const toWireLine = (
-  line: GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number },
-): GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number } => ({
+  line: GolferRoundLine & { readonly finalizedAtMs: number; readonly playedAtMs: number; readonly createdAtMs?: number },
+): GolferRoundLine & { readonly finalizedAt?: number; readonly playedAt: number; readonly createdAt?: number } => ({
   roundId: line.roundId,
   courseName: line.courseName,
   // courseId (course-cards spec §4, the analytics join key) — omitted for pre-scrap lines
@@ -22,6 +22,10 @@ const toWireLine = (
   ...(line.score !== undefined ? { score: line.score } : {}),
   distribution: line.distribution,
   finalizedAt: line.finalizedAtMs,
+  // playedAt (spec 2026-08-01 §4b): WHEN THE GOLF HAPPENED — REQUIRED, unlike finalizedAt/
+  // createdAt above (both optional purely for old-lambda tolerance): projectArchive always
+  // provides it, so there is no legacy-line case to tolerate.
+  playedAt: line.playedAtMs,
   ...(line.createdAtMs !== undefined ? { createdAt: line.createdAtMs } : {}),
 });
 
@@ -40,8 +44,8 @@ const toWireLine = (
 // typicalEighteen + empty averageHistory, no average/spread) — there is no separate "no data"
 // branch to keep in sync.
 export const recordOf = (
-  lines: readonly (GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number })[],
-): { metrics: GolferMetrics; history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number })[] } => {
+  lines: readonly (GolferRoundLine & { readonly finalizedAtMs: number; readonly playedAtMs: number; readonly createdAtMs?: number })[],
+): { metrics: GolferMetrics; history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly playedAt: number; readonly createdAt?: number })[] } => {
   const sorted = sortLines(lines);
   return {
     metrics: golferMetrics(sorted),

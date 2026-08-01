@@ -4,7 +4,7 @@ import type { GolferId, Participant, RoundArchive, RoundEvent, RosterEntry, Scor
 import type { GolferStore } from "../ports/golferStore.js";
 import { getMyRecord } from "../golfers/getMyRecord.js";
 import { createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, putAndBindGolfer } from "../testing/fakes.js";
-import { finalizedAtMsOf, projectArchive } from "./projectArchive.js";
+import { finalizedAtMsOf, projectArchive, sortLines } from "./projectArchive.js";
 
 const ann = golferId("ann");
 const bo = golferId("bo");
@@ -63,7 +63,11 @@ const archiveAt = (id: string, wallMs: number, entries: readonly ArchiveEntry[])
   // off THESE events, never off archive.participants, so any test that seeds a LIVE pointer
   // and expects it cleared needs one here for its golferId.
   events: [
-    { kind: "round-created", roundId: roundId(id), card: fixtureLinks18, opId: opId(`created-${id}`), hlc: { wallMs: 1, counter: 0, deviceId: deviceId("server") }, authorId: ann },
+    // playedAtMs (spec 2026-08-01 §3a): arbitrary here (1, matching the event's own arbitrary
+    // wallMs) — no test in this file cares about its VALUE except the dedicated "stamps the
+    // line's playedAtMs" case below, which appends its own round-played-at-set correction on top
+    // of this genesis rather than editing it.
+    { kind: "round-created", roundId: roundId(id), card: fixtureLinks18, playedAtMs: 1, opId: opId(`created-${id}`), hlc: { wallMs: 1, counter: 0, deviceId: deviceId("server") }, authorId: ann },
     ...entries.map(
       (e, i): RoundEvent => ({
         kind: "participant-joined",
@@ -100,6 +104,28 @@ describe("finalizedAtMsOf", () => {
   });
 });
 
+describe("sortLines", () => {
+  // Ordering is by WHEN THE ROUND WAS PLAYED (spec 2026-08-01 §4), not when it was finalized —
+  // this test FAILS on the pre-arc implementation (sorted by finalizedAtMs), which is the point:
+  // the finalizedAtMs ordering only ever looked right because you finalize the round you just
+  // played, and a back-dated round would sort to the top of a history that is supposed to be a
+  // chronology of golf. A played EARLIER but finalized LATER; B played LATER but finalized
+  // FIRST — a finalizedAtMs sort would return [B, A], the wrong order for a "when did you play
+  // this" history.
+  it("sorts by playedAtMs, not finalizedAtMs", () => {
+    const a = { roundId: roundId("a"), playedAtMs: 1_000, finalizedAtMs: 9_000 };
+    const b = { roundId: roundId("b"), playedAtMs: 5_000, finalizedAtMs: 2_000 };
+    expect(sortLines([b, a])).toEqual([a, b]);
+    expect(sortLines([a, b])).toEqual([a, b]);
+  });
+
+  it("still tiebreaks on roundId for a same-playedAtMs pair", () => {
+    const a = { roundId: roundId("a"), playedAtMs: 1_000, finalizedAtMs: 1_000 };
+    const b = { roundId: roundId("b"), playedAtMs: 1_000, finalizedAtMs: 1_000 };
+    expect(sortLines([b, a])).toEqual([a, b]);
+  });
+});
+
 describe("projectArchive", () => {
   // The handicap index is NOT this projector's concern anymore (pre-prod hardening D4a): it's
   // computed at read time in golfers/getMyRecord.ts from these same lines. projectArchive's
@@ -116,6 +142,32 @@ describe("projectArchive", () => {
     // The line records what the round said about this golfer: the strokes they played off and the
     // round's own gross (18 x 5 on fixtureLinks18's par 72).
     expect(history[0]).toMatchObject({ roundId: roundId("r1"), strokes: 0, score: 90, finalizedAtMs: 1_000 });
+  });
+
+  // playedAtMs (spec 2026-08-01 §4a): the projector stamps every line with the round's played
+  // instant via the ONE shared rule (domain's playedAtMsOf), never re-derived here. A correction
+  // (round-played-at-set) riding the log after genesis must win over the genesis event's own
+  // playedAtMs — exactly the fold rule playedAt.ts itself pins, proven here through the projector
+  // rather than the domain function directly.
+  it("stamps the line's playedAtMs from a log carrying a round-played-at-set", async () => {
+    const ctx = await setup();
+    const base = archiveAt("r1", 1_000, [{ golferId: ann, perHole: 5 }]);
+    const correction: RoundEvent = {
+      kind: "round-played-at-set",
+      playedAtMs: 500_000,
+      opId: opId("played-at-r1"),
+      hlc: { wallMs: 2, counter: 0, deviceId: deviceId("server") },
+      authorId: ann,
+    };
+    const archive: RoundArchive = { ...base, events: [...base.events, correction] };
+    const project = projectArchive(ctx);
+
+    await project(archive);
+
+    const history = await ctx.projectionStore.listLines(ann);
+    // Genesis carried playedAtMs: 1 (archiveAt's own fixed value) — the correction's 500_000
+    // must win, not the genesis value and not the round-finalized wallMs (1_000).
+    expect(history[0]?.playedAtMs).toBe(500_000);
   });
 
   // The read-side pin runs the SAME two steps a real request does: project finalizes (the

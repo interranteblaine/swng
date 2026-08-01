@@ -1,5 +1,5 @@
 import type { GolferId, RoundArchive } from "@swng/domain";
-import { archiveGolferLine } from "@swng/domain";
+import { archiveGolferLine, playedAtMsOf } from "@swng/domain";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { Logger } from "../ports/logger.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
@@ -9,12 +9,16 @@ import type { ProjectionStore } from "../ports/projectionStore.js";
 // `ROUND#<roundId>` sk carries no time to sort by — so every reader imposes this SAME order
 // itself rather than trusting insertion order, or two readers (getMyRecord's read-time index
 // fold and its wire history, since pre-prod hardening D4a moved the fold there)
-// silently disagreeing. Ascending by finalizedAtMs; roundId is a tiebreak for a
-// same-millisecond pair (unreachable at real wall-clock resolution, but a deterministic order
-// beats an unspecified one at zero cost, and it's the exact order the old time-embedded sk gave
-// for free).
-export const sortLines = <T extends { readonly finalizedAtMs: number; readonly roundId: string }>(lines: readonly T[]): T[] =>
-  [...lines].sort((a, b) => a.finalizedAtMs - b.finalizedAtMs || (a.roundId < b.roundId ? -1 : a.roundId > b.roundId ? 1 : 0));
+// silently disagreeing.
+//
+// Ordering is by WHEN THE ROUND WAS PLAYED (spec 2026-08-01 §4), not when it was finalized. The
+// old finalizedAtMs ordering only ever looked right because you finalize the round you just
+// played; a back-dated round would sort to the top of a history that is supposed to be a
+// chronology of golf, not of data entry. roundId stays the tiebreak, unchanged: a deterministic
+// order beats an unspecified one at zero cost, and it's the exact order the old time-embedded sk
+// gave for free.
+export const sortLines = <T extends { readonly playedAtMs: number; readonly roundId: string }>(lines: readonly T[]): T[] =>
+  [...lines].sort((a, b) => a.playedAtMs - b.playedAtMs || (a.roundId < b.roundId ? -1 : a.roundId > b.roundId ? 1 : 0));
 
 // The one place archive.events is searched for round-finalized — both projectArchive
 // (below) and rebuildProjections' own sort key (rebuildProjections.ts) go through this, so
@@ -48,6 +52,10 @@ export const projectArchive =
   async (archive: RoundArchive): Promise<void> => {
     const finalizedAtMs = finalizedAtMsOf(archive);
     const createdAtMs = createdAtMsOf(archive);
+    // playedAtMs (spec 2026-08-01 §4a): the ONE shared rule (domain's playedAtMsOf) — never
+    // re-derived here. createdAtMs stays alongside it (audit: when the RECORD was made); this is
+    // WHEN THE GOLF HAPPENED, the fact sortLines above now orders a golfer's history by.
+    const playedAtMs = playedAtMsOf(archive.events);
 
     // Accounts-only identity (spec §7): only ACCOUNT golfers are projected. One batch read of the
     // finalized roster's golfer records decides which participants are account-bound (carry a
@@ -68,7 +76,7 @@ export const projectArchive =
       if (!accountBound.has(participant.golferId)) continue;
 
       const line = archiveGolferLine(archive, participant.golferId);
-      await deps.projectionStore.putLine(participant.golferId, { ...line, finalizedAtMs, createdAtMs });
+      await deps.projectionStore.putLine(participant.golferId, { ...line, finalizedAtMs, createdAtMs, playedAtMs });
     }
 
     // Presence-cleanup is identity housekeeping, not projection policy: every golfer who ever

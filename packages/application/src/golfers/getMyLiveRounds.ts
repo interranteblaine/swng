@@ -1,3 +1,4 @@
+import { playedAtMsOf } from "@swng/domain";
 import type { RoundId } from "@swng/domain";
 import type { GetMyLiveRoundsResponse } from "@swng/contracts";
 import type { AccountClaims } from "../ports/accountClaims.js";
@@ -5,16 +6,17 @@ import type { EventJournal } from "../ports/eventJournal.js";
 import type { GolferStore } from "../ports/golferStore.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
 
-// The round's created-at (accounts-only identity spec §5, the "course + date" designation) — the
-// round-created genesis event's own wall time, a ROUND-level fact (unlike the per-golfer
-// `joinedAt`). Derived at read time rather than stored on the presence pointer: presence is written
-// by startRound/joinRound (the only two seat paths), and a golfer has only a handful
-// of live rounds at once, so a genesis read per live round is cheap. Best-effort — a stale presence
-// pointer (the 36h TTL backstop outliving a round that vanished) reads back nothing, so createdAt is
-// simply omitted rather than throwing.
-const createdAtOf = async (journal: EventJournal, roundId: RoundId): Promise<number | undefined> => {
+// playedAt (spec 2026-08-01 §4b): WHEN THE GOLF HAPPENED — through the ONE shared rule (domain's
+// playedAtMsOf), a ROUND-level fact (unlike the per-golfer `joinedAt`). Derived at read time
+// rather than stored on the presence pointer: presence is written by startRound/joinRound (the
+// only two seat paths), and a golfer has only a handful of live rounds at once, so a log read per
+// live round is cheap. `undefined` iff the log is genuinely empty (an unknown round, per
+// EventJournal.read's own contract) — a stale presence pointer (the 36h TTL backstop outliving a
+// round that vanished) reads back nothing. playedAt is REQUIRED on the wire (unlike the old
+// best-effort createdAt), so that case drops the ENTRY, never serves a fact-free stub.
+const playedAtOf = async (journal: EventJournal, roundId: RoundId): Promise<number | undefined> => {
   const events = await journal.read(roundId, 0);
-  return events.find((event) => event.kind === "round-created")?.hlc.wallMs;
+  return events.length === 0 ? undefined : playedAtMsOf(events);
 };
 
 // GET /me/rounds/live (projection-realignment Task 13): "your rounds, right now" — every LIVE
@@ -32,11 +34,13 @@ export const getMyLiveRounds =
     // listLive is UNORDERED (ports/projectionStore.ts, same discipline as listLines) — sort
     // here, newest-joined first, rather than trusting the store's own iteration order.
     const sorted = [...live].sort((a, b) => b.joinedAtMs - a.joinedAtMs);
-    const rounds = await Promise.all(
+    const withPlayedAt = await Promise.all(
       sorted.map(async (entry) => {
-        const createdAt = await createdAtOf(deps.journal, entry.roundId);
-        return { roundId: entry.roundId, courseName: entry.courseName, joinedAt: entry.joinedAtMs, ...(createdAt !== undefined ? { createdAt } : {}) };
+        const playedAt = await playedAtOf(deps.journal, entry.roundId);
+        return playedAt === undefined ? undefined : { roundId: entry.roundId, courseName: entry.courseName, joinedAt: entry.joinedAtMs, playedAt };
       }),
     );
-    return { rounds };
+    // Drop a stale pointer's entry entirely (a vanished round has nothing honest to show) rather
+    // than serving a partial object missing the now-REQUIRED playedAt.
+    return { rounds: withPlayedAt.filter((round) => round !== undefined) };
   };

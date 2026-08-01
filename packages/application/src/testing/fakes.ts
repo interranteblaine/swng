@@ -344,12 +344,12 @@ export const createInMemoryCrewStore = (): CrewStore => {
 // index is computed at read time (pre-prod hardening D4a, golfers/getMyRecord.ts), never
 // stored by anything this fake needs to model.
 export const createInMemoryProjectionStore = (): ProjectionStore => {
-  const linesByGolfer = new Map<GolferId, Map<RoundId, GolferRoundLine & { finalizedAtMs: number; createdAtMs?: number }>>();
+  const linesByGolfer = new Map<GolferId, Map<RoundId, GolferRoundLine & { finalizedAtMs: number; playedAtMs: number; createdAtMs?: number }>>();
   const liveByGolfer = new Map<GolferId, Map<RoundId, { roundId: RoundId; courseName: string; joinedAtMs: number; expiresAtSec: number }>>();
 
   return {
     putLine: async (golferId, line) => {
-      const lines = linesByGolfer.get(golferId) ?? new Map<RoundId, GolferRoundLine & { finalizedAtMs: number; createdAtMs?: number }>();
+      const lines = linesByGolfer.get(golferId) ?? new Map<RoundId, GolferRoundLine & { finalizedAtMs: number; playedAtMs: number; createdAtMs?: number }>();
       lines.set(line.roundId, line); // upsert by roundId — REPLACES on a reopen-and-refinalize, never adds a second entry
       linesByGolfer.set(golferId, lines);
     },

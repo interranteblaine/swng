@@ -136,7 +136,10 @@ describe("getMyRecordResponseSchema", () => {
         bests: { best18: { roundId: roundId("r1"), gross: 82, toPar: 10 } },
         milestones: [{ kind: "broke-90", roundId: roundId("r1") }],
       },
-      history: [completeLine, incompleteLine],
+      history: [
+        { ...completeLine, playedAt: 1_000 },
+        { ...incompleteLine, playedAt: 2_000 },
+      ],
     });
   });
 
@@ -153,14 +156,14 @@ describe("getMyRecordResponseSchema", () => {
   it("round-trips a negative average (a golfer who shoots under par)", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: { average: -2, typicalEighteen: zeroTypicalEighteen, averageHistory: [{ roundId: roundId("r1"), average: -2 }], ...zeroBestsMilestones },
-      history: [completeLine],
+      history: [{ ...completeLine, playedAt: 1_000 }],
     });
   });
 
   it("round-trips a record with no scored round at all: no average/spread, zeroed typicalEighteen, empty averageHistory, history present", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones },
-      history: [incompleteLine],
+      history: [{ ...incompleteLine, playedAt: 1_000 }],
     });
   });
 
@@ -173,32 +176,40 @@ describe("getMyRecordResponseSchema", () => {
   it("round-trips a history line carrying courseId", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones },
-      history: [{ ...completeLine, courseId: courseId("course-1") }],
+      history: [{ ...completeLine, courseId: courseId("course-1"), playedAt: 1_000 }],
     });
   });
 
   it("round-trips a pre-scrap history line with no courseId", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones },
-      history: [completeLine],
+      history: [{ ...completeLine, playedAt: 1_000 }],
     });
   });
 
   // index-chart-polish spec §1.6: finalizedAt/createdAt are OPTIONAL on a history line — a new
   // bundle against an old lambda (which never sends them) still parses clean; always present in
-  // practice for finalizedAt.
+  // practice for finalizedAt. playedAt (spec 2026-08-01 §4b) is REQUIRED — always present.
   it("round-trips a history line carrying finalizedAt and createdAt", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones },
-      history: [{ ...completeLine, finalizedAt: 2_000, createdAt: 1_500 }],
+      history: [{ ...completeLine, finalizedAt: 2_000, playedAt: 1_000, createdAt: 1_500 }],
     });
   });
 
   it("round-trips a history line with no finalizedAt/createdAt (the old-lambda tolerance pin)", () => {
     roundTrips(getMyRecordResponseSchema, {
       metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones },
-      history: [completeLine],
+      history: [{ ...completeLine, playedAt: 1_000 }],
     });
+  });
+
+  // playedAt (spec 2026-08-01 §4b) is REQUIRED, unlike finalizedAt/createdAt above — a history
+  // line missing it is rejected, not silently accepted.
+  it("rejects a history line missing playedAt", () => {
+    expect(() =>
+      parse(getMyRecordResponseSchema, { metrics: { typicalEighteen: zeroTypicalEighteen, averageHistory: [], ...zeroBestsMilestones }, history: [completeLine] }),
+    ).toThrow(ContractError);
   });
 
   // typicalEighteen, averageHistory, bests, and milestones are all REQUIRED — a metrics object
@@ -252,14 +263,14 @@ describe("getGolferResponseSchema", () => {
     roundTrips(getGolferResponseSchema, {
       name: "Ann",
       metrics: bareMetrics,
-      history: [{ ...completeLine, finalizedAt: 2_000, createdAt: 1_500 }],
+      history: [{ ...completeLine, finalizedAt: 2_000, playedAt: 1_000, createdAt: 1_500 }],
     });
   });
 
   // The old-lambda tolerance pin (index-chart-polish spec §1.6): a history row without the new
-  // fields still parses clean.
+  // fields still parses clean. playedAt (spec 2026-08-01 §4b) is REQUIRED — always present.
   it("round-trips a history line with no finalizedAt/createdAt", () => {
-    roundTrips(getGolferResponseSchema, { name: "Ann", metrics: bareMetrics, history: [completeLine] });
+    roundTrips(getGolferResponseSchema, { name: "Ann", metrics: bareMetrics, history: [{ ...completeLine, playedAt: 1_000 }] });
   });
 });
 
@@ -299,10 +310,21 @@ describe("getMyCourseRecordResponseSchema", () => {
   });
 });
 
-// accounts-only identity spec §5: createdAt (the "course + date" designation) is OPTIONAL on both
-// list responses — old projection lines / stale presence pointers carry none, tolerated as absent.
+// accounts-only identity spec §5: createdAt (the "course + date" designation) is OPTIONAL on the
+// history list — old projection lines carry none, tolerated as absent. playedAt (spec 2026-08-01
+// §4b) is REQUIRED — projectArchive always provides it.
 describe("getMyRoundsResponseSchema", () => {
-  const line = { roundId: roundId("r1"), courseName: "Casa Verde GC", tee: "white", holes: 18 as const, par: 72, strokes: 8, score: 90, distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 } };
+  const line = {
+    roundId: roundId("r1"),
+    courseName: "Casa Verde GC",
+    tee: "white",
+    holes: 18 as const,
+    par: 72,
+    strokes: 8,
+    score: 90,
+    distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
+    playedAt: 1_000,
+  };
 
   it("round-trips a round line carrying createdAt", () => {
     roundTrips(getMyRoundsResponseSchema, { rounds: [{ ...line, finalizedAt: 2_000, createdAt: 1_500 }] });
@@ -321,14 +343,25 @@ describe("getMyRoundsResponseSchema", () => {
   it("round-trips a pre-scrap round line with no courseId", () => {
     roundTrips(getMyRoundsResponseSchema, { rounds: [{ ...line, finalizedAt: 2_000 }] });
   });
+
+  it("rejects a round line missing playedAt", () => {
+    const { playedAt: _playedAt, ...withoutPlayedAt } = line;
+    expect(() => parse(getMyRoundsResponseSchema, { rounds: [{ ...withoutPlayedAt, finalizedAt: 2_000 }] })).toThrow(ContractError);
+  });
 });
 
+// playedAt (spec 2026-08-01 §4b) REPLACED the old best-effort createdAt outright: REQUIRED, not
+// tolerated absent — a genuinely live round's log always has a genesis, so getMyLiveRounds.ts
+// drops any entry whose presence pointer outlived its own round rather than serving a
+// fact-free stub (application/src/golfers/getMyLiveRounds.ts).
 describe("getMyLiveRoundsResponseSchema", () => {
-  it("round-trips a live round carrying createdAt", () => {
-    roundTrips(getMyLiveRoundsResponseSchema, { rounds: [{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000, createdAt: 900 }] });
+  it("round-trips a live round carrying playedAt", () => {
+    roundTrips(getMyLiveRoundsResponseSchema, { rounds: [{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000, playedAt: 900 }] });
   });
 
-  it("round-trips a live round with no createdAt (a stale pointer)", () => {
-    roundTrips(getMyLiveRoundsResponseSchema, { rounds: [{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000 }] });
+  it("rejects a live round entry missing playedAt", () => {
+    expect(() =>
+      parse(getMyLiveRoundsResponseSchema, { rounds: [{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000 }] }),
+    ).toThrow(ContractError);
   });
 });

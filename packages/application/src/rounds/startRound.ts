@@ -77,6 +77,11 @@ export const startRound =
         kind: "round-created",
         roundId: id,
         card: record.card,
+        // playedAtMs (spec 2026-08-01 §3a/§4a): WHEN THE GOLF HAPPENED, not when this record was
+        // created. Absent means now — exactly today's pre-arc behaviour — resolved from the SAME
+        // server clock the hlc source above reads, so a round with no explicit playedAtMs still
+        // agrees with its own envelope's wall time.
+        playedAtMs: command.playedAtMs ?? deps.clock.now(),
         ...serverEnvelope({ hlc, ids: deps.ids }, host),
       },
       { kind: "participant-joined", participant: hostParticipant, ...serverEnvelope({ hlc, ids: deps.ids }, host) },

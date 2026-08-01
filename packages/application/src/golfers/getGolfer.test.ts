@@ -28,6 +28,7 @@ describe("getGolfer", () => {
       strokes: 8,
       distribution: { eagles: 0, birdies: 0, pars: 9, bogeys: 9, doublePlus: 0 },
       finalizedAtMs: 1_000,
+      playedAtMs: 1_000,
       createdAtMs: 900,
     };
     await ctx.projectionStore.putLine(annId, line);

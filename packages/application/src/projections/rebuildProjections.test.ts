@@ -46,7 +46,9 @@ const archiveAt = (id: string, wallMs: number, entries: readonly { golferId: Gol
   // events, never off archive.participants — without one here, a rebuild replay would never
   // call deleteLive for that golferId.
   events: [
-    { kind: "round-created", roundId: roundId(id), card: fixtureLinks18, opId: opId(`created-${id}`), hlc: { wallMs: 1, counter: 0, deviceId: deviceId("server") }, authorId: ann },
+    // playedAtMs (spec 2026-08-01 §3a): arbitrary (1) — this file's subject is the rebuild LOOP,
+    // never a derived number, so no test here cares about its value.
+    { kind: "round-created", roundId: roundId(id), card: fixtureLinks18, playedAtMs: 1, opId: opId(`created-${id}`), hlc: { wallMs: 1, counter: 0, deviceId: deviceId("server") }, authorId: ann },
     ...entries.map(
       (e, i): RoundEvent => ({
         kind: "participant-joined",

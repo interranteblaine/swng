@@ -1,4 +1,5 @@
 import type { PeekRoundResponse } from "@swng/contracts";
+import { playedAtMsOf } from "@swng/domain";
 import { ApplicationError } from "../errors.js";
 import type { EventJournal } from "../ports/eventJournal.js";
 import type { RoundStore } from "../ports/roundStore.js";
@@ -24,11 +25,6 @@ export const peekRound =
     if (!id) throw new ApplicationError("bad-join-code"); // unknown code — same shape as joinRound's
 
     const { state, events } = await loadRoundState(deps.journal, id);
-    // createdAt (accounts-only identity spec §5, the "course + date" designation): the round-created
-    // event's own wall time. round-created is the genesis of every non-empty log (loadRoundState
-    // already threw on an empty one), so it is always present — the `!` is that invariant, not a
-    // guess, mirroring finalizedAtMsOf's own "a settled archive without one is corrupt" stance.
-    const genesis = events.find((event) => event.kind === "round-created")!;
     return {
       courseName: state.card.courseName,
       // rating/slope are optional as a pair on the frozen tee (unrated-courses spec §1) — spread
@@ -38,6 +34,9 @@ export const peekRound =
         ...(tee.rating !== undefined ? { rating: tee.rating } : {}),
         ...(tee.slope !== undefined ? { slope: tee.slope } : {}),
       })),
-      createdAt: genesis.hlc.wallMs,
+      // playedAt (spec 2026-08-01 §4b): WHEN THE GOLF HAPPENED, through the ONE shared rule
+      // (domain's playedAtMsOf) — never re-derived here. loadRoundState already guarantees a
+      // non-empty log with a genesis event, so this never throws for a real peek.
+      playedAt: playedAtMsOf(events),
     };
   };

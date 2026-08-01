@@ -114,14 +114,21 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   // session which never connects never makes a request on its own.
   let wantsConnection = false;
   let retryDelayMs = RETRY_BASE_MS;
-  // Consecutive socket failures with no intervening open — the reconnect arm's OWN ladder,
-  // separate from retryDelayMs because the two fail for different reasons. retryDelayMs is keyed
-  // on a sync PASS settling badly; a socket that cannot stay up while HTTPS is perfectly fine (a
-  // captive/hotel network blocking WS upgrades, a proxy killing the upgrade, a server-side close
-  // right after accept) fails no pass at all — every catch-up pull succeeds and resets that
-  // ladder to its base, so the reconnect would sit at the 2s floor for the rest of the round,
-  // paying a $connect invocation and a connection-registry write every two seconds.
+  // Consecutive socket failures with no intervening connection that LIVED — the reconnect arm's
+  // OWN ladder, separate from retryDelayMs because the two fail for different reasons.
+  // retryDelayMs is keyed on a sync PASS settling badly; a socket that cannot stay up while HTTPS
+  // is perfectly fine (a captive/hotel network blocking WS upgrades, a proxy killing the upgrade,
+  // a middlebox that permits the upgrade and then kills the tunnel, a server-side close right
+  // after accept) fails no pass at all — every catch-up pull succeeds and resets THAT ladder to
+  // its base, so the reconnect would sit at the 2s floor for the rest of the round, paying a
+  // $connect invocation and a connection-registry write every two seconds.
   let socketFailures = 0;
+  // When the current socket reached OPEN, or undefined if it hasn't (or there isn't one). The
+  // ladder is keyed on this rather than on the open EVENT because "it opened" cannot tell a real
+  // connection from one accepted and killed 200ms later: the accept-then-die case fires onopen
+  // every cycle, so an event-keyed reset re-handshakes at the 2s floor forever — the same hammer
+  // in a narrower scenario. Having LIVED is the property that distinguishes them.
+  let socketOpenedAtMs: number | undefined;
   // Whether the LAST settled pass succeeded — read only to spot the transition below.
   let lastPassOk = true;
   // A pure function of the count, so BOTH arming sites (the socket's own close handler and
@@ -428,6 +435,8 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   // to choose between reconnecting and merely re-syncing, so a session that wrongly believes it
   // holds a socket never opens another one.
   const onSocketDown = (): void => {
+    const openedAtMs = socketOpenedAtMs;
+    socketOpenedAtMs = undefined;
     connectedFlag = false;
     closeSocket = undefined;
     notify();
@@ -435,7 +444,11 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
     // this handler on a real WebSocket) never failed at anything, so it must not push the ladder
     // along — wantsConnection is precisely "the caller still wants a socket".
     if (!wantsConnection) return;
-    socketFailures += 1;
+    // A connection that LIVED at least the base delay did its job and its drop is a fresh event,
+    // so the ladder restarts at its first rung; one that died faster than the retry it would earn
+    // never really connected, whether or not it managed to fire onopen first.
+    const lived = openedAtMs !== undefined && clock.now() - openedAtMs >= RETRY_BASE_MS;
+    socketFailures = lived ? 1 : socketFailures + 1;
     // The socket dropping is itself a dirty state: reconnection rides a backoff of its own, so
     // there is no reachable state in which the session has stopped trying — and no state in
     // which it retries at a fixed floor forever either.
@@ -460,10 +473,10 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
         // unless something re-syncs exactly when it opens. Through the same serialized gate as
         // every other trigger; warn-and-drop, see requestSyncInBackground()'s comment.
         () => {
-          // A socket that actually REACHED open is the only thing that clears the reconnect
-          // ladder — "openSocket() was called" is not evidence of anything, which is exactly
-          // the failure mode the ladder exists for.
-          socketFailures = 0;
+          // Stamped, not reset: reaching open starts the clock that onSocketDown reads to decide
+          // whether this was a real connection. "openSocket() was called" is evidence of nothing,
+          // and "onopen fired" is barely more — see socketOpenedAtMs's own comment.
+          socketOpenedAtMs = clock.now();
           requestSyncInBackground();
         },
       );
@@ -500,6 +513,7 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
     // same reason.
     retryDelayMs = RETRY_BASE_MS;
     socketFailures = 0;
+    socketOpenedAtMs = undefined;
     lastPassOk = true;
     if (!connectedFlag) return;
     closeSocket?.();

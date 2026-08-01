@@ -1189,9 +1189,47 @@ describe("createRoundSession — the outbox drains itself", () => {
     expect(openAttempts).toBe(4); // +8s
   });
 
-  // ...and the other half of that ladder: a socket that actually OPENS resets it, so one
+  // The narrower shape of the same failure, and the one that makes "it opened" the wrong signal:
+  // a middlebox that PERMITS the upgrade and then kills the tunnel. onopen fires every time, so a
+  // ladder keyed on the open event resets to its base and re-handshakes every 2s forever — the
+  // exact hammer this arm exists to stop. What separates a real connection from this one isn't
+  // that it opened, it's that it LIVED.
+  it("widens the gap when the socket opens and is killed at once, not only when it never opens", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    let openAttempts = 0;
+    transport.openSocket = (_onEvents, onClose, onOpen) => {
+      openAttempts += 1;
+      onOpen?.(); // accepted: the upgrade is permitted...
+      queueMicrotask(onClose); // ...and the tunnel dies immediately — zero milliseconds lived
+      return () => {};
+    };
+
+    const session = await liveSession(transport);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(openAttempts).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(openAttempts).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(openAttempts).toBe(2); // +2s: the base
+
+    await vi.advanceTimersByTimeAsync(3_999);
+    expect(openAttempts).toBe(2); // the open event did NOT buy another trip round the floor
+    await vi.advanceTimersByTimeAsync(1);
+    expect(openAttempts).toBe(3); // +4s
+
+    await vi.advanceTimersByTimeAsync(7_999);
+    expect(openAttempts).toBe(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(openAttempts).toBe(4); // +8s
+  });
+
+  // ...and the other half of that ladder: a socket that opens and LIVES resets it, so one
   // flap-and-recover doesn't leave the next real drop waiting out a long delay it didn't earn.
-  it("resets the reconnect ladder once a socket actually opens", async () => {
+  // "Lives" means at least the base delay — the same threshold the test above proves a
+  // zero-millisecond socket fails to clear.
+  it("resets the reconnect ladder once a socket opens and lives", async () => {
     const transport = createScriptedTransport(buildServerLog());
     let openAttempts = 0;
     let socketOpens = false; // flipped once the network is willing to carry a real socket
@@ -1213,11 +1251,13 @@ describe("createRoundSession — the outbox drains itself", () => {
     expect(attemptsWhileFailing).toBeGreaterThan(2);
 
     socketOpens = true;
-    await vi.advanceTimersByTimeAsync(60_000); // the next attempt opens for real
+    await vi.advanceTimersByTimeAsync(60_000); // the next attempt opens for real, and then LIVES
     expect(session.connected()).toBe(true);
 
-    // Now drop that healthy socket. The very next attempt must come at the 2s base — if the
-    // ladder had survived the open, this drop would sit out the climbed delay instead.
+    // Now drop that healthy socket — one that carried a connection for tens of seconds, far past
+    // the base delay, which is what makes it a real one. The very next attempt must come at the
+    // 2s base: if the ladder had survived a genuine connection, this drop would sit out the
+    // climbed delay instead.
     socketOpens = false;
     const attemptsBeforeDrop = openAttempts;
     dropSocket?.();

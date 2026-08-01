@@ -308,16 +308,24 @@ test.describe.serial("M5 field test — two browsers, offline mid-round, the ful
   });
 
   test("6: B comes back online; the queue drains on its own — pending 0, skins refolds, and A sees B's holes 10-12", async () => {
-    test.setTimeout(60_000);
+    // 90s, raised from 60s alongside the drain ceiling just below: a 35s ceiling inside a budget
+    // that can't hold it plus the three cross-context waits after it would just move the coin
+    // flip from the assertion to the test timeout. Costs nothing on the passing path — this test
+    // finishes in seconds when the wake fires, which is every time it has ever run.
+    test.setTimeout(90_000);
     await contextB.setOffline(false);
     // No tap: coming back online fires the browser's own `online` event, and useRoundSession's
     // wake listener (apps/web, 2026-08-01) turns that straight into an immediate sync() call. Even
     // without that listener the SDK's own backoff loop — already retrying on its own the whole
-    // time B was dark — would pick this up unattended; the wake signal only collapses the wait.
+    // time B was dark — would pick this up unattended, but by then the loop is stalled at its 30s
+    // cap, so the unattended path needs a ceiling past 30s to be the claim it reads as. Hence 35s:
+    // the wake collapses this to a round trip in practice, and Playwright resolves as soon as the
+    // condition holds, so the taller ceiling costs nothing on the passing path and removes a coin
+    // flip if the wake ever doesn't fire.
     // This negative means DRAINED, unambiguously: the count now appears in the escalated banner
     // too, so it can no longer disappear because the news got worse rather than because the
     // queue emptied.
-    await expect(pageB.getByText(/saved on this phone/)).not.toBeVisible({ timeout: 20_000 });
+    await expect(pageB.getByText(/saved on this phone/)).not.toBeVisible({ timeout: 35_000 });
 
     // The correction moved the pot, re-derived: Cal's corrected h9 5 nets 4, which TIES Bo's and
     // Dee's 4 — so hole 9 carries instead of paying, Cal's 9 skins go to 0, and the whole

@@ -281,12 +281,15 @@ test.describe.serial("M9 reconnect QA — arm 2: offline through a finalize ATTE
     // No tap: coming back online fires the browser's own `online` event, and useRoundSession's
     // wake listener (apps/web, 2026-08-01) turns that straight into an immediate sync() call. Even
     // without that listener the SDK's own backoff loop — already retrying on its own the whole
-    // time this context was offline — would pick this up unattended; the wake signal only
-    // collapses the wait. Room for the round trip against deployed beta, not the file's 10s default.
+    // time this context was offline — would pick this up unattended, but by then the loop is
+    // stalled at its 30s cap, so the unattended path needs a ceiling past 30s to be the claim it
+    // reads as. Hence 35s, not the file's 10s default: the wake collapses this to a round trip in
+    // practice, and Playwright resolves as soon as the condition holds, so the taller ceiling
+    // costs nothing on the passing path and removes a coin flip if the wake ever doesn't fire.
     // This negative means DRAINED, unambiguously: the count now appears in the escalated banner
     // too, so it can no longer disappear because the news got worse rather than because the queue
     // emptied — which is exactly what it would have done here, having been offline since test 2.
-    await expect(page.getByText(/saved on this phone/)).not.toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(/saved on this phone/)).not.toBeVisible({ timeout: 35_000 });
 
     await page.getByRole("button", { name: "Finalize round" }).click();
     await expect(page.getByRole("dialog", { name: "Confirm finalize" })).toBeVisible();

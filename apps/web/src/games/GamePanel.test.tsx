@@ -23,6 +23,7 @@ const baseState = (games: readonly GameConfig[], participants: readonly RosterEn
   id: roundId("round-1"),
   status: "live",
   card: fixtureLinks,
+  playedAtMs: 1_000,
   participants,
   games,
   cells: {},

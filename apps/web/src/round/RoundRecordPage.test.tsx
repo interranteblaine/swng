@@ -26,7 +26,7 @@ const buildFinalLog = (): RoundEvent[] => {
   let opCounter = 0;
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   return [
-    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: 1_000, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: ANN_ID, name: "Ann", tee: "white", strokes: 0 }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: BO_ID, name: "Bo", tee: "white", strokes: 0 }, authorId: BO_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
@@ -94,13 +94,14 @@ describe("RoundRecordPage — archived (the old ArchivedRoundPage content, absor
     expect(screen.getByRole("status", { name: "Loading round" })).toBeTruthy();
 
     await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
-    // The canonical designation (spec §5): fixtureLinks' courseName plus the round-CREATED event's
-    // own wallMs (1_000ms since epoch — the round's created-at, not the finalize time), rendered
-    // the one way roundLabel renders it everywhere.
-    expect(screen.getByText(roundLabel({ courseName: "Fixture Links", createdAt: 1_000 }))).toBeTruthy();
+    // The canonical designation (spec §5, dated onto the played instant by round-played-date spec
+    // 2026-08-01 §6): fixtureLinks' courseName plus the genesis event's own playedAtMs (1_000ms
+    // since epoch — WHEN THE GOLF HAPPENED, not the finalize time), rendered the one way
+    // roundLabel renders it everywhere.
+    expect(screen.getByText(roundLabel({ courseName: "Fixture Links", playedAt: 1_000 }))).toBeTruthy();
     // Nav infrastructure Task 2: usePageTitle re-runs once the archive loads — the same
     // canonical designation the page's own header renders.
-    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", createdAt: 1_000 })} · swng`);
+    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: 1_000 })} · swng`);
     // The link sweep (navigation spec, task 6): fixtureLinks carries no `source` — the course
     // name renders as PLAIN TEXT, never a dead link.
     expect(screen.queryByRole("link", { name: "Fixture Links" })).toBeNull();
@@ -140,7 +141,7 @@ describe("RoundRecordPage — archived (the old ArchivedRoundPage content, absor
     expect(courseLink.getAttribute("href")).toBe(`/courses/${COURSE_ID}`);
     // The title (usePageTitle) and the date half are unaffected by the split — the SAME
     // roundLabel string, just with its course-name half now wearing an anchor.
-    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", createdAt: 1_000 })} · swng`);
+    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: 1_000 })} · swng`);
   });
 
   // Task review finding: `golfer` starts undefined in AuthProvider and resolves asynchronously
@@ -241,7 +242,7 @@ describe("RoundRecordPage — resolution when the archive read fails (navigation
           // fetch's own render commit; a macrotask tick here reproduces that ordering so this
           // mock (everything else resolves same-tick) doesn't race React's own re-render.
           await new Promise((resolve) => setTimeout(resolve, 0));
-          return fakeResponse(200, { rounds: [{ roundId: ROUND_ID, courseName: "Fixture Links", joinedAt: 1_000 }] });
+          return fakeResponse(200, { rounds: [{ roundId: ROUND_ID, courseName: "Fixture Links", joinedAt: 1_000, playedAt: 1_000 }] });
         }
         if (path === `/rounds/${ROUND_ID}/token` && method === "POST") {
           expect((init?.headers as Record<string, string>).authorization).toBe(`Bearer ${idToken}`);

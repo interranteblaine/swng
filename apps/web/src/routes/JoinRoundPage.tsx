@@ -47,9 +47,10 @@ export function JoinRoundPage() {
   const [error, setError] = useState<string | undefined>(undefined);
 
   const [courseName, setCourseName] = useState<string | undefined>(undefined);
-  // The round-created wall time from the peek — feeds roundLabel so the join-link framing carries
-  // the SAME designation (course + date) as home/archive/watch (accounts-only identity spec §5).
-  const [createdAt, setCreatedAt] = useState<number | undefined>(undefined);
+  // WHEN THE GOLF HAPPENED, from the peek — feeds roundLabel so the join-link framing carries the
+  // SAME designation (course + date) as home/archive/watch (accounts-only identity spec §5,
+  // dated onto the played instant by round-played-date spec 2026-08-01 §6).
+  const [playedAt, setPlayedAt] = useState<number | undefined>(undefined);
   // The peek's tee sets (name + rating/slope), not just names — the picker shows each tee's
   // rating/slope via teeNumbers.
   const [peekTees, setPeekTees] = useState<readonly PeekTee[] | undefined>(undefined);
@@ -63,7 +64,7 @@ export function JoinRoundPage() {
 
   useEffect(() => {
     setCourseName(undefined);
-    setCreatedAt(undefined);
+    setPlayedAt(undefined);
     setPeekTees(undefined);
     setPeekFailed(false);
     if (upperCode.length !== 6) return undefined; // peek only once the code looks complete
@@ -72,7 +73,7 @@ export function JoinRoundPage() {
       peekRound(upperCode)
         .then((response) => {
           setCourseName(response.courseName);
-          setCreatedAt(response.createdAt);
+          setPlayedAt(response.playedAt);
           setPeekTees(response.teeSets);
           setTee(response.teeSets[0]?.name ?? "");
         })
@@ -129,7 +130,10 @@ export function JoinRoundPage() {
         />
       </label>
 
-      {courseName && <p className="text-sm text-fairway">Joining {roundLabel({ courseName, createdAt })}</p>}
+      {/* courseName and playedAt are set together, from the same peek response (the effect
+          above) — both are checked here (not just courseName) so TypeScript narrows playedAt to
+          its required non-optional roundLabel shape without an unchecked assertion. */}
+      {courseName && playedAt !== undefined && <p className="text-sm text-fairway">Joining {roundLabel({ courseName, playedAt })}</p>}
 
       {!auth.signedIn ? (
         // The join link IS the sign-up funnel (spec §3): signing in through the stock Hosted UI

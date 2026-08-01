@@ -458,11 +458,12 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     }, [connect, sync]);
 
     // Re-runs once the session hydrates (usePageTitle's own title-prop-change contract) — "swng"
-    // while loading, then the round's own course name. RoundState carries no created-at (that's
-    // only ever derived from the round-created event's own wallMs, ArchivedRoundPage/WatchPage's
-    // own doc comments), so this is the bare course name — still enough to tell rounds apart in
-    // a browser's tab strip/history.
-    usePageTitle(session.state ? roundLabel({ courseName: session.state.card.courseName }) : undefined);
+    // while loading, then the same canonical course + date designation every other round surface
+    // renders (round-played-date spec 2026-08-01 §6): RoundState.playedAtMs now carries WHEN THE
+    // GOLF HAPPENED directly (domain's playedAtMsOf, folded in by reduceRound), so this is no
+    // longer the bare course name the old "RoundState carries no created-at" limitation left it
+    // with.
+    usePageTitle(session.state ? roundLabel({ courseName: session.state.card.courseName, playedAt: session.state.playedAtMs }) : undefined);
 
     // session.state is only guaranteed once hydrated() is true (RoundSessionView's own
     // contract, mirroring @swng/client's render guard) — checked together so TS narrows

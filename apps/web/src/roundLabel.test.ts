@@ -10,23 +10,20 @@ const SAT_JUL_12_0758 = Date.UTC(2025, 6, 12, 7, 58);
 
 describe("roundLabel", () => {
   it("renders course + date — the canonical 'Casa Verde GC · Sat, Jul 12' (spec §5)", () => {
-    expect(roundLabel({ courseName: "Casa Verde GC", createdAt: SAT_JUL_12_0758 }, { timeZone: "UTC" })).toBe("Casa Verde GC · Sat, Jul 12");
+    expect(roundLabel({ courseName: "Casa Verde GC", playedAt: SAT_JUL_12_0758 }, { timeZone: "UTC" })).toBe("Casa Verde GC · Sat, Jul 12");
   });
 
   it("appends the tee time when withTime is passed (the same-course-same-day disambiguator)", () => {
-    expect(roundLabel({ courseName: "Casa Verde GC", createdAt: SAT_JUL_12_0758 }, { withTime: true, timeZone: "UTC" })).toBe("Casa Verde GC · Sat, Jul 12 · 7:58a");
+    expect(roundLabel({ courseName: "Casa Verde GC", playedAt: SAT_JUL_12_0758 }, { withTime: true, timeZone: "UTC" })).toBe("Casa Verde GC · Sat, Jul 12 · 7:58a");
   });
 
-  it("renders just the course name when createdAt is absent (old projection rows, pre-backfill)", () => {
-    expect(roundLabel({ courseName: "Casa Verde GC" })).toBe("Casa Verde GC");
-    // withTime has nothing to append to a day that isn't there — still the bare course name.
-    expect(roundLabel({ courseName: "Casa Verde GC" }, { withTime: true, timeZone: "UTC" })).toBe("Casa Verde GC");
-  });
+  // round-played-date spec 2026-08-01 §6: playedAt is REQUIRED now — there is no round without
+  // one, so the old "no createdAt → bare course name" branch (and its test) is deleted outright.
 
   it("formats afternoon / midnight / noon times with a single-letter meridiem", () => {
-    expect(roundLabel({ courseName: "X", createdAt: Date.UTC(2025, 6, 12, 14, 5) }, { withTime: true, timeZone: "UTC" })).toBe("X · Sat, Jul 12 · 2:05p");
-    expect(roundLabel({ courseName: "X", createdAt: Date.UTC(2025, 6, 12, 0, 0) }, { withTime: true, timeZone: "UTC" })).toBe("X · Sat, Jul 12 · 12:00a");
-    expect(roundLabel({ courseName: "X", createdAt: Date.UTC(2025, 6, 12, 12, 0) }, { withTime: true, timeZone: "UTC" })).toBe("X · Sat, Jul 12 · 12:00p");
+    expect(roundLabel({ courseName: "X", playedAt: Date.UTC(2025, 6, 12, 14, 5) }, { withTime: true, timeZone: "UTC" })).toBe("X · Sat, Jul 12 · 2:05p");
+    expect(roundLabel({ courseName: "X", playedAt: Date.UTC(2025, 6, 12, 0, 0) }, { withTime: true, timeZone: "UTC" })).toBe("X · Sat, Jul 12 · 12:00a");
+    expect(roundLabel({ courseName: "X", playedAt: Date.UTC(2025, 6, 12, 12, 0) }, { withTime: true, timeZone: "UTC" })).toBe("X · Sat, Jul 12 · 12:00p");
   });
 
   // The reason this fix exists: a round everyone played Friday evening (Pacific) is Saturday in
@@ -36,36 +33,47 @@ describe("roundLabel", () => {
   // wins, never UTC.
   it("renders the pinned zone's day, not UTC's, for a Saturday-in-UTC instant that is still Friday locally", () => {
     const satUtcFriNy = Date.UTC(2025, 6, 12, 2, 0);
-    expect(roundLabel({ courseName: "Casa Verde GC", createdAt: satUtcFriNy }, { timeZone: "UTC" })).toBe("Casa Verde GC · Sat, Jul 12");
-    expect(roundLabel({ courseName: "Casa Verde GC", createdAt: satUtcFriNy }, { timeZone: "America/New_York" })).toBe("Casa Verde GC · Fri, Jul 11");
+    expect(roundLabel({ courseName: "Casa Verde GC", playedAt: satUtcFriNy }, { timeZone: "UTC" })).toBe("Casa Verde GC · Sat, Jul 12");
+    expect(roundLabel({ courseName: "Casa Verde GC", playedAt: satUtcFriNy }, { timeZone: "America/New_York" })).toBe("Casa Verde GC · Fri, Jul 11");
   });
 
   it("renders the tee time on the pinned zone's clock, not UTC's", () => {
     // 07:58 UTC is 03:58 (a.m.) in America/New_York (UTC-4 in July) — the group's own wall clock,
     // not the UTC "7:58a".
-    expect(roundLabel({ courseName: "X", createdAt: SAT_JUL_12_0758 }, { withTime: true, timeZone: "America/New_York" })).toBe("X · Sat, Jul 12 · 3:58a");
+    expect(roundLabel({ courseName: "X", playedAt: SAT_JUL_12_0758 }, { withTime: true, timeZone: "America/New_York" })).toBe("X · Sat, Jul 12 · 3:58a");
   });
 
   it("formats in the environment's local zone when no timeZone is given (the product default)", () => {
     // Deterministic without pinning the worker's TZ: omitting timeZone must equal passing the
     // environment's own resolved zone explicitly — i.e. the default IS local.
     const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    expect(roundLabel({ courseName: "X", createdAt: SAT_JUL_12_0758 }, { withTime: true })).toBe(roundLabel({ courseName: "X", createdAt: SAT_JUL_12_0758 }, { withTime: true, timeZone: localZone }));
+    expect(roundLabel({ courseName: "X", playedAt: SAT_JUL_12_0758 }, { withTime: true })).toBe(roundLabel({ courseName: "X", playedAt: SAT_JUL_12_0758 }, { withTime: true, timeZone: localZone }));
+  });
+
+  // round-played-date spec 2026-08-01 §6: "the played day, not the day the record was created" —
+  // a fixture whose playedAt DIVERGES from what the old createdAt-based code would have read (a
+  // round entered several days after it was played, exactly the back-dating this arc exists
+  // for). "now" is frozen so "three days before now" is deterministic and unambiguous regardless
+  // of when this suite runs.
+  it("renders the played day, not the day the record was created", () => {
+    const NOW = Date.UTC(2026, 6, 15, 12, 0); // Wed, Jul 15 2026, noon UTC
+    const threeDaysBefore = NOW - 3 * 24 * 60 * 60 * 1_000; // Sun, Jul 12 2026
+    expect(roundLabel({ courseName: "Casa Verde GC", playedAt: threeDaysBefore }, { timeZone: "UTC" })).toBe("Casa Verde GC · Sun, Jul 12");
   });
 });
 
 describe("roundDayKey — the same-course-same-day collision key", () => {
   it("two rounds at the same course on the same day (same zone) share a key; a different day does not", () => {
-    const morning = roundDayKey({ courseName: "Casa Verde GC", createdAt: Date.UTC(2025, 6, 12, 7, 58) }, { timeZone: "UTC" });
-    const afternoon = roundDayKey({ courseName: "Casa Verde GC", createdAt: Date.UTC(2025, 6, 12, 15, 30) }, { timeZone: "UTC" });
-    const nextDay = roundDayKey({ courseName: "Casa Verde GC", createdAt: Date.UTC(2025, 6, 13, 7, 58) }, { timeZone: "UTC" });
+    const morning = roundDayKey({ courseName: "Casa Verde GC", playedAt: Date.UTC(2025, 6, 12, 7, 58) }, { timeZone: "UTC" });
+    const afternoon = roundDayKey({ courseName: "Casa Verde GC", playedAt: Date.UTC(2025, 6, 12, 15, 30) }, { timeZone: "UTC" });
+    const nextDay = roundDayKey({ courseName: "Casa Verde GC", playedAt: Date.UTC(2025, 6, 13, 7, 58) }, { timeZone: "UTC" });
     expect(morning).toBe(afternoon);
     expect(morning).not.toBe(nextDay);
   });
 
   it("different courses on the same day do not collide", () => {
-    const casa = roundDayKey({ courseName: "Casa Verde GC", createdAt: Date.UTC(2025, 6, 12, 7, 58) }, { timeZone: "UTC" });
-    const pebble = roundDayKey({ courseName: "Pebble Beach", createdAt: Date.UTC(2025, 6, 12, 7, 58) }, { timeZone: "UTC" });
+    const casa = roundDayKey({ courseName: "Casa Verde GC", playedAt: Date.UTC(2025, 6, 12, 7, 58) }, { timeZone: "UTC" });
+    const pebble = roundDayKey({ courseName: "Pebble Beach", playedAt: Date.UTC(2025, 6, 12, 7, 58) }, { timeZone: "UTC" });
     expect(casa).not.toBe(pebble);
   });
 
@@ -74,28 +82,27 @@ describe("roundDayKey — the same-course-same-day collision key", () => {
     // so its collision key must differ between the two — otherwise a label rendering local days
     // would group on UTC days and append the tee time to the wrong pairs.
     const satUtcFriNy = Date.UTC(2025, 6, 12, 2, 0);
-    const utcKey = roundDayKey({ courseName: "Casa Verde GC", createdAt: satUtcFriNy }, { timeZone: "UTC" });
-    const nyKey = roundDayKey({ courseName: "Casa Verde GC", createdAt: satUtcFriNy }, { timeZone: "America/New_York" });
+    const utcKey = roundDayKey({ courseName: "Casa Verde GC", playedAt: satUtcFriNy }, { timeZone: "UTC" });
+    const nyKey = roundDayKey({ courseName: "Casa Verde GC", playedAt: satUtcFriNy }, { timeZone: "America/New_York" });
     expect(utcKey).not.toBe(nyKey);
   });
 
   it("uses the environment's local zone when no timeZone is given (matching roundLabel's default)", () => {
     const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const instant = Date.UTC(2025, 6, 12, 7, 58);
-    expect(roundDayKey({ courseName: "Casa Verde GC", createdAt: instant })).toBe(roundDayKey({ courseName: "Casa Verde GC", createdAt: instant }, { timeZone: localZone }));
+    expect(roundDayKey({ courseName: "Casa Verde GC", playedAt: instant })).toBe(roundDayKey({ courseName: "Casa Verde GC", playedAt: instant }, { timeZone: localZone }));
   });
 
-  it("is undefined without a createdAt — a round with no day can't collide with anything", () => {
-    expect(roundDayKey({ courseName: "Casa Verde GC" })).toBeUndefined();
-  });
+  // round-played-date spec 2026-08-01 §6: playedAt is REQUIRED now, so there is no "no day" case
+  // left — the old "undefined without a createdAt" test is deleted outright, matching roundLabel's
+  // own deleted branch above.
 });
 
 describe("dayCollisionChecker — in-list same-course-same-day flagging", () => {
-  const casaMorning = { courseName: "Casa Verde GC", createdAt: Date.UTC(2025, 6, 12, 7, 58) };
-  const casaAfternoon = { courseName: "Casa Verde GC", createdAt: Date.UTC(2025, 6, 12, 15, 30) };
-  const casaNextDay = { courseName: "Casa Verde GC", createdAt: Date.UTC(2025, 6, 13, 7, 58) };
-  const pebble = { courseName: "Pebble Beach", createdAt: Date.UTC(2025, 6, 12, 7, 58) };
-  const noDate = { courseName: "Casa Verde GC" };
+  const casaMorning = { courseName: "Casa Verde GC", playedAt: Date.UTC(2025, 6, 12, 7, 58) };
+  const casaAfternoon = { courseName: "Casa Verde GC", playedAt: Date.UTC(2025, 6, 12, 15, 30) };
+  const casaNextDay = { courseName: "Casa Verde GC", playedAt: Date.UTC(2025, 6, 13, 7, 58) };
+  const pebble = { courseName: "Pebble Beach", playedAt: Date.UTC(2025, 6, 12, 7, 58) };
 
   it("flags both rounds that share course AND day", () => {
     const collides = dayCollisionChecker([casaMorning, casaAfternoon], { timeZone: "UTC" });
@@ -115,15 +122,10 @@ describe("dayCollisionChecker — in-list same-course-same-day flagging", () => 
     expect(collides(pebble)).toBe(false);
   });
 
-  it("a round with no createdAt never collides", () => {
-    const collides = dayCollisionChecker([noDate, { courseName: "Casa Verde GC" }], { timeZone: "UTC" });
-    expect(collides(noDate)).toBe(false);
-  });
-
   it("defaults to the local zone (matches an explicit local timeZone)", () => {
     const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const a = { courseName: "X", createdAt: Date.UTC(2025, 6, 12, 12, 0) };
-    const b = { courseName: "X", createdAt: Date.UTC(2025, 6, 12, 13, 0) };
+    const a = { courseName: "X", playedAt: Date.UTC(2025, 6, 12, 12, 0) };
+    const b = { courseName: "X", playedAt: Date.UTC(2025, 6, 12, 13, 0) };
     expect(dayCollisionChecker([a, b])(a)).toBe(dayCollisionChecker([a, b], { timeZone: localZone })(a));
   });
 });

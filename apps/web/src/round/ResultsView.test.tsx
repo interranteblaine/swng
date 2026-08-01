@@ -245,6 +245,7 @@ describe("ResultsView — WS-pushed final (this tab never called finalizeRound i
       id: roundId("r-archive-term"),
       status: "final",
       card: fixtureLinks18,
+      playedAtMs: 1_000,
       participants: [
         { golferId: ann, name: "Ann", tee: "white", strokes: 8 },
         { golferId: bo, name: "Bo", tee: "white", strokes: 2 },
@@ -277,6 +278,7 @@ describe("ResultsView — WS-pushed final (this tab never called finalizeRound i
       id: roundId("r1"),
       status: "final",
       card: fixtureLinks18,
+      playedAtMs: 1_000,
       participants: [{ golferId: ann, name: "Ann", tee: "white", strokes: 8 }],
       games: [],
       cells: { [cellKey(ann, 1)]: cellValue },
@@ -304,6 +306,7 @@ describe("ResultsView — WS-pushed final (this tab never called finalizeRound i
       id: roundId("r-full"),
       status: "final",
       card: fixtureLinks18,
+      playedAtMs: 1_000,
       participants: [{ golferId: ann, name: "Ann", tee: "white", strokes: 9 }],
       games: [],
       cells,
@@ -332,6 +335,7 @@ describe("ResultsView — no claim affordance (accounts-only)", () => {
     id: roundId("r-claim"),
     status: "final",
     card: fixtureLinks18,
+    playedAtMs: 1_000,
     participants: [
       { golferId: ann, name: "Ann", tee: "white", strokes: 8 },
       { golferId: bo, name: "Bo", tee: "white", strokes: 2 },

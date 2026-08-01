@@ -46,7 +46,11 @@ const renderProfilePage = () =>
     </MemoryRouter>,
   );
 
-const lineWithScore = (roundIdSuffix: string, score: number): GolferRoundLine => ({
+// `playedAt` is REQUIRED on a /me/record history row (round-played-date spec 2026-08-01 §6) —
+// same real-zod-schema discipline the file's own top comment names: a fixture missing it doesn't
+// fail to compile (GolferRoundLine, the base domain type, carries no wire fields at all), it
+// fails to PARSE at runtime and silently empties the page via the effect's own swallowed catch.
+const lineWithScore = (roundIdSuffix: string, score: number): GolferRoundLine & { readonly playedAt: number } => ({
   roundId: roundId(`round-${roundIdSuffix}`),
   courseName: "Pebble Beach",
   tee: "white",
@@ -55,6 +59,7 @@ const lineWithScore = (roundIdSuffix: string, score: number): GolferRoundLine =>
   strokes: 8,
   score,
   distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
+  playedAt: 1_000,
 });
 
 beforeEach(() => {
@@ -334,7 +339,9 @@ describe("ProfilePage — signed in", () => {
   // is the mean of exactly these numbers, so the subtraction is checkable by hand on one screen.
   it("history rows lead with the score and its vs-par figure, a nine stating its doubled contribution, and no differential", async () => {
     signIn();
-    const eighteen: GolferRoundLine = {
+    // playedAt is REQUIRED on a /me/record history row (round-played-date spec 2026-08-01 §6) —
+    // same real-zod-schema discipline this file's top comment names.
+    const eighteen: GolferRoundLine & { readonly playedAt: number } = {
       roundId: roundId("round-18"),
       courseName: "Casa Verde GC",
       tee: "white",
@@ -343,8 +350,9 @@ describe("ProfilePage — signed in", () => {
       strokes: 9,
       score: 81,
       distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
+      playedAt: 2_000,
     };
-    const nine: GolferRoundLine = {
+    const nine: GolferRoundLine & { readonly playedAt: number } = {
       roundId: roundId("round-9"),
       courseName: "Sandy Hollow Nine",
       tee: "white",
@@ -353,6 +361,7 @@ describe("ProfilePage — signed in", () => {
       strokes: 5,
       score: 47,
       distribution: { eagles: 0, birdies: 0, pars: 4, bogeys: 3, doublePlus: 2 },
+      playedAt: 1_000,
     };
     const history = [eighteen, nine];
     vi.stubGlobal(

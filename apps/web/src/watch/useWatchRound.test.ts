@@ -32,7 +32,7 @@ const buildServerLog = (): RoundEvent[] => {
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN_ID, BO_ID] };
   const events: RoundEvent[] = [
-    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: 1_000, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: ANN_ID, name: "Ann", tee: "white", strokes: 0 }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: BO_ID, name: "Bo", tee: "white", strokes: 0 }, authorId: BO_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
@@ -57,9 +57,10 @@ describe("useWatchRound", () => {
     expect(result.current.state?.participants).toHaveLength(2);
     expect(result.current.games).toHaveLength(1);
     expect(result.current.games[0]?.kind).toBe("stableford");
-    // The round's created-at (buildServerLog's genesis wallMs) is exposed for WatchPage's
-    // canonical course + date header (accounts-only identity spec §5).
-    expect(result.current.createdAt).toBe(1_000);
+    // The round's played-at (buildServerLog's genesis playedAtMs) is on the folded RoundState —
+    // WatchPage's canonical course + date header reads it straight from there (round-played-date
+    // spec 2026-08-01 §6), not from a second field on this hook's own view.
+    expect(result.current.state?.playedAtMs).toBe(1_000);
   });
 
   it("never calls transport.push — a spectator authors nothing", async () => {

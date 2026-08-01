@@ -271,12 +271,12 @@ describe("RecordSections", () => {
 // The chart geometry survives the model change intact (it was always presentation math): a
 // 20-round drawn window (every point still folds the whole career — the window is a VIEW), a
 // "nice" whole-number axis with a min-span honesty rule, a fluid (no-frame) svg, endpoint-emphasis
-// dots, and date anchors joined against `history` (createdAt preferred over finalizedAt). What
-// CHANGED is the sign convention on the tick labels: `formatOverPar`, not the retired
-// plus-handicap formatter.
+// dots, and date anchors joined against `history`'s own `playedAt` (round-played-date spec
+// 2026-08-01 §6 — WHEN THE GOLF HAPPENED, no preference order anymore). What CHANGED is the sign
+// convention on the tick labels: `formatOverPar`, not the retired plus-handicap formatter.
 describe("RecordSections — average-over-time chart geometry", () => {
-  type DatedLine = GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number };
-  const dated = (row: GolferRoundLine, extra: { readonly finalizedAt?: number; readonly createdAt?: number } = {}): DatedLine => ({ ...row, ...extra });
+  type DatedLine = GolferRoundLine & { readonly playedAt?: number };
+  const dated = (row: GolferRoundLine, extra: { readonly playedAt?: number } = {}): DatedLine => ({ ...row, ...extra });
   const chartHistory = (n: number): GolferRoundLine[] => Array.from({ length: n }, (_, i) => line(String(i + 1)));
   const descending = (n: number, from: number): number[] => Array.from({ length: n }, (_, i) => from - i);
 
@@ -358,14 +358,10 @@ describe("RecordSections — average-over-time chart geometry", () => {
     expect(screen.queryByText(/●/)).toBeNull();
   });
 
-  it("anchors render the first and last DRAWN rounds' dates, preferring createdAt over finalizedAt", () => {
+  it("anchors render the first and last DRAWN rounds' playedAt dates", () => {
     const base = chartHistory(9);
     const history: DatedLine[] = base.map((row, i) =>
-      i === 0
-        ? dated(row, { createdAt: Date.UTC(2026, 0, 5, 12, 0), finalizedAt: Date.UTC(2026, 1, 20, 12, 0) })
-        : i === 8
-          ? dated(row, { createdAt: Date.UTC(2026, 2, 10, 12, 0), finalizedAt: Date.UTC(2026, 3, 1, 12, 0) })
-          : dated(row),
+      i === 0 ? dated(row, { playedAt: Date.UTC(2026, 0, 5, 12, 0) }) : i === 8 ? dated(row, { playedAt: Date.UTC(2026, 2, 10, 12, 0) }) : dated(row),
     );
     renderSections({ ...ZERO_METRICS, averageHistory: averagePoints(base, descending(9, 30)) }, history);
 
@@ -373,12 +369,12 @@ describe("RecordSections — average-over-time chart geometry", () => {
     // exactly as the component does) so the expectation is derived, not hand-typed month text.
     const fmt = (ms: number) => new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(ms));
     const anchors = screen.getAllByTestId("average-anchor").map((el) => el.textContent);
-    expect(anchors).toEqual([fmt(Date.UTC(2026, 0, 5, 12, 0)), fmt(Date.UTC(2026, 2, 10, 12, 0))]); // createdAt, never each round's own finalizedAt
+    expect(anchors).toEqual([fmt(Date.UTC(2026, 0, 5, 12, 0)), fmt(Date.UTC(2026, 2, 10, 12, 0))]);
   });
 
   it("no anchor renders when either drawn endpoint's date is missing — both-or-neither", () => {
     const base = chartHistory(9);
-    const history: DatedLine[] = base.map((row, i) => (i === 0 ? dated(row, { createdAt: Date.UTC(2026, 0, 5, 12, 0) }) : row)); // the last round (i===8) carries no date at all
+    const history: DatedLine[] = base.map((row, i) => (i === 0 ? dated(row, { playedAt: Date.UTC(2026, 0, 5, 12, 0) }) : row)); // the last round (i===8) carries no date at all
     renderSections({ ...ZERO_METRICS, averageHistory: averagePoints(base, descending(9, 30)) }, history);
 
     expect(screen.queryAllByTestId("average-anchor")).toHaveLength(0);
@@ -387,7 +383,7 @@ describe("RecordSections — average-over-time chart geometry", () => {
   it("two anchors spanning different years both include the year", () => {
     const base = chartHistory(9);
     const history: DatedLine[] = base.map((row, i) =>
-      i === 0 ? dated(row, { createdAt: Date.UTC(2024, 5, 15, 12, 0) }) : i === 8 ? dated(row, { createdAt: Date.UTC(2026, 5, 15, 12, 0) }) : row,
+      i === 0 ? dated(row, { playedAt: Date.UTC(2024, 5, 15, 12, 0) }) : i === 8 ? dated(row, { playedAt: Date.UTC(2026, 5, 15, 12, 0) }) : row,
     );
     renderSections({ ...ZERO_METRICS, averageHistory: averagePoints(base, descending(9, 30)) }, history);
 

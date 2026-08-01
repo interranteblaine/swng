@@ -137,14 +137,16 @@ test.describe.serial("golden season gate — counted rounds, standings-on-read, 
     // each member's OWN StoredLine[] (never the together-archives), so its lines are built here
     // directly from the SAME 12 settled archives via archiveGolferLine (never a hand-rolled line
     // shape — the "the fold is the derivation tool" rule) plus synthetic chronology —
-    // finalizedAtMs = the deck's own round order (0..11), no createdAtMs (playedAtMs then falls
-    // back to finalizedAtMs, scoreboard.ts's own rule). The result is asserted against
-    // frozenScoreboardExpectation (crewSeasonDeck.ts) — hand-frozen from running this exact fold
-    // ONCE and reading its printed output, never adjusted to match a live run.
+    // finalizedAtMs = playedAtMs = the deck's own round order (0..11); StoredLine's own
+    // playedAtMs is REQUIRED now (round-played-date spec 2026-08-01 §5 deleted the
+    // createdAtMs-falls-back-to-finalizedAtMs helper scoreboard.ts used to carry), so both are
+    // stamped equal here rather than left to a fallback that no longer exists. The result is
+    // asserted against frozenScoreboardExpectation (crewSeasonDeck.ts) — hand-frozen from running
+    // this exact fold ONCE and reading its printed output, never adjusted to match a live run.
     const archives = computeLocalArchives(placeholderIds);
     const members = (["al", "bo", "cy", "dee"] as const).map((role) => ({
       golferId: placeholderIds[role],
-      lines: archives.map((archive, i): StoredLine => ({ ...archiveGolferLine(archive, placeholderIds[role]), finalizedAtMs: i })),
+      lines: archives.map((archive, i): StoredLine => ({ ...archiveGolferLine(archive, placeholderIds[role]), finalizedAtMs: i, playedAtMs: i })),
     }));
     const scoreboard = crewScoreboard(members, { startMs: 0 });
     expect(scoreboard).toEqual(frozenScoreboardExpectation(placeholderIds));

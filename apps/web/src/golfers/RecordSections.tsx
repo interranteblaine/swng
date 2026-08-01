@@ -22,8 +22,11 @@ import { useContainerWidth } from "../ui/useContainerWidth";
 // handicap.) The svg is FLUID (`useContainerWidth`) — it renders at the column's real CSS-pixel
 // width, no card frame (the chart sits directly on the page). The last point draws larger
 // (endpoint emphasis), and the axis anchors the first/last DRAWN round's date at the bottom
-// corners (a render JOIN against `history`, `createdAt` preferred over `finalizedAt`, shown only
-// when BOTH ends have a date, the year appended only when the two ends cross a year boundary).
+// corners (a render JOIN against `history`'s own `playedAt` — round-played-date spec 2026-08-01
+// §6, WHEN THE GOLF HAPPENED, the one date every round-representing list in this app renders now
+// — shown only when BOTH ends resolve a history row, the year appended only when the two ends
+// cross a year boundary; there is no preference order to state anymore, unlike the old chain that
+// tried the record-creation instant, then the finalize instant).
 // This component derives no golf result — it renders what the wire already computed. Below
 // AVERAGE_HISTORY_MIN_ROUNDS rounds the chart is GATED, not drawn — a 1-3 point sparkline is
 // noise, not a trend. A second gate covers the case the first one misses: 8+ rounds played but
@@ -63,10 +66,13 @@ function AverageOverTime({
   readonly roundsPlayed: number;
   readonly person: "your" | "their";
   // The render JOIN for anchor dates — the same already-fetched response array RecordSections
-  // holds (the bests/milestones precedent). GolferRoundLine plus the two OPTIONAL wire fields; a
-  // plain GolferRoundLine (missing both) is still structurally assignable here, so
-  // RecordSections's own `history` prop type doesn't need to change.
-  readonly history: readonly (GolferRoundLine & { readonly finalizedAt?: number; readonly createdAt?: number })[];
+  // holds (the bests/milestones precedent). GolferRoundLine plus the OPTIONAL wire field this
+  // component actually reads; a plain GolferRoundLine (missing it) is still structurally
+  // assignable here, so RecordSections's own `history` prop type doesn't need to change. Nothing
+  // reads the old record-creation/finalize-instant fields anymore (round-played-date spec
+  // 2026-08-01 §6 — a web-local type mirroring a wire field it never touches is the drift this
+  // arc removes), so neither survives in this local extension.
+  readonly history: readonly (GolferRoundLine & { readonly playedAt?: number })[];
 }) {
   // Person-aware copy (navigation arc review finding: RecordSections rendered second-person text
   // verbatim on GolferPage, addressed to a viewer about someone else's rounds). The "their" arm
@@ -132,13 +138,15 @@ function AverageOverTime({
   const plotted = drawn.map((point, i) => ({ x: x(i), y: y(point.average) }));
   const line = plotted.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
 
-  // Date anchors: a render JOIN of the drawn endpoints' roundIds against `history`, createdAt
-  // preferred over finalizedAt (the round's own wall-clock start over its finalize time). Both
-  // ends must resolve a date, or neither anchor renders — a lone anchor implies a span the chart
-  // isn't actually showing.
+  // Date anchors: a render JOIN of the drawn endpoints' roundIds against `history`'s own
+  // `playedAt` — WHEN THE GOLF HAPPENED, the one date (round-played-date spec 2026-08-01 §6), no
+  // preference order to state anymore. Both ends must resolve a date, or neither anchor renders —
+  // a lone anchor implies a span the chart isn't actually showing. `row` itself (not `playedAt`)
+  // is what can be missing here — a roundId with no matching history row, the same "stale fold
+  // outrunning the card" case bestLine/milestoneLine below guard against.
   const anchorDate = (roundId: RoundId): number | undefined => {
     const row = history.find((entry) => entry.roundId === roundId);
-    return row?.createdAt ?? row?.finalizedAt;
+    return row?.playedAt;
   };
   const firstMs = drawn.length > 0 ? anchorDate(drawn[0]!.roundId) : undefined;
   const lastMs = drawn.length > 0 ? anchorDate(drawn[drawn.length - 1]!.roundId) : undefined;

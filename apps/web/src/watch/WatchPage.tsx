@@ -45,7 +45,7 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
     const view = useWatchRound(roundId, token);
     // Re-runs once the round hydrates (usePageTitle's own title-prop-change contract) — "swng"
     // while loading, then the same course + date designation the page's own header renders below.
-    usePageTitle(view.state ? roundLabel({ courseName: view.state.card.courseName, createdAt: view.createdAt }) : undefined);
+    usePageTitle(view.state ? roundLabel({ courseName: view.state.card.courseName, playedAt: view.state.playedAtMs }) : undefined);
 
     if (!view.hydrated || !view.state) {
       // Papercut 14 (M9 hardening): a mistyped/dead link's every pull fails identically to a
@@ -92,7 +92,7 @@ export const createWatchPage = (useWatchRound: UseWatchRound = defaultUseWatchRo
     // ResultsView roster/Final totals) renders plain — a spectator's tree turns golfer links off
     // at the root via PlainNamesContext, spec §4c.2. Course links stay on: they're public.
     const courseName = view.state.card.courseName;
-    const label = roundLabel({ courseName, createdAt: view.createdAt });
+    const label = roundLabel({ courseName, playedAt: view.state.playedAtMs });
     const dateSuffix = label.slice(courseName.length);
     const courseLinkId = view.state.card.source?.courseId;
 

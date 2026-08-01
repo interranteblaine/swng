@@ -276,6 +276,12 @@ export default [
                 "settleRound",
                 "resultOf",
                 "unresolvedGames",
+                // when a round was played (round-played-date spec 2026-08-01 §3c/§6) — task 6
+                // re-exports this through @swng/client for the narrow case of a raw event log
+                // with no folded RoundState yet; wherever a RoundState already exists, read its
+                // own `playedAtMs` field instead (reduceRound already calls this exact function
+                // to produce it, so that's a second READ of the one answer, not a second rule).
+                "playedAtMsOf",
                 "scoreStrokePlay",
                 "scoreStableford",
                 "scoreSkins",

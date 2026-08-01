@@ -29,6 +29,7 @@ const twoPlayerState = (overrides: Partial<RoundState> = {}): RoundState => ({
   id: roundId("round-1"),
   status: "live",
   card: fixtureLinks,
+  playedAtMs: 1_000,
   participants: [participant(ANN, "Ann", "white", 8), participant(BO, "Bo", "white", 4)],
   games: [],
   cells: {},
@@ -173,6 +174,7 @@ describe("ScorecardGrid — round-stroke dots (the standard card)", () => {
       id: roundId("round-4"),
       status: "live",
       card: fixtureLinks18,
+      playedAtMs: 1_000,
       participants: [ann0, bo19],
       games: [],
       cells: {},
@@ -344,6 +346,7 @@ describe("ScorecardGrid — totals (OUT/IN/TOT)", () => {
     id: roundId("round-totals"),
     status: "live",
     card: fixtureLinks18,
+    playedAtMs: 1_000,
     participants: [participant(BLAINE, "Blaine", "white", 20)],
     games: [],
     cells: fullCardCells,
@@ -384,7 +387,7 @@ describe("ScorecardGrid — totals (OUT/IN/TOT)", () => {
     for (const hole of fixtureWhite18.holes) {
       cells[cellKey(ANN, hole.number)] = hole.number === 3 ? scoreCell({ kind: "picked-up" }, ANN) : scoreCell({ kind: "strokes", strokes: parOf(hole.number) }, ANN);
     }
-    const state: RoundState = { id: roundId("round-scoped-dash"), status: "live", card: fixtureLinks18, participants: [ann2], games: [], cells, terminatedGameIds: new Set() };
+    const state: RoundState = { id: roundId("round-scoped-dash"), status: "live", card: fixtureLinks18, playedAtMs: 1_000, participants: [ann2], games: [], cells, terminatedGameIds: new Set() };
 
     render(<ScorecardGrid state={state} recordScore={() => {}} />);
 

@@ -178,7 +178,7 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
     credentialStore.save(roundId("device-round"), { token: "t1", golferId: golferId("ann"), name: "Device Round", joinCode: "AAA111" });
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000, playedAt: 5_000 }] });
 
     renderHome();
 
@@ -201,15 +201,15 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
     const afternoonAt = Date.UTC(2025, 6, 12, 18, 0);
     mockedGetMyLiveRounds.mockResolvedValue({
       rounds: [
-        { roundId: roundId("walker-1"), courseName: "Walker", joinedAt: 5_000, createdAt: morningAt },
-        { roundId: roundId("walker-2"), courseName: "Walker", joinedAt: 6_000, createdAt: afternoonAt },
+        { roundId: roundId("walker-1"), courseName: "Walker", joinedAt: 5_000, playedAt: morningAt },
+        { roundId: roundId("walker-2"), courseName: "Walker", joinedAt: 6_000, playedAt: afternoonAt },
       ],
     });
 
     renderHome();
 
-    const morning = await screen.findByRole("link", { name: roundLabel({ courseName: "Walker", createdAt: morningAt }, { withTime: true }) });
-    const afternoon = screen.getByRole("link", { name: roundLabel({ courseName: "Walker", createdAt: afternoonAt }, { withTime: true }) });
+    const morning = await screen.findByRole("link", { name: roundLabel({ courseName: "Walker", playedAt: morningAt }, { withTime: true }) });
+    const afternoon = screen.getByRole("link", { name: roundLabel({ courseName: "Walker", playedAt: afternoonAt }, { withTime: true }) });
     expect(morning.getAttribute("href")).toBe("/round/walker-1");
     expect(afternoon.getAttribute("href")).toBe("/round/walker-2");
     // The two labels are genuinely distinct (the tee time did its disambiguating job)...
@@ -225,16 +225,16 @@ describe("HomePage — your rounds by identity (Task 13)", () => {
     const day2At = Date.UTC(2025, 6, 13, 12, 0);
     mockedGetMyLiveRounds.mockResolvedValue({
       rounds: [
-        { roundId: roundId("walker-day1"), courseName: "Walker", joinedAt: 5_000, createdAt: day1At },
-        { roundId: roundId("walker-day2"), courseName: "Walker", joinedAt: 6_000, createdAt: day2At },
+        { roundId: roundId("walker-day1"), courseName: "Walker", joinedAt: 5_000, playedAt: day1At },
+        { roundId: roundId("walker-day2"), courseName: "Walker", joinedAt: 6_000, playedAt: day2At },
       ],
     });
 
     renderHome();
 
     // Different days → distinguished by date alone, no tee time (roundLabel with no withTime).
-    const day1 = await screen.findByRole("link", { name: roundLabel({ courseName: "Walker", createdAt: day1At }) });
-    const day2 = screen.getByRole("link", { name: roundLabel({ courseName: "Walker", createdAt: day2At }) });
+    const day1 = await screen.findByRole("link", { name: roundLabel({ courseName: "Walker", playedAt: day1At }) });
+    const day2 = screen.getByRole("link", { name: roundLabel({ courseName: "Walker", playedAt: day2At }) });
     expect(day1.getAttribute("href")).toBe("/round/walker-day1");
     expect(day2.getAttribute("href")).toBe("/round/walker-day2");
     expect(day1.textContent).not.toBe(day2.textContent);
@@ -276,7 +276,7 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
   it("no local credential: mints a token, stores it via credentialStore, and enters — no raw Link navigation", async () => {
     const idToken = signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000, playedAt: 5_000 }] });
     mockedMintParticipantToken.mockResolvedValue({ roundId: roundId("live-1"), token: "fresh-token", golferId: golferId("ann-g"), joinCode: "FRESH1" });
 
     renderHome();
@@ -296,7 +296,7 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
     credentialStore.save(roundId("live-1"), { token: "existing-token", golferId: golferId("ann-g"), name: "Ann G", joinCode: "XYZ123" });
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000, playedAt: 5_000 }] });
 
     renderHome();
     const link = await screen.findByRole("link", { name: /casa verde gc/i });
@@ -312,7 +312,7 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
   it("a 403 not-a-participant surfaces human copy, never the raw server text", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000, playedAt: 5_000 }] });
     mockedMintParticipantToken.mockRejectedValue(new ApiError("not-a-participant", 403, "golfer ann-g is not a participant in round live-1"));
 
     renderHome();
@@ -330,7 +330,7 @@ describe("HomePage — tapping a live round re-mints a scoring credential when t
   it("a 409 round-final surfaces finished copy with an archive link and removes the row from live rounds", async () => {
     signIn();
     mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
-    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000, playedAt: 5_000 }] });
     mockedMintParticipantToken.mockRejectedValue(new ApiError("round-final", 409, "round live-1 is finalized"));
 
     renderHome();
@@ -382,7 +382,7 @@ describe("HomePage — GET /me loading window never flashes the device list (fix
         resolveGetMe = resolve;
       }),
     );
-    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000 }] });
+    mockedGetMyLiveRounds.mockResolvedValue({ rounds: [{ roundId: roundId("live-1"), courseName: "Casa Verde GC", joinedAt: 5_000, playedAt: 5_000 }] });
 
     renderHome();
     expect(screen.getByRole("status", { name: /loading your rounds/i })).toBeTruthy();
@@ -481,6 +481,7 @@ describe("HomePage — the switchboard (Task 5)", () => {
     score: 82,
     distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
     finalizedAt,
+    playedAt: finalizedAt,
   });
 
   it("recent rounds render via the SAME history row, capped to 3 and linking the round's permanent address (never /archive), plus a pointer to your profile", async () => {

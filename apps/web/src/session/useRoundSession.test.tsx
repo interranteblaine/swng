@@ -23,7 +23,7 @@ const buildServerLog = (): RoundEvent[] => {
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN_ID] };
   const events: RoundEvent[] = [
-    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: 1_000, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: ANN_ID, name: "Ann", tee: "white", strokes: 0 }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "game-added", config: stableford, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },

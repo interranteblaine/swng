@@ -18,12 +18,18 @@ export interface WatchRoundView {
   readonly error: boolean;
   readonly state: RoundState | undefined;
   readonly games: readonly GameState[];
-  // The round's created-at (the round-created event's own wallMs), so WatchPage can render the
-  // canonical course + date designation (accounts-only identity spec §5). Derived here because
-  // the hook already holds the raw events and RoundState itself carries no created timestamp;
-  // `undefined` until genesis has been pulled (same window as `state`).
-  readonly createdAt: number | undefined;
 }
+
+// No separate "when was this round played" field on WatchRoundView (round-played-date spec
+// 2026-08-01 §6): `RoundState.playedAtMs` already carries it (domain's playedAtMsOf, called once
+// by reduceRound inside foldAndScore above) — a second field here recomputing the same fact from
+// the raw log would be a second READ of the one answer at best and a second IMPLEMENTATION of the
+// rule at worst, exactly what playedAt.ts's own doc comment names as the two sanctioned callers
+// (reduceRound and the projector) and no third. WatchPage reads `view.state.playedAtMs` directly,
+// which is unconditionally `number` once `view.state` is defined — a stronger, TRUTHFULLY
+// non-optional type than a hand-derived field ever was (the old `events.find(...)?.hlc.wallMs`
+// was `number | undefined` even after hydration, silently absorbing a genesis that had somehow
+// not arrived yet; reading the fold's own field cannot represent that state at all).
 
 // What useWatchRound needs to talk to ONE round, read-only — deliberately narrower than
 // @swng/client's SessionConfig (no deviceId/golferId/OutboxStore: a spectator authors nothing,
@@ -139,9 +145,8 @@ export const createUseWatchRound = (
     const folded = events.length > 0 ? foldAndScore(events) : undefined;
     const state = folded?.state;
     const games = folded?.games ?? EMPTY_GAMES;
-    const createdAt = events.find((event) => event.kind === "round-created")?.hlc.wallMs;
 
-    return { hydrated: pulledOnce && state !== undefined, error: pullError, state, games, createdAt };
+    return { hydrated: pulledOnce && state !== undefined, error: pullError, state, games };
   };
 };
 

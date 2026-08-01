@@ -361,7 +361,7 @@ export function SeasonPanel({ crewId, seasonId, isOrganizer }: SeasonPanelProps)
             {standings.rounds.map((round) => (
               <li key={round.roundId} className={`${cardBox} flex items-center justify-between gap-2 p-3`}>
                 <Link to={`/rounds/${round.roundId}`} className="font-mono text-forest underline decoration-fairway">
-                  {roundLabel({ courseName: round.courseName, createdAt: round.createdAt }, { withTime: roundCollidesOnDay(round) })}
+                  {roundLabel({ courseName: round.courseName, playedAt: round.playedAt }, { withTime: roundCollidesOnDay(round) })}
                 </Link>
               </li>
             ))}

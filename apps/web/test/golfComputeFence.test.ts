@@ -86,6 +86,11 @@ const NOT_GOLF_NUMBERS: Record<string, string> = {
   joinedAt: "timestamp",
   expiresAtMs: "timestamp",
   wallMs: "timestamp",
+  // WHEN THE GOLF HAPPENED (round-played-date spec 2026-08-01 §3/§6) — a golfer-set/corrected
+  // instant, feeds roundLabel's date rendering and the crew scoreboard's season window, never a
+  // golf RESULT computed from it. Same class as createdAt/finalizedAt beside it.
+  playedAt: "timestamp",
+  playedAtMs: "timestamp",
   seq: "event-log sequence number",
   nextSeq: "event-log sequence number",
   counter: "HLC counter",

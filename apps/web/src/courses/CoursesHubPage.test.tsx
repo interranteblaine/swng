@@ -94,6 +94,7 @@ const line = (
   strokes: 10,
   distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
   finalizedAt: 1_000 + n,
+  playedAt: 1_000 + n,
 });
 
 describe("CoursesHubPage", () => {

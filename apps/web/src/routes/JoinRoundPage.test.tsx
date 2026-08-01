@@ -214,7 +214,7 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
         { name: "white", rating: 71.6, slope: 128 },
         { name: "blue", rating: 74.0, slope: 140 },
       ],
-      createdAt: 1_700_000_000_000,
+      playedAt: 1_700_000_000_000,
     });
 
     renderJoin();
@@ -227,9 +227,9 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
     expect([...select.options].map((o) => o.value)).toEqual(["white", "blue"]);
 
     // The join-link framing carries the round's full designation (course + date), not a bare
-    // course name (spec §5) — computed via roundLabel from the peek's own createdAt, local zone,
+    // course name (spec §5) — computed via roundLabel from the peek's own playedAt, local zone,
     // the same way HomePage/WatchPage's own label tests do.
-    expect(screen.getByText(`Joining ${roundLabel({ courseName: "Fixture Links 18", createdAt: 1_700_000_000_000 })}`)).toBeTruthy();
+    expect(screen.getByText(`Joining ${roundLabel({ courseName: "Fixture Links 18", playedAt: 1_700_000_000_000 })}`)).toBeTruthy();
   });
 
   it("a failed peek falls back to free text with a note — joining is never blocked by it", async () => {
@@ -264,7 +264,7 @@ describe("JoinRoundPage — no question about your game", () => {
     mockedPeekRound.mockResolvedValue({
       courseName: "Fixture Links 18",
       teeSets: [{ name: "white", rating: 71.6, slope: 128 }],
-      createdAt: 1_700_000_000_000,
+      playedAt: 1_700_000_000_000,
     });
 
     renderJoin();
@@ -286,7 +286,7 @@ describe("JoinRoundPage — no question about your game", () => {
     mockedPeekRound.mockResolvedValue({
       courseName: "Fixture Links 18",
       teeSets: [{ name: "white", rating: 71.6, slope: 128 }],
-      createdAt: 1_700_000_000_000,
+      playedAt: 1_700_000_000_000,
     });
 
     renderJoin();

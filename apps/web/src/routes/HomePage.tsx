@@ -205,7 +205,7 @@ export function HomePage() {
             ) : (
               <ul className="flex flex-col gap-2">
                 {liveRounds.map((round) => {
-                  const label = roundLabel({ courseName: round.courseName, createdAt: round.createdAt }, { withTime: collidesOnDay(round) });
+                  const label = roundLabel({ courseName: round.courseName, playedAt: round.playedAt }, { withTime: collidesOnDay(round) });
                   // The date/time segment is the label MINUS the course-name prefix and its one
                   // separating space, so the bullet stays on the date span — getByRole's own
                   // accessible-name computation re-inserts exactly one space between block

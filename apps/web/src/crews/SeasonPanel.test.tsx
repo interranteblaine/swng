@@ -569,7 +569,7 @@ describe("SeasonPanel — together records (ledger, head-to-head, partners)", ()
     signInAsAnn();
     mockedGetSeasonStandings.mockResolvedValue({
       ...baseStandings,
-      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC" }],
+      rounds: [{ roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC", playedAt: 1_700_000_000_000 }],
     });
 
     renderPanel();
@@ -623,8 +623,8 @@ describe("SeasonPanel — played together", () => {
     mockedGetSeasonStandings.mockResolvedValue({
       ...baseStandings,
       rounds: [
-        { roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC" },
-        { roundId: roundId("round-2"), finalizedAt: 1_700_100_000_000, courseName: "Casa Verde GC" },
+        { roundId: roundId("round-1"), finalizedAt: 1_700_000_000_000, courseName: "Casa Verde GC", playedAt: 1_700_000_000_000 },
+        { roundId: roundId("round-2"), finalizedAt: 1_700_100_000_000, courseName: "Casa Verde GC", playedAt: 1_700_100_000_000 },
       ],
     });
 
@@ -646,8 +646,8 @@ describe("SeasonPanel — played together", () => {
     mockedGetSeasonStandings.mockResolvedValue({
       ...baseStandings,
       rounds: [
-        { roundId: roundId("r-morning"), finalizedAt: day + 1, courseName: "Casa Verde GC", createdAt: Date.UTC(2026, 6, 12, 8, 0) },
-        { roundId: roundId("r-afternoon"), finalizedAt: day + 2, courseName: "Casa Verde GC", createdAt: Date.UTC(2026, 6, 12, 15, 0) },
+        { roundId: roundId("r-morning"), finalizedAt: day + 1, courseName: "Casa Verde GC", playedAt: Date.UTC(2026, 6, 12, 8, 0) },
+        { roundId: roundId("r-afternoon"), finalizedAt: day + 2, courseName: "Casa Verde GC", playedAt: Date.UTC(2026, 6, 12, 15, 0) },
       ],
     });
     renderPanel();

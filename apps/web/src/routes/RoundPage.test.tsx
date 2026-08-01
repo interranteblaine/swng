@@ -7,6 +7,7 @@ import { deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/d
 import type { GolferId, OpId, RoundEvent, RoundId } from "@swng/domain";
 import { AuthProvider } from "../auth/useAuth";
 import { credentialStore } from "../identity";
+import { roundLabel } from "../roundLabel";
 import { createUseRoundSession } from "../session/useRoundSession";
 import type { ResolveSessionConfig } from "../session/useRoundSession";
 import { createScriptedTransport, stampSeq } from "../testSupport/scriptedTransport";
@@ -29,7 +30,7 @@ const buildServerLog = (roundIdValue: RoundId, golferIdValue: GolferId, name: st
   let opCounter = 0;
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   const events: RoundEvent[] = [
-    { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, playedAtMs: 1_000, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: golferIdValue, name, tee: "white", strokes: 0 }, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
   ];
@@ -46,7 +47,7 @@ const buildTwoPlayerServerLog = (roundIdValue: RoundId, ann: GolferId, bo: Golfe
   let opCounter = 0;
   const nextOpId = (): OpId => opId(`two-op-${(opCounter += 1)}`);
   const events: RoundEvent[] = [
-    { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, playedAtMs: 2_000, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
     // Ann on 3 strokes, Bo on 0 — the card's dots below are hers, and the chip-tap test needs a
     // non-zero allocation to have something that could wrongly move.
     { kind: "participant-joined", participant: { golferId: ann, name: "Ann", tee: "white", strokes: 3 }, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
@@ -114,9 +115,12 @@ describe("RoundPage", () => {
 
     await waitFor(() => expect(screen.getByText("ABC123")).toBeTruthy()); // SetupPanel's join code banner
     expect(screen.queryByRole("status")).toBeNull();
-    // Nav infrastructure Task 2: usePageTitle re-runs once the session hydrates — fixtureLinks'
-    // own courseName ("Fixture Links"), no created-at on RoundState so no date segment.
-    expect(document.title).toBe("Fixture Links · swng");
+    // Nav infrastructure Task 2: usePageTitle re-runs once the session hydrates — the canonical
+    // course + date designation (round-played-date spec 2026-08-01 §6), fixtureLinks' own
+    // courseName plus buildServerLog's genesis playedAtMs (1_000). Computed via roundLabel itself
+    // (never a hand-typed string) so the assertion stays correct under the local zone roundLabel
+    // renders in by default — the SAME idiom WatchPage.test.tsx/RoundRecordPage.test.tsx use.
+    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: 1_000 })} · swng`);
     // "Ann" alone is ambiguous (also a checkbox label in the Add Game form's players list) —
     // the roster line's fuller text disambiguates. The roster row nests its numbers in a mono
     // span (brand reskin), so getByText's direct-text-only matching can no longer see the full

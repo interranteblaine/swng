@@ -18,6 +18,7 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
   id: roundId("round-1"),
   status: "live",
   card: fixtureLinks,
+  playedAtMs: 1_000,
   participants,
   games: [strokePlayConfig, stablefordConfig],
   cells: {},

@@ -23,13 +23,16 @@
 //
 //   rounds      items carrying an `event`   -> roundEventSchema     (createDynamoEventJournal.read)
 //   snapshots   the `archive` attribute     -> roundArchiveSchema   (createDynamoSnapshotStore)
-//   projections items carrying a `line`     -> every field GolferRoundLine REQUIRES, checked by
-//                                              hand. createDynamoProjectionStore.listLines CASTS
+//   projections items carrying a `line`     -> every field a STORED LINE must carry — GolferRoundLine's
+//                                              required members PLUS `playedAtMs`, which the
+//                                              ProjectionStore PORT requires and that type does not
+//                                              declare — checked by hand.
+//                                              createDynamoProjectionStore.listLines CASTS
 //                                              `item.line` rather than parsing it, so a malformed
 //                                              line is silently wrong at HEAD rather than refused —
 //                                              this gate is the only thing standing between such a
 //                                              line and a wrong stat, so it checks the whole
-//                                              required set, not just the field this arc renames.
+//                                              required set, not just the field an arc renames.
 //   rounds      items with no `event`, and every core-table item: nothing reads them through a
 //               schema. Counted and reported as NOT PARSED, never omitted.
 //
@@ -198,8 +201,20 @@ console.log("");
 // the ONLY thing standing between a bad line and a wrong number on someone's profile, which is why
 // it checks every field GolferRoundLine requires rather than only the one this arc renames.
 
-// GolferRoundLine (packages/domain/src/golfer/record.ts), required members only. `courseId`,
-// `score` and `holeResults` are legitimately optional, so their absence must never be a failure —
+// EVERY FIELD A STORED LINE MUST CARRY — which is not the same set as GolferRoundLine's required
+// members, and the difference is where the gap was. Most of these are GolferRoundLine
+// (packages/domain/src/golfer/record.ts); `playedAtMs` is not a member of that type at all. It is
+// required by the PORT (packages/application/src/ports/projectionStore.ts — `listLines` returns
+// `GolferRoundLine & { playedAtMs: number }`), which makes it exactly as required of a stored item
+// and exactly as uncheckable at HEAD: `createDynamoProjectionStore.listLines` CASTS. Only
+// `rebuildProjections` stamps it onto lines written before it existed, and nothing else proves that
+// step ran — which is why it is in this list. The consequence is asymmetric and the silent half is
+// the reason to check: `playedAt` is REQUIRED on getMyRecordResponseSchema and
+// getGolferResponseSchema, so a line missing it makes the profile and golfer pages THROW (loud, a
+// browser walk finds it), while getSeasonStandings reads `line.playedAtMs` to place a round in a
+// season window, so a crew board just DROPS the round (silent, nothing finds it).
+//
+// `courseId`, `score` and `holeResults` are legitimately optional, so their absence must never be a failure —
 // but `score`'s absence has TWO live causes and this gate cannot tell them apart from the item
 // alone: either the round has a hole with no number (a pickup, so there is no gross to record), or
 // the line was written before the field existed. Both are true of this stage right now — prod's 8
@@ -213,6 +228,7 @@ const REQUIRED_LINE_FIELDS = [
   ["holes", (v) => v === 9 || v === 18],
   ["par", (v) => typeof v === "number"],
   ["strokes", (v) => typeof v === "number"],
+  ["playedAtMs", (v) => typeof v === "number"],
   ["distribution", (v) => v !== null && typeof v === "object" && ["eagles", "birdies", "pars", "bogeys", "doublePlus"].every((k) => typeof v[k] === "number")],
 ];
 

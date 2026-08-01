@@ -25,7 +25,14 @@ const migrate = source("migrateProdStrokes.mjs");
 // actually refuses rather than merely that its `if` line exists.
 
 // Lines that PRINT the given text at runtime. A comment mentioning it does not count.
-const emitted = (text, needle) => text.split("\n").filter((line) => line.includes("console.log(") && line.includes(needle));
+//
+// The `//` exclusion is not decoration, and this file is where it was missing. Without it a
+// commented-OUT `// console.log(…)` counts as an emitted line, so the realistic regression —
+// someone silencing an output line while leaving it in place — passes clean. Proven on this very
+// file: commenting out one of the `rebuildProjections` lines in migrateProdStrokes.mjs left the
+// suite 21/21 green. The played-at sibling shipped with the clause; this one inherited the hole.
+const emitted = (text, needle) =>
+  text.split("\n").filter((line) => !line.trimStart().startsWith("//") && line.includes("console.log(") && line.includes(needle));
 
 // The body of a brace block, from its opening line to the closing brace at the same indentation.
 // Used so "this guard refuses" is asserted against the guard's own statements.
@@ -152,6 +159,19 @@ describe("--restore undoes the migration, not the day", () => {
 
   it("records the changed keys in the export", () => {
     expect(migrate).toMatch(/JSON\.stringify\(\{ stage, takenAt: [^,]+, migrated, tables \}/);
+  });
+
+  // The mirror of the played-at migration's own provenance guard. That script writes
+  // `swng-backup-*.json` over the same four tables in the same shape, with a `stage` and a
+  // `migrated` list that both read as valid here — so handing this instrument the other arc's dump
+  // would restore records into a shape this migration knows nothing about with every other check
+  // green. This script's own exports predate any stamp and carry none, so ABSENT is accepted and
+  // only a foreign name is refused; requiring its own name would break the restore path for the
+  // export files that already exist, which is the one thing this guard must not do.
+  it("refuses an export another script stamped, while accepting its own unstamped ones", () => {
+    const guard = blockOf(migrate, '  if (backup.writtenBy !== undefined && backup.writtenBy !== "scripts/migrateProdStrokes.mjs") {');
+    expect(guard).toContain("process.exit(1)");
+    expect(guard).toContain("JSON.stringify(backup.writtenBy)");
   });
 
   // The break-glass path must not need a working build of a package it never parses with.

@@ -218,6 +218,18 @@ if (restoreFile !== undefined) {
     console.error(`error: ${restoreFile} is not an export written by this script (no \`tables\` key).`);
     process.exit(1);
   }
+  // THE OTHER ARC'S DUMP. scripts/migrateRoundPlayedAt.mjs writes `swng-backup-*.json` over the same
+  // four tables, in the same shape, with a `stage` and a `migrated` key list that both look right
+  // here — so nothing else in this path can tell the two apart, and restoring one would put records
+  // back into their pre-played-at shape while every check passed. That script stamps its exports;
+  // this one's own exports predate the stamp and legitimately carry none, so ABSENT is accepted and
+  // only a foreign name is refused.
+  if (backup.writtenBy !== undefined && backup.writtenBy !== "scripts/migrateProdStrokes.mjs") {
+    console.error(`error: ${restoreFile} says writtenBy: ${JSON.stringify(backup.writtenBy)} — another script wrote it.`);
+    console.error(`       Restoring it here would put records back into a shape this migration knows nothing about, while the stage`);
+    console.error(`       and key-list checks below passed. Use the script that wrote it. Nothing was written.`);
+    process.exit(1);
+  }
   console.log(`export taken ${backup.takenAt} from stage ${backup.stage}`);
   if (backup.stage !== stage) {
     console.error(`error: the export was taken from stage "${backup.stage}" but --stage says "${stage}". Refusing to write one stage's data into another.`);

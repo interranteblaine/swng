@@ -18,7 +18,7 @@
 // what lets a genuinely back-dated round survive a re-run — so the migration is idempotent: a
 // re-run is a no-op and an interrupted run is just a shorter next run.
 //
-// ORDERING — WHY `--write` REQUIRES `--before-deploy`
+// ORDERING — WHY `--write` MAKES YOU NAME WHICH SIDE OF THE DEPLOY YOU ARE ON
 //
 // This is the OPPOSITE of the strokes migration (scripts/migrateProdStrokes.mjs), which requires
 // `--after-deploy`. Reading that file first and assuming the same order is the mistake this guard
@@ -38,9 +38,23 @@
 //     history by NaN.
 //
 // So the ordering is something you must ASSERT rather than something you must remember: `--write`
-// is refused without `--before-deploy`. Same ruling as scrapCourseAndRoundData's required course
+// is refused unless you name a side — `--before-deploy`, or `--straggler-after-deploy` for the one
+// legitimate post-deploy run (next section). Same ruling as scrapCourseAndRoundData's required course
 // choice and the strokes migration's own flag — make illegal states unrepresentable rather than
 // documenting the hazard, because prose stops nothing and an exit code does.
+//
+// THE STRAGGLER: A LEGITIMATE POST-DEPLOY RUN, AND ITS OWN FLAG
+//
+// A round created between the final dry run and the deploy carries no `playedAtMs`, and it is
+// therefore broken the moment the new build lands. Migrating it is not optional and it cannot
+// happen before the deploy, so `--before-deploy` is an assertion the operator cannot honestly make
+// — and a guard whose only escape is to lie to it or to edit the script is a guard that gets
+// edited. `--straggler-after-deploy` is that run's own assertion. It is not a bypass: migrating is
+// never unsafe in either order (the transform is idempotent, and a record it changes is one the
+// deployed build cannot currently read, so the write can only improve matters), which is why this
+// flag exists at all. What the guard actually protects is that you have THOUGHT about which side of
+// the deploy you are on, so each side gets a flag and neither is the default. Passing both is
+// refused: they say opposite things about the world.
 //
 // `--stage` is required for the same reason, and unlike the sibling it has no default: this arc
 // migrates BOTH beta and prod in one close-out, so a default is a stage you can hit by forgetting
@@ -60,19 +74,42 @@
 // whole job is: re-run until a DRY RUN on every stage reports 0 pending, and only then deploy.
 // That dry-run-reports-zero is the precondition for step 2 — not this script having exited 0 once.
 //
+// A ROUND YOU ALREADY MIGRATED CAN COME BACK AS PENDING. That is not a failed write, and it is the
+// one observation on this whole path that reads like one, so it is named here rather than left to
+// be re-derived at 2am. `createDynamoEventJournal.read` parses stored events with the DEPLOYED
+// schema, and the deployed (pre-migration) build does not know `playedAtMs`, so it strips the key
+// on read. `settleRound` builds `archive.events` out of those parsed events. So a round whose
+// genesis event you migrated, and which is then FINALIZED by the old lambda, writes a brand-new
+// snapshot whose genesis event carries no played date — a freshly un-migrated record, created after
+// your write, by a build that was never told about the field. The rounds-table event stays
+// migrated; the snapshot is new. The remedy is already the rule above and needs no special
+// handling: re-run until a dry run reports 0 pending. It is only surprising if you read a
+// reappearing key as evidence the earlier write did not land.
+//
 // Safety, in the order it happens:
 //
-//   1. In `--write` mode, every item of all four tables is exported to
-//      `prod-backup-<stage>-<timestamp>.json` BEFORE any write, together with the enumerated keys
-//      this run intends to change. If the export fails for any reason the run exits before
-//      writing. The export is taken from the very same scan the migration is computed from, so the
-//      `before` images on disk are exactly the images being transformed.
+//   1. In `--write` mode with something to write, every item of all four tables is exported to
+//      `swng-backup-<stage>-<timestamp>.json` BEFORE any write, together with the enumerated keys
+//      this run intends to change and the NAME OF THE SCRIPT THAT WROTE IT. If the export fails for
+//      any reason the run exits before writing. The export is taken from the very same scan the
+//      migration is computed from, so the `before` images on disk are exactly the images being
+//      transformed. NOTE THE PREFIX: `prod-backup-` is the STROKES migration's export
+//      (scripts/migrateProdStrokes.mjs) and `swng-backup-` is this one's, because this arc migrates
+//      beta too and a beta export named "prod-backup" is a file someone will misread at exactly the
+//      wrong moment. The filename is a convention though, and an operator globbing for "a backup"
+//      can walk straight past it — so the stamp inside the file is what `--restore` actually checks.
 //      A dry run does NOT write an export — it says so — because the protection that matters is an
-//      export taken in the same invocation as the write, not a stale one from an earlier run.
+//      export taken in the same invocation as the write, not a stale one from an earlier run. A
+//      `--write` run with NOTHING PENDING does not write one either, and says so: an export is a
+//      verbatim dump of every golfer's real name and Cognito sub, and there is no reason to put
+//      another copy of that on disk to protect zero writes.
 //   2. Every transformed record is PARSED with HEAD's own schema before a single Put is issued. A
 //      record that would not parse is never written and stops the run. That makes it structurally
 //      impossible for this script to write a record the app cannot read.
-//   3. `--expect <n>` is OPTIONAL and, when given, asserted: `--write` refuses on a mismatch.
+//   3. `--expect <n>` is OPTIONAL and, when given, asserted: `--write` refuses on a mismatch —
+//      INCLUDING a mismatch against an empty write set, which is checked before the "nothing to do"
+//      exits. A zero write set is a write set, and an operator who asserts a number about the world
+//      has to be told when the world disagrees, even on a run that would have written nothing.
 //      There is deliberately no default. The strokes migration could default to 15 because its
 //      spec enumerated exactly 15 records; nothing enumerates this one — every round on every
 //      stage is in scope, and beta legitimately grows between the dry run and the write (a round
@@ -85,8 +122,12 @@
 //      not a sign something half-ran.
 //
 // `--restore <file>` puts back the ORIGINAL images of exactly the records the migration changed —
-// the keys it recorded in the export — and nothing else. Two limits, both real, stated because
-// each is a different way a restore can disappoint:
+// the keys it recorded in the export — and nothing else. It REFUSES a file this script did not
+// write: the strokes migration's own `prod-backup-*.json` dumps sit in the same directory, hold the
+// same four tables in the same shape, carry a matching `stage` and a matching `migrated` key list,
+// and would therefore sail through every other guard here while putting prod's records back into
+// their PRE-STROKES shape. A filename cannot stop that; a stamp inside the file can. Two further
+// limits, both real, stated because each is a different way a restore can disappoint:
 //   * it does not DELETE items created since the export; and
 //   * it does not REVERT the items the migration never touched. Restoring all four tables verbatim
 //     would do that, and an hour after the migration it would silently roll back every round,
@@ -106,6 +147,7 @@
 //
 //   node scripts/migrateRoundPlayedAt.mjs --stage <beta|prod> [--dry-run]        # dry run
 //   node scripts/migrateRoundPlayedAt.mjs --stage <beta|prod> --write --before-deploy [--expect N]
+//   node scripts/migrateRoundPlayedAt.mjs --stage <beta|prod> --write --straggler-after-deploy   # deploy already landed
 //   node scripts/migrateRoundPlayedAt.mjs --stage <beta|prod> --restore <file> [--write]
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -139,7 +181,13 @@ const stage = flagValue("--stage", "`--stage beta` or `--stage prod`.");
 const write = argv.includes("--write");
 const dryRun = argv.includes("--dry-run");
 const beforeDeploy = argv.includes("--before-deploy");
+const stragglerAfterDeploy = argv.includes("--straggler-after-deploy");
 const restoreFile = flagValue("--restore", "the path of an export file written by an earlier --write run.");
+
+// Stamped into every export this script writes and ASSERTED by `--restore` (see the header). The
+// strokes migration's exports hold the same four tables under the same keys with a matching `stage`
+// and `migrated` list, so nothing else in the restore path can tell one arc's dump from the other's.
+const WRITTEN_BY = "scripts/migrateRoundPlayedAt.mjs";
 
 // NO DEFAULT STAGE (see the header). This close-out migrates beta and then prod, so a default is a
 // stage you can hit by forgetting to type one.
@@ -167,17 +215,32 @@ if (expectRaw !== undefined && (!Number.isInteger(expected) || expected < 0)) {
   process.exit(1);
 }
 
+// Two flags, one for each side of the deploy, and they say opposite things about the world.
+if (beforeDeploy && stragglerAfterDeploy) {
+  console.error("error: --before-deploy and --straggler-after-deploy say opposite things about whether the new build is live. Pass one.");
+  console.error("       Nothing has been read or written.");
+  process.exit(1);
+}
+
 // THE ORDERING GUARD (see the header) — and note it INVERTS relative to migrateProdStrokes.mjs.
 // Scoped to a MIGRATION write: `--restore --write` is the break-glass rollback and must not be
 // gated behind an acknowledgement about deploy order, which has nothing to do with putting
 // original images back.
-if (write && restoreFile === undefined && !beforeDeploy) {
+if (write && restoreFile === undefined && !beforeDeploy && !stragglerAfterDeploy) {
   console.error(
     "error: pass --before-deploy to confirm the new build is NOT deployed yet (spec §8 — migrate first, then deploy).\n" +
       "       NOTE THIS IS THE OPPOSITE of scripts/migrateProdStrokes.mjs, which requires --after-deploy. Here the new\n" +
       "       lambda REQUIRES playedAtMs with no fallback arm, so deploying before every stored round carries it takes\n" +
       "       every un-migrated round offline. Migrating first breaks nothing: round-created's schema is not .strict(),\n" +
-      "       so the deployed build silently strips the key it does not know. Nothing has been read or written.",
+      "       so the deployed build silently strips the key it does not know.\n" +
+      "\n" +
+      "       IF THE DEPLOY HAS ALREADY LANDED, pass --straggler-after-deploy instead. That is a real case, not a\n" +
+      "       loophole: a round created between the final dry run and the deploy carries no playedAtMs and is broken\n" +
+      "       right now, and migrating it is the repair. Migrating is never unsafe in either order — the transform is\n" +
+      "       idempotent and a record it changes is one the live build cannot read — so the flag you pass is a\n" +
+      "       statement about which side of the deploy you are on, not permission to do something dangerous. Do not\n" +
+      "       assert --before-deploy when it is false, and do not edit this file: say which side you are on.\n" +
+      "       Nothing has been read or written.",
   );
   process.exit(1);
 }
@@ -257,7 +320,22 @@ if (restoreFile !== undefined) {
     console.error(`error: ${restoreFile} is not an export written by this script (no \`tables\` key).`);
     process.exit(1);
   }
-  console.log(`export taken ${backup.takenAt} from stage ${backup.stage}`);
+  // WHICH ARC'S DUMP IS THIS? Every other guard in this branch passes on the strokes migration's
+  // own `prod-backup-*.json`: same four tables, same item shape, same `stage`, same `migrated` key
+  // list. Restoring one here would put those records back into their PRE-STROKES shape and report
+  // success. The header names the prefix difference, but a header is not what an operator globbing
+  // for "a backup" reads — so the file has to say what wrote it, and a file that does not say this
+  // script is refused. The message names what it FOUND, because "wrong file" without saying which
+  // file you handed it is a dead end.
+  if (backup.writtenBy !== WRITTEN_BY) {
+    console.error(`error: ${restoreFile} was not written by this script.`);
+    console.error(`       it says writtenBy: ${JSON.stringify(backup.writtenBy)} — this script restores only exports stamped ${JSON.stringify(WRITTEN_BY)}.`);
+    console.error(`       An export with no writtenBy at all was written before this stamp existed, and the likeliest such file is the`);
+    console.error(`       STROKES migration's own prod-backup-*.json (scripts/migrateProdStrokes.mjs). Restoring that here would put`);
+    console.error(`       records back into their pre-strokes shape while every other check in this path passed. Nothing was written.`);
+    process.exit(1);
+  }
+  console.log(`export taken ${backup.takenAt} from stage ${backup.stage}, written by ${backup.writtenBy}`);
   if (backup.stage !== stage) {
     console.error(`error: the export was taken from stage "${backup.stage}" but --stage says "${stage}". Refusing to write one stage's data into another.`);
     process.exit(1);
@@ -422,11 +500,16 @@ if (skipped.size > 0) {
 }
 console.log("");
 
-// --- export (write mode only, before anything is written) ---------------------------------------
+// --- export (write mode with something to write, before anything is written) ---------------------
 // The full four-table dump is the forensic artifact; `migrated` is the enumerated key list a
-// `--restore` puts back. Both land in one file, written before any table is touched.
+// `--restore` puts back; `writtenBy` is what stops the other arc's dump being restored with this
+// script. All three land in one file, written before any table is touched.
+//
+// NOT written when there is nothing pending. An export protects the records a run is about to
+// change, and a no-op `--write` changes none — so the file would be, for zero benefit, one more
+// verbatim copy of every golfer's real name and Cognito sub sitting in a working tree.
 
-if (write) {
+if (write && records.length > 0) {
   const projectionItems = await scanAll(projectionsTable);
   const coreItems = await scanAll(coreTable);
   // `swng-backup-`, not the strokes migration's `prod-backup-`: this arc migrates beta too, and a
@@ -448,7 +531,7 @@ if (write) {
     return sk === undefined ? { table: record.table, pk } : { table: record.table, pk, sk };
   });
   try {
-    writeFileSync(path, JSON.stringify({ stage, takenAt: new Date().toISOString(), migrated, tables }, undefined, 1));
+    writeFileSync(path, JSON.stringify({ writtenBy: WRITTEN_BY, stage, takenAt: new Date().toISOString(), migrated, tables }, undefined, 1));
   } catch (error) {
     console.error(`error: the export failed, so nothing will be written: ${String(error)}`);
     process.exit(1);
@@ -456,7 +539,12 @@ if (write) {
   console.log(`EXPORT: ${total} item(s) from all 4 tables -> ${path}`);
   for (const [tableName, items] of Object.entries(tables)) console.log(`         ${items.length.toString().padStart(6)}  ${tableName}`);
   console.log(`        recorded ${migrated.length} key(s) as this run's write set — a --restore of this file puts back those and nothing else`);
+  console.log(`        stamped writtenBy: ${WRITTEN_BY} — --restore refuses a file another script wrote`);
   console.log("");
+} else if (write) {
+  // Announced, never silent (see below) — and this one is a different skip from the dry run's.
+  console.log(`SKIPPED the export: nothing is pending, so this run will change no record. An export protects the records a run`);
+  console.log(`        is about to change; with none, it would only be another verbatim copy of every golfer's name and Cognito sub.\n`);
 } else {
   // Announced, never silent. A skipped step that logs nothing is indistinguishable from one that
   // ran, and the person reading this transcript later has to be able to tell which happened.
@@ -492,6 +580,29 @@ if (unreadable.length > 0) {
   process.exit(1);
 }
 
+// --- the write set is the size the operator says it is -------------------------------------------
+// Optional (header, safety note 3): nothing enumerates this write set, so there is no default to
+// assert against. When the operator DOES assert one — read off a dry run moments earlier — a
+// mismatch means the stage moved in between, and `--write` stops.
+//
+// THIS SITS ABOVE THE "nothing to do" EXITS ON PURPOSE. It used to sit below them, so
+// `--write --expect 9` against an already-migrated stage printed "Nothing to do" and exited 0
+// without ever mentioning that 9 is not 0. Nothing was written, so nothing was harmed — but the
+// operator asserted a number about the world and the script quietly dropped the assertion, which is
+// the same failure mode as a guard that is off. A zero write set is a write set.
+
+if (expected !== undefined && records.length !== expected) {
+  const message =
+    `the write set is ${records.length} record(s), but --expect said ${expected}.\n` +
+    `       The stage moved between the dry run and this one, or this is a resumed run after a partial write.\n` +
+    `       Re-read the dry run — or, if ${records.length} is genuinely what is left, pass --expect ${records.length}.`;
+  if (write) {
+    console.error(`REFUSING TO WRITE — ${message}\n\nNothing was written.`);
+    process.exit(1);
+  }
+  console.log(`WARNING — ${message}\n`);
+}
+
 if (candidates === 0) {
   console.log(`No round-created events or snapshots found at all in ${roundsTable} / ${snapshotsTable}. That is an empty stage, not a completed migration — check --stage and the AWS profile.`);
   process.exit(0);
@@ -505,23 +616,6 @@ if (records.length === 0) {
   console.log(`      writes a migration performs re-drive the stream under the OLD projector, which cannot stamp a field it does`);
   console.log(`      not know. That is a STEP, not a repair: listLines CASTS, so a line without it sorts a history by NaN.`);
   process.exit(0);
-}
-
-// --- the write set is the size the operator says it is -------------------------------------------
-// Optional (header, safety note 3): nothing enumerates this write set, so there is no default to
-// assert against. When the operator DOES assert one — read off a dry run moments earlier — a
-// mismatch means the stage moved in between, and `--write` stops.
-
-if (expected !== undefined && records.length !== expected) {
-  const message =
-    `the write set is ${records.length} record(s), but --expect said ${expected}.\n` +
-    `       The stage moved between the dry run and this one, or this is a resumed run after a partial write.\n` +
-    `       Re-read the dry run — or, if ${records.length} is genuinely what is left, pass --expect ${records.length}.`;
-  if (write) {
-    console.error(`REFUSING TO WRITE — ${message}\n\nNothing was written.`);
-    process.exit(1);
-  }
-  console.log(`WARNING — ${message}\n`);
 }
 
 // --- the plan ---------------------------------------------------------------------------------

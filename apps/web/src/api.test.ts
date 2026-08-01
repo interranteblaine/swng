@@ -42,6 +42,7 @@ import {
   peekRound,
   removeCrewMember,
   searchCourses,
+  setPlayedAt,
   setStrokes,
   shareRound,
   supersedeCard,
@@ -953,6 +954,32 @@ describe("setStrokes", () => {
     expect(seenInit?.method).toBe("POST");
     expect(JSON.parse(String(seenInit?.body))).toEqual({ golferId: "bo", strokes: 20 });
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-strokes");
+    expect(seenInit).not.toHaveProperty("token");
+    expect(result).toEqual({ events: [] });
+  });
+});
+
+// Correcting the round's played date (round-played-date spec 2026-08-01 §3b): same POST +
+// bearer-token (participant) idiom as setStrokes above — a ROUND-level fact, so the body carries
+// no subject, just the corrected instant, and the appended round-played-at-set event comes back
+// for the caller to fold. The URL is a TEMPLATE STRING in api.ts, so nothing but this test pins
+// the path itself: a missed rename here stays green locally and 404s live.
+describe("setPlayedAt", () => {
+  it("POSTs { playedAtMs } to /rounds/{roundId}/played-at with the bearer token and parses a SetPlayedAtResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { events: [] });
+    });
+
+    const result = await setPlayedAt(roundId("round-1"), "tok-played-at", { playedAtMs: 1_700_000_000_000 });
+
+    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/played-at`);
+    expect(seenInit?.method).toBe("POST");
+    expect(JSON.parse(String(seenInit?.body))).toEqual({ playedAtMs: 1_700_000_000_000 });
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-played-at");
     expect(seenInit).not.toHaveProperty("token");
     expect(result).toEqual({ events: [] });
   });

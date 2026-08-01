@@ -3,9 +3,29 @@ import type { GameState, GolferId, RosterEntry, RoundState } from "@swng/domain"
 import { MAX_STROKES } from "@swng/contracts";
 import type { GameConfigInput } from "@swng/contracts";
 import { GolferLink } from "../ui/GolferLink";
-import { badge, btnQuiet, cardBox, eyebrow, inputBox } from "../ui/classes";
+import { badge, btnQuiet, btnSecondary, cardBox, eyebrow, inputBox } from "../ui/classes";
 import { CopiedLinkLine } from "../ui/CopiedLinkLine";
 import { AddGameForm } from "./AddGameForm";
+
+// A datetime-local input's value is a LOCAL wall-clock string with no zone — "2026-07-31T14:05".
+// Both directions go through here so the instant submitted is exactly the one the field shows;
+// nothing is inferred (round-played-date spec 2026-08-01 §5). The SAME helper CreateRoundPage.tsx
+// carries under its own copy — two occurrences of a small presentation conversion is this repo's
+// own tolerated precedent (see the crew-page-papercuts arc's "hoist on a third copy" note); it is
+// not golf compute, so the ESLint compute fence does not apply to either copy.
+const pad = (n: number): string => String(n).padStart(2, "0");
+const toDatetimeLocalValue = (date: Date): string => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+
+// The static display for the round's own played date — plain "Jul 22, 2026, 7:58 PM" via Intl's
+// built-in dateStyle/timeStyle presets. NOT roundLabel: that function's job is course+day IDENTITY
+// for a list of rounds (with its own day-collision rules); this is the one, always-present value
+// on the round's own live page, shown for a golfer to review or correct — a different job, so
+// there's no shared call here.
+const formatPlayedAt = (playedAtMs: number): string => new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(playedAtMs));
+
+// A typed value is valid iff it parses to a real instant — the same "non-empty, parseable" check
+// CreateRoundPage.tsx's own canSubmit applies to this exact input type.
+const isValidPlayedAtValue = (value: string): boolean => value !== "" && !Number.isNaN(new Date(value).getTime());
 
 // A strokes count is a whole number in [0, MAX_STROKES] — the SAME range commands.ts's
 // `strokesInputSchema` accepts, bound to it by the shared constant rather than by a second literal
@@ -41,9 +61,15 @@ export interface SetupPanelProps {
   // api.setStrokes + sync() — no optimistic local write; the new number arrives via the fold like
   // every other roster fact.
   readonly onSetStrokes: (golferId: GolferId, strokes: number) => Promise<void>;
+  // The round's own played date, correctable while live (round-played-date spec 2026-08-01 §3b/
+  // §5) — the SAME roster-strokes-editor idiom (Edit swaps the static value for an input; api
+  // call then sync(); no optimistic local write), a ROUND-level fact rather than a per-golfer one,
+  // so there's one editor, not one per roster row. Implemented by RoundPage as
+  // api.setPlayedAt + sync().
+  readonly onSetPlayedAt: (playedAtMs: number) => Promise<void>;
 }
 
-export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes }: SetupPanelProps) {
+export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlayedAt }: SetupPanelProps) {
   // A single `editing` id (not a per-row map) holds at most one open editor. Every OTHER row's
   // own Edit button stays visible and clickable the whole time — only the row currently being
   // edited hides its own Edit button, swapping in the Save/Cancel pair in its place. Tapping a
@@ -65,6 +91,43 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes }: SetupPa
 
   const [inviteUrl, setInviteUrl] = useState<string | undefined>(undefined);
   const [inviteCopied, setInviteCopied] = useState(false);
+
+  // The played-date editor's own state — a SEPARATE editor from the roster's `editing`/`value`
+  // above (a round-level fact, not a per-golfer one, so there's nothing to key by golferId).
+  const [editingPlayedAt, setEditingPlayedAt] = useState(false);
+  const [playedAtValue, setPlayedAtValue] = useState("");
+  const [playedAtError, setPlayedAtError] = useState<string | undefined>(undefined);
+  const [savingPlayedAt, setSavingPlayedAt] = useState(false);
+
+  // Seeds the field with the round's own current instant, converted to the local wall-clock
+  // string the input speaks — the same "edit swaps in a field holding the current value" contract
+  // startEdit follows for strokes above.
+  const startEditPlayedAt = () => {
+    setEditingPlayedAt(true);
+    setPlayedAtValue(toDatetimeLocalValue(new Date(state.playedAtMs)));
+    setPlayedAtError(undefined);
+  };
+
+  const cancelEditPlayedAt = () => {
+    setEditingPlayedAt(false);
+    setPlayedAtError(undefined);
+  };
+
+  const savePlayedAt = async () => {
+    if (!isValidPlayedAtValue(playedAtValue)) return; // guarded by the disabled Save button too
+    setSavingPlayedAt(true);
+    setPlayedAtError(undefined);
+    try {
+      await onSetPlayedAt(new Date(playedAtValue).getTime());
+      // No optimistic local write: the corrected instant arrives via the fold once the caller
+      // sync()s (RoundPage's own onSetPlayedAt), same as the roster's own save() above.
+      setEditingPlayedAt(false);
+    } catch {
+      setPlayedAtError("Could not update the played date — try again.");
+    } finally {
+      setSavingPlayedAt(false);
+    }
+  };
 
   const copyInviteLink = async () => {
     // The receiving path already exists whole: /join?code= seeds the form and survives the
@@ -136,6 +199,55 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes }: SetupPa
           </>
         )}
       </div>
+
+      {/* The round's own played date, correctable while live (round-played-date spec 2026-08-01
+          §3b/§5) — the roster-strokes-editor idiom applied to a round-level fact: Edit swaps the
+          static value for a datetime-local editor, mutually exclusive with it. Named as its own
+          region (the Roster `<ul aria-label="Roster">` precedent just below) so it's addressable
+          as a stable ancestor. */}
+      <section aria-label="When did you play?" className={`${cardBox} flex flex-col gap-2 p-4`}>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm text-fairway">When did you play?</span>
+          {!editingPlayedAt && (
+            <button type="button" className={`${btnQuiet} text-sm`} disabled={savingPlayedAt} onClick={startEditPlayedAt}>
+              Edit
+            </button>
+          )}
+        </div>
+
+        {/* The static line and the editor are mutually exclusive — the same swap the roster's
+            own strokes editor pins (2026-07-20 review finding: two representations of one value
+            on screen at once). */}
+        {editingPlayedAt ? (
+          <div className="flex flex-col gap-2">
+            <input
+              type="datetime-local"
+              aria-label="When did you play?"
+              className={inputBox}
+              value={playedAtValue}
+              onChange={(event) => setPlayedAtValue(event.target.value)}
+            />
+            <div className="flex gap-2">
+              {/* btnSecondary, not btnQuiet (owner's own Step 5 instruction) — one gold per
+                  screen: this page's only gold action is FinalizeControl's own confirm-dialog
+                  Finalize button, so a bordered Save here never competes with it. */}
+              <button type="button" className={btnSecondary} disabled={savingPlayedAt || !isValidPlayedAtValue(playedAtValue)} onClick={() => void savePlayedAt()}>
+                Save
+              </button>
+              <button type="button" className={btnQuiet} disabled={savingPlayedAt} onClick={cancelEditPlayedAt}>
+                Cancel
+              </button>
+            </div>
+            {playedAtError && (
+              <p role="alert" className="text-oxblood">
+                {playedAtError}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-lg text-forest">{formatPlayedAt(state.playedAtMs)}</p>
+        )}
+      </section>
 
       <div>
         <h2 className="text-lg font-semibold text-forest">Roster</h2>

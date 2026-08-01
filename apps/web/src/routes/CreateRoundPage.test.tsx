@@ -142,8 +142,14 @@ describe("CreateRoundPage — create as yourself", () => {
     // Course-cards spec §4: a REFERENCE (courseId + cardId), never a card — the server resolves
     // and freezes the lineage's current card itself. Accounts-only identity (spec §3): the
     // request carries only that reference + a host tee — the seat (name + golferId) is resolved
-    // server-side from the Bearer.
-    expect(body).toEqual({ course: { courseId: courseView.courseId, cardId: courseView.cardId }, host: { tee: "white" } });
+    // server-side from the Bearer. playedAtMs (round-played-date spec §5) is always sent by this
+    // form — its exact value (the field defaults to "now") is pinned by the dedicated
+    // "when did you play" describe block below, not re-asserted here.
+    expect(body).toEqual({
+      course: { courseId: courseView.courseId, cardId: courseView.cardId },
+      host: { tee: "white" },
+      playedAtMs: expect.any(Number),
+    });
     expect(token).toBe(idToken);
     expect(() => startRoundRequestSchema.parse(body)).not.toThrow();
 
@@ -230,6 +236,87 @@ describe("CreateRoundPage — create as yourself", () => {
     // getCourse re-called (once for the initial load, once for the card-superseded re-fetch).
     await waitFor(() => expect(mockedGetCourse).toHaveBeenCalledTimes(2));
     expect(mockedGetCourse).toHaveBeenLastCalledWith(courseId("course-18"));
+  });
+});
+
+// Round-played-date spec 2026-08-01 §5: "When did you play?" is always visible (no "past round"
+// disclosure, no second mode) and defaults to now. Whatever the field shows is exactly what gets
+// submitted — nothing inferred, nothing rounded, nothing snapped.
+describe("CreateRoundPage — when did you play", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("defaults the played-at field to now and submits that instant", async () => {
+    // A local wall-clock instant with a non-zero minute/hour — a fixture where "now" happens to
+    // land on a round number (e.g. midnight) couldn't distinguish "reads the real clock" from
+    // "always sends some fixed placeholder."
+    vi.setSystemTime(new Date(2026, 6, 31, 14, 5, 0, 0));
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-pd-1"), joinCode: "PDA001", token: "tok-pd-1", golferId: golferId("ann-g") });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    const input = screen.getByLabelText(/when did you play/i) as HTMLInputElement;
+    expect(input.value).toBe("2026-07-31T14:05");
+
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
+    const [body] = mockedCreateRound.mock.calls[0]!;
+    expect(body.playedAtMs).toBe(new Date(2026, 6, 31, 14, 5, 0, 0).getTime());
+  });
+
+  it("submits the instant shown in the field when the golfer back-dates it", async () => {
+    // "Now" for this test — deliberately a DIFFERENT calendar day AND a different time of day
+    // than the value typed below, so a component that silently sends Date.now() instead of the
+    // field's own value cannot pass by accident (falsifiability traps: same-instant fixtures, and
+    // divergence too small to cross a rendered day, both hide this exact bug).
+    vi.setSystemTime(new Date(2026, 6, 31, 14, 5, 0, 0));
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-pd-2"), joinCode: "PDA002", token: "tok-pd-2", golferId: golferId("ann-g") });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    // Three days back, a different hour AND minute than "now" — the pin that fails if the
+    // component ever infers a time (local noon, the entry clock) instead of sending exactly
+    // what the field shows.
+    const input = screen.getByLabelText(/when did you play/i);
+    fireEvent.change(input, { target: { value: "2026-07-28T08:15" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
+    const [body] = mockedCreateRound.mock.calls[0]!;
+    const expectedMs = new Date(2026, 6, 28, 8, 15, 0, 0).getTime();
+    expect(body.playedAtMs).toBe(expectedMs);
+    // Genuinely divergent from "now", crossing a calendar day — the pin a same-instant or
+    // sub-day-diff fixture could not make.
+    expect(body.playedAtMs).not.toBe(new Date(2026, 6, 31, 14, 5, 0, 0).getTime());
+  });
+
+  it("disables submit while the field is empty or holds an unparseable value", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    const input = screen.getByLabelText(/when did you play/i);
+    expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(false);
+
+    fireEvent.change(input, { target: { value: "" } });
+    expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(true);
   });
 });
 

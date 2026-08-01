@@ -276,11 +276,14 @@ export default [
                 "settleRound",
                 "resultOf",
                 "unresolvedGames",
-                // when a round was played (round-played-date spec 2026-08-01 §3c/§6) — task 6
-                // re-exports this through @swng/client for the narrow case of a raw event log
-                // with no folded RoundState yet; wherever a RoundState already exists, read its
-                // own `playedAtMs` field instead (reduceRound already calls this exact function
-                // to produce it, so that's a second READ of the one answer, not a second rule).
+                // when a round was played (round-played-date spec 2026-08-01 §3c/§6). NOT
+                // re-exported through @swng/client (task 7 found zero web callers that need the
+                // raw-log form — every read surface already holds a folded RoundState by the
+                // time it asks and reads its own `playedAtMs` field instead; reduceRound already
+                // calls this exact function to produce it, so that's a second READ of the one
+                // answer, not a second rule). The banlist entry stays regardless: it bans a
+                // future direct-from-@swng/domain leak independently of what @swng/client
+                // re-exports.
                 "playedAtMsOf",
                 "scoreStrokePlay",
                 "scoreStableford",

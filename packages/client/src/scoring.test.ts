@@ -25,7 +25,7 @@ const buildLog = (extraGames: readonly GameConfig[] = []): RoundEvent[] => {
   const boScores = [5, 4, 4, 5, 3, 6, 4, 4, 5];
 
   const events: RoundEvent[] = [
-    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: 1_000, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: ANN_ID, name: "Ann", tee: "white", strokes: 3 }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: BO_ID, name: "Bo", tee: "white", strokes: 0 }, authorId: BO_ID, opId: nextOpId(), hlc: nextHlc() },

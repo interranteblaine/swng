@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useParams } from "react-router";
 import type { GameConfigInput } from "@swng/contracts";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { GameId, GameState, GolferId, HoleResult, RoundId, RoundState } from "@swng/domain";
-import { abandonRound, addGame, finalizeRound, leaveRound, setStrokes, terminateGame } from "../api";
+import { abandonRound, addGame, finalizeRound, leaveRound, setPlayedAt, setStrokes, terminateGame } from "../api";
 import { credentialStore } from "../identity";
 import type { RoundCredential } from "../identity";
 import { unresolvedGames } from "../round/finalizeReadiness";
@@ -304,6 +304,7 @@ interface LiveRoundProps {
   readonly onAbandon: () => Promise<void>;
   readonly onLeave: () => Promise<void>;
   readonly onSetStrokes: (golferId: GolferId, strokes: number) => Promise<void>;
+  readonly onSetPlayedAt: (playedAtMs: number) => Promise<void>;
 }
 
 // Everything that's only ever rendered pre-finalize, as its OWN component (not an inline
@@ -311,7 +312,7 @@ interface LiveRoundProps {
 // StandingsHeader no longer needs an active-game selection threaded down to it at all (its own
 // chips are pure disclosure toggles now), so this component's only remaining job is composing
 // the live-only chrome that unmounts once status flips to "final".
-function LiveRound({ state, games, recordScore, pending, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave, onSetStrokes }: LiveRoundProps) {
+function LiveRound({ state, games, recordScore, pending, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave, onSetStrokes, onSetPlayedAt }: LiveRoundProps) {
   // The card locks for exactly as long as a finalize attempt is in flight, and not a moment
   // longer. onFinalize drains the outbox and only then seals — but a score tapped INSIDE that
   // window joins the outbox too late for the drain that already ran, so it pushes after
@@ -342,7 +343,7 @@ function LiveRound({ state, games, recordScore, pending, joinCode, token, onAddG
     <>
       <StandingsHeader state={state} games={games} onTerminate={onTerminate} />
       <ScorecardGrid state={state} recordScore={recordScore} readOnly={finalizing} />
-      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} onSetStrokes={onSetStrokes} />
+      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} onSetStrokes={onSetStrokes} onSetPlayedAt={onSetPlayedAt} />
       <FinalizeControl state={state} games={games} pending={pending} busy={finalizing} onFinalize={attemptFinalize} />
       <LeaveControl onLeave={onLeave} />
       <ScrapControl onAbandon={onAbandon} />
@@ -385,6 +386,18 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
         // every standing they appear in when the fold re-renders, matching every other mutation's
         // sync()-then-let-the-fold-swap pattern.
         await setStrokes(roundId, credential.token, { golferId, strokes });
+        await sync();
+      },
+      [roundId, credential.token, sync],
+    );
+
+    const onSetPlayedAt = useCallback(
+      async (playedAtMs: number) => {
+        // Server-authored append, then sync() — the corrected instant re-renders SetupPanel's own
+        // display and, wherever a card+date title reads state.playedAtMs (this page's own
+        // usePageTitle below), the same sync()-then-let-the-fold-swap pattern every other
+        // mutation on this page follows. No optimistic local write.
+        await setPlayedAt(roundId, credential.token, { playedAtMs });
         await sync();
       },
       [roundId, credential.token, sync],
@@ -517,6 +530,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
             onAbandon={onAbandon}
             onLeave={onLeave}
             onSetStrokes={onSetStrokes}
+            onSetPlayedAt={onSetPlayedAt}
           />
         )}
       </main>

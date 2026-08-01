@@ -70,13 +70,16 @@ export const foldAndScore = (events: readonly RoundEvent[]): { state: RoundState
 // ranking order is golf logic (the stroke-play order carries an owner ruling, spec 2026-07-19
 // §2b), the same class `aggregateSeason` already moved server-side for crew standings ("the web
 // never re-ranks").
-// `playedAtMsOf` (round-played-date spec 2026-08-01 §3c/§6): THE one rule for "when was this
-// round played," re-exported so a web read surface that only holds a raw event log (no folded
-// RoundState yet — e.g. a spectator's hook before its first successful pull) can still ask.
-// Prefer `state.playedAtMs` wherever a folded RoundState is already on hand (reduceRound already
-// calls this exact function to produce it — reading the field is not a second implementation of
-// the rule, just a second READ of the one answer); this re-export is for the narrower case where
-// no fold exists yet.
+//
+// `playedAtMsOf` (round-played-date spec 2026-08-01 §3c/§6) is deliberately NOT re-exported here
+// (round-played-date Task 7): every web read surface that needs "when was this round played"
+// already holds a folded RoundState by the time it asks (useWatchRound/RoundPage/
+// RoundRecordPage all read `state.playedAtMs` off foldAndScore's own result) — reduceRound
+// already calls playedAtMsOf to produce that field, so reading it is a second READ of the one
+// answer, not a second implementation. A re-export with zero callers is dead weight; the
+// domain-compute ESLint banlist entry for `playedAtMsOf` stays regardless (eslint.config.mjs) —
+// that fence bans a future direct-from-@swng/domain leak independently of whether this file ever
+// re-exports the name.
 export {
   gameStrokeAllocation,
   roundStrokeAllocation,
@@ -90,5 +93,4 @@ export {
   sortedStrokePlayLines,
   sortedStablefordLines,
   sortedSkinsLines,
-  playedAtMsOf,
 } from "@swng/domain";

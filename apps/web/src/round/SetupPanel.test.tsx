@@ -40,6 +40,7 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
 
 const noopAddGame = vi.fn().mockResolvedValue(undefined);
 const noopSetStrokes = vi.fn().mockResolvedValue(undefined);
+const noopSetPlayedAt = vi.fn().mockResolvedValue(undefined);
 
 // SetupPanel no longer touches auth (the claim affordance is gone), but the AuthProvider wrapper
 // stays: it lets the signed-in pins below prove that even in the state that USED to render the
@@ -69,6 +70,7 @@ const signIn = () => {
 beforeEach(() => {
   noopAddGame.mockClear();
   noopSetStrokes.mockClear();
+  noopSetPlayedAt.mockClear();
   vi.stubGlobal("localStorage", createMemoryStorage());
   vi.stubGlobal("sessionStorage", createMemoryStorage());
 });
@@ -79,7 +81,7 @@ afterEach(() => {
 
 describe("SetupPanel", () => {
   it("shows the join code prominently", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     expect(screen.getByText("ABC123")).toBeTruthy();
   });
@@ -87,7 +89,7 @@ describe("SetupPanel", () => {
   // Two lines and ONE control (spec 2026-07-30 §8): name + Edit, then `tee · N strokes`. There is
   // one thing to edit, so there is one button — no "normally", no "gets", no second affordance.
   it("shows the roster row as name + Edit over `tee · N strokes`, with no game badges", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     expect(annRow).toBeTruthy();
@@ -100,14 +102,14 @@ describe("SetupPanel", () => {
 
   it("says `1 stroke`, not `1 strokes`", () => {
     const state = baseState({ participants: [participant(BO, "Bo", "white", 1)] });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const boRow = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
     expect(within(boRow!).getByText("white · 1 stroke")).toBeTruthy();
   });
 
   it("shows a zero-stroke seat as `tee · 0 strokes` — the default every seat starts on", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const deeRow = screen.getAllByRole("listitem").find((li) => /Dee/.test(li.textContent ?? ""));
     expect(within(deeRow!).getByText("white · 0 strokes")).toBeTruthy();
@@ -120,7 +122,7 @@ describe("SetupPanel", () => {
     const state = baseState({
       participants: [participant(ANN, "Ann", "white", 3), { ...participant(BO, "Bo", "white", 1), departed: true }],
     });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const boRow = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
     expect(boRow).toBeTruthy(); // still on the roster, seat data intact
@@ -139,7 +141,7 @@ describe("SetupPanel", () => {
     const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
     const state = baseState({ games: [stableford], terminatedGameIds: new Set([stableford.id]) });
 
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     expect(annRow).toBeTruthy();
@@ -154,7 +156,7 @@ describe("SetupPanel", () => {
   // roster's own identity row links each golfer's name to /golfers/:golferId, the tee/CH suffix
   // staying plain text.
   it("links each roster name to /golfers/:golferId, leaving the tee/CH suffix as plain text", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annLink = screen.getByRole("link", { name: "Ann" });
     expect(annLink.getAttribute("href")).toBe(`/golfers/${ANN}`);
@@ -168,7 +170,7 @@ describe("SetupPanel", () => {
     const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN] };
     const state = baseState({ games: [stableford] });
 
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     // Scope to <li> rows specifically (not the Add Game form's player checkboxes, which are
     // <label> elements, not list items) — Ann must appear as exactly one roster row.
@@ -189,13 +191,13 @@ describe("SetupPanel", () => {
 // ghost form is deleted; the join code — already rendered above — is framed as the one way in.
 describe("SetupPanel — share the code, not add a player", () => {
   it("frames the join code as the one way in — new players sign up on the way", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     expect(screen.getByText(/players join with this code — new players create their account on the way/i)).toBeTruthy();
   });
 
   it("has no 'Add player' ghost form at all — no name field, no Add player button", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     expect(screen.queryByRole("button", { name: /^add player$/i })).toBeNull();
     expect(screen.queryByLabelText(/^name$/i)).toBeNull();
@@ -212,7 +214,7 @@ describe("SetupPanel — share the code, not add a player", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     // Let the AuthProvider's own GET /me settle so a claim button, if any, would have rendered.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/me"), expect.anything()));
@@ -231,7 +233,7 @@ describe("SetupPanel — share the code, not add a player", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/me"), expect.anything()));
     // Every fetch the whole tree ever made was the AuthProvider's GET /me — SetupPanel itself
@@ -248,7 +250,7 @@ describe("SetupPanel — Copy invite link", () => {
   it("Copy invite link copies the origin-relative join URL and shows Link copied with the url", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     fireEvent.click(screen.getByRole("button", { name: "Copy invite link" }));
 
@@ -265,7 +267,7 @@ describe("SetupPanel — Copy invite link", () => {
 
   it("still shows the raw url with 'Copy this link' when clipboard access fails", async () => {
     vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) } });
-    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     fireEvent.click(screen.getByRole("button", { name: "Copy invite link" }));
 
@@ -274,7 +276,7 @@ describe("SetupPanel — Copy invite link", () => {
   });
 
   it("hides Copy invite link entirely on an empty cached code (legacy re-mint credential)", () => {
-    renderPanel({ state: baseState(), games: [], joinCode: "", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state: baseState(), games: [], joinCode: "", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     expect(screen.queryByRole("button", { name: "Copy invite link" })).toBeNull();
   });
@@ -288,7 +290,7 @@ describe("SetupPanel — setting a player's strokes", () => {
   it("Edit opens an inline editor holding the seat's current number, with its teaching line", async () => {
     const user = userEvent.setup();
     const state = baseState({ participants: [participant(ANN, "Ann", "white", 3), participant(BO, "Bo", "white", 1)] });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     expect(annRow).toBeTruthy();
@@ -311,7 +313,7 @@ describe("SetupPanel — setting a player's strokes", () => {
   it("Save submits the typed number for THAT golfer and closes the editor", async () => {
     const user = userEvent.setup();
     const state = baseState({ participants: [participant(ANN, "Ann", "white", 3), participant(BO, "Bo", "white", 1)] });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
@@ -335,7 +337,7 @@ describe("SetupPanel — setting a player's strokes", () => {
   it("Cancel restores the static row (the swap back) without calling onSetStrokes", async () => {
     const user = userEvent.setup();
     const state = baseState({ participants: [participant(ANN, "Ann", "white", 3), participant(BO, "Bo", "white", 1)] });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
@@ -356,7 +358,7 @@ describe("SetupPanel — setting a player's strokes", () => {
     const user = userEvent.setup();
     const failingSetStrokes = vi.fn().mockRejectedValue(new Error("network exploded"));
     const state = baseState({ participants: [participant(ANN, "Ann", "white", 3), participant(BO, "Bo", "white", 1)] });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: failingSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: failingSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
@@ -389,7 +391,7 @@ describe("SetupPanel — setting a player's strokes", () => {
         }),
     );
     const state = baseState({ participants: [participant(ANN, "Ann", "white", 3), participant(BO, "Bo", "white", 1)] });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: pendingSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: pendingSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     const boRow = screen.getAllByRole("listitem").find((li) => /Bo/.test(li.textContent ?? ""));
@@ -418,7 +420,7 @@ describe("SetupPanel — setting a player's strokes", () => {
   it("refuses a negative — Save stays disabled, nothing is posted, and the input floors at 0", async () => {
     const user = userEvent.setup();
     const state = baseState({ participants: [participant(ANN, "Ann", "white", 3)] });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
@@ -448,7 +450,7 @@ describe("SetupPanel — setting a player's strokes", () => {
   it("refuses a number above the wire's ceiling — Save stays disabled one over, enabled at the ceiling", async () => {
     const user = userEvent.setup();
     const state = baseState({ participants: [participant(ANN, "Ann", "white", 3)] });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
@@ -476,7 +478,7 @@ describe("SetupPanel — setting a player's strokes", () => {
   it("says WHY Save is disabled while the field holds an illegal value, and stops once it is legal", async () => {
     const user = userEvent.setup();
     const state = baseState({ participants: [participant(ANN, "Ann", "white", 3)] });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
@@ -512,7 +514,7 @@ describe("SetupPanel — setting a player's strokes", () => {
   it("refuses a fractional number too — a stroke count is whole", async () => {
     const user = userEvent.setup();
     const state = baseState({ participants: [participant(ANN, "Ann", "white", 3)] });
-    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     const annRow = screen.getAllByRole("listitem").find((li) => /Ann/.test(li.textContent ?? ""));
     await user.click(within(annRow!).getByRole("button", { name: "Edit" }));
@@ -522,5 +524,104 @@ describe("SetupPanel — setting a player's strokes", () => {
     await user.type(input, "12.5");
     expect((within(annRow!).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
     expect(noopSetStrokes).not.toHaveBeenCalled();
+  });
+});
+
+// The round's own played date (round-played-date spec 2026-08-01 §3b/§5), correctable while
+// live — the SAME roster-strokes-editor idiom applied to a round-level fact, so these mirror the
+// "setting a player's strokes" tests above one for one.
+describe("SetupPanel — the played date", () => {
+  const region = () => screen.getByRole("region", { name: "When did you play?" });
+
+  it("Edit opens a datetime-local editor holding the round's own value; the static line and the editor are mutually exclusive", async () => {
+    const user = userEvent.setup();
+    const playedAtMs = new Date(2026, 5, 12, 9, 30, 0, 0).getTime();
+    const state = baseState({ playedAtMs });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
+
+    expect(within(region()).getByText(/Jun 12, 2026/)).toBeTruthy();
+    expect(within(region()).queryByLabelText("When did you play?")).toBeNull();
+
+    await user.click(within(region()).getByRole("button", { name: "Edit" }));
+
+    const input = within(region()).getByLabelText("When did you play?") as HTMLInputElement;
+    expect(input.value).toBe("2026-06-12T09:30");
+
+    // The swap (2026-07-20 review finding, applied here): the static line must NOT still be on
+    // screen while the editor holds the same value — two representations of one value at once.
+    expect(within(region()).queryByText(/Jun 12, 2026/)).toBeNull();
+  });
+
+  it("Save submits the instant shown in the field and closes the editor — no optimistic write", async () => {
+    const user = userEvent.setup();
+    const playedAtMs = new Date(2026, 5, 12, 9, 30, 0, 0).getTime();
+    const state = baseState({ playedAtMs });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
+
+    await user.click(within(region()).getByRole("button", { name: "Edit" }));
+    const input = within(region()).getByLabelText("When did you play?");
+    // A back-date, crossing a calendar day AND a different time of day than the seeded value —
+    // the pin that fails if Save ever sends something other than exactly what the field shows.
+    fireEvent.change(input, { target: { value: "2026-06-09T07:00" } });
+    await user.click(within(region()).getByRole("button", { name: "Save" }));
+
+    expect(noopSetPlayedAt).toHaveBeenCalledTimes(1);
+    expect(noopSetPlayedAt).toHaveBeenCalledWith(new Date(2026, 5, 9, 7, 0, 0, 0).getTime());
+
+    // No optimistic local write (the change arrives via the fold, not local state): the editor
+    // closes and the static line reappears showing the UNCHANGED prop value — asserting the
+    // spy's args, never the rendered text, is the point of the assertion above.
+    await waitFor(() => expect(within(region()).queryByLabelText("When did you play?")).toBeNull());
+    expect(within(region()).getByRole("button", { name: "Edit" })).toBeTruthy();
+    expect(within(region()).getByText(/Jun 12, 2026/)).toBeTruthy();
+  });
+
+  it("Cancel restores the static line (the swap back) without calling onSetPlayedAt", async () => {
+    const user = userEvent.setup();
+    const playedAtMs = new Date(2026, 5, 12, 9, 30, 0, 0).getTime();
+    const state = baseState({ playedAtMs });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
+
+    await user.click(within(region()).getByRole("button", { name: "Edit" }));
+    const input = within(region()).getByLabelText("When did you play?");
+    expect(within(region()).queryByText(/Jun 12, 2026/)).toBeNull(); // swapped out while editing
+    fireEvent.change(input, { target: { value: "2020-01-01T00:00" } });
+    await user.click(within(region()).getByRole("button", { name: "Cancel" }));
+
+    expect(noopSetPlayedAt).not.toHaveBeenCalled();
+    expect(within(region()).queryByLabelText("When did you play?")).toBeNull();
+    // Swapped back: the static text is on screen again, at its unchanged value.
+    expect(within(region()).getByText(/Jun 12, 2026/)).toBeTruthy();
+  });
+
+  it("a failed save surfaces the error text and keeps the editor open", async () => {
+    const user = userEvent.setup();
+    const failingSetPlayedAt = vi.fn().mockRejectedValue(new Error("network exploded"));
+    const state = baseState({ playedAtMs: new Date(2026, 5, 12, 9, 30, 0, 0).getTime() });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: failingSetPlayedAt });
+
+    await user.click(within(region()).getByRole("button", { name: "Edit" }));
+    await user.click(within(region()).getByRole("button", { name: "Save" }));
+
+    // Never a raw generic Error's message (papercut 12's own precedent) — an honest fallback,
+    // and the editor stays open (retry one tap away).
+    expect(await within(region()).findByRole("alert")).toBeTruthy();
+    expect(within(region()).getByRole("alert").textContent).toBe("Could not update the played date — try again.");
+    expect(document.body.textContent).not.toMatch(/network exploded/);
+    expect(within(region()).getByLabelText("When did you play?")).toBeTruthy();
+  });
+
+  it("refuses an empty field — Save stays disabled and nothing is posted", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ playedAtMs: new Date(2026, 5, 12, 9, 30, 0, 0).getTime() });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
+
+    await user.click(within(region()).getByRole("button", { name: "Edit" }));
+    const input = within(region()).getByLabelText("When did you play?");
+    fireEvent.change(input, { target: { value: "" } });
+
+    expect((within(region()).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(region()).getByRole("button", { name: "Save" }));
+    expect(noopSetPlayedAt).not.toHaveBeenCalled();
   });
 });

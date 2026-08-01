@@ -34,7 +34,7 @@ const buildSeedEvents = (): RoundEvent[] => {
   const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN_ID, BO_ID] };
 
   return [
-    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: 1_000, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: ANN_ID, name: "Ann", tee: "white", strokes: 3 }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: BO_ID, name: "Bo", tee: "white", strokes: 0 }, authorId: BO_ID, opId: nextOpId(), hlc: nextHlc() },

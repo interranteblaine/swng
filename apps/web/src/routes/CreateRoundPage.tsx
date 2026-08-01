@@ -10,8 +10,16 @@ import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 import { CourseSummaryCard } from "../courses/CourseSummaryCard";
 import { credentialStore } from "../identity";
-import { btnPrimary, cardBox } from "../ui/classes";
+import { btnPrimary, cardBox, inputBox } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
+
+// A datetime-local input's value is a LOCAL wall-clock string with no zone — "2026-07-31T14:05".
+// Both directions go through here so the instant submitted is exactly the one the field shows;
+// nothing is inferred (spec §5). Earlier drafts of this design picked local noon, then the entry
+// clock, by a hidden rule — the field showing the real value is what makes those unnecessary.
+const pad = (n: number): string => String(n).padStart(2, "0");
+const toDatetimeLocalValue = (date: Date): string =>
+  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 
 interface LocationState {
   // AddCoursePage's own success navigation (M6 Task 5's "Add a course" hand-off) — a course
@@ -44,6 +52,9 @@ export function CreateRoundPage() {
   const [courseError, setCourseError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
+  // Round-played-date spec §5: always visible, defaulting to now, no "past round" disclosure and
+  // no second mode. The lazy initializer reads the clock exactly once, at mount.
+  const [playedAt, setPlayedAt] = useState<string>(() => toDatetimeLocalValue(new Date()));
 
   const selectCourse = (courseId: CourseId) => {
     setCourseError(undefined);
@@ -89,12 +100,13 @@ export function CreateRoundPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: keyed by the router's own per-navigation identity, not by `state`'s object identity
   }, [location.key]);
 
-  const canSubmit = courseView !== undefined && tee !== "" && golfer !== undefined;
+  const canSubmit =
+    courseView !== undefined && tee !== "" && golfer !== undefined && playedAt !== "" && !Number.isNaN(new Date(playedAt).getTime());
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     // Only ever reachable in the signed-in-with-a-golfer state (the form isn't rendered
-    // otherwise), but guarded anyway: a course, a tee, and a real golfer.
+    // otherwise), but guarded anyway: a course, a tee, a real golfer, and a parseable played-at.
     if (!canSubmit || !courseView || !golfer) return;
 
     setSubmitting(true);
@@ -104,8 +116,11 @@ export function CreateRoundPage() {
       // lineage's CURRENT card itself. Accounts-only identity (spec §3): the creator seat is
       // always yourself, resolved server-side from the Bearer — the request carries no
       // name/golferId (the server freezes the account golfer's name into the join event).
+      // playedAtMs (round-played-date spec §5): always sent — the field always holds a value on
+      // this form, so there is no "absent means now" case here (that arm exists on the wire for
+      // other clients, not for this form). Exactly what the field shows, never inferred.
       const response: StartRoundResponse = await auth.withAuth((token) =>
-        createRound({ course: { courseId: courseView.courseId, cardId: cardId(courseView.cardId) }, host: { tee } }, token),
+        createRound({ course: { courseId: courseView.courseId, cardId: cardId(courseView.cardId) }, host: { tee }, playedAtMs: new Date(playedAt).getTime() }, token),
       );
       credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer.name, joinCode: response.joinCode });
       navigate(`/round/${response.roundId}`);
@@ -149,6 +164,19 @@ export function CreateRoundPage() {
               {courseError}
             </p>
           )}
+
+          {/* Round-played-date spec §5: always visible, no "past round" disclosure and no second
+              mode — a retroactive round is not a different kind of round, just a different date.
+              Date AND time, deliberately: whatever this field shows is exactly what gets sent. */}
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-fairway">When did you play?</span>
+            <input
+              type="datetime-local"
+              value={playedAt}
+              onChange={(e) => setPlayedAt(e.target.value)}
+              className={inputBox}
+            />
+          </label>
 
           {golfer ? (
             <div className="flex flex-col gap-1">

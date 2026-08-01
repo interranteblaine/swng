@@ -123,10 +123,43 @@ describe("roundEventSchema", () => {
   };
 
   it("parses a round-created event with no crewId (the untagged case) and round-trips through JSON unchanged", () => {
-    const event: RoundEvent = { kind: "round-created", roundId: roundId("r1"), card, opId: opId("op-create"), hlc: baseHlc, authorId: golferId("author") };
+    const event: RoundEvent = {
+      kind: "round-created",
+      roundId: roundId("r1"),
+      card,
+      playedAtMs: baseHlc.wallMs,
+      opId: opId("op-create"),
+      hlc: baseHlc,
+      authorId: golferId("author"),
+    };
     const roundTripped = parse(roundEventSchema, JSON.parse(JSON.stringify(event)) as unknown);
     expect(roundTripped).toEqual(event);
     expect(roundTripped).not.toHaveProperty("crewId");
+  });
+
+  // THE no-fallback pin (spec 2026-08-01 §3a / domain events.ts's own comment): playedAtMs is
+  // REQUIRED on round-created, deliberately with no fallback to hlc.wallMs or any other value. If
+  // this ever passes, the required-ness has been quietly relaxed — e.g. by adding `.optional()` or
+  // `.default()` back onto the field below.
+  it("rejects a round-created with no playedAtMs", () => {
+    const event = { kind: "round-created", roundId: roundId("r1"), card, opId: opId("op-create"), hlc: baseHlc, authorId: golferId("author") };
+    expect(() => roundEventSchema.parse(event)).toThrow();
+  });
+
+  // Arc A's placement rule (pre-prod hardening, restated in commands.ts's playedAtInputSchema
+  // comment): a bound belongs on the REQUEST ingress only. The stored round-created arm here
+  // carries no bound at all, so a value the request schema would reject (well before 2000, and
+  // negative to boot) must still parse — rejecting it would brick an already-stored round on read.
+  it("accepts a stored round-created whose playedAtMs is outside the request bounds", () => {
+    const event = { kind: "round-created", roundId: roundId("r1"), card, playedAtMs: -1, opId: opId("op-create"), hlc: baseHlc, authorId: golferId("author") };
+    const parsed = roundEventSchema.parse(event);
+    expect(parsed).toMatchObject({ playedAtMs: -1 });
+  });
+
+  it("round-trips a round-played-at-set", () => {
+    const event: RoundEvent = { kind: "round-played-at-set", playedAtMs: 1_700_000_000_000, opId: opId("op-playedat"), hlc: baseHlc, authorId: golferId("author") };
+    const roundTripped = parse(roundEventSchema, JSON.parse(JSON.stringify(event)) as unknown);
+    expect(roundTripped).toEqual(event);
   });
 
   // Round-is-a-sealed-leaf + append-only event log: an OLD stored round-created from the M8 era
@@ -139,6 +172,7 @@ describe("roundEventSchema", () => {
       roundId: roundId("r1"),
       card,
       crewId: "crew-1", // the stray key an M8-era stored log still carries
+      playedAtMs: baseHlc.wallMs,
       opId: opId("op-create"),
       hlc: baseHlc,
       authorId: golferId("author"),

@@ -8,6 +8,7 @@ import {
   gameConfigInputSchema,
   joinRoundRequestSchema,
   recordScoreRequestSchema,
+  setPlayedAtRequestSchema,
   setStrokesRequestSchema,
   startRoundRequestSchema,
 } from "./commands.js";
@@ -70,6 +71,33 @@ describe("startRoundRequestSchema", () => {
     expect(parsed.host).not.toHaveProperty("name");
     expect(parsed.host).not.toHaveProperty("basis");
     expect(parsed).toEqual({ course, host: { tee: "white" } });
+  });
+
+  // spec 2026-08-01 §3a: playedAtMs is the golfer-set played date, optional on the request — absent
+  // means "now", exactly today's behaviour (see round-created's own genesis-hlc fallback removal in
+  // the domain, which this field's presence at start time replaces).
+  it("accepts a playedAtMs on startRound", () => {
+    const request = { course, host: { tee: "white" }, playedAtMs: 1_700_000_000_000 };
+    expect(parse(startRoundRequestSchema, request)).toEqual(request);
+  });
+
+  // MIN_PLAYED_AT_MS = Date.UTC(2000, 0, 1) = 946_684_800_000; one ms below it must reject.
+  it("rejects a playedAtMs before 2000-01-01", () => {
+    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white" }, playedAtMs: 946_684_799_999 })).toThrow(ContractError);
+  });
+
+  it("rejects a playedAtMs more than two years ahead", () => {
+    const farFuture = Date.now() + 3 * 365 * 24 * 60 * 60 * 1_000; // safely past the 2-year ceiling regardless of leap years
+    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white" }, playedAtMs: farFuture })).toThrow(ContractError);
+  });
+
+  // The absent case: setting up Saturday's round on Thursday is still typing nothing here — the
+  // application layer defaults to "now" (a later task), and the wire itself must accept the omission.
+  it("accepts a startRound with no playedAtMs", () => {
+    const request = { course, host: { tee: "white" } };
+    const parsed = parse(startRoundRequestSchema, request);
+    expect(parsed).toEqual(request);
+    expect(parsed).not.toHaveProperty("playedAtMs");
   });
 });
 
@@ -195,6 +223,24 @@ describe("setStrokesRequestSchema", () => {
     expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: 0 })).not.toThrow();
     // The value the ceiling exists to admit: a raw difference bigger than any course handicap.
     expect(() => parse(setStrokesRequestSchema, { golferId: "g", strokes: 58 })).not.toThrow();
+  });
+});
+
+describe("setPlayedAtRequestSchema", () => {
+  // POST /rounds/{roundId}/played-at (spec 2026-08-01 §3b): no golferId — the played date is a
+  // round-level fact, not a per-participant one, so the body carries only the number.
+  it("accepts a valid playedAtMs and round-trips", () => {
+    const request = { playedAtMs: 1_700_000_000_000 };
+    expect(parse(setPlayedAtRequestSchema, request)).toEqual(request);
+  });
+
+  it("rejects a playedAtMs before 2000-01-01", () => {
+    expect(() => parse(setPlayedAtRequestSchema, { playedAtMs: 946_684_799_999 })).toThrow(ContractError);
+  });
+
+  it("rejects a playedAtMs more than two years ahead", () => {
+    const farFuture = Date.now() + 3 * 365 * 24 * 60 * 60 * 1_000;
+    expect(() => parse(setPlayedAtRequestSchema, { playedAtMs: farFuture })).toThrow(ContractError);
   });
 });
 

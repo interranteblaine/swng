@@ -183,7 +183,13 @@ export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
   // card), never a crew reference. This object is NOT `.strict()`, so an old stored event
   // from the M8 era that still carries a `crewId` key parses fine — Zod's default strips the
   // unknown key rather than rejecting it (event schema is append-only; tolerate old data).
-  z.object({ ...envelope, kind: z.literal("round-created"), roundId: roundIdSchema, card: courseCardSchema }),
+  //
+  // `playedAtMs` (spec 2026-08-01 §3a): WHEN THE GOLF HAPPENED, not when this record was
+  // created (the envelope's own `hlc.wallMs` still records that). REQUIRED, no bound — see
+  // domain's events.ts for why there is deliberately no fallback, and commands.ts's
+  // `playedAtInputSchema` comment for why the bound lives on the request only (Arc A's
+  // placement rule: a bound here would reject an already-stored round on read).
+  z.object({ ...envelope, kind: z.literal("round-created"), roundId: roundIdSchema, card: courseCardSchema, playedAtMs: z.number().int() }),
   z.object({ ...envelope, kind: z.literal("participant-joined"), participant: participantSchema }),
   z.object({ ...envelope, kind: z.literal("game-added"), config: gameConfigSchemaImpl }),
   z.object({ ...envelope, kind: z.literal("round-started") }),
@@ -208,6 +214,11 @@ export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
   // this arc's close-out and there is nothing honest to migrate) and why the deploy must be
   // LAMBDA-FIRST.
   z.object({ ...envelope, kind: z.literal("participant-strokes-set"), golferId: golferIdSchema, strokes: z.number().int() }),
+  // The played date, corrected (spec 2026-08-01 §3b): the participant-strokes-set template minus
+  // the subject — a round-level fact, so there is no golferId. Latest-HLC-wins in the fold
+  // (domain's playedAtMsOf); `authorId` (the envelope) records who changed it. UNBOUNDED, same
+  // placement reason as round-created's own playedAtMs above.
+  z.object({ ...envelope, kind: z.literal("round-played-at-set"), playedAtMs: z.number().int() }),
 ]);
 export const roundEventSchema: z.ZodType<RoundEvent> = roundEventSchemaImpl;
 
@@ -315,6 +326,16 @@ export interface SetStrokesResponse {
 }
 
 export const setStrokesResponseSchema: z.ZodType<SetStrokesResponse> = z.object({
+  events: z.array(roundEventSchema).readonly(),
+});
+
+// POST /rounds/{roundId}/played-at: response mirrors setStrokes's append idiom — `events` carries
+// exactly what THIS call appended (the one round-played-at-set), seq-stamped.
+export interface SetPlayedAtResponse {
+  readonly events: readonly RoundEvent[];
+}
+
+export const setPlayedAtResponseSchema: z.ZodType<SetPlayedAtResponse> = z.object({
   events: z.array(roundEventSchema).readonly(),
 });
 

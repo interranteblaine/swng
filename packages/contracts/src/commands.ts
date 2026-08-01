@@ -81,6 +81,19 @@ export const MAX_STROKES = 100;
 // worse than no bound at all.
 export const strokesInputSchema = z.number().int().min(0).max(MAX_STROKES);
 
+// Typo protection on a user-typed instant, NOT a product limit (spec 2026-08-01 §6). Request
+// schemas only — the stored round-created arm carries no bound at all, because a bound on a
+// stored/fold path rejects already-stored data on a read (pre-prod hardening Arc A's placement
+// rule). Future dates ARE allowed: setting up Saturday's round on Thursday is the same round
+// entered early instead of late.
+const MIN_PLAYED_AT_MS = Date.UTC(2000, 0, 1);
+const TWO_YEARS_MS = 2 * 365 * 24 * 60 * 60 * 1_000;
+export const playedAtInputSchema = z
+  .number()
+  .int()
+  .min(MIN_PLAYED_AT_MS)
+  .refine((ms) => ms <= Date.now() + TWO_YEARS_MS, { message: "playedAtMs is too far in the future" });
+
 // Accounts-only identity (spec §3): StartRound seats its creator ONLY, always as-self from the
 // caller's Bearer (application/src/golfers/ensureGolfer.ts resolves the account golfer by sub).
 // No `host.name` — the participant name is the golfer record's name at start time, frozen into
@@ -100,6 +113,10 @@ export const startRoundRequestSchema = z.object({
     // task-1 (pre-prod hardening): a tee name is a short label, never a paragraph.
     tee: z.string().min(1).max(40),
   }),
+  // spec 2026-08-01 §3a: absent means now — exactly today's behaviour. A golfer entering
+  // Friday's paper card on Sunday types Friday's date here instead; the application layer is
+  // where "absent" becomes "now" (a later task), so the wire itself just needs to allow the gap.
+  playedAtMs: playedAtInputSchema.optional(),
 });
 export type StartRoundRequest = z.infer<typeof startRoundRequestSchema>;
 
@@ -176,6 +193,12 @@ export const setStrokesRequestSchema = z.object({
   strokes: strokesInputSchema,
 });
 export type SetStrokesRequest = z.infer<typeof setStrokesRequestSchema>;
+
+// POST /rounds/{roundId}/played-at (spec 2026-08-01 §3b): any participant corrects the round's
+// played date — a round-level fact, so there is no subject in the body. Server-minted envelope,
+// like join/leave/strokes.
+export const setPlayedAtRequestSchema = z.object({ playedAtMs: playedAtInputSchema });
+export type SetPlayedAtRequest = z.infer<typeof setPlayedAtRequestSchema>;
 
 export interface StartRoundResponse {
   readonly roundId: RoundId;

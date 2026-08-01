@@ -247,6 +247,19 @@ describe("round use cases — golden path over in-memory ports", () => {
     ).rejects.toMatchObject({ code: "round-not-live" });
   });
 
+  it("accepts a RE-push of an already-recorded score on a finalized round — duplicate, not a refusal", async () => {
+    const round = await freshLiveRound();
+    const hostClaims: ParticipantClaims = { roundId: round.host.roundId, golferId: round.host.golferId };
+    const annPhone = createClientOps("ann-phone");
+    // One op, pushed twice — the real shape of "the push landed but the pull never confirmed it,
+    // so it is still in this device's outbox."
+    const op = annPhone();
+    await round.record(hostClaims, { golferId: round.host.golferId, hole: 1, result: toResult(4), ...op });
+    await round.finalize(hostClaims);
+
+    await expect(round.record(hostClaims, { golferId: round.host.golferId, hole: 1, result: toResult(4), ...op })).resolves.toEqual({ duplicate: true });
+  });
+
   it("rejects a join after finalize — round-final (before ensureGolfer even runs)", async () => {
     const round = await freshLiveRound();
     const hostClaims: ParticipantClaims = { roundId: round.host.roundId, golferId: round.host.golferId };

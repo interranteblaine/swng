@@ -13,8 +13,16 @@ import { loadRoundState } from "./loadRoundState.js";
 export const recordScore =
   (deps: { journal: EventJournal; broadcast: Broadcast }) =>
   async (claims: ParticipantClaims, command: RecordScoreRequest): Promise<RecordScoreResponse> => {
-    const { state } = await loadRoundState(deps.journal, claims.roundId);
+    const { events, state } = await loadRoundState(deps.journal, claims.roundId);
     requireParticipant(state, claims.golferId);
+    // A re-push of a score this log ALREADY holds is idempotent whatever the round's status.
+    // The shape it exists for: a device pushed successfully but never pulled the confirmation,
+    // so the event is still in its outbox; a later drain finds the round finalized. Refusing
+    // there would report — and, before the outbox kept them, delete — a score that is safely
+    // stored. This runs after the auth check (a stranger learns nothing) and before the status
+    // check (the status is exactly what must not matter here). No extra read: loadRoundState
+    // already returned the events.
+    if (events.some((event) => event.opId === command.opId)) return { duplicate: true };
     if (state.status !== "live") throw new ApplicationError("round-not-live");
     // v1's only ScoringPolicy member requires both author and subject to be participants;
     // the author half is already covered by requireParticipant above, so this call's real

@@ -72,7 +72,11 @@ const buildArchive = (id: RoundId, finalizedAtMs: number): RoundArchive => ({
 const settledLog = (id: RoundId, strayCrewId?: string): RoundEvent[] => {
   const at = (wallMs: number) => ({ wallMs, counter: 0, deviceId: deviceId("contract-test") });
   const author = golferId(`author-${id}`);
-  const created = { kind: "round-created", roundId: id, card: fixtureLinks, opId: opId(`op-${id}-created`), hlc: at(1), authorId: author };
+  // playedAtMs equals this fixture's own genesis hlc.wallMs (spec 2026-08-01), so the sweep that
+  // added the field changed no existing assertion's meaning here. The `as unknown as RoundEvent`
+  // cast below is why the typechecker never flagged its absence — only the journal's runtime
+  // parse did, as a contract-test failure.
+  const created = { kind: "round-created", roundId: id, card: fixtureLinks, playedAtMs: 1, opId: opId(`op-${id}-created`), hlc: at(1), authorId: author };
   const genesis = (strayCrewId !== undefined ? { ...created, crewId: strayCrewId } : created) as unknown as RoundEvent;
   return [
     genesis,

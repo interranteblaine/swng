@@ -111,10 +111,14 @@ const recordPlayed = async (
   ctx.snapshots.record(archive);
   const ids = golferIds ?? archive.participants.map((p) => p.golferId);
   for (const golfer of ids) {
-    // playedAtMs (spec 2026-08-01 §4a) is REQUIRED on the port now; this file's own window-fold
-    // subject is `createdAtMs ?? finalizedAtMs` (getSeasonStandings.ts, untouched by that arc), so
-    // playedAtMs here is a type-satisfying value only — mirroring wallMs like finalizedAtMs, never
-    // read by anything in this file.
+    // playedAtMs (spec 2026-08-01 §4a) is REQUIRED on the port now, and IS read here: sortLines'
+    // sort key is playedAtMs (projectArchive.ts), and getSeasonStandings.ts:60 sorts every
+    // member's lines through it before crewScoreboard ever sees them. This fixture is unaffected
+    // by that only because playedAtMs === finalizedAtMs === wallMs here, so sorting by playedAtMs
+    // lands the exact same order sorting by finalizedAtMs would — a true statement, unlike "never
+    // read by anything in this file" (a task-3-review fix; the window-fold subject itself,
+    // `createdAtMs ?? finalizedAtMs` on getSeasonStandings.ts, is a separate and still-untouched
+    // fact).
     await ctx.projectionStore.putLine(golfer, {
       ...archiveGolferLine(archive, golfer),
       finalizedAtMs: wallMs,
@@ -486,9 +490,12 @@ describe("getSeasonStandings — scoreboard", () => {
       distribution: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 },
       holeResults: Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: 4, result: { kind: "strokes" as const, strokes: perHole } })),
       finalizedAtMs: ms,
-      // playedAtMs (spec 2026-08-01 §4a) is REQUIRED on the port now — a type-satisfying value
-      // only, unread by this test (crewScoreboard's own window reads createdAtMs ?? finalizedAtMs,
-      // untouched by that arc).
+      // playedAtMs (spec 2026-08-01 §4a) is REQUIRED on the port now, and IS read: sortLines' sort
+      // key is playedAtMs (projectArchive.ts, applied at getSeasonStandings.ts:60 before
+      // crewScoreboard sees these lines). This fixture is unaffected only because
+      // playedAtMs === finalizedAtMs === ms here, so sorting by playedAtMs matches sorting by
+      // finalizedAtMs exactly — a task-3-review fix; crewScoreboard's OWN window fold still reads
+      // createdAtMs ?? finalizedAtMs, untouched by that arc.
       playedAtMs: ms,
     });
     const annLines = [annLine("a1", 1_000, 6), annLine("a2", 2_000, 5), annLine("a3", 3_000, 5)];

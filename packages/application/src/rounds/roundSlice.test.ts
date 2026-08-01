@@ -30,6 +30,7 @@ import { leaveRound } from "./leaveRound.js";
 import { peekRound } from "./peekRound.js";
 import { readEvents } from "./readEvents.js";
 import { recordScore } from "./recordScore.js";
+import { setPlayedAt } from "./setPlayedAt.js";
 import { setStrokes } from "./setStrokes.js";
 import { startRound } from "./startRound.js";
 
@@ -111,6 +112,7 @@ const setup = async (clock: Clock = createFixedClock(1_000)) => {
     finalize: finalizeRound({ journal, snapshots, broadcast, clock, ids }),
     events: readEvents({ journal }),
     peek: peekRound({ journal, store }),
+    setPlayedAt: setPlayedAt({ journal, broadcast, clock, ids }),
   };
 };
 
@@ -326,6 +328,24 @@ describe("round use cases — golden path over in-memory ports", () => {
     expect(typeof peeked.playedAt).toBe("number");
   });
 
+  // Fix wave (task-3 review, Important 1): the assertion above only pins the TYPE, which a
+  // peekRound reverted to reading the genesis event's own `hlc.wallMs` would still satisfy — the
+  // fixture's genesis carries playedAtMs === hlc.wallMs, so no VALUE assertion there could tell
+  // "read the played date" apart from "read the genesis clock". This test appends a
+  // round-played-at-set correction (the stronger of the two options the review named: it exercises
+  // both arms of playedAtMsOf's rule, not just the fixture's own genesis field) whose value is far
+  // from the round's genesis hlc.wallMs, then asserts peek reports THAT value.
+  it("peekRound resolves playedAt through a round-played-at-set correction, not the genesis event's own hlc.wallMs", async () => {
+    const round = await freshLiveRound();
+    const hostClaims: ParticipantClaims = { roundId: round.host.roundId, golferId: round.host.golferId };
+
+    const correctedPlayedAtMs = 1_700_000_000_000; // far from the fixed clock's own wall time (~1_000)
+    await round.setPlayedAt(hostClaims, { playedAtMs: correctedPlayedAtMs });
+
+    const peeked = await round.peek(round.host.joinCode);
+    expect(peeked.playedAt).toBe(correctedPlayedAtMs);
+  });
+
   it("rejects peekRound with an unknown join code — bad-join-code, same shape as join's", async () => {
     const ctx = await setup();
     await expect(ctx.peek("ZZZZZZ")).rejects.toMatchObject({ code: "bad-join-code" });
@@ -362,6 +382,44 @@ describe("StartRound — as-self only", () => {
     const genesis = await ctx.events(host.roundId, 0);
     const joinEvent = genesis.events.find((event) => event.kind === "participant-joined");
     expect(joinEvent).toMatchObject({ participant: { golferId: host.golferId, name: placeholderName("sub-new") } });
+  });
+});
+
+// Fix wave (task-3 review, Important 1): no test in this file previously asserted round-created's
+// own `playedAtMs` value at all — every existing fixture only checked event kinds/ordering/hlc, so
+// `command.playedAtMs ?? deps.clock.now()` (startRound.ts) could be reverted to the pre-arc
+// `deps.clock.now()` unconditionally and the whole suite stayed green. These two cases exercise
+// both arms of that expression directly.
+describe("StartRound — playedAtMs (spec 2026-08-01 §3a)", () => {
+  it("stores a caller-supplied playedAtMs verbatim on round-created, not the clock's own wall time", async () => {
+    const ctx = await setup(); // createFixedClock(1_000) by default — genesis lands near wall time 1_000
+    await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
+
+    // Far from the clock's own wall time so a construction that silently discarded the
+    // caller-supplied value in favor of deps.clock.now() cannot coincidentally match.
+    const explicitPlayedAtMs = 1_700_000_000_000;
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white" }, playedAtMs: explicitPlayedAtMs }, { sub: ANN.sub });
+
+    const genesis = await ctx.events(host.roundId, 0);
+    const created = genesis.events.find((event) => event.kind === "round-created");
+    expect(created).toMatchObject({ playedAtMs: explicitPlayedAtMs });
+  });
+
+  it("falls back to the clock's own wall time when playedAtMs is omitted", async () => {
+    // A FROZEN clock (always returns the same instant), not the file's default fixed clock — the
+    // fixed clock advances 1ms on every single .now() call, including the two separate reads
+    // startRound.ts makes within one round-created construction (the playedAtMs default, then the
+    // hlc envelope), which would make even the CORRECT implementation's playedAtMs and hlc.wallMs
+    // differ by a spurious 1ms. A frozen clock removes that artifact so the assertion below is
+    // exactly "the clock's own value", not "approximately the clock's own value".
+    const ctx = await setup(createFrozenClock(1_000));
+    await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
+
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white" } }, { sub: ANN.sub });
+
+    const genesis = await ctx.events(host.roundId, 0);
+    const created = genesis.events.find((event) => event.kind === "round-created");
+    expect(created).toMatchObject({ playedAtMs: 1_000 });
   });
 });
 

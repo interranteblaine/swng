@@ -626,4 +626,22 @@ describe("getMyLiveRounds", () => {
     const result = await ctx.myLiveRounds({ sub: "sub-1" });
     expect(result.rounds).toEqual([{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000, playedAt: 7_777 }]);
   });
+
+  // Fix wave (task-3 review, Important 1): every OTHER fixture in this block sets playedAtMs equal
+  // to the genesis event's own hlc.wallMs, which makes "read the played date" and "read the
+  // genesis clock" the same function — a getMyLiveRounds.ts reverted to
+  // `events.find((e) => e.kind === "round-created")?.hlc.wallMs` would still satisfy every
+  // assertion above. This fixture deliberately diverges the two (playedAtMs 9_000 vs. hlc.wallMs
+  // 500) so only the real rule, playedAtMsOf, can produce the expected value.
+  it("resolves playedAt from the round's own playedAtMs, not the genesis event's hlc.wallMs", async () => {
+    const ctx = setup();
+    const { golfer } = await ctx.updateMe({ sub: "sub-1" }, {});
+    await ctx.journal.append(roundId("r1"), [
+      { kind: "round-created", roundId: roundId("r1"), card: fixtureLinks, playedAtMs: 9_000, opId: opId("g1"), hlc: { wallMs: 500, counter: 0, deviceId: deviceId("test") }, authorId: golferId("author") },
+    ]);
+    await ctx.projectionStore.putLive(golfer.golferId, { roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAtMs: 1_000, expiresAtSec: 9_999_999_999 });
+
+    const result = await ctx.myLiveRounds({ sub: "sub-1" });
+    expect(result.rounds).toEqual([{ roundId: roundId("r1"), courseName: "Casa Verde GC", joinedAt: 1_000, playedAt: 9_000 }]);
+  });
 });

@@ -272,6 +272,13 @@ describe("getGolferResponseSchema", () => {
   it("round-trips a history line with no finalizedAt/createdAt", () => {
     roundTrips(getGolferResponseSchema, { name: "Ann", metrics: bareMetrics, history: [{ ...completeLine, playedAt: 1_000 }] });
   });
+
+  // Minor 2 (task-3 review): the same required-field pin getMyRecordResponseSchema's own "rejects
+  // a history line missing playedAt" test above carries — golferRoundLineFields backs both
+  // schemas, so a missing playedAt must be rejected here too, not silently accepted.
+  it("rejects a history line missing playedAt", () => {
+    expect(() => parse(getGolferResponseSchema, { name: "Ann", metrics: bareMetrics, history: [completeLine] })).toThrow(ContractError);
+  });
 });
 
 // GET /me/courses/{courseId}/record (analytics spec 2026-07-21 §4).

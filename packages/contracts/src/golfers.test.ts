@@ -321,7 +321,11 @@ describe("getMyCourseRecordResponseSchema", () => {
 // history list — old projection lines carry none, tolerated as absent. playedAt (spec 2026-08-01
 // §4b) is REQUIRED — projectArchive always provides it.
 describe("getMyRoundsResponseSchema", () => {
-  const line = {
+  // Split so the missing-playedAt case below can be built by OMISSION rather than by
+  // destructure-and-drop — the same shape every sibling "rejects … missing X" test in this file
+  // and crews.test.ts uses (and the destructured form trips no-unused-vars, since the repo's
+  // eslint config sets argsIgnorePattern but not varsIgnorePattern).
+  const lineWithoutPlayedAt = {
     roundId: roundId("r1"),
     courseName: "Casa Verde GC",
     tee: "white",
@@ -330,8 +334,8 @@ describe("getMyRoundsResponseSchema", () => {
     strokes: 8,
     score: 90,
     distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
-    playedAt: 1_000,
   };
+  const line = { ...lineWithoutPlayedAt, playedAt: 1_000 };
 
   it("round-trips a round line carrying createdAt", () => {
     roundTrips(getMyRoundsResponseSchema, { rounds: [{ ...line, finalizedAt: 2_000, createdAt: 1_500 }] });
@@ -352,8 +356,7 @@ describe("getMyRoundsResponseSchema", () => {
   });
 
   it("rejects a round line missing playedAt", () => {
-    const { playedAt: _playedAt, ...withoutPlayedAt } = line;
-    expect(() => parse(getMyRoundsResponseSchema, { rounds: [{ ...withoutPlayedAt, finalizedAt: 2_000 }] })).toThrow(ContractError);
+    expect(() => parse(getMyRoundsResponseSchema, { rounds: [{ ...lineWithoutPlayedAt, finalizedAt: 2_000 }] })).toThrow(ContractError);
   });
 });
 

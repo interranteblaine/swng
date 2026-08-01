@@ -499,6 +499,7 @@ describe("unresolvedGames — finalize readiness", () => {
     games: [stablefordConfig],
     cells: {},
     terminatedGameIds: new Set(),
+    playedAtMs: 1,
     ...overrides,
   });
 

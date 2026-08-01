@@ -31,7 +31,14 @@ const newStore = () => createDynamoProjectionStore({ client: local.client, table
 
 const distribution = { eagles: 0, birdies: 0, pars: 4, bogeys: 0, doublePlus: 0 };
 
-const makeLine = (id: ReturnType<typeof roundId>, finalizedAtMs: number, overrides: Partial<GolferRoundLine> = {}): GolferRoundLine & { finalizedAtMs: number } => ({
+// playedAtMs (spec 2026-08-01 §4a) is REQUIRED on a stored line — defaults to finalizedAtMs
+// (a round played and finalized "now" in these fixtures), overridable via `overrides` for the
+// tests below that need a distinct played-at value.
+const makeLine = (
+  id: ReturnType<typeof roundId>,
+  finalizedAtMs: number,
+  overrides: Partial<GolferRoundLine> & { playedAtMs?: number } = {},
+): GolferRoundLine & { finalizedAtMs: number; playedAtMs: number } => ({
   roundId: id,
   courseName: "Casa Verde GC",
   tee: "white",
@@ -40,6 +47,7 @@ const makeLine = (id: ReturnType<typeof roundId>, finalizedAtMs: number, overrid
   strokes: 8,
   distribution,
   finalizedAtMs,
+  playedAtMs: finalizedAtMs,
   ...overrides,
 });
 
@@ -82,6 +90,22 @@ describe("createDynamoProjectionStore", () => {
       const back = new Map((await store.listLines(golfer)).map((line) => [line.roundId, line]));
       expect(back.get(withCreated.roundId)?.createdAtMs).toBe(1_500);
       expect(back.get(withoutCreated.roundId)).not.toHaveProperty("createdAtMs");
+    });
+
+    // playedAtMs (spec 2026-08-01 §4a) is REQUIRED and distinct from finalizedAtMs — a golfer
+    // entering last Friday's card on Sunday finalizes "now" but played "then". A value that
+    // differs from finalizedAtMs (rather than makeLine's own default-to-finalizedAtMs shortcut)
+    // proves the two fields round-trip independently, not conflated.
+    it("round-trips playedAtMs on a line, distinct from finalizedAtMs", async () => {
+      const store = newStore();
+      const golfer = golferId(randomUUID());
+      const line = makeLine(roundId(randomUUID()), 5_000, { playedAtMs: 1_000 });
+
+      await store.putLine(golfer, line);
+
+      const [back] = await store.listLines(golfer);
+      expect(back?.playedAtMs).toBe(1_000);
+      expect(back?.finalizedAtMs).toBe(5_000);
     });
 
     it("listLines on a golfer with no lines returns []", async () => {

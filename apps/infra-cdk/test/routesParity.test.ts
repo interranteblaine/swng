@@ -31,6 +31,9 @@ const stubUseCases: UseCases = {
   setStrokes: () => {
     throw new Error("not implemented: parity test never dispatches");
   },
+  setPlayedAt: () => {
+    throw new Error("not implemented: parity test never dispatches");
+  },
   readEvents: () => {
     throw new Error("not implemented: parity test never dispatches");
   },

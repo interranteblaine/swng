@@ -8,7 +8,15 @@ import { queryAllPages } from "./paginate.js";
 // `createdAtMs` (accounts-only identity spec §5) rides inside the stored `line` map like every
 // other line field — putLine writes the whole object and listLines reads it back, so no per-field
 // marshalling is needed. Optional: lines written before the field existed simply lack it on read.
-type Line = GolferRoundLine & { readonly finalizedAtMs: number; readonly createdAtMs?: number };
+//
+// `playedAtMs` (spec 2026-08-01 §4a) is REQUIRED, unlike createdAtMs — ports/projectionStore.ts's
+// own doc comment: projectArchive is the only writer and it always has a real value
+// (domain's playedAtMsOf throws rather than produce undefined), so there is no legacy-line case
+// to tolerate the way there is for createdAtMs. A line stored BEFORE this task landed carries no
+// playedAtMs on the raw item and will read back missing it regardless of this type annotation —
+// that is a close-out backfill fact (one `rebuildProjections` run replaces every stored line),
+// not something this adapter's read path should paper over with a fallback.
+type Line = GolferRoundLine & { readonly finalizedAtMs: number; readonly playedAtMs: number; readonly createdAtMs?: number };
 type LiveEntry = { readonly roundId: RoundId; readonly courseName: string; readonly joinedAtMs: number; readonly expiresAtSec: number };
 
 export const createDynamoProjectionStore = (config: { client: DynamoDBDocumentClient; tableName: string }): ProjectionStore => {

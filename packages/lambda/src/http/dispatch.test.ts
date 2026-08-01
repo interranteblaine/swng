@@ -46,6 +46,7 @@ import {
   removeCrewMember,
   searchCourses,
   seedCard,
+  setPlayedAt,
   setStrokes,
   startRound,
   supersedeCard,
@@ -84,6 +85,7 @@ import {
   recordScoreResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
+  setPlayedAtResponseSchema,
   setStrokesResponseSchema,
   shareLinkResponseSchema,
   startRoundResponseSchema,
@@ -177,6 +179,7 @@ const setup = async (verifier: AccountVerifier = subVerifier, logger: Logger = c
     abandonRound: abandonRound({ journal, broadcast, clock, ids, projectionStore, logger }),
     leaveRound: leaveRound({ journal, broadcast, clock, ids }),
     setStrokes: setStrokes({ journal, broadcast, clock, ids }),
+    setPlayedAt: setPlayedAt({ journal, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
@@ -401,6 +404,44 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     expect(eventsResp.statusCode).toBe(200);
     const events = eventsResponseSchema.parse(JSON.parse(eventsResp.body!));
     expect(events.events.some((event) => event.kind === "participant-strokes-set")).toBe(true);
+  });
+
+  // spec 2026-08-01 §3b/§4: a round's played date, corrected — a round-level fact (no SUBJECT,
+  // unlike setStrokes above), so any participant's own token is enough.
+  it("POST /rounds/{roundId}/played-at: participant auth, 200, appends the set", async () => {
+    const { dispatcher } = await setup();
+
+    const started = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(
+            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+          ),
+        ).body!,
+      ),
+    );
+
+    const resp = asStructured(
+      await dispatcher(
+        makeEvent({
+          method: "POST",
+          path: `/rounds/${started.roundId}/played-at`,
+          token: started.token,
+          body: { playedAtMs: 1_700_000_000_000 },
+        }),
+      ),
+    );
+    expect(resp.statusCode).toBe(200);
+    const parsed = setPlayedAtResponseSchema.parse(JSON.parse(resp.body!));
+    expect(parsed.events).toHaveLength(1);
+    expect(parsed.events[0]).toMatchObject({ kind: "round-played-at-set", playedAtMs: 1_700_000_000_000 });
+
+    const eventsResp = asStructured(
+      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
+    );
+    expect(eventsResp.statusCode).toBe(200);
+    const events = eventsResponseSchema.parse(JSON.parse(eventsResp.body!));
+    expect(events.events.some((event) => event.kind === "round-played-at-set")).toBe(true);
   });
 
   it("rejects a request with no bearer token on a participant route — 401", async () => {
@@ -688,7 +729,7 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
     const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek", query: { code: started.joinCode } })));
     expect(resp.statusCode).toBe(200);
     const peeked = peekRoundResponseSchema.parse(JSON.parse(resp.body!));
-    expect(Object.keys(peeked).sort()).toEqual(["courseName", "createdAt", "teeSets"]); // createdAt: accounts-only identity spec §5
+    expect(Object.keys(peeked).sort()).toEqual(["courseName", "playedAt", "teeSets"]); // playedAt: spec 2026-08-01 §4b, replacing the old createdAt
   });
 });
 
@@ -1759,6 +1800,23 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
     });
 
+    it("POST /rounds/{roundId}/played-at", async () => {
+      const { dispatcher } = await setup();
+      const { started, spectatorToken } = await startAndShare(dispatcher);
+      const resp = asStructured(
+        await dispatcher(
+          makeEvent({
+            method: "POST",
+            path: `/rounds/${started.roundId}/played-at`,
+            token: spectatorToken,
+            body: { playedAtMs: 1_700_000_000_000 },
+          }),
+        ),
+      );
+      expect(resp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
+    });
+
     it("POST /rounds/{roundId}/share itself — minting a NEW share link is participant-only", async () => {
       const { dispatcher } = await setup();
       const { started, spectatorToken } = await startAndShare(dispatcher);
@@ -1980,7 +2038,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       expect(getMyLiveRoundsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: [] });
     });
 
-    it("lists a round the golfer just started, by identity — courseName + joinedAt + createdAt on the wire", async () => {
+    it("lists a round the golfer just started, by identity — courseName + joinedAt + playedAt on the wire", async () => {
       const { dispatcher } = await setupArchive();
       await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
 
@@ -2002,9 +2060,10 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds/live", token: golferBearer(ann) })));
       expect(resp.statusCode).toBe(200);
       const parsed = getMyLiveRoundsResponseSchema.parse(JSON.parse(resp.body!));
-      // createdAt (accounts-only identity spec §5) — derived from the round's genesis at read time.
+      // playedAt (spec 2026-08-01 §4b, replacing the old createdAt) — domain's playedAtMsOf over
+      // the round's genesis, read at getMyLiveRounds.ts's own journal read.
       expect(parsed.rounds).toEqual([
-        { roundId: started.roundId, courseName: fixtureLinks.courseName, joinedAt: expect.any(Number), createdAt: expect.any(Number) },
+        { roundId: started.roundId, courseName: fixtureLinks.courseName, joinedAt: expect.any(Number), playedAt: expect.any(Number) },
       ]);
     });
 

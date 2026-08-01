@@ -737,7 +737,7 @@ describe("SwngStack", () => {
       template.hasResourceProperties("AWS::ApiGatewayV2::Route", { RouteKey: "$disconnect" });
     });
 
-    it("wires all thirty-nine HTTP routes (38 + GET /me/courses/{courseId}/record — the all-time analytics read, GET /crews/{crewId}/records, is deleted whole, spec 2026-07-22 §4)", () => {
+    it("wires all forty HTTP routes (39 + POST /rounds/{roundId}/played-at — a round's played date corrected, spec 2026-08-01 §3b/§4)", () => {
       const expectedRouteKeys = [
         "POST /rounds",
         "POST /rounds/join",
@@ -751,6 +751,9 @@ describe("SwngStack", () => {
         // spec 2026-07-30 §2: any participant sets any participant's strokes (score-for-anyone,
         // participant-gated).
         "POST /rounds/{roundId}/strokes",
+        // spec 2026-08-01 §3b/§4: any participant corrects the round's played date
+        // (participant-gated, same tier as strokes above).
+        "POST /rounds/{roundId}/played-at",
         "GET /rounds/{roundId}/events",
         // M9 Task 3 (share): mints this round's immortal spectator link.
         "POST /rounds/{roundId}/share",
@@ -810,11 +813,11 @@ describe("SwngStack", () => {
       }
     });
 
-    // Pins the total route count exactly (39 HTTP + $connect + $disconnect): the two tests
+    // Pins the total route count exactly (40 HTTP + $connect + $disconnect): the two tests
     // above each check membership, neither pins the count, so a stray extra route (or one
     // silently dropped) could pass both without this.
-    it("has exactly 41 routes total (39 HTTP + $connect + $disconnect)", () => {
-      template.resourceCountIs("AWS::ApiGatewayV2::Route", 41);
+    it("has exactly 42 routes total (40 HTTP + $connect + $disconnect)", () => {
+      template.resourceCountIs("AWS::ApiGatewayV2::Route", 42);
     });
 
     // M7 Task 5: PUT /me shipped, and the live preflight check against beta showed a route

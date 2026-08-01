@@ -70,11 +70,12 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (39, as of "the season is the record" spec 2026-07-22: +PUT
-// .../seasons/{seasonId} and +PUT /crews/{crewId} replace the deleted POST close/reopen
-// verbs, and GET /crews/{crewId}/records — the all-time surface, §4 — is deleted whole,
-// netting 40 back down to 39; the navigation spec's GET /golfers/{golferId} had brought this
-// to 37 before that; the course-cards wire switch trimmed it to 36 before that by dropping
+// function — but the (40, as of spec 2026-08-01 §3b/§4: +POST /rounds/{roundId}/played-at, a
+// round's played date corrected — 39 before that, as of "the season is the record" spec
+// 2026-07-22: +PUT .../seasons/{seasonId} and +PUT /crews/{crewId} replace the deleted POST
+// close/reopen verbs, and GET /crews/{crewId}/records — the all-time surface, §4 — is deleted
+// whole, netting 40 back down to 39; the navigation spec's GET /golfers/{golferId} had brought
+// this to 37 before that; the course-cards wire switch trimmed it to 36 before that by dropping
 // add-tee/verify for one whole-card PUT /courses/{courseId}) routes are declared here explicitly (matching
 // packages/lambda/src/http/routes.ts) rather than via a single $default catch-all, so the API's
 // shape is visible in the CloudFormation template and the AWS console, not hidden inside the
@@ -95,6 +96,11 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // spec 2026-07-30 §2: any participant sets any participant's strokes (score-for-anyone) —
   // "participant"-gated, same tier as leave/finalize above.
   { method: HttpMethod.POST, path: "/rounds/{roundId}/strokes" },
+  // spec 2026-08-01 §3b/§4: any participant corrects the round's played date —
+  // "participant"-gated, same tier as strokes/leave/finalize above. Deliberately NOT in
+  // ANON_THROTTLED_ROUTES below — same story as strokes/leave (a round-scoped participant token
+  // is required first, a higher bar than the anonymous-reachable routes there).
+  { method: HttpMethod.POST, path: "/rounds/{roundId}/played-at" },
   { method: HttpMethod.GET, path: "/rounds/{roundId}/events" },
   // M9 Task 3 (share): mints this round's immortal spectator link — participant-gated, same
   // tier as finalize/terminate above.

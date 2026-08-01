@@ -352,6 +352,10 @@ describe("createProjectorHandler", () => {
     // projector's createdAtMsOf (accounts-only identity spec §5) resolves; its wall time (1) is
     // arbitrary here, only its PRESENCE matters. playedAtMs mirrors that same arbitrary instant
     // (round-played-date spec 2026-08-01 §3a's required field — no fallback exists to lean on).
+    // Deliberately equal (Minor 7, task-7 review) — correct today since no assertion in this
+    // file reads it, but the exact same-instant shape this arc has twice shipped an
+    // unfalsifiable test on. Any future played-date assertion here must make the two diverge
+    // ACROSS A CALENDAR DAY to be observable.
     events: [
       {
         kind: "round-created",

@@ -25,6 +25,12 @@ const buildLog = (extraGames: readonly GameConfig[] = []): RoundEvent[] => {
   const boScores = [5, 4, 4, 5, 3, 6, 4, 4, 5];
 
   const events: RoundEvent[] = [
+    // playedAtMs deliberately equals this genesis event's own hlc.wallMs (Minor 7, task-7
+    // review) — correct today since no assertion in this file reads it, but the exact
+    // same-instant shape this arc has twice shipped an unfalsifiable test on. Any future
+    // played-date assertion added to this file must make the two diverge ACROSS A CALENDAR DAY
+    // to be observable (a sub-day skew round-trips through a rendered/derived label the same as
+    // no skew at all).
     { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: 1_000, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: ANN_ID, name: "Ann", tee: "white", strokes: 3 }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },

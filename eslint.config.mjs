@@ -267,6 +267,21 @@ export default [
         {
           paths: [
             {
+              // A dedicated entry (Minor 4, task-7 review): the shared message below tells a
+              // developer to "import it from @swng/client, not @swng/domain," which is FALSE for
+              // playedAtMsOf specifically — task 7 deleted that re-export as dead (zero web
+              // callers; every read surface already holds a folded RoundState by the time it
+              // asks and reads its own `playedAtMs` field instead — reduceRound already calls
+              // this exact function to produce it, so that's a second READ of the one answer,
+              // not a second rule). The banlist entry stays regardless — it independently bans a
+              // future direct-from-@swng/domain leak in apps/web/src — but its OWN message now
+              // says the thing that's actually true.
+              name: "@swng/domain",
+              allowTypeImports: true,
+              importNames: ["playedAtMsOf"],
+              message: "playedAtMsOf has no @swng/client re-export — read state.playedAtMs off the folded RoundState you already have instead.",
+            },
+            {
               name: "@swng/domain",
               allowTypeImports: true,
               importNames: [
@@ -276,15 +291,6 @@ export default [
                 "settleRound",
                 "resultOf",
                 "unresolvedGames",
-                // when a round was played (round-played-date spec 2026-08-01 §3c/§6). NOT
-                // re-exported through @swng/client (task 7 found zero web callers that need the
-                // raw-log form — every read surface already holds a folded RoundState by the
-                // time it asks and reads its own `playedAtMs` field instead; reduceRound already
-                // calls this exact function to produce it, so that's a second READ of the one
-                // answer, not a second rule). The banlist entry stays regardless: it bans a
-                // future direct-from-@swng/domain leak independently of what @swng/client
-                // re-exports.
-                "playedAtMsOf",
                 "scoreStrokePlay",
                 "scoreStableford",
                 "scoreSkins",

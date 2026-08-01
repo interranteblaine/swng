@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { GameState, GolferId, RosterEntry, RoundState } from "@swng/domain";
 import { MAX_STROKES } from "@swng/contracts";
 import type { GameConfigInput } from "@swng/contracts";
+import { ApiError } from "../api";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnQuiet, btnSecondary, cardBox, eyebrow, inputBox } from "../ui/classes";
 import { CopiedLinkLine } from "../ui/CopiedLinkLine";
@@ -98,13 +99,20 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
   const [playedAtValue, setPlayedAtValue] = useState("");
   const [playedAtError, setPlayedAtError] = useState<string | undefined>(undefined);
   const [savingPlayedAt, setSavingPlayedAt] = useState(false);
+  // The exact string Edit seeded the field with — a ref, not state, since it never drives a
+  // render on its own. savePlayedAt compares against it (Minor 5, task-7 review): the value it
+  // captures at open time, not a live recomputation from `state.playedAtMs` (which could itself
+  // move mid-edit if another device's correction arrives via sync).
+  const seededPlayedAtValue = useRef("");
 
   // Seeds the field with the round's own current instant, converted to the local wall-clock
   // string the input speaks — the same "edit swaps in a field holding the current value" contract
   // startEdit follows for strokes above.
   const startEditPlayedAt = () => {
+    const seeded = toDatetimeLocalValue(new Date(state.playedAtMs));
     setEditingPlayedAt(true);
-    setPlayedAtValue(toDatetimeLocalValue(new Date(state.playedAtMs)));
+    setPlayedAtValue(seeded);
+    seededPlayedAtValue.current = seeded;
     setPlayedAtError(undefined);
   };
 
@@ -115,6 +123,15 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
 
   const savePlayedAt = async () => {
     if (!isValidPlayedAtValue(playedAtValue)) return; // guarded by the disabled Save button too
+    // A no-change Save must not silently move the stored instant (Minor 5, task-7 review):
+    // toDatetimeLocalValue drops seconds, which a `datetime-local` input can't display, so a
+    // round whose playedAtMs carries sub-minute precision would otherwise get rewritten up to
+    // 59.999s earlier by a Save the golfer typed nothing into. If the field still reads exactly
+    // what Edit seeded it with, treat Save like Cancel — close without calling the API at all.
+    if (playedAtValue === seededPlayedAtValue.current) {
+      setEditingPlayedAt(false);
+      return;
+    }
     setSavingPlayedAt(true);
     setPlayedAtError(undefined);
     try {
@@ -122,8 +139,16 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
       // No optimistic local write: the corrected instant arrives via the fold once the caller
       // sync()s (RoundPage's own onSetPlayedAt), same as the roster's own save() above.
       setEditingPlayedAt(false);
-    } catch {
-      setPlayedAtError("Could not update the played date — try again.");
+    } catch (caught) {
+      // Unlike the strokes editor above, this editor validates nothing beyond "non-empty,
+      // parseable" — a second UI-side ceiling duplicating the wire's own bound is forbidden
+      // (the strokes editor's own isValidStrokes comment), so a wire rejection (a
+      // too-far-future/too-old playedAtMs, or a 409 once another device finalizes first) is a
+      // first-class reachable outcome here, not a hypothetical. A generic "try again" can never
+      // succeed for any of those. Same idiom as CreateRoundPage's submit and this same panel's
+      // own AddGameForm.tsx (composed a few lines below) — the server's own message when it's an
+      // ApiError, an honest fallback otherwise, never a raw unexpected Error's message.
+      setPlayedAtError(caught instanceof ApiError ? caught.message : "Could not update the played date — try again.");
     } finally {
       setSavingPlayedAt(false);
     }
@@ -208,8 +233,13 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
       <section aria-label="When did you play?" className={`${cardBox} flex flex-col gap-2 p-4`}>
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm text-fairway">When did you play?</span>
+          {/* No `disabled={savingPlayedAt}` here (Minor 8, task-7 review): this button only
+              renders while `!editingPlayedAt`, and `savingPlayedAt` is only ever true WHILE
+              editing — the two conditions can't be true at once, unlike the roster's own Edit
+              buttons above/below, where a save on one row must disable every OTHER row's Edit
+              while it's mid-flight. */}
           {!editingPlayedAt && (
-            <button type="button" className={`${btnQuiet} text-sm`} disabled={savingPlayedAt} onClick={startEditPlayedAt}>
+            <button type="button" className={`${btnQuiet} text-sm`} onClick={startEditPlayedAt}>
               Edit
             </button>
           )}
@@ -229,8 +259,14 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
             />
             <div className="flex gap-2">
               {/* btnSecondary, not btnQuiet (owner's own Step 5 instruction) — one gold per
-                  screen: this page's only gold action is FinalizeControl's own confirm-dialog
-                  Finalize button, so a bordered Save here never competes with it. */}
+                  screen: AddGameForm's submit (below, this same panel) is this screen's one gold
+                  action (Minor 2, task-7 review — this comment previously named
+                  FinalizeControl's confirm-dialog Finalize button instead, which is wrong:
+                  that button only exists conditionally, inside a dialog someone has to open
+                  first, while AddGameForm's own gold submit renders unconditionally on every
+                  live round, matching the OTHER "AddGameForm's submit ... gold action" comment
+                  ~40 lines above in this same file), so a bordered Save here never competes
+                  with it. */}
               <button type="button" className={btnSecondary} disabled={savingPlayedAt || !isValidPlayedAtValue(playedAtValue)} onClick={() => void savePlayedAt()}>
                 Save
               </button>

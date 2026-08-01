@@ -438,6 +438,11 @@ describe("RoundPage", () => {
     // contract: ResultsView must render fully from folded state + games() alone).
     expect(screen.queryByRole("tablist")).toBeNull();
     expect(screen.queryByRole("button", { name: "Finalize round" })).toBeNull();
+    // Minor 6 (task-7 review): SetupPanel — including its played-date editor — is composed only
+    // inside LiveRound, which itself only renders pre-finalize/pre-abandon. Pinned here rather
+    // than left implicit: the abandoned case already has its own dedicated "no scoring chrome"
+    // test below, but nothing previously asserted the SAME absence on an already-final round.
+    expect(screen.queryByRole("region", { name: /when did you play/i })).toBeNull();
 
     const cell = screen.getByRole("button", { name: "Ann hole 1" });
     expect(cell.hasAttribute("disabled")).toBe(true);

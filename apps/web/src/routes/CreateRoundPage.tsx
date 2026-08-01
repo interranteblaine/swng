@@ -21,6 +21,20 @@ const pad = (n: number): string => String(n).padStart(2, "0");
 const toDatetimeLocalValue = (date: Date): string =>
   `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 
+// A typed value is valid iff it parses to a real instant — the same "non-empty, parseable" check
+// SetupPanel.tsx's own played-date editor applies to this exact input type (that file's own
+// isValidPlayedAtValue). Extracted to a named, exported function (Minor 3, task-7 review) rather
+// than left inline in canSubmit below: a real `type="datetime-local"` input's OWN value
+// sanitization algorithm (WHATWG HTML §4.10.5.1.13) rejects anything that isn't a fully valid
+// local date-and-time string BEFORE onChange ever fires — verified empirically against this exact
+// input in happy-dom, every candidate tried ("not-a-date", "2026-13-45T99:99",
+// "2026-02-30T10:00", an out-of-range "T10:60") comes back "" from the DOM itself, same as typing
+// nothing at all. So `fireEvent.change` can never drive a non-empty, unparseable value through the
+// rendered field — the isNaN half of this predicate is unreachable that way, and a test asserting
+// it via the DOM would pass whether the clause exists or not. Exported so the test can pin it
+// directly instead.
+export const isPlayedAtValueValid = (value: string): boolean => value !== "" && !Number.isNaN(new Date(value).getTime());
+
 interface LocationState {
   // AddCoursePage's own success navigation (M6 Task 5's "Add a course" hand-off) — a course
   // just added should land here already selected, not force the golfer to search for the
@@ -100,8 +114,7 @@ export function CreateRoundPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: keyed by the router's own per-navigation identity, not by `state`'s object identity
   }, [location.key]);
 
-  const canSubmit =
-    courseView !== undefined && tee !== "" && golfer !== undefined && playedAt !== "" && !Number.isNaN(new Date(playedAt).getTime());
+  const canSubmit = courseView !== undefined && tee !== "" && golfer !== undefined && isPlayedAtValueValid(playedAt);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

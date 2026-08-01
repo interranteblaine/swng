@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
 import { MAX_STROKES } from "@swng/contracts";
 import type { GameConfig, RosterEntry, RoundState } from "@swng/domain";
+import { ApiError } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
@@ -601,6 +602,10 @@ describe("SetupPanel — the played date", () => {
     renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: failingSetPlayedAt });
 
     await user.click(within(region()).getByRole("button", { name: "Edit" }));
+    // A genuine edit (Minor 5, task-7 review): Save with no change closes the editor without
+    // calling onSetPlayedAt at all, which would make this failure path unreachable.
+    const input = within(region()).getByLabelText("When did you play?");
+    fireEvent.change(input, { target: { value: "2026-06-09T07:00" } });
     await user.click(within(region()).getByRole("button", { name: "Save" }));
 
     // Never a raw generic Error's message (papercut 12's own precedent) — an honest fallback,
@@ -609,6 +614,31 @@ describe("SetupPanel — the played date", () => {
     expect(within(region()).getByRole("alert").textContent).toBe("Could not update the played date — try again.");
     expect(document.body.textContent).not.toMatch(/network exploded/);
     expect(within(region()).getByLabelText("When did you play?")).toBeTruthy();
+  });
+
+  // Important 1 (task-7 review): the generic "try again" line is a dead end for a wire
+  // rejection — this editor deliberately validates nothing beyond "non-empty, parseable" (a
+  // second UI-side ceiling duplicating the wire's own bound is forbidden, the strokes editor's
+  // own precedent), so a too-far-future/too-old playedAtMs, or a 409 once another device
+  // finalizes the round first, are first-class reachable outcomes, not hypotheticals — "try
+  // again" can never succeed for either. Same fix, same idiom as CreateRoundPage.tsx's own
+  // submit: the server's own message reaches the screen when the rejection is an ApiError.
+  it("a rejected ApiError surfaces the server's own message, not the generic fallback", async () => {
+    const user = userEvent.setup();
+    const failingSetPlayedAt = vi.fn().mockRejectedValue(new ApiError("invalid-request", 400, "playedAtMs: playedAtMs is too far in the future"));
+    const state = baseState({ playedAtMs: new Date(2026, 5, 12, 9, 30, 0, 0).getTime() });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: failingSetPlayedAt });
+
+    await user.click(within(region()).getByRole("button", { name: "Edit" }));
+    const input = within(region()).getByLabelText("When did you play?");
+    fireEvent.change(input, { target: { value: "2062-06-12T09:30" } });
+    await user.click(within(region()).getByRole("button", { name: "Save" }));
+
+    expect(await within(region()).findByRole("alert")).toBeTruthy();
+    // The server's real message, not "Could not update the played date — try again." — that
+    // fallback can never succeed on retry for exactly this rejection.
+    expect(within(region()).getByRole("alert").textContent).toBe("playedAtMs: playedAtMs is too far in the future");
+    expect(within(region()).getByLabelText("When did you play?")).toBeTruthy(); // editor stays open
   });
 
   it("refuses an empty field — Save stays disabled and nothing is posted", async () => {
@@ -623,5 +653,28 @@ describe("SetupPanel — the played date", () => {
     expect((within(region()).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(within(region()).getByRole("button", { name: "Save" }));
     expect(noopSetPlayedAt).not.toHaveBeenCalled();
+  });
+
+  // Minor 5 (task-7 review): toDatetimeLocalValue drops seconds (a datetime-local input can't
+  // display them), so a round created with sub-minute precision would get its stored instant
+  // silently rewritten up to 59.999s earlier by a Save the golfer typed nothing into. A Save
+  // that alters stored data when nothing changed is worth not having — Edit then Save with no
+  // edit in between must be a no-op, not a network round trip.
+  it("Save with no change closes the editor without calling onSetPlayedAt", async () => {
+    const user = userEvent.setup();
+    // Sub-minute precision (12.345s) the datetime-local field cannot show — exactly the value a
+    // round-created-with-no-explicit-playedAtMs carries, and exactly what a no-op Save must not
+    // silently round away.
+    const playedAtMs = new Date(2026, 5, 12, 9, 30, 12, 345).getTime();
+    const state = baseState({ playedAtMs });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
+
+    await user.click(within(region()).getByRole("button", { name: "Edit" }));
+    await user.click(within(region()).getByRole("button", { name: "Save" }));
+
+    expect(noopSetPlayedAt).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(region()).queryByLabelText("When did you play?")).toBeNull());
+    expect(within(region()).getByRole("button", { name: "Edit" })).toBeTruthy();
+    expect(within(region()).getByText(/Jun 12, 2026/)).toBeTruthy();
   });
 });

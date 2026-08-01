@@ -35,7 +35,7 @@ vi.mock("../api", () => ({
 import { ApiError, createRound, getCourse, getMe, searchCourses } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
-import { CreateRoundPage } from "./CreateRoundPage";
+import { CreateRoundPage, isPlayedAtValueValid } from "./CreateRoundPage";
 const mockedCreateRound = vi.mocked(createRound);
 const mockedGetCourse = vi.mocked(getCourse);
 const mockedSearchCourses = vi.mocked(searchCourses);
@@ -243,10 +243,6 @@ describe("CreateRoundPage — create as yourself", () => {
 // disclosure, no second mode) and defaults to now. Whatever the field shows is exactly what gets
 // submitted — nothing inferred, nothing rounded, nothing snapped.
 describe("CreateRoundPage — when did you play", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("defaults the played-at field to now and submits that instant", async () => {
     // A local wall-clock instant with a non-zero minute/hour — a fixture where "now" happens to
     // land on a round number (e.g. midnight) couldn't distinguish "reads the real clock" from
@@ -317,6 +313,19 @@ describe("CreateRoundPage — when did you play", () => {
 
     fireEvent.change(input, { target: { value: "" } });
     expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(true);
+
+    // The title's other half — "or holds an unparseable value" — cannot be driven through the
+    // rendered field at all (Minor 3, task-7 review): a real `type="datetime-local"` input's OWN
+    // value-sanitization algorithm rejects anything that isn't a fully valid local date-and-time
+    // string BEFORE onChange ever fires. Verified empirically against THIS input:
+    // `fireEvent.change(input, { target: { value: "not-a-date" } })` — the review's own suggested
+    // repro — leaves `input.value` at `""`, indistinguishable from the empty-field case just
+    // asserted above, so it can't tell "the isNaN clause exists" from "it was deleted" (confirmed
+    // by deleting the clause and re-running: still green). So instead this pins the exported
+    // predicate `canSubmit` is built from directly — a genuine RED when the isNaN half is removed.
+    expect(isPlayedAtValueValid("not-a-date")).toBe(false);
+    expect(isPlayedAtValueValid("")).toBe(false);
+    expect(isPlayedAtValueValid("2026-07-28T08:15")).toBe(true);
   });
 });
 

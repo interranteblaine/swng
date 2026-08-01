@@ -267,7 +267,9 @@ git commit -m "feat(contracts): playedAtMs on round-created, POST /rounds/{id}/p
 - Modify: `packages/application/src/ports/projectionStore.ts` (line shape)
 - Modify: `packages/application/src/golfers/getMyRounds.ts`, `golfers/recordOf.ts` (`toWireLine` ×2)
 - Modify: `packages/application/src/golfers/getMyLiveRounds.ts`
+- Modify: `packages/application/src/rounds/peekRound.ts`
 - Modify: `packages/contracts/src/golfers.ts` (history rows + live rounds gain `playedAt`)
+- Modify: `packages/contracts/src/round.ts` (`PeekRoundResponse` gains `playedAt`)
 - Modify: `packages/application/src/index.ts`
 - Test: the co-located `*.test.ts` for each
 
@@ -330,6 +332,8 @@ In `projectArchive`, add `const playedAtMs = playedAtMsOf(archive.events);` besi
 Both `toWireLine` implementations (`getMyRounds.ts`, `recordOf.ts`) gain `playedAt: line.playedAtMs` — placed with the other explicit field mappings, never a spread. Leave their existing `...(line.createdAtMs !== undefined ? { createdAt: line.createdAtMs } : {})` lines exactly as they are.
 
 `getMyLiveRounds.ts`: replace its genesis-`hlc.wallMs` derivation with `playedAtMsOf(events)`.
+
+`peekRound.ts` + `PeekRoundResponse`: gains required `playedAt: number`, derived by `playedAtMsOf(events)` — it currently serves `createdAt: genesis.hlc.wallMs`, which `JoinRoundPage` renders through `roundLabel` ("Joining Casa Verde GC · Sat, Jul 12"). **Replace `createdAt` here rather than adding beside it**: unlike a history line, a peek carries no audit surface at all, so a second date on this response would be one nobody reads. A peek is capability-scoped and already discloses the round's day; nothing new leaks.
 
 - [ ] **Step 7: Run the tests**
 
@@ -464,7 +468,7 @@ git commit -m "feat(crew): a round counts in the season it was played in"
 **Files:**
 - Modify: `packages/client/src/index.ts` (re-export `playedAtMsOf`)
 - Modify: `apps/web/src/roundLabel.ts` + `roundLabel.test.ts` (`RoundDesignation.createdAt` → `playedAt`)
-- Modify: `apps/web/src/routes/HomePage.tsx`, `apps/web/src/crews/SeasonPanel.tsx`, `apps/web/src/golfers/RecordSections.tsx`, `apps/web/src/watch/useWatchRound.ts`
+- Modify: `apps/web/src/routes/HomePage.tsx`, `apps/web/src/routes/JoinRoundPage.tsx`, `apps/web/src/crews/SeasonPanel.tsx`, `apps/web/src/golfers/RecordSections.tsx`, `apps/web/src/watch/useWatchRound.ts`, `apps/web/src/watch/WatchPage.tsx`, `apps/web/src/round/RoundRecordPage.tsx`
 - Modify: their co-located tests
 
 **Interfaces:**
@@ -495,19 +499,27 @@ Re-export `playedAtMsOf` from `@swng/domain` beside the other on-device round-co
 
 `RoundDesignation.createdAt?: number` → `playedAt: number` (required). Update `dayOf`/`timeOf`/`roundLabel`/`roundDayKey`/`dayCollisionChecker` and their doc comments. The module doc's explanation of the timezone contract is unchanged and stays. Delete the `if (createdAt === undefined) return courseName` branch and the `roundDayKey` undefined-return branch, and the `RoundDayKey` return type narrows from `string | undefined` to `string` — chase the callers.
 
-- [ ] **Step 5: Point the four call sites at `playedAt`**
+- [ ] **Step 5: Point every call site at `playedAt`**
 
-Read each file first; these are one-line-per-site changes.
+Read each file first. Seven sites, and **two of them are more than a rename**:
 
-- `HomePage.tsx` — live rounds and recent rounds both.
-- `SeasonPanel.tsx:364` — the "Played together" row.
-- `RecordSections.tsx:135-141` — the chart's date anchors: `row?.createdAt ?? row?.finalizedAt` becomes `row?.playedAt`. Update the comment at :25 too, which names the old preference order.
-- `useWatchRound.ts:142` — `events.find((e) => e.kind === "round-created")?.hlc.wallMs` becomes `playedAtMsOf(events)` imported from `@swng/client`, and the field's type narrows from `number | undefined` to `number`.
+- `HomePage.tsx:208` — live rounds and recent rounds both.
+- `SeasonPanel.tsx:364` — the "Played together" row (`SharedRoundView.playedAt`, Task 5).
+- `JoinRoundPage.tsx:52,75,132` — the peek's date (`PeekRoundResponse.playedAt`, Task 3); the local state variable renames with it.
+- `WatchPage.tsx:48,95` — two `roundLabel` calls off `view.createdAt`.
+- `RecordSections.tsx:25,69,135,141` — the chart's date anchors: `row?.createdAt ?? row?.finalizedAt` becomes `row.playedAt`. **Also delete `createdAt` from the `history` prop type at :69** — nothing reads it, and a web-local type mirroring a wire field it never touches is the drift this arc exists to remove. Update the comments at :25 and :135, which both name the old preference order.
+- `useWatchRound.ts:25,142,144` — **a second implementation of the rule.** `events.find((e) => e.kind === "round-created")?.hlc.wallMs` becomes `playedAtMsOf(events)` from `@swng/client`; the field's type narrows from `number | undefined` to `number`.
+- `RoundRecordPage.tsx:20,25,57,73,148` — **the same second implementation again**, as a module-local `createdAtMsOf` helper. **Delete the helper outright** and call `playedAtMsOf(events)` from `@swng/client`; `view.createdAtMs` becomes `view.playedAtMs`, type `number`. Two hand-rolled copies of "read the genesis clock" living in the web is precisely what the one-rule constraint forbids; do not leave either.
 
 - [ ] **Step 6: Grep gate**
 
-Run: `grep -rn "createdAt" apps/web/src --include="*.tsx" --include="*.ts" | grep -v "\.test\."`
-Expected: **no matches.** Nothing in the web renders, groups, or sorts by the record-creation instant anymore. If a match survives, it is either a real leak or a deliberate audit surface this plan did not authorize — stop and escalate rather than adding an exception.
+Run:
+```bash
+grep -rn "createdAt" apps/web/src --include="*.tsx" --include="*.ts" | grep -v "\.test\." | grep -v "season"
+```
+Expected: **no matches.** Nothing in the web renders, groups, or sorts by a round's record-creation instant anymore, and no copy of the genesis-clock derivation survives there.
+
+The `season` exclusion is load-bearing and narrow: `CrewPage.tsx:330` sorts crew SEASONS by `season.createdAtMs`, which is when a season was created and has nothing to do with a round's dates. **That line is correct and must not be touched.** If a match survives the gate, it is a real leak or a surface this plan did not authorize — stop and escalate rather than widening the exclusion.
 
 - [ ] **Step 7: Run the web suite**
 

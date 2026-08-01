@@ -447,11 +447,11 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
       navigate("/");
     }, [roundId, credential.token, navigate]);
 
-    // StatusChrome's "Sync now" button: connect() re-opens the socket if it dropped (a no-op
-    // otherwise — session.ts's own idempotency), then sync() explicitly pushes+pulls once,
-    // through the same serialized gate as every other trigger, so it coalesces onto whatever
-    // pass connect()'s own opportunistic sync may already have started rather than running
-    // twice.
+    // StatusChrome's "Try now" backstop (shown only once the outbox's own backoff loop is
+    // `stalled`): connect() re-opens the socket if it dropped (a no-op otherwise — session.ts's
+    // own idempotency), then sync() explicitly pushes+pulls once, through the same serialized
+    // gate as every other trigger, so it coalesces onto whatever pass connect()'s own
+    // opportunistic sync may already have started rather than running twice.
     const reconnect = useCallback(() => {
       connect();
       void sync();
@@ -481,8 +481,8 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     const isAbandoned = session.state.status === "abandoned";
 
     // A scrapped round is terminal and has no scorecard/results to show — swap the whole page
-    // for the honest notice, ahead of any scoring chrome (StatusChrome's offline banner / pending
-    // badge would be meaningless noise over a round that counts nowhere).
+    // for the honest notice, ahead of any scoring chrome (StatusChrome's queue/stalled banner
+    // would be meaningless noise over a round that counts nowhere).
     if (isAbandoned) {
       return (
         <main className="min-h-screen bg-cream">
@@ -494,7 +494,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
     return (
       <main className="min-h-screen bg-cream">
         <StatusChrome
-          connected={session.connected}
+          stalled={session.stalled}
           pending={session.pending}
           rejected={session.rejected}
           participants={session.state.participants}

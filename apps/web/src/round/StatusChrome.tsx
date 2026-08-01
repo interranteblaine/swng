@@ -3,7 +3,12 @@ import type { GolferId, Participant } from "@swng/domain";
 import type { RejectedOp } from "@swng/client";
 
 export interface StatusChromeProps {
-  readonly connected: boolean;
+  // NOT the socket. The socket closes on a perfectly good connection — API Gateway caps
+  // connection duration well below the length of a round, and phones lock and background — so
+  // "Offline" was a claim about our own plumbing that a golfer with full bars could read as a
+  // claim about theirs. `stalled` says the only thing worth saying: we are still trying, and it
+  // is still not working.
+  readonly stalled: boolean;
   readonly pending: number;
   // rejected() is IN-MEMORY ONLY (M4 handoff note in useRoundSession.ts / session.ts) — a
   // permanently-rejected op is forgotten on reload. Persisting this list across restarts is
@@ -13,8 +18,9 @@ export interface StatusChromeProps {
   readonly participants: readonly Participant[];
   // Re-triggers the session's connect()+sync() (session/useRoundSession.ts's own doc comment:
   // the client SDK has no reconnect timer — a caller that wants to reconnect calls connect()
-  // again). This button is the only user-visible way to resume after coming back online; it
-  // lives beside the offline banner it's paired with, not as a separate always-there control.
+  // again). The outbox drains itself on its own backoff loop now — this is no longer the only
+  // way to resume, just a backstop: it appears only inside the escalated (`stalled`) state, for
+  // a golfer who wants to give the queue a manual nudge rather than wait out the backoff.
   readonly onReconnect: () => void;
 }
 
@@ -29,11 +35,12 @@ const describeRejection = (participants: readonly Participant[], rejected: Rejec
   return event.kind;
 };
 
-// Connectivity + queue chrome around the scorecard (brief): a calm offline banner (the queue
-// IS the feature, not an error state), a pending badge that drains as the outbox does, and
-// rejected ops surfaced twice — a dismissible toast (so it doesn't nag forever) plus a
+// Queue chrome around the scorecard (brief): the subject is the outbox, not the socket — a
+// quiet syncing line while it drains (the queue IS the feature, not an error state), an
+// escalated banner only once the backoff loop is `stalled` (with a manual "Try now" backstop),
+// and rejected ops surfaced twice — a dismissible toast (so it doesn't nag forever) plus a
 // persistent row per op (so a rejection is never silently lost while it's still in memory).
-export function StatusChrome({ connected, pending, rejected, participants, onReconnect }: StatusChromeProps) {
+export function StatusChrome({ stalled, pending, rejected, participants, onReconnect }: StatusChromeProps) {
   const [toastDismissed, setToastDismissed] = useState(false);
   const seenCountRef = useRef(rejected.length);
 
@@ -46,19 +53,19 @@ export function StatusChrome({ connected, pending, rejected, participants, onRec
 
   return (
     <div className="flex flex-col gap-2 p-3">
-      {!connected && (
+      {stalled ? (
         <div role="status" className="flex items-center justify-between gap-2 border border-gold bg-goldwash px-3 py-2 text-sm text-forest">
-          <p>Offline — scores queue and sync when signal returns.</p>
+          <p>Can&apos;t reach swng — your scores are safe here.</p>
           <button type="button" onClick={onReconnect} className="min-h-8 shrink-0 border border-forest px-2 text-xs font-medium text-forest">
-            Sync now
+            Try now
           </button>
         </div>
-      )}
-
-      {pending > 0 && (
-        <p className="text-xs text-fairway">
-          {pending} score{pending === 1 ? "" : "s"} syncing…
-        </p>
+      ) : (
+        pending > 0 && (
+          <p role="status" className="text-xs text-fairway">
+            {pending} score{pending === 1 ? "" : "s"} saved on this phone — syncing…
+          </p>
+        )
       )}
 
       {rejected.length > 0 && !toastDismissed && (

@@ -190,8 +190,9 @@ describe("RoundPage", () => {
     );
 
     await waitFor(() => expect(screen.getByText("CCC333")).toBeTruthy());
-    // Connected (the scripted transport's openSocket opens synchronously) — StatusChrome
-    // wired to the real session renders no offline banner.
+    // Nothing queued and nothing stalled (the scripted transport's openSocket opens
+    // synchronously, and there's no failed push to escalate) — StatusChrome wired to the real
+    // session renders no status element at all.
     expect(screen.queryByRole("status")).toBeNull();
 
     // Two taps, idle to posted: tap the cell (fixtureLinks hole 1, no games — plain gross),
@@ -833,7 +834,7 @@ describe("RoundPage", () => {
     transport.offline = true;
     fireEvent.click(screen.getByRole("button", { name: "Ann hole 1" }));
     fireEvent.click(screen.getByRole("button", { name: "5" }));
-    await waitFor(() => expect(screen.getByText(/^1 score syncing/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/^1 score saved on this phone — syncing/)).toBeTruthy());
     expect(transport.log.some((event) => event.kind === "score-recorded")).toBe(false);
 
     // Pushes work again, but NOTHING re-syncs on its own (no timer in the SDK — session.ts) —
@@ -895,7 +896,7 @@ describe("RoundPage", () => {
     transport.offline = true;
     fireEvent.click(screen.getByRole("button", { name: "Ann hole 1" }));
     fireEvent.click(screen.getByRole("button", { name: "5" }));
-    await waitFor(() => expect(screen.getByText(/^1 score syncing/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/^1 score saved on this phone — syncing/)).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "Finalize round" }));
     fireEvent.click(screen.getByRole("button", { name: "Finalize" }));
@@ -906,7 +907,7 @@ describe("RoundPage", () => {
     expect(finalizeCalls).toBe(0);
     expect(screen.getByRole("dialog", { name: "Confirm finalize" })).toBeTruthy(); // stays open — retry is one tap away
     expect(screen.queryByText("Final results")).toBeNull();
-    expect(screen.getByText(/^1 score syncing/)).toBeTruthy(); // the score is still queued, not lost
+    expect(screen.getByText(/^1 score saved on this phone — syncing/)).toBeTruthy(); // the score is still queued, not lost
 
     // Signal returns: the SAME tap now drains and then seals.
     transport.offline = false;

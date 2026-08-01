@@ -18,7 +18,7 @@ const SCORE_EVENT: RoundEvent = {
 describe("createIndexedDbOutboxStore", () => {
   it("round-trips a saved sync state through IndexedDB", async () => {
     const store = createIndexedDbOutboxStore({ indexedDb: new IDBFactory() });
-    const sync: PersistedSync = { pending: [SCORE_EVENT], lastSeq: 5, opCounter: 1 };
+    const sync: PersistedSync = { pending: [SCORE_EVENT], lastSeq: 5, opCounter: 1, rejected: [] };
 
     await store.save(roundId("round-1"), sync);
     const loaded = await store.load(roundId("round-1"));
@@ -34,7 +34,7 @@ describe("createIndexedDbOutboxStore", () => {
 
   it("persists across two store instances sharing one IDBFactory — the app-restarted case", async () => {
     const factory = new IDBFactory();
-    const sync: PersistedSync = { pending: [SCORE_EVENT], lastSeq: 7, opCounter: 4 };
+    const sync: PersistedSync = { pending: [SCORE_EVENT], lastSeq: 7, opCounter: 4, rejected: [] };
 
     const first = createIndexedDbOutboxStore({ indexedDb: factory, databaseName: "restart-test" });
     await first.save(roundId("round-1"), sync);

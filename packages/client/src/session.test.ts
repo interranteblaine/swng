@@ -503,7 +503,7 @@ describe("createRoundSession — sync + reconnect", () => {
       hole: 5,
       result: toResult(4),
     };
-    await store.save(ROUND_ID, { pending: [...seed, staleEvent], lastSeq: 0, opCounter: 1 });
+    await store.save(ROUND_ID, { pending: [...seed, staleEvent], lastSeq: 0, opCounter: 1, rejected: [] });
 
     const transport = createScriptedTransport([]); // never touched — this test never syncs
     const session = await createRoundSession({
@@ -833,5 +833,63 @@ describe("createRoundSession — review fixes: throwing passes must not strand o
       await new Promise((resolve) => setTimeout(resolve, 0)); // flush past the rejected opportunistic sync
       expect(warnSpy).toHaveBeenCalled(); // reported, not silently dropped
     });
+  });
+});
+
+// A store whose load() returns a record written BEFORE `rejected` existed. The cast is the
+// point of the fixture: it reproduces exactly what a real browser's IndexedDB holds for any
+// round a golfer opened before this change shipped.
+const legacyStore = (sync: Omit<PersistedSync, "rejected">): OutboxStore => ({
+  load: async () => sync as PersistedSync,
+  save: async () => {},
+});
+
+describe("createRoundSession — rejected ops are durable", () => {
+  it("seeds rejected() from the store, so a permanently refused score survives a reload", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const store = createMemoryOutboxStore();
+    const refused: RoundEvent = {
+      kind: "score-recorded",
+      opId: opId("device-a-1"),
+      hlc: { wallMs: 1_000, counter: 0, deviceId: deviceId("device-a") },
+      authorId: ANN_ID,
+      golferId: ANN_ID,
+      hole: 1,
+      result: toResult(4),
+    };
+    await store.save(ROUND_ID, { pending: [], lastSeq: 0, opCounter: 1, rejected: [{ event: refused, code: "round-not-live" }] });
+
+    const session = await createRoundSession({ transport, store, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("device-a") });
+
+    expect(session.rejected()).toEqual([{ event: refused, code: "round-not-live" }]);
+  });
+
+  it("persists a rejection, so the score is still on the device after a restart", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const store = createMemoryOutboxStore();
+    const session = await createRoundSession({ transport, store, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("device-a") });
+
+    transport.rejectOpId = opId("device-a-1");
+    session.recordScore(ANN_ID, 1, toResult(4));
+    await session.sync();
+    await session.close();
+
+    const restarted = await createRoundSession({ transport, store, roundId: ROUND_ID, golferId: ANN_ID, deviceId: deviceId("device-a") });
+
+    expect(restarted.rejected()).toHaveLength(1);
+    expect(restarted.rejected()[0]!.event.opId).toBe(opId("device-a-1"));
+  });
+
+  it("tolerates a record written before `rejected` existed — starts empty, never throws", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const session = await createRoundSession({
+      transport,
+      store: legacyStore({ pending: [], lastSeq: 0, opCounter: 3 }),
+      roundId: ROUND_ID,
+      golferId: ANN_ID,
+      deviceId: deviceId("device-a"),
+    });
+
+    expect(session.rejected()).toEqual([]);
   });
 });

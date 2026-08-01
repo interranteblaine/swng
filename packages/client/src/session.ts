@@ -2,17 +2,12 @@ import { opId, reduceRound, scoreGame } from "@swng/domain";
 import type { DeviceId, GameState, GolferId, HoleResult, RoundEvent, RoundId, RoundState } from "@swng/domain";
 import { createHlcSource } from "./hlc.js";
 import { createMemoryOutboxStore } from "./outbox.js";
-import type { OutboxStore, PersistedSync } from "./outbox.js";
+import type { OutboxStore, PersistedSync, RejectedOp } from "./outbox.js";
 // The known-game-kinds set lives in scoring.ts now — ONE list shared by this live fold and
 // foldAndScore's read-only one, not two copies to keep in sync. See its doc comment there.
 import { KNOWN_GAME_KINDS } from "./scoring.js";
 import { TransportError } from "./transport.js";
 import type { RoundTransport } from "./transport.js";
-
-export interface RejectedOp {
-  readonly event: RoundEvent;
-  readonly code: string;
-}
 
 export interface RoundSession {
   readonly roundId: RoundId;
@@ -86,7 +81,9 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   let lastSeq = 0;
   let opCounter = persisted?.opCounter ?? 0;
   let confirmed: readonly RoundEvent[] = [];
-  let rejectedOps: readonly RejectedOp[] = [];
+  // Seeded, not started empty: a refused op is the ONLY copy of that score anywhere, so it
+  // survives the restart exactly as `pending` does.
+  let rejectedOps: readonly RejectedOp[] = persisted?.rejected ?? [];
   let connectedFlag = false;
   let closeSocket: (() => void) | undefined;
   let cachedState: RoundState | undefined;
@@ -130,7 +127,7 @@ export const createRoundSession = async (config: SessionConfig): Promise<RoundSe
   // (close(), specifically); in-memory state is authoritative regardless of what persist()
   // does.
   const persist = (): Promise<void> => {
-    const snapshot: PersistedSync = { pending, lastSeq, opCounter };
+    const snapshot: PersistedSync = { pending, lastSeq, opCounter, rejected: rejectedOps };
     const attempt = saveChain.then(() => store.save(config.roundId, snapshot));
     saveChain = attempt.catch(() => {});
     return attempt;

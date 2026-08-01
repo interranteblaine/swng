@@ -1,9 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMemoryOutboxStore } from "@swng/client";
 import { cellKey, deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { GameConfig, OpId, RoundEvent } from "@swng/domain";
 import { createScriptedTransport, stampSeq } from "../testSupport/scriptedTransport";
+import type { ScriptedTransport } from "../testSupport/scriptedTransport";
 import { createUseRoundSession } from "./useRoundSession";
 import type { ResolveSessionConfig } from "./useRoundSession";
 
@@ -151,5 +152,113 @@ describe("useRoundSession", () => {
 
     expect(transport.socketOpenCalls).toBe(1); // still just the one real socket
     expect(result.current.connected).toBe(true);
+  });
+});
+
+describe("useRoundSession — wake signals", () => {
+  const liveHook = (transport: ScriptedTransport) => {
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: ROUND_ID,
+      golferId: ANN_ID,
+      deviceId: deviceId("ann-tab-1"),
+    });
+    return renderHook(() => createUseRoundSession(resolveSessionConfig)(ROUND_ID));
+  };
+
+  it("syncs on the browser's online event, so a queue drains the moment signal returns", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const { result, unmount } = liveHook(transport);
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    const pullsBefore = transport.pullCalls;
+
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+
+    await waitFor(() => expect(transport.pullCalls).toBeGreaterThan(pullsBefore));
+    unmount();
+  });
+
+  it("syncs on the browser's focus event, covering a tab that regains focus without an online event", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const { result, unmount } = liveHook(transport);
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    const pullsBefore = transport.pullCalls;
+
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    await waitFor(() => expect(transport.pullCalls).toBeGreaterThan(pullsBefore));
+    unmount();
+  });
+
+  it("syncs on visibilitychange while the document is visible, covering a phone waking from a locked screen", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const { result, unmount } = liveHook(transport);
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    const pullsBefore = transport.pullCalls;
+
+    // happy-dom's default document.visibilityState is "visible" — the positive arm needs no stub.
+    expect(document.visibilityState).toBe("visible");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => expect(transport.pullCalls).toBeGreaterThan(pullsBefore));
+    unmount();
+  });
+
+  it("does not sync on visibilitychange while the document is hidden", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const { result, unmount } = liveHook(transport);
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    const pullsBefore = transport.pullCalls;
+
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    // No wait needed: the guard reads visibilityState synchronously and returns without ever
+    // calling sync() when hidden, so there's no async work in flight to wait out — a fixed
+    // setTimeout here would just be an arbitrary "prove nothing happened" delay.
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(transport.pullCalls).toBe(pullsBefore);
+
+    visibilitySpy.mockRestore();
+    unmount();
+  });
+
+  it("removes its listeners on unmount — the exact handler added is the one removed", async () => {
+    const transport = createScriptedTransport(buildServerLog());
+    const windowAddSpy = vi.spyOn(window, "addEventListener");
+    const windowRemoveSpy = vi.spyOn(window, "removeEventListener");
+    const documentAddSpy = vi.spyOn(document, "addEventListener");
+    const documentRemoveSpy = vi.spyOn(document, "removeEventListener");
+
+    const { result, unmount } = liveHook(transport);
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+
+    // Capture the ACTUAL handler references the effect registered — asserting removal with a
+    // freshly-constructed function of the same name would pass even if removeEventListener were
+    // called with the wrong reference (a silent no-op), which is the realistic way this breaks.
+    const onlineHandler = windowAddSpy.mock.calls.find(([type]) => type === "online")?.[1];
+    const focusHandler = windowAddSpy.mock.calls.find(([type]) => type === "focus")?.[1];
+    const visibilityHandler = documentAddSpy.mock.calls.find(([type]) => type === "visibilitychange")?.[1];
+    expect(onlineHandler).toBeInstanceOf(Function);
+    expect(focusHandler).toBeInstanceOf(Function);
+    expect(visibilityHandler).toBeInstanceOf(Function);
+
+    unmount();
+
+    expect(windowRemoveSpy).toHaveBeenCalledWith("online", onlineHandler);
+    expect(windowRemoveSpy).toHaveBeenCalledWith("focus", focusHandler);
+    expect(documentRemoveSpy).toHaveBeenCalledWith("visibilitychange", visibilityHandler);
+
+    windowAddSpy.mockRestore();
+    windowRemoveSpy.mockRestore();
+    documentAddSpy.mockRestore();
+    documentRemoveSpy.mockRestore();
   });
 });

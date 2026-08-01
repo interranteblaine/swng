@@ -12,6 +12,7 @@ export interface RoundSessionView {
   readonly pending: number;
   readonly rejected: readonly RejectedOp[];
   readonly connected: boolean;
+  readonly stalled: boolean;
   recordScore(golferId: GolferId, hole: number, result: HoleResult): void;
   sync(): Promise<void>;
   // Pushes whatever is queued and answers "how much is STILL queued?" — read from the live
@@ -61,13 +62,14 @@ interface Snapshot {
   readonly pending: number;
   readonly rejected: readonly RejectedOp[];
   readonly connected: boolean;
+  readonly stalled: boolean;
 }
 
 const EMPTY_GAMES: readonly GameState[] = [];
 const EMPTY_REJECTED: readonly RejectedOp[] = [];
 // No session yet (still constructing, or no credential for this round at all) — same shape
 // a real session reports before its own hydrated() flips.
-const IDLE_SNAPSHOT: Snapshot = { hydrated: false, state: undefined, games: EMPTY_GAMES, pending: 0, rejected: EMPTY_REJECTED, connected: false };
+const IDLE_SNAPSHOT: Snapshot = { hydrated: false, state: undefined, games: EMPTY_GAMES, pending: 0, rejected: EMPTY_REJECTED, connected: false, stalled: false };
 
 // state()/games() throw until session.hydrated() — the render guard from @swng/client's own
 // M5 handoff (createRoundSession's own doc comment). Guarded here so this is the only place
@@ -81,6 +83,7 @@ const snapshotOf = (session: RoundSession): Snapshot => {
     pending: session.pending(),
     rejected: session.rejected(),
     connected: session.connected(),
+    stalled: session.stalled(),
   };
 };
 
@@ -151,6 +154,31 @@ export const createUseRoundSession = (resolveSessionConfig: ResolveSessionConfig
         if (session) void session.close();
       };
     }, [roundId]);
+
+    // Wake signals. These are pure accelerators — @swng/client's backoff loop drains the outbox
+    // on its own whether or not anything here is wired; these just collapse the wait when the
+    // device tells us something changed. `focus` and `visibilitychange` are what cover a phone
+    // coming back from a locked screen, where no `online` event fires because the radio never
+    // actually dropped. Nothing can run while a tab is fully suspended (Background Sync is not
+    // in Safari) — visibilitychange firing on resume is the answer to that, not a service worker.
+    useEffect(() => {
+      const wake = (): void => {
+        // Swallowed: an explicit caller owns reporting its own sync failure, and this one has no
+        // caller — same warn-and-drop shape as the SDK's own opportunistic triggers.
+        void sessionRef.current?.sync().catch(() => {});
+      };
+      const onVisibility = (): void => {
+        if (document.visibilityState === "visible") wake();
+      };
+      window.addEventListener("online", wake);
+      window.addEventListener("focus", wake);
+      document.addEventListener("visibilitychange", onVisibility);
+      return () => {
+        window.removeEventListener("online", wake);
+        window.removeEventListener("focus", wake);
+        document.removeEventListener("visibilitychange", onVisibility);
+      };
+    }, []);
 
     const snapshot = useSyncExternalStore(subscribe, getSnapshot);
 

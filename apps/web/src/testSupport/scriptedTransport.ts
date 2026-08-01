@@ -17,6 +17,7 @@ export interface ScriptedTransport extends RoundTransport {
   offline: boolean;
   socketCloseCalls: number;
   socketOpenCalls: number; // proves connect()'s own idempotency (session.ts: "if (connectedFlag) return")
+  pullCalls: number; // counts every pull ATTEMPT, including ones that fail offline
 }
 
 export const createScriptedTransport = (seed: readonly RoundEvent[]): ScriptedTransport => {
@@ -29,6 +30,7 @@ export const createScriptedTransport = (seed: readonly RoundEvent[]): ScriptedTr
     offline: false,
     socketCloseCalls: 0,
     socketOpenCalls: 0,
+    pullCalls: 0,
     push: async (event) => {
       if (transport.offline) throw new TransportError("network");
       const existing = log.find((logged) => logged.opId === event.opId);
@@ -39,6 +41,7 @@ export const createScriptedTransport = (seed: readonly RoundEvent[]): ScriptedTr
       return { seq: stamped.seq, duplicate: false };
     },
     pull: async (sinceSeq) => {
+      transport.pullCalls += 1;
       if (transport.offline) throw new TransportError("network");
       const events = log.filter((event) => (event.seq ?? 0) > sinceSeq);
       const maxSeq = events.reduce((max, event) => Math.max(max, event.seq ?? 0), sinceSeq);

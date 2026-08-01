@@ -50,12 +50,13 @@ describe("roundLabel", () => {
     expect(roundLabel({ courseName: "X", playedAt: SAT_JUL_12_0758 }, { withTime: true })).toBe(roundLabel({ courseName: "X", playedAt: SAT_JUL_12_0758 }, { withTime: true, timeZone: localZone }));
   });
 
-  // round-played-date spec 2026-08-01 §6: "the played day, not the day the record was created" —
-  // a fixture whose playedAt DIVERGES from what the old createdAt-based code would have read (a
-  // round entered several days after it was played, exactly the back-dating this arc exists
-  // for). "now" is frozen so "three days before now" is deterministic and unambiguous regardless
-  // of when this suite runs.
-  it("renders the played day, not the day the record was created", () => {
+  // Fix wave (Minor 1): renamed from "renders the played day, not the day the record was
+  // created" — `RoundDesignation` has exactly ONE date field (`playedAt`), so no fixture here
+  // can distinguish "played" from "created"; this is a third format assertion (a back-dated
+  // instant, several days before a frozen "now" reference), not a played-vs-created pin. That
+  // claim is actually carried by Important 1's fixes, at the call sites (RoundRecordPage.test.tsx
+  // etc.) where BOTH facts exist on the fixture and only one is read.
+  it("renders the day for a playedAt several days before 'now' (a back-dated round)", () => {
     const NOW = Date.UTC(2026, 6, 15, 12, 0); // Wed, Jul 15 2026, noon UTC
     const threeDaysBefore = NOW - 3 * 24 * 60 * 60 * 1_000; // Sun, Jul 12 2026
     expect(roundLabel({ courseName: "Casa Verde GC", playedAt: threeDaysBefore }, { timeZone: "UTC" })).toBe("Casa Verde GC · Sun, Jul 12");

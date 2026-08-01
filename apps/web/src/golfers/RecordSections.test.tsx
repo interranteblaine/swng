@@ -14,7 +14,15 @@ const ZERO_METRICS: GolferMetrics = {
   milestones: [],
 };
 
-const line = (suffix: string, overrides: Partial<GolferRoundLine> = {}): GolferRoundLine => ({
+// `RecordSectionsProps.history`'s element type (fix-wave Minor 3): `playedAt` REQUIRED,
+// mirroring the real wire shape (GetMyRecordResponse/GetGolferResponse, both
+// `GolferRoundLine & { playedAt: number; ... }`) — every fixture in this file goes through this
+// type now, so a wire regression that dropped `playedAt` would fail typecheck here too, not just
+// in production. `finalizedAt` stays OPTIONAL and unused by most tests — only the chart-anchor
+// tests below set it, to prove `anchorDate` prefers `playedAt` over it (fix-wave Important 2).
+type DatedLine = GolferRoundLine & { readonly playedAt: number; readonly finalizedAt?: number };
+
+const line = (suffix: string, overrides: Partial<DatedLine> = {}): DatedLine => ({
   roundId: roundId(`round-${suffix}`),
   courseName: "Pebble Beach",
   tee: "white",
@@ -23,17 +31,18 @@ const line = (suffix: string, overrides: Partial<GolferRoundLine> = {}): GolferR
   strokes: 8,
   score: 82,
   distribution: { eagles: 0, birdies: 1, pars: 10, bogeys: 6, doublePlus: 1 },
+  playedAt: 1_000, // arbitrary — irrelevant to every non-chart test below
   ...overrides,
 });
 
-const renderSections = (metrics: GolferMetrics, history: readonly GolferRoundLine[], historyLimit?: number) =>
+const renderSections = (metrics: GolferMetrics, history: readonly DatedLine[], historyLimit?: number) =>
   render(
     <MemoryRouter>
       <RecordSections metrics={metrics} history={history} historyLimit={historyLimit} />
     </MemoryRouter>,
   );
 
-const renderSectionsAs = (person: "your" | "their", metrics: GolferMetrics, history: readonly GolferRoundLine[]) =>
+const renderSectionsAs = (person: "your" | "their", metrics: GolferMetrics, history: readonly DatedLine[]) =>
   render(
     <MemoryRouter>
       <RecordSections metrics={metrics} history={history} person={person} />
@@ -275,9 +284,11 @@ describe("RecordSections", () => {
 // 2026-08-01 §6 — WHEN THE GOLF HAPPENED, no preference order anymore). What CHANGED is the sign
 // convention on the tick labels: `formatOverPar`, not the retired plus-handicap formatter.
 describe("RecordSections — average-over-time chart geometry", () => {
-  type DatedLine = GolferRoundLine & { readonly playedAt?: number };
-  const dated = (row: GolferRoundLine, extra: { readonly playedAt?: number } = {}): DatedLine => ({ ...row, ...extra });
-  const chartHistory = (n: number): GolferRoundLine[] => Array.from({ length: n }, (_, i) => line(String(i + 1)));
+  // `DatedLine` is the file-level type above (playedAt required, finalizedAt optional) — no
+  // second, locally-shadowing declaration here anymore (it used to make playedAt optional,
+  // which is exactly the "TypeScript can't see the required field" gap fix-wave Minor 3 closes).
+  const dated = (row: DatedLine, extra: { readonly playedAt?: number; readonly finalizedAt?: number } = {}): DatedLine => ({ ...row, ...extra });
+  const chartHistory = (n: number): DatedLine[] => Array.from({ length: n }, (_, i) => line(String(i + 1)));
   const descending = (n: number, from: number): number[] => Array.from({ length: n }, (_, i) => from - i);
 
   it("draws at most the last 20 rounds — 25 rounds draws 20 dots and reads 'last 20 rounds'", () => {
@@ -358,10 +369,19 @@ describe("RecordSections — average-over-time chart geometry", () => {
     expect(screen.queryByText(/●/)).toBeNull();
   });
 
-  it("anchors render the first and last DRAWN rounds' playedAt dates", () => {
+  // Fix-wave Important 2: the OLD version of this test dropped `finalizedAt` from the fixture
+  // entirely, so a reintroduced `row?.finalizedAt ?? row?.playedAt` fallback in `anchorDate`
+  // (exactly what the reviewer proved passes this suite unmodified otherwise) would go
+  // undetected. Both endpoint rows now carry a `finalizedAt` that DIVERGES from `playedAt` —
+  // the assertion below only holds if `anchorDate` reads `playedAt` and ignores it.
+  it("anchors render the first and last DRAWN rounds' playedAt dates — not finalizedAt", () => {
     const base = chartHistory(9);
     const history: DatedLine[] = base.map((row, i) =>
-      i === 0 ? dated(row, { playedAt: Date.UTC(2026, 0, 5, 12, 0) }) : i === 8 ? dated(row, { playedAt: Date.UTC(2026, 2, 10, 12, 0) }) : dated(row),
+      i === 0
+        ? dated(row, { playedAt: Date.UTC(2026, 0, 5, 12, 0), finalizedAt: Date.UTC(2026, 5, 20, 12, 0) })
+        : i === 8
+          ? dated(row, { playedAt: Date.UTC(2026, 2, 10, 12, 0), finalizedAt: Date.UTC(2026, 8, 1, 12, 0) })
+          : dated(row),
     );
     renderSections({ ...ZERO_METRICS, averageHistory: averagePoints(base, descending(9, 30)) }, history);
 
@@ -369,12 +389,19 @@ describe("RecordSections — average-over-time chart geometry", () => {
     // exactly as the component does) so the expectation is derived, not hand-typed month text.
     const fmt = (ms: number) => new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(ms));
     const anchors = screen.getAllByTestId("average-anchor").map((el) => el.textContent);
+    // The playedAt dates win, NOT the divergent finalizedAt dates set above.
     expect(anchors).toEqual([fmt(Date.UTC(2026, 0, 5, 12, 0)), fmt(Date.UTC(2026, 2, 10, 12, 0))]);
   });
 
-  it("no anchor renders when either drawn endpoint's date is missing — both-or-neither", () => {
+  // `playedAt` is REQUIRED on every real wire history row (round-played-date spec 2026-08-01
+  // §6) — a PRESENT row with no date is no longer representable, so the realistic "missing"
+  // case is a drawn round with NO MATCHING row in `history` at all (the "stale fold outrunning
+  // the card" case `bestLine`/`milestoneLine` also guard against), not a present-but-dateless
+  // row. Dropping the last round from `history` while `averageHistory` still draws it reproduces
+  // that: `anchorDate`'s `history.find(...)` returns undefined for it.
+  it("no anchor renders when either drawn endpoint has no matching history row — both-or-neither", () => {
     const base = chartHistory(9);
-    const history: DatedLine[] = base.map((row, i) => (i === 0 ? dated(row, { playedAt: Date.UTC(2026, 0, 5, 12, 0) }) : row)); // the last round (i===8) carries no date at all
+    const history: DatedLine[] = base.slice(0, -1).map((row, i) => (i === 0 ? dated(row, { playedAt: Date.UTC(2026, 0, 5, 12, 0) }) : row)); // round 9 (the last drawn round) has no entry in `history` at all
     renderSections({ ...ZERO_METRICS, averageHistory: averagePoints(base, descending(9, 30)) }, history);
 
     expect(screen.queryAllByTestId("average-anchor")).toHaveLength(0);

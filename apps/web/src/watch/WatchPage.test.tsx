@@ -21,6 +21,14 @@ const ANN_ID = golferId("ann");
 const BO_ID = golferId("bo");
 const SERVER_DEVICE = deviceId("server");
 
+// Fix wave (Important 1): DELIBERATELY on a different calendar day than the log's own
+// `hlc.wallMs` (which starts at 1_000 — Thu, Jan 1 1970 in any zone). A fixture that sets
+// playedAtMs equal to (or same-day as) wallMs can't tell the current `state.playedAtMs`-based
+// render apart from a reverted `WatchRoundView.createdAt` read off `hlc.wallMs` — both would
+// print the same day. A UTC midday instant so the rendered day is stable across any plausible
+// test-runner zone (verified: UTC through Pacific/Kiritimati all read "Mon, Jan 5").
+const PLAYED_AT_MS = Date.UTC(2026, 0, 5, 12, 0);
+
 const buildLiveLog = (): RoundEvent[] => {
   let wallMs = 1_000;
   const nextHlc = () => ({ wallMs: wallMs++, counter: 0, deviceId: SERVER_DEVICE });
@@ -28,7 +36,7 @@ const buildLiveLog = (): RoundEvent[] => {
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN_ID, BO_ID] };
   return [
-    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: 1_000, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: PLAYED_AT_MS, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: ANN_ID, name: "Ann", tee: "white", strokes: 0 }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: BO_ID, name: "Bo", tee: "white", strokes: 0 }, authorId: BO_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
@@ -113,18 +121,18 @@ describe("WatchPage", () => {
     const events = buildLiveLog();
     const state = reduceRound(events);
     const games = state.games.map((g) => scoreGame(g, state));
-    // buildLiveLog's genesis carries playedAtMs 1_000 — state.playedAtMs, which WatchPage's
-    // header renders via the canonical designation (spec §5).
+    // buildLiveLog's genesis carries playedAtMs PLAYED_AT_MS — state.playedAtMs, which
+    // WatchPage's header renders via the canonical designation (spec §5).
     const view: WatchRoundView = { hydrated: true, error: false, state, games };
 
     renderWatchPage(`/watch/${ROUND_ID}#spectator-tok-2`, fixedUseWatchRound(view));
 
     // The canonical course + date header identifies WHICH round the spectator is watching
-    // (fixtureLinks' courseName + played-at 1_000ms), replacing the bare course name.
-    expect(await screen.findByText(roundLabel({ courseName: "Fixture Links", playedAt: 1_000 }))).toBeTruthy();
+    // (fixtureLinks' courseName + played-at PLAYED_AT_MS), replacing the bare course name.
+    expect(await screen.findByText(roundLabel({ courseName: "Fixture Links", playedAt: PLAYED_AT_MS }))).toBeTruthy();
     // Nav infrastructure Task 2: usePageTitle re-runs once the round hydrates — the same
     // canonical designation the page's own header renders.
-    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: 1_000 })} · swng`);
+    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: PLAYED_AT_MS })} · swng`);
     // The live grid + standings actually render (a real spectator sees the scorecard).
     await waitFor(() => expect(screen.getByRole("button", { name: /Stableford/ })).toBeTruthy());
     expect(screen.getByRole("columnheader", { name: "Ann" })).toBeTruthy();

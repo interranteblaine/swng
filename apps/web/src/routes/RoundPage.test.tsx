@@ -21,6 +21,12 @@ const render = (ui: ReactElement) => rtlRender(<AuthProvider>{ui}</AuthProvider>
 
 const SERVER_DEVICE = deviceId("server");
 
+// Fix wave (Important 1): DELIBERATELY on a different calendar day than either builder's own
+// `hlc.wallMs` (which starts at 1_000/2_000 respectively — both still Thu, Jan 1 1970 in any
+// zone) — see WatchPage.test.tsx's own PLAYED_AT_MS for the same reasoning. A UTC midday instant
+// so the rendered day is stable across any plausible test-runner zone.
+const PLAYED_AT_MS = Date.UTC(2026, 0, 5, 12, 0);
+
 // One live round's worth of server log — creation + a join + start, no games. Local to this
 // file (server-log scenarios are per-spec, per testSupport/scriptedTransport's own
 // documentation; only the transport plumbing itself is shared).
@@ -30,7 +36,7 @@ const buildServerLog = (roundIdValue: RoundId, golferIdValue: GolferId, name: st
   let opCounter = 0;
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   const events: RoundEvent[] = [
-    { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, playedAtMs: 1_000, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, playedAtMs: PLAYED_AT_MS, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: golferIdValue, name, tee: "white", strokes: 0 }, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
   ];
@@ -47,7 +53,7 @@ const buildTwoPlayerServerLog = (roundIdValue: RoundId, ann: GolferId, bo: Golfe
   let opCounter = 0;
   const nextOpId = (): OpId => opId(`two-op-${(opCounter += 1)}`);
   const events: RoundEvent[] = [
-    { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, playedAtMs: 2_000, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, playedAtMs: PLAYED_AT_MS, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
     // Ann on 3 strokes, Bo on 0 — the card's dots below are hers, and the chip-tap test needs a
     // non-zero allocation to have something that could wrongly move.
     { kind: "participant-joined", participant: { golferId: ann, name: "Ann", tee: "white", strokes: 3 }, authorId: ann, opId: nextOpId(), hlc: nextHlc() },
@@ -117,10 +123,10 @@ describe("RoundPage", () => {
     expect(screen.queryByRole("status")).toBeNull();
     // Nav infrastructure Task 2: usePageTitle re-runs once the session hydrates — the canonical
     // course + date designation (round-played-date spec 2026-08-01 §6), fixtureLinks' own
-    // courseName plus buildServerLog's genesis playedAtMs (1_000). Computed via roundLabel itself
-    // (never a hand-typed string) so the assertion stays correct under the local zone roundLabel
-    // renders in by default — the SAME idiom WatchPage.test.tsx/RoundRecordPage.test.tsx use.
-    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: 1_000 })} · swng`);
+    // courseName plus buildServerLog's genesis playedAtMs (PLAYED_AT_MS). Computed via roundLabel
+    // itself (never a hand-typed string) so the assertion stays correct under the local zone
+    // roundLabel renders in by default — the SAME idiom WatchPage.test.tsx/RoundRecordPage.test.tsx use.
+    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: PLAYED_AT_MS })} · swng`);
     // "Ann" alone is ambiguous (also a checkbox label in the Add Game form's players list) —
     // the roster line's fuller text disambiguates. The roster row nests its numbers in a mono
     // span (brand reskin), so getByText's direct-text-only matching can no longer see the full

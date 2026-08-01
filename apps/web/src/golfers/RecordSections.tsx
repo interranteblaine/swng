@@ -6,6 +6,15 @@ import { nineHoleContribution } from "@swng/client";
 import { cardBox, linkEntity } from "../ui/classes";
 import { useContainerWidth } from "../ui/useContainerWidth";
 
+// `playedAt` is REQUIRED on every wire history row (round-played-date spec 2026-08-01 §6 —
+// projectArchive always provides it; there is no legacy-line case). This is the shape the two
+// wire responses that feed `RecordSectionsProps.history` actually have
+// (`GetMyRecordResponse`/`GetGolferResponse`, both `GolferRoundLine & { playedAt: number; ... }`
+// in @swng/contracts) — declared here, at the domain-plus-web boundary, so a wire regression
+// (playedAt dropped) fails typecheck at this component's own props rather than silently reaching
+// `AverageOverTime` as `undefined` and dropping both chart anchors with no error anywhere.
+type DatedGolferRoundLine = GolferRoundLine & { readonly playedAt: number };
+
 // "Your average over time" (spec 2026-07-29 §5, keeping the index-chart-polish geometry the
 // two-line index chart it replaces already had) — a dependency-free inline SVG (no chart lib: ONE
 // polyline plus per-round markers). `points` is the served metrics projection's own
@@ -66,13 +75,14 @@ function AverageOverTime({
   readonly roundsPlayed: number;
   readonly person: "your" | "their";
   // The render JOIN for anchor dates — the same already-fetched response array RecordSections
-  // holds (the bests/milestones precedent). GolferRoundLine plus the OPTIONAL wire field this
-  // component actually reads; a plain GolferRoundLine (missing it) is still structurally
-  // assignable here, so RecordSections's own `history` prop type doesn't need to change. Nothing
-  // reads the old record-creation/finalize-instant fields anymore (round-played-date spec
-  // 2026-08-01 §6 — a web-local type mirroring a wire field it never touches is the drift this
-  // arc removes), so neither survives in this local extension.
-  readonly history: readonly (GolferRoundLine & { readonly playedAt?: number })[];
+  // holds (the bests/milestones precedent), typed via the SAME `DatedGolferRoundLine` as
+  // `RecordSectionsProps.history` below (fix-wave Minor 3: `playedAt` is REQUIRED on the wire, so
+  // it stays required here too — an optional local copy let a wire regression drop both chart
+  // anchors silently instead of failing typecheck). Nothing reads the old record-creation/
+  // finalize-instant fields anymore (round-played-date spec 2026-08-01 §6 — a web-local type
+  // mirroring a wire field it never touches is the drift this arc removes), so neither survives
+  // in this local extension.
+  readonly history: readonly DatedGolferRoundLine[];
 }) {
   // Person-aware copy (navigation arc review finding: RecordSections rendered second-person text
   // verbatim on GolferPage, addressed to a viewer about someone else's rounds). The "their" arm
@@ -314,7 +324,12 @@ export function HistoryList({ history, historyLimit }: HistoryListProps) {
 
 export interface RecordSectionsProps {
   readonly metrics: GolferMetrics;
-  readonly history: readonly GolferRoundLine[];
+  // `playedAt` REQUIRED (fix-wave Minor 3): both real callers (ProfilePage's `GetMyRecordResponse`,
+  // GolferPage's `GetGolferResponse`) already carry it as a required wire field — this makes that
+  // guarantee visible to the compiler instead of erasing it back down to the bare domain
+  // `GolferRoundLine[]`, which a `bestLine`/`milestoneLine`/`HistoryList` call still accepts (they
+  // only need `GolferRoundLine`, a strict subset).
+  readonly history: readonly DatedGolferRoundLine[];
   // Caps the rendered HISTORY ROWS to the first N entries (newest-first, per the wire contract —
   // never re-sorted here). The chart/typical-18 above always reflect the FULL career (roundsPlayed
   // is `history.length`, not the capped count) — a limit is a display truncation of the list, not a

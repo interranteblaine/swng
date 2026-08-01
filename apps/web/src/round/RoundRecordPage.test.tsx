@@ -18,6 +18,14 @@ const ANN_ID = golferId("ann");
 const BO_ID = golferId("bo");
 const SERVER_DEVICE = deviceId("server");
 
+// Fix wave (Important 1): DELIBERATELY on a different calendar day than the log's own
+// `hlc.wallMs` (which starts at 1_000 — Thu, Jan 1 1970 in any zone). A fixture that sets
+// playedAtMs equal to (or same-day as) wallMs can't tell the current `state.playedAtMs`-based
+// render apart from a reverted `events.find(k === "round-created")?.hlc.wallMs` read — both would
+// print the same day. A UTC midday instant so the rendered day is stable across any plausible
+// test-runner zone (verified: UTC through Pacific/Kiritimati all read "Mon, Jan 5").
+const PLAYED_AT_MS = Date.UTC(2026, 0, 5, 12, 0);
+
 // Mirrors watch/WatchPage.test.tsx's own buildFinalLog — a small, real, finalized round log
 // (genesis through round-finalized), the exact shape GET /rounds/{roundId}/archive hands back.
 const buildFinalLog = (): RoundEvent[] => {
@@ -26,7 +34,7 @@ const buildFinalLog = (): RoundEvent[] => {
   let opCounter = 0;
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   return [
-    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: 1_000, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: PLAYED_AT_MS, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: ANN_ID, name: "Ann", tee: "white", strokes: 0 }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: BO_ID, name: "Bo", tee: "white", strokes: 0 }, authorId: BO_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
@@ -95,13 +103,14 @@ describe("RoundRecordPage — archived (the old ArchivedRoundPage content, absor
 
     await waitFor(() => expect(screen.getByText("Final results")).toBeTruthy());
     // The canonical designation (spec §5, dated onto the played instant by round-played-date spec
-    // 2026-08-01 §6): fixtureLinks' courseName plus the genesis event's own playedAtMs (1_000ms
-    // since epoch — WHEN THE GOLF HAPPENED, not the finalize time), rendered the one way
-    // roundLabel renders it everywhere.
-    expect(screen.getByText(roundLabel({ courseName: "Fixture Links", playedAt: 1_000 }))).toBeTruthy();
+    // 2026-08-01 §6): fixtureLinks' courseName plus the genesis event's own playedAtMs (Mon, Jan 5
+    // 2026 — WHEN THE GOLF HAPPENED, not the finalize time, and DELIBERATELY not the same day as
+    // the log's own hlc.wallMs — see PLAYED_AT_MS above), rendered the one way roundLabel renders
+    // it everywhere.
+    expect(screen.getByText(roundLabel({ courseName: "Fixture Links", playedAt: PLAYED_AT_MS }))).toBeTruthy();
     // Nav infrastructure Task 2: usePageTitle re-runs once the archive loads — the same
     // canonical designation the page's own header renders.
-    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: 1_000 })} · swng`);
+    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: PLAYED_AT_MS })} · swng`);
     // The link sweep (navigation spec, task 6): fixtureLinks carries no `source` — the course
     // name renders as PLAIN TEXT, never a dead link.
     expect(screen.queryByRole("link", { name: "Fixture Links" })).toBeNull();
@@ -141,7 +150,7 @@ describe("RoundRecordPage — archived (the old ArchivedRoundPage content, absor
     expect(courseLink.getAttribute("href")).toBe(`/courses/${COURSE_ID}`);
     // The title (usePageTitle) and the date half are unaffected by the split — the SAME
     // roundLabel string, just with its course-name half now wearing an anchor.
-    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: 1_000 })} · swng`);
+    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: PLAYED_AT_MS })} · swng`);
   });
 
   // Task review finding: `golfer` starts undefined in AuthProvider and resolves asynchronously

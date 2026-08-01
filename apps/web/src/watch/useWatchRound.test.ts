@@ -22,6 +22,12 @@ const ANN_ID = golferId("ann");
 const BO_ID = golferId("bo");
 const SERVER_DEVICE = deviceId("server");
 
+// Fix wave (Important 1): DELIBERATELY on a different calendar day than the log's own
+// `hlc.wallMs` (which starts at 1_000 — Thu, Jan 1 1970 in any zone) — see WatchPage.test.tsx's
+// own PLAYED_AT_MS for the same reasoning. A UTC midday instant so the rendered day is stable
+// across any plausible test-runner zone.
+const PLAYED_AT_MS = Date.UTC(2026, 0, 5, 12, 0);
+
 // One live round's worth of server log (creation + two joins + start + one stableford game) —
 // same per-file "build a scenario-specific server log" idiom as useRoundSession.test.tsx's own
 // buildServerLog.
@@ -32,7 +38,7 @@ const buildServerLog = (): RoundEvent[] => {
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   const stableford: GameConfig = { kind: "stableford", id: gameId("game-1"), players: [ANN_ID, BO_ID] };
   const events: RoundEvent[] = [
-    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: 1_000, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-created", roundId: ROUND_ID, card: fixtureLinks, playedAtMs: PLAYED_AT_MS, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: ANN_ID, name: "Ann", tee: "white", strokes: 0 }, authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: BO_ID, name: "Bo", tee: "white", strokes: 0 }, authorId: BO_ID, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: ANN_ID, opId: nextOpId(), hlc: nextHlc() },
@@ -60,7 +66,7 @@ describe("useWatchRound", () => {
     // The round's played-at (buildServerLog's genesis playedAtMs) is on the folded RoundState —
     // WatchPage's canonical course + date header reads it straight from there (round-played-date
     // spec 2026-08-01 §6), not from a second field on this hook's own view.
-    expect(result.current.state?.playedAtMs).toBe(1_000);
+    expect(result.current.state?.playedAtMs).toBe(PLAYED_AT_MS);
   });
 
   it("never calls transport.push — a spectator authors nothing", async () => {

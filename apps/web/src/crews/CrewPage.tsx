@@ -324,9 +324,10 @@ function CrewPageForId({ crewIdParam }: { readonly crewIdParam: string }) {
   const myGolferId = auth.golfer?.golferId;
   const isOrganizer = crew.members.some((member) => member.golferId === myGolferId && member.role === "organizer");
 
-  // Newest createdAtMs first (task-11-brief.md: "NO order promised — sort client-side") — the
-  // use case already sorts this way server-side (listSeasons.ts), but a freshly-created season
-  // is prepended locally above, so this re-sort is what keeps a same-page create honest too.
+  // Newest season createdAtMs first (task-11-brief.md: "NO order promised — sort client-side") —
+  // the use case already sorts this way server-side (listSeasons.ts), but a freshly-created
+  // season is prepended locally above, so this re-sort is what keeps a same-page create honest
+  // too.
   const sortedSeasons = seasons ? [...seasons].sort((a, b) => b.createdAtMs - a.createdAtMs) : [];
 
   return (

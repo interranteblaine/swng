@@ -1077,7 +1077,7 @@ git commit -m "test(e2e): the queue drains without the tap"
 Not a task — the controller runs this after Task 7, per the repo's standing close-out discipline.
 
 - `pnpm validate` (exit 0) and `pnpm test:contract` at HEAD.
-- **`deploy:beta` LAMBDA-FIRST.** Task 2 and Task 6 change server behaviour; no wire schema changed, and an old bundle is unaffected by either (a `{ duplicate: true }` response is already in `recordScoreResponseSchema`). Web-first would be safe too, but lambda-first matches every precedent here.
+- **`deploy:beta` LAMBDA-FIRST — required, not precedent.** (Corrected 2026-08-01 after the whole-branch review; the original text here claimed either order was safe, and it was wrong.) Both orders *parse* — no wire schema changed, and `{ duplicate: true }` is already in `recordScoreResponseSchema`. But web-first puts new bundles on real phones that auto-retry against a server still lacking Task 2's duplicate guard: every re-push of an already-recorded score takes a 409 and lands in `rejected` as "couldn't be saved," unattended, which is the exact misreporting Task 2 exists to prevent. Old bundle + new Lambda is strictly better than today. The ordering rule that governs the tasks governs the deploy too.
 - `publish:web:beta` (Tasks 4, 5).
 - `e2e:beta` ×2, then the full `e2e:field`.
 - An adversarial USE pass on the deployed surface, driving the actual failure this arc exists for: put a phone offline mid-round, score three holes, restore signal **without touching anything**, and watch the queue drain. Then force the socket closed with the network healthy and confirm the same. Read the chrome copy on a phone viewport as a design artifact, not just a locator.

@@ -1865,6 +1865,58 @@ deletion path exists; `scanAll` and the dist loader are duplicated across the tw
 gate's reconciliation check is near-tautological; and `migrateProdStrokes.test.mjs` also tests
 `checkProdParses.mjs`. On local `main`, never pushed.
 
+The outbox drains itself, and never deletes a score (2026-08-01, spec
+`docs/superpowers/specs/2026-08-01-outbox-drains-itself-design.md`, plan
+`2026-08-01-outbox-drains-itself.md`, 7 SDD tasks + 3 fix waves, commits `ad91bc3..44fa3d9`,
+base `1bf8978`): offline sync was **manual** — M4 deferred retry cadence to "the UI," no UI ever
+claimed it, so the policy existed nowhere and a golfer had to tap "Sync now" to make a queued
+score leave the phone. Worse, `recordScore` gated its push on socket liveness (a silently-dead
+socket left no banner → no button → nothing to press), and a permanently-refused score was
+**deleted from the only durable copy that existed anywhere** (`pending` pruned and persisted; the
+compensating record in RAM). Closed in a load-bearing order: **stop deleting and stop misreporting
+BEFORE automatic retry exists**, because retry finds finalized rounds unattended and would have
+automated the deletion. So `PersistedSync.rejected` (required, `?? []` on read — no migration, no
+version bump), then `recordScore` returning `{duplicate:true}` for an opId already in the log
+*before* the status check (a device that pushed but never pulled the confirmation is not a loss),
+then the loop: a backoff ladder in `@swng/client` (2/4/8/16→30s cap) armed whenever the session is
+dirty (`wantsConnection && (pending>0 || !connectedFlag)`), a **second** liveness-keyed ladder for
+the socket (a socket that opens and dies inside the base delay is a failure, not a reconnect — the
+accept-then-die middlebox), `REQUEST_TIMEOUT_MS` via `AbortController` (a pass that never settles
+disarms the loop), and `stalled()` gated on the same value that decides arming so the flag can
+never claim an effort that isn't happening. `apps/web` adds `online`/`focus`/`visibilitychange`
+wake signals as pure accelerators — **cadence in the SDK, latency in the app** — and the chrome
+stops describing the socket ("Offline" was a claim about our plumbing that a golfer with full bars
+read as a claim about their phone): `N scores saved on this phone — syncing…`, escalating to
+`… — can't reach swng yet. They're safe here.` with the **count preserved in both states**, silence
+when healthy. `LateScoreRefused` (EMF, `final`-only, after the duplicate guard) + a ≥1-in-15min
+alarm is what earns the right to build for the multi-device finalize hole — deliberately NOT built
+here (no grace period, no HLC acceptance window, no mutable snapshots, no device acks; A cannot see
+B's outbox, and the metric decides whether that ever needs a mechanism). Reviews earned their keep
+at every level: task reviewers found a `close()` that left a live timer **reopening a closed
+session's socket**, a non-`TransportError` mid-pass that escaped before the retry was armed, and
+**four plan-authored tests that could not fail** (a cleanup asserted through an effect another
+teardown already suppressed; a jest-dom matcher this repo lacks; a negative metrics assertion with
+no positive control in its file; a visibility guard test that passed with the guard deleted); the
+whole-branch review (opus) then found the reconnect arm had **no backoff at all** (2s handshake
+loop forever on WS-hostile networks — backoff was keyed on *pass* success, the failure is a
+*socket* event), a 429 throttle classified as a permanent refusal, and `AbortSignal.timeout`
+silently breaking **every** request on iOS 15 (below Safari 16; caught by `requestJson`'s own catch
+and remapped to a network error, invisible to CI since Playwright runs bundled Chromium). Gates:
+`validate` green at every commit + at HEAD, `test:contract` 96/96, `deploy:beta` **LAMBDA-FIRST —
+required, not precedent** (web-first would have real phones auto-retrying into 409s unattended,
+the exact misreporting the duplicate guard prevents), `publish:web:beta`, `e2e:beta` 17/17 ×2,
+`e2e:field` **66 passed / 1 documented-skip on the FIRST run** (killNetwork 8→7 declared after the
+arm-1 merge — that arm severs only the socket, so its old "stays queued" checkpoint is no longer a
+stable state), and a controller USE pass on the DEPLOYED `beta.swng.golf` at phone width: three
+scores queued offline, the escalated banner reading `3 scores saved on this phone — can't reach
+swng yet. They're safe here.`, then **signal restored with nothing tapped and the queue drained on
+its own** — plus an accept-then-die socket producing 5 attempts in 45s at gaps 2.1/4.1/8.1/16.1s
+(a 2s hammer would be ~22), the one behaviour no unit test can prove against a real WebSocket.
+NO wipe. Riding: the escalation fires at t≈14s (failures arm 2/4/8/16, so the 4th — which sets the
+cap — lands there), pinned by test and left as an **owner tuning call**; a silently-dead socket
+with an empty outbox stops pulling until a wake signal (no data at risk); frequent wake syncs push
+the reconnect countdown out. On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

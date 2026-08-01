@@ -49,5 +49,14 @@ export const playedAtMsOf = (events: readonly RoundEvent[]): number => {
     }
   }
   if (!hasGenesis) throw new DomainError("round-log-missing-genesis");
+  // The TYPE says `number`; the DATA is what decides (fix wave, Minor 1). A genesis carrying no
+  // `playedAtMs` would walk straight out of here as `undefined` under a `number` signature — the
+  // exact type-lie this function's own doc refuses two paragraphs up ("never a silent 0"), just
+  // wearing a different value, and downstream it becomes a NaN sort key or an Invalid Date rather
+  // than an error anyone can trace back here. It is unreachable TODAY because every read path
+  // parses first — but that is a property of the callers, not of this function, and the strokes
+  // arc's own task 6 found the whole adapter layer CASTING stored items into domain types without
+  // parsing. Refusal is the fix; silent reinterpretation is the harm.
+  if (typeof playedAtMs !== "number") throw new DomainError("round-genesis-missing-played-at");
   return playedAtMs;
 };

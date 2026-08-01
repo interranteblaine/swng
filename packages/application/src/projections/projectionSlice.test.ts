@@ -119,6 +119,20 @@ describe("sortLines", () => {
     expect(sortLines([a, b])).toEqual([a, b]);
   });
 
+  // Fix wave (Important 1): the test above proves played is not FINALIZED — and nothing more. Both
+  // its fixtures happen to sit in ascending roundId order too, so a comparator that ignored
+  // `playedAtMs` outright and ranked on the roundId tiebreak ALONE passed it (proven: replacing the
+  // comparator with `roundId`-only left the whole package green at 227). Here the played order is
+  // the REVERSE of both the roundId order and the finalizedAtMs order, so all three candidate keys
+  // give three different answers and only the played one gives this one. If this regresses, every
+  // golfer's rolling average, bests, milestones and chart order silently reorder.
+  it("sorts by playedAtMs — neither the roundId tiebreak nor finalizedAtMs can stand in for it", () => {
+    const zulu = { roundId: roundId("z-round"), playedAtMs: 1_000, finalizedAtMs: 9_000 };
+    const alpha = { roundId: roundId("a-round"), playedAtMs: 5_000, finalizedAtMs: 2_000 };
+    expect(sortLines([alpha, zulu])).toEqual([zulu, alpha]);
+    expect(sortLines([zulu, alpha])).toEqual([zulu, alpha]);
+  });
+
   it("still tiebreaks on roundId for a same-playedAtMs pair", () => {
     const a = { roundId: roundId("a"), playedAtMs: 1_000, finalizedAtMs: 1_000 };
     const b = { roundId: roundId("b"), playedAtMs: 1_000, finalizedAtMs: 1_000 };

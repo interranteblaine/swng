@@ -74,6 +74,23 @@ describe("playedAtMsOf", () => {
     // missing-genesis corruption would go undetected).
     expect(() => playedAtMsOf([playedAtSet(5_000, 10)])).toThrowError(/round-log-missing-genesis/);
   });
+
+  // Fix wave (Minor 1). A genesis PRESENT but carrying no played date walked out of here as
+  // `undefined` under a `number` signature — a type-lie that becomes a NaN sort key or an Invalid
+  // Date somewhere else entirely, with nothing pointing back at this function. Unreachable today
+  // (every read path parses first), which is exactly why it needs a test rather than a comment:
+  // the cast-not-parse adapter reads the strokes arc found are one edit away from making it
+  // reachable, and the distinct code says which corruption it is.
+  //
+  // The cast is what the runtime can genuinely hand this function; TypeScript would refuse to
+  // write the fixture otherwise, which is the whole point of the guard.
+  it("throws a distinct error when the genesis carries no played date at all — never a silent undefined", () => {
+    const noPlayedAt = { ...base(1), kind: "round-created", roundId: roundId("r1"), card } as unknown as RoundEvent;
+    expect(() => playedAtMsOf([noPlayedAt])).toThrowError(/round-genesis-missing-played-at/);
+    // And a correction that supplies one rescues the same log — so the guard reads the RESOLVED
+    // value, not merely "the genesis event looked wrong".
+    expect(playedAtMsOf([noPlayedAt, playedAtSet(5_000, 10)])).toBe(5_000);
+  });
 });
 
 describe("reduceRound", () => {

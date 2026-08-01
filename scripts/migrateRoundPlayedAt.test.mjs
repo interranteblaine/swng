@@ -152,16 +152,34 @@ describe("migrateRoundPlayedAt.mjs writes whole items, never rebuilt ones", () =
   // A snapshot item carries `finalizedAt` and whatever else it carries. Spreading the item that
   // was read and replacing ONE attribute is the only form that cannot silently drop a field nobody
   // remembered; a hand-built `Item: { pk, sk, event }` would look correct and lose the rest.
+  //
+  // These two read `rules`, not `migrate`: the item a run puts back is built inside `classifyItems`
+  // now (fix wave — see the behavioural suite in roundPlayedAtMigration.test.mjs for WHY that moved
+  // out of the CLI). The property is unchanged and so is the pin; only the file that owns it moved.
+  // Behavioural cover exists for this one too — the classification suite asserts the built item is
+  // the read item with one attribute swapped, over a fixture carrying a key neither type declares.
   it("puts back the read item with only `event` replaced", () => {
-    expect(migrate).toContain("{ ...item, event: after }");
+    expect(rules).toContain("{ ...item, event: after }");
   });
 
   it("puts back the read item with only `archive` replaced", () => {
-    expect(migrate).toContain("{ ...item, archive: after }");
+    expect(rules).toContain("{ ...item, archive: after }");
   });
 
+  // The instrument itself must not have grown an item-building path of its own alongside the
+  // module's — asserted over BOTH files, since either one hand-rolling a key set reintroduces the
+  // silent-attribute-drop this whole section exists to refuse.
   it("never constructs an item out of named key fields", () => {
     expect(migrate).not.toMatch(/Item:\s*\{\s*pk:/);
+    expect(rules).not.toMatch(/Item:\s*\{\s*pk:/);
+  });
+
+  // The instrument builds NO item at all now: it puts back exactly what `classifyItems` handed it.
+  // Without this, a second, hand-rolled build site could reappear in the CLI while the two pins
+  // above went on passing against the module's own copy.
+  it("puts back only the item the classification handed it", () => {
+    expect(migrate).toContain("Item: record.item");
+    expect(codeLines(migrate).filter((line) => /\{ \.\.\.item,/.test(line))).toStrictEqual([]);
   });
 });
 
@@ -343,6 +361,73 @@ describe("--restore undoes the migration, not the day", () => {
   it("sits above the schema load", () => {
     before("if (restoreFile !== undefined) {", 'await import("../packages/contracts/dist/index.js")');
   });
+
+  // FIX WAVE, IMPORTANT 6. `--restore --write` is the one genuinely order-sensitive verb in this
+  // file and it was the one with NO assertion: `--write` (migrating, which the header itself says
+  // is never unsafe in either order) demanded `--before-deploy`, while a restore demanded nothing,
+  // exited 0, performed its Puts, and printed "IF THE NEW BUILD IS ALREADY DEPLOYED, ROLL THE
+  // LAMBDAS BACK TOO" once the writes had already happened. Post-deploy that writes playedAtMs-less
+  // archives, which poison the snapshots stream and brick rebuildProjections. The guard's CONDITION
+  // and BODY are both asserted — an `if` line alone stays green if the body is softened to a
+  // warning that carries on into the loop.
+  it("refuses --restore --write without an explicit --head-not-deployed", () => {
+    const guard = blockOf(migrate, "if (write && restoreFile !== undefined && !headNotDeployed) {");
+    expect(guard).toContain("--head-not-deployed");
+    expect(guard).toContain("process.exit(1)");
+    // The flag must be READ, not merely named in a message — a guard keyed on a constant nobody
+    // parses is always false and always refuses, which is a different bug wearing this one's face.
+    expect(migrate).toContain('const headNotDeployed = argv.includes("--head-not-deployed");');
+  });
+
+  // It must refuse BEFORE reading the export, so the message can honestly say nothing was touched —
+  // and, more importantly, so the refusal cannot be reached from inside a half-finished restore.
+  it("refuses before the restore branch reads anything", () => {
+    before("if (write && restoreFile !== undefined && !headNotDeployed) {", "if (restoreFile !== undefined) {");
+  });
+
+  // The warning is only protection if it precedes the hazard. It printed after the Put loop; the
+  // fix is a position, so position is what this pins — and the block itself is asserted, not just
+  // its ordering, so deleting it fails here rather than silently returning to the old behaviour.
+  it("prints the restore's hazard warning BEFORE the first Put, not after the last", () => {
+    // Emitted lines, not source text: a commented-out warning is not a warning. It says what the
+    // operator just asserted, so a reader who got the flag wrong can still stop.
+    expect(emitted(migrate, "ABOUT TO RESTORE")).toHaveLength(1);
+    expect(emitted(migrate, "You asserted --head-not-deployed")).toHaveLength(1);
+    // Write-gated (a dry run has no hazard to warn about) — pinned as the exact adjacency, since
+    // `blockOf` would find the earlier `if (write) {` inside the --expect guard instead.
+    expect(migrate).toContain("  if (write) {\n    console.log(`ABOUT TO RESTORE");
+    // THE FIX IS A POSITION, so position is what this pins.
+    before("ABOUT TO RESTORE", "await client.send(new PutCommand({ TableName: table, Item: item }))");
+    // And the old trailing copy is gone — leaving it would put the hazard back after the hazard.
+    expect(emitted(migrate, "IF THE NEW BUILD IS ALREADY DEPLOYED")).toStrictEqual([]);
+  });
+
+  // FIX WAVE, MINOR 5. `backup.stage` is a METADATA FIELD; the Puts address `entry.table`, a string
+  // out of the same file. A stamp and a destination are two different things, and only one of them
+  // is what a Put obeys — an export whose `stage` says "beta" while its keys name `swng-rounds-prod`
+  // passed the stage check and wrote prod. The destination set is now checked directly, against the
+  // two tables a migration ever writes on THIS run's stage.
+  it("checks the destination table names, not just the export's own stage stamp", () => {
+    const guard = blockOf(migrate, "  if (foreign.length > 0) {");
+    expect(guard).toContain("process.exit(1)");
+    // Derived from this run's own table names — a hardcoded allowlist would not be stage-scoped,
+    // which is the half of the property that stops one stage's export writing another's tables.
+    expect(migrate).toContain("const restorable = new Set([roundsTable, snapshotsTable]);");
+    expect(migrate).toContain("!restorable.has(table)");
+    // And it runs before anything is resolved or written.
+    before("const restorable = new Set([roundsTable, snapshotsTable]);", "await client.send(new PutCommand({ TableName: table, Item: item }))");
+  });
+
+  // FIX WAVE, MINOR 4. `--expect` was accepted on this path and silently dropped — the same class
+  // already fixed once on the migration path, and for the same reason: an operator who asserts a
+  // number about the world has to be told when the world disagrees. Checked BEFORE the
+  // nothing-to-restore exit, exactly as the migration's own sits above its nothing-to-do exits.
+  it("asserts --expect on the restore path too, before the empty-set exit", () => {
+    const guard = blockOf(migrate, "  if (expected !== undefined && backup.migrated.length !== expected) {");
+    expect(guard).toContain("REFUSING TO WRITE");
+    expect(guard).toContain("process.exit(1)");
+    before("if (expected !== undefined && backup.migrated.length !== expected) {", "if (backup.migrated.length === 0) {");
+  });
 });
 
 describe("the rebuild is named as a STEP, in the script's own output", () => {
@@ -355,8 +440,14 @@ describe("the rebuild is named as a STEP, in the script's own output", () => {
   // Four states can be mistaken for "done": the dry run, the nothing-to-do path, the post-write
   // path, and the restore. Each says it once. The counts are EXACT on purpose — a range would let
   // a deleted line pass, which is precisely how the sibling's version of this pin went hollow.
-  it("names rebuildProjections on every path that could be mistaken for done", () => {
-    expect(emitted(migrate, "rebuildProjections")).toHaveLength(4);
+  //
+  // FIVE now, not four (fix wave, Important 6). The fifth is not a fifth "done" state: it is the
+  // restore's new ABOUT-TO-WRITE warning, which names the instrument a post-deploy restore would
+  // brick while there is still a Ctrl-C between reading it and the Puts. That block is the whole
+  // point of the Important-6 fix, so it is counted here rather than exempted — the exactness still
+  // does its job, since deleting ANY of the five fails.
+  it("names rebuildProjections on every path that could be mistaken for done, and before the restore writes", () => {
+    expect(emitted(migrate, "rebuildProjections")).toHaveLength(5);
   });
 
   it("names the lambda that runs it, so nobody has to go looking", () => {

@@ -492,6 +492,32 @@ describe("getSeasonStandings", () => {
     expect(standings.rounds[0]).toMatchObject({ playedAt: 5 * day, finalizedAt: 20 * day });
     expect(standings.scoreboard.find((row) => row.golferId === ann)?.rounds).toBe(1);
   });
+
+  // Fix wave (Important 4). "Played together" is LABELLED with the played date (SeasonPanel's
+  // roundLabel) and used to be ORDERED by the finalize date — a list read by one fact and ranked by
+  // another, the exact shape spec §2 names as the latent bug this arc removes. The two orders have
+  // to DIVERGE for the pin to bite, so they do: `late` was played FIRST (day 4) but finalized LAST
+  // (day 32), `early` was played SECOND (day 11) and finalized the same day. Newest-PLAYED-first is
+  // [early, late]; the old finalizedAt sort answered [late, early], i.e. it put "Jan 4" above
+  // "Jan 11" in a list that says newest first.
+  it("shared rounds are ordered newest-PLAYED-first, not newest-finalized-first", async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const ctx = setup();
+    const { ann, bo, crewId, seasonId } = await crewWithSeason(ctx);
+
+    await recordPlayed(ctx, singlesArchive("late-finalize", 32 * day, ann, bo, ann, {}), 32 * day, undefined, undefined, 4 * day);
+    await recordPlayed(ctx, singlesArchive("same-day", 11 * day, ann, bo, bo, {}), 11 * day, undefined, undefined, 11 * day);
+
+    const standings = await ctx.standings(asClaims("ann"), crewId, seasonId);
+
+    expect(standings.rounds.map((r) => r.roundId)).toEqual([roundId("same-day"), roundId("late-finalize")]);
+    // Spelled out so the failure message names the fact, not just the order: the row that sorts
+    // first is the one PLAYED most recently, even though it was finalized three weeks earlier.
+    expect(standings.rounds.map((r) => ({ playedAt: r.playedAt, finalizedAt: r.finalizedAt }))).toEqual([
+      { playedAt: 11 * day, finalizedAt: 11 * day },
+      { playedAt: 4 * day, finalizedAt: 32 * day },
+    ]);
+  });
 });
 
 // Crew-scoreboard spec §3a: the per-member scoreboard SeasonPanel leads with — a reuse proof

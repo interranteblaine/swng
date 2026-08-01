@@ -367,7 +367,11 @@ export default [
                 "crewScoreboard",
                 "sharedRoundIds",
                 "seasonWindowOf",
-                "playedAtMs",
+                // `playedAtMs` used to sit here and was INERT: @swng/domain exports no such name
+                // (it is a FIELD on RoundState/GolferRoundLine, and `import { playedAtMs }` is not
+                // a thing anyone can write), so the entry banned nothing and read as protection
+                // (fix wave, Minor 2). The live played-date ban is `playedAtMsOf`, in its own
+                // `paths` entry above with its own message — that one is verified biting.
                 "inWindow",
                 // golden-deck runners (barrel-exported, run domain compute — nonsensical in
                 // product, but fenced so the ban covers EVERY barrel-exported golf computation)

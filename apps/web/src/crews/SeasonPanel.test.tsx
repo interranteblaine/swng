@@ -28,6 +28,7 @@ vi.mock("../api", () => ({
 import { getMe, getSeasonStandings, updateSeason } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
+import { roundLabel } from "../roundLabel";
 import { SeasonPanel } from "./SeasonPanel";
 
 const mockedGetSeasonStandings = vi.mocked(getSeasonStandings);
@@ -658,6 +659,34 @@ describe("SeasonPanel — played together", () => {
     expect(links.map((l) => l.getAttribute("href"))).toEqual(["/rounds/r-morning", "/rounds/r-afternoon"]);
     // The bare locale date the section used to show is gone from the section.
     expect(screen.queryByText(new Date(day + 1).toLocaleDateString())).toBeNull();
+  });
+
+  // Fix wave (Important 2): the arc's own thesis, in the first row of spec §4's "what moves onto
+  // playedAt" table — and nothing pinned it. Swapping this row's `playedAt` for `finalizedAt` left
+  // the whole web suite green at 640, because every other fixture in this file sets the two to the
+  // same instant.
+  //
+  // The two dates here differ ACROSS A CALENDAR DAY, and by three whole days, which is the point:
+  // a label rendered at day granularity reads identically for two instants seconds apart, so a
+  // fixture like that would pass with either field wired in (that exact trap has bitten this branch
+  // twice already). Three days apart, the two answers differ in EVERY time zone a runner could sit
+  // in — and the expectation is computed through `roundLabel` itself rather than hand-typed, so the
+  // pin stays correct under whichever zone that is.
+  it("labels each shared round with the date it was PLAYED, not the date it was finalized", async () => {
+    signInAsAnn();
+    const played = Date.UTC(2026, 6, 11, 15, 0); // the golf: a Saturday
+    const finalized = Date.UTC(2026, 6, 14, 15, 0); // the paperwork: the following Tuesday
+    mockedGetSeasonStandings.mockResolvedValue({
+      ...baseStandings,
+      rounds: [{ roundId: roundId("r-back-dated"), finalizedAt: finalized, courseName: "Casa Verde GC", playedAt: played }],
+    });
+
+    renderPanel();
+
+    const link = await screen.findByRole("link", { name: /Casa Verde GC · /i });
+    expect(link.textContent).toBe(roundLabel({ courseName: "Casa Verde GC", playedAt: played }));
+    // Stated as a negative too, so the failure names the confusion rather than just a string diff.
+    expect(link.textContent).not.toBe(roundLabel({ courseName: "Casa Verde GC", playedAt: finalized }));
   });
 
   it("no shared rounds: the empty state is honest", async () => {

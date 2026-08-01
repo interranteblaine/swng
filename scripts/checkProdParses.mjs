@@ -2,9 +2,26 @@
 // spot check"). READ-ONLY — the only DynamoDB command it imports is ScanCommand, so there is no
 // code path here that can write or delete.
 //
-// It runs BEFORE the migration, where it must FAIL on exactly the 15 known records, and again
-// AFTER, where 100% must pass. A gate that has never been seen to fail is not a gate — it is a
-// green light of unknown provenance.
+// WHAT IT GATES NOW. Written for the 2026-07-31 strokes migration, where it ran before (failing on
+// exactly the 15 known records) and after (100% passing). That arc is done; the header used to
+// describe only it, and this file has since become load-bearing for a second, ONGOING job — so it
+// says both, because a header describing a finished job is how an instrument gets read as
+// decorative.
+//
+//   * ANY stored-shape migration, as its before/after gate. The principle is the same one that
+//     made it worth building: a gate that has never been seen to FAIL is not a gate, it is a green
+//     light of unknown provenance. Run it before, watch it name the records the migration is for;
+//     run it after, and require 100%.
+//   * THE PRECONDITION FOR DEPLOYING A BUILD THAT REQUIRES A NEW FIELD (round played-at arc, spec
+//     2026-08-01 §8). A migration script reporting "0 pending" is a SELF-REPORT: it says the
+//     transform found nothing left to change, which is also what it says if it looked in the wrong
+//     place. This script is the independent check — it parses every item of four tables with HEAD's
+//     own schemas and knows nothing about any transform. "0 pending" plus a clean run here is the
+//     precondition; "0 pending" alone is not.
+//
+// It is deliberately not stage-specific despite its name: `--stage` selects, and beta is as much in
+// scope as prod. The name is kept because it is the name every runbook and sibling script already
+// points at, and a rename that leaves stale references behind is worse than a name that undersells.
 //
 // SCOPE — four of the stage's five tables. `swng-rounds-<stage>`, `swng-snapshots-<stage>`,
 // `swng-projections-<stage>` and `swng-core-<stage>` are scanned in full (the table names are
@@ -36,13 +53,19 @@
 //   rounds      items with no `event`, and every core-table item: nothing reads them through a
 //               schema. Counted and reported as NOT PARSED, never omitted.
 //
-// For the two shapes prod's migration touches, the RESOLVED VALUE is printed rather than a bare
-// "ok" — a participant-joined reports the strokes it parsed to and a participant-strokes-set
+// For the two shapes the strokes migration touched, the RESOLVED VALUE is printed rather than a
+// bare "ok" — a participant-joined reports the strokes it parsed to and a participant-strokes-set
 // reports its number, and each snapshot prints its whole roster. A check that only says "parsed"
 // cannot tell a faithful translation from a confidently wrong one; these numbers are meant to be
 // read against the expected rosters by hand.
 //
-//   node scripts/checkProdParses.mjs [--stage prod]
+// `--stage` DEFAULTS TO PROD, unlike the played-at migration's own required flag. That asymmetry is
+// deliberate and it is safe in exactly one direction: this script only ever READS, so the worst a
+// forgotten `--stage beta` costs is a report about the wrong stage — whereas a defaulted stage on
+// something that WRITES is a table you can hit by forgetting to type one. Say `--stage beta` when
+// you mean beta; the summary names the stage it read, so a mistake is visible in the output.
+//
+//   node scripts/checkProdParses.mjs [--stage prod|beta]
 import { createRequire } from "node:module";
 
 const require = createRequire(new URL("../packages/adapters-dynamodb/package.json", import.meta.url));

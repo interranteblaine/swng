@@ -106,10 +106,13 @@
 //   2. Every transformed record is PARSED with HEAD's own schema before a single Put is issued. A
 //      record that would not parse is never written and stops the run. That makes it structurally
 //      impossible for this script to write a record the app cannot read.
-//   3. `--expect <n>` is OPTIONAL and, when given, asserted: `--write` refuses on a mismatch —
-//      INCLUDING a mismatch against an empty write set, which is checked before the "nothing to do"
-//      exits. A zero write set is a write set, and an operator who asserts a number about the world
-//      has to be told when the world disagrees, even on a run that would have written nothing.
+//   3. `--expect <n>` is OPTIONAL and, when given, asserted ON BOTH VERBS: a migration `--write`
+//      refuses on a mismatch against its write set, and a `--restore` refuses on a mismatch against
+//      the number of changed keys the export records. (It used to be accepted and silently dropped
+//      on the restore path — the same class already fixed once here.) The check runs before the
+//      "nothing to do" / "nothing to restore" exits. A zero write set is a write set, and an
+//      operator who asserts a number about the world has to be told when the world disagrees, even
+//      on a run that would have written nothing.
 //      There is deliberately no default. The strokes migration could default to 15 because its
 //      spec enumerated exactly 15 records; nothing enumerates this one — every round on every
 //      stage is in scope, and beta legitimately grows between the dry run and the write (a round
@@ -134,12 +137,22 @@
 //     golfer and course created since — data loss dressed as safety. The full four-table dump
 //     stays in the file as the forensic artifact; the restore is scoped to the changed keys.
 // A restore run BEFORE the deploy needs nothing else: pre-migration records are exactly what the
-// deployed build already expects. IF THE DEPLOY HAS ALREADY LANDED, ROLL THE LAMBDAS BACK TOO.
+// deployed build already expects. IF THE DEPLOY HAS ALREADY LANDED, ROLL THE LAMBDAS BACK FIRST.
 // Putting `playedAtMs`-less archives back while HEAD is deployed writes archives HEAD cannot parse:
 // each one poisons the snapshots stream (bisect, retry, DLQ) and — because the rebuild pages by
 // parsing eagerly — it also BRICKS `rebuildProjections`, the very instrument this file points at
 // for the step that follows. Restoring the data without restoring the code leaves you with neither
 // a working read path nor a working re-drive.
+//
+// SO `--restore --write` REQUIRES `--head-not-deployed`, and this is the one place in this file
+// where the flag guards a genuine hazard rather than recording which side of a deploy you are on.
+// It reads as an inversion of the header's own opening principle — that migrating "is never unsafe
+// in either order" — and it is not: MIGRATING is never unsafe in either order, and RESTORING is.
+// The two verbs earn different guards because they carry different risk, and the previous version
+// had it backwards: `--write` demanded a flag, `--restore --write` demanded nothing, exited 0,
+// performed its Puts, and printed the hazard warning AFTERWARDS. The warning now prints before any
+// Put, and the assertion is about the DEPLOYED CODE — "HEAD is not what is live" — which is true
+// both before the deploy lands and after the lambdas have been rolled back.
 //
 // The projections and core tables are READ (for the export) and never written. The projection
 // lines are not migrated here at all — they are re-derived by `rebuildProjections` after the
@@ -148,12 +161,14 @@
 //   node scripts/migrateRoundPlayedAt.mjs --stage <beta|prod> [--dry-run]        # dry run
 //   node scripts/migrateRoundPlayedAt.mjs --stage <beta|prod> --write --before-deploy [--expect N]
 //   node scripts/migrateRoundPlayedAt.mjs --stage <beta|prod> --write --straggler-after-deploy   # deploy already landed
-//   node scripts/migrateRoundPlayedAt.mjs --stage <beta|prod> --restore <file> [--write]
+//   node scripts/migrateRoundPlayedAt.mjs --stage <beta|prod> --restore <file>                    # dry run
+//   node scripts/migrateRoundPlayedAt.mjs --stage <beta|prod> --restore <file> --write --head-not-deployed
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
-// `transformEvent` / `transformArchive` are the only two entry points a stored item can need, so
-// every change this script performs comes out of that module and none of it is restated here.
-import { transformEvent, transformArchive, changed } from "./roundPlayedAtMigration.mjs";
+// `classifyItems` decides what this run will write, using the only two transform entry points a
+// stored item can need — so every change this script performs, and every decision about which
+// records to change, comes out of that module and none of it is restated here.
+import { classifyItems, isoOf, playedDateOf } from "./roundPlayedAtMigration.mjs";
 
 const require = createRequire(new URL("../packages/adapters-dynamodb/package.json", import.meta.url));
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
@@ -183,6 +198,15 @@ const dryRun = argv.includes("--dry-run");
 const beforeDeploy = argv.includes("--before-deploy");
 const stragglerAfterDeploy = argv.includes("--straggler-after-deploy");
 const restoreFile = flagValue("--restore", "the path of an export file written by an earlier --write run.");
+// `--restore --write` is THE order-sensitive verb here, and it used to be the one with no assertion
+// at all (fix wave, Important 6). Migrating is never unsafe in either order — which is why that
+// path's flags are about naming which side you are on — but a RESTORE after the deploy puts back
+// archives HEAD cannot parse, poisoning the snapshots stream and bricking rebuildProjections. It
+// asked for nothing, exited 0, performed its Puts, and printed the warning AFTERWARDS. So the one
+// genuinely dangerous combination now carries the one real acknowledgement, and it is an assertion
+// about the DEPLOYED CODE rather than about intent: "HEAD is not what is live" — true both before
+// the deploy has landed and after the lambdas have been rolled back.
+const headNotDeployed = argv.includes("--head-not-deployed");
 
 // Stamped into every export this script writes and ASSERTED by `--restore` (see the header). The
 // strokes migration's exports hold the same four tables under the same keys with a matching `stage`
@@ -245,6 +269,27 @@ if (write && restoreFile === undefined && !beforeDeploy && !stragglerAfterDeploy
   process.exit(1);
 }
 
+// THE RESTORE ACKNOWLEDGEMENT (fix wave, Important 6). Placed with the other argument guards, above
+// every read, so the refusal can honestly say nothing has been touched. This is the inverse
+// situation to the migration guard above: there, both orders are safe and the flag records which
+// one you are in; here, one order is a real outage and the flag is the thing that stops it.
+if (write && restoreFile !== undefined && !headNotDeployed) {
+  console.error(
+    "error: pass --head-not-deployed to confirm the build that REQUIRES playedAtMs is not the one currently live.\n" +
+      "       A restore puts back records with NO playedAtMs. That is exactly what the pre-deploy build expects, and it is\n" +
+      "       poison to HEAD: every archive you restore fails HEAD's parse, so each one poisons the snapshots stream\n" +
+      "       (bisect, retry, DLQ) AND bricks rebuildProjections, which pages by parsing eagerly. You would be left with\n" +
+      "       neither a working read path nor a working re-drive — and this warning used to print AFTER the writes.\n" +
+      "\n" +
+      "       The flag is true in TWO real situations, and you must be in one of them:\n" +
+      "         * the deploy has not landed yet — the deployed build is the one that ignores the field; or\n" +
+      "         * it landed and you have ALREADY ROLLED THE LAMBDAS BACK. Roll the code back first, then restore.\n" +
+      "       Restoring the data without restoring the code is the failure this refusal exists to prevent, so do not\n" +
+      "       assert this when it is false. Nothing has been read or written.",
+  );
+  process.exit(1);
+}
+
 const roundsTable = `swng-rounds-${stage}`;
 const snapshotsTable = `swng-snapshots-${stage}`;
 const projectionsTable = `swng-projections-${stage}`;
@@ -287,7 +332,9 @@ const describeChange = (before, after) => {
   return lines;
 };
 
-const isoOf = (ms) => (typeof ms === "number" ? new Date(ms).toISOString() : "??");
+// `isoOf` / `playedDateOf` live in the rules module beside `classifyItems`, for the same reason it
+// does: both crashed rather than diagnosed (fix wave, Minor 6), and a fix that cannot be executed
+// by a test is a fix nobody can check.
 
 console.log(`swng round played-at migration — stage ${stage} — ${write ? "*** WRITE MODE ***" : "DRY RUN"}${restoreFile !== undefined ? ` — RESTORE from ${restoreFile}` : ""}`);
 console.log("this script never deletes anything; prod is never wiped\n");
@@ -346,8 +393,41 @@ if (restoreFile !== undefined) {
     process.exit(1);
   }
 
+  // WHERE THE PUTS ACTUALLY GO (fix wave, Minor 5). The `backup.stage` check above compares a
+  // METADATA FIELD; the writes below address `entry.table`, which is a string out of the same file.
+  // A stamp and a destination are two different things, and only one of them is what a Put obeys —
+  // an export whose `stage` says "beta" while its keys name `swng-rounds-prod` sails through the
+  // check above and writes prod. So the destination set is checked directly, and it is exactly the
+  // two tables a migration ever writes, on THIS run's stage: projections and core are read for the
+  // export and never written, so a key naming either of them is an export this script did not make.
+  const restorable = new Set([roundsTable, snapshotsTable]);
+  const foreign = [...new Set(backup.migrated.map((entry) => String(entry.table)))].filter((table) => !restorable.has(table));
+  if (foreign.length > 0) {
+    console.error(`error: the export's changed-key list names table(s) this run must not write: ${foreign.join(", ")}.`);
+    console.error(`       --stage ${stage} restores into ${roundsTable} and ${snapshotsTable} and nothing else — a migration writes no other table,`);
+    console.error(`       so a key naming one is either another stage's data or an export this script did not produce. Nothing was written.`);
+    process.exit(1);
+  }
+
   const held = Object.values(backup.tables).reduce((n, items) => n + items.length, 0);
   console.log(`the export holds ${held} item(s) across ${Object.keys(backup.tables).length} table(s) as the forensic record; ${backup.migrated.length} of them were changed by that run and are what a restore puts back\n`);
+
+  // `--expect` was accepted here and silently dropped (fix wave, Minor 4) — the same class already
+  // fixed once on the migration path, where a zero write set turned out to be a write set. An
+  // operator who asserts a number about the world has to be told when the world disagrees, and on
+  // this path the number is how many original images the file will put back. Checked BEFORE the
+  // nothing-to-restore exit for exactly that reason.
+  if (expected !== undefined && backup.migrated.length !== expected) {
+    const message =
+      `this export records ${backup.migrated.length} changed key(s), but --expect said ${expected}.\n` +
+      `       This is not the export you think it is, or not the run you think it is.\n` +
+      `       Re-read the file — or, if ${backup.migrated.length} is genuinely what that run changed, pass --expect ${backup.migrated.length}.`;
+    if (write) {
+      console.error(`REFUSING TO WRITE — ${message}\n\nNothing was written.`);
+      process.exit(1);
+    }
+    console.log(`WARNING — ${message}\n`);
+  }
 
   if (backup.migrated.length === 0) {
     console.log("That run changed nothing, so there is nothing to restore.");
@@ -368,6 +448,18 @@ if (restoreFile !== undefined) {
     originals.push({ table: entry.table, key: `${entry.pk}${entry.sk === undefined ? "" : ` ${entry.sk}`}`, item: original });
   }
 
+  // BEFORE THE WRITES, NOT AFTER (fix wave, Important 6). This block used to print below the loop —
+  // a warning about a hazard delivered once the hazard had already been created. A `--write` run
+  // only reaches here having asserted `--head-not-deployed` (the guard at the top), so this states
+  // what that assertion committed to while there is still a Ctrl-C between reading it and the Puts.
+  if (write) {
+    console.log(`ABOUT TO RESTORE ${originals.length} original image(s), each carrying NO playedAtMs.`);
+    console.log(`You asserted --head-not-deployed: the build that REQUIRES that field is not the one live on swng-${stage}.`);
+    console.log(`If that is wrong, stop now — every archive below would poison the snapshots stream (bisect, retry, DLQ)`);
+    console.log(`and brick rebuildProjections, which pages by parsing eagerly, leaving neither a working read path nor a`);
+    console.log(`working re-drive. Roll the lambdas back FIRST, then restore.\n`);
+  }
+
   let restored = 0;
   for (const { table, key, item } of originals) {
     console.log(`  ${write ? "restoring" : "would restore"} ${table}  ${key}`);
@@ -376,16 +468,12 @@ if (restoreFile !== undefined) {
     restored += 1;
   }
   if (!write) {
-    console.log("\nDRY RUN — nothing written. Re-run with --write to restore.");
+    console.log("\nDRY RUN — nothing written. Re-run with --write --head-not-deployed to restore.");
     process.exit(0);
   }
   console.log(`\nrestored ${restored} original image(s). The other ${held - originals.length} item(s) in the export were untouched by the migration and are untouched by this restore.`);
-  console.log(`\nIF THE NEW BUILD IS ALREADY DEPLOYED, ROLL THE LAMBDAS BACK TOO. These archives carry no playedAtMs and`);
-  console.log(`the new build REQUIRES it, so each snapshot you just restored poisons the snapshots stream (bisect, retry,`);
-  console.log(`DLQ) and bricks rebuildProjections, which pages by parsing eagerly. Restoring the data without restoring`);
-  console.log(`the code leaves neither a working read path nor a working re-drive. If the deploy has NOT happened yet,`);
-  console.log(`there is nothing else to do — these are exactly the records the deployed build already expects, and the`);
-  console.log(`RebuildFunction lambda on swng-${stage} is only needed once the new build is live.`);
+  console.log(`These records are exactly what the pre-deploy build expects. The RebuildFunction lambda on swng-${stage} is`);
+  console.log(`only needed once the new build is live, so rebuildProjections is not part of undoing this.`);
   process.exit(0);
 }
 
@@ -414,81 +502,22 @@ const snapshotItems = await scanAll(snapshotsTable);
 console.log(`read ${roundsItems.length} item(s) from ${roundsTable} and ${snapshotItems.length} item(s) from ${snapshotsTable}\n`);
 
 // --- transform and classify ---------------------------------------------------------------------
-// Every candidate lands in one of three buckets, and all three are reported. "Nothing to do" is not
-// one state but three, and they mean completely different things:
-//
-//   pending    the transform changes it — this is the write set
-//   current    the transform leaves it alone AND it parses at HEAD — already in the right shape
-//   unreadable the transform leaves it alone and it does NOT parse at HEAD — this migration cannot
-//              fix it, and saying "nothing to do" over such a record would be a lie
-//
-// Distinguishing them is what stops "0 records" from reading identically whether the migration is
-// complete, the stage is empty, or something is wrong that this instrument cannot repair.
-//
-// SCOPE, stated rather than inferred: on the rounds table only `round-created` events are
-// candidates, because that is the only kind this rule can touch. Every other event item is counted
-// and named below, never dropped from the accounting, but it is NOT parsed here — checking that
-// every stored item of every kind is readable is a different job with a different instrument
-// (scripts/checkProdParses.mjs), and a mutation script that also claimed to be the verification
-// gate would be exactly the drift the pure/I-O split exists to prevent. On the snapshots table
-// every item is a candidate: the archive is one parse unit and one write unit.
+// The bucketing rule lives in `scripts/roundPlayedAtMigration.mjs` alongside the transform it
+// applies — see `classifyItems` there for what the three buckets mean and why every non-candidate
+// item is still counted. It used to sit inline here, where nothing could execute it and every pin
+// on it was a pin on this file's source text; three mutations of it (an empty snapshot list among
+// them) made a run print "Nothing to do" while leaving every record un-migrated, with all forty
+// pins green. "0 pending" is the precondition for deploying, so it is behaviour that has to be
+// tested, not shape.
 
-const records = [];
-const problems = [];
-let currentCount = 0;
-const unreadable = [];
-const skipped = new Map();
-const tally = (map, key) => map.set(key, (map.get(key) ?? 0) + 1);
-
-const classify = (table, key, before, after, buildItem, schema, order, kind) => {
-  if (changed(before, after)) {
-    records.push({ table, key, kind, before, after, item: buildItem(), schema, order });
-    return;
-  }
-  const result = schema.safeParse(before);
-  if (result.success) {
-    currentCount += 1;
-    return;
-  }
-  // The REASON travels with the key. This bucket stops the run, and "record X is unreadable" with
-  // no path is a dead end for whoever has to decide what to do about it — especially on a snapshot,
-  // where the cause can be any embedded event of any kind, not the genesis this rule looks at.
-  const issues = result.error.issues.map((issue) => (issue.path.length > 0 ? `${issue.path.join(".")}: ${issue.message}` : issue.message));
-  unreadable.push(`${table}  ${key}\n      ${(issues.length > 5 ? [...issues.slice(0, 5), `(+${issues.length - 5} more)`] : issues).join("; ")}`);
-};
-
-for (const item of roundsItems) {
-  if (item.event === undefined) {
-    const sk = String(item.sk ?? "");
-    tally(skipped, sk.startsWith("OPID#") ? "OPID# dedup tombstone (carries no event)" : sk === "META" ? "META round pointer (carries no event)" : `other sk "${sk}" (carries no event)`);
-    continue;
-  }
-  if (item.event.kind !== "round-created") {
-    tally(skipped, `${String(item.event.kind)} event (not this rule's subject)`);
-    continue;
-  }
-  let after;
-  try {
-    after = transformEvent(item.event);
-  } catch (error) {
-    problems.push({ key: `${roundsTable}  ${item.pk} ${item.sk}`, detail: `the transform threw: ${String(error)}` });
-    continue;
-  }
-  // events first — `order` drives both the write order and the order recorded in the export
-  classify(roundsTable, `${item.pk} ${item.sk}`, item.event, after, () => ({ ...item, event: after }), roundEventSchema, 0, "round-created");
-}
-
-for (const item of snapshotItems) {
-  let after;
-  try {
-    after = transformArchive(item.archive);
-  } catch (error) {
-    problems.push({ key: `${snapshotsTable}  ${item.pk}`, detail: `the transform threw: ${String(error)}` });
-    continue;
-  }
-  // snapshots last — the stream fires off these
-  classify(snapshotsTable, String(item.pk), item.archive, after, () => ({ ...item, archive: after }), roundArchiveSchema, 1, "archive");
-}
+const { records, problems, currentCount, unreadable, skipped } = classifyItems({
+  roundsItems,
+  snapshotItems,
+  roundsTable,
+  snapshotsTable,
+  roundEventSchema,
+  roundArchiveSchema,
+});
 
 const candidates = records.length + currentCount + unreadable.length + problems.length;
 records.sort((a, b) => a.order - b.order || (a.key < b.key ? -1 : 1));
@@ -627,8 +656,7 @@ for (const record of records) {
   // The played date in words, because a 13-digit epoch is not something anyone can sanity-check by
   // eye — and "is this the date that round was actually played" is the one question a reader of
   // this plan can answer and the script cannot.
-  const played = record.table === roundsTable ? record.after.playedAtMs : record.after.events.find((e) => e.kind === "round-created")?.playedAtMs;
-  console.log(`      played date becomes ${isoOf(played)}`);
+  console.log(`      played date becomes ${isoOf(playedDateOf(record, roundsTable))}`);
 }
 console.log("");
 

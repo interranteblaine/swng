@@ -1006,6 +1006,98 @@ describe("RoundPage", () => {
     expect(transport.log.some((event) => event.kind === "score-recorded")).toBe(false);
   });
 
+  // Fix wave (Important 3). The mid-round played-date correction (spec §3b) is half the shipped
+  // feature and had ZERO coverage at any level: SetupPanel.test.tsx drives the editor against a
+  // MOCK `onSetPlayedAt` prop, so deleting the `await setPlayedAt(...)` call out of RoundPage's own
+  // handler — leaving Save to post nothing at all — kept the whole web suite green at 640, and no
+  // e2e spec drives the editor either. This is the seam between the two: the real editor, the real
+  // handler, the real api module, and the sync() that has to follow.
+  //
+  // Both halves are asserted because they fail differently. The POST is what reaches the server;
+  // the sync() is what makes the correction visible on THIS device — without it the golfer taps
+  // Save, the round moves, and their own screen keeps showing the old date until some later
+  // unrelated action happens to pull (the exact papercut-4 shape onAddGame was fixed for).
+  it("played-date correction: Edit → Save → POST /played-at → the corrected date renders via sync()", async () => {
+    const id = roundId("round-played-at");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-played", golferId: ann, name: "Ann", joinCode: "PLD001" });
+
+    const transport = createScriptedTransport(buildServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    // The corrected instant, three days behind the genesis PLAYED_AT_MS — Friday's paper card
+    // entered on Monday, the spec's own motivating story. Built as a LOCAL wall-clock instant
+    // because that is what a `datetime-local` field speaks: the string typed below and the number
+    // asserted on the wire have to be the same moment in whatever zone the runner sits in.
+    const corrected = new Date(2026, 0, 2, 9, 30, 0, 0);
+    const correctedValue = "2026-01-02T09:30";
+
+    let playedAtBody: unknown;
+    let playedAtCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        expect(String(url)).toBe(`https://api.example.test/rounds/${id}/played-at`);
+        expect(init?.method).toBe("POST");
+        expect((init?.headers as Record<string, string>).authorization).toBe("Bearer tok-played");
+        playedAtCalls += 1;
+        playedAtBody = JSON.parse(String(init?.body));
+        // Stands in for the real endpoint: appends the one round-played-at-set it would append, so
+        // this tab's own sync() folds it exactly as it would a real server append.
+        const event: RoundEvent = {
+          kind: "round-played-at-set",
+          playedAtMs: corrected.getTime(),
+          authorId: ann,
+          opId: opId("srv-played-at"),
+          hlc: { wallMs: 9_800, counter: 0, deviceId: SERVER_DEVICE },
+          seq: transport.log.length + 1,
+        };
+        (transport.log as RoundEvent[]).push(event);
+        return { ok: true, status: 200, json: async () => ({ events: [event] }) } as unknown as Response;
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("PLD001")).toBeTruthy());
+
+    // Before: the page is titled with the round's genesis played date.
+    expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: PLAYED_AT_MS })} · swng`);
+
+    const editor = screen.getByRole("region", { name: "When did you play?" });
+    fireEvent.click(within(editor).getByRole("button", { name: "Edit" }));
+    // A DIFFERENT value than the field was seeded with — SetupPanel treats a Save that changed
+    // nothing as a Cancel (its own no-op guard), which would make this pass with the API call gone.
+    const field = within(editor).getByLabelText("When did you play?");
+    expect((field as HTMLInputElement).value).not.toBe(correctedValue);
+    fireEvent.change(field, { target: { value: correctedValue } });
+    fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
+
+    // Half one: exactly one POST, carrying the edited instant — not the seeded one, not a re-derived
+    // "now".
+    await waitFor(() => expect(playedAtCalls).toBe(1));
+    expect(playedAtBody).toEqual({ playedAtMs: corrected.getTime() });
+
+    // Half two: sync() follows, so THIS device re-renders off the corrected fold — the page title
+    // (RoundPage's own usePageTitle over state.playedAtMs) and the editor's static line both move.
+    await waitFor(() => expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: corrected.getTime() })} · swng`));
+    expect(screen.getByRole("region", { name: "When did you play?" }).textContent).toContain(
+      new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(corrected),
+    );
+  });
+
   // Papercut 1's other half: the raw-uuid catch is gone — a finalize rejection renders a
   // human line (and the dialog's own structured list), never caught.message verbatim.
   it("a finalize rejection never renders the raw server message", async () => {

@@ -78,10 +78,18 @@ export const getSeasonStandings =
       nameB: nameByGolfer.get(pair.b) ?? pair.b,
     }));
 
-    // Shared rounds newest-first by finalizedAtMs; any holder's line is authoritative for a given
+    // Shared rounds newest-first by playedAtMs; any holder's line is authoritative for a given
     // roundId (a round finalizes once — same finalizedAt, frozen courseName, createdAt/playedAt on
     // every participant's line), so the first holder found supplies the canonical designation
     // (spec §3, extended 2026-08-01 §4c for playedAt).
+    //
+    // Fix wave (Important 4): this sorted by `finalizedAtMs` while SeasonPanel LABELS each row with
+    // the played date — a list ordered by one date and read by another, which is the exact shape
+    // spec §2 names as the latent bug this arc exists to remove, and spec §3's "the only date the
+    // product shows, groups, or SORTS BY" settles it. Concretely: a round played Jul 11 and
+    // finalized the same day, next to one played Jul 4 but not finalized until Aug 1, rendered
+    // "Sat, Jul 4" ABOVE "Sat, Jul 11" in a newest-first list. There is no tiebreak here and never
+    // was: `sort` is stable, so an exact-millisecond tie keeps `shared`'s own derivation order.
     //
     // `StoredLine` (domain, crew/scoreboard.ts) deliberately DROPS `createdAtMs` — crewScoreboard/
     // inWindow never read it, so it has no reason to ride the narrower type crewScoreboard itself
@@ -95,7 +103,7 @@ export const getSeasonStandings =
         const line = lineByRound.get(roundId)!;
         return { roundId, finalizedAt: line.finalizedAtMs, playedAt: line.playedAtMs, courseName: line.courseName, createdAt: line.createdAtMs };
       })
-      .sort((a, b) => b.finalizedAt - a.finalizedAt);
+      .sort((a, b) => b.playedAt - a.playedAt);
 
     return {
       seasonId: season.seasonId,

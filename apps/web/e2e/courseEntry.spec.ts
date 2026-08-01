@@ -347,7 +347,7 @@ test.describe.serial("round-played-date gate — a round entered three days late
     await page?.context().close();
   });
 
-  test("10: created three days back through the real form; the history row's playedAt and the round's own roundLabel both name that day", async () => {
+  test("1: created three days back through the real form; the history row's playedAt and the round's own roundLabel both name that day", async () => {
     test.setTimeout(90_000);
     const { httpUrl } = loadWebEnv();
 

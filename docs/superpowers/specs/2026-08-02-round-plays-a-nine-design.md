@@ -3,6 +3,11 @@
 > Status: **proposed** (2026-08-02, owner design session). Scope: `@swng/domain`,
 > `@swng/contracts`, `@swng/application`, `@swng/client`, `apps/infra-cdk` (one route),
 > `apps/web`. No migration, no wipe — every stored round folds unchanged.
+>
+> **BETA ONLY — no prod deploy in this arc** (owner call, 2026-08-02). `swng-prod` keeps
+> serving its current build and is not touched. That is clean rather than merely deferred:
+> the arc adds no required field and no migration, so prod's rounds are already correct under
+> its own build, and a later prod deploy needs nothing from this arc but the deploy itself.
 
 ## 1. The problem
 
@@ -189,7 +194,12 @@ genuinely says nine.
 eighteen-hole round with no error anywhere. The reverse (old bundle, new lambda) is inert: it
 never sends the field and every round it creates is `"all"`, which is what it means today.
 
-No migration, no wipe, no rebuild: absence already means the whole card, on beta and on prod.
+No migration, no wipe, no rebuild: absence already means the whole card.
+
+**Beta only.** `deploy:prod` and `publish:web:prod` are not run in this arc. Nothing about that is
+load-bearing on prod's side — no stored prod round changes meaning, and no prod read path starts
+requiring a field — so the two stages simply diverge by one feature until prod is deployed on its
+own schedule.
 
 ## 9. Testing
 

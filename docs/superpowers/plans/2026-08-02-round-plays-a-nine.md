@@ -11,6 +11,9 @@
 ## Global Constraints
 
 - Spec: `docs/superpowers/specs/2026-08-02-round-plays-a-nine-design.md`. Read it before Task 1.
+- **BETA ONLY — no prod deploy in this arc** (owner call, 2026-08-02). No `deploy:prod`, no
+  `publish:web:prod`, no prod script of any kind. Prod is not touched and needs nothing: the arc
+  adds no required field and no migration, so no stored prod round changes meaning.
 - **No migration, no wipe, no rebuild.** Absent `holes` means the whole card, on every stored round, snapshot and fixture. Any change that makes an existing stored round parse differently is a defect.
 - **Bounds and validation on request schemas only** — never on a stored-event, archive, or fold path (Arc A placement rule). A guard on a read path makes a stored round permanently unreadable.
 - `intendedHoles` is **total**: on a card with one nine, every selection resolves to that nine. It never throws.
@@ -1307,3 +1310,4 @@ Not a task — the controller runs this after Task 9, in this order:
 4. `pnpm e2e:beta` ×2, then the full `pnpm e2e:field`.
 5. An adversarial USE pass on deployed `beta.swng.golf` at phone width: play a **back nine** at an 18-hole course whose stroke indexes are known, and read the screenshots as artifacts — every typed stroke drawn as a dot on the right holes, a game settling on the nine, the finalize dialog naming nothing spurious, and the history row reading nine holes. Then change a live round from Front 9 to 18 and confirm the previously-scored holes are still there.
 6. **No wipe, no migration, no `rebuildProjections`.**
+7. **No prod deploy.** The arc ends on beta.

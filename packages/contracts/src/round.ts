@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CourseCard, GameConfig, GameResult, HoleResult, Participant, RosterEntry, RoundArchive, RoundEvent, ScoreCell } from "@swng/domain";
+import type { CourseCard, GameConfig, GameResult, HoleResult, HoleSelection, Participant, RosterEntry, RoundArchive, RoundEvent, ScoreCell } from "@swng/domain";
 import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema, teeIdSchema } from "./ids.js";
 
 // Wire mirrors of domain types. These stay structural (loose numeric bounds where the
@@ -167,6 +167,11 @@ export const gameConfigSchemaImpl = z.discriminatedUnion("kind", [
 ]);
 export const gameConfigSchema: z.ZodType<GameConfig> = gameConfigSchemaImpl;
 
+// Which holes the round set out to play (spec 2026-08-02 §3). Optional on the stored arms and on
+// the archive: absence means the whole card, which is a TRUE statement about every round already
+// stored, so nothing migrates.
+export const holeSelectionSchema: z.ZodType<HoleSelection> = z.enum(["all", "front", "back"]);
+
 // Envelope fields shared by every RoundEvent kind (see domain's RoundEventBase).
 const envelope = {
   opId: opIdSchema,
@@ -189,7 +194,14 @@ export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
   // domain's events.ts for why there is deliberately no fallback, and commands.ts's
   // `playedAtInputSchema` comment for why the bound lives on the request only (Arc A's
   // placement rule: a bound here would reject an already-stored round on read).
-  z.object({ ...envelope, kind: z.literal("round-created"), roundId: roundIdSchema, card: courseCardSchema, playedAtMs: z.number().int() }),
+  z.object({
+    ...envelope,
+    kind: z.literal("round-created"),
+    roundId: roundIdSchema,
+    card: courseCardSchema,
+    playedAtMs: z.number().int(),
+    holes: holeSelectionSchema.optional(),
+  }),
   z.object({ ...envelope, kind: z.literal("participant-joined"), participant: participantSchema }),
   z.object({ ...envelope, kind: z.literal("game-added"), config: gameConfigSchemaImpl }),
   z.object({ ...envelope, kind: z.literal("round-started") }),
@@ -219,6 +231,11 @@ export const roundEventSchemaImpl = z.discriminatedUnion("kind", [
   // (domain's playedAtMsOf); `authorId` (the envelope) records who changed it. UNBOUNDED, same
   // placement reason as round-created's own playedAtMs above.
   z.object({ ...envelope, kind: z.literal("round-played-at-set"), playedAtMs: z.number().int() }),
+  // The holes, corrected (spec 2026-08-02 §3b): the round-played-at-set template — a round-level
+  // fact, so no golferId. Latest-HLC-wins; `authorId` records who changed it. Going out for nine
+  // and playing on is the normal case, not the error case, so this is an ordinary correction, not
+  // a special one.
+  z.object({ ...envelope, kind: z.literal("round-holes-set"), holes: holeSelectionSchema }),
 ]);
 export const roundEventSchema: z.ZodType<RoundEvent> = roundEventSchemaImpl;
 

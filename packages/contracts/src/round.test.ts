@@ -17,6 +17,12 @@ import {
   terminateGameResponseSchema,
 } from "./round.js";
 
+// parse(JSON.parse(JSON.stringify(x))) === x — the wire round-trip every schema here has to
+// survive unchanged, same pattern as courses.test.ts / crews.test.ts / golfers.test.ts.
+const roundTrips = <S extends z.ZodType>(schema: S, value: z.infer<S>): void => {
+  expect(parse(schema, JSON.parse(JSON.stringify(value)) as unknown)).toEqual(value);
+};
+
 const baseHlc = { wallMs: 1_000, counter: 0, deviceId: deviceId("device-1") };
 
 const scoreRecordedEvent: RoundEvent = {
@@ -27,6 +33,20 @@ const scoreRecordedEvent: RoundEvent = {
   opId: opId("op-1"),
   hlc: baseHlc,
   authorId: golferId("ann"),
+};
+
+// The one course card round-created fixtures in this file build from — hoisted to module scope
+// (was describe-local to roundEventSchema) so the holes-on-the-wire suite below can reuse it too.
+const card: CourseCard = {
+  courseName: "Test Links",
+  teeSets: [
+    {
+      name: "white",
+      rating: 71.2,
+      slope: 128,
+      holes: Array.from({ length: 9 }, (_, index) => ({ number: index + 1, par: 4, yardage: 380, strokeIndex: index + 1 })),
+    },
+  ],
 };
 
 describe("holeResultSchema", () => {
@@ -109,18 +129,6 @@ describe("roundEventSchema", () => {
     };
     expect(roundEventSchema.parse(join)).toEqual(join);
   });
-
-  const card: CourseCard = {
-    courseName: "Test Links",
-    teeSets: [
-      {
-        name: "white",
-        rating: 71.2,
-        slope: 128,
-        holes: Array.from({ length: 9 }, (_, index) => ({ number: index + 1, par: 4, yardage: 380, strokeIndex: index + 1 })),
-      },
-    ],
-  };
 
   it("parses a round-created event with no crewId (the untagged case) and round-trips through JSON unchanged", () => {
     const event: RoundEvent = {
@@ -230,6 +238,43 @@ describe("roundEventSchema", () => {
     // domain type are structurally identical in both directions. This assertion just gives
     // vitest something to run.
     expect([forwardEvent, backwardEvent, forwardConfig, backwardConfig, forwardResult, backwardResult, forwardArchive, backwardArchive]).toHaveLength(8);
+  });
+});
+
+describe("holes on the wire (spec 2026-08-02)", () => {
+  // A genesis event, built from the same course card + envelope pieces every round-created
+  // fixture above already uses. Not typed as `RoundEvent`: keeping it structural lets the spread
+  // below add `holes` without the whole-union spread ambiguity that annotation would introduce.
+  const genesis = {
+    kind: "round-created" as const,
+    roundId: roundId("r1"),
+    card,
+    playedAtMs: baseHlc.wallMs,
+    opId: opId("op-genesis-holes"),
+    hlc: baseHlc,
+    authorId: golferId("author"),
+  };
+
+  // A bare envelope — just the fields every RoundEvent kind carries (RoundEventBase) — for
+  // building the round-holes-set correction event below.
+  const envelope = { opId: opId("op-holes-set"), hlc: baseHlc, authorId: golferId("author") };
+
+  it("round-trips a genesis carrying a nine", () => {
+    roundTrips(roundEventSchema, { ...genesis, holes: "back" });
+  });
+
+  // The no-migration pin: a stored genesis with no `holes` key parses, and stays without one.
+  it("parses a genesis with no holes and does not invent one", () => {
+    const parsed = parse(roundEventSchema, genesis);
+    expect("holes" in parsed).toBe(false);
+  });
+
+  it("round-trips the correction event", () => {
+    roundTrips(roundEventSchema, { ...envelope, kind: "round-holes-set", holes: "front" });
+  });
+
+  it("rejects a selection that is not one of the three", () => {
+    expect(() => parse(roundEventSchema, { ...envelope, kind: "round-holes-set", holes: "middle" })).toThrow(ContractError);
   });
 });
 

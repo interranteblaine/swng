@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { GameState, GolferId, HoleSelection, RosterEntry, RoundState } from "@swng/domain";
-import { holeSelectionLabel } from "@swng/domain";
+import { HOLE_SELECTION_ORDER, hasHoleChoice, holeSelectionLabel } from "@swng/domain";
 import { MAX_STROKES } from "@swng/contracts";
 import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";
@@ -49,12 +49,6 @@ const isValidStrokes = (value: string): boolean => /^\d+$/.test(value.trim()) &&
 // scolded; Save is still disabled by the predicate.
 const strokesReasonFor = (value: string): string | undefined =>
   value.trim() === "" || isValidStrokes(value) ? undefined : `Enter a whole number from 0 to ${MAX_STROKES}.`;
-
-// Which holes the round set out to play (spec 2026-08-02 §3): three choices, in the order the
-// radio group renders them. Just the ORDER — the label text itself is domain presentation truth
-// now (`holeSelectionLabel`, task 8b), the same shared list CreateRoundPage.tsx's own
-// creation-time picker renders through.
-const HOLE_SELECTIONS: readonly HoleSelection[] = ["all", "front", "back"];
 
 export interface SetupPanelProps {
   readonly state: RoundState;
@@ -348,7 +342,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
           Edit button reads "Edit holes" (not the bare "Edit" the row above uses) because this
           region isn't scoped when it's found on screen — a distinct name is what disambiguates it
           from the Date played and roster rows' own Edit buttons. */}
-      {state.card.teeSets[0]?.holes.length === 18 && (
+      {state.card.teeSets[0] && hasHoleChoice(state.card.teeSets[0]) && (
         <section aria-label="Holes" className={`${cardBox} flex flex-col gap-2 p-4`}>
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm text-fairway">Holes</span>
@@ -362,7 +356,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
           {editingHoles ? (
             <div className="flex flex-col gap-2">
               <div className="flex gap-2">
-                {HOLE_SELECTIONS.map((value) => (
+                {HOLE_SELECTION_ORDER.map((value) => (
                   <label key={value} className="flex items-center gap-1 text-sm text-forest">
                     <input type="radio" name="holes-edit" value={value} checked={holesValue === value} onChange={() => setHolesValue(value)} />
                     {holeSelectionLabel(value)}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TeeSet } from "../course/card.js";
-import { intendedHoles } from "./holes.js";
+import { hasHoleChoice, intendedHoles } from "./holes.js";
 
 // An 18-hole tee with the conventional split: odd stroke indexes on the front, even on the back.
 const eighteen: TeeSet = {
@@ -39,5 +39,17 @@ describe("intendedHoles", () => {
 
   it("preserves the hole objects themselves, not copies", () => {
     expect(intendedHoles(eighteen, "back")[0]).toBe(eighteen.holes[9]);
+  });
+});
+
+// whole-branch review Finding 4: the ONE spelling of "does this card have a choice to make",
+// replacing three independent ones (startRound's `<= 9` guard, two `=== 18` web predicates).
+describe("hasHoleChoice", () => {
+  it("is true for an 18-hole tee set — front/back is a real choice", () => {
+    expect(hasHoleChoice(eighteen)).toBe(true);
+  });
+
+  it("is false for a 9-hole tee set — there's nothing to split", () => {
+    expect(hasHoleChoice(nine)).toBe(false);
   });
 });

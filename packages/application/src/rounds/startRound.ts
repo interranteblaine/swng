@@ -1,5 +1,5 @@
 import type { GolferId, Participant, RoundEvent } from "@swng/domain";
-import { findTeeSet, roundId } from "@swng/domain";
+import { findTeeSet, hasHoleChoice, roundId } from "@swng/domain";
 import type { StartRoundRequest, StartRoundResponse } from "@swng/contracts";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { Broadcast } from "../ports/broadcast.js";
@@ -62,7 +62,7 @@ export const startRound =
     // rejects a card whose tees disagree), so there is no other tee on this card whose hole count
     // could differ from teeSet's.
     const holes = command.holes ?? "all";
-    if (holes !== "all" && teeSet.holes.length <= 9) {
+    if (holes !== "all" && !hasHoleChoice(teeSet)) {
       throw new ApplicationError("holes-not-on-this-card", `this course has one nine; "${holes}" names a second`);
     }
 

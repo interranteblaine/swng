@@ -17,3 +17,14 @@ export const intendedHoles = (teeSet: TeeSet, selection: HoleSelection): readonl
   if (selection === "all" || teeSet.holes.length <= NINE) return teeSet.holes;
   return selection === "front" ? teeSet.holes.slice(0, NINE) : teeSet.holes.slice(NINE);
 };
+
+// "Does this card have a choice to make?" (whole-branch review Finding 4, spec 2026-08-02 §3c) —
+// the ONE spelling of that predicate, replacing three independent ones (`holes.length <= 9` in
+// startRound's guard, `=== 18` in the web's two pickers). A 9-hole tee set has one nine and
+// nothing to split ("no choice to make, so none is offered" — §3c's own words); an 18-hole tee
+// set can be played front, back, or all. `>` rather than `!== NINE` reads as the actual question
+// ("is there more than a nine here"), though validateTeeSet's own invariant (hole count is always
+// exactly 9 or 18, never anything else) makes every phrasing of this predicate agree in practice.
+// A pure structural accessor, not a golf computation — not on the compute-fence banlist, reached
+// directly from apps/web/src the same way `findTeeSet` is.
+export const hasHoleChoice = (teeSet: TeeSet): boolean => teeSet.holes.length > NINE;

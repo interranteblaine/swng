@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import type { CourseId, HoleSelection } from "@swng/domain";
-import { cardId, holeSelectionLabel } from "@swng/domain";
+import { HOLE_SELECTION_ORDER, cardId, hasHoleChoice, holeSelectionLabel } from "@swng/domain";
 import type { CourseView, StartRoundResponse } from "@swng/contracts";
 import { ApiError, createRound, getCourse } from "../api";
 import { SignInCta } from "../auth/SignInCta";
@@ -34,13 +34,6 @@ const toDatetimeLocalValue = (date: Date): string =>
 // it via the DOM would pass whether the clause exists or not. Exported so the test can pin it
 // directly instead.
 export const isPlayedAtValueValid = (value: string): boolean => value !== "" && !Number.isNaN(new Date(value).getTime());
-
-// Which holes the round sets out to play (spec 2026-08-02 §3): three choices, in the order the
-// radio group renders them. The label text itself is domain presentation truth now
-// (`holeSelectionLabel`, task 8b) — this is just the ORDER, not a second copy of the words; the
-// round page's own mid-round editor (SetupPanel.tsx) renders the identical list through the same
-// shared label.
-const HOLE_SELECTIONS: readonly HoleSelection[] = ["all", "front", "back"];
 
 interface LocationState {
   // AddCoursePage's own success navigation (M6 Task 5's "Add a course" hand-off) — a course
@@ -128,10 +121,13 @@ export function CreateRoundPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: keyed by the router's own per-navigation identity, not by `state`'s object identity
   }, [location.key]);
 
-  // The selected card's own hole count — read off its first tee set, since every tee set on one
-  // card shares the same hole count by construction (the same-hole-count invariant pinned
-  // elsewhere in the course-cards work). Undefined while no course is selected yet.
-  const selectedCardHoleCount = courseView?.card.teeSets[0]?.holes.length;
+  // Does the selected card offer a front/back choice? Read off its first tee set, since every tee
+  // set on one card shares the same hole count by construction (the same-hole-count invariant
+  // pinned elsewhere in the course-cards work) — `hasHoleChoice` is the ONE spelling of this
+  // predicate (whole-branch review Finding 4), the same one startRound's guard and SetupPanel's
+  // mid-round editor use. False while no course is selected yet.
+  const selectedTeeSet = courseView?.card.teeSets[0];
+  const offersHoleChoice = selectedTeeSet !== undefined && hasHoleChoice(selectedTeeSet);
 
   const canSubmit = courseView !== undefined && tee !== "" && golfer !== undefined && isPlayedAtValueValid(playedAt);
 
@@ -213,11 +209,11 @@ export function CreateRoundPage() {
               18-hole card — "a card with one nine has no choice to make, so none is offered" is
               the spec's own words, and it means exactly that: no control, no default to explain,
               nothing, not a disabled or pre-filled one. */}
-          {selectedCardHoleCount === 18 && (
+          {offersHoleChoice && (
             <fieldset className="flex flex-col gap-1">
               <legend className={eyebrow}>Holes</legend>
               <div className="flex gap-2">
-                {HOLE_SELECTIONS.map((value) => (
+                {HOLE_SELECTION_ORDER.map((value) => (
                   <label key={value} className="flex items-center gap-1 text-sm text-forest">
                     <input type="radio" name="holes" value={value} checked={holes === value} onChange={() => setHoles(value)} />
                     {holeSelectionLabel(value)}

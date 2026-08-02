@@ -85,6 +85,12 @@ export const holeSelectionLabel = (selection: HoleSelection): string => {
   }
 };
 
+// The order the three selections render in — every picker (CreateRoundPage's create-time
+// picker, SetupPanel's mid-round editor) mapped its own `["all", "front", "back"]` array beside
+// the shared label above; that's the same one-copy drift risk task 8b already fixed for the
+// words themselves (whole-branch review Finding 4). One array, beside the labels it orders.
+export const HOLE_SELECTION_ORDER: readonly HoleSelection[] = ["all", "front", "back"];
+
 // One seat's asserted number, or 0 if that golfer isn't on the roster handed in. Shared by the two
 // sentences below so they can never disagree about what a seat holds.
 //

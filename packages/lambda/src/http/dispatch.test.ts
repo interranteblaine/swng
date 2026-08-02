@@ -46,6 +46,7 @@ import {
   removeCrewMember,
   searchCourses,
   seedCard,
+  setHoles,
   setPlayedAt,
   setStrokes,
   startRound,
@@ -85,6 +86,7 @@ import {
   recordScoreResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
+  setHolesResponseSchema,
   setPlayedAtResponseSchema,
   setStrokesResponseSchema,
   shareLinkResponseSchema,
@@ -180,6 +182,7 @@ const setup = async (verifier: AccountVerifier = subVerifier, logger: Logger = c
     leaveRound: leaveRound({ journal, broadcast, clock, ids }),
     setStrokes: setStrokes({ journal, broadcast, clock, ids }),
     setPlayedAt: setPlayedAt({ journal, broadcast, clock, ids }),
+    setHoles: setHoles({ journal, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),
@@ -442,6 +445,44 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     expect(eventsResp.statusCode).toBe(200);
     const events = eventsResponseSchema.parse(JSON.parse(eventsResp.body!));
     expect(events.events.some((event) => event.kind === "round-played-at-set")).toBe(true);
+  });
+
+  // spec 2026-08-02 §3b: the holes a round set out to play, corrected — same round-level-fact
+  // shape as played-at above (no SUBJECT), so any participant's own token is enough.
+  it("POST /rounds/{roundId}/holes: participant auth, 200, appends the set", async () => {
+    const { dispatcher } = await setup();
+
+    const started = startRoundResponseSchema.parse(
+      JSON.parse(
+        asStructured(
+          await dispatcher(
+            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+          ),
+        ).body!,
+      ),
+    );
+
+    const resp = asStructured(
+      await dispatcher(
+        makeEvent({
+          method: "POST",
+          path: `/rounds/${started.roundId}/holes`,
+          token: started.token,
+          body: { holes: "front" },
+        }),
+      ),
+    );
+    expect(resp.statusCode).toBe(200);
+    const parsed = setHolesResponseSchema.parse(JSON.parse(resp.body!));
+    expect(parsed.events).toHaveLength(1);
+    expect(parsed.events[0]).toMatchObject({ kind: "round-holes-set", holes: "front" });
+
+    const eventsResp = asStructured(
+      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
+    );
+    expect(eventsResp.statusCode).toBe(200);
+    const events = eventsResponseSchema.parse(JSON.parse(eventsResp.body!));
+    expect(events.events.some((event) => event.kind === "round-holes-set")).toBe(true);
   });
 
   it("rejects a request with no bearer token on a participant route — 401", async () => {
@@ -1810,6 +1851,23 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
             path: `/rounds/${started.roundId}/played-at`,
             token: spectatorToken,
             body: { playedAtMs: 1_700_000_000_000 },
+          }),
+        ),
+      );
+      expect(resp.statusCode).toBe(403);
+      expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
+    });
+
+    it("POST /rounds/{roundId}/holes", async () => {
+      const { dispatcher } = await setup();
+      const { started, spectatorToken } = await startAndShare(dispatcher);
+      const resp = asStructured(
+        await dispatcher(
+          makeEvent({
+            method: "POST",
+            path: `/rounds/${started.roundId}/holes`,
+            token: spectatorToken,
+            body: { holes: "front" },
           }),
         ),
       );

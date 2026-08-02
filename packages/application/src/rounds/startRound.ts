@@ -52,7 +52,15 @@ export const startRound =
     if (record.cardId !== command.course.cardId) {
       throw new ApplicationError("card-superseded", `course ${command.course.courseId}: current card is ${record.cardId}`);
     }
-    findTeeSet(record.card, command.host.tee); // unknown-tee-set (DomainError) propagates
+    const teeSet = findTeeSet(record.card, command.host.tee); // unknown-tee-set (DomainError) propagates
+
+    // The one guard on this fact (spec 2026-08-02 §3): a nine selection needs a card that HAS two
+    // nines. Checked here, at the one door where the card is already in hand, and never again —
+    // intendedHoles is total, and a guard on a read path would make a stored round unreadable.
+    const holes = command.holes ?? "all";
+    if (holes !== "all" && teeSet.holes.length <= 9) {
+      throw new ApplicationError("holes-not-on-this-card", `this course has one nine; "${holes}" names a second`);
+    }
 
     // As-self, the ONLY identity path: get-or-create the caller's account golfer. The seat's
     // golferId and its frozen participant name both come straight from that record.
@@ -82,6 +90,9 @@ export const startRound =
         // server clock the hlc source above reads, so a round with no explicit playedAtMs still
         // agrees with its own envelope's wall time.
         playedAtMs: command.playedAtMs ?? deps.clock.now(),
+        // Present only when it is not "all" (spec §3a) — absence is the default and keeps every
+        // whole-card round's genesis byte-identical to the ones written before this existed.
+        ...(holes !== "all" ? { holes } : {}),
         ...serverEnvelope({ hlc, ids: deps.ids }, host),
       },
       { kind: "participant-joined", participant: hostParticipant, ...serverEnvelope({ hlc, ids: deps.ids }, host) },

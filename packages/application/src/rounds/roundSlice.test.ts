@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HoleResult } from "@swng/domain";
-import { cardId, compareHlc, courseId, deviceId, fixtureLinks, golferId, opId, placeholderName, reduceRound } from "@swng/domain";
+import { cardId, compareHlc, courseId, deviceId, fixtureLinks, fixtureLinks18, golferId, opId, placeholderName, reduceRound } from "@swng/domain";
 import type { Clock } from "../ports/clock.js";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import type { ProjectionStore } from "../ports/projectionStore.js";
@@ -346,6 +346,23 @@ describe("round use cases — golden path over in-memory ports", () => {
     expect(peeked.playedAt).toBe(correctedPlayedAtMs);
   });
 
+  // Which holes the round set out to play (spec 2026-08-02 §3c): peek serves it, sourced from
+  // RoundState.holes (the ONE fold, never re-derived) — so the join screen can name the nine
+  // before a tee is chosen. The default-"all" case is already covered by the key-set assertion
+  // above (fixtureLinks' own 9-hole card never carries an explicit selection there); this test
+  // exercises the other arm, an 18-hole card with a real nine selection frozen onto genesis.
+  it("peekRound serves holes when the round is not playing the whole card", async () => {
+    const ctx = await setup();
+    await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
+    const eighteenRef = { courseId: courseId("course-18"), cardId: cardId("card-18") };
+    await seedCard(ctx.cardStore, eighteenRef.courseId, eighteenRef.cardId, fixtureLinks18);
+
+    const host = await ctx.start({ course: eighteenRef, host: { tee: "white" }, holes: "back" }, { sub: ANN.sub });
+
+    const peeked = await ctx.peek(host.joinCode);
+    expect(peeked.holes).toBe("back");
+  });
+
   it("rejects peekRound with an unknown join code — bad-join-code, same shape as join's", async () => {
     const ctx = await setup();
     await expect(ctx.peek("ZZZZZZ")).rejects.toMatchObject({ code: "bad-join-code" });
@@ -462,6 +479,51 @@ describe("StartRound — card resolution (course-cards spec §4)", () => {
     await expect(
       ctx.start({ course: { courseId: courseId("nope"), cardId: cardId("nope-card") }, host: { tee: "white" } }, { sub: ANN.sub }),
     ).rejects.toMatchObject({ code: "course-not-found" });
+  });
+});
+
+// Which holes the round set out to play (spec 2026-08-02 §3): StartRound freezes the caller's
+// selection onto round-created unless it's the default "all", and rejects a nine selection
+// against a card with only one nine — the ONE guard in the system (startRound.ts's own doc
+// comment). Not because the value is dangerous downstream (intendedHoles resolves any selection
+// against a one-nine card sensibly on its own) but so no round is ever STORED carrying a
+// "Back 9" label its own card cannot have.
+describe("StartRound — holes (spec 2026-08-02 §3)", () => {
+  it("freezes the chosen nine onto the genesis (an 18-hole card)", async () => {
+    const ctx = await setup();
+    await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
+    const eighteenRef = { courseId: courseId("course-18"), cardId: cardId("card-18") };
+    await seedCard(ctx.cardStore, eighteenRef.courseId, eighteenRef.cardId, fixtureLinks18);
+
+    const host = await ctx.start({ course: eighteenRef, host: { tee: "white" }, holes: "back" }, { sub: ANN.sub });
+
+    const genesis = await ctx.events(host.roundId, 0);
+    const created = genesis.events.find((event) => event.kind === "round-created");
+    expect(created).toMatchObject({ holes: "back" });
+  });
+
+  it("omits the key when the round plays the whole card", async () => {
+    const ctx = await setup();
+    await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
+
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white" } }, { sub: ANN.sub });
+
+    const genesis = await ctx.events(host.roundId, 0);
+    const created = genesis.events.find((event) => event.kind === "round-created")!;
+    expect("holes" in created).toBe(false);
+  });
+
+  // The one guard in the system: not because the value is dangerous downstream — intendedHoles
+  // handles it — but so no round can be stored carrying a "Back 9" label its course cannot have.
+  it("rejects a nine selection against a card that has only one nine", async () => {
+    const ctx = await setup(); // ctx.course seeds fixtureLinks — a 9-hole card
+    await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
+
+    await expect(ctx.start({ course: ctx.course, host: { tee: "white" }, holes: "back" }, { sub: ANN.sub })).rejects.toMatchObject({
+      code: "holes-not-on-this-card",
+    });
+    // Same discipline as the card-superseded rejection above: nothing appended.
+    expect(ctx.broadcast.calls).toHaveLength(0);
   });
 });
 

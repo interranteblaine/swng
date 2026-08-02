@@ -38,5 +38,11 @@ export const peekRound =
       // (domain's playedAtMsOf) — never re-derived here. loadRoundState already guarantees a
       // non-empty log with a genesis event, so this never throws for a real peek.
       playedAt: playedAtMsOf(events),
+      // Which holes the round set out to play (spec 2026-08-02 §3c): RoundState.holes is ALWAYS
+      // defined (absence resolves to "all" inside the fold itself), so this reads state, not
+      // events — spread conditionally so a whole-card round's peek omits the key, the same
+      // discipline as the teeSets' own optional rating/slope above. Lets the join screen name the
+      // nine before a tee is chosen.
+      ...(state.holes !== "all" ? { holes: state.holes } : {}),
     };
   };

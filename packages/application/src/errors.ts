@@ -103,7 +103,13 @@ export type ApplicationErrorCode =
   // longer names the card the caller reviewed (record.supersedes). No retry, no revision
   // counter: a moved pointer means a human re-reviews the now-current card, same 409 bucket as
   // crew-conflict above.
-  | "card-superseded";
+  | "card-superseded"
+  // Round-plays-a-nine spec 2026-08-02 §3: startRound's ONE guard on a nine selection — the card
+  // has only one nine, so "front"/"back" would name a second the course doesn't have. A bad-body
+  // precondition the caller can correct (pick "all", or the tee that actually has two nines), same
+  // 400 bucket as unknown-golfer-in-game above — never thrown again after creation (setHoles
+  // deliberately does not re-check the card).
+  | "holes-not-on-this-card";
 
 export class ApplicationError extends Error {
   constructor(

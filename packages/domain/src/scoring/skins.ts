@@ -19,8 +19,8 @@ export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState =>
     return { golferId, holes, dots: allocation.get(golferId) };
   });
 
-  // Course card order is shared; hole numbers, not tee choice, drive it — so any
-  // player's tee set supplies the sequence the carryover chain walks.
+  // Round order is shared; hole numbers, not tee choice, drive it — so any player's own intended
+  // holes supply the sequence the carryover chain walks.
   const holes = players[0]?.holes ?? [];
 
   const skinsWon = new Map(config.players.map((golferId) => [golferId, 0]));

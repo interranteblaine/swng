@@ -1,17 +1,19 @@
-import { findTeeSet, type Hole, type TeeSet } from "../course/card.js";
+import { findTeeSet, type Hole } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import type { GolferId } from "../ids.js";
 import { intendedHoles } from "../round/holes.js";
-import type { Participant } from "../round/participant.js";
 import { cellAt } from "../round/state.js";
 import type { RoundState } from "../round/state.js";
 
 export interface PlayerTeeSet {
-  readonly participant: Participant;
-  readonly teeSet: TeeSet;
   // The holes THIS ROUND set out to play, off this player's own tee (spec 2026-08-02 §3c). Every
-  // engine walks this, never `teeSet.holes` — the tee set describes the course, this describes the
-  // round. Resolved once per player rather than per hole.
+  // engine walks this, never a raw tee set's own `.holes` — the tee set describes the course, this
+  // describes the round. Resolved once per player rather than per hole.
+  //
+  // `participant` and the tee set itself were dropped (task-3 review finding): all five engines
+  // destructure only `holes`, `participant` had no consumer even before this arc, and leaving the
+  // tee set here would keep a `teeSet.holes` walk one keystroke away from the exact regression
+  // this arc closes. Add a field back only when something actually reads it.
   readonly holes: readonly Hole[];
 }
 
@@ -19,7 +21,7 @@ export const playerTeeSet = (state: RoundState, golferId: GolferId): PlayerTeeSe
   const participant = state.participants.find((p) => p.golferId === golferId);
   if (!participant) throw new DomainError("unknown-participant", `no participant ${golferId} joined this round`);
   const teeSet = findTeeSet(state.card, participant.tee);
-  return { participant, teeSet, holes: intendedHoles(teeSet, state.holes) };
+  return { holes: intendedHoles(teeSet, state.holes) };
 };
 
 // True once every player has a recorded cell for every hole the ROUND set out to play — the shared

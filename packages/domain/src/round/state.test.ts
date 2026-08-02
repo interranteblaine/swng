@@ -541,6 +541,16 @@ describe("holes — which holes the round set out to play (spec 2026-08-02 §3)"
     expect(reduceRound([genesis, started, set]).holes).toBe("front");
   });
 
+  // Review fix (Finding 1): the two arms fold by ONE hlc-ordered rule, exactly like playedAtMsOf's
+  // two arms — not a seed-then-unconditional-overwrite that would let a correction win even when
+  // its hlc sorts BEFORE the genesis. Unreachable with today's server-minted envelopes, but the
+  // genesis's own selection must stand against a stray earlier write.
+  it("an earlier round-holes-set does not win — the genesis's own selection stands", () => {
+    const g: RoundEvent = { ...base(10), kind: "round-created", roundId: roundId("r1"), card, playedAtMs: 10, holes: "back" };
+    const early: RoundEvent = { ...base(1), kind: "round-holes-set", holes: "front" };
+    expect(reduceRound([g, early]).holes).toBe("back");
+  });
+
   it("resolves two corrections by hlc, not arrival order", () => {
     const early: RoundEvent = { ...base(10), kind: "round-holes-set", holes: "front" };
     const late: RoundEvent = { ...base(20), kind: "round-holes-set", holes: "all" };

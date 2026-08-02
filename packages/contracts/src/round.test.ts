@@ -276,6 +276,12 @@ describe("holes on the wire (spec 2026-08-02)", () => {
   it("rejects a selection that is not one of the three", () => {
     expect(() => parse(roundEventSchema, { ...envelope, kind: "round-holes-set", holes: "middle" })).toThrow(ContractError);
   });
+
+  // holes is REQUIRED on the correction arm (unlike round-created's own optional holes above) —
+  // pinned separately so a future .optional() edit on this arm fails here, not silently.
+  it("rejects a correction with no holes at all", () => {
+    expect(() => parse(roundEventSchema, { ...envelope, kind: "round-holes-set" })).toThrow(ContractError);
+  });
 });
 
 // The stored shape of a settled round (spec 2026-07-30 §10). Its members are the same wire

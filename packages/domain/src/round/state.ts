@@ -171,11 +171,20 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
   //     stamped with the same instant). Never re-derived inline.
   const playedAtMs = playedAtMsOf(deduped);
 
-  // 2c. Holes: the latest round-holes-set by HLC, else the genesis's own selection, else the whole
-  //     card. One ascending scan over the canonical order handles all three arms.
-  let holes: HoleSelection = genesis.holes ?? "all";
+  // 2c. Holes: one ascending scan over canonical order, exactly like playedAtMsOf (playedAt.ts)
+  //     handles its own two arms — the genesis's own selection (or "all" if it named none),
+  //     overwritten by any later round-holes-set correction. NOT a separate seed-then-overwrite:
+  //     a seeded `genesis.holes ?? "all"` followed by an unconditional overwrite on every
+  //     round-holes-set would let a correction win even when its HLC sorts BEFORE the genesis
+  //     (unreachable today — envelopes are server-minted — but a silent wrong answer if it ever
+  //     became reachable is exactly the harm this arc exists to fix). Folding round-created inside
+  //     the same scan makes both arms subject to the identical last-write-in-canonical-order rule.
+  //     `genesis` is guaranteed present by the missing-genesis throw above, so the initial "all"
+  //     here only types the binding — it is never the answer, same as playedAtMsOf's `playedAtMs = 0`.
+  let holes: HoleSelection = "all";
   for (const event of deduped) {
-    if (event.kind === "round-holes-set") holes = event.holes;
+    if (event.kind === "round-created") holes = event.holes ?? "all";
+    else if (event.kind === "round-holes-set") holes = event.holes;
   }
 
   // 3. Status: among lifecycle events pick highest hlc (last in canonical order).

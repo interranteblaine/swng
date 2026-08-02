@@ -84,6 +84,14 @@ const backNine: readonly Hole[] = [
   { number: 18, par: 4, yardage: 400, strokeIndex: 18 },
 ];
 
+// An 18-hole permutation fixture — the shape nearly every existing round in the system carries,
+// pinned directly rather than relying on allocation.test.ts's own hard-coded 18-hole value to
+// carry this coverage alone. Deterministic permutation of 1..18 (gcd(7,18)=1), same construction
+// as strokes.properties.test.ts's own fixture generator.
+const eighteen: readonly Hole[] = Array.from({ length: 18 }, (_, i) => ({
+  number: i + 1, par: 4, yardage: 400, strokeIndex: ((i * 7) % 18) + 1,
+}));
+
 describe("allocateStrokes over a nine drawn out of an eighteen (spec 2026-08-02 §3d)", () => {
   it("gives every typed stroke a hole, ranking the holes played by stroke index", () => {
     // 5 strokes over these nine → the five hardest of THEM: SI 2,4,6,8,10 = holes 10-14.
@@ -102,15 +110,22 @@ describe("allocateStrokes over a nine drawn out of an eighteen (spec 2026-08-02 
   });
 
   // The pin that protects every round that has nothing to do with nines: on a full card, rank IS
-  // stroke index, so ranking changes no existing number.
+  // stroke index, so ranking changes no existing number. Checked on both a 9-hole and (nearly
+  // every existing round's own shape) an 18-hole permutation.
   it("is byte-identical to the raw-strokeIndex rule on a full card", () => {
+    // `raw` is the PRE-CHANGE rule — the raw strokeIndex read with no ranking at all. It must
+    // NEVER be edited to also rank: its entire job in this test is to disagree with
+    // allocateStrokes the instant the ranking is wrong, and a `raw` that ranks would make this
+    // pin vacuously green with no other test noticing.
     const raw = (strokes: number, holes: readonly Hole[]) => {
       const base = Math.floor(strokes / holes.length);
       const extra = strokes % holes.length;
       return holes.map(({ strokeIndex }) => base + (strokeIndex <= extra ? 1 : 0));
     };
-    for (const strokes of [0, 1, 5, 8, 9, 10, 17, 18, 25, 36]) {
-      expect(allocateStrokes(strokes, nine.holes)).toEqual(raw(strokes, nine.holes));
+    for (const holes of [nine.holes, eighteen]) {
+      for (const strokes of [0, 1, 5, 8, 9, 10, 17, 18, 25, 36]) {
+        expect(allocateStrokes(strokes, holes)).toEqual(raw(strokes, holes));
+      }
     }
   });
 });

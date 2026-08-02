@@ -188,7 +188,7 @@ test.describe.serial("a round declares Back 9 — strokes allocate onto the nine
     await expect(holesSection).toContainText("Back 9");
     await holesSection.getByRole("button", { name: "Edit holes" }).click();
     await holesSection.getByRole("radio", { name: "18 holes", exact: true }).check();
-    await holesSection.getByRole("button", { name: "Save", exact: true }).click();
+    await holesSection.getByRole("button", { name: "Save" }).click();
     await expect(holesSection).toContainText("18 holes");
 
     // The card grows to the whole card — OUT/IN/TOT all present now, holes 1-9 drawn again.
@@ -207,7 +207,7 @@ test.describe.serial("a round declares Back 9 — strokes allocate onto the nine
     // Switch back — the guarantee is a round trip, not a one-way street.
     await holesSection.getByRole("button", { name: "Edit holes" }).click();
     await holesSection.getByRole("radio", { name: "Back 9", exact: true }).check();
-    await holesSection.getByRole("button", { name: "Save", exact: true }).click();
+    await holesSection.getByRole("button", { name: "Save" }).click();
     await expect(holesSection).toContainText("Back 9");
 
     await expect(page.locator("tbody tr")).toHaveCount(9);

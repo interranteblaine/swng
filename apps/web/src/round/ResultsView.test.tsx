@@ -160,7 +160,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
     const annId = players[0]!.golferId;
     // An independent oracle (domain's own roundStrokeAllocation, not the component under
     // test) for Ann's per-hole standard-card dots.
-    const chDots = roundStrokeAllocation(state.participants, state.card).get(annId)!;
+    const chDots = roundStrokeAllocation(state.participants, state.card, state.holes).get(annId)!;
     const hole = [...chDots.keys()].find((h) => (chDots.get(h) ?? 0) > 0);
     expect(hole).toBeDefined();
 

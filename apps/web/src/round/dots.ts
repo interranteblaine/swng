@@ -7,8 +7,16 @@ import type { CourseCard, GameConfig, GolferId, RosterEntry } from "@swng/domain
 // ESLint fence forbids the web importing it straight from @swng/domain). M6 Task 5 deleted this
 // file's own hand-mirrored allocation arithmetic (byte-identical to the domain version, now a
 // single source instead of two to keep in sync).
+// "all" is pinned here, not derived: gameDots takes no RoundState (only a game's own
+// config/roster/card), so the round's own `holes` selection is genuinely out of scope at this
+// call site without widening it into a component prop or a RoundState parameter — out of bounds
+// for task-3b, which is scoped to the three call sites the compiler flags after Task 3's arity
+// change, not the web's own hole-selection wiring (Task 7/8). Every round folds to "all" until
+// then, so this is behaviour-preserving TODAY — flagged as a real gap in task-3b's report, not
+// silently accepted: gameDots/strokesSummary feed GamePanel's strokes panel and AddGameForm's
+// preview, and neither will reflect a round's actual selection until this is threaded too.
 export const gameDots = (config: GameConfig, participants: readonly RosterEntry[], card: CourseCard): ReadonlyMap<GolferId, ReadonlyMap<number, number>> =>
-  gameStrokeAllocation(config, participants, card);
+  gameStrokeAllocation(config, participants, card, "all");
 
 // A thin re-export of the domain's totalDots (packages/domain/src/scoring/allocation.ts),
 // reached through @swng/client (same on-device compute seam as gameDots above) — Task 4 deleted

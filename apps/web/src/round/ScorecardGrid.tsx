@@ -170,7 +170,7 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
   // 2026-07-30 §2) — allocated by stroke index, no game, computed once per render (spec
   // 2026-07-19 §2a). A MEDAL game's dots agree with this by construction; a MATCH game's are the
   // difference off its own lowest and deliberately do not, which its own panel states in words.
-  const dotsByGolfer = roundStrokeAllocation(state.participants, state.card);
+  const dotsByGolfer = roundStrokeAllocation(state.participants, state.card, state.holes);
 
   // OUT (front nine) / IN (back nine) / TOT — the same rows any paper card totals, keyed off
   // hole NUMBER rather than array position (every card in this codebase numbers holes 1..N, but

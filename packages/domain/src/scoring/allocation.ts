@@ -2,6 +2,7 @@ import type { CourseCard, Hole } from "../course/card.js";
 import { findTeeSet } from "../course/card.js";
 import { DomainError } from "../errors.js";
 import type { GolferId } from "../ids.js";
+import { intendedHoles, type HoleSelection } from "../round/holes.js";
 import type { Participant, RosterEntry } from "../round/participant.js";
 import type { GameConfig } from "./game.js";
 // game.js → the five engines → back here: the engines all read their dots from
@@ -31,15 +32,19 @@ const participantFor = (participants: readonly Participant[], id: GolferId): Par
 // placement is pinned explicitly in allocation.test.ts.
 //
 // Nobody in the history of golf has said "I get 20 and you get 10." They say "you get 10."
+//
+// The dots are allocated over the holes the ROUND set out to play (spec 2026-08-02 §3c), so a nine
+// hands out every stroke that was typed rather than the fraction that happens to fall on it.
 export const gameStrokeAllocation = (
   config: GameConfig,
   participants: readonly RosterEntry[],
   card: CourseCard,
+  selection: HoleSelection,
 ): ReadonlyMap<GolferId, ReadonlyMap<number, number>> => {
   if ("scoring" in config && config.scoring === "gross") return new Map();
   const dotsFor = (id: GolferId, strokes: number) => {
     const p = participantFor(participants, id);
-    return [id, dotsByHole(strokes, findTeeSet(card, p.tee))] as const;
+    return [id, dotsByHole(strokes, intendedHoles(findTeeSet(card, p.tee), selection))] as const;
   };
   const strokesOf = (id: GolferId) => participantFor(participants, id).strokes;
 
@@ -67,8 +72,9 @@ export const gameStrokeAllocation = (
 export const roundStrokeAllocation = (
   participants: readonly RosterEntry[],
   card: CourseCard,
+  selection: HoleSelection,
 ): ReadonlyMap<GolferId, ReadonlyMap<number, number>> =>
-  new Map(participants.map((p) => [p.golferId, dotsByHole(p.strokes, findTeeSet(card, p.tee))]));
+  new Map(participants.map((p) => [p.golferId, dotsByHole(p.strokes, intendedHoles(findTeeSet(card, p.tee), selection))]));
 
 // dotsByHole's allocation always sums exactly to its input strokes value (allocateStrokes' own
 // documented invariant, strokes.ts) — summing here is safe rather than re-deriving a parallel

@@ -70,8 +70,10 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (40, as of spec 2026-08-01 §3b/§4: +POST /rounds/{roundId}/played-at, a
-// round's played date corrected — 39 before that, as of "the season is the record" spec
+// function — but the (41, as of spec 2026-08-02 §3b: +POST /rounds/{roundId}/holes, the holes a
+// round set out to play, corrected — 40 before that, as of spec 2026-08-01 §3b/§4:
+// +POST /rounds/{roundId}/played-at, a round's played date corrected — 39 before that, as of
+// "the season is the record" spec
 // 2026-07-22: +PUT .../seasons/{seasonId} and +PUT /crews/{crewId} replace the deleted POST
 // close/reopen verbs, and GET /crews/{crewId}/records — the all-time surface, §4 — is deleted
 // whole, netting 40 back down to 39; the navigation spec's GET /golfers/{golferId} had brought
@@ -101,6 +103,10 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // ANON_THROTTLED_ROUTES below — same story as strokes/leave (a round-scoped participant token
   // is required first, a higher bar than the anonymous-reachable routes there).
   { method: HttpMethod.POST, path: "/rounds/{roundId}/played-at" },
+  // spec 2026-08-02 §3b: any participant corrects the holes the round set out to play —
+  // "participant"-gated, same tier as played-at/strokes/leave/finalize above. Deliberately NOT
+  // in ANON_THROTTLED_ROUTES below — same story as played-at/strokes/leave.
+  { method: HttpMethod.POST, path: "/rounds/{roundId}/holes" },
   { method: HttpMethod.GET, path: "/rounds/{roundId}/events" },
   // M9 Task 3 (share): mints this round's immortal spectator link — participant-gated, same
   // tier as finalize/terminate above.

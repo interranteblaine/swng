@@ -2,13 +2,18 @@ import { describe, expect, it } from "vitest";
 import { DomainError } from "../errors.js";
 import { cardId, courseId, deviceId, golferId, opId, roundId } from "../ids.js";
 import { fixtureLinks18 } from "../scoring/golden/fixtureCourse.js";
+import type { CourseCard } from "../course/card.js";
+import { settleRound } from "../round/archive.js";
 import type { RoundArchive } from "../round/archive.js";
+import type { RoundEvent } from "../round/events.js";
+import type { HoleSelection } from "../round/holes.js";
 import type { HoleResult } from "../round/holeResult.js";
 import { cellKey } from "../round/state.js";
 import type { ScoreCell } from "../round/state.js";
 import { archiveGolferLine } from "./record.js";
 
 const G = golferId("gigi");
+const A = golferId("ann");
 
 const cellOf = (hole: number, result: HoleResult): ScoreCell => ({
   result,
@@ -168,5 +173,60 @@ describe("archiveGolferLine", () => {
       line.distribution.eagles + line.distribution.birdies + line.distribution.pars +
       line.distribution.bogeys + line.distribution.doublePlus;
     expect(numberedHoles.length).toBe(bucketTotal);
+  });
+});
+
+// An 18-hole card, par 4 throughout (par 72), conventional stroke-index split.
+const eighteenCard: CourseCard = {
+  courseName: "Casa Verde GC",
+  teeSets: [
+    {
+      name: "white",
+      holes: Array.from({ length: 18 }, (_, i) => ({
+        number: i + 1,
+        par: 4,
+        yardage: 400,
+        strokeIndex: i < 9 ? i * 2 + 1 : (i - 9) * 2 + 2,
+      })),
+    },
+  ],
+};
+
+// Settles a finished round that SET OUT to play `selection` and scored `scoredHoles`, five strokes
+// a hole. No games, so nothing blocks the settle.
+const settledRound = (selection: HoleSelection, scoredHoles: readonly number[]) => {
+  let n = 0;
+  const env = (wallMs: number) => ({ opId: opId(`o-${n++}`), hlc: { wallMs, counter: 0, deviceId: deviceId("d1") }, authorId: A });
+  const events: RoundEvent[] = [
+    { ...env(1), kind: "round-created", roundId: roundId("r1"), card: eighteenCard, playedAtMs: 1, ...(selection !== "all" ? { holes: selection } : {}) },
+    { ...env(2), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", strokes: 0 } },
+    { ...env(3), kind: "round-started" },
+    ...scoredHoles.map((hole): RoundEvent => ({ ...env(10 + hole), kind: "score-recorded", golferId: A, hole, result: { kind: "strokes", strokes: 5 } })),
+    { ...env(200), kind: "round-finalized" },
+  ];
+  return settleRound(events);
+};
+
+const BACK_NINE = [10, 11, 12, 13, 14, 15, 16, 17, 18];
+const FIRST_THIRTEEN = Array.from({ length: 13 }, (_, i) => i + 1);
+
+describe("a nine played on an 18-hole card (spec 2026-08-02 §4)", () => {
+  it("records nine holes, that nine's par, and a real gross", () => {
+    const line = archiveGolferLine(settledRound("back", BACK_NINE), A);
+    expect(line.holes).toBe(9);
+    expect(line.par).toBe(36);
+    expect(line.holeResults).toHaveLength(9);
+    expect(line.score).toBe(45);
+  });
+
+  // The no-regression pin (spec §5): a round that SET OUT to play eighteen and stopped after
+  // thirteen is exactly what it is today — an eighteen-hole line with thirteen results and no
+  // score. This arc must not touch it.
+  it("leaves a short eighteen exactly as it is today", () => {
+    const line = archiveGolferLine(settledRound("all", FIRST_THIRTEEN), A);
+    expect(line.holes).toBe(18);
+    expect(line.par).toBe(72);
+    expect(line.holeResults).toHaveLength(13);
+    expect(line.score).toBeUndefined();
   });
 });

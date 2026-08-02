@@ -35,7 +35,7 @@ describe("gameDots", () => {
 
   it("every kind allocates the roster's own numbers when the lowest is already zero", () => {
     for (const config of twoPlayerGames) {
-      const dots = gameDots(config, annAndBo, CARD);
+      const dots = gameDots(config, annAndBo, CARD, "all");
       expect(totalDots(dots.get(ANN)!)).toBe(3);
       expect(totalDots(dots.get(BO)!)).toBe(0);
     }
@@ -43,22 +43,22 @@ describe("gameDots", () => {
 
   it("the same field on an eighteen-hole card gets the same COUNT — the card only changes where the dots land", () => {
     for (const config of twoPlayerGames) {
-      const dots = gameDots(config, annAndBo, fixtureLinks18);
+      const dots = gameDots(config, annAndBo, fixtureLinks18, "all");
       expect(totalDots(dots.get(ANN)!)).toBe(3);
       expect(totalDots(dots.get(BO)!)).toBe(0);
     }
   });
 
   it("a gross game allocates nothing at all — on either kind that offers the choice", () => {
-    expect(gameDots({ kind: "stroke-play", id: gameId("g"), scoring: "gross", players: [ANN, BO] }, annAndBo, CARD).size).toBe(0);
-    expect(gameDots({ kind: "skins", id: gameId("g"), scoring: "gross", players: [ANN, BO] }, annAndBo, CARD).size).toBe(0);
+    expect(gameDots({ kind: "stroke-play", id: gameId("g"), scoring: "gross", players: [ANN, BO] }, annAndBo, CARD, "all").size).toBe(0);
+    expect(gameDots({ kind: "skins", id: gameId("g"), scoring: "gross", players: [ANN, BO] }, annAndBo, CARD, "all").size).toBe(0);
   });
 
   it("singles-match: the relief flips when b is the higher number", () => {
     const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 3)];
     const config: GameConfig = { kind: "singles-match", id: gameId("g"), a: ANN, b: BO };
 
-    const dots = gameDots(config, participants, CARD);
+    const dots = gameDots(config, participants, CARD, "all");
 
     expect(totalDots(dots.get(ANN)!)).toBe(0);
     expect(totalDots(dots.get(BO)!)).toBe(3);
@@ -68,7 +68,7 @@ describe("gameDots", () => {
     const participants = [participant(ANN, "Ann", 4), participant(BO, "Bo", 2), participant(CAL, "Cal", 6), participant(DEE, "Dee", 1)];
     const config: GameConfig = { kind: "fourball-match", id: gameId("g"), a: [ANN, BO], b: [CAL, DEE] };
 
-    const dots = gameDots(config, participants, CARD);
+    const dots = gameDots(config, participants, CARD, "all");
 
     // Differences from Dee's 1: 3/1/5/0.
     expect(totalDots(dots.get(ANN)!)).toBe(3);
@@ -83,11 +83,25 @@ describe("gameDots", () => {
     const participants = [participant(ANN, "Ann", 10), participant(BO, "Bo", 4), participant(CAL, "Cal", 14), participant(DEE, "Dee", 2)];
     const config: GameConfig = { kind: "stableford", id: gameId("g"), players: [BO, CAL] };
 
-    const dots = gameDots(config, participants, CARD);
+    const dots = gameDots(config, participants, CARD, "all");
 
     expect(totalDots(dots.get(BO)!)).toBe(4);
     expect(totalDots(dots.get(CAL)!)).toBe(14);
     expect(dots.has(DEE)).toBe(false);
+  });
+
+  // The round's own hole selection (spec 2026-08-02 §3c/Task 7 amendment): gameDots' per-hole map
+  // must resolve THROUGH the round's selection, not always the whole tee set — a live trap for
+  // any future per-hole consumer if it silently stayed pinned to "all".
+  it("resolves the round's OWN hole selection — a back-nine round allocates only onto holes 10-18", () => {
+    const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 3)];
+    const config: GameConfig = { kind: "stableford", id: gameId("g"), players: [ANN, BO] };
+
+    const dots = gameDots(config, participants, fixtureLinks18, "back");
+
+    const perHole = dots.get(BO)!;
+    expect([...perHole.keys()].every((hole) => hole > 9)).toBe(true);
+    expect(totalDots(perHole)).toBe(3); // allocateStrokes' own invariant: the sum always equals the input, whatever the hole list
   });
 });
 
@@ -99,14 +113,14 @@ describe("strokesSummary", () => {
     const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 2)];
     const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] };
 
-    expect(strokesSummary(config, participants, CARD)).toBe("Bo 2 dots");
+    expect(strokesSummary(config, participants, CARD, "all")).toBe("Bo 2 dots");
   });
 
   it("reads 'everyone in this game plays level' when every member's total is zero", () => {
     const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 0)];
     const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] };
 
-    expect(strokesSummary(config, participants, CARD)).toBe("No strokes — everyone in this game plays level.");
+    expect(strokesSummary(config, participants, CARD, "all")).toBe("No strokes — everyone in this game plays level.");
   });
 
   // In a MATCH an all-zero allocation means the members are EQUAL, at whatever level — two
@@ -116,13 +130,36 @@ describe("strokesSummary", () => {
     const participants = [participant(ANN, "Ann", 12), participant(BO, "Bo", 12)];
     const config: GameConfig = { kind: "singles-match", id: gameId("g"), a: ANN, b: BO };
 
-    expect(strokesSummary(config, participants, CARD)).toBe("No strokes — everyone in this game plays level.");
+    expect(strokesSummary(config, participants, CARD, "all")).toBe("No strokes — everyone in this game plays level.");
   });
 
   it("renders nothing at all for a gross game — it has no strokes by definition, not zero of them", () => {
     const participants = [participant(ANN, "Ann", 3), participant(BO, "Bo", 0)];
     const gross: GameConfig = { kind: "skins", id: gameId("g"), scoring: "gross", players: [ANN, BO] };
 
-    expect(strokesSummary(gross, participants, CARD)).toBeUndefined();
+    expect(strokesSummary(gross, participants, CARD, "all")).toBeUndefined();
+  });
+
+  // The task-3+3b review's own proof, executed rather than just asserted in prose: strokesSummary
+  // renders only totalDots(...) per member, and allocateStrokes' allocation always sums exactly to
+  // its input for ANY hole list — so the rendered line is provably invariant under the round's
+  // hole selection. Made to actually PIN the threading (review fix, task-7 review Minor 2): a
+  // hardcoded "all" inside gameDots would satisfy the old form of this test too, since it only
+  // compared strokesSummary's own output to itself — it never proved the selection argument does
+  // anything. Asserting the underlying per-hole MAPS actually differ under "front" vs "back" is
+  // what makes ignoring the parameter fail here; the invariant line then states the real claim —
+  // the map moves, the summary doesn't — instead of only the second half of it.
+  it("the per-hole map moves under a different hole selection, but strokesSummary's rendered line does not", () => {
+    const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 3)];
+    const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] };
+
+    const frontHoles = [...gameDots(config, participants, fixtureLinks18, "front").get(BO)!.keys()];
+    const backHoles = [...gameDots(config, participants, fixtureLinks18, "back").get(BO)!.keys()];
+    expect(frontHoles).not.toEqual(backHoles); // the allocation genuinely lands on different holes...
+
+    const front = strokesSummary(config, participants, fixtureLinks18, "front");
+    const back = strokesSummary(config, participants, fixtureLinks18, "back");
+    expect(front).toBe("Bo 3 dots"); // ...while the rendered TOTAL — what a golfer actually reads — does not
+    expect(back).toBe(front);
   });
 });

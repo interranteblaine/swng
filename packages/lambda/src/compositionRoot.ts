@@ -49,6 +49,7 @@ import {
   recordScore,
   removeCrewMember,
   searchCourses,
+  setHoles,
   setPlayedAt,
   setStrokes,
   startRound,
@@ -337,6 +338,9 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
     // spec 2026-08-01 §3b/§4: any participant corrects the round's played date — same
     // journal/broadcast/clock/ids instances setStrokes/leaveRound above already share.
     setPlayedAt: setPlayedAt({ journal, broadcast, clock, ids }),
+    // spec 2026-08-02 §3b: any participant corrects the holes the round set out to play — same
+    // journal/broadcast/clock/ids instances setPlayedAt above already shares.
+    setHoles: setHoles({ journal, broadcast, clock, ids }),
     readEvents: readEvents({ journal }),
     peekRound: peekRound({ journal, store }),
     getShareLink: getShareLink({ tokens }),

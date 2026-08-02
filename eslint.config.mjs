@@ -63,8 +63,10 @@ const NODE = {
 const GOLF_ARITHMETIC_PROPS = [
   // scores and the numbers derived straight from them
   "score", "par", "strokes", "gross", "net", "total", "toPar", "relativeToPar", "underPar",
-  // averages and spreads
-  "average", "scoringAverage", "avgOverPar", "sumOverPar", "spread",
+  // averages and spreads — scoringAverage split into scoringAverage18/scoringAverage9 the same
+  // way best split into best18/best9 below (round-plays-a-nine spec 2026-08-02, Finding 1: a
+  // course can now hold both a 9- and an 18-hole round, so its scoring average is two numbers).
+  "average", "scoringAverage18", "scoringAverage9", "avgOverPar", "sumOverPar", "spread",
   // per-game results
   "points", "skins", "pot", "carrying", "carriedOut", "up", "thru", "remaining",
   // match/season tallies
@@ -310,6 +312,10 @@ export default [
                 "netDoubleBogey",
                 "netStrokes",
                 "roundHalfUp",
+                // which holes a round set out to play (spec 2026-08-02 §3c) — the grid, the
+                // results headline, and dots.ts's per-game allocation all resolve the round's
+                // OWN hole list through this, never their own front/back slicing.
+                "intendedHoles",
                 // leaderboard ORDER (task-5 fix round, spec 2026-07-30 §10 review I2): a ranking
                 // rule is golf logic — GamePanel.tsx's three inline `.sort()` calls moved here, the
                 // same class `aggregateSeason` already moved server-side for crew standings ("the

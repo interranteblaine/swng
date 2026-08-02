@@ -129,6 +129,33 @@ describe("peekRoundResponseSchema", () => {
   it("rejects a payload missing playedAt", () => {
     expect(() => parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white" }] })).toThrow(ContractError);
   });
+
+  // spec 2026-08-02 §3c: a peek discloses which holes the round is playing — the same fact the
+  // join-side tee picker needs before JoinRound. Optional, same no-migration shape as the event and
+  // archive schemas: a peek of an "all" round (every round on file today) carries no key.
+  it("round-trips a peek carrying a nine selection", () => {
+    roundTrips(peekRoundResponseSchema, {
+      courseName: "Casa Verde GC",
+      teeSets: [{ name: "white", rating: 71.2, slope: 128 }],
+      playedAt: 1_700_000_000_000,
+      holes: "front",
+    });
+  });
+
+  it("parses a peek with no holes and does not invent one", () => {
+    const parsed = parse(peekRoundResponseSchema, {
+      courseName: "Casa Verde GC",
+      teeSets: [{ name: "white" }],
+      playedAt: 1,
+    });
+    expect("holes" in parsed).toBe(false);
+  });
+
+  it("rejects a holes value that isn't one of the three", () => {
+    expect(() =>
+      parse(peekRoundResponseSchema, { courseName: "Casa Verde GC", teeSets: [{ name: "white" }], playedAt: 1, holes: "middle" }),
+    ).toThrow(ContractError);
+  });
 });
 
 // task-1 (pre-prod hardening, wire-ingress length/count bounds): request-only bounds on

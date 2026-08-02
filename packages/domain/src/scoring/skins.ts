@@ -13,15 +13,15 @@ export const scoreSkins = (config: SkinsConfig, state: RoundState): GameState =>
   // hole (see dotsByHole's doc comment). A GROSS pot's allocation is EMPTY, so
   // `dots` below comes out undefined and every net reads the raw score: the gross rule is decided
   // in one place (gameStrokeAllocation) rather than re-tested here.
-  const allocation = gameStrokeAllocation(config, state.participants, state.card);
+  const allocation = gameStrokeAllocation(config, state.participants, state.card, state.holes);
   const players = config.players.map((golferId) => {
-    const { teeSet } = playerTeeSet(state, golferId);
-    return { golferId, teeSet, dots: allocation.get(golferId) };
+    const { holes } = playerTeeSet(state, golferId);
+    return { golferId, holes, dots: allocation.get(golferId) };
   });
 
-  // Course card order is shared; hole numbers, not tee choice, drive it — so any
-  // player's tee set supplies the sequence the carryover chain walks.
-  const holes = players[0]?.teeSet.holes ?? [];
+  // Round order is shared; hole numbers, not tee choice, drive it — so any player's own intended
+  // holes supply the sequence the carryover chain walks.
+  const holes = players[0]?.holes ?? [];
 
   const skinsWon = new Map(config.players.map((golferId) => [golferId, 0]));
   const trail: SkinsHole[] = [];

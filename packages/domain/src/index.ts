@@ -9,6 +9,8 @@ export * from "./round/events.js";
 export * from "./round/state.js";
 export * from "./round/playedAt.js";
 export * from "./round/archive.js";
+export { hasHoleChoice, intendedHoles } from "./round/holes.js";
+export type { HoleSelection } from "./round/holes.js";
 export * from "./scoring/strokes.js";
 // scoring/allowances.js and scoring/strokeBasis.js are both deleted: the 95/90/100 allowance
 // table and the StrokeBasis/resolveStrokes/anchorOf derivation that replaced it are gone with the

@@ -31,7 +31,7 @@ describe("M5 field deck — 18-hole fourball + skins golden card", () => {
     // allocation.test.ts rather than here.
     const roster = reduceRound(playGoldenRoundLog(fixtureLinks18, players, [fourball, skins], scores, corrections)).participants;
     for (const game of [fourball, skins]) {
-      const allocation = gameStrokeAllocation(game, roster, fixtureLinks18);
+      const allocation = gameStrokeAllocation(game, roster, fixtureLinks18, "all");
       for (const { golferId } of players) expect(totalDots(allocation.get(golferId)!)).toBe(expected.strokes[golferId]);
     }
     // The card's own dots come from the SAME numbers, because the fold seats what the log asserts.

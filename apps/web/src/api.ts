@@ -28,6 +28,7 @@ import {
   peekRoundResponseSchema,
   searchCoursesResponseSchema,
   seasonStandingsResponseSchema,
+  setHolesResponseSchema,
   setPlayedAtResponseSchema,
   setStrokesResponseSchema,
   shareLinkResponseSchema,
@@ -70,6 +71,8 @@ import type {
   PeekRoundResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
+  SetHolesRequest,
+  SetHolesResponse,
   SetPlayedAtRequest,
   SetPlayedAtResponse,
   SetStrokesRequest,
@@ -201,6 +204,14 @@ export const setStrokes = async (roundId: RoundId, token: string, request: SetSt
 export const setPlayedAt = async (roundId: RoundId, token: string, request: SetPlayedAtRequest): Promise<SetPlayedAtResponse> => {
   const json = await requestJson(`/rounds/${roundId}/played-at`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request), token });
   return parse(setPlayedAtResponseSchema, json);
+};
+
+// POST /rounds/{roundId}/holes (spec 2026-08-02 §3b): any participant corrects the holes the
+// round set out to play. Append idiom, like setStrokes/setPlayedAt — the response carries the
+// one event this call appended; the caller sync()s and lets the fold render.
+export const setHoles = async (roundId: RoundId, token: string, request: SetHolesRequest): Promise<SetHolesResponse> => {
+  const json = await requestJson(`/rounds/${roundId}/holes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request), token });
+  return parse(setHolesResponseSchema, json);
 };
 
 // M9 Task 3 (share): mints this round's own immortal spectator link. `url` is a path+fragment

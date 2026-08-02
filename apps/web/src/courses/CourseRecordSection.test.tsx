@@ -91,8 +91,8 @@ describe("CourseRecordSection", () => {
     const record: GetMyCourseRecordResponse = {
       courseId: COURSE,
       rounds: 3,
-      best: { roundId: roundId("round-1"), gross: 84, toPar: 12 },
-      scoringAverage: 87.3,
+      best18: { roundId: roundId("round-1"), gross: 84, toPar: 12 },
+      scoringAverage18: 87.3,
     };
     mockedGetMyCourseRecord.mockResolvedValue(record);
 
@@ -102,10 +102,36 @@ describe("CourseRecordSection", () => {
     expect(screen.getByText("Rounds played — 3")).toBeTruthy();
     const bestLink = screen.getByRole("link", { name: "84 (+12)" });
     expect(bestLink.getAttribute("href")).toBe("/rounds/round-1");
-    expect(screen.getByText("Scoring average — 87.3")).toBeTruthy();
+    expect(screen.getByText("Scoring average (18) — 87.3")).toBeTruthy();
 
     expect(screen.getByText("Your course record builds at 5 rounds here — you've played 3.")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "The holes, by name" })).toBeNull();
+  });
+
+  // round-plays-a-nine spec 2026-08-02, Finding 1: a course can now hold both a 9- and an
+  // 18-hole round — both bests/averages render side by side, never mixed into one number.
+  it("renders both a best9 and a best18 at once, never mixed", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann" } });
+    const record: GetMyCourseRecordResponse = {
+      courseId: COURSE,
+      rounds: 4,
+      best18: { roundId: roundId("round-1"), gross: 84, toPar: 12 },
+      best9: { roundId: roundId("round-2"), gross: 41, toPar: 5 },
+      scoringAverage18: 87.3,
+      scoringAverage9: 42.5,
+    };
+    mockedGetMyCourseRecord.mockResolvedValue(record);
+
+    renderSection();
+
+    expect(await screen.findByRole("heading", { name: "Your record here" })).toBeTruthy();
+    const best18Link = screen.getByRole("link", { name: "84 (+12)" });
+    expect(best18Link.getAttribute("href")).toBe("/rounds/round-1");
+    const best9Link = screen.getByRole("link", { name: "41 (+5)" });
+    expect(best9Link.getAttribute("href")).toBe("/rounds/round-2");
+    expect(screen.getByText("Scoring average (18) — 87.3")).toBeTruthy();
+    expect(screen.getByText("Scoring average (9) — 42.5")).toBeTruthy();
   });
 
   it("at 5+ rounds: renders the hole insights via the domain phrase formatters", async () => {
@@ -114,8 +140,8 @@ describe("CourseRecordSection", () => {
     const record: GetMyCourseRecordResponse = {
       courseId: COURSE,
       rounds: 5,
-      best: { roundId: roundId("round-9"), gross: 79, toPar: 7 },
-      scoringAverage: 84.0,
+      best18: { roundId: roundId("round-9"), gross: 79, toPar: 7 },
+      scoringAverage18: 84.0,
       insights: {
         worstHole: { hole: 12, par: 4, plays: 5, avgOverPar: 1.4, doublePlus: 2 },
         scoringHole: { hole: 4, par: 3, plays: 5, parOrBetter: 4 },

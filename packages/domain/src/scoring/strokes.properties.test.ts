@@ -18,7 +18,7 @@ describe("allocateStrokes properties", () => {
       // allocateStrokes' give-back branch is deleted, so a negative is no longer a case this
       // property can meaningfully assert.
       fc.property(fc.integer({ min: 0, max: 54 }), fc.constantFrom(9 as const, 18 as const), (n, count) => {
-        const dots = allocateStrokes(n, teeSet(count));
+        const dots = allocateStrokes(n, teeSet(count).holes);
         expect(dots.reduce((a, b) => a + b, 0)).toBe(n);
         expect(Math.max(...dots) - Math.min(...dots)).toBeLessThanOrEqual(1);
       }),

@@ -34,7 +34,7 @@ const signedNumber = (n: number): string => (n < 0 ? `−${-n}` : String(n));
 const strokesLabel = (strokes: number): string => (strokes === 0 ? "0" : `−${strokes}`);
 
 export function ResultsView({ state, games, shareToken }: ResultsViewProps) {
-  const holes = canonicalHoles(state.card);
+  const holes = canonicalHoles(state.card, state.holes);
   // parForHoles (@swng/client) — the static par total for a set of holes, a course-card fact
   // rather than a rule, but the exact shape grossForHoles was extracted for; this and
   // ScorecardGrid.tsx's OUT/IN/TOT header used to hand-sum `hole.par` two separate ways (task-5

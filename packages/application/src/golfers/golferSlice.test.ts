@@ -392,8 +392,8 @@ describe("getMyCourseRecord", () => {
     expect(record).toEqual({
       courseId: courseId("course-1"),
       rounds: 2,
-      best: { roundId: roundId("r2"), gross: 84, toPar: 12 },
-      scoringAverage: 87.0,
+      best18: { roundId: roundId("r2"), gross: 84, toPar: 12 },
+      scoringAverage18: 87.0,
     });
   });
 

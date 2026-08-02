@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { GameId, GameResult, GolferId, HoleResult, RoundEvent, RoundId } from "@swng/domain";
 import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema } from "./ids.js";
-import { gameConfigFields, gameResultSchema, roundEventSchema } from "./round.js";
+import { gameConfigFields, gameResultSchema, holeSelectionSchema, roundEventSchema } from "./round.js";
 
 // gameConfigFields' five field sets, minus `id` (they never had one — id-ness is
 // GameConfig's addition, applied in round.ts) — the server assigns the id on the
@@ -117,6 +117,10 @@ export const startRoundRequestSchema = z.object({
   // Friday's paper card on Sunday types Friday's date here instead; the application layer is
   // where "absent" becomes "now" (a later task), so the wire itself just needs to allow the gap.
   playedAtMs: playedAtInputSchema.optional(),
+  // spec 2026-08-02 §3a: absent means the whole card — exactly today's behaviour. A nine selection
+  // against a card that has only one nine is rejected by the application layer, where the card is
+  // already resolved; the wire cannot check it, because the wire does not hold the card.
+  holes: holeSelectionSchema.optional(),
 });
 export type StartRoundRequest = z.infer<typeof startRoundRequestSchema>;
 
@@ -199,6 +203,12 @@ export type SetStrokesRequest = z.infer<typeof setStrokesRequestSchema>;
 // like join/leave/strokes.
 export const setPlayedAtRequestSchema = z.object({ playedAtMs: playedAtInputSchema });
 export type SetPlayedAtRequest = z.infer<typeof setPlayedAtRequestSchema>;
+
+// POST /rounds/{roundId}/holes (spec 2026-08-02 §3b): any participant corrects the holes the round
+// set out to play — a round-level fact, so there is no subject in the body, same shape as
+// setPlayedAtRequestSchema above. Server-minted envelope, like join/leave/strokes/played-at.
+export const setHolesRequestSchema = z.object({ holes: holeSelectionSchema });
+export type SetHolesRequest = z.infer<typeof setHolesRequestSchema>;
 
 export interface StartRoundResponse {
   readonly roundId: RoundId;

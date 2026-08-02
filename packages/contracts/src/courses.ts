@@ -1,7 +1,7 @@
 import { z } from "zod";
-import type { CourseCard, CourseId } from "@swng/domain";
+import type { CourseCard, CourseId, HoleSelection } from "@swng/domain";
 import { courseIdSchema } from "./ids.js";
-import { courseCardSchema, holeSchema } from "./round.js";
+import { courseCardSchema, holeSchema, holeSelectionSchema } from "./round.js";
 
 // The wire view of a lineage's CURRENT card (course-cards spec §4): the exact frozen-able
 // value plus attribution. No `name` field — the card carries courseName; no per-tee badge
@@ -98,10 +98,15 @@ export interface PeekRoundResponse {
   // Required — a peek always reads a live round, whose log always has round-created, and a peek is
   // already capability-scoped to disclose the round's day, so this discloses nothing new.
   readonly playedAt: number;
+  // Which holes the round set out to play (spec 2026-08-02 §3c) — the join-side tee picker needs
+  // this the same way it needs playedAt above. Optional: absence means the whole card, true of
+  // every round on file before this arc, so nothing migrates.
+  readonly holes?: HoleSelection;
 }
 
 export const peekRoundResponseSchema: z.ZodType<PeekRoundResponse> = z.object({
   courseName: z.string(),
   teeSets: z.array(z.object({ name: z.string(), rating: z.number().optional(), slope: z.number().optional() })).readonly(),
   playedAt: z.number().int(),
+  holes: holeSelectionSchema.optional(),
 });

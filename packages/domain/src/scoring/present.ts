@@ -1,7 +1,9 @@
 import type { GameConfig } from "./game.js";
 import { gameMembers } from "./game.js";
 import type { GolferId } from "../ids.js";
+import { DomainError } from "../errors.js";
 import type { Participant } from "../round/participant.js";
+import type { HoleSelection } from "../round/holes.js";
 
 // The games' human meaning as domain truth — names, one-line rules, who a game fits, and how its
 // strokes convention reads in words. One tested copy: every surface that names a game renders
@@ -56,6 +58,38 @@ export const gameKindFits = (kind: GameKind): string => {
       return "2+ players";
   }
 };
+
+// Which holes a round set out to play (spec 2026-08-02 §3/§6, task 8b) — the ONE label table
+// every surface renders through. CreateRoundPage's create-time picker and SetupPanel's mid-round
+// editor each carried their own copy of these three strings; a join screen rendering a third
+// copy is exactly how "Front 9" on one screen becomes "Front nine" on another, so both are
+// deleted in favor of this. The wording is the one already on screen — pinned by existing web
+// tests, so it cannot move here either.
+//
+// Throws on an unknown arm rather than falling back (the scoreGame/resultOf "unknown-game-kind"
+// idiom, this file's own precedent for a runtime value that bypasses the type system):
+// SetupPanel's own retired `?? "18 holes"` would have rendered the WRONG label for a future
+// fourth arm instead of surfacing the gap.
+export const holeSelectionLabel = (selection: HoleSelection): string => {
+  switch (selection) {
+    case "all":
+      return "18 holes";
+    case "front":
+      return "Front 9";
+    case "back":
+      return "Back 9";
+    default:
+      // The union is exhaustive at compile time; this guards runtime inputs that bypass the type
+      // system (a deserialized peek response, or a stored round, from an older or foreign client).
+      throw new DomainError("unknown-hole-selection", `no label for hole selection "${selection as unknown as string}"`);
+  }
+};
+
+// The order the three selections render in — every picker (CreateRoundPage's create-time
+// picker, SetupPanel's mid-round editor) mapped its own `["all", "front", "back"]` array beside
+// the shared label above; that's the same one-copy drift risk task 8b already fixed for the
+// words themselves (whole-branch review Finding 4). One array, beside the labels it orders.
+export const HOLE_SELECTION_ORDER: readonly HoleSelection[] = ["all", "front", "back"];
 
 // One seat's asserted number, or 0 if that golfer isn't on the roster handed in. Shared by the two
 // sentences below so they can never disagree about what a seat holds.

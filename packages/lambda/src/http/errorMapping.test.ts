@@ -290,3 +290,14 @@ describe("toHttpError — course-cards (Task 3)", () => {
     expect(JSON.parse(result.body)).toEqual({ code: "card-superseded", message: "course c-1: the card being replaced is no longer current" });
   });
 });
+
+// Round-plays-a-nine spec 2026-08-02 §3, Task 6: startRound's own guard — the map is
+// exhaustive by construction, so the mapping lands the moment the union grows, same precedent
+// as card-superseded above.
+describe("toHttpError — round plays a nine (Task 6)", () => {
+  it("maps ApplicationError holes-not-on-this-card to 400", () => {
+    const result = toHttpError(new ApplicationError("holes-not-on-this-card", 'this course has one nine; "back" names a second'), createNullLogger());
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body)).toEqual({ code: "holes-not-on-this-card", message: 'this course has one nine; "back" names a second' });
+  });
+});

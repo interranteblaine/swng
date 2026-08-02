@@ -34,6 +34,7 @@ const twoPlayerState = (overrides: Partial<RoundState> = {}): RoundState => ({
   games: [],
   cells: {},
   terminatedGameIds: new Set(),
+  holes: "all",
   ...overrides,
 });
 
@@ -179,6 +180,7 @@ describe("ScorecardGrid — round-stroke dots (the standard card)", () => {
       games: [],
       cells: {},
       terminatedGameIds: new Set(),
+      holes: "all",
     };
 
     render(<ScorecardGrid state={state} recordScore={vi.fn()} />);
@@ -351,6 +353,7 @@ describe("ScorecardGrid — totals (OUT/IN/TOT)", () => {
     games: [],
     cells: fullCardCells,
     terminatedGameIds: new Set(),
+    holes: "all",
   };
 
   it("totals the card like a scorecard — OUT, IN and TOT each carry their own par/gross/net", () => {
@@ -387,7 +390,7 @@ describe("ScorecardGrid — totals (OUT/IN/TOT)", () => {
     for (const hole of fixtureWhite18.holes) {
       cells[cellKey(ANN, hole.number)] = hole.number === 3 ? scoreCell({ kind: "picked-up" }, ANN) : scoreCell({ kind: "strokes", strokes: parOf(hole.number) }, ANN);
     }
-    const state: RoundState = { id: roundId("round-scoped-dash"), status: "live", card: fixtureLinks18, playedAtMs: 1_000, participants: [ann2], games: [], cells, terminatedGameIds: new Set() };
+    const state: RoundState = { id: roundId("round-scoped-dash"), status: "live", card: fixtureLinks18, playedAtMs: 1_000, participants: [ann2], games: [], cells, terminatedGameIds: new Set(), holes: "all" };
 
     render(<ScorecardGrid state={state} recordScore={() => {}} />);
 
@@ -410,6 +413,32 @@ describe("ScorecardGrid — totals (OUT/IN/TOT)", () => {
     const state = twoPlayerState({ participants: [participant(ANN, "Ann", "white", 0)], cells: {} });
     render(<ScorecardGrid state={state} recordScore={() => {}} />);
 
+    expect(screen.queryByRole("row", { name: "OUT" })).toBeNull();
+    expect(screen.queryByRole("row", { name: "IN" })).toBeNull();
+    expect(screen.getByRole("row", { name: "TOT" })).toBeTruthy();
+  });
+});
+
+// The round's own hole selection (spec 2026-08-02 §3): a round set out to play only one nine of
+// an 18-hole card must draw exactly that nine, by its REAL hole numbers — never renumbered — and
+// total to one unambiguous TOT row, exactly as a genuinely 9-hole card already does.
+describe("ScorecardGrid — the round's own hole selection", () => {
+  const backNineState = twoPlayerState({ card: fixtureLinks18, holes: "back" });
+
+  it("draws only the nine the round set out to play", () => {
+    render(<ScorecardGrid state={backNineState} recordScore={vi.fn()} />);
+
+    expect(screen.queryByRole("row", { name: "Hole 9" })).toBeNull();
+    expect(screen.getByRole("row", { name: "Hole 10" })).toBeTruthy();
+    expect(screen.getByRole("row", { name: "Hole 18" })).toBeTruthy();
+    // The three checks above already rule out renumbering (no "Hole 9", "Hole 10" and "Hole 18"
+    // both present); this closes the coverage exactly, by count — 1 header row + 9 hole rows + 1
+    // TOT row (no OUT/IN), ruling out a stray extra/missing row the name-only checks can't see.
+    expect(screen.getAllByRole("row")).toHaveLength(11);
+
+    // One unambiguous total row, exactly as a nine-hole card already renders — no OUT/IN, even
+    // though every hole number here is above 9 (the split must be positional, not by hole number,
+    // or a back nine would wrongly get an OUT/IN split of its own).
     expect(screen.queryByRole("row", { name: "OUT" })).toBeNull();
     expect(screen.queryByRole("row", { name: "IN" })).toBeNull();
     expect(screen.getByRole("row", { name: "TOT" })).toBeTruthy();

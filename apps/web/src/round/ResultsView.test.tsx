@@ -160,7 +160,7 @@ describe("ResultsView — the agreement assertion (brief-mandated)", () => {
     const annId = players[0]!.golferId;
     // An independent oracle (domain's own roundStrokeAllocation, not the component under
     // test) for Ann's per-hole standard-card dots.
-    const chDots = roundStrokeAllocation(state.participants, state.card).get(annId)!;
+    const chDots = roundStrokeAllocation(state.participants, state.card, state.holes).get(annId)!;
     const hole = [...chDots.keys()].find((h) => (chDots.get(h) ?? 0) > 0);
     expect(hole).toBeDefined();
 
@@ -253,6 +253,7 @@ describe("ResultsView — WS-pushed final (this tab never called finalizeRound i
       games: [terminatedConfig, resolvedConfig],
       cells: {},
       terminatedGameIds: new Set([terminatedConfig.id]),
+      holes: "all",
     };
     const games = [scoreGame(terminatedConfig, state), scoreGame(resolvedConfig, state)];
 
@@ -283,6 +284,7 @@ describe("ResultsView — WS-pushed final (this tab never called finalizeRound i
       games: [],
       cells: { [cellKey(ann, 1)]: cellValue },
       terminatedGameIds: new Set(),
+      holes: "all",
     };
 
     render(<ResultsView state={state} games={[]} />);
@@ -311,6 +313,7 @@ describe("ResultsView — WS-pushed final (this tab never called finalizeRound i
       games: [],
       cells,
       terminatedGameIds: new Set(),
+      holes: "all",
     };
 
     render(<ResultsView state={state} games={[]} />);
@@ -343,6 +346,7 @@ describe("ResultsView — no claim affordance (accounts-only)", () => {
     games: [],
     cells: {},
     terminatedGameIds: new Set(),
+    holes: "all",
   });
 
   const fakeResponse = (status: number, body: unknown): Response => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as unknown as Response;

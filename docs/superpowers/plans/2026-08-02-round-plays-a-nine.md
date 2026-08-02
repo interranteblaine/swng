@@ -19,7 +19,11 @@
 - `intendedHoles` is **total**: on a card with one nine, every selection resolves to that nine. It never throws.
 - **The settled wire must stay byte-unchanged** apart from the one additive optional `holes` on the archive.
 - Golf logic lives in `@swng/domain`; `apps/web` renders. New compute names go on the ESLint banlist and are re-exported through `@swng/client` (Task 7).
-- `pnpm validate` must pass at every commit. Run it before each commit step.
+- `pnpm validate` must pass at every commit. Run it before each commit step. **One documented
+  exception, closed immediately:** Task 1 alone cannot be green, because
+  `packages/contracts/src/round.test.ts` carries a compile-time parity guard requiring
+  `roundEventSchema` to cover every `RoundEvent` arm — so the domain arm and its wire schema must
+  land together. Task 1b (below) does that and restores green. Tasks 2 onward are green as normal.
 - Commit messages: sentence-case subject, no scope-less noise; end with the `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>` trailer.
 
 ---
@@ -266,6 +270,92 @@ git commit -m "feat(domain): a round records the holes it set out to play"
 
 ---
 
+### Task 1b: The event schema, so the parity guard holds
+
+> Added during execution (2026-08-02). Task 1's domain arm cannot compile against
+> `packages/contracts/src/round.test.ts`'s type-parity guard until `roundEventSchema` covers it.
+> These two items were originally in Task 5; they move here so `pnpm validate` is green from this
+> commit onward instead of staying red across three tasks that need it as their gate. Task 5 keeps
+> the archive schema, the request schemas and the peek — those depend on `RoundArchive.holes`,
+> which does not exist until Task 4.
+
+**Files:**
+- Modify: `packages/contracts/src/round.ts`
+- Modify: `packages/contracts/src/round.test.ts`
+
+**Interfaces:**
+- Consumes: `HoleSelection` from `@swng/domain` (Task 1).
+- Produces: `holeSelectionSchema: z.ZodType<HoleSelection>` — Task 5 imports it into `commands.ts`
+  and `courses.ts`.
+
+- [ ] **Step 1: See the guard fail**
+
+Run: `pnpm typecheck`
+Expected: FAIL in `packages/contracts` — `round.test.ts` reports that
+`RoundEventBase & { kind: "round-holes-set"; holes: HoleSelection }` is not assignable to the
+schema's inferred union. That error IS the guard doing its job; it is what this task closes.
+
+- [ ] **Step 2: Add the schema**
+
+In `packages/contracts/src/round.ts`, above the event union:
+
+```ts
+// Which holes the round set out to play (spec 2026-08-02 §3). Optional on the stored arms and on
+// the archive: absence means the whole card, which is a TRUE statement about every round already
+// stored, so nothing migrates.
+export const holeSelectionSchema = z.enum(["all", "front", "back"]);
+```
+
+Add `holes: holeSelectionSchema.optional(),` to the `round-created` object, and the new arm beside
+`round-played-at-set`:
+
+```ts
+  z.object({ ...envelope, kind: z.literal("round-holes-set"), holes: holeSelectionSchema }),
+```
+
+Do **not** touch `roundArchiveSchemaImpl`, the request schemas, or the peek — those are Task 5.
+
+- [ ] **Step 3: Pin both directions**
+
+Add to `packages/contracts/src/round.test.ts` — reuse that file's real fixture names for a valid
+`round-created` event and a bare envelope rather than inventing new ones:
+
+```ts
+describe("holes on the wire (spec 2026-08-02)", () => {
+  it("round-trips a genesis carrying a nine", () => {
+    roundTrips(roundEventSchema, { ...genesisEvent, holes: "back" });
+  });
+
+  // The no-migration pin: a stored genesis with no `holes` key parses, and stays without one.
+  it("parses a genesis with no holes and does not invent one", () => {
+    const parsed = parse(roundEventSchema, genesisEvent);
+    expect("holes" in parsed).toBe(false);
+  });
+
+  it("round-trips the correction event", () => {
+    roundTrips(roundEventSchema, { ...envelopeFixture, kind: "round-holes-set", holes: "front" });
+  });
+
+  it("rejects a selection that is not one of the three", () => {
+    expect(() => parse(roundEventSchema, { ...envelopeFixture, kind: "round-holes-set", holes: "middle" })).toThrow(ContractError);
+  });
+});
+```
+
+- [ ] **Step 4: Green**
+
+Run: `pnpm validate`
+Expected: exit 0 — the parity guard now passes, and the whole repo is green again.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/contracts/src/round.ts packages/contracts/src/round.test.ts
+git commit -m "feat(contracts): the holes selection on the round event log"
+```
+
+---
+
 ### Task 2: Allocation ranks the holes played
 
 **Files:**
@@ -498,16 +588,24 @@ describe("a nine played on an 18-hole card (spec 2026-08-02)", () => {
     expect(resultOf(scoreGame(state.games[0]!, state))).toBeDefined();
   });
 
-  // A match's closing arithmetic counts the holes the ROUND has left, not the card's. Bo wins
-  // every hole (4 to Ann's 5, and Ann's five dots do not cover a stroke a hole), so he is 5 up
-  // after five holes with four to play — dormie territory on a nine, meaningless on an eighteen.
+  // A match's closing arithmetic counts the holes the ROUND has left, not the card's.
+  //
+  // CORRECTED DURING EXECUTION (2026-08-02): this comment originally claimed "Bo wins every hole"
+  // and asserted thru 9. That was wrong, and the Task 3 implementer caught it. A singles match is
+  // played off the DIFFERENCE, so Ann's 5 typed strokes all land on her — on the back nine's five
+  // hardest, which are holes 10-14. Those five holes are HALVED at net 4 apiece; Bo then wins
+  // 15, 16, 17 and is 3 up with 1 to play, so the match closes 3&1 at thru 8. Assert 8.
+  // It still discriminates: under an "all" selection the ladder stops at the first unscored hole
+  // (hole 1), giving thru 0 and no outcome at all.
   it("closes a match over nine holes, not eighteen", () => {
-    const events = backNineRound().filter((e) => e.kind !== "game-added");
+    // The annotation is load-bearing: without it TS narrows the filtered array and rejects the
+    // pushed `game-added` literal.
+    const events: RoundEvent[] = backNineRound().filter((e) => e.kind !== "game-added");
     events.push({ ...base(6), kind: "game-added", config: { kind: "singles-match", id: gameId("g2"), a: A, b: B } });
     const state = reduceRound(events);
     const match = scoreGame(state.games[0]!, state);
     expect(match.kind).toBe("singles-match");
-    expect((match as { thru: number }).thru).toBe(9);
+    expect((match as { thru: number }).thru).toBe(8);
     expect(resultOf(match)).toBeDefined();
   });
 
@@ -604,6 +702,59 @@ Run: `pnpm validate`
 ```bash
 git add packages/domain/src/scoring/
 git commit -m "feat(domain): every engine walks the holes the round set out to play"
+```
+
+---
+
+### Task 3b: Thread the selection at the web's call sites, so the repo compiles
+
+> Added during execution (2026-08-02), same reason as Task 1b. Task 3 gave
+> `gameStrokeAllocation`/`roundStrokeAllocation` a required `selection` argument, which breaks three
+> `apps/web` call sites. Left unfixed, `pnpm validate` stays red across Tasks 4, 5 and 6 — stripping
+> the gate from three tasks. This is the minimum that makes the repo compile; the rest of the web
+> work (which holes the grid DRAWS, the OUT/IN split, the client re-export, the ESLint fence)
+> stays in Task 7.
+
+**Files:**
+- Modify: `apps/web/src/round/dots.ts` (line ~11)
+- Modify: `apps/web/src/round/ScorecardGrid.tsx` (line ~173)
+- Modify: `apps/web/src/round/ResultsView.test.tsx` (line ~163)
+
+**Interfaces:**
+- Consumes: `gameStrokeAllocation(config, participants, card, selection)` and
+  `roundStrokeAllocation(participants, card, selection)` (Task 3); `RoundState.holes` (Task 1).
+
+- [ ] **Step 1: See the three failures**
+
+Run: `pnpm typecheck`
+Expected: FAIL in `apps/web` with exactly three `TS2554` errors — `dots.ts(11,3)` expected 4 got 3,
+`ResultsView.test.tsx(163,20)` expected 3 got 2, `ScorecardGrid.tsx(173,24)` expected 3 got 2.
+
+- [ ] **Step 2: Pass the round's own selection at each**
+
+At each site the correct argument is the folded round's `holes` — `state.holes` wherever the
+component or helper already holds a `RoundState`. Thread it from the nearest existing state value
+rather than introducing a new prop; if a site genuinely has no state in scope, report that rather
+than defaulting it to `"all"`, because a silent default is how a nine would quietly draw
+whole-card dots.
+
+For `ResultsView.test.tsx`, pass the selection its fixture round already carries.
+
+- [ ] **Step 3: Confirm nothing else moved**
+
+Run: `pnpm validate`
+Expected: exit 0. No expected value in any web test may change — every existing round folds to
+`holes: "all"`, which is exactly today's behaviour.
+
+**Deliberately NOT in this task:** the grid still DRAWS all 18 rows for a nine, because
+`canonicalHoles` is unchanged. That is Task 7's job. The intermediate is inert: no round can carry
+a non-`"all"` selection yet (no wire, no UI), so every rendered round is unaffected.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/web/src/round/
+git commit -m "fix(web): pass the round's hole selection to the allocators"
 ```
 
 ---
@@ -800,10 +951,15 @@ git commit -m "feat(domain): a settled nine is a nine in the golfer's record"
 - Modify: `packages/contracts/src/courses.ts` (`peekRoundResponseSchema.holes`)
 - Modify: `packages/contracts/src/round.test.ts`, `commands.test.ts`, `courses.test.ts`
 
+> **Amended during execution (2026-08-02):** the event-schema half of this task — the
+> `holeSelectionSchema` definition, `round-created.holes?`, and the `round-holes-set` arm — moved
+> forward to **Task 1b** to keep the repo green. What remains here is the archive schema, the
+> request schemas, and the peek. Skip Step 3's `round.ts` event-union edits and the Step 1 tests
+> that cover them; they are already done.
+
 **Interfaces:**
-- Consumes: `HoleSelection` from `@swng/domain`.
+- Consumes: `HoleSelection` from `@swng/domain`; `holeSelectionSchema` from `./round.js` (Task 1b).
 - Produces:
-  - `holeSelectionSchema: z.ZodType<HoleSelection>`
   - `setHolesRequestSchema` / `SetHolesRequest` = `{ holes: HoleSelection }`
   - `SetHolesResponse` = `{ events: RoundEvent[] }` (same shape as `SetPlayedAtResponse`)
   - `StartRoundRequest.holes?: HoleSelection`
@@ -1081,7 +1237,29 @@ git commit -m "feat(application,lambda,infra): POST /rounds/{roundId}/holes"
 - Modify: `apps/web/src/round/ScorecardGrid.tsx` (`canonicalHoles`)
 - Modify: `apps/web/src/round/ResultsView.tsx`
 - Modify: `apps/web/src/round/ScorecardGrid.test.tsx`
+- Modify: `apps/web/src/round/dots.ts` (`gameDots`, `strokesSummary` — see below)
+- Modify: `apps/web/src/games/GamePanel.tsx`, `apps/web/src/round/AddGameForm.tsx`,
+  `apps/web/src/round/SetupPanel.tsx` (see below)
 - Modify: any caller of `canonicalHoles` the compiler flags
+
+> **Added during execution (2026-08-02), found by Task 3b's implementer — with its severity
+> CORRECTED by the Task 3+3b review.** `dots.ts`'s `gameDots` and `strokesSummary` pin `"all"`,
+> deliberately and with a comment, because at Task 3b's scope neither had the round's selection
+> available.
+>
+> The original wording here (and Task 3b's report) claimed this would make a nine-hole round show a
+> strokes summary computed over 18 holes while the card drew nine. **That is wrong, and the review
+> proved it:** `strokesSummary` renders only `totalDots(...)` per member, and `allocateStrokes` sums
+> to exactly its input for ANY hole list (`base*n + extra = floor(s/n)*n + s%n = s`), so the rendered
+> line is provably invariant under the selection. `gameDots`' per-hole map IS selection-sensitive,
+> but its only consumers are `strokesSummary` and `dots.test.ts` — no component reads it.
+>
+> So thread it for the **one-copy principle**, not as a user-visible defect: a per-hole map computed
+> against the wrong hole set is a live trap for the next consumer who reads it per-hole. Give both
+> functions a `selection` parameter; `GamePanel.tsx:73` already holds `state`, so it passes
+> `state.holes`; `AddGameForm` takes a new prop, passed from `SetupPanel.tsx:381`, which also holds
+> `state`. Replace the pinned-`"all"` comment in `dots.ts` rather than deleting it silently — it
+> should end up stating that the map is selection-correct, not that a gap exists.
 
 **Interfaces:**
 - Consumes: `intendedHoles`, `HoleSelection` (Task 1), via `@swng/client`.
@@ -1261,6 +1439,69 @@ Run: `pnpm validate`
 ```bash
 git add apps/web/src/
 git commit -m "feat(web): choose the holes at creation, change them while you play"
+```
+
+---
+
+### Task 8b: One label, and the join screen says which nine
+
+> Added during execution (2026-08-02), found by the Task 8 review. Spec §6 promises three surfaces:
+> create, the live round, and **joining** — "`PeekRoundResponse` gains `holes?`, so the join screen
+> can say which nine it is before you commit a tee." `peekRound` serves it (Task 6) and nothing
+> renders it: **no task in this plan ever owned that surface.** Shipping as-is leaves a dormant wire
+> field, which is exactly what this repo deleted whole in the strokes arc
+> (`PeekRoundResponse.teeSets[].par`/`.holes`, three comments asserting a justification that no
+> longer existed).
+>
+> The label move comes first and in the same task, deliberately: the three `HoleSelection` labels are
+> already duplicated across two web files, and adding the join line without fixing that creates the
+> third copy — which is how "Front 9" on one screen becomes "Front nine" on another.
+
+**Files:**
+- Modify: `packages/domain/src/scoring/present.ts` (+ its test)
+- Modify: `packages/client/src/scoring.ts` if the fence requires it — check, don't assume
+- Modify: `apps/web/src/routes/CreateRoundPage.tsx`, `apps/web/src/round/SetupPanel.tsx` (drop their
+  local label tables)
+- Modify: `apps/web/src/routes/JoinRoundPage.tsx` (+ its test)
+
+**Interfaces:**
+- Produces: `holeSelectionLabel(selection: HoleSelection): string` — `"18 holes"` / `"Front 9"` /
+  `"Back 9"`, the one copy every surface renders through.
+
+- [ ] **Step 1: One owner for the label**
+
+The human label of a domain union is domain presentation truth in this repo — `gameKindLabel`,
+`formatOverPar` and `underPar` all live in `scoring/present.ts`, and the ESLint fence carves out
+presentation formatters precisely so the web can render through them. Add `holeSelectionLabel`
+there with a test per arm.
+
+**Throw on an unknown arm rather than falling back.** `SetupPanel`'s current `?? "18 holes"` is
+unreachable today but would render the WRONG label if an arm were ever added — this repo's idiom
+for that shape is to throw (`unresolvedGames`, `settleRound`).
+
+- [ ] **Step 2: Both existing surfaces render through it**
+
+Delete the local tables in `CreateRoundPage.tsx` and `SetupPanel.tsx` and call the shared helper.
+No visible string may change — the existing tests pin the current labels, and none of their expected
+values may move.
+
+- [ ] **Step 3: The join screen says which nine**
+
+`JoinRoundPage` already reads `courseName` and `playedAt` off the same peek response, so the seam
+exists. Render the selection when the peek carries one, and render nothing when it does not (an
+absent `holes` means the whole card, which needs no announcement — the join screen has never said
+"18 holes" and should not start).
+
+Add a test that a peek carrying `holes: "back"` names the back nine, and one that a peek without
+`holes` adds no such line.
+
+- [ ] **Step 4: Validate and commit**
+
+Run: `pnpm validate` (exit 0).
+
+```bash
+git add packages/domain/src/scoring/ packages/client/src/ apps/web/src/
+git commit -m "feat(web): the join screen names the nine, from one shared label"
 ```
 
 ---

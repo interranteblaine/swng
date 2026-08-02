@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 import { gameId, golferId } from "../ids.js";
 import type { GameConfig } from "./game.js";
 import type { Participant } from "../round/participant.js";
+import type { HoleSelection } from "../round/holes.js";
 import { nineHoleContribution } from "../golfer/average.js";
 import { gameStrokeAllocation, totalDots } from "./allocation.js";
 import { fixtureLinks18 } from "./golden/fixtureCourse.js";
-import { formatOverPar, formatScoreVsPar, gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, strokesNote, underPar } from "./present.js";
+import { formatOverPar, formatScoreVsPar, gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, holeSelectionLabel, strokesNote, underPar } from "./present.js";
 
 const A = golferId("a");
 const B = golferId("b");
@@ -31,6 +32,26 @@ describe("gameKindLabel", () => {
     expect(gameKindLabel("stableford")).toBe("Stableford");
     expect(gameKindLabel("fourball-match")).toBe("Four-ball");
     expect(gameKindLabel("skins")).toBe("Skins");
+  });
+});
+
+// The one label table for which holes a round set out to play (spec 2026-08-02 §6/task 8b) —
+// CreateRoundPage's and SetupPanel's own local tables render through this instead of carrying
+// their own copies, and the strings pinned here must not move: existing web tests already assert
+// them ("18 holes"/"Front 9"/"Back 9").
+describe("holeSelectionLabel", () => {
+  it("names all three arms in the pinned, existing wording", () => {
+    expect(holeSelectionLabel("all")).toBe("18 holes");
+    expect(holeSelectionLabel("front")).toBe("Front 9");
+    expect(holeSelectionLabel("back")).toBe("Back 9");
+  });
+
+  // The idiom this repo uses for a runtime value that bypasses the type system (scoreGame's own
+  // "unknown-game-kind", resultOf's "unknown-game-kind") — throw, don't fall back. SetupPanel's
+  // retired `?? "18 holes"` would have rendered the WRONG label for a future fourth arm instead of
+  // surfacing the gap.
+  it("throws on a selection outside the known three, rather than falling back to a default label", () => {
+    expect(() => holeSelectionLabel("nine" as unknown as HoleSelection)).toThrow();
   });
 });
 
@@ -135,7 +156,7 @@ describe("strokesNote", () => {
   // and check the two agree — so a change to the allocation rule can't leave the copy behind.
   it("names exactly the players gameStrokeAllocation gives dots to — the copy can't drift from the dots", () => {
     const tied = [participant(A, "Ann", 20), participant(B, "Bo", 20), participant(C, "Cy", 10), participant(D, "Dee", 10)];
-    const allocation = gameStrokeAllocation(fourball, tied, fixtureLinks18);
+    const allocation = gameStrokeAllocation(fourball, tied, fixtureLinks18, "all");
     const receiving = tied.filter((p) => totalDots(allocation.get(p.golferId) ?? new Map()) > 0).map((p) => p.golferId);
     expect(receiving).toEqual([A, B]); // two, not three — the count the old sentence asserted
     const lowest = Math.min(...tied.map((p) => p.strokes));

@@ -30,6 +30,14 @@ const roundOf = (id: string, gross: number): GolferRoundLine => {
   return line({ roundId: roundId(id), holeResults });
 };
 
+// A fully-scored 9-hole line whose strokes sum to exactly `gross` — the `roundOf` precedent
+// (holes: 9, par 36), for the mixed-hole-count test below (round-plays-a-nine spec 2026-08-02).
+const nineOf = (id: string, gross: number): GolferRoundLine => {
+  const rest = 8;
+  const holeResults = [stroke(1, 4, gross - 4 * rest), ...Array.from({ length: rest }, (_, i) => stroke(i + 2, 4, 4))];
+  return line({ roundId: roundId(id), holes: 9, par: 36, holeResults });
+};
+
 // A line contributing a single decided hole — used to build precise per-hole aggregates without
 // needing a full 18-hole card; not fully scored (irrelevant to the hole-level folds, which
 // read raw holeResults regardless of round completeness — spec §4's "all decided plays").
@@ -47,7 +55,7 @@ describe("courseRecord — rounds/best/scoringAverage (always present from the 1
     const record = courseRecord([here, elsewhere], COURSE);
 
     expect(record.rounds).toBe(1);
-    expect(record.best).toEqual({ roundId: roundId("r-here"), gross: 90, toPar: 18 });
+    expect(record.best18).toEqual({ roundId: roundId("r-here"), gross: 90, toPar: 18 });
   });
 
   it("rounds counts lines at this course in ANY state, including one with no holeResults", () => {
@@ -66,7 +74,7 @@ describe("courseRecord — rounds/best/scoringAverage (always present from the 1
 
     const record = courseRecord([earlier, later, worse], COURSE);
 
-    expect(record.best).toEqual({ roundId: roundId("r-earlier"), gross: 85, toPar: 13 });
+    expect(record.best18).toEqual({ roundId: roundId("r-earlier"), gross: 85, toPar: 13 });
   });
 
   it("a line without holeResults counts toward rounds but contributes NO hole stats and can never hold best", () => {
@@ -79,7 +87,7 @@ describe("courseRecord — rounds/best/scoringAverage (always present from the 1
     const record = courseRecord([...holed, unresulted], COURSE);
 
     expect(record.rounds).toBe(5);
-    expect(record.best).toEqual({ roundId: roundId("r-holed-3"), gross: 80, toPar: 8 });
+    expect(record.best18).toEqual({ roundId: roundId("r-holed-3"), gross: 80, toPar: 8 });
     // hole 1 across the 4 holed lines: strokes = gross-68 = 22,27,32,12 vs par 4 → overPar 18,23,28,8,
     // all doublePlus (≥ par+2) — 4 plays, so hole 1 clears the ≥3 floor from the 4 holed lines
     // alone; the 5th (no-holeResults) line must not have padded or corrupted this count.
@@ -100,13 +108,27 @@ describe("courseRecord — rounds/best/scoringAverage (always present from the 1
     const record = courseRecord([a, b, pickedUpLine], COURSE);
 
     // mean(90, 91) = 90.5 → roundHalfUp(905)/10 = 90.5
-    expect(record.scoringAverage).toBe(90.5);
+    expect(record.scoringAverage18).toBe(90.5);
   });
 
   it("scoringAverage is absent when no line is fully scored", () => {
     const record = courseRecord([noResults("r-a")], COURSE);
 
-    expect(record.scoringAverage).toBeUndefined();
+    expect(record.scoringAverage18).toBeUndefined();
+  });
+});
+
+describe("courseRecord — best/scoringAverage split by hole count (round-plays-a-nine spec 2026-08-02, Finding 1)", () => {
+  it("a 9-hole and an 18-hole fully-scored line at the same course report separately — never mixed into one number", () => {
+    const nine = nineOf("r-nine", 45); // way over par for 18 holes, but a fine back-nine 45
+    const eighteen = roundOf("r-eighteen", 92);
+
+    const record = courseRecord([nine, eighteen], COURSE);
+
+    expect(record.best9).toEqual({ roundId: roundId("r-nine"), gross: 45, toPar: 9 });
+    expect(record.best18).toEqual({ roundId: roundId("r-eighteen"), gross: 92, toPar: 20 });
+    expect(record.scoringAverage9).toBe(45);
+    expect(record.scoringAverage18).toBe(92);
   });
 });
 

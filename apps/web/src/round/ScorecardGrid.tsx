@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { dotsForHoles, grossForHoles, netStrokes, parForHoles, roundStrokeAllocation } from "@swng/client";
+import { dotsForHoles, grossForHoles, intendedHoles, netStrokes, parForHoles, roundStrokeAllocation } from "@swng/client";
 import { cellAt, findTeeSet, scoredStrokes, underPar } from "@swng/domain";
-import type { CourseCard, GolferId, HoleResult, Hole, Participant, RoundState, ScoreCell } from "@swng/domain";
+import type { CourseCard, GolferId, HoleResult, Hole, HoleSelection, Participant, RoundState, ScoreCell } from "@swng/domain";
 import { cardBox } from "../ui/classes";
 import { ScorePad } from "./ScorePad";
 
@@ -25,12 +25,14 @@ interface Selection {
   readonly hole: number;
 }
 
-// The canonical hole numbering/par/SI for the grid's rows. Real courses keep these identical
-// across every tee at a course (only yardage/rating/slope vary by tee) — the first tee set is
-// as good a source as any, so this doesn't force a "primary tee" concept onto the round.
-// Exported: ResultsView's own "Final totals" headline reuses this SAME hole list rather than
-// re-deciding "which holes make up this card" a second way.
-export const canonicalHoles = (card: CourseCard): readonly Hole[] => card.teeSets[0]?.holes ?? [];
+// The hole numbering/par/SI for the grid's rows: the holes THIS ROUND set out to play (spec
+// 2026-08-02 §3c), off the canonical first tee set (real courses keep these identical across
+// tees — only yardage/rating/slope vary). Exported: ResultsView's "Final totals" headline reuses
+// this SAME list rather than re-deciding which holes make up the round a second way.
+export const canonicalHoles = (card: CourseCard, selection: HoleSelection): readonly Hole[] => {
+  const teeSet = card.teeSets[0];
+  return teeSet ? intendedHoles(teeSet, selection) : [];
+};
 
 // First hole where not every participant has a cell — the on-course "where are we" pointer
 // (brief: "current hole = first hole where not every participant has a cell"). Reads through
@@ -163,23 +165,22 @@ function Cell({ participant, hole, cell, dots, onTap, readOnly }: CellProps) {
 export function ScorecardGrid({ state, recordScore, readOnly = false }: ScorecardGridProps) {
   const [selection, setSelection] = useState<Selection | undefined>(undefined);
 
-  const holes = canonicalHoles(state.card);
+  const holes = canonicalHoles(state.card, state.holes);
   const current = currentHoleNumber(holes, state.participants, state.cells);
 
   // The STANDARD CARD's dots: each player's own roster strokes — the number someone typed (spec
   // 2026-07-30 §2) — allocated by stroke index, no game, computed once per render (spec
   // 2026-07-19 §2a). A MEDAL game's dots agree with this by construction; a MATCH game's are the
   // difference off its own lowest and deliberately do not, which its own panel states in words.
-  const dotsByGolfer = roundStrokeAllocation(state.participants, state.card);
+  const dotsByGolfer = roundStrokeAllocation(state.participants, state.card, state.holes);
 
-  // OUT (front nine) / IN (back nine) / TOT — the same rows any paper card totals, keyed off
-  // hole NUMBER rather than array position (every card in this codebase numbers holes 1..N, but
-  // this doesn't need to assume it). OUT/IN only mean anything once a card actually HAS a back
-  // nine to split from — on a 9-hole card, "OUT" would cover the exact same holes as "TOT" (a
-  // confusing duplicate row, review fix task-4 fix round 1), so both are omitted and only the
-  // unambiguous whole-round TOT renders.
-  const outHoles = holes.filter((h) => h.number <= 9);
-  const inHoles = holes.filter((h) => h.number > 9);
+  // OUT / IN only mean anything when the round plays two nines. A round that set out to play ONE
+  // nine gets the single unambiguous TOT row, exactly as a nine-hole card already does — and the
+  // back nine must take that path too, so the split is by COUNT, not by hole number (a back
+  // nine's hole numbers are all above 9, so a numeric split — `h.number <= 9` / `h.number > 9` —
+  // would put NOTHING in OUT and all nine holes in IN, rather than treating it as one nine).
+  const outHoles = holes.slice(0, 9);
+  const inHoles = holes.slice(9);
   const segments: readonly { readonly label: string; readonly holes: readonly Hole[] }[] =
     inHoles.length > 0 ? [{ label: "OUT", holes: outHoles }, { label: "IN", holes: inHoles }, { label: "TOT", holes }] : [{ label: "TOT", holes }];
 

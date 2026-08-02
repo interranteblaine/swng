@@ -1,5 +1,5 @@
 import type { GolferId, Participant, RoundEvent } from "@swng/domain";
-import { findTeeSet, roundId } from "@swng/domain";
+import { findTeeSet, hasHoleChoice, roundId } from "@swng/domain";
 import type { StartRoundRequest, StartRoundResponse } from "@swng/contracts";
 import type { AccountClaims } from "../ports/accountClaims.js";
 import type { Broadcast } from "../ports/broadcast.js";
@@ -52,7 +52,19 @@ export const startRound =
     if (record.cardId !== command.course.cardId) {
       throw new ApplicationError("card-superseded", `course ${command.course.courseId}: current card is ${record.cardId}`);
     }
-    findTeeSet(record.card, command.host.tee); // unknown-tee-set (DomainError) propagates
+    const teeSet = findTeeSet(record.card, command.host.tee); // unknown-tee-set (DomainError) propagates
+
+    // The one guard on this fact (spec 2026-08-02 §3): a nine selection needs a card that HAS two
+    // nines. Checked here, at the one door where the card is already in hand, and never again —
+    // intendedHoles is total, and a guard on a read path would make a stored round unreadable.
+    // Reading the HOST'S TEE ALONE answers for the whole card: every tee on a card carries the
+    // same hole count (domain's validateCard collapses every tee's hole count into one Set and
+    // rejects a card whose tees disagree), so there is no other tee on this card whose hole count
+    // could differ from teeSet's.
+    const holes = command.holes ?? "all";
+    if (holes !== "all" && !hasHoleChoice(teeSet)) {
+      throw new ApplicationError("holes-not-on-this-card", `this course has one nine; "${holes}" names a second`);
+    }
 
     // As-self, the ONLY identity path: get-or-create the caller's account golfer. The seat's
     // golferId and its frozen participant name both come straight from that record.
@@ -82,6 +94,9 @@ export const startRound =
         // server clock the hlc source above reads, so a round with no explicit playedAtMs still
         // agrees with its own envelope's wall time.
         playedAtMs: command.playedAtMs ?? deps.clock.now(),
+        // Present only when it is not "all" (spec §3a) — absence is the default and keeps every
+        // whole-card round's genesis byte-identical to the ones written before this existed.
+        ...(holes !== "all" ? { holes } : {}),
         ...serverEnvelope({ hlc, ids: deps.ids }, host),
       },
       { kind: "participant-joined", participant: hostParticipant, ...serverEnvelope({ hlc, ids: deps.ids }, host) },

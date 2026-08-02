@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { courseId, fixtureLinks18, fixtureWhite18, golferId, roundId } from "@swng/domain";
+import { courseId, fixtureLinks, fixtureLinks18, fixtureWhite18, golferId, roundId } from "@swng/domain";
 import { startRoundRequestSchema } from "@swng/contracts";
 import type { CourseView, GetMeResponse } from "@swng/contracts";
 import { credentialStore } from "../identity";
@@ -413,5 +413,120 @@ describe("CreateRoundPage — identity still loading", () => {
     await screen.findByText(/playing as/i);
     expect(screen.getByText("Ann G")).toBeTruthy();
     expect(screen.queryByRole("status", { name: /loading your profile/i })).toBeNull();
+  });
+});
+
+// Which holes the round set out to play (spec 2026-08-02 §3): offered only at an 18-hole card
+// ("a card with one nine has no choice to make, so none is offered" — spec's own words), and
+// defaulting to the whole card — the same "absence means the whole card" truth every round
+// already stored carries (task-1's own no-migration contract).
+describe("CreateRoundPage — which holes", () => {
+  const nineHoleCourse: CourseView = {
+    courseId: courseId("course-9"),
+    cardId: "card-9",
+    card: fixtureLinks,
+    enteredBy: "Ann",
+    updatedAtMs: 1_700_000_000_000,
+  };
+
+  it("offers the three choices at an 18-hole course, defaulting to 18", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    // No jest-dom in this repo (no `.toBeChecked()`) — asserted via the input's own `.checked`.
+    expect((screen.getByRole("radio", { name: /18 holes/i }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("radio", { name: /front 9/i })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /back 9/i })).toBeTruthy();
+  });
+
+  it("asks nothing at a nine-hole course", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetCourse.mockResolvedValue({ course: nineHoleCourse });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-9") } });
+    await screen.findByText(fixtureLinks.courseName);
+    await screen.findByText(/playing as/i);
+
+    expect(screen.queryByRole("radio", { name: /18 holes/i })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /front 9/i })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /back 9/i })).toBeNull();
+  });
+
+  it("submits the chosen nine", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedGetCourse.mockResolvedValue({ course: courseView });
+    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-holes"), joinCode: "HOL001", token: "tok-holes", golferId: golferId("ann-g") });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await screen.findByText(fixtureLinks18.courseName);
+    await screen.findByText(/playing as/i);
+
+    fireEvent.click(screen.getByRole("radio", { name: /back 9/i }));
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+
+    await waitFor(() => expect(mockedCreateRound).toHaveBeenCalledTimes(1));
+    const [body] = mockedCreateRound.mock.calls[0]!;
+    expect(body).toEqual({
+      course: { courseId: courseView.courseId, cardId: courseView.cardId },
+      host: { tee: "white" },
+      playedAtMs: expect.any(Number),
+      holes: "back",
+    });
+    expect(() => startRoundRequestSchema.parse(body)).not.toThrow();
+  });
+
+  // The hint task-8's own brief carries: a stale front/back selection surviving a course switch
+  // would submit a `holes` key the newly-picked (9-hole) card can't satisfy — startRound's own
+  // holes-not-on-this-card guard would 400 it server-side. This proves the web never gets that
+  // far: the selection resets to "all" the same way `tee` already does, on the very fetch that
+  // lands the new card.
+  it("switching from an 18-hole card with a chosen nine to a 9-hole card resets the selection", async () => {
+    vi.useFakeTimers();
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("ann-g"), name: "Ann G" } });
+    mockedSearchCourses.mockResolvedValue({ courses: [{ courseId: courseId("course-9"), name: fixtureLinks.courseName, holeCount: 9 }] });
+    mockedGetCourse.mockResolvedValueOnce({ course: courseView }).mockResolvedValueOnce({ course: nineHoleCourse });
+    mockedCreateRound.mockResolvedValue({ roundId: roundId("round-switch"), joinCode: "SWI001", token: "tok-switch", golferId: golferId("ann-g") });
+
+    renderCreate({ pathname: "/create", state: { courseId: courseId("course-18") } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText(fixtureLinks18.courseName)).toBeTruthy();
+    expect(screen.getByText(/playing as/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("radio", { name: /back 9/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: /change course/i }));
+    fireEvent.change(screen.getByLabelText(/^course$/i), { target: { value: "fixture" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(fixtureLinks.courseName) }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // The new (9-hole) card offers no choice at all — not merely a reset-but-hidden "back".
+    expect(screen.queryByRole("radio", { name: /front 9/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /create round/i }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(mockedCreateRound).toHaveBeenCalledTimes(1);
+    const [body] = mockedCreateRound.mock.calls[0]!;
+    expect(body).toEqual({
+      course: { courseId: nineHoleCourse.courseId, cardId: nineHoleCourse.cardId },
+      host: { tee: "white" },
+      playedAtMs: expect.any(Number),
+    });
   });
 });

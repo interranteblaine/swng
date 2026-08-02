@@ -18,11 +18,11 @@ export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundStat
   // with the rest of the allowance table, so this is the full difference. The per-player
   // playing-handicap-then-subtract-the-low walk this replaced was that same relative arithmetic,
   // spelled a second time.
-  const allocation = gameStrokeAllocation(config, state.participants, state.card);
+  const allocation = gameStrokeAllocation(config, state.participants, state.card, state.holes);
 
   // Course card order is shared; hole numbers, not tee choice, drive it.
-  const { teeSet: cardTeeSet } = playerTeeSet(state, golfers[0]!);
-  const holeCount = cardTeeSet.holes.length;
+  const { holes: cardHoles } = playerTeeSet(state, golfers[0]!);
+  const holeCount = cardHoles.length;
 
   const netFor = (golferId: GolferId, holeNumber: number): number | undefined => {
     const cell = cellAt(state.cells, golferId, holeNumber);
@@ -39,7 +39,7 @@ export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundStat
     return nets.length > 0 ? Math.min(...nets) : undefined;
   };
 
-  const winners: (HoleWinner | undefined)[] = cardTeeSet.holes.map((hole): HoleWinner | undefined => {
+  const winners: (HoleWinner | undefined)[] = cardHoles.map((hole): HoleWinner | undefined => {
     // A hole is decided once all four players have a recorded cell — picked-up still counts as
     // recorded (it drops that player's ball, not the hole itself).
     const allFourRecorded = golfers.every((golferId) => cellAt(state.cells, golferId, hole.number) !== undefined);
@@ -58,7 +58,7 @@ export const scoreFourballMatch = (config: FourballMatchConfig, state: RoundStat
 
   // The trail is exactly the prefix the ladder consumed (thru): every entry inside it is
   // defined (the ladder stops at the first undefined), hence the non-null assertion.
-  const holes = cardTeeSet.holes.slice(0, ladder.thru).map((hole, i) => ({ hole: hole.number, winner: winners[i]! }));
+  const holes = cardHoles.slice(0, ladder.thru).map((hole, i) => ({ hole: hole.number, winner: winners[i]! }));
 
   return {
     kind: "fourball-match",

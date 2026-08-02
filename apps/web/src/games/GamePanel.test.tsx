@@ -28,6 +28,7 @@ const baseState = (games: readonly GameConfig[], participants: readonly RosterEn
   games,
   cells: {},
   terminatedGameIds: new Set(),
+  holes: "all",
   ...overrides,
 });
 

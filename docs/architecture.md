@@ -111,6 +111,9 @@ type RoundEvent =
   | RoundCreated | ParticipantJoined | ParticipantLeft | ParticipantStrokesSet
   | GameAdded | GameTerminated
   | ScoreRecorded      // { golferId, hole, result: strokes | 'picked-up' | 'cleared', authorId, opId, hlc }
+  | RoundHolesSet      // { holes: HoleSelection } — which holes the round set out to play,
+                       // correctable while live (spec 2026-08-02 §3b); no subject, unlike
+                       // ParticipantStrokesSet — it's a round-level fact, not a per-golfer one
   | RoundStarted | RoundFinalized | RoundReopened | RoundAbandoned
 // v1.1/v2 will extend the same union — e.g. PressOpened (Nassau), PartnerPicked (Wolf):
 // a game decision that is not a score lives in this log too. Nothing here is speculative
@@ -139,9 +142,11 @@ number*, and it is the only thing that keeps a round out of a golfer's average.
 - Reopen-and-refinalize is the correction path after finalization; projections treat finalize
   as an idempotent upsert by `roundId` and recompute.
 - Finalization writes the **`RoundArchive`**: one immutable record holding the setup and
-  course snapshot, the final grid, the full event log, per-game results, and each
+  course snapshot, the final grid, the full event log, per-game results, each
   participant's strokes as the roster last held them (an asserted integer, never computed at
-  fold time and never a WHS differential). Completeness rule: **the archive captures everything a projection that
+  fold time and never a WHS differential), and which holes the round set out to play
+  (`holes?: HoleSelection`, spec 2026-08-02 §3a — absent means the whole card, so nothing
+  stored before that field existed changes meaning). Completeness rule: **the archive captures everything a projection that
   doesn't exist yet could need** — it is the replay source for all of them, and it is never
   mutated. Settlement is deterministic: re-settling the same log yields a byte-identical
   archive (enforced by test).
@@ -207,6 +212,9 @@ nothing re-derives it. The server runs it behind the API for reads and finalize;
 used by the spectator watch page and the archived-round page) and re-exports the round-compute
 the web needs (`gameStrokeAllocation`, `roundStrokeAllocation`, `netStrokes`, `totalDots`,
 `dotsForHoles`, `grossForHoles`, `parForHoles`, `unresolvedGames`, `nineHoleContribution`,
+`intendedHoles` (which holes a round set out to play, spec 2026-08-02 §3c — the grid, the
+results headline, and per-game dot allocation all resolve the round's own hole list through
+this, never their own front/back slicing),
 `sortedStrokePlayLines`/`sortedStablefordLines`/`sortedSkinsLines`). The average is deliberately
 NOT re-exported: it is server-computed and served on the golfer record, so an on-device copy
 would be fence-legal and boundary-wrong.

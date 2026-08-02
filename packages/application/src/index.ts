@@ -40,6 +40,9 @@ export { setStrokes } from "./rounds/setStrokes.js";
 // spec 2026-08-01 §3b/§4: any participant corrects the round's played date — a round-level fact,
 // shaped like setStrokes/leaveRound's own participant-append.
 export { setPlayedAt } from "./rounds/setPlayedAt.js";
+// spec 2026-08-02 §3b: any participant corrects the holes the round set out to play — a
+// round-level fact, shaped exactly like setPlayedAt's own participant-append.
+export { setHoles } from "./rounds/setHoles.js";
 export { readEvents } from "./rounds/readEvents.js";
 export { peekRound } from "./rounds/peekRound.js";
 export { getShareLink } from "./rounds/getShareLink.js";

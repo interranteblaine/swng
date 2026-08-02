@@ -40,6 +40,8 @@ import type {
   RecordScoreResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
+  SetHolesRequest,
+  SetHolesResponse,
   SetPlayedAtRequest,
   SetPlayedAtResponse,
   SetStrokesRequest,
@@ -65,6 +67,7 @@ import {
   joinRoundRequestSchema,
   peekCrewInviteRequestSchema,
   recordScoreRequestSchema,
+  setHolesRequestSchema,
   setPlayedAtRequestSchema,
   setStrokesRequestSchema,
   startRoundRequestSchema,
@@ -103,6 +106,10 @@ export interface UseCases {
   // unlike setStrokes above), so requireParticipant runs once, against the caller only.
   // "participant"-gated, same tier as the acts above.
   setPlayedAt: (claims: ParticipantClaims, request: SetPlayedAtRequest) => Promise<SetPlayedAtResponse>;
+  // spec 2026-08-02 §3b: the holes a round set out to play, corrected — a round-level fact (no
+  // SUBJECT), shaped exactly like setPlayedAt above. "participant"-gated, same tier as the acts
+  // above. Deliberately does NOT re-check the card (startRound owns the one guard on this fact).
+  setHoles: (claims: ParticipantClaims, request: SetHolesRequest) => Promise<SetHolesResponse>;
   readEvents: (id: RoundId, sinceSeq: number) => Promise<EventsResponse>;
   peekRound: (code: string) => Promise<PeekRoundResponse>;
   // M9 Task 3 (share): mints (deterministically) this round's own spectator link — participant-
@@ -347,6 +354,14 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "participant", // spec 2026-08-01 §3b: any participant corrects the round's played date.
     successStatus: 200, // an act on an existing round (appends round-played-at-set), not a mint — same 200 spirit as strokes/leave/finalize.
     handler: async (ctx, body) => useCases.setPlayedAt(ctx.claims!, body as SetPlayedAtRequest),
+  },
+  {
+    method: "POST",
+    path: "/rounds/{roundId}/holes",
+    schema: setHolesRequestSchema,
+    auth: "participant", // spec 2026-08-02 §3b: any participant corrects the holes the round set out to play.
+    successStatus: 200, // an act on an existing round (appends round-holes-set), not a mint — same 200 spirit as played-at/strokes/leave/finalize.
+    handler: async (ctx, body) => useCases.setHoles(ctx.claims!, body as SetHolesRequest),
   },
   // GET /rounds/peek must be matched BEFORE any /rounds/{roundId}/... template below it —
   // the dispatcher (http/dispatch.ts) walks this array in order and returns the first match,

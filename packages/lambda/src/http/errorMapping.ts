@@ -91,6 +91,10 @@ const APPLICATION_ERROR_STATUS: Record<ApplicationErrorCode, number> = {
   // signal — the CURRENT pointer no longer names the card the caller reviewed. A failed
   // precondition on the write, same 409 bucket as crew-conflict above.
   "card-superseded": 409,
+  // Round-plays-a-nine spec 2026-08-02 §3 (application/src/errors.ts): startRound's own guard —
+  // a nine selection against a card with only one nine. A bad-body precondition the client can
+  // correct, same 400 bucket as unknown-golfer-in-game above.
+  "holes-not-on-this-card": 400,
 };
 
 // `unknown-tee-set` (a command names a tee not on the card) and `game-unresolved`

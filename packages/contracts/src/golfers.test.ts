@@ -287,21 +287,34 @@ describe("getMyCourseRecordResponseSchema", () => {
     roundTrips(getMyCourseRecordResponseSchema, { courseId: courseId("course-1"), rounds: 2 });
   });
 
-  it("round-trips a record with best + scoringAverage, gated insights still absent below 5 rounds", () => {
+  it("round-trips a record with best18 + scoringAverage18, gated insights still absent below 5 rounds", () => {
     roundTrips(getMyCourseRecordResponseSchema, {
       courseId: courseId("course-1"),
       rounds: 3,
-      best: { roundId: roundId("r1"), gross: 82, toPar: 10 },
-      scoringAverage: 88.3,
+      best18: { roundId: roundId("r1"), gross: 82, toPar: 10 },
+      scoringAverage18: 88.3,
     });
   });
 
-  it("round-trips a fully-populated record: best, scoringAverage, and every insights member", () => {
+  // round-plays-a-nine spec 2026-08-02, Finding 1: best/scoringAverage split by hole count — both
+  // a 9- and an 18-hole number can be present at once, never mixed into one.
+  it("round-trips a record with both best9 and best18 present at once", () => {
+    roundTrips(getMyCourseRecordResponseSchema, {
+      courseId: courseId("course-1"),
+      rounds: 4,
+      best18: { roundId: roundId("r1"), gross: 82, toPar: 10 },
+      best9: { roundId: roundId("r2"), gross: 41, toPar: 5 },
+      scoringAverage18: 88.3,
+      scoringAverage9: 42.5,
+    });
+  });
+
+  it("round-trips a fully-populated record: best18, scoringAverage18, and every insights member", () => {
     roundTrips(getMyCourseRecordResponseSchema, {
       courseId: courseId("course-1"),
       rounds: 5,
-      best: { roundId: roundId("r1"), gross: 79, toPar: 7 },
-      scoringAverage: 86.4,
+      best18: { roundId: roundId("r1"), gross: 79, toPar: 7 },
+      scoringAverage18: 86.4,
       insights: {
         worstHole: { hole: 7, par: 4, plays: 5, avgOverPar: 1.4, doublePlus: 2 },
         scoringHole: { hole: 2, par: 5, plays: 5, parOrBetter: 4 },

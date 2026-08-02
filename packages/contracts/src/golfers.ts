@@ -153,11 +153,17 @@ export const getMyRecordResponseSchema: z.ZodType<GetMyRecordResponse> = z.objec
 // ensureGolfer). Mirrors domain's CourseRecord shape field-for-field, wrapped with the courseId
 // the caller asked about. Non-strict, house style — `insights` shows only from ≥5 rounds at the
 // course (the domain's own gate, never re-derived here).
+//
+// best/scoringAverage split by hole count (round-plays-a-nine spec 2026-08-02, Finding 1): a
+// course can now hold both a 9- and an 18-hole round, so — mirroring `bests`/`GolferBests` above
+// — there are two of each rather than one number that would mix them.
 export interface GetMyCourseRecordResponse {
   readonly courseId: CourseId;
   readonly rounds: number;
-  readonly best?: { readonly roundId: RoundId; readonly gross: number; readonly toPar: number };
-  readonly scoringAverage?: number;
+  readonly best18?: { readonly roundId: RoundId; readonly gross: number; readonly toPar: number };
+  readonly best9?: { readonly roundId: RoundId; readonly gross: number; readonly toPar: number };
+  readonly scoringAverage18?: number;
+  readonly scoringAverage9?: number;
   readonly insights?: {
     readonly worstHole?: { readonly hole: number; readonly par: number; readonly plays: number; readonly avgOverPar: number; readonly doublePlus: number };
     readonly scoringHole?: { readonly hole: number; readonly par: number; readonly plays: number; readonly parOrBetter: number };
@@ -168,8 +174,10 @@ export interface GetMyCourseRecordResponse {
 export const getMyCourseRecordResponseSchema: z.ZodType<GetMyCourseRecordResponse> = z.object({
   courseId: courseIdSchema,
   rounds: z.number().int(),
-  best: bestRoundSchema.optional(),
-  scoringAverage: z.number().optional(),
+  best18: bestRoundSchema.optional(),
+  best9: bestRoundSchema.optional(),
+  scoringAverage18: z.number().optional(),
+  scoringAverage9: z.number().optional(),
   insights: z
     .object({
       worstHole: z.object({ hole: z.number().int(), par: z.number().int(), plays: z.number().int(), avgOverPar: z.number(), doublePlus: z.number().int() }).optional(),

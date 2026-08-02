@@ -57,15 +57,27 @@ export function CourseRecordSection({ courseId }: { readonly courseId: CourseId 
         <h2 className="text-lg font-semibold text-forest">Your record here</h2>
         <ul className="flex flex-col gap-1 text-sm text-fairway tabular-nums">
           <li>Rounds played — {record.rounds}</li>
-          {record.best && (
+          {/* best/scoringAverage split by hole count (round-plays-a-nine spec 2026-08-02, Finding
+              1) — the profile's own "Best 18"/"Best 9" labelling (RecordSections.tsx), since a
+              course can now hold both a nine and an eighteen and they must never mix. */}
+          {record.best18 && (
             <li>
-              Best round —{" "}
-              <Link to={`/rounds/${record.best.roundId}`} className={linkEntity}>
-                {record.best.gross} ({formatOverPar(record.best.toPar)})
+              Best 18 —{" "}
+              <Link to={`/rounds/${record.best18.roundId}`} className={linkEntity}>
+                {record.best18.gross} ({formatOverPar(record.best18.toPar)})
               </Link>
             </li>
           )}
-          {record.scoringAverage !== undefined && <li>Scoring average — {record.scoringAverage.toFixed(1)}</li>}
+          {record.best9 && (
+            <li>
+              Best 9 —{" "}
+              <Link to={`/rounds/${record.best9.roundId}`} className={linkEntity}>
+                {record.best9.gross} ({formatOverPar(record.best9.toPar)})
+              </Link>
+            </li>
+          )}
+          {record.scoringAverage18 !== undefined && <li>Scoring average (18) — {record.scoringAverage18.toFixed(1)}</li>}
+          {record.scoringAverage9 !== undefined && <li>Scoring average (9) — {record.scoringAverage9.toFixed(1)}</li>}
         </ul>
       </div>
 

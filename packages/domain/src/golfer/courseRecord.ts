@@ -6,10 +6,19 @@ import { hasCompleteScore, scoreOf } from "./analytics.js";
 import type { GolferRoundLine } from "./record.js";
 
 // "Your record here" — the per-course fold over a golfer's own lines (analytics spec 2026-07-21
-// §4). `rounds`/`best`/`scoringAverage` show from the golfer's 1st round at the course; the
+// §4). `rounds`/`best*`/`scoringAverage*` show from the golfer's 1st round at the course; the
 // per-hole `insights` block is gated behind ≥5 rounds AT THIS COURSE (the domain owns the gate,
 // never the web — the index-over-time ≥8-round precedent). Lines arrive oldest→newest (the
 // golferMetrics contract) — tie-breaks and "most recent par" both lean on that order.
+//
+// best/scoringAverage are split by hole count (round-plays-a-nine spec 2026-08-02, Finding 1):
+// before that arc one courseId could only ever produce lines of one hole count, so a single
+// number was safe. Now a course can hold both a front/back-nine round and an 18-hole round, and
+// mixing their gross totals produces nonsense (a 45 on 9 holes reading as the course "best", or a
+// 9-and-an-18 averaged together). `bestsOf` (analytics.ts) and `crewScoreboard` already treat a
+// nine and an eighteen as separate record classes — this mirrors `bestsOf` exactly rather than
+// inventing a normalization. The per-hole `insights` block is untouched: it aggregates by hole
+// NUMBER, so a nine simply contributes nine holes to it, same as it always has.
 
 export interface CourseHoleInsight {
   readonly hole: number;
@@ -19,8 +28,10 @@ export interface CourseHoleInsight {
 
 export interface CourseRecord {
   readonly rounds: number; // lines at this course, any state
-  readonly best?: BestRound;
-  readonly scoringAverage?: number; // mean gross over fully-scored lines, 1 decimal
+  readonly best18?: BestRound;
+  readonly best9?: BestRound;
+  readonly scoringAverage18?: number; // mean gross over fully-scored 18-hole lines, 1 decimal
+  readonly scoringAverage9?: number; // mean gross over fully-scored 9-hole lines, 1 decimal
   readonly insights?: {
     readonly worstHole?: CourseHoleInsight & { readonly avgOverPar: number; readonly doublePlus: number };
     readonly scoringHole?: CourseHoleInsight & { readonly parOrBetter: number };
@@ -127,14 +138,27 @@ export const courseRecord = (lines: readonly GolferRoundLine[], courseId: Course
   const rounds = courseLines.length;
 
   const fullyScored = courseLines.filter(hasCompleteScore);
-  let best: BestRound | undefined;
-  for (const line of fullyScored) {
-    const gross = scoreOf(line);
-    if (best === undefined || gross < best.gross) best = { roundId: line.roundId, gross, toPar: gross - line.par };
-  }
 
-  const scoringAverage =
-    fullyScored.length > 0 ? roundHalfUp((fullyScored.reduce((sum, line) => sum + scoreOf(line), 0) / fullyScored.length) * 10) / 10 : undefined;
+  // Lowest gross among fully-scored lines of that hole count, per hole count independently — the
+  // `bestsOf` (analytics.ts) precedent applied to one course instead of a whole career.
+  const bestFor = (holes: 9 | 18): BestRound | undefined => {
+    let best: BestRound | undefined;
+    for (const line of fullyScored) {
+      if (line.holes !== holes) continue;
+      const gross = scoreOf(line);
+      if (best === undefined || gross < best.gross) best = { roundId: line.roundId, gross, toPar: gross - line.par };
+    }
+    return best;
+  };
+  const best18 = bestFor(18);
+  const best9 = bestFor(9);
+
+  const averageFor = (holes: 9 | 18): number | undefined => {
+    const scored = fullyScored.filter((line) => line.holes === holes);
+    return scored.length > 0 ? roundHalfUp((scored.reduce((sum, line) => sum + scoreOf(line), 0) / scored.length) * 10) / 10 : undefined;
+  };
+  const scoringAverage18 = averageFor(18);
+  const scoringAverage9 = averageFor(9);
 
   const insights =
     rounds >= INSIGHTS_MIN_ROUNDS
@@ -153,8 +177,10 @@ export const courseRecord = (lines: readonly GolferRoundLine[], courseId: Course
 
   return {
     rounds,
-    ...(best !== undefined ? { best } : {}),
-    ...(scoringAverage !== undefined ? { scoringAverage } : {}),
+    ...(best18 !== undefined ? { best18 } : {}),
+    ...(best9 !== undefined ? { best9 } : {}),
+    ...(scoringAverage18 !== undefined ? { scoringAverage18 } : {}),
+    ...(scoringAverage9 !== undefined ? { scoringAverage9 } : {}),
     ...(insights !== undefined ? { insights } : {}),
   };
 };

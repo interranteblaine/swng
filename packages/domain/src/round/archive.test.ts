@@ -500,6 +500,7 @@ describe("unresolvedGames — finalize readiness", () => {
     cells: {},
     terminatedGameIds: new Set(),
     playedAtMs: 1,
+    holes: "all",
     ...overrides,
   });
 

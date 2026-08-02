@@ -36,6 +36,7 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
   games: [],
   cells: {},
   terminatedGameIds: new Set(),
+  holes: "all",
   ...overrides,
 });
 

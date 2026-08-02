@@ -4,6 +4,7 @@ import type { GameConfig } from "../scoring/game.js";
 import type { Hlc } from "./hlc.js";
 import type { Participant } from "./participant.js";
 import type { HoleResult } from "./holeResult.js";
+import type { HoleSelection } from "./holes.js";
 
 export type { GameConfig };
 
@@ -33,7 +34,12 @@ export type RoundEvent = RoundEventBase &
     // existing to serve a handful of enumerable stored rounds, which is the reflex the
     // 2026-07-31 prod-migration spec rejected on proportion. Every stored round is migrated
     // (scripts/migrateRoundPlayedAt.mjs) and the branch never exists.
-    | { readonly kind: "round-created"; readonly roundId: RoundId; readonly card: CourseCard; readonly playedAtMs: number }
+    // Which holes this round set out to play (spec 2026-08-02 §3a). OPTIONAL, and its absence is a
+    // TRUE STATEMENT rather than a missing fact: every round ever played played its whole card, so
+    // there is nothing to migrate and every stored genesis folds byte-identically. That is the
+    // distinction from playedAtMs above, which was made required precisely because an absent value
+    // there had to be invented.
+    | { readonly kind: "round-created"; readonly roundId: RoundId; readonly card: CourseCard; readonly playedAtMs: number; readonly holes?: HoleSelection }
     | { readonly kind: "participant-joined"; readonly participant: Participant }
     | { readonly kind: "game-added"; readonly config: GameConfig }
     | { readonly kind: "round-started" }
@@ -82,4 +88,9 @@ export type RoundEvent = RoundEventBase &
     // `authorId` (the envelope) records who changed it. Any participant may set it (the
     // score-for-anyone trust model), enforced at the API layer, not here.
     | { readonly kind: "round-played-at-set"; readonly playedAtMs: number }
+    // The holes, corrected (spec 2026-08-02 §3b): the round-played-at-set template — a round-level
+    // fact, so no golferId. Latest-HLC-wins; `authorId` records who changed it. Any participant may
+    // set it (the score-for-anyone trust model), enforced at the API layer, not here. Going out for
+    // nine and playing on is the normal case, not the error case.
+    | { readonly kind: "round-holes-set"; readonly holes: HoleSelection }
   );

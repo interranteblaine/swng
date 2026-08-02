@@ -23,6 +23,7 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
   games: [strokePlayConfig, stablefordConfig],
   cells: {},
   terminatedGameIds: new Set(),
+  holes: "all",
   ...overrides,
 });
 

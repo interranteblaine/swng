@@ -7,6 +7,7 @@ import { scoredStrokes } from "./holeResult.js";
 import type { Participant, RosterEntry } from "./participant.js";
 import type { GameConfig, RoundEvent } from "./events.js";
 import { playedAtMsOf } from "./playedAt.js";
+import type { HoleSelection } from "./holes.js";
 
 // "abandoned" is a TERMINAL status like "final", but for a scrapped round rather than a settled
 // one (task-15): unlike "final" (which round-reopened can flip back to "live"), nothing ever
@@ -28,6 +29,10 @@ export interface RoundState {
   // When the golf happened (spec 2026-08-01 §3): the round's ONE date, set at creation and
   // correctable while live. Derived by playedAtMsOf — this fold does not re-implement the rule.
   readonly playedAtMs: number;
+  // Which holes this round set out to play (spec 2026-08-02 §3). ALWAYS DEFINED here even though
+  // the stored fields are optional — absence means the whole card, and resolving that once in the
+  // fold keeps every downstream reader from re-deciding it.
+  readonly holes: HoleSelection;
   readonly participants: readonly RosterEntry[];
   readonly games: readonly GameConfig[];
   readonly cells: Readonly<Record<string, ScoreCell>>;
@@ -166,6 +171,13 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
   //     stamped with the same instant). Never re-derived inline.
   const playedAtMs = playedAtMsOf(deduped);
 
+  // 2c. Holes: the latest round-holes-set by HLC, else the genesis's own selection, else the whole
+  //     card. One ascending scan over the canonical order handles all three arms.
+  let holes: HoleSelection = genesis.holes ?? "all";
+  for (const event of deduped) {
+    if (event.kind === "round-holes-set") holes = event.holes;
+  }
+
   // 3. Status: among lifecycle events pick highest hlc (last in canonical order).
   let status: RoundStatus = LIFECYCLE_STATUS["round-created"];
   for (const event of deduped) {
@@ -301,6 +313,7 @@ export const reduceRound = (events: readonly RoundEvent[]): RoundState => {
     status,
     card: genesis.card,
     playedAtMs,
+    holes,
     // No crewId register: a round is a sealed leaf, so `genesis` never contributes an
     // outbound crew reference. An old genesis that still carries a stray `crewId` JSON key is
     // simply ignored here (it's not read into state) — the fold tolerates the extra key rather

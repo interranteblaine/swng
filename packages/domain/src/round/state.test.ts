@@ -525,3 +525,38 @@ describe("parForHoles", () => {
     expect(parForHoles([])).toBe(0);
   });
 });
+
+describe("holes — which holes the round set out to play (spec 2026-08-02 §3)", () => {
+  it("defaults to the whole card when the genesis says nothing", () => {
+    expect(reduceRound([genesis]).holes).toBe("all");
+  });
+
+  it("takes the genesis's own selection", () => {
+    const g: RoundEvent = { ...base(1), kind: "round-created", roundId: roundId("r1"), card, playedAtMs: 1, holes: "back" };
+    expect(reduceRound([g]).holes).toBe("back");
+  });
+
+  it("a later round-holes-set wins", () => {
+    const set: RoundEvent = { ...base(10), kind: "round-holes-set", holes: "front" };
+    expect(reduceRound([genesis, started, set]).holes).toBe("front");
+  });
+
+  it("resolves two corrections by hlc, not arrival order", () => {
+    const early: RoundEvent = { ...base(10), kind: "round-holes-set", holes: "front" };
+    const late: RoundEvent = { ...base(20), kind: "round-holes-set", holes: "all" };
+    expect(reduceRound([genesis, early, late]).holes).toBe("all");
+    expect(reduceRound([genesis, late, early]).holes).toBe("all");
+  });
+
+  // Spec §3b: changing your mind is the normal case, so it must cost nothing. Cells are keyed by
+  // hole number and the hole set is a filter over them, so this is true by construction — pinned
+  // anyway, because it is the promise the round page's teaching line makes to the golfer.
+  it("loses nothing scored when the selection changes", () => {
+    const front: RoundEvent = { ...base(5), kind: "round-holes-set", holes: "front" };
+    const scored: RoundEvent = { ...base(6), kind: "score-recorded", golferId: A, hole: 2, result: { kind: "strokes", strokes: 4 } };
+    const widened: RoundEvent = { ...base(7), kind: "round-holes-set", holes: "all" };
+    const state = reduceRound([genesis, joinA, started, front, scored, widened]);
+    expect(state.holes).toBe("all");
+    expect(cellAt(state.cells, A, 2)?.result).toEqual({ kind: "strokes", strokes: 4 });
+  });
+});

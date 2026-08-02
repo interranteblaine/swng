@@ -226,6 +226,14 @@ failure — including a contract-parse failure under deploy skew — so the affe
 retrying and recovers on its next refresh rather than wedging silently. The blast radius is
 bounded (one stale device, mid-deploy, beta-only) but real, and "inert" was the wrong word for it.
 
+**The course record's own skew** (added post-review, 2026-08-02, for §4a's wire rename): under the
+same lambda-first order, an unrefreshed bundle reading `GET /me/courses/{courseId}/record` receives
+`best18`/`scoringAverage18` where it looks for `best`/`scoringAverage`, finds neither, and silently
+drops both lines from the course page until it refreshes. They are optional fields on a non-strict
+schema, so there is no parse throw and no crash — the section simply renders without them. Cosmetic
+and transient, unlike the event-kind skew above, but recorded here because §4a declares the wire
+change and this is what it costs.
+
 No migration, no wipe, no rebuild: absence already means the whole card.
 
 **Beta only.** `deploy:prod` and `publish:web:prod` are not run in this arc. Nothing about that is

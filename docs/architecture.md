@@ -137,8 +137,15 @@ number*, and it is the only thing that keeps a round out of a golfer's average.
 - An explicit `ScoringPolicy` on the round says who may score for whom (default: anyone in
   the group, matching how real cards are kept).
 - **The event schema is append-only** (new event types and optional fields only), and reducers
-  ignore event types they don't recognize. Old clients survive mid-round; archived logs replay
-  forever.
+  ignore event types they don't recognize; archived logs replay forever.
+  - **But an old client does NOT survive a brand-new event KIND mid-round** (corrected
+    2026-08-02): `roundEventSchema` is a discriminated union and throws on an unknown
+    discriminator, so a stale bundle's `GET /events` fails to parse before its reducer is ever
+    reached, and that device stops syncing until it refreshes. The *reducer* tolerance above is
+    real; the *client* tolerance it seemed to promise is not. Accepted and beta-only by
+    precedent (the `cleared` `HoleResult` arm, 2026-07-19), and `client/src/session.ts` keeps
+    its retry loop armed for exactly this skew — but the deploy order that follows from it is
+    lambda-first, not "either way".
 - Reopen-and-refinalize is the correction path after finalization; projections treat finalize
   as an idempotent upsert by `roundId` and recompute.
 - Finalization writes the **`RoundArchive`**: one immutable record holding the setup and

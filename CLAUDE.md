@@ -1929,6 +1929,76 @@ Riding: a silently-dead socket
 with an empty outbox stops pulling until a wake signal (no data at risk); frequent wake syncs push
 the reconnect countdown out. On local `main`, never pushed.
 
+A round plays a nine — the holes it set out to play, not the holes the card has (2026-08-02, spec
+`docs/superpowers/specs/2026-08-02-round-plays-a-nine-design.md`, plan
+`docs/superpowers/plans/2026-08-02-round-plays-a-nine.md`, 9 planned SDD tasks + 3 added mid-arc
+(1b/3b/8b), 31 commits `6c68e0e..1655dac`, merged at `ff50150`): the owner's problem — a round's
+hole count came from the card it froze, so there was no way to say "we played the back nine at an
+18-hole course." That round was enterable and **wrong in two registers, the quieter one serious**:
+`allocateStrokes` read `strokeIndex <= strokes` across the WHOLE card, so a nine drawn out of an
+eighteen (stroke indexes 2, 4 … 18) received a FRACTION of the typed strokes — five typed, about
+two received — silently, while the dots rendered authoritatively and net skins and the match
+settled on them; and the record reported `holes: 18` with nine results, no gross, counting nowhere.
+With games added it could not be finalized normally at all. **The design was re-derived three times
+under owner probing** — the first pass invented an error case (throwing on a nine selection at a
+nine-hole course, which is a TRUE statement, not a contradiction), the second failed to weigh the
+real competitor, and the third found it: **duplicate courses are the wrong tool for the front/back
+nine and the RIGHT tool for the played-it-twice case** (a score is stored per golfer per hole
+NUMBER, so hole 3 twice needs two slots and there is one — a hard wall, not a scoping choice). The
+decisive argument against a second course record: **which holes you played is a fact about the
+round, not about the course** — encoding it in the course's identity fragments one real place
+across search, per-hole insights, "courses you've played" and the crew board, permanently, the
+same class of error `round is a sealed leaf` and `a crew is a grouping, not a preset` already
+ruled on. **The model:** `HoleSelection = "all" | "front" | "back"` on `round-created`
+(**optional — absence is a TRUE statement about every round ever played, so no migration**, unlike
+`playedAtMs`, whose absence was a MISSING fact), corrected by `round-holes-set` (the
+`round-played-at-set` template), frozen into `RoundArchive.holes?` only when it is not `"all"`.
+ONE total function `intendedHoles(teeSet, selection)` — on a one-nine card **every** selection
+resolves to that nine, so there is no error case to design — and **exactly ONE guard**, at
+`startRound` where the card is in hand, existing only so no round can store a "Back 9" label its
+course cannot have; a guard on any read path would make a stored round permanently unreadable
+(Arc A's placement rule). `setHoles` **structurally cannot** re-check: its deps carry no
+`cardStore`. `allocateStrokes` now **ranks the holes played by stroke index** rather than reading
+it raw — positionally, not keyed by `hole.number` (a review-caught illegal state: duplicates would
+collapse and the allocation would stop summing to its input) — and is **byte-identical on a full
+card**, pinned against a scrambled non-identity permutation. Everything else derives: all five
+engines through `playerTeeSet.holes` (which shrank to `{ holes }`, deleting the `teeSet` field that
+was one keystroke from restoring the regression), both match kinds' `holeCount`, finalize
+readiness, `settleRound`, and `archiveGolferLine`'s `holes`/`par` — so a completed nine gets a real
+gross, contends for Best 9, and counts doubled into the average. The web draws the nine (OUT/IN
+split made POSITIONAL so a back nine collapses to one TOT row), offers the choice only on an
+18-hole card, edits it on the turn, and names it on the join screen; `intendedHoles` joined the
+`@swng/client` seam and the ESLint banlist. **Process findings worth keeping:** the plan carried a
+WRONG ORACLE (a nine-hole match asserted `thru: 9` on the premise "Bo wins every hole" — false,
+since a singles match plays off the DIFFERENCE, so the five strokes HALVE holes 10-14 and the match
+closes 3&1 at `thru: 8`) which an implementer caught by hitting the "stop and report if an expected
+value must move" rule, and which a reviewer then proved was **the only assertion in the unit that
+catches a wrong `holeCount`** — the plan's number was precisely the one that would have hidden the
+bug; briefs were wrong about fixture/helper/file names in FOUR tasks (root cause: test code naming
+fixtures in files the controller had not read closely enough); the arc found the
+**unfalsifiable-test class four times** and closed each; and the whole-branch review found the one
+defect no task-scoped review could see — **`courseRecord` mixed 9s and 18s**, safe before this arc
+only because one `courseId` could produce a single hole count, and now reporting a nine-hole 45
+(+9) as your record at a course where you have never broken 80, fixed by mirroring `bestsOf`.
+Two controller rulings were overturned by review and are recorded as such: the `dots.ts` pinned
+`"all"` was NOT a user-visible defect (`allocateStrokes` sums to its input for ANY hole list, so
+`strokesSummary`'s line is provably invariant), and the repo's own brand-reskin note claiming CSS
+`uppercase` changes Playwright's accessible names is **wrong for `playwright-core@1.61.1`** —
+`text-transform` appears nowhere in its accname path — now carrying a dated correction.
+Close-out (controller-run, BETA ONLY, no prod deploy — owner call): `validate` 0 + `test:contract`
+97 → `cdk diff` showing ONLY the new route, its permission, five lambda code updates and one stage
+`DependsOn` (nothing stateful) → `deploy:beta` LAMBDA-FIRST (**required**, not precedent:
+`startRoundRequestSchema` is non-strict, so a new bundle against an old lambda has `holes` SILENTLY
+STRIPPED and the golfer picks Front 9 and gets eighteen with no error) — 21.6s, **41 HTTP routes**
+live → `publish:web:beta`, the served bundle verified BY CONTENT (all six new-code markers) rather
+than by filename → `e2e:beta` 17/17 ×2 → `e2e:field` **72 passed / 1 documented skip on the FIRST
+run** (and again on a second full run), every statically-reconciled locator in the new
+`nineHoles.spec.ts` resolving live → a controller USE pass at phone width on DEPLOYED
+`beta.swng.golf`, screenshots read as artifacts: the card drawing **holes 10-18 with their real
+numbers**, one **TOT Par 36** row and no OUT/IN, and five dots on exactly holes 10, 12, 13, 15, 17
+— the five hardest of that nine ranked among themselves, where the old rule would have drawn TWO;
+console clean signed-out and signed-in; walk user auto-torn-down. On local `main`, never pushed.
+
 Real code lands milestone by milestone per `docs/implementation-plan.md` — update this
 section as it does.
 

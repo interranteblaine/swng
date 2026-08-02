@@ -69,8 +69,10 @@ export function GamePanel({ game, state, onTerminate: onOpenConfirm }: GamePanel
   const treatment = config && gameTreatment(config, state.participants);
 
   // strokesSummary renders nothing for a gross game (dots.ts) — gross never allocates a single
-  // dot, so there is nothing to summarize.
-  const strokes = config && strokesSummary(config, state.participants, state.card);
+  // dot, so there is nothing to summarize. state.holes (spec 2026-08-02 §3c) is the round's own
+  // hole selection — threaded through for the one-copy principle (gameDots' per-hole map is
+  // selection-sensitive even though this line's own rendered total provably isn't).
+  const strokes = config && strokesSummary(config, state.participants, state.card, state.holes);
 
   // Reads the config + roster, not a bare kind (whole-branch review I1): the note is a claim about
   // somebody getting nothing BECAUSE somebody else gets some, so it renders nothing at all when

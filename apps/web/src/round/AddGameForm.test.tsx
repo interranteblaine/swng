@@ -36,7 +36,7 @@ const card: CourseCard = fixtureLinks;
 
 describe("the picker teaches", () => {
   it("renders all five games as cards with label, fits, and blurb", () => {
-    render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={vi.fn()} />);
     expect(screen.getByRole("radio", { name: "Match play" })).toBeTruthy();
     expect(screen.getByText("2 players")).toBeTruthy();
     expect(screen.getByText("Head-to-head, hole by hole. Win more holes to win the match.")).toBeTruthy();
@@ -48,7 +48,7 @@ describe("the picker teaches", () => {
 describe("who's in", () => {
   it("skins needs two players before Add enables", async () => {
     const user = userEvent.setup();
-    render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={vi.fn()} />);
     await user.click(screen.getByRole("radio", { name: "Skins" }));
     await user.click(screen.getByRole("checkbox", { name: "Pat" }));
     expect(screen.getByRole("button", { name: "Add game" })).toHaveProperty("disabled", true);
@@ -59,7 +59,7 @@ describe("who's in", () => {
   it("match play asks in plain words and builds the config", async () => {
     const user = userEvent.setup();
     const onAddGame = vi.fn().mockResolvedValue(undefined);
-    render(<AddGameForm participants={participants} card={card} onAddGame={onAddGame} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={onAddGame} />);
     await user.click(screen.getByRole("radio", { name: "Match play" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Player 1" }), "Pat");
     await user.selectOptions(screen.getByRole("combobox", { name: "Player 2" }), "Alex");
@@ -71,7 +71,7 @@ describe("who's in", () => {
 describe("strokes preview", () => {
   it("states the treatment in words and the dots outcome before adding", async () => {
     const user = userEvent.setup();
-    render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={vi.fn()} />);
     await user.click(screen.getByRole("radio", { name: "Skins" }));
     await user.click(screen.getByRole("checkbox", { name: "Pat" }));
     await user.click(screen.getByRole("checkbox", { name: "Sam" }));
@@ -86,7 +86,7 @@ describe("strokes preview", () => {
 
   it("match play names who receives and how many, from the actual pairing — Pat's 3 against Alex's 1", async () => {
     const user = userEvent.setup();
-    render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={vi.fn()} />);
     await user.click(screen.getByRole("radio", { name: "Match play" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Player 1" }), "Pat");
     await user.selectOptions(screen.getByRole("combobox", { name: "Player 2" }), "Alex");
@@ -100,7 +100,7 @@ describe("strokes preview", () => {
   // There is no allowance percentage left to adjust, so no Adjust affordance exists at all.
   it("gross stroke play states its own treatment — no strokes line, no percentage anywhere", async () => {
     const user = userEvent.setup();
-    render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={vi.fn()} />);
     await user.click(screen.getByRole("radio", { name: "Stroke play" }));
     await user.click(screen.getByRole("checkbox", { name: "Pat" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "gross");
@@ -119,7 +119,7 @@ describe("strokes preview", () => {
   // plays. Gross skins allocates nothing, exactly like gross stroke play.
   it("skins offers the gross/net choice, and gross drops the strokes line", async () => {
     const user = userEvent.setup();
-    render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={vi.fn()} />);
     await user.click(screen.getByRole("radio", { name: "Skins" }));
     await user.click(screen.getByRole("checkbox", { name: "Pat" }));
     await user.click(screen.getByRole("checkbox", { name: "Sam" }));
@@ -132,7 +132,7 @@ describe("strokes preview", () => {
 
   it("fourball explains that all four play off the lowest of the four", async () => {
     const user = userEvent.setup();
-    render(<AddGameForm participants={participants} card={card} onAddGame={vi.fn()} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={vi.fn()} />);
     await user.click(screen.getByRole("radio", { name: "Four-ball" }));
     const team1 = screen.getByRole("group", { name: "Team 1" });
     const team2 = screen.getByRole("group", { name: "Team 2" });
@@ -151,7 +151,7 @@ describe("strokes preview", () => {
   it("a four-ball of all-level players previews the level line and NO note", async () => {
     const user = userEvent.setup();
     const level = participants.map((p) => ({ ...p, strokes: 0 }));
-    render(<AddGameForm participants={level} card={card} onAddGame={vi.fn()} />);
+    render(<AddGameForm participants={level} card={card} selection="all" onAddGame={vi.fn()} />);
     await user.click(screen.getByRole("radio", { name: "Four-ball" }));
     const team1 = screen.getByRole("group", { name: "Team 1" });
     const team2 = screen.getByRole("group", { name: "Team 2" });
@@ -171,7 +171,7 @@ describe("submitting", () => {
   it("adds a fourball-match game with the exact {kind, a, b} shape (ids from participants) and no id field", async () => {
     const user = userEvent.setup();
     const onAddGame = vi.fn().mockResolvedValue(undefined);
-    render(<AddGameForm participants={participants} card={card} onAddGame={onAddGame} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={onAddGame} />);
 
     await user.click(screen.getByRole("radio", { name: "Four-ball" }));
     const team1 = screen.getByRole("group", { name: "Team 1" });
@@ -191,7 +191,7 @@ describe("submitting", () => {
   it("sends skins with the gross/net choice that was picked, and no allowance field at all", async () => {
     const user = userEvent.setup();
     const onAddGame = vi.fn().mockResolvedValue(undefined);
-    render(<AddGameForm participants={participants} card={card} onAddGame={onAddGame} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={onAddGame} />);
 
     await user.click(screen.getByRole("radio", { name: "Skins" }));
     await user.click(screen.getByRole("checkbox", { name: "Pat" }));
@@ -208,7 +208,7 @@ describe("submitting", () => {
   it("re-anchors the gross/net choice back to net when the kind changes", async () => {
     const user = userEvent.setup();
     const onAddGame = vi.fn().mockResolvedValue(undefined);
-    render(<AddGameForm participants={participants} card={card} onAddGame={onAddGame} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={onAddGame} />);
 
     await user.click(screen.getByRole("radio", { name: "Skins" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "Scoring" }), "gross");
@@ -224,7 +224,7 @@ describe("submitting", () => {
   it("never renders a raw generic Error's message from a failed Add game — only an honest fallback (papercut 12)", async () => {
     const user = userEvent.setup();
     const rejecting = vi.fn().mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'bar')"));
-    render(<AddGameForm participants={participants} card={card} onAddGame={rejecting} />);
+    render(<AddGameForm participants={participants} card={card} selection="all" onAddGame={rejecting} />);
 
     await user.click(screen.getByRole("checkbox", { name: "Pat" })); // default kind stableford
     await user.click(screen.getByRole("button", { name: "Add game" }));

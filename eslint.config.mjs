@@ -310,6 +310,10 @@ export default [
                 "netDoubleBogey",
                 "netStrokes",
                 "roundHalfUp",
+                // which holes a round set out to play (spec 2026-08-02 §3c) — the grid, the
+                // results headline, and dots.ts's per-game allocation all resolve the round's
+                // OWN hole list through this, never their own front/back slicing.
+                "intendedHoles",
                 // leaderboard ORDER (task-5 fix round, spec 2026-07-30 §10 review I2): a ranking
                 // rule is golf logic — GamePanel.tsx's three inline `.sort()` calls moved here, the
                 // same class `aggregateSeason` already moved server-side for crew standings ("the

@@ -419,6 +419,28 @@ describe("ScorecardGrid — totals (OUT/IN/TOT)", () => {
   });
 });
 
+// The round's own hole selection (spec 2026-08-02 §3): a round set out to play only one nine of
+// an 18-hole card must draw exactly that nine, by its REAL hole numbers — never renumbered — and
+// total to one unambiguous TOT row, exactly as a genuinely 9-hole card already does.
+describe("ScorecardGrid — the round's own hole selection", () => {
+  const backNineState = twoPlayerState({ card: fixtureLinks18, holes: "back" });
+
+  it("draws only the nine the round set out to play", () => {
+    render(<ScorecardGrid state={backNineState} recordScore={vi.fn()} />);
+
+    expect(screen.queryByRole("row", { name: "Hole 9" })).toBeNull();
+    expect(screen.getByRole("row", { name: "Hole 10" })).toBeTruthy();
+    expect(screen.getByRole("row", { name: "Hole 18" })).toBeTruthy();
+
+    // One unambiguous total row, exactly as a nine-hole card already renders — no OUT/IN, even
+    // though every hole number here is above 9 (the split must be positional, not by hole number,
+    // or a back nine would wrongly get an OUT/IN split of its own).
+    expect(screen.queryByRole("row", { name: "OUT" })).toBeNull();
+    expect(screen.queryByRole("row", { name: "IN" })).toBeNull();
+    expect(screen.getByRole("row", { name: "TOT" })).toBeTruthy();
+  });
+});
+
 describe("ScorecardGrid — current hole", () => {
   it("highlights the first hole where not every participant has a cell", () => {
     const state = twoPlayerState({

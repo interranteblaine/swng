@@ -378,7 +378,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
         </ul>
       </div>
 
-      <AddGameForm participants={state.participants} card={state.card} onAddGame={onAddGame} />
+      <AddGameForm participants={state.participants} card={state.card} selection={state.holes} onAddGame={onAddGame} />
     </section>
   );
 }

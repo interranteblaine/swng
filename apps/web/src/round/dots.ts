@@ -1,22 +1,21 @@
 import { gameStrokeAllocation, totalDots } from "@swng/client";
 import { gameMembers } from "@swng/domain";
-import type { CourseCard, GameConfig, GolferId, RosterEntry } from "@swng/domain";
+import type { CourseCard, GameConfig, GolferId, HoleSelection, RosterEntry } from "@swng/domain";
 
 // A thin delegation to the domain's gameStrokeAllocation (packages/domain/src/scoring/
 // allocation.ts), reached through @swng/client — the one on-device compute seam (this arc's
 // ESLint fence forbids the web importing it straight from @swng/domain). M6 Task 5 deleted this
 // file's own hand-mirrored allocation arithmetic (byte-identical to the domain version, now a
 // single source instead of two to keep in sync).
-// "all" is pinned here, not derived: gameDots takes no RoundState (only a game's own
-// config/roster/card), so the round's own `holes` selection is genuinely out of scope at this
-// call site without widening it into a component prop or a RoundState parameter — out of bounds
-// for task-3b, which is scoped to the three call sites the compiler flags after Task 3's arity
-// change, not the web's own hole-selection wiring (Task 7/8). Every round folds to "all" until
-// then, so this is behaviour-preserving TODAY — flagged as a real gap in task-3b's report, not
-// silently accepted: gameDots/strokesSummary feed GamePanel's strokes panel and AddGameForm's
-// preview, and neither will reflect a round's actual selection until this is threaded too.
-export const gameDots = (config: GameConfig, participants: readonly RosterEntry[], card: CourseCard): ReadonlyMap<GolferId, ReadonlyMap<number, number>> =>
-  gameStrokeAllocation(config, participants, card, "all");
+// `selection` is the round's own hole selection (spec 2026-08-02 §3c/Task 7), threaded from the
+// two call sites' own RoundState rather than pinned to "all": GamePanel.tsx passes state.holes
+// directly (it already holds `state`); AddGameForm.tsx takes it as a new prop from
+// SetupPanel.tsx, which also holds `state`. The map this produces is per-hole, so it is
+// selection-SENSITIVE even though its only two consumers (strokesSummary's own total below, and
+// dots.test.ts) don't currently read it per-hole — a future per-hole consumer must not inherit a
+// silently-wrong map (task-3+3b review finding).
+export const gameDots = (config: GameConfig, participants: readonly RosterEntry[], card: CourseCard, selection: HoleSelection): ReadonlyMap<GolferId, ReadonlyMap<number, number>> =>
+  gameStrokeAllocation(config, participants, card, selection);
 
 // A thin re-export of the domain's totalDots (packages/domain/src/scoring/allocation.ts),
 // reached through @swng/client (same on-device compute seam as gameDots above) — Task 4 deleted
@@ -32,9 +31,9 @@ export { totalDots };
 // Undefined for a GROSS game (spec §9): it allocates nothing by definition, so the all-zero line
 // below would be a false statement about a game that never had strokes to begin with — the
 // treatment line already says so in words.
-export const strokesSummary = (config: GameConfig, participants: readonly RosterEntry[], card: CourseCard): string | undefined => {
+export const strokesSummary = (config: GameConfig, participants: readonly RosterEntry[], card: CourseCard, selection: HoleSelection): string | undefined => {
   if ("scoring" in config && config.scoring === "gross") return undefined;
-  const dots = gameDots(config, participants, card);
+  const dots = gameDots(config, participants, card, selection);
   const nameOf = (id: GolferId): string => participants.find((p) => p.golferId === id)?.name ?? id;
   const parts = gameMembers(config).flatMap((id) => {
     const perHole = dots.get(id);

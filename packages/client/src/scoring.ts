@@ -80,6 +80,9 @@ export const foldAndScore = (events: readonly RoundEvent[]): { state: RoundState
 // domain-compute ESLint banlist entry for `playedAtMsOf` stays regardless (eslint.config.mjs) —
 // that fence bans a future direct-from-@swng/domain leak independently of whether this file ever
 // re-exports the name.
+// `intendedHoles` (spec 2026-08-02 §3c) is the round's own hole list — which holes it set out to
+// play, off a given tee. The grid and the results headline both need it to draw and total the right
+// holes; it is golf compute, so it comes through here and is banned from direct import below.
 export {
   gameStrokeAllocation,
   roundStrokeAllocation,
@@ -93,4 +96,5 @@ export {
   sortedStrokePlayLines,
   sortedStablefordLines,
   sortedSkinsLines,
+  intendedHoles,
 } from "@swng/domain";

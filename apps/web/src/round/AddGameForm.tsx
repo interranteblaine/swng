@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { gameId, gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, golferId, strokesNote } from "@swng/domain";
-import type { CourseCard, GameConfig, GolferId, RosterEntry } from "@swng/domain";
+import type { CourseCard, GameConfig, GolferId, HoleSelection, RosterEntry } from "@swng/domain";
 import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";
 import { btnPrimary, cardBox, inputBox } from "../ui/classes";
@@ -17,10 +17,14 @@ const PREVIEW_ID = gameId("preview");
 export interface AddGameFormProps {
   readonly participants: readonly RosterEntry[];
   readonly card: CourseCard;
+  // The round's own hole selection (spec 2026-08-02 §3c) — threaded from SetupPanel.tsx's own
+  // `state.holes` so the strokes preview's per-hole allocation agrees with the round it previews
+  // for, one-copy with GamePanel.tsx's identical need (see dots.ts's gameDots comment).
+  readonly selection: HoleSelection;
   readonly onAddGame: (game: GameConfigInput) => Promise<void>;
 }
 
-export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps) {
+export function AddGameForm({ participants, card, selection, onAddGame }: AddGameFormProps) {
   const [kind, setKind] = useState<Kind>("stableford");
   const [scoring, setScoring] = useState<"gross" | "net">("net");
   const [players, setPlayers] = useState<readonly GolferId[]>([]);
@@ -77,7 +81,7 @@ export function AddGameForm({ participants, card, onAddGame }: AddGameFormProps)
   const previewConfig = config ? ({ ...config, id: PREVIEW_ID } as GameConfig) : undefined;
   // strokesSummary reads the config, so a gross game (either kind that offers the choice) renders
   // its own "no strokes" treatment line and no strokes preview at all — one place decides that.
-  const preview = previewConfig && strokesSummary(previewConfig, participants, card);
+  const preview = previewConfig && strokesSummary(previewConfig, participants, card, selection);
   // Same config + roster the preview line above uses (whole-branch review I1) — it only renders
   // when a match's picked players are NOT all level, so the preview can never claim someone gets
   // nothing while the line above it says nobody is getting any. Only ever shown alongside a real

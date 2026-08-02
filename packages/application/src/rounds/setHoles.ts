@@ -15,9 +15,17 @@ import { createServerHlcSource, serverEnvelope } from "./serverEnvelope.js";
 // carries only the new value and requireParticipant runs once, against the caller. Nothing scored
 // is lost by a change: cells are keyed by hole number and the hole set is a filter over them.
 //
-// No card check here, deliberately: the only selection this could get wrong is a nine against a
-// one-nine card, which intendedHoles resolves sensibly anyway, and re-resolving the course record
-// mid-round to re-check it would buy nothing. startRound owns that guard.
+// No card check here, deliberately — and NOT because the card is hard to reach: `loadRoundState`
+// above already returns the folded state, so `state.card.teeSets[0].holes.length` is IN HAND, no
+// course-record resolution involved. The real reason is the spec's own rule: exactly ONE guard
+// exists, at the one door where a round is created (startRound); every other path, this one
+// included, leaves `intendedHoles` to resolve whatever selection it's handed, which it does
+// harmlessly on a one-nine card (there's nothing to split, so it falls back to the whole card).
+// The one honest residual: an API caller (not reachable through the UI — SetupPanel renders no
+// Holes section at all on a one-nine card) can set "back" on a one-nine course, after which the
+// join screen renders "This round plays the Back 9." on a course that only has one nine. Left
+// unguarded on purpose — a guard here would contradict the spec's one-guard rule for a cosmetic
+// label, not a data-integrity issue.
 export const setHoles =
   (deps: { journal: EventJournal; broadcast: Broadcast; clock: Clock; ids: IdGenerator }) =>
   async (claims: ParticipantClaims, request: SetHolesRequest): Promise<SetHolesResponse> => {

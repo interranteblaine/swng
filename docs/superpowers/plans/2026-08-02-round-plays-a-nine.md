@@ -1235,7 +1235,20 @@ git commit -m "feat(application,lambda,infra): POST /rounds/{roundId}/holes"
 - Modify: `apps/web/src/round/ScorecardGrid.tsx` (`canonicalHoles`)
 - Modify: `apps/web/src/round/ResultsView.tsx`
 - Modify: `apps/web/src/round/ScorecardGrid.test.tsx`
+- Modify: `apps/web/src/round/dots.ts` (`gameDots`, `strokesSummary` — see below)
+- Modify: `apps/web/src/games/GamePanel.tsx`, `apps/web/src/round/AddGameForm.tsx`,
+  `apps/web/src/round/SetupPanel.tsx` (see below)
 - Modify: any caller of `canonicalHoles` the compiler flags
+
+> **Added during execution (2026-08-02), found by Task 3b's implementer.** `dots.ts`'s `gameDots`
+> and `strokesSummary` currently pin `"all"` — deliberately and with a comment, because at Task 3b's
+> scope neither had the round's selection available. They feed **GamePanel's strokes panel** and
+> **AddGameForm's preview**, so left as they are, a nine-hole round would show a strokes summary
+> computed over all 18 holes while the card beside it draws nine. Thread the selection: give both
+> functions a `selection` parameter; `GamePanel.tsx:73` already holds `state`, so it passes
+> `state.holes`; `AddGameForm` takes a new prop, passed from `SetupPanel.tsx:381`, which also holds
+> `state`. Delete the pinned-`"all"` comment in `dots.ts` when you do — it documents a gap that no
+> longer exists. Add a test that a nine-hole round's strokes summary reports the dots for that nine.
 
 **Interfaces:**
 - Consumes: `intendedHoles`, `HoleSelection` (Task 1), via `@swng/client`.

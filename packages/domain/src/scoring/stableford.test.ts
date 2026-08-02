@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { gameId, golferId } from "../ids.js";
+import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
+import type { Hlc } from "../round/hlc.js";
 import type { Participant } from "../round/participant.js";
+import type { RoundEvent } from "../round/events.js";
+import { reduceRound } from "../round/state.js";
+import { scoreGame } from "./game.js";
 import { playGoldenRound } from "./golden/deck.js";
-import { fixtureLinks } from "./golden/fixtureCourse.js";
+import { fixtureLinks, fixtureLinks18 } from "./golden/fixtureCourse.js";
 import { sortedStablefordLines } from "./stableford.js";
 import type { StablefordLine } from "./game.js";
 
@@ -125,5 +129,46 @@ describe("sortedStablefordLines", () => {
     const lines = [line("a", 20), line("b", 35)];
     sortedStablefordLines(lines);
     expect(lines.map((l) => l.golferId)).toEqual([golferId("a"), golferId("b")]);
+  });
+});
+
+// Whole-branch review Finding 5: reverting ONLY the loop's hole source in scoreStableford — from
+// `playerTeeSet`'s round-scoped `holes` back to the tee set's own full `.holes` — while leaving
+// `gameStrokeAllocation(..., state.holes)` correctly scoped, leaves every OTHER test in this file
+// green (they never narrow a round after scoring, so no cell ever sits outside the selection).
+// Task 8 (spec 2026-08-02 §3b) made that combination user-reachable: switching "all" → "front"
+// keeps holes 10-18's already-recorded scores by design (fold-time scoring is never destructive —
+// state.ts), so a narrowed round can carry real cells the round no longer intends. Under the
+// revert, those out-of-selection cells still get walked, `gameStrokeAllocation`'s map has no entry
+// for them (it's scoped to the front nine), and `dots?.get(hole.number) ?? 0` silently reads that
+// as "no stroke on this hole" rather than "not this round's hole" — so they get COUNTED instead of
+// excluded.
+describe("scoreStableford — a round narrowed after scoring (whole-branch review Finding 5)", () => {
+  it("counts only the front nine after all 18 are scored and the round narrows to front", () => {
+    const at = (wallMs: number): Hlc => ({ wallMs, counter: 0, deviceId: deviceId("d1") });
+    let op = 0;
+    const base = (wallMs: number) => ({ opId: opId(`op-narrow-sf-${op++}`), hlc: at(wallMs), authorId: A });
+    const events: RoundEvent[] = [
+      { ...base(1), kind: "round-created", roundId: roundId("r-narrow-sf"), card: fixtureLinks18, playedAtMs: 1 },
+      { ...base(2), kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", strokes: 0 } },
+      { ...base(3), kind: "round-started" },
+      { ...base(4), kind: "game-added", config: { kind: "stableford", id: gameId("s-narrow"), players: [A] } },
+    ];
+    // Scratch strokes (0) means net === gross everywhere, so scoring exactly at par is worth
+    // exactly 2 + par - par = 2 points on EVERY hole, front or back — which makes the front-nine
+    // vs. whole-card totals cleanly distinguishable: 9 holes -> 18 points, 18 holes -> 36 points.
+    for (const hole of fixtureLinks18.teeSets[0]!.holes) {
+      events.push({ ...base(10 + hole.number), kind: "score-recorded", golferId: A, hole: hole.number, result: { kind: "strokes", strokes: hole.par } });
+    }
+    // Narrow to front AFTER all 18 are already scored — holes 10-18 keep their cells, just outside
+    // the round's current selection.
+    events.push({ ...base(100), kind: "round-holes-set", holes: "front" });
+
+    const state = reduceRound(events);
+    const line = (scoreGame(state.games[0]!, state) as { lines: readonly { golferId: string; thru: number; points: number }[] }).lines[0]!;
+    // Correct: only the front nine's 9 cells count. Under the reverted loop source, this would be
+    // thru: 18, points: 36 — every back-nine cell counted too.
+    expect(line.thru).toBe(9);
+    expect(line.points).toBe(18);
   });
 });

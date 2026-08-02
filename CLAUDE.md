@@ -1954,8 +1954,12 @@ A round has one date — when you played it (2026-08-01, spec
 on a Friday, kept score on paper because pushing carts made phone-in-and-out-of-the-bag scoring
 absurd, and wanted that round in their history. The path already worked (start a round, type the
 scores, add no games, finalize — `unresolvedGames` returns nothing when a round has none); **the
-round was simply dated when you tapped the button**. Two further owner asks were re-derived and
-DROPPED rather than built: "add him retroactively" and "remove a round someone added me to." The
+round was simply dated when you tapped the button**. **NOTHING about joining, inviting or the
+roster changed in this arc** — `joinRound.ts` has zero diff, exactly one route was added and none
+removed, and `JoinRoundPage`'s only change is which date its "Joining …" line displays. Invite a
+buddy, they join, you enter the card together and finalize: unchanged, now on the date you set.
+Two ideas raised in the design session were considered and NOT BUILT (they never existed, so
+nothing was removed): "add him retroactively" and "remove a round someone added me to." The
 escape hatch was the tell that the primitive was wrong — this repo already ruled on that exact
 shape when `addCrewMember` was deleted whole and replaced by invite links ("nobody is
 conscripted"), and a round writes to a permanent scoring record, so the argument is stronger, not
@@ -2027,6 +2031,4 @@ throwaway user deleted → **prod** fresh dry run 7 records → deploy 50.41s, 4
 READ-ONLY with no test data created in prod: all 8 projection lines carry played dates equal to
 their original genesis clocks (Jul 25/26/27), each sitting hours BEFORE its own finalize time,
 exactly right for a live-scored morning round. **NO WIPE, nothing deleted, 15 prod records
-rewritten.** Recorded, not scheduled: nine holes played on an 18-hole card still records as
-half-finished and counts nowhere (spec §2, a separate design question about a round declaring a
-subset of its card's holes). On local `main`, never pushed.
+rewritten.** On local `main`, never pushed.

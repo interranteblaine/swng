@@ -1443,6 +1443,69 @@ git commit -m "feat(web): choose the holes at creation, change them while you pl
 
 ---
 
+### Task 8b: One label, and the join screen says which nine
+
+> Added during execution (2026-08-02), found by the Task 8 review. Spec §6 promises three surfaces:
+> create, the live round, and **joining** — "`PeekRoundResponse` gains `holes?`, so the join screen
+> can say which nine it is before you commit a tee." `peekRound` serves it (Task 6) and nothing
+> renders it: **no task in this plan ever owned that surface.** Shipping as-is leaves a dormant wire
+> field, which is exactly what this repo deleted whole in the strokes arc
+> (`PeekRoundResponse.teeSets[].par`/`.holes`, three comments asserting a justification that no
+> longer existed).
+>
+> The label move comes first and in the same task, deliberately: the three `HoleSelection` labels are
+> already duplicated across two web files, and adding the join line without fixing that creates the
+> third copy — which is how "Front 9" on one screen becomes "Front nine" on another.
+
+**Files:**
+- Modify: `packages/domain/src/scoring/present.ts` (+ its test)
+- Modify: `packages/client/src/scoring.ts` if the fence requires it — check, don't assume
+- Modify: `apps/web/src/routes/CreateRoundPage.tsx`, `apps/web/src/round/SetupPanel.tsx` (drop their
+  local label tables)
+- Modify: `apps/web/src/routes/JoinRoundPage.tsx` (+ its test)
+
+**Interfaces:**
+- Produces: `holeSelectionLabel(selection: HoleSelection): string` — `"18 holes"` / `"Front 9"` /
+  `"Back 9"`, the one copy every surface renders through.
+
+- [ ] **Step 1: One owner for the label**
+
+The human label of a domain union is domain presentation truth in this repo — `gameKindLabel`,
+`formatOverPar` and `underPar` all live in `scoring/present.ts`, and the ESLint fence carves out
+presentation formatters precisely so the web can render through them. Add `holeSelectionLabel`
+there with a test per arm.
+
+**Throw on an unknown arm rather than falling back.** `SetupPanel`'s current `?? "18 holes"` is
+unreachable today but would render the WRONG label if an arm were ever added — this repo's idiom
+for that shape is to throw (`unresolvedGames`, `settleRound`).
+
+- [ ] **Step 2: Both existing surfaces render through it**
+
+Delete the local tables in `CreateRoundPage.tsx` and `SetupPanel.tsx` and call the shared helper.
+No visible string may change — the existing tests pin the current labels, and none of their expected
+values may move.
+
+- [ ] **Step 3: The join screen says which nine**
+
+`JoinRoundPage` already reads `courseName` and `playedAt` off the same peek response, so the seam
+exists. Render the selection when the peek carries one, and render nothing when it does not (an
+absent `holes` means the whole card, which needs no announcement — the join screen has never said
+"18 holes" and should not start).
+
+Add a test that a peek carrying `holes: "back"` names the back nine, and one that a peek without
+`holes` adds no such line.
+
+- [ ] **Step 4: Validate and commit**
+
+Run: `pnpm validate` (exit 0).
+
+```bash
+git add packages/domain/src/scoring/ packages/client/src/ apps/web/src/
+git commit -m "feat(web): the join screen names the nine, from one shared label"
+```
+
+---
+
 ### Task 9: The field gate
 
 **Files:**

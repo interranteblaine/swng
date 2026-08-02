@@ -31,7 +31,7 @@ pnpm -F @swng/web dev     # Web dev server (Vite; needs apps/web/.env.local — 
 pnpm deploy:beta          # CDK deploy of swng-beta (profile swng)
 ```
 
-Run a single test file: `pnpm -F <package> vitest run <file>` (e.g. `pnpm -F @swng/domain vitest run src/index.test.ts`). Tests are Vitest, co-located as `*.test.ts`, importing from `vitest` explicitly (web component tests are `*.test.tsx` under happy-dom).
+Run a single test file: `pnpm -F <package> exec vitest run <file>` (e.g. `pnpm -F @swng/domain exec vitest run src/index.test.ts`) — `exec` is load-bearing: packages expose a `test` script, not a `vitest` one, so the form without it fails with "None of the selected packages has a 'vitest' script". Tests are Vitest, co-located as `*.test.ts`, importing from `vitest` explicitly (web component tests are `*.test.tsx` under happy-dom).
 
 **Before claiming a change is done, run `pnpm validate`** — lint + typecheck + build + test, the same gate CI enforces. Changes to `adapters-dynamodb` also warrant `pnpm test:contract`; changes deployed to beta warrant `pnpm e2e:beta`.
 

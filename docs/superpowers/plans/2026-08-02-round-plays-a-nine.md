@@ -588,16 +588,22 @@ describe("a nine played on an 18-hole card (spec 2026-08-02)", () => {
     expect(resultOf(scoreGame(state.games[0]!, state))).toBeDefined();
   });
 
-  // A match's closing arithmetic counts the holes the ROUND has left, not the card's. Bo wins
-  // every hole (4 to Ann's 5, and Ann's five dots do not cover a stroke a hole), so he is 5 up
-  // after five holes with four to play — dormie territory on a nine, meaningless on an eighteen.
+  // A match's closing arithmetic counts the holes the ROUND has left, not the card's.
+  //
+  // CORRECTED DURING EXECUTION (2026-08-02): this comment originally claimed "Bo wins every hole"
+  // and asserted thru 9. That was wrong, and the Task 3 implementer caught it. A singles match is
+  // played off the DIFFERENCE, so Ann's 5 typed strokes all land on her — on the back nine's five
+  // hardest, which are holes 10-14. Those five holes are HALVED at net 4 apiece; Bo then wins
+  // 15, 16, 17 and is 3 up with 1 to play, so the match closes 3&1 at thru 8. Assert 8.
+  // It still discriminates: under an "all" selection the ladder stops at the first unscored hole
+  // (hole 1), giving thru 0 and no outcome at all.
   it("closes a match over nine holes, not eighteen", () => {
     const events = backNineRound().filter((e) => e.kind !== "game-added");
     events.push({ ...base(6), kind: "game-added", config: { kind: "singles-match", id: gameId("g2"), a: A, b: B } });
     const state = reduceRound(events);
     const match = scoreGame(state.games[0]!, state);
     expect(match.kind).toBe("singles-match");
-    expect((match as { thru: number }).thru).toBe(9);
+    expect((match as { thru: number }).thru).toBe(8);
     expect(resultOf(match)).toBeDefined();
   });
 
@@ -694,6 +700,59 @@ Run: `pnpm validate`
 ```bash
 git add packages/domain/src/scoring/
 git commit -m "feat(domain): every engine walks the holes the round set out to play"
+```
+
+---
+
+### Task 3b: Thread the selection at the web's call sites, so the repo compiles
+
+> Added during execution (2026-08-02), same reason as Task 1b. Task 3 gave
+> `gameStrokeAllocation`/`roundStrokeAllocation` a required `selection` argument, which breaks three
+> `apps/web` call sites. Left unfixed, `pnpm validate` stays red across Tasks 4, 5 and 6 — stripping
+> the gate from three tasks. This is the minimum that makes the repo compile; the rest of the web
+> work (which holes the grid DRAWS, the OUT/IN split, the client re-export, the ESLint fence)
+> stays in Task 7.
+
+**Files:**
+- Modify: `apps/web/src/round/dots.ts` (line ~11)
+- Modify: `apps/web/src/round/ScorecardGrid.tsx` (line ~173)
+- Modify: `apps/web/src/round/ResultsView.test.tsx` (line ~163)
+
+**Interfaces:**
+- Consumes: `gameStrokeAllocation(config, participants, card, selection)` and
+  `roundStrokeAllocation(participants, card, selection)` (Task 3); `RoundState.holes` (Task 1).
+
+- [ ] **Step 1: See the three failures**
+
+Run: `pnpm typecheck`
+Expected: FAIL in `apps/web` with exactly three `TS2554` errors — `dots.ts(11,3)` expected 4 got 3,
+`ResultsView.test.tsx(163,20)` expected 3 got 2, `ScorecardGrid.tsx(173,24)` expected 3 got 2.
+
+- [ ] **Step 2: Pass the round's own selection at each**
+
+At each site the correct argument is the folded round's `holes` — `state.holes` wherever the
+component or helper already holds a `RoundState`. Thread it from the nearest existing state value
+rather than introducing a new prop; if a site genuinely has no state in scope, report that rather
+than defaulting it to `"all"`, because a silent default is how a nine would quietly draw
+whole-card dots.
+
+For `ResultsView.test.tsx`, pass the selection its fixture round already carries.
+
+- [ ] **Step 3: Confirm nothing else moved**
+
+Run: `pnpm validate`
+Expected: exit 0. No expected value in any web test may change — every existing round folds to
+`holes: "all"`, which is exactly today's behaviour.
+
+**Deliberately NOT in this task:** the grid still DRAWS all 18 rows for a nine, because
+`canonicalHoles` is unchanged. That is Task 7's job. The intermediate is inert: no round can carry
+a non-`"all"` selection yet (no wire, no UI), so every rendered round is unaffected.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/web/src/round/
+git commit -m "fix(web): pass the round's hole selection to the allocators"
 ```
 
 ---

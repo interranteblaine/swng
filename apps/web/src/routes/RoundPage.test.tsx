@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render as rtlRender, screen, waitFor, within }
 import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryOutboxStore } from "@swng/client";
-import { deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/domain";
+import { deviceId, fixtureLinks, fixtureLinks18, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { GolferId, OpId, RoundEvent, RoundId } from "@swng/domain";
 import { AuthProvider } from "../auth/useAuth";
 import { credentialStore } from "../identity";
@@ -37,6 +37,23 @@ const buildServerLog = (roundIdValue: RoundId, golferIdValue: GolferId, name: st
   const nextOpId = (): OpId => opId(`server-op-${(opCounter += 1)}`);
   const events: RoundEvent[] = [
     { kind: "round-created", roundId: roundIdValue, card: fixtureLinks, playedAtMs: PLAYED_AT_MS, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "participant-joined", participant: { golferId: golferIdValue, name, tee: "white", strokes: 0 }, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
+    { kind: "round-started", authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
+  ];
+  return stampSeq(events);
+};
+
+// One live round's worth of server log on an 18-hole card, already set to play the front nine —
+// task-8 (spec 2026-08-02 §3b)'s own scenario: an 18-hole card is the precondition for the Holes
+// editor to render at all (§3c), and a non-"all" selection already in play is what makes
+// switching back to 18 holes a meaningful, observable correction.
+const buildFrontNineServerLog = (roundIdValue: RoundId, golferIdValue: GolferId, name: string): RoundEvent[] => {
+  let wallMs = 4_000;
+  const nextHlc = () => ({ wallMs: wallMs++, counter: 0, deviceId: SERVER_DEVICE });
+  let opCounter = 0;
+  const nextOpId = (): OpId => opId(`front9-op-${(opCounter += 1)}`);
+  const events: RoundEvent[] = [
+    { kind: "round-created", roundId: roundIdValue, card: fixtureLinks18, playedAtMs: PLAYED_AT_MS, holes: "front", authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
     { kind: "participant-joined", participant: { golferId: golferIdValue, name, tee: "white", strokes: 0 }, authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
     { kind: "round-started", authorId: golferIdValue, opId: nextOpId(), hlc: nextHlc() },
   ];
@@ -1096,6 +1113,77 @@ describe("RoundPage", () => {
     expect(screen.getByRole("region", { name: "Date played" }).textContent).toContain(
       new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(corrected),
     );
+  });
+
+  // Task 8 (spec 2026-08-02 §3b): the round-page mirror of the played-date correction above —
+  // same seam (the real editor, the real handler, the real api module, the sync() that follows),
+  // a different round-level fact. Built on an 18-hole card with holes:"front" already selected
+  // (buildFrontNineServerLog) so the Holes editor renders at all (§3c's OTHER half — a 9-hole
+  // card showing nothing — has its own coverage in SetupPanel.test.tsx, which drives the editor
+  // directly against a mock onSetHoles prop).
+  it("changes the holes mid-round with one POST /holes, then re-syncs", async () => {
+    const id = roundId("round-holes");
+    const ann = golferId("ann");
+    credentialStore.save(id, { token: "tok-holes", golferId: ann, name: "Ann", joinCode: "HOL001" });
+
+    const transport = createScriptedTransport(buildFrontNineServerLog(id, ann, "Ann"));
+    const resolveSessionConfig: ResolveSessionConfig = () => ({
+      transport,
+      store: createMemoryOutboxStore(),
+      roundId: id,
+      golferId: ann,
+      deviceId: deviceId("ann-tab"),
+    });
+    const RoundPageUnderTest = createRoundPage(createUseRoundSession(resolveSessionConfig));
+
+    let holesBody: unknown;
+    let holesCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        expect(String(url)).toBe(`https://api.example.test/rounds/${id}/holes`);
+        expect(init?.method).toBe("POST");
+        expect((init?.headers as Record<string, string>).authorization).toBe("Bearer tok-holes");
+        holesCalls += 1;
+        holesBody = JSON.parse(String(init?.body));
+        // Stands in for the real endpoint: appends the one round-holes-set it would append, so
+        // this tab's own sync() folds it exactly as it would a real server append.
+        const event: RoundEvent = {
+          kind: "round-holes-set",
+          holes: "all",
+          authorId: ann,
+          opId: opId("srv-holes"),
+          hlc: { wallMs: 9_700, counter: 0, deviceId: SERVER_DEVICE },
+          seq: transport.log.length + 1,
+        };
+        (transport.log as RoundEvent[]).push(event);
+        return { ok: true, status: 200, json: async () => ({ events: [event] }) } as unknown as Response;
+      }),
+    );
+
+    render(
+      <MemoryRouter initialEntries={[`/round/${id}`]}>
+        <Routes>
+          <Route path="/round/:roundId" element={<RoundPageUnderTest />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByText("HOL001")).toBeTruthy());
+
+    const editor = screen.getByRole("region", { name: "Holes" });
+    expect(within(editor).getByText("Front 9")).toBeTruthy(); // before: the round's genesis selection
+
+    fireEvent.click(within(editor).getByRole("button", { name: /edit holes/i }));
+    fireEvent.click(within(editor).getByRole("radio", { name: /^18 holes$/i }));
+    fireEvent.click(within(editor).getByRole("button", { name: /^save$/i }));
+
+    // Half one: exactly one POST, carrying the chosen selection.
+    await waitFor(() => expect(holesCalls).toBe(1));
+    expect(holesBody).toEqual({ holes: "all" });
+
+    // Half two: sync() follows, so THIS device re-renders off the corrected fold — the editor's
+    // static line moves off "Front 9" (no optimistic write drove it there).
+    await waitFor(() => expect(within(screen.getByRole("region", { name: "Holes" })).getByText("18 holes")).toBeTruthy());
   });
 
   // Papercut 1's other half: the raw-uuid catch is gone — a finalize rejection renders a

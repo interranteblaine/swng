@@ -42,6 +42,7 @@ import {
   peekRound,
   removeCrewMember,
   searchCourses,
+  setHoles,
   setPlayedAt,
   setStrokes,
   shareRound,
@@ -980,6 +981,32 @@ describe("setPlayedAt", () => {
     expect(seenInit?.method).toBe("POST");
     expect(JSON.parse(String(seenInit?.body))).toEqual({ playedAtMs: 1_700_000_000_000 });
     expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-played-at");
+    expect(seenInit).not.toHaveProperty("token");
+    expect(result).toEqual({ events: [] });
+  });
+});
+
+// Correcting the holes the round set out to play (spec 2026-08-02 §3b): same POST + bearer-token
+// (participant) idiom as setStrokes/setPlayedAt above — a ROUND-level fact, so the body carries
+// no subject, just the corrected selection, and the appended round-holes-set event comes back for
+// the caller to fold. The URL is a TEMPLATE STRING in api.ts, so nothing but this test pins the
+// path itself: a missed rename here stays green locally and 404s live.
+describe("setHoles", () => {
+  it("POSTs { holes } to /rounds/{roundId}/holes with the bearer token and parses a SetHolesResponse", async () => {
+    let seenUrl: string | undefined;
+    let seenInit: RequestInit | undefined;
+    stubFetch(async (url, init) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return fakeResponse(200, { events: [] });
+    });
+
+    const result = await setHoles(roundId("round-1"), "tok-holes", { holes: "front" });
+
+    expect(seenUrl).toBe(`${HTTP_URL}/rounds/round-1/holes`);
+    expect(seenInit?.method).toBe("POST");
+    expect(JSON.parse(String(seenInit?.body))).toEqual({ holes: "front" });
+    expect((seenInit?.headers as Record<string, string>).authorization).toBe("Bearer tok-holes");
     expect(seenInit).not.toHaveProperty("token");
     expect(result).toEqual({ events: [] });
   });

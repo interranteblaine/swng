@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { GameState, GolferId, RosterEntry, RoundState } from "@swng/domain";
+import type { GameState, GolferId, HoleSelection, RosterEntry, RoundState } from "@swng/domain";
 import { MAX_STROKES } from "@swng/contracts";
 import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";
@@ -49,6 +49,19 @@ const isValidStrokes = (value: string): boolean => /^\d+$/.test(value.trim()) &&
 const strokesReasonFor = (value: string): string | undefined =>
   value.trim() === "" || isValidStrokes(value) ? undefined : `Enter a whole number from 0 to ${MAX_STROKES}.`;
 
+// Which holes the round set out to play (spec 2026-08-02 §3): three choices, in the order the
+// radio group renders them. The SAME three-way labels CreateRoundPage.tsx's own creation-time
+// picker carries — a small presentation array, not golf compute, so the two-file duplication
+// follows this repo's own tolerated precedent (this file's own `toDatetimeLocalValue` alongside
+// CreateRoundPage's copy).
+const HOLE_SELECTION_OPTIONS: ReadonlyArray<readonly [HoleSelection, string]> = [
+  ["all", "18 holes"],
+  ["front", "Front 9"],
+  ["back", "Back 9"],
+];
+
+const holesLabel = (selection: HoleSelection): string => HOLE_SELECTION_OPTIONS.find(([value]) => value === selection)?.[1] ?? "18 holes";
+
 export interface SetupPanelProps {
   readonly state: RoundState;
   // Task 5/6 seam: live per-game standings (up/thru, points, skins won) render from here once
@@ -68,9 +81,14 @@ export interface SetupPanelProps {
   // so there's one editor, not one per roster row. Implemented by RoundPage as
   // api.setPlayedAt + sync().
   readonly onSetPlayedAt: (playedAtMs: number) => Promise<void>;
+  // Which holes the round set out to play, correctable while live (spec 2026-08-02 §3b) — the
+  // SAME idiom as onSetPlayedAt above, one more round-level fact with one editor. Rendered only
+  // while the card has 18 holes (§3c: a card with one nine has no choice to make). Implemented by
+  // RoundPage as api.setHoles + sync().
+  readonly onSetHoles: (holes: HoleSelection) => Promise<void>;
 }
 
-export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlayedAt }: SetupPanelProps) {
+export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlayedAt, onSetHoles }: SetupPanelProps) {
   // A single `editing` id (not a per-row map) holds at most one open editor. Every OTHER row's
   // own Edit button stays visible and clickable the whole time — only the row currently being
   // edited hides its own Edit button, swapping in the Save/Cancel pair in its place. Tapping a
@@ -151,6 +169,50 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
       setPlayedAtError(caught instanceof ApiError ? caught.message : "Could not update the played date — try again.");
     } finally {
       setSavingPlayedAt(false);
+    }
+  };
+
+  // Which holes the round set out to play, correctable while live (spec 2026-08-02 §3b) — the
+  // SAME roster-strokes/played-date editor idiom, its own separate state (a round-level fact,
+  // like playedAtMs, so there's nothing to key by golferId).
+  const [editingHoles, setEditingHoles] = useState(false);
+  const [holesValue, setHolesValue] = useState<HoleSelection>(state.holes);
+  const [holesError, setHolesError] = useState<string | undefined>(undefined);
+  const [savingHoles, setSavingHoles] = useState(false);
+
+  const startEditHoles = () => {
+    setEditingHoles(true);
+    setHolesValue(state.holes);
+    setHolesError(undefined);
+  };
+
+  const cancelEditHoles = () => {
+    setEditingHoles(false);
+    setHolesError(undefined);
+  };
+
+  const saveHoles = async () => {
+    // A no-change Save must not fire an empty correction — the played-date editor's own no-op
+    // guard above, simpler here: HoleSelection is a plain three-value enum with no lossy
+    // round-trip (playedAt's own dropped-seconds problem doesn't exist), so "no change" is a
+    // direct equality check against the round's own current value.
+    if (holesValue === state.holes) {
+      setEditingHoles(false);
+      return;
+    }
+    setSavingHoles(true);
+    setHolesError(undefined);
+    try {
+      await onSetHoles(holesValue);
+      // No optimistic local write: the corrected selection arrives via the fold once the caller
+      // sync()s (RoundPage's own onSetHoles) — cells are keyed by hole number and every engine
+      // already filters by selection, so switching front → all restores holes 10–18 exactly as
+      // typed, never cleared or rewritten here.
+      setEditingHoles(false);
+    } catch (caught) {
+      setHolesError(caught instanceof ApiError ? caught.message : "Could not update the holes — try again.");
+    } finally {
+      setSavingHoles(false);
     }
   };
 
@@ -284,6 +346,58 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
           <p className="text-lg text-forest">{formatPlayedAt(state.playedAtMs)}</p>
         )}
       </section>
+
+      {/* Which holes the round set out to play, correctable while live (spec 2026-08-02 §3b) —
+          the SAME roster-strokes/played-date editor idiom, beside the played-date row. Rendered
+          ONLY while the card has 18 holes (§3c: "a card with one nine has no choice to make, so
+          none is offered") — a 9-hole card shows no section here at all, not a disabled one. The
+          Edit button reads "Edit holes" (not the bare "Edit" the row above uses) because this
+          region isn't scoped when it's found on screen — a distinct name is what disambiguates it
+          from the Date played and roster rows' own Edit buttons. */}
+      {state.card.teeSets[0]?.holes.length === 18 && (
+        <section aria-label="Holes" className={`${cardBox} flex flex-col gap-2 p-4`}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm text-fairway">Holes</span>
+            {!editingHoles && (
+              <button type="button" className={`${btnQuiet} text-sm`} onClick={startEditHoles}>
+                Edit holes
+              </button>
+            )}
+          </div>
+
+          {editingHoles ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                {HOLE_SELECTION_OPTIONS.map(([value, label]) => (
+                  <label key={value} className="flex items-center gap-1 text-sm text-forest">
+                    <input type="radio" name="holes-edit" value={value} checked={holesValue === value} onChange={() => setHolesValue(value)} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                {/* btnSecondary, not btnQuiet — the SAME demoted-commit register the played-date
+                    editor's own Save uses, for the SAME reason: AddGameForm's submit is this
+                    screen's one gold action, so a bordered Save here never competes with it. */}
+                <button type="button" className={btnSecondary} disabled={savingHoles} onClick={() => void saveHoles()}>
+                  Save
+                </button>
+                <button type="button" className={btnQuiet} disabled={savingHoles} onClick={cancelEditHoles}>
+                  Cancel
+                </button>
+              </div>
+              <span className="text-sm text-fairway">Changing this redraws the card. Nothing you&apos;ve scored is lost.</span>
+              {holesError && (
+                <p role="alert" className="text-oxblood">
+                  {holesError}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-lg text-forest">{holesLabel(state.holes)}</p>
+          )}
+        </section>
+      )}
 
       <div>
         <h2 className="text-lg font-semibold text-forest">Roster</h2>

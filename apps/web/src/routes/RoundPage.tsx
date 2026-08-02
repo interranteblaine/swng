@@ -2,8 +2,8 @@ import { useCallback, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import type { GameConfigInput } from "@swng/contracts";
 import { roundId as makeRoundId } from "@swng/domain";
-import type { GameId, GameState, GolferId, HoleResult, RoundId, RoundState } from "@swng/domain";
-import { abandonRound, addGame, finalizeRound, leaveRound, setPlayedAt, setStrokes, terminateGame } from "../api";
+import type { GameId, GameState, GolferId, HoleResult, HoleSelection, RoundId, RoundState } from "@swng/domain";
+import { abandonRound, addGame, finalizeRound, leaveRound, setHoles, setPlayedAt, setStrokes, terminateGame } from "../api";
 import { credentialStore } from "../identity";
 import type { RoundCredential } from "../identity";
 import { unresolvedGames } from "../round/finalizeReadiness";
@@ -305,6 +305,7 @@ interface LiveRoundProps {
   readonly onLeave: () => Promise<void>;
   readonly onSetStrokes: (golferId: GolferId, strokes: number) => Promise<void>;
   readonly onSetPlayedAt: (playedAtMs: number) => Promise<void>;
+  readonly onSetHoles: (holes: HoleSelection) => Promise<void>;
 }
 
 // Everything that's only ever rendered pre-finalize, as its OWN component (not an inline
@@ -312,7 +313,7 @@ interface LiveRoundProps {
 // StandingsHeader no longer needs an active-game selection threaded down to it at all (its own
 // chips are pure disclosure toggles now), so this component's only remaining job is composing
 // the live-only chrome that unmounts once status flips to "final".
-function LiveRound({ state, games, recordScore, pending, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave, onSetStrokes, onSetPlayedAt }: LiveRoundProps) {
+function LiveRound({ state, games, recordScore, pending, joinCode, token, onAddGame, onFinalize, onTerminate, onAbandon, onLeave, onSetStrokes, onSetPlayedAt, onSetHoles }: LiveRoundProps) {
   // The card locks for exactly as long as a finalize attempt is in flight, and not a moment
   // longer. onFinalize drains the outbox and only then seals — but a score tapped INSIDE that
   // window joins the outbox too late for the drain that already ran, so it pushes after
@@ -343,7 +344,7 @@ function LiveRound({ state, games, recordScore, pending, joinCode, token, onAddG
     <>
       <StandingsHeader state={state} games={games} onTerminate={onTerminate} />
       <ScorecardGrid state={state} recordScore={recordScore} readOnly={finalizing} />
-      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} onSetStrokes={onSetStrokes} onSetPlayedAt={onSetPlayedAt} />
+      <SetupPanel state={state} games={games} joinCode={joinCode} onAddGame={onAddGame} onSetStrokes={onSetStrokes} onSetPlayedAt={onSetPlayedAt} onSetHoles={onSetHoles} />
       <FinalizeControl state={state} games={games} pending={pending} busy={finalizing} onFinalize={attemptFinalize} />
       <LeaveControl onLeave={onLeave} />
       <ScrapControl onAbandon={onAbandon} />
@@ -398,6 +399,19 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
         // usePageTitle below), the same sync()-then-let-the-fold-swap pattern every other
         // mutation on this page follows. No optimistic local write.
         await setPlayedAt(roundId, credential.token, { playedAtMs });
+        await sync();
+      },
+      [roundId, credential.token, sync],
+    );
+
+    const onSetHoles = useCallback(
+      async (holes: HoleSelection) => {
+        // Server-authored append, then sync() — the corrected selection re-draws the card (every
+        // engine already filters cells by selection) and SetupPanel's own display, matching every
+        // other roster/round-level mutation's sync()-then-let-the-fold-swap pattern. No
+        // optimistic local write: switching front → all restores holes 10–18 exactly as typed,
+        // via the fold, never a local rewrite here.
+        await setHoles(roundId, credential.token, { holes });
         await sync();
       },
       [roundId, credential.token, sync],
@@ -531,6 +545,7 @@ export const createRoundPage = (useRoundSession: UseRoundSession = defaultUseRou
             onLeave={onLeave}
             onSetStrokes={onSetStrokes}
             onSetPlayedAt={onSetPlayedAt}
+            onSetHoles={onSetHoles}
           />
         )}
       </main>

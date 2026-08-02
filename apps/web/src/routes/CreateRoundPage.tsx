@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import type { CourseId } from "@swng/domain";
+import type { CourseId, HoleSelection } from "@swng/domain";
 import { cardId } from "@swng/domain";
 import type { CourseView, StartRoundResponse } from "@swng/contracts";
 import { ApiError, createRound, getCourse } from "../api";
@@ -10,7 +10,7 @@ import { useAuth } from "../auth/useAuth";
 import { CourseSearch } from "../courses/CourseSearch";
 import { CourseSummaryCard } from "../courses/CourseSummaryCard";
 import { credentialStore } from "../identity";
-import { btnPrimary, cardBox, inputBox } from "../ui/classes";
+import { btnPrimary, cardBox, eyebrow, inputBox } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
 
 // A datetime-local input's value is a LOCAL wall-clock string with no zone — "2026-07-31T14:05".
@@ -34,6 +34,17 @@ const toDatetimeLocalValue = (date: Date): string =>
 // it via the DOM would pass whether the clause exists or not. Exported so the test can pin it
 // directly instead.
 export const isPlayedAtValueValid = (value: string): boolean => value !== "" && !Number.isNaN(new Date(value).getTime());
+
+// Which holes the round sets out to play (spec 2026-08-02 §3): three choices, in the order the
+// radio group renders them. The SAME three-way labels the round page's own mid-round editor
+// carries (SetupPanel.tsx) — a small presentation array, not golf compute, so the two-file
+// duplication follows this repo's own tolerated precedent (this file's `toDatetimeLocalValue`
+// alongside SetupPanel's own copy).
+const HOLE_SELECTION_OPTIONS: ReadonlyArray<readonly [HoleSelection, string]> = [
+  ["all", "18 holes"],
+  ["front", "Front 9"],
+  ["back", "Back 9"],
+];
 
 interface LocationState {
   // AddCoursePage's own success navigation (M6 Task 5's "Add a course" hand-off) — a course
@@ -69,6 +80,9 @@ export function CreateRoundPage() {
   // Round-played-date spec §5: always visible, defaulting to now, no "past round" disclosure and
   // no second mode. The lazy initializer reads the clock exactly once, at mount.
   const [playedAt, setPlayedAt] = useState<string>(() => toDatetimeLocalValue(new Date()));
+  // Which holes the round sets out to play (spec 2026-08-02 §3): defaults to the whole card, the
+  // same "absence means the whole card" truth every round already stored carries.
+  const [holes, setHoles] = useState<HoleSelection>("all");
 
   const selectCourse = (courseId: CourseId) => {
     setCourseError(undefined);
@@ -78,6 +92,10 @@ export function CreateRoundPage() {
         // Tee always tracks the newly chosen card's own tee sets, never a stale name from a
         // previously selected course.
         setTee(response.course.card.teeSets[0]?.name ?? "");
+        // Holes resets the same way (spec 2026-08-02 §3c) — a stale front/back selection
+        // surviving a course switch could submit a `holes` key the newly-picked card can't
+        // satisfy (a 9-hole card has no second nine, or the fetch simply hasn't landed yet).
+        setHoles("all");
       })
       .catch((caught: unknown) => {
         setCourseView(undefined);
@@ -114,6 +132,11 @@ export function CreateRoundPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above: keyed by the router's own per-navigation identity, not by `state`'s object identity
   }, [location.key]);
 
+  // The selected card's own hole count — read off its first tee set, since every tee set on one
+  // card shares the same hole count by construction (the same-hole-count invariant pinned
+  // elsewhere in the course-cards work). Undefined while no course is selected yet.
+  const selectedCardHoleCount = courseView?.card.teeSets[0]?.holes.length;
+
   const canSubmit = courseView !== undefined && tee !== "" && golfer !== undefined && isPlayedAtValueValid(playedAt);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -133,7 +156,19 @@ export function CreateRoundPage() {
       // this form, so there is no "absent means now" case here (that arm exists on the wire for
       // other clients, not for this form). Exactly what the field shows, never inferred.
       const response: StartRoundResponse = await auth.withAuth((token) =>
-        createRound({ course: { courseId: courseView.courseId, cardId: cardId(courseView.cardId) }, host: { tee }, playedAtMs: new Date(playedAt).getTime() }, token),
+        createRound(
+          {
+            course: { courseId: courseView.courseId, cardId: cardId(courseView.cardId) },
+            host: { tee },
+            playedAtMs: new Date(playedAt).getTime(),
+            // Which holes the round sets out to play (spec 2026-08-02 §3a): omitted when it's the
+            // whole card — "absence means the whole card" is a TRUE statement about every round
+            // already stored, so an unremarkable 18-hole round sends the exact same body it always
+            // has.
+            ...(holes !== "all" ? { holes } : {}),
+          },
+          token,
+        ),
       );
       credentialStore.save(response.roundId, { token: response.token, golferId: response.golferId, name: golfer.name, joinCode: response.joinCode });
       navigate(`/round/${response.roundId}`);
@@ -176,6 +211,24 @@ export function CreateRoundPage() {
             <p role="alert" className="text-oxblood">
               {courseError}
             </p>
+          )}
+
+          {/* Which holes the round sets out to play (spec 2026-08-02 §3c): offered ONLY at an
+              18-hole card — "a card with one nine has no choice to make, so none is offered" is
+              the spec's own words, and it means exactly that: no control, no default to explain,
+              nothing, not a disabled or pre-filled one. */}
+          {selectedCardHoleCount === 18 && (
+            <fieldset className="flex flex-col gap-1">
+              <legend className={eyebrow}>Holes</legend>
+              <div className="flex gap-2">
+                {HOLE_SELECTION_OPTIONS.map(([value, label]) => (
+                  <label key={value} className="flex items-center gap-1 text-sm text-forest">
+                    <input type="radio" name="holes" value={value} checked={holes === value} onChange={() => setHoles(value)} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
           )}
 
           {/* Round-played-date spec §5: always visible, no "past round" disclosure and no second

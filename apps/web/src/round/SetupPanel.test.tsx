@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fixtureLinks, gameId, golferId, roundId } from "@swng/domain";
+import { fixtureLinks, fixtureLinks18, gameId, golferId, roundId } from "@swng/domain";
 import { MAX_STROKES } from "@swng/contracts";
 import type { GameConfig, RosterEntry, RoundState } from "@swng/domain";
 import { ApiError } from "../api";
@@ -43,15 +43,21 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
 const noopAddGame = vi.fn().mockResolvedValue(undefined);
 const noopSetStrokes = vi.fn().mockResolvedValue(undefined);
 const noopSetPlayedAt = vi.fn().mockResolvedValue(undefined);
+const noopSetHoles = vi.fn().mockResolvedValue(undefined);
 
 // SetupPanel no longer touches auth (the claim affordance is gone), but the AuthProvider wrapper
 // stays: it lets the signed-in pins below prove that even in the state that USED to render the
 // claim button, nothing does — and that SetupPanel fires no fetch of its own.
-const renderPanel = (props: SetupPanelProps) =>
+//
+// `onSetHoles` defaults to a noop so every call site predating task-8 (all of them, bar the
+// "Holes" describe block below) doesn't need to name a prop it never exercises — `baseState()`'s
+// own card (fixtureLinks, 9 holes) never renders the Holes section anyway, so a real caller would
+// never observe the default.
+const renderPanel = (props: Omit<SetupPanelProps, "onSetHoles"> & Partial<Pick<SetupPanelProps, "onSetHoles">>) =>
   render(
     <MemoryRouter>
       <AuthProvider>
-        <SetupPanel {...props} />
+        <SetupPanel {...props} onSetHoles={props.onSetHoles ?? noopSetHoles} />
       </AuthProvider>
     </MemoryRouter>,
   );
@@ -73,6 +79,7 @@ beforeEach(() => {
   noopAddGame.mockClear();
   noopSetStrokes.mockClear();
   noopSetPlayedAt.mockClear();
+  noopSetHoles.mockClear();
   vi.stubGlobal("localStorage", createMemoryStorage());
   vi.stubGlobal("sessionStorage", createMemoryStorage());
 });
@@ -677,5 +684,106 @@ describe("SetupPanel — the played date", () => {
     await waitFor(() => expect(within(region()).queryByLabelText("Date played")).toBeNull());
     expect(within(region()).getByRole("button", { name: "Edit" })).toBeTruthy();
     expect(within(region()).getByText(/Jun 12, 2026/)).toBeTruthy();
+  });
+});
+
+// Which holes the round set out to play, correctable while live (spec 2026-08-02 §3b) — the same
+// roster-strokes/played-date editor idiom, gated on the card's own hole count (§3c).
+describe("SetupPanel — the holes editor", () => {
+  const region = () => screen.getByRole("region", { name: "Holes" });
+
+  it("renders nothing at a 9-hole card — no section, no Edit affordance, not merely disabled", () => {
+    // baseState()'s own card (fixtureLinks) has one nine — the default every other test in this
+    // file already exercises.
+    renderPanel({ state: baseState(), games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
+
+    expect(screen.queryByRole("region", { name: "Holes" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /edit holes/i })).toBeNull();
+  });
+
+  it("at an 18-hole card, shows the round's current selection and an Edit holes affordance", () => {
+    const state = baseState({ card: fixtureLinks18, holes: "front" });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
+
+    expect(within(region()).getByText("Front 9")).toBeTruthy();
+    expect(within(region()).getByRole("button", { name: "Edit holes" })).toBeTruthy();
+  });
+
+  it("Edit swaps the static value for a three-way radio group seeded at the round's current selection", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ card: fixtureLinks18, holes: "front" });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
+
+    await user.click(within(region()).getByRole("button", { name: "Edit holes" }));
+
+    expect((within(region()).getByRole("radio", { name: "Front 9" }) as HTMLInputElement).checked).toBe(true);
+    expect((within(region()).getByRole("radio", { name: "18 holes" }) as HTMLInputElement).checked).toBe(false);
+    expect((within(region()).getByRole("radio", { name: "Back 9" }) as HTMLInputElement).checked).toBe(false);
+    // The static line and the editor are mutually exclusive — the same swap the played-date
+    // editor's own pin asserts (2026-07-20 review finding).
+    expect(within(region()).queryByRole("button", { name: "Edit holes" })).toBeNull();
+  });
+
+  it("Save submits the chosen selection and closes the editor — no optimistic write", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ card: fixtureLinks18, holes: "front" });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt, onSetHoles: noopSetHoles });
+
+    await user.click(within(region()).getByRole("button", { name: "Edit holes" }));
+    await user.click(within(region()).getByRole("radio", { name: "18 holes" }));
+    await user.click(within(region()).getByRole("button", { name: "Save" }));
+
+    expect(noopSetHoles).toHaveBeenCalledTimes(1);
+    expect(noopSetHoles).toHaveBeenCalledWith("all");
+
+    // No optimistic local write (the change arrives via the fold, not local state): the editor
+    // closes and the static line reappears showing the UNCHANGED prop value.
+    await waitFor(() => expect(within(region()).queryByRole("radio", { name: "18 holes" })).toBeNull());
+    expect(within(region()).getByRole("button", { name: "Edit holes" })).toBeTruthy();
+    expect(within(region()).getByText("Front 9")).toBeTruthy();
+  });
+
+  it("Cancel restores the static line (the swap back) without calling onSetHoles", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ card: fixtureLinks18, holes: "front" });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt, onSetHoles: noopSetHoles });
+
+    await user.click(within(region()).getByRole("button", { name: "Edit holes" }));
+    await user.click(within(region()).getByRole("radio", { name: "18 holes" }));
+    await user.click(within(region()).getByRole("button", { name: "Cancel" }));
+
+    expect(noopSetHoles).not.toHaveBeenCalled();
+    expect(within(region()).queryByRole("radio")).toBeNull();
+    expect(within(region()).getByText("Front 9")).toBeTruthy();
+  });
+
+  it("Save with no change closes the editor without calling onSetHoles", async () => {
+    const user = userEvent.setup();
+    const state = baseState({ card: fixtureLinks18, holes: "front" });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt, onSetHoles: noopSetHoles });
+
+    await user.click(within(region()).getByRole("button", { name: "Edit holes" }));
+    await user.click(within(region()).getByRole("button", { name: "Save" }));
+
+    expect(noopSetHoles).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(region()).getByRole("button", { name: "Edit holes" })).toBeTruthy());
+    expect(within(region()).getByText("Front 9")).toBeTruthy();
+  });
+
+  it("a failed save surfaces the error text and keeps the editor open", async () => {
+    const user = userEvent.setup();
+    const failingSetHoles = vi.fn().mockRejectedValue(new Error("network exploded"));
+    const state = baseState({ card: fixtureLinks18, holes: "front" });
+    renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt, onSetHoles: failingSetHoles });
+
+    await user.click(within(region()).getByRole("button", { name: "Edit holes" }));
+    await user.click(within(region()).getByRole("radio", { name: "18 holes" }));
+    await user.click(within(region()).getByRole("button", { name: "Save" }));
+
+    // Never a raw generic Error's message — an honest fallback, and the editor stays open.
+    expect(await within(region()).findByRole("alert")).toBeTruthy();
+    expect(within(region()).getByRole("alert").textContent).toBe("Could not update the holes — try again.");
+    expect(document.body.textContent).not.toMatch(/network exploded/);
+    expect(within(region()).getByRole("radio", { name: "18 holes" })).toBeTruthy();
   });
 });

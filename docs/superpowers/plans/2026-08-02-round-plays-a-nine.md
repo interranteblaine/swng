@@ -598,7 +598,9 @@ describe("a nine played on an 18-hole card (spec 2026-08-02)", () => {
   // It still discriminates: under an "all" selection the ladder stops at the first unscored hole
   // (hole 1), giving thru 0 and no outcome at all.
   it("closes a match over nine holes, not eighteen", () => {
-    const events = backNineRound().filter((e) => e.kind !== "game-added");
+    // The annotation is load-bearing: without it TS narrows the filtered array and rejects the
+    // pushed `game-added` literal.
+    const events: RoundEvent[] = backNineRound().filter((e) => e.kind !== "game-added");
     events.push({ ...base(6), kind: "game-added", config: { kind: "singles-match", id: gameId("g2"), a: A, b: B } });
     const state = reduceRound(events);
     const match = scoreGame(state.games[0]!, state);
@@ -1240,15 +1242,24 @@ git commit -m "feat(application,lambda,infra): POST /rounds/{roundId}/holes"
   `apps/web/src/round/SetupPanel.tsx` (see below)
 - Modify: any caller of `canonicalHoles` the compiler flags
 
-> **Added during execution (2026-08-02), found by Task 3b's implementer.** `dots.ts`'s `gameDots`
-> and `strokesSummary` currently pin `"all"` — deliberately and with a comment, because at Task 3b's
-> scope neither had the round's selection available. They feed **GamePanel's strokes panel** and
-> **AddGameForm's preview**, so left as they are, a nine-hole round would show a strokes summary
-> computed over all 18 holes while the card beside it draws nine. Thread the selection: give both
+> **Added during execution (2026-08-02), found by Task 3b's implementer — with its severity
+> CORRECTED by the Task 3+3b review.** `dots.ts`'s `gameDots` and `strokesSummary` pin `"all"`,
+> deliberately and with a comment, because at Task 3b's scope neither had the round's selection
+> available.
+>
+> The original wording here (and Task 3b's report) claimed this would make a nine-hole round show a
+> strokes summary computed over 18 holes while the card drew nine. **That is wrong, and the review
+> proved it:** `strokesSummary` renders only `totalDots(...)` per member, and `allocateStrokes` sums
+> to exactly its input for ANY hole list (`base*n + extra = floor(s/n)*n + s%n = s`), so the rendered
+> line is provably invariant under the selection. `gameDots`' per-hole map IS selection-sensitive,
+> but its only consumers are `strokesSummary` and `dots.test.ts` — no component reads it.
+>
+> So thread it for the **one-copy principle**, not as a user-visible defect: a per-hole map computed
+> against the wrong hole set is a live trap for the next consumer who reads it per-hole. Give both
 > functions a `selection` parameter; `GamePanel.tsx:73` already holds `state`, so it passes
 > `state.holes`; `AddGameForm` takes a new prop, passed from `SetupPanel.tsx:381`, which also holds
-> `state`. Delete the pinned-`"all"` comment in `dots.ts` when you do — it documents a gap that no
-> longer exists. Add a test that a nine-hole round's strokes summary reports the dots for that nine.
+> `state`. Replace the pinned-`"all"` comment in `dots.ts` rather than deleting it silently — it
+> should end up stating that the map is selection-correct, not that a gap exists.
 
 **Interfaces:**
 - Consumes: `intendedHoles`, `HoleSelection` (Task 1), via `@swng/client`.

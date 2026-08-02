@@ -513,6 +513,22 @@ describe("StartRound — holes (spec 2026-08-02 §3)", () => {
     expect("holes" in created).toBe(false);
   });
 
+  // Review fix (Minor 2): the byte-identity invariant rests entirely on `command.holes ?? "all"`
+  // collapsing ABSENT and EXPLICITLY-"all" onto the same branch — the test above only exercises
+  // the absent arm. A create form whose radio group defaults to "all" (Task 8) is a plausible
+  // source of an explicit "all" on the wire; if that branch ever diverged, every ordinary 18-hole
+  // round would start writing a `holes` key with nothing here to notice.
+  it("omits the key when the round explicitly names the whole card", async () => {
+    const ctx = await setup();
+    await putAndBindGolfer(ctx.golferStore, ANN.id, ANN.sub, ANN.name);
+
+    const host = await ctx.start({ course: ctx.course, host: { tee: "white" }, holes: "all" }, { sub: ANN.sub });
+
+    const genesis = await ctx.events(host.roundId, 0);
+    const created = genesis.events.find((event) => event.kind === "round-created")!;
+    expect("holes" in created).toBe(false);
+  });
+
   // The one guard in the system: not because the value is dangerous downstream — intendedHoles
   // handles it — but so no round can be stored carrying a "Back 9" label its course cannot have.
   it("rejects a nine selection against a card that has only one nine", async () => {

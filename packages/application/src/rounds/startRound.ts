@@ -57,6 +57,10 @@ export const startRound =
     // The one guard on this fact (spec 2026-08-02 §3): a nine selection needs a card that HAS two
     // nines. Checked here, at the one door where the card is already in hand, and never again —
     // intendedHoles is total, and a guard on a read path would make a stored round unreadable.
+    // Reading the HOST'S TEE ALONE answers for the whole card: every tee on a card carries the
+    // same hole count (domain's validateCard collapses every tee's hole count into one Set and
+    // rejects a card whose tees disagree), so there is no other tee on this card whose hole count
+    // could differ from teeSet's.
     const holes = command.holes ?? "all";
     if (holes !== "all" && teeSet.holes.length <= 9) {
       throw new ApplicationError("holes-not-on-this-card", `this course has one nine; "${holes}" names a second`);

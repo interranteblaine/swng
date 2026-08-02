@@ -561,12 +561,26 @@ describe("holes — which holes the round set out to play (spec 2026-08-02 §3)"
   // Spec §3b: changing your mind is the normal case, so it must cost nothing. Cells are keyed by
   // hole number and the hole set is a filter over them, so this is true by construction — pinned
   // anyway, because it is the promise the round page's teaching line makes to the golfer.
+  //
+  // Task-1 review finding, carried into task 3: the original fixture here scored hole 2 on the
+  // file's own 3-hole `card`, where `intendedHoles`' <=9 escape hatch resolves EVERY selection to
+  // all three holes — nothing was ever actually filtered out, so the test could not fail no matter
+  // how "front"/"all" were handled. An 18-hole card with a genuinely split front/back is what makes
+  // this a real exercise: the score below lands on hole 14, on the BACK nine, while the selection
+  // is "front" — outside it. A destructive filter (dropping an incoming score for a hole outside
+  // the CURRENT selection at fold time, rather than treating `holes` as a downstream view) would
+  // lose it right there, before "all" ever gets a chance to widen back to it.
   it("loses nothing scored when the selection changes", () => {
+    const eighteen: CourseCard = {
+      courseName: "Eighteen Holes",
+      teeSets: [{ name: "white", holes: Array.from({ length: 18 }, (_, i) => ({ number: i + 1, par: 4, yardage: 400, strokeIndex: i + 1 })) }],
+    };
+    const g: RoundEvent = { ...base(1), kind: "round-created", roundId: roundId("r1"), card: eighteen, playedAtMs: 1 };
     const front: RoundEvent = { ...base(5), kind: "round-holes-set", holes: "front" };
-    const scored: RoundEvent = { ...base(6), kind: "score-recorded", golferId: A, hole: 2, result: { kind: "strokes", strokes: 4 } };
+    const scored: RoundEvent = { ...base(6), kind: "score-recorded", golferId: A, hole: 14, result: { kind: "strokes", strokes: 4 } };
     const widened: RoundEvent = { ...base(7), kind: "round-holes-set", holes: "all" };
-    const state = reduceRound([genesis, joinA, started, front, scored, widened]);
+    const state = reduceRound([g, joinA, started, front, scored, widened]);
     expect(state.holes).toBe("all");
-    expect(cellAt(state.cells, A, 2)?.result).toEqual({ kind: "strokes", strokes: 4 });
+    expect(cellAt(state.cells, A, 14)?.result).toEqual({ kind: "strokes", strokes: 4 });
   });
 });

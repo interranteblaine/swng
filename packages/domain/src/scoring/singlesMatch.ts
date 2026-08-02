@@ -13,14 +13,14 @@ type SinglesMatchConfig = Extract<GameConfig, { kind: "singles-match" }>;
 export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState): GameState => {
   // Course card order is shared; hole numbers, not tee choice, drive it — so either player's
   // tee set supplies the sequence the ladder walks.
-  const { teeSet: cardTeeSet } = playerTeeSet(state, config.a);
+  const { holes: cardHoles } = playerTeeSet(state, config.a);
 
   // A singles match is a MATCH kind (spec 2026-07-30 §3): played off the DIFFERENCE, so only the
   // higher number receives dots and the lower receives none — and those dots land on the HARDEST
   // holes, which is what makes this deliberately unlike the card. "Plays off scratch" would be the
   // wrong words for the lower side: they may be on 20 and simply get nothing here, not a scratch
   // golfer. The higher/lower branch this replaced was that same arithmetic, spelled a second time.
-  const allocation = gameStrokeAllocation(config, state.participants, state.card);
+  const allocation = gameStrokeAllocation(config, state.participants, state.card, state.holes);
 
   const netFor = (golferId: GolferId, cell: ScoreCell | undefined, holeNumber: number): number | undefined => {
     // Picked-up is the only kind with no number, hence the only one that's truly absent.
@@ -29,11 +29,11 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
     return strokes - (allocation.get(golferId)?.get(holeNumber) ?? 0);
   };
 
-  const holeCount = cardTeeSet.holes.length;
+  const holeCount = cardHoles.length;
 
   // Per-hole winner in the ladder's "a"/"b" vocabulary (config.a is always "a"
   // here) — undefined when either side hasn't posted a cell yet.
-  const winners: (HoleWinner | undefined)[] = cardTeeSet.holes.map((hole): HoleWinner | undefined => {
+  const winners: (HoleWinner | undefined)[] = cardHoles.map((hole): HoleWinner | undefined => {
     const cellA = cellAt(state.cells, config.a, hole.number);
     const cellB = cellAt(state.cells, config.b, hole.number);
     if (!cellA || !cellB) return undefined;
@@ -52,7 +52,7 @@ export const scoreSinglesMatch = (config: SinglesMatchConfig, state: RoundState)
 
   // The trail is exactly the prefix the ladder consumed (thru): every entry inside it is
   // defined (the ladder stops at the first undefined), hence the non-null assertion.
-  const holes = cardTeeSet.holes.slice(0, ladder.thru).map((hole, i) => ({ hole: hole.number, winner: winners[i]! }));
+  const holes = cardHoles.slice(0, ladder.thru).map((hole, i) => ({ hole: hole.number, winner: winners[i]! }));
 
   return {
     kind: "singles-match",

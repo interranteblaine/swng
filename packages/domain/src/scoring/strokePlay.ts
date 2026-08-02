@@ -14,9 +14,9 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
   // not per hole (see dotsByHole's doc comment). A gross game's allocation is EMPTY, so
   // `dots` below comes out undefined and no net is accumulated: the gross rule is decided in one
   // place (gameStrokeAllocation) rather than re-tested here.
-  const allocation = gameStrokeAllocation(config, state.participants, state.card);
+  const allocation = gameStrokeAllocation(config, state.participants, state.card, state.holes);
   const lines = config.players.map((golferId) => {
-    const { teeSet } = playerTeeSet(state, golferId);
+    const { holes } = playerTeeSet(state, golferId);
     const dots = allocation.get(golferId);
 
     let grossTotal = 0;
@@ -24,7 +24,7 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
     let netTotal = 0;
     let thru = 0;
 
-    for (const hole of teeSet.holes) {
+    for (const hole of holes) {
       const cell = cellAt(state.cells, golferId, hole.number);
       if (!cell) continue;
       thru += 1;
@@ -60,7 +60,7 @@ export const scoreStrokePlay = (config: StrokePlayConfig, state: RoundState): Ga
     // players.ts/state.ts), but the best available running baseline without exposing
     // which holes are individually decided. Scored against whichever total this game
     // scores by (net when net-scored, else gross) — the same selection `leaders` below uses.
-    const parThru = teeSet.holes.slice(0, thru).reduce((sum, hole) => sum + hole.par, 0);
+    const parThru = holes.slice(0, thru).reduce((sum, hole) => sum + hole.par, 0);
     const total = config.scoring === "net" ? netTotal : grossTotal;
     const relativeToPar = total - parThru;
 

@@ -135,7 +135,7 @@ describe("strokesNote", () => {
   // and check the two agree — so a change to the allocation rule can't leave the copy behind.
   it("names exactly the players gameStrokeAllocation gives dots to — the copy can't drift from the dots", () => {
     const tied = [participant(A, "Ann", 20), participant(B, "Bo", 20), participant(C, "Cy", 10), participant(D, "Dee", 10)];
-    const allocation = gameStrokeAllocation(fourball, tied, fixtureLinks18);
+    const allocation = gameStrokeAllocation(fourball, tied, fixtureLinks18, "all");
     const receiving = tied.filter((p) => totalDots(allocation.get(p.golferId) ?? new Map()) > 0).map((p) => p.golferId);
     expect(receiving).toEqual([A, B]); // two, not three — the count the old sentence asserted
     const lowest = Math.min(...tied.map((p) => p.strokes));

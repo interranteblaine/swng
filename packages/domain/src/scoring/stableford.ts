@@ -12,9 +12,9 @@ export const scoreStableford = (config: StablefordConfig, state: RoundState): Ga
   // always agree with the card. Computed once for the whole game, not per player and not per hole
   // (see dotsByHole's doc comment). Stableford is always net: it is a
   // handicap format by construction, so it has no gross arm to choose.
-  const allocation = gameStrokeAllocation(config, state.participants, state.card);
+  const allocation = gameStrokeAllocation(config, state.participants, state.card, state.holes);
   const lines = config.players.map((golferId) => {
-    const { teeSet } = playerTeeSet(state, golferId);
+    const { holes } = playerTeeSet(state, golferId);
     // `?.` below, not a `!` here — symmetric with strokePlay/skins, which read the same map. Safe
     // either way today (stableford is always net, so the allocation always has an entry for every
     // member), but a `!` in one engine and a `?.` in two invites a copy-paste into a kind that DOES
@@ -24,7 +24,7 @@ export const scoreStableford = (config: StablefordConfig, state: RoundState): Ga
     let points = 0;
     let thru = 0;
 
-    for (const hole of teeSet.holes) {
+    for (const hole of holes) {
       const cell = cellAt(state.cells, golferId, hole.number);
       if (!cell) continue;
       thru += 1;

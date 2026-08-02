@@ -315,6 +315,17 @@ describe("roundArchiveSchema", () => {
     expect(parse(roundArchiveSchema, JSON.parse(JSON.stringify(archive)) as unknown)).toEqual(archive);
   });
 
+  // The hole this task exists to close (spec 2026-08-02 §5): `roundArchiveSchemaImpl` had no
+  // `holes` key and was non-strict, so a settled nine parsed through this schema silently lost its
+  // selection and read back as an 18-hole round. Optional, same no-migration shape as the event
+  // schemas above — a stored archive with no `holes` key must parse and must NOT come back with
+  // one added.
+  it("round-trips an archive carrying a nine, and one without", () => {
+    roundTrips(roundArchiveSchema, { ...archive, holes: "front" });
+    const parsed = parse(roundArchiveSchema, archive);
+    expect("holes" in parsed).toBe(false);
+  });
+
   it("rejects a participant with no strokes — the required field the adapters' cast used to wave through", () => {
     const corrupt = { ...archive, participants: [{ golferId: golferId("ann"), name: "Ann", tee: "white" }] };
     expect(() => parse(roundArchiveSchema, corrupt)).toThrow(ContractError);

@@ -300,6 +300,12 @@ const scoreCellSchema: z.ZodType<ScoreCell> = z.object({
 export const roundArchiveSchemaImpl = z.object({
   roundId: roundIdSchema,
   card: courseCardSchema,
+  // Which holes the round set out to play (spec 2026-08-02 §5). Optional, same no-migration shape
+  // as round-created's own field above: absence means the whole card, a TRUE statement about every
+  // archive already on file, so nothing migrates. This is the fix for the hole a reviewer flagged
+  // at Task 4 — before this field existed, a settled nine parsed through this schema silently lost
+  // its selection and read back as an 18-hole round.
+  holes: holeSelectionSchema.optional(),
   participants: z.array(rosterEntrySchema).readonly(),
   games: z.array(gameConfigSchemaImpl).readonly(),
   cells: z.record(z.string(), scoreCellSchema),
@@ -353,6 +359,16 @@ export interface SetPlayedAtResponse {
 }
 
 export const setPlayedAtResponseSchema: z.ZodType<SetPlayedAtResponse> = z.object({
+  events: z.array(roundEventSchema).readonly(),
+});
+
+// POST /rounds/{roundId}/holes: response mirrors setPlayedAt's append idiom — `events` carries
+// exactly what THIS call appended (the one round-holes-set), seq-stamped.
+export interface SetHolesResponse {
+  readonly events: readonly RoundEvent[];
+}
+
+export const setHolesResponseSchema: z.ZodType<SetHolesResponse> = z.object({
   events: z.array(roundEventSchema).readonly(),
 });
 

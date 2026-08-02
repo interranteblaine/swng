@@ -8,6 +8,7 @@ import {
   gameConfigInputSchema,
   joinRoundRequestSchema,
   recordScoreRequestSchema,
+  setHolesRequestSchema,
   setPlayedAtRequestSchema,
   setStrokesRequestSchema,
   startRoundRequestSchema,
@@ -111,6 +112,24 @@ describe("startRoundRequestSchema", () => {
     const parsed = parse(startRoundRequestSchema, request);
     expect(parsed).toEqual(request);
     expect(parsed).not.toHaveProperty("playedAtMs");
+  });
+
+  // spec 2026-08-02 §3a: absent means the whole card — exactly today's behaviour. The wire cannot
+  // check a nine selection against the card (it doesn't hold one); that guard is the application
+  // layer's job, a later task.
+  it("accepts a holes selection on startRound", () => {
+    const request = { course, host: { tee: "white" }, holes: "front" as const };
+    expect(parse(startRoundRequestSchema, request)).toEqual(request);
+  });
+
+  it("rejects a holes value that isn't one of the three", () => {
+    expect(() => parse(startRoundRequestSchema, { course, host: { tee: "white" }, holes: "middle" })).toThrow(ContractError);
+  });
+
+  it("accepts a startRound with no holes and does not invent one", () => {
+    const request = { course, host: { tee: "white" } };
+    const parsed = parse(startRoundRequestSchema, request);
+    expect(parsed).not.toHaveProperty("holes");
   });
 });
 
@@ -254,6 +273,25 @@ describe("setPlayedAtRequestSchema", () => {
   it("rejects a playedAtMs more than two years ahead", () => {
     const farFuture = Date.now() + 3 * 365 * 24 * 60 * 60 * 1_000;
     expect(() => parse(setPlayedAtRequestSchema, { playedAtMs: farFuture })).toThrow(ContractError);
+  });
+});
+
+describe("setHolesRequestSchema", () => {
+  // POST /rounds/{roundId}/holes (spec 2026-08-02 §3b): no golferId — the holes a round set out to
+  // play are a round-level fact, not a per-participant one, so the body carries only the selection.
+  it("round-trips each of the three selections", () => {
+    for (const holes of ["all", "front", "back"] as const) {
+      const request = { holes };
+      expect(parse(setHolesRequestSchema, request)).toEqual(request);
+    }
+  });
+
+  it("rejects a selection that isn't one of the three", () => {
+    expect(() => parse(setHolesRequestSchema, { holes: "middle" })).toThrow(ContractError);
+  });
+
+  it("rejects a request with no holes at all — unlike startRound's optional field, this one is required", () => {
+    expect(() => parse(setHolesRequestSchema, {})).toThrow(ContractError);
   });
 });
 

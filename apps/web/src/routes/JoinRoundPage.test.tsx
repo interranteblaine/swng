@@ -255,6 +255,50 @@ describe("JoinRoundPage — join as yourself (signed in, real name)", () => {
   });
 });
 
+// Spec §6/task 8b: `PeekRoundResponse` gains `holes?` so the join screen can say which nine it is
+// before the golfer commits a tee — the ONE surface the original plan named and never wired up.
+// Rendered through the shared `holeSelectionLabel` (task 8b's own extraction), never a local copy.
+describe("JoinRoundPage — which holes", () => {
+  it("names the nine when the peek carries a selection", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
+    mockedPeekRound.mockResolvedValue({
+      courseName: "Fixture Links 18",
+      teeSets: [{ name: "white", rating: 71.6, slope: 128 }],
+      playedAt: 1_700_000_000_000,
+      holes: "back",
+    });
+
+    renderJoin();
+    await screen.findByText(/playing as/i);
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });
+
+    await screen.findByText(/back 9/i);
+  });
+
+  // The whole card needs no announcement — the join screen has never said "18 holes" and must
+  // not start (an absent `holes` on the peek response is the ordinary case: every round on file
+  // before this arc, and every 18-hole round created since).
+  it("says nothing when the peek carries no selection at all", async () => {
+    signIn();
+    mockedGetMe.mockResolvedValue({ golfer: { golferId: golferId("bo-g"), name: "Bo G" } });
+    mockedPeekRound.mockResolvedValue({
+      courseName: "Fixture Links 18",
+      teeSets: [{ name: "white", rating: 71.6, slope: 128 }],
+      playedAt: 1_700_000_000_000,
+    });
+
+    renderJoin();
+    await screen.findByText(/playing as/i);
+    fireEvent.change(screen.getByLabelText(/code/i), { target: { value: "abc123" } });
+
+    await waitFor(() => expect(mockedPeekRound).toHaveBeenCalledWith("ABC123"));
+    expect(screen.queryByText(/18 holes/i)).toBeNull();
+    expect(screen.queryByText(/front 9/i)).toBeNull();
+    expect(screen.queryByText(/back 9/i)).toBeNull();
+  });
+});
+
 // The form asks NOTHING about your game (spec 2026-07-30 §9): strokes are typed onto the round's
 // roster by whoever agreed them, so joining is a code and a tee.
 describe("JoinRoundPage — no question about your game", () => {

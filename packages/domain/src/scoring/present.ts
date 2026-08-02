@@ -1,7 +1,9 @@
 import type { GameConfig } from "./game.js";
 import { gameMembers } from "./game.js";
 import type { GolferId } from "../ids.js";
+import { DomainError } from "../errors.js";
 import type { Participant } from "../round/participant.js";
+import type { HoleSelection } from "../round/holes.js";
 
 // The games' human meaning as domain truth — names, one-line rules, who a game fits, and how its
 // strokes convention reads in words. One tested copy: every surface that names a game renders
@@ -54,6 +56,32 @@ export const gameKindFits = (kind: GameKind): string => {
     case "stableford":
     case "skins":
       return "2+ players";
+  }
+};
+
+// Which holes a round set out to play (spec 2026-08-02 §3/§6, task 8b) — the ONE label table
+// every surface renders through. CreateRoundPage's create-time picker and SetupPanel's mid-round
+// editor each carried their own copy of these three strings; a join screen rendering a third
+// copy is exactly how "Front 9" on one screen becomes "Front nine" on another, so both are
+// deleted in favor of this. The wording is the one already on screen — pinned by existing web
+// tests, so it cannot move here either.
+//
+// Throws on an unknown arm rather than falling back (the scoreGame/resultOf "unknown-game-kind"
+// idiom, this file's own precedent for a runtime value that bypasses the type system):
+// SetupPanel's own retired `?? "18 holes"` would have rendered the WRONG label for a future
+// fourth arm instead of surfacing the gap.
+export const holeSelectionLabel = (selection: HoleSelection): string => {
+  switch (selection) {
+    case "all":
+      return "18 holes";
+    case "front":
+      return "Front 9";
+    case "back":
+      return "Back 9";
+    default:
+      // The union is exhaustive at compile time; this guards runtime inputs that bypass the type
+      // system (a deserialized peek response, or a stored round, from an older or foreign client).
+      throw new DomainError("unknown-hole-selection", `no label for hole selection "${selection as unknown as string}"`);
   }
 };
 

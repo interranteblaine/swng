@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import type { CourseId, HoleSelection } from "@swng/domain";
-import { cardId } from "@swng/domain";
+import { cardId, holeSelectionLabel } from "@swng/domain";
 import type { CourseView, StartRoundResponse } from "@swng/contracts";
 import { ApiError, createRound, getCourse } from "../api";
 import { SignInCta } from "../auth/SignInCta";
@@ -36,15 +36,11 @@ const toDatetimeLocalValue = (date: Date): string =>
 export const isPlayedAtValueValid = (value: string): boolean => value !== "" && !Number.isNaN(new Date(value).getTime());
 
 // Which holes the round sets out to play (spec 2026-08-02 §3): three choices, in the order the
-// radio group renders them. The SAME three-way labels the round page's own mid-round editor
-// carries (SetupPanel.tsx) — a small presentation array, not golf compute, so the two-file
-// duplication follows this repo's own tolerated precedent (this file's `toDatetimeLocalValue`
-// alongside SetupPanel's own copy).
-const HOLE_SELECTION_OPTIONS: ReadonlyArray<readonly [HoleSelection, string]> = [
-  ["all", "18 holes"],
-  ["front", "Front 9"],
-  ["back", "Back 9"],
-];
+// radio group renders them. The label text itself is domain presentation truth now
+// (`holeSelectionLabel`, task 8b) — this is just the ORDER, not a second copy of the words; the
+// round page's own mid-round editor (SetupPanel.tsx) renders the identical list through the same
+// shared label.
+const HOLE_SELECTIONS: readonly HoleSelection[] = ["all", "front", "back"];
 
 interface LocationState {
   // AddCoursePage's own success navigation (M6 Task 5's "Add a course" hand-off) — a course
@@ -221,10 +217,10 @@ export function CreateRoundPage() {
             <fieldset className="flex flex-col gap-1">
               <legend className={eyebrow}>Holes</legend>
               <div className="flex gap-2">
-                {HOLE_SELECTION_OPTIONS.map(([value, label]) => (
+                {HOLE_SELECTIONS.map((value) => (
                   <label key={value} className="flex items-center gap-1 text-sm text-forest">
                     <input type="radio" name="holes" value={value} checked={holes === value} onChange={() => setHoles(value)} />
-                    {label}
+                    {holeSelectionLabel(value)}
                   </label>
                 ))}
               </div>

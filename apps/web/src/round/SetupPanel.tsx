@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import type { GameState, GolferId, HoleSelection, RosterEntry, RoundState } from "@swng/domain";
+import { holeSelectionLabel } from "@swng/domain";
 import { MAX_STROKES } from "@swng/contracts";
 import type { GameConfigInput } from "@swng/contracts";
 import { ApiError } from "../api";
@@ -50,17 +51,10 @@ const strokesReasonFor = (value: string): string | undefined =>
   value.trim() === "" || isValidStrokes(value) ? undefined : `Enter a whole number from 0 to ${MAX_STROKES}.`;
 
 // Which holes the round set out to play (spec 2026-08-02 §3): three choices, in the order the
-// radio group renders them. The SAME three-way labels CreateRoundPage.tsx's own creation-time
-// picker carries — a small presentation array, not golf compute, so the two-file duplication
-// follows this repo's own tolerated precedent (this file's own `toDatetimeLocalValue` alongside
-// CreateRoundPage's copy).
-const HOLE_SELECTION_OPTIONS: ReadonlyArray<readonly [HoleSelection, string]> = [
-  ["all", "18 holes"],
-  ["front", "Front 9"],
-  ["back", "Back 9"],
-];
-
-const holesLabel = (selection: HoleSelection): string => HOLE_SELECTION_OPTIONS.find(([value]) => value === selection)?.[1] ?? "18 holes";
+// radio group renders them. Just the ORDER — the label text itself is domain presentation truth
+// now (`holeSelectionLabel`, task 8b), the same shared list CreateRoundPage.tsx's own
+// creation-time picker renders through.
+const HOLE_SELECTIONS: readonly HoleSelection[] = ["all", "front", "back"];
 
 export interface SetupPanelProps {
   readonly state: RoundState;
@@ -368,10 +362,10 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
           {editingHoles ? (
             <div className="flex flex-col gap-2">
               <div className="flex gap-2">
-                {HOLE_SELECTION_OPTIONS.map(([value, label]) => (
+                {HOLE_SELECTIONS.map((value) => (
                   <label key={value} className="flex items-center gap-1 text-sm text-forest">
                     <input type="radio" name="holes-edit" value={value} checked={holesValue === value} onChange={() => setHolesValue(value)} />
-                    {label}
+                    {holeSelectionLabel(value)}
                   </label>
                 ))}
               </div>
@@ -394,7 +388,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
               )}
             </div>
           ) : (
-            <p className="text-lg text-forest">{holesLabel(state.holes)}</p>
+            <p className="text-lg text-forest">{holeSelectionLabel(state.holes)}</p>
           )}
         </section>
       )}

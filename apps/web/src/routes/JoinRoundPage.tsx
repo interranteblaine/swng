@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
+import type { HoleSelection } from "@swng/domain";
+import { holeSelectionLabel } from "@swng/domain";
 import type { PeekRoundResponse } from "@swng/contracts";
 import { ApiError, joinRound, peekRound, updateMe } from "../api";
 import { SignInCta } from "../auth/SignInCta";
@@ -51,6 +53,12 @@ export function JoinRoundPage() {
   // SAME designation (course + date) as home/archive/watch (accounts-only identity spec §5,
   // dated onto the played instant by round-played-date spec 2026-08-01 §6).
   const [playedAt, setPlayedAt] = useState<number | undefined>(undefined);
+  // Which holes the round set out to play (spec 2026-08-02 §6, task 8b) — the ONE surface the
+  // plan named and never wired up. Absent means the whole card: `peekRound` omits this key
+  // entirely for an "all" round (application/rounds/peekRound.ts), so undefined here is the
+  // ordinary case and renders nothing, exactly like courseName/playedAt above render nothing
+  // before a peek has landed.
+  const [holes, setHoles] = useState<HoleSelection | undefined>(undefined);
   // The peek's tee sets (name + rating/slope), not just names — the picker shows each tee's
   // rating/slope via teeNumbers.
   const [peekTees, setPeekTees] = useState<readonly PeekTee[] | undefined>(undefined);
@@ -65,6 +73,7 @@ export function JoinRoundPage() {
   useEffect(() => {
     setCourseName(undefined);
     setPlayedAt(undefined);
+    setHoles(undefined);
     setPeekTees(undefined);
     setPeekFailed(false);
     if (upperCode.length !== 6) return undefined; // peek only once the code looks complete
@@ -74,6 +83,7 @@ export function JoinRoundPage() {
         .then((response) => {
           setCourseName(response.courseName);
           setPlayedAt(response.playedAt);
+          setHoles(response.holes);
           setPeekTees(response.teeSets);
           setTee(response.teeSets[0]?.name ?? "");
         })
@@ -134,6 +144,12 @@ export function JoinRoundPage() {
           above) — both are checked here (not just courseName) so TypeScript narrows playedAt to
           its required non-optional roundLabel shape without an unchecked assertion. */}
       {courseName && playedAt !== undefined && <p className="text-sm text-fairway">Joining {roundLabel({ courseName, playedAt })}</p>}
+
+      {/* Which holes the round set out to play (spec 2026-08-02 §6) — rendered ONLY once the peek
+          actually carries a selection. Absence means the whole card, a true statement about every
+          round on file before this arc and every ordinary 18-hole round since, so this line has
+          never appeared for one and must not start now. */}
+      {holes !== undefined && <p className="text-sm text-fairway">This round plays the {holeSelectionLabel(holes)}.</p>}
 
       {!auth.signedIn ? (
         // The join link IS the sign-up funnel (spec §3): signing in through the stock Hosted UI

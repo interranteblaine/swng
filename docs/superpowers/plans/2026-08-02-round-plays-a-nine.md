@@ -19,7 +19,11 @@
 - `intendedHoles` is **total**: on a card with one nine, every selection resolves to that nine. It never throws.
 - **The settled wire must stay byte-unchanged** apart from the one additive optional `holes` on the archive.
 - Golf logic lives in `@swng/domain`; `apps/web` renders. New compute names go on the ESLint banlist and are re-exported through `@swng/client` (Task 7).
-- `pnpm validate` must pass at every commit. Run it before each commit step.
+- `pnpm validate` must pass at every commit. Run it before each commit step. **One documented
+  exception, closed immediately:** Task 1 alone cannot be green, because
+  `packages/contracts/src/round.test.ts` carries a compile-time parity guard requiring
+  `roundEventSchema` to cover every `RoundEvent` arm — so the domain arm and its wire schema must
+  land together. Task 1b (below) does that and restores green. Tasks 2 onward are green as normal.
 - Commit messages: sentence-case subject, no scope-less noise; end with the `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>` trailer.
 
 ---
@@ -262,6 +266,92 @@ git add packages/domain/src/round/holes.ts packages/domain/src/round/holes.test.
   packages/domain/src/round/events.ts packages/domain/src/round/state.ts \
   packages/domain/src/round/state.test.ts packages/domain/src/index.ts
 git commit -m "feat(domain): a round records the holes it set out to play"
+```
+
+---
+
+### Task 1b: The event schema, so the parity guard holds
+
+> Added during execution (2026-08-02). Task 1's domain arm cannot compile against
+> `packages/contracts/src/round.test.ts`'s type-parity guard until `roundEventSchema` covers it.
+> These two items were originally in Task 5; they move here so `pnpm validate` is green from this
+> commit onward instead of staying red across three tasks that need it as their gate. Task 5 keeps
+> the archive schema, the request schemas and the peek — those depend on `RoundArchive.holes`,
+> which does not exist until Task 4.
+
+**Files:**
+- Modify: `packages/contracts/src/round.ts`
+- Modify: `packages/contracts/src/round.test.ts`
+
+**Interfaces:**
+- Consumes: `HoleSelection` from `@swng/domain` (Task 1).
+- Produces: `holeSelectionSchema: z.ZodType<HoleSelection>` — Task 5 imports it into `commands.ts`
+  and `courses.ts`.
+
+- [ ] **Step 1: See the guard fail**
+
+Run: `pnpm typecheck`
+Expected: FAIL in `packages/contracts` — `round.test.ts` reports that
+`RoundEventBase & { kind: "round-holes-set"; holes: HoleSelection }` is not assignable to the
+schema's inferred union. That error IS the guard doing its job; it is what this task closes.
+
+- [ ] **Step 2: Add the schema**
+
+In `packages/contracts/src/round.ts`, above the event union:
+
+```ts
+// Which holes the round set out to play (spec 2026-08-02 §3). Optional on the stored arms and on
+// the archive: absence means the whole card, which is a TRUE statement about every round already
+// stored, so nothing migrates.
+export const holeSelectionSchema = z.enum(["all", "front", "back"]);
+```
+
+Add `holes: holeSelectionSchema.optional(),` to the `round-created` object, and the new arm beside
+`round-played-at-set`:
+
+```ts
+  z.object({ ...envelope, kind: z.literal("round-holes-set"), holes: holeSelectionSchema }),
+```
+
+Do **not** touch `roundArchiveSchemaImpl`, the request schemas, or the peek — those are Task 5.
+
+- [ ] **Step 3: Pin both directions**
+
+Add to `packages/contracts/src/round.test.ts` — reuse that file's real fixture names for a valid
+`round-created` event and a bare envelope rather than inventing new ones:
+
+```ts
+describe("holes on the wire (spec 2026-08-02)", () => {
+  it("round-trips a genesis carrying a nine", () => {
+    roundTrips(roundEventSchema, { ...genesisEvent, holes: "back" });
+  });
+
+  // The no-migration pin: a stored genesis with no `holes` key parses, and stays without one.
+  it("parses a genesis with no holes and does not invent one", () => {
+    const parsed = parse(roundEventSchema, genesisEvent);
+    expect("holes" in parsed).toBe(false);
+  });
+
+  it("round-trips the correction event", () => {
+    roundTrips(roundEventSchema, { ...envelopeFixture, kind: "round-holes-set", holes: "front" });
+  });
+
+  it("rejects a selection that is not one of the three", () => {
+    expect(() => parse(roundEventSchema, { ...envelopeFixture, kind: "round-holes-set", holes: "middle" })).toThrow(ContractError);
+  });
+});
+```
+
+- [ ] **Step 4: Green**
+
+Run: `pnpm validate`
+Expected: exit 0 — the parity guard now passes, and the whole repo is green again.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/contracts/src/round.ts packages/contracts/src/round.test.ts
+git commit -m "feat(contracts): the holes selection on the round event log"
 ```
 
 ---
@@ -800,10 +890,15 @@ git commit -m "feat(domain): a settled nine is a nine in the golfer's record"
 - Modify: `packages/contracts/src/courses.ts` (`peekRoundResponseSchema.holes`)
 - Modify: `packages/contracts/src/round.test.ts`, `commands.test.ts`, `courses.test.ts`
 
+> **Amended during execution (2026-08-02):** the event-schema half of this task — the
+> `holeSelectionSchema` definition, `round-created.holes?`, and the `round-holes-set` arm — moved
+> forward to **Task 1b** to keep the repo green. What remains here is the archive schema, the
+> request schemas, and the peek. Skip Step 3's `round.ts` event-union edits and the Step 1 tests
+> that cover them; they are already done.
+
 **Interfaces:**
-- Consumes: `HoleSelection` from `@swng/domain`.
+- Consumes: `HoleSelection` from `@swng/domain`; `holeSelectionSchema` from `./round.js` (Task 1b).
 - Produces:
-  - `holeSelectionSchema: z.ZodType<HoleSelection>`
   - `setHolesRequestSchema` / `SetHolesRequest` = `{ holes: HoleSelection }`
   - `SetHolesResponse` = `{ events: RoundEvent[] }` (same shape as `SetPlayedAtResponse`)
   - `StartRoundRequest.holes?: HoleSelection`

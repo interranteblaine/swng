@@ -459,6 +459,28 @@ describe("round is a sealed leaf — no crewId on state or archive", () => {
   });
 });
 
+// holes on the archive (spec 2026-08-02 §3a): a minimal genesis/join/start/finalize log, the
+// same shape state.test.ts's own genesis/joinA/started/finalized fixtures use, kept local to this
+// describe block since no other test in this file needs a bare single-player round.
+describe("holes on the archive (spec 2026-08-02 §3a)", () => {
+  const at = (wallMs: number) => ({ wallMs, counter: 0, deviceId: deviceId("test") });
+  const genesis: RoundEvent = { kind: "round-created", roundId: roundId("r-holes"), card: fixtureLinks, playedAtMs: 1, opId: opId("op-holes-created"), hlc: at(1), authorId: A };
+  const joinA: RoundEvent = { kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", strokes: 0 }, opId: opId("op-holes-join"), hlc: at(2), authorId: A };
+  const started: RoundEvent = { kind: "round-started", opId: opId("op-holes-started"), hlc: at(3), authorId: A };
+  const finalized: RoundEvent = { kind: "round-finalized", opId: opId("op-holes-finalized"), hlc: at(4), authorId: A };
+
+  it("records the selection when the round played a nine", () => {
+    const frontGenesis: RoundEvent = { ...genesis, holes: "front" };
+    expect(settleRound([frontGenesis, joinA, started, finalized]).holes).toBe("front");
+  });
+
+  // The byte-identity pin: a whole-card round settles to exactly the archive it always did, with
+  // no new key at all — which is what makes every stored snapshot deserialize unchanged.
+  it("omits the key entirely for a whole-card round", () => {
+    expect("holes" in settleRound([genesis, joinA, started, finalized])).toBe(false);
+  });
+});
+
 // unresolvedGames is the finalize dialog's live readiness view (task 3 of the "domain owns the
 // golf math" arc) — the SAME must-resolve set settleRound's own throw path enforces above,
 // walked without throwing. This deck was hand-picked to match apps/web's own former

@@ -6,6 +6,7 @@ import type { GameConfig } from "../scoring/game.js";
 import { gameMembers, scoreGame } from "../scoring/game.js";
 import type { GameResult } from "../scoring/result.js";
 import { resultOf } from "../scoring/result.js";
+import { intendedHoles, type HoleSelection } from "./holes.js";
 import type { RosterEntry } from "./participant.js";
 import type { RoundEvent } from "./events.js";
 import type { RoundState, ScoreCell } from "./state.js";
@@ -24,6 +25,10 @@ export interface RoundArchive {
   // (CrewStore's counted rounds), so the outbound link this field used to be simply doesn't
   // exist anymore.
   readonly card: CourseCard;
+  // Which holes this round set out to play (spec 2026-08-02 §3a). Present ONLY when it is not
+  // "all" — absence is the default and a true statement about every round settled before this
+  // existed, so every stored snapshot deserializes and settles byte-identically.
+  readonly holes?: HoleSelection;
   // Departed participants who settled carry `departed: true` (RosterEntry's optional flag);
   // everyone else has no such key — additive-optional so old snapshots deserialize unchanged.
   // A departed participant with nothing to aggregate is omitted here entirely (see settleRound).
@@ -89,8 +94,8 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   // there is genuinely nothing to aggregate for them. Every non-departed participant is kept
   // unconditionally (this filter only ever removes a departed one).
   const hasScoredHole = (entry: RosterEntry): boolean => {
-    const teeSet = findTeeSet(state.card, entry.tee);
-    return teeSet.holes.some((hole) => cellAt(state.cells, entry.golferId, hole.number) !== undefined);
+    const holes = intendedHoles(findTeeSet(state.card, entry.tee), state.holes);
+    return holes.some((hole) => cellAt(state.cells, entry.golferId, hole.number) !== undefined);
   };
   const inSomeGame = (golferId: GolferId): boolean => state.games.some((config) => gameMembers(config).includes(golferId));
   const settledParticipants = state.participants.filter((entry) => !entry.departed || hasScoredHole(entry) || inSomeGame(entry.golferId));
@@ -107,6 +112,7 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   return {
     roundId: state.id,
     card: state.card,
+    ...(state.holes !== "all" ? { holes: state.holes } : {}),
     participants: settledParticipants,
     games: state.games,
     // Cells ride verbatim, including cleared ones — this is the fold's own state.cells, not
@@ -124,7 +130,8 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
 // the (now-deleted) web finalizeReadiness.ts both used: the first tee set's hole numbering —
 // shared canonically by every tee at a course, since only yardage/rating/slope vary per tee.
 const missingHolesFor = (state: RoundState, golfer: GolferId): readonly number[] => {
-  const holes = state.card.teeSets[0]?.holes ?? [];
+  const teeSet = state.card.teeSets[0];
+  const holes = teeSet ? intendedHoles(teeSet, state.holes) : [];
   return holes.filter((hole) => cellAt(state.cells, golfer, hole.number) === undefined).map((hole) => hole.number);
 };
 

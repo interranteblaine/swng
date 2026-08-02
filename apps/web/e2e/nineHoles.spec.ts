@@ -11,6 +11,7 @@ import {
   joinRoundDirect,
   loadWebEnv,
   mintAccountGolfer,
+  openGamePanel,
   pollUntil,
   readJoinCode,
   setStrokesInBrowser,
@@ -39,7 +40,14 @@ import type { AccountGolfer } from "./support.js";
 // One browser page, one host (Nia) who drives it, one out-of-browser companion (Robin) who joins
 // as herself via joinRoundDirect — score-for-anyone (product.md §9) means Nia's own page can enter
 // both players' scores, the same one-page structure strokesCorrection.spec.ts already uses.
-test.describe.serial("a round declares Back 9 — strokes allocate onto the nine actually played, the game resolves on its own, and the record counts a nine", () => {
+//
+// Test 3 (review-added, beyond the brief): a mid-round correction. POST /rounds/{roundId}/holes
+// and SetupPanel's own "Edit holes" affordance had no automated live coverage anywhere — the
+// closest structural sibling this suite already has for "a live round, a mid-round change, an
+// assertion that a number moved (or here, didn't)" is strokesCorrection.spec.ts's roster editor.
+// This walks the round's own design-doc guarantee directly: switching the selection out to the
+// whole card and back to Back 9 must never lose an already-typed score.
+test.describe.serial("a round declares Back 9 — strokes allocate onto the nine actually played, a mid-round Holes correction never loses a score, the game resolves on its own, and the record counts a nine", () => {
   let page: Page;
   let httpUrl: string;
   let nia: AccountGolfer;
@@ -52,6 +60,10 @@ test.describe.serial("a round declares Back 9 — strokes allocate onto the nine
   // net skins pot below). Simple, deterministic, and irrelevant to whether the skins game itself
   // resolves — allPlayersComplete only checks that every intended hole carries a cell.
   const HOLE_SCORE = 4;
+  // fixtureLinks18 carries exactly one tee ("white") — derived once, here, rather than typed as a
+  // literal a second time at each site that needs it (review finding: a hard-coded "white" beside
+  // this SAME derived expression a few lines below it is the file disagreeing with itself).
+  const TEE_NAME = fixtureLinks18.teeSets[0]!.name;
 
   test.beforeAll(async ({ browser }) => {
     nia = await mintAccountGolfer("nine-nia", "Nia");
@@ -88,7 +100,7 @@ test.describe.serial("a round declares Back 9 — strokes allocate onto the nine
     roundId = new URL(page.url()).pathname.replace("/round/", "");
 
     const joinCode = await readJoinCode(page);
-    await joinRoundDirect(httpUrl, robin, { code: joinCode, tee: fixtureLinks18.teeSets[0]!.name });
+    await joinRoundDirect(httpUrl, robin, { code: joinCode, tee: TEE_NAME });
     await waitForParticipant(page, "Robin");
 
     // The round's own held selection, on screen (SetupPanel.tsx's "Holes" region — a bare
@@ -114,14 +126,23 @@ test.describe.serial("a round declares Back 9 — strokes allocate onto the nine
 
   test("2: Nia's 5 strokes allocate onto the nine actually played, ranked by ITS OWN difficulty — derived from the seeded card's real stroke indexes, not hard-coded", async () => {
     await setStrokesInBrowser(page, "Nia", NIA_STROKES);
-    await expect(page.getByRole("list", { name: "Roster" }).locator("li").filter({ hasText: "Nia" })).toContainText(`white · ${NIA_STROKES} strokes`);
+    await expect(page.getByRole("list", { name: "Roster" }).locator("li").filter({ hasText: "Nia" })).toContainText(`${TEE_NAME} · ${NIA_STROKES} strokes`);
 
     // The oracle: the SAME domain function the card itself renders through
     // (roundStrokeAllocation -> dotsByHole, packages/domain/src/scoring/allocation.ts), fed the
     // real back-nine holes off the real seeded card (intendedHoles(teeSet, "back")) — never a
-    // hand-typed hole list. This is exactly the defect this arc fixes: a regression that allocated
-    // off the raw 18-hole stroke index (holes 1-18) rather than ranking these nine holes among
-    // THEMSELVES would strand dots on a different subset of this same back nine.
+    // hand-typed hole list. Calling the SAME function the app calls means a regression INSIDE
+    // that function (e.g. reverting to raw strokeIndex comparison instead of ranking these nine
+    // holes among themselves) would corrupt the oracle and the DOM identically, so a bare
+    // per-hole "does the DOM match the oracle" check could not, on its own, catch it — what
+    // actually breaks that circularity is the toHaveLength(5) assertion two lines down: it is a
+    // pure arithmetic fact (5 strokes over 9 holes, base 0 extra 5) independent of which specific
+    // holes the function names, so a buggy allocateStrokes that under- or over-counts (e.g. the
+    // raw-strokeIndex regression this arc fixed, which would qualify only 2 of these 9 holes
+    // instead of 5 — see this repo's own strokes.ts doc comment) fails HERE, on the oracle call
+    // alone, with no DOM involved at all. The per-hole DOM checks below then catch the OTHER
+    // failure class: the app computing the right dots but drawing them on the wrong cells, or not
+    // drawing them at all.
     const backNine = intendedHoles(fixtureLinks18.teeSets[0]!, "back");
     const dots = dotsByHole(NIA_STROKES, backNine);
     const dotHoles = backNine.filter((h) => (dots.get(h.number) ?? 0) > 0).map((h) => h.number);
@@ -133,15 +154,68 @@ test.describe.serial("a round declares Back 9 — strokes allocate onto the nine
     expect(noDotHoles).toHaveLength(4);
 
     for (const holeNumber of dotHoles) {
-      await expect(page.getByRole("button", { name: `Nia hole ${holeNumber}`, exact: true })).toContainText("●");
+      const cell = page.getByRole("button", { name: `Nia hole ${holeNumber}`, exact: true });
+      await expect(cell).toContainText("●");
+      // base === 0 here, so every dot-bearing hole gets exactly ONE dot, never two — pin the
+      // count, not just presence, or a regression that double-allocates on the right holes
+      // (still summing wrong) would pass a bare toContainText("●") check.
+      await expect(cell).not.toContainText("●●");
     }
     for (const holeNumber of noDotHoles) {
       await expect(page.getByRole("button", { name: `Nia hole ${holeNumber}`, exact: true })).not.toContainText("●");
     }
   });
 
-  test("3: a net skins game, scored for both players over the nine, resolves on its own — finalize never needs 'End unfinished games'", async () => {
-    test.setTimeout(150_000); // 18 real score posts to beta plus a finalize round-trip — courseEntry.spec.ts's played-date gate gives itself the same headroom for a lighter version of this exact story
+  test("3: a mid-round correction — Edit holes to 18 and back through the real SetupPanel affordance never loses an already-typed score", async () => {
+    // No new capability under test on the wire side is missed here: this is
+    // POST /rounds/{roundId}/holes (apps/web/src/api.ts's setHoles), driven through the SAME
+    // SetupPanel.tsx "Holes" editor the create-time choice's own mid-round correction affordance
+    // is — nothing about this arc's round-plays-a-nine story is covered live until this test
+    // exercises it. Chosen hole is DERIVED (backNine's own first entry, hole 10), not a literal —
+    // consistent with test 2's own discipline.
+    const backNine = intendedHoles(fixtureLinks18.teeSets[0]!, "back");
+    const correctionHole = backNine[0]!.number;
+    const CORRECTION_SCORE = 7; // distinct from HOLE_SCORE (4) below, so a later overwrite can't be mistaken for persistence
+
+    await enterScore(page, "Nia", correctionHole, CORRECTION_SCORE);
+    const correctionCell = page.getByRole("button", { name: `Nia hole ${correctionHole}`, exact: true });
+    await expect(correctionCell).toHaveText(new RegExp(`^\\D*${CORRECTION_SCORE}`));
+
+    // Every button/radio below is scoped to the "Holes" region (SetupPanel.tsx:351-394) — the
+    // roster's own strokes editor and the "Date played" editor each render their own same-named
+    // Save/Cancel pair, so an unscoped lookup would be ambiguous the instant either is open.
+    const holesSection = page.getByRole("region", { name: "Holes" });
+    await expect(holesSection).toContainText("Back 9");
+    await holesSection.getByRole("button", { name: "Edit holes" }).click();
+    await holesSection.getByRole("radio", { name: "18 holes", exact: true }).check();
+    await holesSection.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(holesSection).toContainText("18 holes");
+
+    // The card grows to the whole card — OUT/IN/TOT all present now, holes 1-9 drawn again.
+    await expect(page.locator("tbody tr")).toHaveCount(18);
+    await expect(page.getByRole("row", { name: "Hole 1", exact: true })).toBeVisible();
+    await expect(page.getByRole("row", { name: "Hole 9", exact: true })).toBeVisible();
+    await expect(page.getByRole("row", { name: "OUT", exact: true })).toBeVisible();
+    await expect(page.getByRole("row", { name: "IN", exact: true })).toBeVisible();
+
+    // The load-bearing guarantee (SetupPanel.tsx's own teaching line: "Changing this redraws the
+    // card. Nothing you've scored is lost.") — the already-typed score at correctionHole is
+    // untouched by growing the card around it. Cells are keyed by hole number, never cleared or
+    // rewritten by a selection change.
+    await expect(correctionCell).toHaveText(new RegExp(`^\\D*${CORRECTION_SCORE}`));
+
+    // Switch back — the guarantee is a round trip, not a one-way street.
+    await holesSection.getByRole("button", { name: "Edit holes" }).click();
+    await holesSection.getByRole("radio", { name: "Back 9", exact: true }).check();
+    await holesSection.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(holesSection).toContainText("Back 9");
+
+    await expect(page.locator("tbody tr")).toHaveCount(9);
+    await expect(correctionCell).toHaveText(new RegExp(`^\\D*${CORRECTION_SCORE}`));
+  });
+
+  test("4: a net skins game, scored for both players over the nine, resolves on its own — finalize never needs 'End unfinished games'", async () => {
+    test.setTimeout(150_000); // 18 real score posts to beta plus a finalize round-trip — fieldTest.spec.ts:242 gives itself 180s for 36 posts (4 players x 9 holes), the closest real analogue to this budget
 
     await addSkinsGame(page, ["Nia", "Robin"]);
     await expect(chip(page, "Skins (net)")).toBeVisible();
@@ -151,6 +225,24 @@ test.describe.serial("a round declares Back 9 — strokes allocate onto the nine
       await enterScore(page, "Nia", hole.number, HOLE_SCORE);
       await enterScore(page, "Robin", hole.number, HOLE_SCORE);
     }
+
+    // DERIVED BY HAND over packages/domain/src/scoring/skins.ts's own algorithm — proves the
+    // dots actually FED the game across the whole nine, which "the dialog didn't offer the escape
+    // hatch" below does not: that only proves allPlayersComplete, not that the pot moved with the
+    // strokes. Both players score HOLE_SCORE (4) on every hole, so each hole is decided by net
+    // alone: Nia's five dot-bearing holes (10, 12, 13, 15, 17 — test 2's own derived `dotHoles`)
+    // net 4-1=3 against Robin's undotted 4, so Nia wins each of those pots outright; the other
+    // four holes (11, 14, 16, 18) net 4-4, a tie, so each hole's pot carries into the next. Holes
+    // play in order 10..18 (skins.ts's own `holes` sequencing): hole 10's bare pot (1) goes to
+    // Nia (running 1); hole 11 ties, carrying 1; hole 12's pot (1+1=2) goes to Nia (running 3);
+    // hole 13's bare pot (1) goes to Nia (running 4); hole 14 ties, carrying 1; hole 15's pot
+    // (1+1=2) goes to Nia (running 6); hole 16 ties, carrying 1; hole 17's pot (1+1=2) goes to Nia
+    // (running 8); hole 18 — the LAST hole — ties again, and with no next hole for the pot to
+    // carry into, that final 1 is stranded as carriedOut. Robin never wins a hole outright.
+    const skinsPanel = await openGamePanel(page, "Skins (net)");
+    await expect(skinsPanel).toContainText("Nia 8");
+    await expect(skinsPanel).toContainText("Robin 0");
+    await expect(skinsPanel).toContainText("1 carried out");
 
     // allPlayersComplete (packages/domain/src/scoring/players.ts) is now true for both players
     // over every hole THIS ROUND set out to play — the skins game resolves without either player
@@ -169,7 +261,7 @@ test.describe.serial("a round declares Back 9 — strokes allocate onto the nine
     await expect(page.getByRole("heading", { name: "Final results" })).toBeVisible({ timeout: 60_000 });
   });
 
-  test("4: the golfer's record counts a nine — the history row reads nine holes with its gross, and Best 9 names this round", async () => {
+  test("5: the golfer's record counts a nine — the history row reads nine holes with its gross, and Best 9 names this round", async () => {
     const record = await pollUntil(
       () => getMyRecordDirect(httpUrl, nia.tokens.idToken),
       (r) => r.history.some((line) => line.roundId === roundId),

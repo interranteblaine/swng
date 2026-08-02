@@ -177,8 +177,8 @@ export function ScorecardGrid({ state, recordScore, readOnly = false }: Scorecar
   // OUT / IN only mean anything when the round plays two nines. A round that set out to play ONE
   // nine gets the single unambiguous TOT row, exactly as a nine-hole card already does — and the
   // back nine must take that path too, so the split is by COUNT, not by hole number (a back
-  // nine's hole numbers are all above 9, so a numeric split would wrongly treat it as one whole
-  // 18-hole card's worth of "OUT" and nothing for "IN").
+  // nine's hole numbers are all above 9, so a numeric split — `h.number <= 9` / `h.number > 9` —
+  // would put NOTHING in OUT and all nine holes in IN, rather than treating it as one nine).
   const outHoles = holes.slice(0, 9);
   const inHoles = holes.slice(9);
   const segments: readonly { readonly label: string; readonly holes: readonly Hole[] }[] =

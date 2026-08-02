@@ -431,6 +431,10 @@ describe("ScorecardGrid — the round's own hole selection", () => {
     expect(screen.queryByRole("row", { name: "Hole 9" })).toBeNull();
     expect(screen.getByRole("row", { name: "Hole 10" })).toBeTruthy();
     expect(screen.getByRole("row", { name: "Hole 18" })).toBeTruthy();
+    // The three checks above already rule out renumbering (no "Hole 9", "Hole 10" and "Hole 18"
+    // both present); this closes the coverage exactly, by count — 1 header row + 9 hole rows + 1
+    // TOT row (no OUT/IN), ruling out a stray extra/missing row the name-only checks can't see.
+    expect(screen.getAllByRole("row")).toHaveLength(11);
 
     // One unambiguous total row, exactly as a nine-hole card already renders — no OUT/IN, even
     // though every hole number here is above 9 (the split must be positional, not by hole number,

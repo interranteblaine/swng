@@ -143,17 +143,23 @@ describe("strokesSummary", () => {
   // The task-3+3b review's own proof, executed rather than just asserted in prose: strokesSummary
   // renders only totalDots(...) per member, and allocateStrokes' allocation always sums exactly to
   // its input for ANY hole list — so the rendered line is provably invariant under the round's
-  // hole selection, even though gameDots' underlying per-hole map (pinned above) genuinely moves.
-  it("renders the identical line under every hole selection — the total is invariant even though the per-hole map moves", () => {
+  // hole selection. Made to actually PIN the threading (review fix, task-7 review Minor 2): a
+  // hardcoded "all" inside gameDots would satisfy the old form of this test too, since it only
+  // compared strokesSummary's own output to itself — it never proved the selection argument does
+  // anything. Asserting the underlying per-hole MAPS actually differ under "front" vs "back" is
+  // what makes ignoring the parameter fail here; the invariant line then states the real claim —
+  // the map moves, the summary doesn't — instead of only the second half of it.
+  it("the per-hole map moves under a different hole selection, but strokesSummary's rendered line does not", () => {
     const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 3)];
     const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] };
 
-    const all = strokesSummary(config, participants, fixtureLinks18, "all");
+    const frontHoles = [...gameDots(config, participants, fixtureLinks18, "front").get(BO)!.keys()];
+    const backHoles = [...gameDots(config, participants, fixtureLinks18, "back").get(BO)!.keys()];
+    expect(frontHoles).not.toEqual(backHoles); // the allocation genuinely lands on different holes...
+
     const front = strokesSummary(config, participants, fixtureLinks18, "front");
     const back = strokesSummary(config, participants, fixtureLinks18, "back");
-
-    expect(all).toBe("Bo 3 dots");
-    expect(front).toBe(all);
-    expect(back).toBe(all);
+    expect(front).toBe("Bo 3 dots"); // ...while the rendered TOTAL — what a golfer actually reads — does not
+    expect(back).toBe(front);
   });
 });

@@ -139,6 +139,25 @@ have nothing to do with nines.
 
 The record wire does not change. `holes` and `par` were always derived — from the wrong hole set.
 
+### 4a. A consequence this section missed: the course record (correction, dated 2026-08-02, whole-branch review Finding 1)
+
+This section traced the per-round-line effect (`line.holes`/`line.par`/`line.score`, Best 9, the
+average) — all of which were already split by hole count before this arc (`bestsOf`,
+`crewScoreboard`, `milestonesOf`'s `firstBroke` gate). It did not trace the effect one fold
+further, into `domain/golfer/courseRecord.ts`'s "Your record here": `best`/`scoringAverage` were
+NOT split by hole count, because before this arc one `courseId` could only ever produce lines of
+one hole count, so a single number was safe. This arc breaks that invariant — play the back nine
+at Casa Verde on league night and 18 on Saturday, and the course record's `best`/`scoringAverage`
+silently mix a 45 with a 92, reading as a course where you've never broken 80. Nobody owned this
+because the spec never named the course record at all; caught in whole-branch review, not here.
+
+Fixed to mirror `bestsOf` exactly: `best9?`/`best18?` and `scoringAverage9?`/`scoringAverage18?`
+on `CourseRecord`, split the same way, never mixed. This IS a wire change to `GET
+/me/courses/{courseId}/record`, contrary to this section's own "the record wire does not change"
+above — that claim was true of the per-round history line, not of this course-level aggregation.
+The per-hole `insights` block needed no change: it aggregates by hole NUMBER, so a nine simply
+contributes nine holes to it, same as always.
+
 ## 5. The 13-hole round: already correct, and untouched
 
 You set out to play 18 and stop after 13. Intended is 18; scored is 13. **That is exactly today's
@@ -191,8 +210,21 @@ genuinely says nine.
 
 **Lambda-first, required.** `startRoundRequestSchema` is not `.strict()`, so a new bundle sending
 `holes` to an old lambda has it silently stripped — the golfer picks Front 9 and gets an
-eighteen-hole round with no error anywhere. The reverse (old bundle, new lambda) is inert: it
-never sends the field and every round it creates is `"all"`, which is what it means today.
+eighteen-hole round with no error anywhere. The reverse (old bundle, new lambda) is inert **for a
+round an old bundle creates and plays alone** — it never sends the field and every round it
+creates is `"all"`, which is what it means today.
+
+**Correction (dated 2026-08-02, whole-branch review Finding 7): that "inert" claim is overstated
+for a mixed-bundle round.** If one player has refreshed to the new bundle and another hasn't, and
+either the round was created with a non-`"all"` selection or the fresh player corrects it live via
+`setHoles`, a `round-holes-set` event lands on the log. `roundEventSchema` is a discriminated
+union, so the stale bundle's `GET /events` parse throws on that unrecognized discriminator — that
+device stops syncing until it refreshes. This repo has an accepted precedent for exactly this
+shape of skew (the `cleared` `HoleResult` arm, 2026-07-19, landed the same way under the same
+lambda-first reasoning), and `client/src/session.ts`'s retry loop stays armed on any non-transport
+failure — including a contract-parse failure under deploy skew — so the affected device keeps
+retrying and recovers on its next refresh rather than wedging silently. The blast radius is
+bounded (one stale device, mid-deploy, beta-only) but real, and "inert" was the wrong word for it.
 
 No migration, no wipe, no rebuild: absence already means the whole card.
 

@@ -171,6 +171,17 @@ when a refresh genuinely dies, now without a user-visible redirect.
   keep sentence-case matchers; e2e locators on uppercase-styled controls move to
   case-insensitive regex names during reconciliation — verified locator-by-locator against
   the JSX (the games-legibility lesson).
+
+  **Correction (dated 2026-08-02, round-plays-a-nine whole-branch review Finding 8):** the
+  Chromium half of that claim does not hold. Two independent reads of the pinned
+  `playwright-core@1.61.1` bundle's accessible-name computation
+  (`getElementAccessibleName`) found `text-transform` referenced **zero** times in that path
+  — it accumulates raw `textContent`, uppercase or not. The belief was never falsified by the
+  gate that motivated it, because a case-insensitive regex passes identically whether or not
+  `text-transform` affects the accname — the fix worked, but not for the stated reason, and
+  it has since propagated as guidance to other work. This correction leaves the happy-dom
+  half of the original claim ("does not [apply `text-transform`]") **un-re-examined** — it was
+  not the part checked here, and this note makes no claim about it either way.
 - `pnpm validate` green at every commit. Close-out is controller-run: whole-branch review →
   `publish:web:beta` (no backend deploy) → `pnpm e2e:beta` ×2 (backend-regression sanity) →
   full `pnpm e2e:field` → an **adversarial USE pass** on the deployed beta.swng.golf in a

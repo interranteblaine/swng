@@ -442,7 +442,7 @@ describe("RoundPage", () => {
     // inside LiveRound, which itself only renders pre-finalize/pre-abandon. Pinned here rather
     // than left implicit: the abandoned case already has its own dedicated "no scoring chrome"
     // test below, but nothing previously asserted the SAME absence on an already-final round.
-    expect(screen.queryByRole("region", { name: /when did you play/i })).toBeNull();
+    expect(screen.queryByRole("region", { name: /date played/i })).toBeNull();
 
     const cell = screen.getByRole("button", { name: "Ann hole 1" });
     expect(cell.hasAttribute("disabled")).toBe(true);
@@ -1076,11 +1076,11 @@ describe("RoundPage", () => {
     // Before: the page is titled with the round's genesis played date.
     expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: PLAYED_AT_MS })} · swng`);
 
-    const editor = screen.getByRole("region", { name: "When did you play?" });
+    const editor = screen.getByRole("region", { name: "Date played" });
     fireEvent.click(within(editor).getByRole("button", { name: "Edit" }));
     // A DIFFERENT value than the field was seeded with — SetupPanel treats a Save that changed
     // nothing as a Cancel (its own no-op guard), which would make this pass with the API call gone.
-    const field = within(editor).getByLabelText("When did you play?");
+    const field = within(editor).getByLabelText("Date played");
     expect((field as HTMLInputElement).value).not.toBe(correctedValue);
     fireEvent.change(field, { target: { value: correctedValue } });
     fireEvent.click(within(editor).getByRole("button", { name: "Save" }));
@@ -1093,7 +1093,7 @@ describe("RoundPage", () => {
     // Half two: sync() follows, so THIS device re-renders off the corrected fold — the page title
     // (RoundPage's own usePageTitle over state.playedAtMs) and the editor's static line both move.
     await waitFor(() => expect(document.title).toBe(`${roundLabel({ courseName: "Fixture Links", playedAt: corrected.getTime() })} · swng`));
-    expect(screen.getByRole("region", { name: "When did you play?" }).textContent).toContain(
+    expect(screen.getByRole("region", { name: "Date played" }).textContent).toContain(
       new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(corrected),
     );
   });

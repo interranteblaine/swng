@@ -532,7 +532,7 @@ describe("SetupPanel — setting a player's strokes", () => {
 // live — the SAME roster-strokes-editor idiom applied to a round-level fact, so these mirror the
 // "setting a player's strokes" tests above one for one.
 describe("SetupPanel — the played date", () => {
-  const region = () => screen.getByRole("region", { name: "When did you play?" });
+  const region = () => screen.getByRole("region", { name: "Date played" });
 
   it("Edit opens a datetime-local editor holding the round's own value; the static line and the editor are mutually exclusive", async () => {
     const user = userEvent.setup();
@@ -541,11 +541,11 @@ describe("SetupPanel — the played date", () => {
     renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     expect(within(region()).getByText(/Jun 12, 2026/)).toBeTruthy();
-    expect(within(region()).queryByLabelText("When did you play?")).toBeNull();
+    expect(within(region()).queryByLabelText("Date played")).toBeNull();
 
     await user.click(within(region()).getByRole("button", { name: "Edit" }));
 
-    const input = within(region()).getByLabelText("When did you play?") as HTMLInputElement;
+    const input = within(region()).getByLabelText("Date played") as HTMLInputElement;
     expect(input.value).toBe("2026-06-12T09:30");
 
     // The swap (2026-07-20 review finding, applied here): the static line must NOT still be on
@@ -560,7 +560,7 @@ describe("SetupPanel — the played date", () => {
     renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     await user.click(within(region()).getByRole("button", { name: "Edit" }));
-    const input = within(region()).getByLabelText("When did you play?");
+    const input = within(region()).getByLabelText("Date played");
     // A back-date, crossing a calendar day AND a different time of day than the seeded value —
     // the pin that fails if Save ever sends something other than exactly what the field shows.
     fireEvent.change(input, { target: { value: "2026-06-09T07:00" } });
@@ -572,7 +572,7 @@ describe("SetupPanel — the played date", () => {
     // No optimistic local write (the change arrives via the fold, not local state): the editor
     // closes and the static line reappears showing the UNCHANGED prop value — asserting the
     // spy's args, never the rendered text, is the point of the assertion above.
-    await waitFor(() => expect(within(region()).queryByLabelText("When did you play?")).toBeNull());
+    await waitFor(() => expect(within(region()).queryByLabelText("Date played")).toBeNull());
     expect(within(region()).getByRole("button", { name: "Edit" })).toBeTruthy();
     expect(within(region()).getByText(/Jun 12, 2026/)).toBeTruthy();
   });
@@ -584,13 +584,13 @@ describe("SetupPanel — the played date", () => {
     renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     await user.click(within(region()).getByRole("button", { name: "Edit" }));
-    const input = within(region()).getByLabelText("When did you play?");
+    const input = within(region()).getByLabelText("Date played");
     expect(within(region()).queryByText(/Jun 12, 2026/)).toBeNull(); // swapped out while editing
     fireEvent.change(input, { target: { value: "2020-01-01T00:00" } });
     await user.click(within(region()).getByRole("button", { name: "Cancel" }));
 
     expect(noopSetPlayedAt).not.toHaveBeenCalled();
-    expect(within(region()).queryByLabelText("When did you play?")).toBeNull();
+    expect(within(region()).queryByLabelText("Date played")).toBeNull();
     // Swapped back: the static text is on screen again, at its unchanged value.
     expect(within(region()).getByText(/Jun 12, 2026/)).toBeTruthy();
   });
@@ -604,7 +604,7 @@ describe("SetupPanel — the played date", () => {
     await user.click(within(region()).getByRole("button", { name: "Edit" }));
     // A genuine edit (Minor 5, task-7 review): Save with no change closes the editor without
     // calling onSetPlayedAt at all, which would make this failure path unreachable.
-    const input = within(region()).getByLabelText("When did you play?");
+    const input = within(region()).getByLabelText("Date played");
     fireEvent.change(input, { target: { value: "2026-06-09T07:00" } });
     await user.click(within(region()).getByRole("button", { name: "Save" }));
 
@@ -613,7 +613,7 @@ describe("SetupPanel — the played date", () => {
     expect(await within(region()).findByRole("alert")).toBeTruthy();
     expect(within(region()).getByRole("alert").textContent).toBe("Could not update the played date — try again.");
     expect(document.body.textContent).not.toMatch(/network exploded/);
-    expect(within(region()).getByLabelText("When did you play?")).toBeTruthy();
+    expect(within(region()).getByLabelText("Date played")).toBeTruthy();
   });
 
   // Important 1 (task-7 review): the generic "try again" line is a dead end for a wire
@@ -630,7 +630,7 @@ describe("SetupPanel — the played date", () => {
     renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: failingSetPlayedAt });
 
     await user.click(within(region()).getByRole("button", { name: "Edit" }));
-    const input = within(region()).getByLabelText("When did you play?");
+    const input = within(region()).getByLabelText("Date played");
     fireEvent.change(input, { target: { value: "2062-06-12T09:30" } });
     await user.click(within(region()).getByRole("button", { name: "Save" }));
 
@@ -638,7 +638,7 @@ describe("SetupPanel — the played date", () => {
     // The server's real message, not "Could not update the played date — try again." — that
     // fallback can never succeed on retry for exactly this rejection.
     expect(within(region()).getByRole("alert").textContent).toBe("playedAtMs: playedAtMs is too far in the future");
-    expect(within(region()).getByLabelText("When did you play?")).toBeTruthy(); // editor stays open
+    expect(within(region()).getByLabelText("Date played")).toBeTruthy(); // editor stays open
   });
 
   it("refuses an empty field — Save stays disabled and nothing is posted", async () => {
@@ -647,7 +647,7 @@ describe("SetupPanel — the played date", () => {
     renderPanel({ state, games: [], joinCode: "ABC123", onAddGame: noopAddGame, onSetStrokes: noopSetStrokes, onSetPlayedAt: noopSetPlayedAt });
 
     await user.click(within(region()).getByRole("button", { name: "Edit" }));
-    const input = within(region()).getByLabelText("When did you play?");
+    const input = within(region()).getByLabelText("Date played");
     fireEvent.change(input, { target: { value: "" } });
 
     expect((within(region()).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
@@ -673,7 +673,7 @@ describe("SetupPanel — the played date", () => {
     await user.click(within(region()).getByRole("button", { name: "Save" }));
 
     expect(noopSetPlayedAt).not.toHaveBeenCalled();
-    await waitFor(() => expect(within(region()).queryByLabelText("When did you play?")).toBeNull());
+    await waitFor(() => expect(within(region()).queryByLabelText("Date played")).toBeNull());
     expect(within(region()).getByRole("button", { name: "Edit" })).toBeTruthy();
     expect(within(region()).getByText(/Jun 12, 2026/)).toBeTruthy();
   });

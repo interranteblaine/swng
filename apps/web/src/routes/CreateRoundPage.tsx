@@ -182,7 +182,7 @@ export function CreateRoundPage() {
               mode — a retroactive round is not a different kind of round, just a different date.
               Date AND time, deliberately: whatever this field shows is exactly what gets sent. */}
           <label className="flex flex-col gap-1">
-            <span className="text-sm text-fairway">When did you play?</span>
+            <span className="text-sm text-fairway">Date played</span>
             <input
               type="datetime-local"
               value={playedAt}

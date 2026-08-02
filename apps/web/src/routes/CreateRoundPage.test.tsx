@@ -144,7 +144,7 @@ describe("CreateRoundPage — create as yourself", () => {
     // request carries only that reference + a host tee — the seat (name + golferId) is resolved
     // server-side from the Bearer. playedAtMs (round-played-date spec §5) is always sent by this
     // form — its exact value (the field defaults to "now") is pinned by the dedicated
-    // "when did you play" describe block below, not re-asserted here.
+    // "date played" describe block below, not re-asserted here.
     expect(body).toEqual({
       course: { courseId: courseView.courseId, cardId: courseView.cardId },
       host: { tee: "white" },
@@ -239,10 +239,10 @@ describe("CreateRoundPage — create as yourself", () => {
   });
 });
 
-// Round-played-date spec 2026-08-01 §5: "When did you play?" is always visible (no "past round"
+// Round-played-date spec 2026-08-01 §5: "Date played" is always visible (no "past round"
 // disclosure, no second mode) and defaults to now. Whatever the field shows is exactly what gets
 // submitted — nothing inferred, nothing rounded, nothing snapped.
-describe("CreateRoundPage — when did you play", () => {
+describe("CreateRoundPage — date played", () => {
   it("defaults the played-at field to now and submits that instant", async () => {
     // A local wall-clock instant with a non-zero minute/hour — a fixture where "now" happens to
     // land on a round number (e.g. midnight) couldn't distinguish "reads the real clock" from
@@ -257,7 +257,7 @@ describe("CreateRoundPage — when did you play", () => {
     await screen.findByText(fixtureLinks18.courseName);
     await screen.findByText(/playing as/i);
 
-    const input = screen.getByLabelText(/when did you play/i) as HTMLInputElement;
+    const input = screen.getByLabelText(/date played/i) as HTMLInputElement;
     expect(input.value).toBe("2026-07-31T14:05");
 
     fireEvent.click(screen.getByRole("button", { name: /create round/i }));
@@ -285,7 +285,7 @@ describe("CreateRoundPage — when did you play", () => {
     // Three days back, a different hour AND minute than "now" — the pin that fails if the
     // component ever infers a time (local noon, the entry clock) instead of sending exactly
     // what the field shows.
-    const input = screen.getByLabelText(/when did you play/i);
+    const input = screen.getByLabelText(/date played/i);
     fireEvent.change(input, { target: { value: "2026-07-28T08:15" } });
 
     fireEvent.click(screen.getByRole("button", { name: /create round/i }));
@@ -308,7 +308,7 @@ describe("CreateRoundPage — when did you play", () => {
     await screen.findByText(fixtureLinks18.courseName);
     await screen.findByText(/playing as/i);
 
-    const input = screen.getByLabelText(/when did you play/i);
+    const input = screen.getByLabelText(/date played/i);
     expect(screen.getByRole("button", { name: /create round/i }).hasAttribute("disabled")).toBe(false);
 
     fireEvent.change(input, { target: { value: "" } });

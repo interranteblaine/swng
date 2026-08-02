@@ -230,9 +230,9 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
           static value for a datetime-local editor, mutually exclusive with it. Named as its own
           region (the Roster `<ul aria-label="Roster">` precedent just below) so it's addressable
           as a stable ancestor. */}
-      <section aria-label="When did you play?" className={`${cardBox} flex flex-col gap-2 p-4`}>
+      <section aria-label="Date played" className={`${cardBox} flex flex-col gap-2 p-4`}>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm text-fairway">When did you play?</span>
+          <span className="text-sm text-fairway">Date played</span>
           {/* No `disabled={savingPlayedAt}` here (Minor 8, task-7 review): this button only
               renders while `!editingPlayedAt`, and `savingPlayedAt` is only ever true WHILE
               editing — the two conditions can't be true at once, unlike the roster's own Edit
@@ -252,7 +252,7 @@ export function SetupPanel({ state, joinCode, onAddGame, onSetStrokes, onSetPlay
           <div className="flex flex-col gap-2">
             <input
               type="datetime-local"
-              aria-label="When did you play?"
+              aria-label="Date played"
               className={inputBox}
               value={playedAtValue}
               onChange={(event) => setPlayedAtValue(event.target.value)}

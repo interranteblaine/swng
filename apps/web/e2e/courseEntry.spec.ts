@@ -316,7 +316,7 @@ test.describe.serial("M6 course-entry gate — paper card to correct dots, again
 });
 
 // --- The round-played-date beat (spec 2026-08-01, plan Task 9 Step 2) -----------------------
-// A round dated through the real "When did you play?" field on CreateRoundPage reads as that
+// A round dated through the real "Date played" field on CreateRoundPage reads as that
 // day everywhere the played date surfaces: the projection line served to GET /me/record and the
 // canonical roundLabel rendered on the round's own permanent address. THREE DAYS BACK,
 // deliberately, not a few seconds — this arc's own spec (§9) names by number the mistake of
@@ -371,9 +371,9 @@ test.describe.serial("round-played-date gate — a round entered three days late
     await expect(result).toBeVisible();
     await result.click();
 
-    // "When did you play?" (round-played-date spec §5) — always visible, defaulting to now;
+    // "Date played" (round-played-date spec §5) — always visible, defaulting to now;
     // overwritten with the exact instant this test expects to see stored and rendered.
-    await page.getByLabel("When did you play?", { exact: true }).fill(playedAtInput);
+    await page.getByLabel("Date played", { exact: true }).fill(playedAtInput);
 
     await page.getByRole("button", { name: "Create round" }).click();
     await expect(page).toHaveURL(/\/round\//);

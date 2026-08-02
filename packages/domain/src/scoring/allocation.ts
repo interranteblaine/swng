@@ -39,7 +39,7 @@ export const gameStrokeAllocation = (
   if ("scoring" in config && config.scoring === "gross") return new Map();
   const dotsFor = (id: GolferId, strokes: number) => {
     const p = participantFor(participants, id);
-    return [id, dotsByHole(strokes, findTeeSet(card, p.tee))] as const;
+    return [id, dotsByHole(strokes, findTeeSet(card, p.tee).holes)] as const;
   };
   const strokesOf = (id: GolferId) => participantFor(participants, id).strokes;
 
@@ -68,7 +68,7 @@ export const roundStrokeAllocation = (
   participants: readonly RosterEntry[],
   card: CourseCard,
 ): ReadonlyMap<GolferId, ReadonlyMap<number, number>> =>
-  new Map(participants.map((p) => [p.golferId, dotsByHole(p.strokes, findTeeSet(card, p.tee))]));
+  new Map(participants.map((p) => [p.golferId, dotsByHole(p.strokes, findTeeSet(card, p.tee).holes)]));
 
 // dotsByHole's allocation always sums exactly to its input strokes value (allocateStrokes' own
 // documented invariant, strokes.ts) — summing here is safe rather than re-deriving a parallel

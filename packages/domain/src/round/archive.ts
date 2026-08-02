@@ -93,6 +93,14 @@ export const settleRound = (events: readonly RoundEvent[]): RoundArchive => {
   // nowhere downstream. That is settle deciding once, not a reader filtering:
   // there is genuinely nothing to aggregate for them. Every non-departed participant is kept
   // unconditionally (this filter only ever removes a departed one).
+  //
+  // "Scored" means scored INSIDE the holes this round actually set out to play (spec 2026-08-02
+  // §4) — hasScoredHole walks intendedHoles, not the whole tee set. A cell recorded while the
+  // round still covered the whole card, then left behind by a LATER round-holes-set narrowing to
+  // a nine, still rides in archive.cells untouched (fold-time scoring is never destructive —
+  // state.ts), but no longer counts here: a golfer who scored holes 1-3 while the round was
+  // "all", was then narrowed to "back", and then departed is now OMITTED — before this task they
+  // would have been kept on the strength of that now-out-of-selection front-nine cell.
   const hasScoredHole = (entry: RosterEntry): boolean => {
     const holes = intendedHoles(findTeeSet(state.card, entry.tee), state.holes);
     return holes.some((hole) => cellAt(state.cells, entry.golferId, hole.number) !== undefined);

@@ -462,9 +462,15 @@ describe("round is a sealed leaf — no crewId on state or archive", () => {
 // holes on the archive (spec 2026-08-02 §3a): a minimal genesis/join/start/finalize log, the
 // same shape state.test.ts's own genesis/joinA/started/finalized fixtures use, kept local to this
 // describe block since no other test in this file needs a bare single-player round.
+//
+// Review fix (Finding 1): built on fixtureLinks18, an 18-hole card, not the 9-hole fixtureLinks —
+// on a one-nine card every selection resolves to that same nine (intendedHoles' own <=9 escape
+// hatch), so "front" and "all" would be indistinguishable, AND Task 6's startRound guard rejects
+// a nine selection against a one-nine card outright: fixtureLinks would be a log the application
+// layer refuses to ever create.
 describe("holes on the archive (spec 2026-08-02 §3a)", () => {
   const at = (wallMs: number) => ({ wallMs, counter: 0, deviceId: deviceId("test") });
-  const genesis: RoundEvent = { kind: "round-created", roundId: roundId("r-holes"), card: fixtureLinks, playedAtMs: 1, opId: opId("op-holes-created"), hlc: at(1), authorId: A };
+  const genesis: RoundEvent = { kind: "round-created", roundId: roundId("r-holes"), card: fixtureLinks18, playedAtMs: 1, opId: opId("op-holes-created"), hlc: at(1), authorId: A };
   const joinA: RoundEvent = { kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", strokes: 0 }, opId: opId("op-holes-join"), hlc: at(2), authorId: A };
   const started: RoundEvent = { kind: "round-started", opId: opId("op-holes-started"), hlc: at(3), authorId: A };
   const finalized: RoundEvent = { kind: "round-finalized", opId: opId("op-holes-finalized"), hlc: at(4), authorId: A };
@@ -478,6 +484,34 @@ describe("holes on the archive (spec 2026-08-02 §3a)", () => {
   // no new key at all — which is what makes every stored snapshot deserialize unchanged.
   it("omits the key entirely for a whole-card round", () => {
     expect("holes" in settleRound([genesis, joinA, started, finalized])).toBe(false);
+  });
+});
+
+// Review fix (Finding 2): hasScoredHole must ask about the round's INTENDED holes, not the whole
+// tee set. Under "all" the two walks agree (intendedHoles IS the whole tee set there), so this is
+// the one case where reverting hasScoredHole back to the old `teeSet.holes` walk leaves the rest
+// of the suite green — a real gap, closed here.
+describe("settleRound — hasScoredHole narrows to the round's intended holes (spec 2026-08-02 §4)", () => {
+  it("omits a departed participant whose only scored cell falls OUTSIDE a LATER-narrowed selection", () => {
+    const at = (wallMs: number) => ({ wallMs, counter: 0, deviceId: deviceId("test") });
+    const genesis: RoundEvent = { kind: "round-created", roundId: roundId("r-narrow"), card: fixtureLinks18, playedAtMs: 1, opId: opId("op-narrow-created"), hlc: at(1), authorId: A };
+    const join: RoundEvent = { kind: "participant-joined", participant: { golferId: A, name: "Ann", tee: "white", strokes: 0 }, opId: opId("op-narrow-join"), hlc: at(2), authorId: A };
+    const started: RoundEvent = { kind: "round-started", opId: opId("op-narrow-started"), hlc: at(3), authorId: A };
+    // Scored on the front nine WHILE the round still covered the whole card.
+    const scoreHole1: RoundEvent = { kind: "score-recorded", golferId: A, hole: 1, result: { kind: "strokes", strokes: 4 }, opId: opId("op-narrow-score"), hlc: at(4), authorId: A };
+    // Then the round is narrowed to the back nine — the scored cell rides on in state.cells
+    // untouched (fold-time scoring is never destructive — state.ts), but is no longer "intended".
+    const narrow: RoundEvent = { kind: "round-holes-set", holes: "back", opId: opId("op-narrow-set"), hlc: at(5), authorId: A };
+    const leave: RoundEvent = { kind: "participant-left", golferId: A, opId: opId("op-narrow-leave"), hlc: at(6), authorId: A };
+    const finalized: RoundEvent = { kind: "round-finalized", opId: opId("op-narrow-finalized"), hlc: at(7), authorId: A };
+
+    const archive = settleRound([genesis, join, started, scoreHole1, narrow, leave, finalized]);
+
+    // Ann has NO game membership and her only scored cell (hole 1) sits outside the back nine, so
+    // hasScoredHole comes back false and she is omitted entirely — even though the cell itself
+    // still rides in archive.cells untouched.
+    expect(archive.participants).toEqual([]);
+    expect(archive.cells[cellKey(A, 1)]?.result).toEqual({ kind: "strokes", strokes: 4 });
   });
 });
 
@@ -582,5 +616,21 @@ describe("unresolvedGames — finalize readiness", () => {
     // Dee has 5 of 9 holes; the missing set names exactly the 4 unscored ones, Eve absent
     // entirely (she's fully scored — nothing to report for her).
     expect(unresolved[0]!.missing).toEqual([{ golferId: D, holes: [6, 7, 8, 9] }]);
+  });
+
+  // Review fix (Finding 2): missingHolesFor must narrow to the round's OWN selection, not walk
+  // the whole card — otherwise a nine-hole round reports the nine it never set out to play as
+  // permanently unscored, and finalize looks permanently blocked forever (spec 2026-08-02 §4).
+  // Ann is fully scored on the back nine; Pat has only played its first hole (10) — the missing
+  // set must be exactly holes 11-18, never the front nine 1-9 this round never asked either of
+  // them to play.
+  it("on a back-nine round, names only the back-nine holes as missing — never the front nine this round never set out to play", () => {
+    const backNine = holes.slice(9);
+    const cells: RoundState["cells"] = {
+      ...Object.fromEntries(backNine.map((h) => [cellKey(ANN, h.number), cell({ kind: "strokes", strokes: 4 }, ANN)])),
+      [cellKey(PAT, 10)]: cell({ kind: "strokes", strokes: 5 }, PAT),
+    };
+    const state = baseState({ holes: "back", cells });
+    expect(unresolvedGames(state)).toEqual([{ gameId: stablefordConfig.id, missing: [{ golferId: PAT, holes: [11, 12, 13, 14, 15, 16, 17, 18] }] }]);
   });
 });

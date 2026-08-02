@@ -5,7 +5,7 @@ import type { RoundArchive } from "../round/archive.js";
 import { intendedHoles } from "../round/holes.js";
 import type { DecidedHoleResult } from "../round/holeResult.js";
 import { scoredStrokes } from "../round/holeResult.js";
-import { cellAt } from "../round/state.js";
+import { cellAt, parForHoles } from "../round/state.js";
 import { hasCompleteScore, scoreOf } from "./analytics.js";
 
 // One decided hole from the frozen card (analytics spec 2026-07-21 §2) — par is the card's
@@ -90,7 +90,7 @@ export const archiveGolferLine = (archive: RoundArchive, golferId: GolferId): Go
     // or 18 by construction) or exactly one nine, so this is always 9 or 18 either way. The cast
     // documents that invariant rather than re-checking it here.
     holes: holes.length as 9 | 18,
-    par: holes.reduce((sum, hole) => sum + hole.par, 0),
+    par: parForHoles(holes),
     strokes: participant.strokes,
     distribution,
     holeResults,

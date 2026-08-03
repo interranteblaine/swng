@@ -89,7 +89,22 @@ export const holeSelectionLabel = (selection: HoleSelection): string => {
 // picker, SetupPanel's mid-round editor) mapped its own `["all", "front", "back"]` array beside
 // the shared label above; that's the same one-copy drift risk task 8b already fixed for the
 // words themselves (whole-branch review Finding 4). One array, beside the labels it orders.
-export const HOLE_SELECTION_ORDER: readonly HoleSelection[] = ["all", "front", "back"];
+//
+// Written as a `satisfies Record<HoleSelection, true>` object rather than a plain string array
+// (the KNOWN_GAME_KINDS_BY_KIND precedent, @swng/client's scoring.ts) so a future arm added to
+// `HoleSelection` fails THIS build with a missing-key error instead of silently compiling — a
+// plain `readonly HoleSelection[]` literal would still typecheck with the new arm simply absent,
+// which is exactly how it could vanish from both pickers while `holeSelectionLabel` above (which
+// throws on an unrecognized value) kept working. `Object.keys` preserves insertion order for
+// plain string keys (the ECMAScript spec's own guarantee), so the render order this object is
+// written in is preserved exactly.
+const HOLE_SELECTION_ORDER_BY_SELECTION = {
+  all: true,
+  front: true,
+  back: true,
+} satisfies Record<HoleSelection, true>;
+
+export const HOLE_SELECTION_ORDER: readonly HoleSelection[] = Object.keys(HOLE_SELECTION_ORDER_BY_SELECTION) as HoleSelection[];
 
 // One seat's asserted number, or 0 if that golfer isn't on the roster handed in. Shared by the two
 // sentences below so they can never disagree about what a seat holds.

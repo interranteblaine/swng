@@ -75,8 +75,19 @@ So nothing on a read path ever validates this, and that is the load-bearing part
 would make a stored round permanently unreadable, which Arc A's placement rule already forbids.
 The control is never offered at a nine-hole course, and `startRound` rejects a nine selection
 against a one-nine card — not because the value is dangerous, but so no round can be stored
-carrying a "Back 9" label its course cannot have. That check lives at the one door where the card
-is already in hand, and it happens once.
+carrying a "Back 9" label its course cannot have.
+
+**Correction (dated 2026-08-03): the invariant this section describes was never "one guard, and
+it happens once."** It is **no guard on a READ or FOLD path** — a guard there would make a stored
+round permanently unreadable, exactly as the paragraph above already says. `startRound` checks at
+the door where a round is created; `setHoles`, the round's other WRITE door, must check the
+identical way, and originally didn't: it left this fact unguarded on purpose, on the reasoning
+that the spec called for exactly one guard. That let an API caller (never the UI — the control is
+never offered at a one-nine course) set a nine selection on a one-nine round after creation, and
+the join screen would then assert something false — "This round plays the Back 9." — about a
+course that has one nine. `setHoles` now rejects a nine selection against a one-nine card the same
+way `startRound` does, with the same error code. A second WRITE-door guard was consistent with the
+real rule all along; the sentence claiming otherwise was the error, not the code.
 
 ### 3a. Where it lives
 

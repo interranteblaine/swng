@@ -54,13 +54,14 @@ export const startRound =
     }
     const teeSet = findTeeSet(record.card, command.host.tee); // unknown-tee-set (DomainError) propagates
 
-    // The one guard on this fact (spec 2026-08-02 §3): a nine selection needs a card that HAS two
-    // nines. Checked here, at the one door where the card is already in hand, and never again —
-    // intendedHoles is total, and a guard on a read path would make a stored round unreadable.
-    // Reading the HOST'S TEE ALONE answers for the whole card: every tee on a card carries the
-    // same hole count (domain's validateCard collapses every tee's hole count into one Set and
-    // rejects a card whose tees disagree), so there is no other tee on this card whose hole count
-    // could differ from teeSet's.
+    // A guard on this fact (spec 2026-08-02 §3, corrected 2026-08-03): a nine selection needs a
+    // card that HAS two nines. Checked here, at the door where a round is first created — and
+    // ALSO at setHoles' door, the one other place this value is written (the real invariant is "no
+    // guard on a READ or FOLD path", never "exactly one guard" — intendedHoles stays total, and a
+    // guard there would make a stored round unreadable). Reading the HOST'S TEE ALONE answers for
+    // the whole card: every tee on a card carries the same hole count (domain's validateCard
+    // collapses every tee's hole count into one Set and rejects a card whose tees disagree), so
+    // there is no other tee on this card whose hole count could differ from teeSet's.
     const holes = command.holes ?? "all";
     if (holes !== "all" && !hasHoleChoice(teeSet)) {
       throw new ApplicationError("holes-not-on-this-card", `this course has one nine; "${holes}" names a second`);

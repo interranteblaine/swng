@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
-import { cardId, courseId, crewId, deviceId, fixtureLinks, fixtureWhite, golferId, opId, placeholderName } from "@swng/domain";
+import { cardId, courseId, crewId, deviceId, fixtureLinks, fixtureLinks18, fixtureWhite, golferId, opId, placeholderName } from "@swng/domain";
 import type { AccountClaims, AccountVerifier, Logger } from "@swng/application";
 import {
   abandonRound,
@@ -448,15 +448,20 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
   });
 
   // spec 2026-08-02 §3b: the holes a round set out to play, corrected — same round-level-fact
-  // shape as played-at above (no SUBJECT), so any participant's own token is enough.
+  // shape as played-at above (no SUBJECT), so any participant's own token is enough. Seeded on its
+  // own 18-hole card, NOT DEFAULT_COURSE (fixtureLinks, one nine) — since the setHoles correction
+  // 2026-08-03, a nine selection against a one-nine card is refused (holes-not-on-this-card,
+  // covered below), so this golden-path test needs a card that actually has two nines to name.
   it("POST /rounds/{roundId}/holes: participant auth, 200, appends the set", async () => {
-    const { dispatcher } = await setup();
+    const { dispatcher, cardStore } = await setup();
+    const eighteenHoleCard = await seedCard(cardStore, courseId("course-18"), cardId("card-18"), fixtureLinks18);
+    const course18 = { courseId: eighteenHoleCard.courseId, cardId: eighteenHoleCard.cardId };
 
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: course18, host: { tee: "white" } } }),
           ),
         ).body!,
       ),

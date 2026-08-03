@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cardId, courseId, deviceId, fixtureLinks, golferId, opId } from "@swng/domain";
+import { cardId, courseId, deviceId, fixtureLinks, fixtureLinks18, golferId, opId } from "@swng/domain";
 import type { ParticipantClaims, TokenClaims, TokenIssuer } from "../ports/tokenIssuer.js";
 import {
   createCapturingBroadcast,
@@ -41,7 +41,9 @@ const createClientOps = (device: string) => {
   return () => ({ opId: opId(`${device}-op-${(opCounter += 1)}`), hlc: { wallMs: wallMs++, counter: 0, deviceId: deviceId(device) } });
 };
 
-const setup = async () => {
+// card defaults to the 18-hole fixtureLinks18 — front/back are two genuinely different nines on
+// it, unlike the one-nine fixtureLinks card, which has its own dedicated setup below.
+const setup = async (card = fixtureLinks18) => {
   const snapshots = createInMemorySnapshotStore();
   const journal = createInMemoryJournal(snapshots);
   const store = createInMemoryRoundStore();
@@ -53,7 +55,7 @@ const setup = async () => {
   const projectionStore = createInMemoryProjectionStore();
   const logger = createNullLogger();
   const cardStore = createInMemoryCardStore();
-  const cardRecord = await seedCard(cardStore, courseId("course-1"), cardId("card-1"), fixtureLinks);
+  const cardRecord = await seedCard(cardStore, courseId("course-1"), cardId("card-1"), card);
   const course = { courseId: cardRecord.courseId, cardId: cardRecord.cardId };
 
   return {
@@ -68,10 +70,8 @@ const setup = async () => {
   };
 };
 
-// A live round, Ann (host) + Bo on the NINE-hole fixtureLinks card. setHoles never re-checks the
-// card (its own doc comment) — a nine selection against a one-nine card is exactly the case
-// intendedHoles resolves sensibly on its own, so exercising "front"/"back" here is deliberate,
-// not an oversight.
+// A live round, Ann (host) + Bo, on the 18-hole fixtureLinks18 card — front and back are real,
+// distinct nines here, so a correction that names one actually moves something.
 const freshLiveRound = async () => {
   const ctx = await setup();
   const host = await ctx.start({ course: ctx.course, host: { tee: "white" } }, { sub: "sub-host" });
@@ -79,6 +79,16 @@ const freshLiveRound = async () => {
   const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
   const boClaims: ParticipantClaims = { roundId: bo.roundId, golferId: bo.golferId };
   return { ...ctx, host, bo, hostClaims, boClaims };
+};
+
+// A live round on the one-nine fixtureLinks card — the case setHoles' own guard exists for
+// (spec correction, 2026-08-03 §3): a nine selection here must be refused exactly like
+// startRound's door refuses it at creation.
+const freshLiveRoundOnOneNineCard = async () => {
+  const ctx = await setup(fixtureLinks);
+  const host = await ctx.start({ course: ctx.course, host: { tee: "white" } }, { sub: "sub-host" });
+  const hostClaims: ParticipantClaims = { roundId: host.roundId, golferId: host.golferId };
+  return { ...ctx, host, hostClaims };
 };
 
 describe("setHoles", () => {
@@ -123,5 +133,27 @@ describe("setHoles", () => {
     const round = await freshLiveRound();
     const stranger: ParticipantClaims = { roundId: round.host.roundId, golferId: golferId("stranger") };
     await expect(round.set(stranger, { holes: "front" })).rejects.toMatchObject({ code: "not-a-participant" });
+  });
+
+  // Gap closed 2026-08-03 (spec correction §3): setHoles used to leave a one-nine card entirely
+  // unguarded, on purpose — an API caller could set "back" on it and the join screen would then
+  // assert something false about a course that has only one nine. Both non-"all" selections are
+  // rejected the same way startRound's own door rejects them at creation.
+  it("rejects a front-nine correction against a card with only one nine, with holes-not-on-this-card", async () => {
+    const round = await freshLiveRoundOnOneNineCard();
+    await expect(round.set(round.hostClaims, { holes: "front" })).rejects.toMatchObject({ code: "holes-not-on-this-card" });
+  });
+
+  it("rejects a back-nine correction against a card with only one nine, with holes-not-on-this-card", async () => {
+    const round = await freshLiveRoundOnOneNineCard();
+    await expect(round.set(round.hostClaims, { holes: "back" })).rejects.toMatchObject({ code: "holes-not-on-this-card" });
+  });
+
+  it("still accepts 'all' against a one-nine card — that selection never names a second nine", async () => {
+    const round = await freshLiveRoundOnOneNineCard();
+    const result = await round.set(round.hostClaims, { holes: "all" });
+    expect(result.events).toHaveLength(1);
+    const { state } = await loadRoundState(round.journal, round.host.roundId);
+    expect(state.holes).toBe("all");
   });
 });

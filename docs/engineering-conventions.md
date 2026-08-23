@@ -92,6 +92,22 @@ worse than no name.
   store is parsed, not cast: casting a persisted item into a domain type makes the compiler
   vouch for a runtime shape nobody checked, and the failure is silent — a stored arm from a
   deleted model reads as the nearest surviving one rather than failing (spec 2026-07-30 §10).
+- **Bounds belong at the wire ingress, and nowhere else.** Every user-controlled string,
+  array and count gets a `.max()` — on the **request** schema. A bound on a stored-event,
+  read or fold schema rejects data that is already written, which bricks a legitimate user and
+  is strictly worse than the abuse it was meant to stop (spec 2026-07-23 Arc A). When a request
+  shape and a stored shape share a schema, the request-side copy is the one that carries the
+  bound. The corollary is that a bound is not an enforcement point on its own: harden the render
+  and the editor too, because `max=` on an input does not clamp typed text.
+- **Old stored shapes: tolerate what you cannot enumerate, migrate what you can.** Tolerating
+  a legacy shape is a permanent branch on a read path — often one the *client* parses on every
+  event forever — so it is the right answer only when the affected records are unbounded or
+  unknown (a stray `crewId`, a dead `standingGame`). When the records are countable, count them
+  and migrate them: prod's 2026-07-31 rename touched 15 records and shipped **zero** lines of
+  compatibility code. Beta round data is disposable and may be wiped instead; **prod is never
+  wiped** (see `arc-log.md` 2026-07-31, and the `beta-and-prod-data` skill for the instruments).
+  A compatibility gate is derived from reading the old data, never from reading the change that
+  broke it.
 - **Two clocks, two jobs — and never a third.** Canonical order and sync cursors come from
   server-assigned `seq`; concurrent-write resolution comes from the authoring-time `hlc`.
   Naive wall-clock comparison (ISO-string `updatedAt` ordering and kin) appears nowhere.
@@ -125,6 +141,15 @@ worse than no name.
   be declared binding here that §4 does not list — a doc-declared gate nobody can satisfy is
   worse than a stale sentence.
 - **Pure-domain tests use no mocks** — that's the payoff of a pure `domain`.
+- **A test that cannot fail is worse than no test** — it reads as coverage. Before accepting
+  one, name the line that would make it go red, then delete or invert that line and watch it.
+  This repo has shipped this defect repeatedly and in escalating subtlety: equal fixtures; two
+  timestamps differing by seconds where a day-granular label renders identically (**divergence
+  must cross a calendar day**); an assertion a DOM sanitizer neutralized; a pin that compared
+  `indexOf` results where `-1 < n` passes vacuously; a substring check that stayed green with
+  the whole subject branch deleted; and a plan-authored negative assertion with no positive
+  control in its file. Plans are a common source, because a plan author writes the expected
+  value without running it — a task that must move an expected value stops and reports.
 - **Every fixed bug gets a test that fails without the fix.** Scoring bugs become golden
   cards.
 

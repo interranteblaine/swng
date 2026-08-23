@@ -242,6 +242,18 @@ with per-line FIRE/SILENT expectations. Presentation formatters (`formatOverPar`
 pure structural accessors (`cellKey`, `findTeeSet`, `gameMembers`), and all `import type`s stay
 importable from `@swng/domain` directly — they compute no golf result.
 
+**A concept's human meaning is domain truth too.** Its name, its one-line explanation, the
+conventions golf uses to notate it — these are as much a single tested copy as the arithmetic is,
+and every surface renders through them rather than spelling its own. They live in `present.ts`
+modules beside the logic they describe: `scoring/present.ts` (`gameKindLabel`/`gameKindBlurb`/
+`gameKindFits`, `gameTreatment`, `strokesNote`, `holeSelectionLabel`, `formatOverPar`,
+`formatScoreVsPar`, `underPar`) and `golfer/present.ts` (the course-record phrases). They are
+fence-allowed imports precisely because they compute no golf result — but the *reason* they exist
+is the same one-copy law: a phrase duplicated into a component drifts from the panel it describes,
+and it has, repeatedly (a chip reading "wins" against a sheet reading "win"; an add-game preview
+showing net-shaped copy for a gross game). When a rendering rule needs two spellings, that is two
+functions with two names, not one softened to cover both.
+
 ### Crew — plain entity, no event sourcing
 
 A roster of real accounts — like everything else now: every round participant is an account,

@@ -6,7 +6,7 @@ import type { HoleSelection } from "../round/holes.js";
 import { nineHoleContribution } from "../golfer/average.js";
 import { gameStrokeAllocation, totalDots } from "./allocation.js";
 import { fixtureLinks18 } from "./golden/fixtureCourse.js";
-import { formatOverPar, formatScoreVsPar, gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, holeSelectionLabel, strokesNote, underPar } from "./present.js";
+import { formatOverPar, formatScoreVsPar, gameKindBlurb, gameKindFits, gameKindLabel, gameTreatment, holeSelectionLabel, strokesLine, strokesNote, underPar } from "./present.js";
 
 const A = golferId("a");
 const B = golferId("b");
@@ -171,6 +171,21 @@ describe("strokesNote", () => {
     expect(strokesNote(strokePlay("net"), two)).toBeUndefined();
     expect(strokesNote(stableford, two)).toBeUndefined();
     expect(strokesNote(skins("net"), two)).toBeUndefined();
+  });
+});
+
+// The pure sentence over ALREADY-COMPUTED dots — moved from apps/web/src/round/dots.test.ts's
+// own strokesSummary describe block (task 4, "the strokes line splits from its allocation"). The
+// cases that turn on real gameStrokeAllocation math (a match's equal-strokes-but-nonzero field,
+// the gross-game early return, hole-selection threading) stay in dots.test.ts, where CourseCard
+// is in scope; these two turn on nothing but the entries array, so they follow the formatter here.
+describe("strokesLine", () => {
+  it("omits the members with no strokes and names the rest, in gameMembers order", () => {
+    expect(strokesLine([{ name: "Ann", dots: 0 }, { name: "Bo", dots: 2 }])).toBe("Bo 2 dots");
+  });
+
+  it("reads 'everyone in this game plays level' when every member's total is zero", () => {
+    expect(strokesLine([{ name: "Ann", dots: 0 }, { name: "Bo", dots: 0 }])).toBe("No strokes — everyone in this game plays level.");
   });
 });
 

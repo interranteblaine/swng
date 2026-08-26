@@ -1,5 +1,5 @@
 import { gameStrokeAllocation, totalDots } from "@swng/client";
-import { gameMembers } from "@swng/domain";
+import { gameMembers, strokesLine } from "@swng/domain";
 import type { CourseCard, GameConfig, GolferId, HoleSelection, RosterEntry } from "@swng/domain";
 
 // A thin delegation to the domain's gameStrokeAllocation (packages/domain/src/scoring/
@@ -35,14 +35,9 @@ export const strokesSummary = (config: GameConfig, participants: readonly Roster
   if ("scoring" in config && config.scoring === "gross") return undefined;
   const dots = gameDots(config, participants, card, selection);
   const nameOf = (id: GolferId): string => participants.find((p) => p.golferId === id)?.name ?? id;
-  const parts = gameMembers(config).flatMap((id) => {
+  const pairs = gameMembers(config).map((id) => {
     const perHole = dots.get(id);
-    const total = perHole ? totalDots(perHole) : 0;
-    if (total === 0) return [];
-    return [`${nameOf(id)} ${total} ${total === 1 ? "dot" : "dots"}`];
+    return { name: nameOf(id), dots: perHole ? totalDots(perHole) : 0 };
   });
-  // "everyone plays off 0" would be false for a MATCH, where zero dots means the members are
-  // EQUAL at whatever level — two golfers both on 20 receive nothing from each other and are not
-  // scratch (spec 2026-07-30 §3). What is true for both arms is that nobody is receiving.
-  return parts.length > 0 ? parts.join(" · ") : "No strokes — everyone in this game plays level.";
+  return strokesLine(pairs);
 };

@@ -107,22 +107,12 @@ describe("gameDots", () => {
 
 // AddGameForm.test.tsx's "strokes preview" describe block covers the ordinary receives/omit
 // case (through a render); these edge cases — the all-scratch line and a gross game's absent
-// one — are pinned directly against the same fixture card here instead.
+// one — are pinned directly against the same fixture card here instead. The sentence-shape
+// cases (omission, join, the all-zero fallback) moved to present.test.ts's own strokesLine
+// describe block (task 4): they turn on nothing but the already-computed entries array, not on
+// this file's CourseCard. What stays here are the cases that turn on real gameStrokeAllocation
+// math.
 describe("strokesSummary", () => {
-  it("omits the members with no strokes and names the rest, in gameMembers order", () => {
-    const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 2)];
-    const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] };
-
-    expect(strokesSummary(config, participants, CARD, "all")).toBe("Bo 2 dots");
-  });
-
-  it("reads 'everyone in this game plays level' when every member's total is zero", () => {
-    const participants = [participant(ANN, "Ann", 0), participant(BO, "Bo", 0)];
-    const config: GameConfig = { kind: "skins", id: gameId("g"), scoring: "net", players: [ANN, BO] };
-
-    expect(strokesSummary(config, participants, CARD, "all")).toBe("No strokes — everyone in this game plays level.");
-  });
-
   // In a MATCH an all-zero allocation means the members are EQUAL, at whatever level — two
   // golfers both on 12 receive nothing from each other and are not scratch. The line says the
   // true thing in both cases; "everyone plays off 0" (its old wording) would be false here.

@@ -6,7 +6,7 @@ import type { GameId, GameState, GolferId, HoleResult, HoleSelection, RoundId, R
 import { abandonRound, addGame, finalizeRound, leaveRound, setHoles, setPlayedAt, setStrokes, terminateGame } from "../api";
 import { credentialStore } from "../identity";
 import type { RoundCredential } from "../identity";
-import { unresolvedGames } from "../round/finalizeReadiness";
+import { describeUnresolvedGames } from "@swng/domain";
 import { ResultsView } from "../round/ResultsView";
 import { ScorecardGrid } from "../round/ScorecardGrid";
 import { ShareButton } from "../round/ShareButton";
@@ -61,7 +61,7 @@ function FinalizeControl({ state, games, pending, busy, onFinalize }: FinalizeCo
   // Recomputed from the fold on every render — a score or termination landing mid-dialog (via
   // sync) updates the list live, and after a failed attempt this same recomputation IS the
   // structured explanation the brief demands in place of the old raw caught.message.
-  const unresolved = unresolvedGames(state, games);
+  const unresolved = describeUnresolvedGames(state, games);
 
   // Both buttons below are the SAME guarded attempt, differing only in which games it ends on
   // the way through — so the drain-first rule can't be true of one path and forgotten on the

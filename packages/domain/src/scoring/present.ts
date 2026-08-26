@@ -1,10 +1,12 @@
 import type { GameConfig, GameState } from "./game.js";
 import { gameMembers } from "./game.js";
-import type { GolferId } from "../ids.js";
+import type { GameId, GolferId } from "../ids.js";
 import { DomainError } from "../errors.js";
 import type { Participant } from "../round/participant.js";
 import type { RoundState } from "../round/state.js";
 import type { HoleSelection } from "../round/holes.js";
+import type { UnresolvedGameMissing } from "../round/archive.js";
+import { unresolvedGames } from "../round/archive.js";
 
 // The games' human meaning as domain truth — names, one-line rules, who a game fits, and how its
 // strokes convention reads in words. One tested copy: every surface that names a game renders
@@ -354,4 +356,76 @@ const describeSkins = (game: Skins, round: RoundState): string => {
 
   if (game.carrying > 0) return `${base} · carrying ${game.carrying} into ${game.holesDecided + 1}`;
   return base;
+};
+
+// "Pat 5 dots · Alex 1 dot" over ALREADY-COMPUTED dots — a formatter, which is why it may live
+// here. Allocation is not: it needs a CourseCard, and this module computes no golf result.
+// Members with no strokes are omitted; a game where nobody receives says so in words, because
+// "everyone plays off 0" would be false for a match, where zero dots means the members are EQUAL
+// at whatever level, not scratch (spec 2026-07-30 §3).
+export const strokesLine = (entries: readonly { readonly name: string; readonly dots: number }[]): string => {
+  const parts = entries.filter((entry) => entry.dots > 0).map((entry) => `${entry.name} ${entry.dots} ${entry.dots === 1 ? "dot" : "dots"}`);
+  return parts.length > 0 ? parts.join(" · ") : "No strokes — everyone in this game plays level.";
+};
+
+export interface UnresolvedGameDescription {
+  readonly gameId: GameId;
+  readonly title: string; // the game chip's OWN naming (describeGame's title) — never a hand-rolled label here
+  readonly missing: string; // e.g. "holes 2–18 unscored for Pat"
+}
+
+const nameOfInRound = (state: RoundState, golfer: GolferId): string => state.participants.find((p) => p.golferId === golfer)?.name ?? golfer;
+
+// [2,3,4,7,8] -> "2–4, 7–8"; a lone hole never gets a dash ("18", not "18–18").
+const formatHoleRanges = (holes: readonly number[]): string => {
+  const ranges: string[] = [];
+  let start: number | undefined;
+  let prev: number | undefined;
+  for (const hole of holes) {
+    if (start !== undefined && prev !== undefined && hole === prev + 1) {
+      prev = hole;
+      continue;
+    }
+    if (start !== undefined && prev !== undefined) ranges.push(start === prev ? `${start}` : `${start}–${prev}`);
+    start = hole;
+    prev = hole;
+  }
+  if (start !== undefined && prev !== undefined) ranges.push(start === prev ? `${start}` : `${start}–${prev}`);
+  return ranges.join(", ");
+};
+
+// One clause per DISTINCT missing-hole set among the game's own players — a crew that all
+// stopped at the same hole (the common case) reads as one clause naming everyone, not one
+// repetitive clause per golfer. Fed from the domain's own structured `missing[]` (already
+// filtered to golfers with at least one open hole) rather than re-deriving it locally.
+const describeMissing = (state: RoundState, missing: readonly UnresolvedGameMissing[]): string => {
+  const groups = new Map<string, { readonly holes: readonly number[]; readonly names: string[] }>();
+  for (const entry of missing) {
+    const key = entry.holes.join(",");
+    const existing = groups.get(key);
+    if (existing) existing.names.push(nameOfInRound(state, entry.golferId));
+    else groups.set(key, { holes: entry.holes, names: [nameOfInRound(state, entry.golferId)] });
+  }
+
+  if (groups.size === 0) return "not yet resolved"; // every hole scored, but the game hasn't concluded (defensive — resultOf already gated the caller)
+
+  return [...groups.values()]
+    .map((group) => `${group.holes.length === 1 ? "hole" : "holes"} ${formatHoleRanges(group.holes)} unscored for ${group.names.join(", ")}`)
+    .join("; ");
+};
+
+// The finalize dialog's own readiness check — presentation only now (task 3 of the "domain owns
+// the golf math" arc). WHICH games must resolve, and which holes are missing per player, is
+// this module's own `unresolvedGames` (round/archive.ts): the identical must-resolve set
+// settleRound's own throw path enforces server-side, so what's left after this call is exactly
+// what finalize would 409 on right now. This function only turns that structured result into the
+// dialog's strings (title via describeGame, "holes X unscored for Y" via describeMissing above).
+export const describeUnresolvedGames = (state: RoundState, games: readonly GameState[]): readonly UnresolvedGameDescription[] => {
+  const result: UnresolvedGameDescription[] = [];
+  for (const game of unresolvedGames(state)) {
+    const gameState = games.find((g) => g.id === game.gameId);
+    if (!gameState) continue; // an unknown/future kind the session already filtered out of games() — nothing useful to report
+    result.push({ gameId: game.gameId, title: describeGame(gameState, state).title, missing: describeMissing(state, game.missing) });
+  }
+  return result;
 };

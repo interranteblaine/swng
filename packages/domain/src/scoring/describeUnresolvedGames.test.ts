@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { cellKey, deviceId, fixtureLinks18, gameId, golferId, opId, roundId, scoreGame } from "@swng/domain";
-import type { GameConfig, GameState, RosterEntry, RoundState, ScoreCell } from "@swng/domain";
-import { unresolvedGames } from "./finalizeReadiness";
+import { deviceId, gameId, golferId, opId, roundId } from "../ids.js";
+import type { GameConfig, GameState } from "./game.js";
+import { scoreGame } from "./game.js";
+import { fixtureLinks18 } from "./golden/fixtureCourse.js";
+import type { RosterEntry } from "../round/participant.js";
+import type { RoundState, ScoreCell } from "../round/state.js";
+import { cellKey } from "../round/state.js";
+import { describeUnresolvedGames } from "./present.js";
 
 const ANN = golferId("ann");
 const PAT = golferId("pat");
@@ -41,7 +46,7 @@ const baseState = (overrides: Partial<RoundState> = {}): RoundState => ({
   ...overrides,
 });
 
-describe("unresolvedGames", () => {
+describe("describeUnresolvedGames", () => {
   it("is empty when every game has resolved", () => {
     const cells = Object.fromEntries(
       fixtureLinks18.teeSets[0]!.holes.flatMap((h) => [
@@ -52,14 +57,14 @@ describe("unresolvedGames", () => {
     const state = baseState({ cells });
     const games: readonly GameState[] = [scoreGame(stablefordConfig, state)];
 
-    expect(unresolvedGames(state, games)).toEqual([]);
+    expect(describeUnresolvedGames(state, games)).toEqual([]);
   });
 
   it("names an unresolved game by its own describeGame title, with the missing hole range and golfer", () => {
     const state = baseState({ cells: cellsWithPatStoppedAtHole1 });
     const games: readonly GameState[] = [scoreGame(stablefordConfig, state)];
 
-    const result = unresolvedGames(state, games);
+    const result = describeUnresolvedGames(state, games);
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ gameId: stablefordConfig.id, title: "Stableford" });
@@ -70,14 +75,14 @@ describe("unresolvedGames", () => {
     const state = baseState({ cells: cellsWithPatStoppedAtHole1, terminatedGameIds: new Set([stablefordConfig.id]) });
     const games: readonly GameState[] = [scoreGame(stablefordConfig, state)];
 
-    expect(unresolvedGames(state, games)).toEqual([]);
+    expect(describeUnresolvedGames(state, games)).toEqual([]);
   });
 
   it("lists multiple unresolved games independently, one per game", () => {
     const state = baseState({ games: [stablefordConfig, skinsConfig], cells: cellsWithPatStoppedAtHole1 });
     const games: readonly GameState[] = [scoreGame(stablefordConfig, state), scoreGame(skinsConfig, state)];
 
-    const result = unresolvedGames(state, games);
+    const result = describeUnresolvedGames(state, games);
 
     expect(result.map((r) => r.gameId)).toEqual([stablefordConfig.id, skinsConfig.id]);
     expect(result.every((r) => r.missing === "holes 2–18 unscored for Pat")).toBe(true);
@@ -88,7 +93,7 @@ describe("unresolvedGames", () => {
     const state = baseState({ cells: { [cellKey(ANN, 1)]: cell({ kind: "strokes", strokes: 4 }, ANN), [cellKey(PAT, 1)]: cell({ kind: "strokes", strokes: 5 }, PAT) } });
     const games: readonly GameState[] = [scoreGame(stablefordConfig, state)];
 
-    const result = unresolvedGames(state, games);
+    const result = describeUnresolvedGames(state, games);
 
     expect(result[0]!.missing).toBe("holes 2–18 unscored for Ann, Pat");
   });
@@ -102,6 +107,6 @@ describe("unresolvedGames", () => {
     const state = baseState({ cells });
     const games: readonly GameState[] = [scoreGame(stablefordConfig, state)];
 
-    expect(unresolvedGames(state, games)[0]!.missing).toBe("hole 18 unscored for Pat");
+    expect(describeUnresolvedGames(state, games)[0]!.missing).toBe("hole 18 unscored for Pat");
   });
 });

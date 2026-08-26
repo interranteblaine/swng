@@ -16,6 +16,121 @@ const layer = (pathGlob, patterns, extensions = ["ts"]) => ({
   },
 });
 
+// The domain-compute banlist. Compute is banned; the PRESENTATION vocabulary in
+// scoring/present.ts is deliberately NOT on this list — a consumer that may not say a golf fact
+// in words is a consumer that will write its own second wording of it (spec §1.1). Shared by
+// every non-domain consumer so a new one inherits the rule instead of inventing a weaker or a
+// blanket-stricter one.
+const DOMAIN_COMPUTE_BANLIST = {
+  name: "@swng/domain",
+  allowTypeImports: true,
+  importNames: [
+    // the fold + the five scoring engines + settlement/result readers
+    "scoreGame",
+    "reduceRound",
+    "settleRound",
+    "resultOf",
+    "unresolvedGames",
+    "scoreStrokePlay",
+    "scoreStableford",
+    "scoreSkins",
+    "scoreSinglesMatch",
+    "scoreFourballMatch",
+    "matchLadder",
+    // stroke allocation + net arithmetic
+    "gameStrokeAllocation",
+    "roundStrokeAllocation",
+    "totalDots",
+    "dotsForHoles",
+    "grossForHoles",
+    "parForHoles",
+    "allocateStrokes",
+    "dotsByHole",
+    "strokesReceivedOnHole",
+    "netDoubleBogey",
+    "netStrokes",
+    "roundHalfUp",
+    // which holes a round set out to play (spec 2026-08-02 §3c) — the grid, the
+    // results headline, and dots.ts's per-game allocation all resolve the round's
+    // OWN hole list through this, never their own front/back slicing.
+    "intendedHoles",
+    // leaderboard ORDER (task-5 fix round, spec 2026-07-30 §10 review I2): a ranking
+    // rule is golf logic — GamePanel.tsx's three inline `.sort()` calls moved here, the
+    // same class `aggregateSeason` already moved server-side for crew standings ("the
+    // web never re-ranks"). sortedStrokePlayLines carries the owner ruling (spec
+    // 2026-07-19 §2b, vs-par ascending then thru descending) — see its own comment.
+    "sortedStrokePlayLines",
+    "sortedStablefordLines",
+    "sortedSkinsLines",
+    // resolveStrokes/anchorOf are gone from this list with scoring/strokeBasis.ts
+    // itself (spec 2026-07-30 §9): strokes are asserted on the roster now, so there is
+    // no resolution rule left for the web to re-derive. The allowance table
+    // (defaultAllowance/playingHandicap) that stood here before them is equally gone.
+    // what you shoot relative to par (spec 2026-07-29 §2c/§5) — the whole WHS
+    // banlist block that stood here (adjustedGrossScore, scoreDifferential,
+    // computeIndex(Detail), swngIndex, courseHandicapFor(RatingSlopePar),
+    // unratedCourseHandicap, combineNineHoleDifferentials) is gone with handicap/whs.ts
+    // itself. The six names below (through `overPar`) are DELIBERATELY not re-exported
+    // through @swng/client: the average is server-computed and served, so an on-device
+    // copy would be fence-legal and boundary-wrong. formatOverPar is absent on purpose
+    // — a presentation formatter, like underPar (the handicap/present.ts precedent).
+    // (`nineHoleContribution`, immediately below these six, is the ONE exception in
+    // this whole file — it IS re-exported; see its own comment, not this one.)
+    "averageOf",
+    "averageOfValues",
+    "spreadOfValues",
+    "averageHistory",
+    "scoredOverPar",
+    "overPar",
+    // nineHoleContribution (task 5 — RecordSections.tsx's history row re-derived `* 2`
+    // inline for a nine's "counts +32" line) IS re-exported through @swng/client,
+    // unlike its neighbors above: it's a small pure fact (a nine counts doubled), not
+    // the average fold itself, and the web still needs it to render over already-served
+    // score/par fields. Still banned straight from @swng/domain — the client re-export
+    // is the one sanctioned path. (Two more leaks of the SAME class — GamePanel.tsx's
+    // ranking sorts — surfaced in task 5's own fix round; see sortedStrokePlayLines et
+    // al. above and parForHoles/dotsForHoles near totalDots.)
+    "nineHoleContribution",
+    // golfer metrics + per-round archive line
+    "golferMetrics",
+    "archiveGolferLine",
+    // analytics read folds — bests/milestones
+    "bestsOf",
+    "milestonesOf",
+    // course record — the per-course fold (its present.ts phrase formatters are
+    // fence-ALLOWED, the handicap/present.ts precedent, so they're deliberately absent here)
+    "courseRecord",
+    // crew season aggregation
+    "crewContribution",
+    "aggregateSeason",
+    // crew analytics — partner records / season titles
+    "partnerRecords",
+    "stablefordTitle",
+    // crew scoreboard (crew-scoreboard spec §3a/§3b) — the per-member window fold +
+    // the shared-rounds derivation; the web renders SERVED scoreboard rows only
+    "crewScoreboard",
+    "sharedRoundIds",
+    "seasonWindowOf",
+    // `playedAtMs` used to sit here and was INERT: @swng/domain exports no such name
+    // (it is a FIELD on RoundState/GolferRoundLine, and `import { playedAtMs }` is not
+    // a thing anyone can write), so the entry banned nothing and read as protection
+    // (fix wave, Minor 2). The live played-date ban is `playedAtMsOf`, in its own
+    // `paths` entry above with its own message — that one is verified biting.
+    "inWindow",
+    // golden-deck runners (barrel-exported, run domain compute — nonsensical in
+    // product, but fenced so the ban covers EVERY barrel-exported golf computation)
+    "playGoldenRound",
+    "playGoldenRoundLog",
+    // The fold moves down (MCP arc Phase 1, 2026-08-24): foldAndScore + KNOWN_GAME_KINDS now
+    // live in @swng/domain, re-exported through @swng/client exactly as they were before the
+    // move — banned here for the same reason every other name on this list is banned.
+    "foldAndScore",
+    "KNOWN_GAME_KINDS",
+  ],
+  message:
+    "Golf compute runs on-device via @swng/client (the one sanctioned client-side path) — import it from @swng/client, not @swng/domain. See docs/architecture.md 'Where golf logic lives'.",
+};
+
 const AWS = {
   group: ["@aws-sdk/*", "aws-sdk"],
   message: "AWS SDKs are importable only inside adapters.",
@@ -283,110 +398,7 @@ export default [
               importNames: ["playedAtMsOf"],
               message: "playedAtMsOf has no @swng/client re-export — read state.playedAtMs off the folded RoundState you already have instead.",
             },
-            {
-              name: "@swng/domain",
-              allowTypeImports: true,
-              importNames: [
-                // the fold + the five scoring engines + settlement/result readers
-                "scoreGame",
-                "reduceRound",
-                "settleRound",
-                "resultOf",
-                "unresolvedGames",
-                "scoreStrokePlay",
-                "scoreStableford",
-                "scoreSkins",
-                "scoreSinglesMatch",
-                "scoreFourballMatch",
-                "matchLadder",
-                // stroke allocation + net arithmetic
-                "gameStrokeAllocation",
-                "roundStrokeAllocation",
-                "totalDots",
-                "dotsForHoles",
-                "grossForHoles",
-                "parForHoles",
-                "allocateStrokes",
-                "dotsByHole",
-                "strokesReceivedOnHole",
-                "netDoubleBogey",
-                "netStrokes",
-                "roundHalfUp",
-                // which holes a round set out to play (spec 2026-08-02 §3c) — the grid, the
-                // results headline, and dots.ts's per-game allocation all resolve the round's
-                // OWN hole list through this, never their own front/back slicing.
-                "intendedHoles",
-                // leaderboard ORDER (task-5 fix round, spec 2026-07-30 §10 review I2): a ranking
-                // rule is golf logic — GamePanel.tsx's three inline `.sort()` calls moved here, the
-                // same class `aggregateSeason` already moved server-side for crew standings ("the
-                // web never re-ranks"). sortedStrokePlayLines carries the owner ruling (spec
-                // 2026-07-19 §2b, vs-par ascending then thru descending) — see its own comment.
-                "sortedStrokePlayLines",
-                "sortedStablefordLines",
-                "sortedSkinsLines",
-                // resolveStrokes/anchorOf are gone from this list with scoring/strokeBasis.ts
-                // itself (spec 2026-07-30 §9): strokes are asserted on the roster now, so there is
-                // no resolution rule left for the web to re-derive. The allowance table
-                // (defaultAllowance/playingHandicap) that stood here before them is equally gone.
-                // what you shoot relative to par (spec 2026-07-29 §2c/§5) — the whole WHS
-                // banlist block that stood here (adjustedGrossScore, scoreDifferential,
-                // computeIndex(Detail), swngIndex, courseHandicapFor(RatingSlopePar),
-                // unratedCourseHandicap, combineNineHoleDifferentials) is gone with handicap/whs.ts
-                // itself. The six names below (through `overPar`) are DELIBERATELY not re-exported
-                // through @swng/client: the average is server-computed and served, so an on-device
-                // copy would be fence-legal and boundary-wrong. formatOverPar is absent on purpose
-                // — a presentation formatter, like underPar (the handicap/present.ts precedent).
-                // (`nineHoleContribution`, immediately below these six, is the ONE exception in
-                // this whole file — it IS re-exported; see its own comment, not this one.)
-                "averageOf",
-                "averageOfValues",
-                "spreadOfValues",
-                "averageHistory",
-                "scoredOverPar",
-                "overPar",
-                // nineHoleContribution (task 5 — RecordSections.tsx's history row re-derived `* 2`
-                // inline for a nine's "counts +32" line) IS re-exported through @swng/client,
-                // unlike its neighbors above: it's a small pure fact (a nine counts doubled), not
-                // the average fold itself, and the web still needs it to render over already-served
-                // score/par fields. Still banned straight from @swng/domain — the client re-export
-                // is the one sanctioned path. (Two more leaks of the SAME class — GamePanel.tsx's
-                // ranking sorts — surfaced in task 5's own fix round; see sortedStrokePlayLines et
-                // al. above and parForHoles/dotsForHoles near totalDots.)
-                "nineHoleContribution",
-                // golfer metrics + per-round archive line
-                "golferMetrics",
-                "archiveGolferLine",
-                // analytics read folds — bests/milestones
-                "bestsOf",
-                "milestonesOf",
-                // course record — the per-course fold (its present.ts phrase formatters are
-                // fence-ALLOWED, the handicap/present.ts precedent, so they're deliberately absent here)
-                "courseRecord",
-                // crew season aggregation
-                "crewContribution",
-                "aggregateSeason",
-                // crew analytics — partner records / season titles
-                "partnerRecords",
-                "stablefordTitle",
-                // crew scoreboard (crew-scoreboard spec §3a/§3b) — the per-member window fold +
-                // the shared-rounds derivation; the web renders SERVED scoreboard rows only
-                "crewScoreboard",
-                "sharedRoundIds",
-                "seasonWindowOf",
-                // `playedAtMs` used to sit here and was INERT: @swng/domain exports no such name
-                // (it is a FIELD on RoundState/GolferRoundLine, and `import { playedAtMs }` is not
-                // a thing anyone can write), so the entry banned nothing and read as protection
-                // (fix wave, Minor 2). The live played-date ban is `playedAtMsOf`, in its own
-                // `paths` entry above with its own message — that one is verified biting.
-                "inWindow",
-                // golden-deck runners (barrel-exported, run domain compute — nonsensical in
-                // product, but fenced so the ban covers EVERY barrel-exported golf computation)
-                "playGoldenRound",
-                "playGoldenRoundLog",
-              ],
-              message:
-                "Golf compute runs on-device via @swng/client (the one sanctioned client-side path) — import it from @swng/client, not @swng/domain. See docs/architecture.md 'Where golf logic lives'.",
-            },
+            DOMAIN_COMPUTE_BANLIST,
           ],
         },
       ],

@@ -85,3 +85,4 @@ export * from "./crew/seasonWindow.js";
 // here doesn't collide on GameConfig.
 export type { GameState, RunningTotal, StrokePlayLine, StablefordLine, SkinsLine, MatchOutcome, FourballOutcome, GameConfigDraft } from "./scoring/game.js";
 export { gameMembers, scoreGame } from "./scoring/game.js";
+export { KNOWN_GAME_KINDS, foldAndScore } from "./scoring/fold.js";

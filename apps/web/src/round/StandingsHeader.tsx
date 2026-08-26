@@ -1,6 +1,6 @@
 import { useState } from "react";
+import { describeGame } from "@swng/domain";
 import type { GameId, GameState, RoundState } from "@swng/domain";
-import { describeGame } from "../games/describeGame";
 import { GamePanel } from "../games/GamePanel";
 import { badge, btnDangerSolid, btnSecondary } from "../ui/classes";
 

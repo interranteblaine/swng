@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { fieldDeck18, fixtureLinks, fixtureLinks18, gameId, golferId, playGoldenRoundLog, reduceRound, scoreGame } from "@swng/domain";
-import type { CourseCard, GameConfig, GameState, Participant, RoundState } from "@swng/domain";
-import { describeGame } from "./describeGame";
+import { gameId, golferId } from "../ids.js";
+import { fieldDeck18 } from "./golden/fieldDeck18.js";
+import { fixtureLinks, fixtureLinks18 } from "./golden/fixtureCourse.js";
+import { playGoldenRoundLog } from "./golden/deck.js";
+import { reduceRound } from "../round/state.js";
+import { scoreGame } from "./game.js";
+import type { CourseCard } from "../course/card.js";
+import type { GameConfig, GameState } from "./game.js";
+import type { Participant } from "../round/participant.js";
+import type { RoundState } from "../round/state.js";
+import { describeGame } from "./present.js";
 
 // Builds the same RoundState + scored GameState[] playGoldenRound itself returns, but keeps
 // the RoundState around too — describeGame needs it (card for stroke-play's vs-par, games for

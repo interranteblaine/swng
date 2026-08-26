@@ -1,11 +1,10 @@
 import type { ReactNode } from "react";
-import { gameKindLabel, gameTreatment, strokesNote } from "@swng/domain";
+import { gameKindLabel, gameTreatment, inParens, strokesNote } from "@swng/domain";
 import type { GameConfig, GameState, GolferId, Participant, RoundState } from "@swng/domain";
 import { sortedSkinsLines, sortedStablefordLines, sortedStrokePlayLines } from "@swng/client";
 import { strokesSummary } from "../round/dots";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnDanger, cardBox } from "../ui/classes";
-import { inParens } from "./describeGame";
 
 export interface GamePanelProps {
   readonly game: GameState;

@@ -1,6 +1,6 @@
 import { unresolvedGames as domainUnresolvedGames } from "@swng/client";
+import { describeGame } from "@swng/domain";
 import type { GameId, GameState, GolferId, RoundState, UnresolvedGameMissing } from "@swng/domain";
-import { describeGame } from "../games/describeGame";
 
 export interface UnresolvedGame {
   readonly gameId: GameId;

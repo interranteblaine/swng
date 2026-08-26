@@ -61,10 +61,9 @@ import type {
   StartRoundResponse,
   UpdateMeRequest,
 } from "@swng/contracts";
-import { deviceId as toDeviceId, fieldDeck18, fixtureLinks18, opId as toOpId, playGoldenRoundLog, reduceRound, scoreGame } from "@swng/domain";
+import { deviceId as toDeviceId, describeGame, fieldDeck18, fixtureLinks18, opId as toOpId, playGoldenRoundLog, reduceRound, scoreGame } from "@swng/domain";
 import type { CourseCard, CourseId, CrewId, DeviceId, FixtureScores, GolferId, Hlc, OpId, RoundId, RoundState } from "@swng/domain";
 import type { AuthTokens } from "../src/auth/tokenStore.js";
-import { describeGame } from "../src/games/describeGame.js";
 
 // --- Legibility-walk screenshots (M7 Task 8; papercuts.md §4) -----------------------------
 

@@ -21,7 +21,7 @@ import type { GameConfig, RoundState, ScoreCell } from "@swng/domain";
 import type { FinalizeRoundResponse } from "@swng/contracts";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
-import { describeGame } from "../games/describeGame";
+import { describeGame } from "@swng/domain";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 import { ResultsView } from "./ResultsView";
 

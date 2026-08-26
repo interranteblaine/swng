@@ -28,7 +28,7 @@ vi.mock("../api", () => ({
 import { getMe, getSeasonStandings, updateSeason } from "../api";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
-import { roundLabel } from "../roundLabel";
+import { roundLabel } from "@swng/domain";
 import { SeasonPanel } from "./SeasonPanel";
 
 const mockedGetSeasonStandings = vi.mocked(getSeasonStandings);

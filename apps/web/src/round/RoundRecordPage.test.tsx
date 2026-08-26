@@ -7,7 +7,7 @@ import { ArchiveRedirect } from "../App";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { credentialStore } from "../identity";
-import { roundLabel } from "../roundLabel";
+import { roundLabel } from "@swng/domain";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 import { RoundRecordPage } from "./RoundRecordPage";
 

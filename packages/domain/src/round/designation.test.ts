@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dayCollisionChecker, roundDayKey, roundLabel } from "./roundLabel";
+import { dayCollisionChecker, roundDayKey, roundLabel } from "./designation.js";
 
 // A fixed instant used across the format assertions: 2025-07-12 07:58 UTC. July 12 2025 is a
 // Saturday. The tests below pass an EXPLICIT `timeZone: "UTC"` so the assertions read

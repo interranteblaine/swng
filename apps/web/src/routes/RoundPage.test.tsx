@@ -7,7 +7,7 @@ import { deviceId, fixtureLinks, fixtureLinks18, gameId, golferId, opId, roundId
 import type { GolferId, OpId, RoundEvent, RoundId } from "@swng/domain";
 import { AuthProvider } from "../auth/useAuth";
 import { credentialStore } from "../identity";
-import { roundLabel } from "../roundLabel";
+import { roundLabel } from "@swng/domain";
 import { createUseRoundSession } from "../session/useRoundSession";
 import type { ResolveSessionConfig } from "../session/useRoundSession";
 import { createScriptedTransport, stampSeq } from "../testSupport/scriptedTransport";

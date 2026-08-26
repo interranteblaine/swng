@@ -5,7 +5,7 @@ import { formatOverPar } from "@swng/domain";
 import type { SeasonStandingsResponse } from "@swng/contracts";
 import { getSeasonStandings, updateSeason } from "../api";
 import { useAuth } from "../auth/useAuth";
-import { dayCollisionChecker, roundLabel } from "../roundLabel";
+import { dayCollisionChecker, roundLabel } from "@swng/domain";
 import { GolferLink } from "../ui/GolferLink";
 import { badge, btnQuiet, cardBox, inputBox } from "../ui/classes";
 import { headToHeadLine } from "./headToHeadLine";

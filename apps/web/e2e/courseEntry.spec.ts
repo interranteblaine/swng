@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { fixtureLinks18 } from "@swng/domain";
-import { roundLabel } from "../src/roundLabel.js";
+import { roundLabel } from "@swng/domain";
 import {
   addSinglesGame,
   chip,

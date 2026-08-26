@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GetMeResponse } from "@swng/contracts";
 import { golferId, roundId } from "@swng/domain";
 import { credentialStore } from "../identity";
-import { roundLabel } from "../roundLabel";
+import { roundLabel } from "@swng/domain";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
 // M8 Task 6: HomePage composes useAuth, so the api.ts module boundary is faked here too — getMe

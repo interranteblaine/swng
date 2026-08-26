@@ -8,7 +8,7 @@ import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { HistoryList } from "../golfers/RecordSections";
 import { credentialStore } from "../identity";
-import { dayCollisionChecker, roundLabel } from "../roundLabel";
+import { dayCollisionChecker, roundLabel } from "@swng/domain";
 import { openLiveRound } from "../session/openLiveRound";
 import { btnCreamOutline, btnPrimary, btnSecondary, cardBox, eyebrow, inputCode } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";

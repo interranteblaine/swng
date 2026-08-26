@@ -1,7 +1,7 @@
 import { Link, useLocation, useParams } from "react-router";
 import { roundId as makeRoundId } from "@swng/domain";
 import type { RoundId } from "@swng/domain";
-import { roundLabel } from "../roundLabel";
+import { roundLabel } from "@swng/domain";
 import { ResultsView } from "../round/ResultsView";
 import { ScorecardGrid } from "../round/ScorecardGrid";
 import { StandingsHeader } from "../round/StandingsHeader";

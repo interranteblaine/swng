@@ -13,7 +13,7 @@ import { ShareButton } from "../round/ShareButton";
 import { SetupPanel } from "../round/SetupPanel";
 import { StandingsHeader } from "../round/StandingsHeader";
 import { StatusChrome } from "../round/StatusChrome";
-import { roundLabel } from "../roundLabel";
+import { roundLabel } from "@swng/domain";
 import { useRoundSession as defaultUseRoundSession } from "../session/useRoundSession";
 import type { RoundSessionView } from "../session/useRoundSession";
 import { btnDanger, btnDangerSolid, btnPrimary, btnSecondary } from "../ui/classes";

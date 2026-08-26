@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cardId, courseId, deviceId, fixtureLinks, gameId, golferId, opId, roundId } from "@swng/domain";
 import type { GameConfig, OpId, RoundEvent, RoundId } from "@swng/domain";
 import { AuthProvider } from "../auth/useAuth";
-import { roundLabel } from "../roundLabel";
+import { roundLabel } from "@swng/domain";
 import type { WatchRoundView } from "./useWatchRound";
 import { createWatchPage } from "./WatchPage";
 

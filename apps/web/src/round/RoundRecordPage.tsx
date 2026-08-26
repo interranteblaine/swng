@@ -6,7 +6,7 @@ import type { GameState, RoundId, RoundState } from "@swng/domain";
 import { getMyLiveRounds, getRoundArchive } from "../api";
 import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
-import { roundLabel } from "../roundLabel";
+import { roundLabel } from "@swng/domain";
 import { openLiveRound } from "../session/openLiveRound";
 import { usePageTitle } from "../ui/usePageTitle";
 import { ResultsView } from "./ResultsView";

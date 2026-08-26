@@ -6,7 +6,7 @@ import type { GetMeResponse } from "@swng/contracts";
 import { AuthProvider } from "../auth/useAuth";
 import { tokenStore } from "../auth/tokenStore";
 import { credentialStore } from "../identity";
-import { roundLabel } from "../roundLabel";
+import { roundLabel } from "@swng/domain";
 import { createMemoryStorage } from "../testSupport/memoryStorage";
 
 // Faking the api.ts module boundary, same idiom as CreateRoundPage.test.tsx — JoinRoundPage

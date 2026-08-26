@@ -9,7 +9,7 @@ import { SignInCta } from "../auth/SignInCta";
 import { useAuth } from "../auth/useAuth";
 import { teeNumbers } from "../courses/teeNumbers";
 import { credentialStore } from "../identity";
-import { roundLabel } from "../roundLabel";
+import { roundLabel } from "@swng/domain";
 import { btnPrimary, cardBox, inputBox, inputCode } from "../ui/classes";
 import { usePageTitle } from "../ui/usePageTitle";
 

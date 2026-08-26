@@ -362,7 +362,8 @@ const describeSkins = (game: Skins, round: RoundState): string => {
 // here. Allocation is not: it needs a CourseCard, and this module computes no golf result.
 // Members with no strokes are omitted; a game where nobody receives says so in words, because
 // "everyone plays off 0" would be false for a match, where zero dots means the members are EQUAL
-// at whatever level, not scratch (spec 2026-07-30 §3).
+// at whatever level — two golfers both on 20 receive nothing from each other and are not
+// scratch (spec 2026-07-30 §3). What is true for both arms is that nobody is receiving.
 export const strokesLine = (entries: readonly { readonly name: string; readonly dots: number }[]): string => {
   const parts = entries.filter((entry) => entry.dots > 0).map((entry) => `${entry.name} ${entry.dots} ${entry.dots === 1 ? "dot" : "dots"}`);
   return parts.length > 0 ? parts.join(" · ") : "No strokes — everyone in this game plays level.";

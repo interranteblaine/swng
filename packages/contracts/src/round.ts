@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CourseCard, GameConfig, GameResult, HoleResult, HoleSelection, Participant, RosterEntry, RoundArchive, RoundEvent, ScoreCell } from "@swng/domain";
+import type { CourseCard, GameConfig, GameResult, GameState, HoleResult, HoleSelection, Participant, RosterEntry, RoundArchive, RoundEvent, ScoreCell } from "@swng/domain";
 import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema, teeIdSchema } from "./ids.js";
 
 // Wire mirrors of domain types. These stay structural (loose numeric bounds where the
@@ -272,6 +272,104 @@ export const gameResultSchemaImpl = z.discriminatedUnion("kind", [
   }),
 ]);
 export const gameResultSchema: z.ZodType<GameResult> = gameResultSchemaImpl;
+
+// The live-scored stroke-play line: `strokePlayLineSchema` above is the SETTLED line
+// (StrokePlayLine — golferId/thru/gross/net only) and is NOT reused here — domain's
+// ScoredStrokePlayLine adds `relativeToPar`, a live-standings figure that deliberately stays
+// off the settled line so an old stored snapshot (no relativeToPar) keeps parsing. Reusing
+// strokePlayLineSchema here would silently narrow the wire shape and drop relativeToPar, and
+// the parity check below (checked in both directions) is what would catch that.
+const scoredStrokePlayLineSchema = z.object({
+  golferId: golferIdSchema,
+  thru: z.number(),
+  gross: runningTotalSchema,
+  net: runningTotalSchema.optional(),
+  relativeToPar: z.number(),
+});
+
+const stablefordLineSchema = z.object({
+  golferId: golferIdSchema,
+  thru: z.number(),
+  points: z.number(),
+});
+
+const skinsLineSchema = z.object({
+  golferId: golferIdSchema,
+  skins: z.number(),
+});
+
+// One decided hole in a match's trail (singles or fourball) — live-GameState only, never
+// reached by resultOf (see domain's own MatchHole doc comment).
+const matchHoleSchema = z.object({
+  hole: z.number(),
+  winner: z.enum(["a", "b", "halved"]),
+});
+
+// One decided hole in a skins trail — winner absent means the pot carried. Live-GameState
+// only, like matchHoleSchema above (see domain's own SkinsHole doc comment).
+const skinsHoleSchema = z.object({
+  hole: z.number(),
+  winner: golferIdSchema.optional(),
+  pot: z.number(),
+});
+
+// Unannotated on purpose, same reasoning as gameConfigSchemaImpl/gameResultSchemaImpl above:
+// round.test.ts's parity check needs this impl's own inferred Output type, not one steered to
+// GameState by an annotation on this const itself, so a dropped field or a silently-missing
+// union arm (e.g. the dormie case) fails typecheck instead of vanishing behind the annotation.
+// No bounds anywhere in this union (CLAUDE.md placement rule): every field here describes a
+// FOLDED value produced by the domain's own fold, not a client request.
+export const gameStateSchemaImpl = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("stroke-play"),
+    id: gameIdSchema,
+    scoring: z.enum(["gross", "net"]),
+    lines: z.array(scoredStrokePlayLineSchema).readonly(),
+    complete: z.boolean(),
+    leaders: z.array(golferIdSchema).readonly(),
+  }),
+  z.object({
+    kind: z.literal("singles-match"),
+    id: gameIdSchema,
+    up: z.number(),
+    leader: golferIdSchema.optional(),
+    thru: z.number(),
+    remaining: z.number(),
+    dormie: z.boolean(),
+    holes: z.array(matchHoleSchema).readonly(),
+    outcome: matchOutcomeSchema.optional(),
+  }),
+  z.object({
+    kind: z.literal("stableford"),
+    id: gameIdSchema,
+    lines: z.array(stablefordLineSchema).readonly(),
+    complete: z.boolean(),
+    leaders: z.array(golferIdSchema).readonly(),
+  }),
+  z.object({
+    kind: z.literal("fourball-match"),
+    id: gameIdSchema,
+    up: z.number(),
+    leader: z.enum(["a", "b"]).optional(),
+    thru: z.number(),
+    remaining: z.number(),
+    dormie: z.boolean(),
+    holes: z.array(matchHoleSchema).readonly(),
+    outcome: fourballOutcomeSchema.optional(),
+  }),
+  z.object({
+    kind: z.literal("skins"),
+    id: gameIdSchema,
+    scoring: z.enum(["gross", "net"]),
+    lines: z.array(skinsLineSchema).readonly(),
+    carrying: z.number(),
+    carriedOut: z.number(),
+    complete: z.boolean(),
+    holesDecided: z.number(),
+    holes: z.array(skinsHoleSchema).readonly(),
+  }),
+]);
+export const gameStateSchema: z.ZodType<GameState> = gameStateSchemaImpl;
 
 // A settled seat: `Participant` plus the fold's own `departed` derivation. Only ever `true` —
 // its absence IS false (domain/round/participant.ts), so a round with no departures parses

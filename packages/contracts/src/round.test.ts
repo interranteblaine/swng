@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
-import { deviceId, gameId, golferId, opId, roundId } from "@swng/domain";
-import type { CourseCard, GameConfig, GameResult, RoundArchive, RoundEvent } from "@swng/domain";
+import { deviceId, fixtureLinks, foldAndScore, gameId, golferId, opId, playGoldenRoundLog, roundId } from "@swng/domain";
+import type { CourseCard, GameConfig, GameResult, GameState, Participant, RoundArchive, RoundEvent } from "@swng/domain";
 import { MAX_STROKES } from "./commands.js";
 import { ContractError, parse } from "./parse.js";
 import {
   gameConfigSchemaImpl,
   gameResultSchemaImpl,
+  gameStateSchema,
+  gameStateSchemaImpl,
   holeResultSchema,
   leaveRoundResponseSchema,
   roundArchiveSchema,
@@ -208,7 +210,7 @@ describe("roundEventSchema", () => {
     expect(parsed).toMatchObject({ kind: "game-added", config: { kind: "skins", scoring: "net" } });
   });
 
-  it("roundEventSchema, gameConfigSchema, gameResultSchema and roundArchiveSchema type-parity holds in both directions (compile-time check)", () => {
+  it("roundEventSchema, gameConfigSchema, gameResultSchema, gameStateSchema and roundArchiveSchema type-parity holds in both directions (compile-time check)", () => {
     // Deliberately checked against the *Impl consts (round.ts), not the exported
     // roundEventSchema / gameConfigSchema / gameResultSchema aliases: those aliases carry
     // an explicit `z.ZodType<RoundEvent>` annotation, which makes
@@ -225,6 +227,8 @@ describe("roundEventSchema", () => {
     const backwardConfig: z.infer<typeof gameConfigSchemaImpl> = {} as GameConfig;
     const forwardResult: GameResult = {} as z.infer<typeof gameResultSchemaImpl>;
     const backwardResult: z.infer<typeof gameResultSchemaImpl> = {} as GameResult;
+    const forwardState: GameState = {} as z.infer<typeof gameStateSchemaImpl>;
+    const backwardState: z.infer<typeof gameStateSchemaImpl> = {} as GameState;
     // The archive's own reach is NARROWER than the three above, and the difference is worth
     // stating so nothing here is credited with work it isn't doing: `roundArchiveSchemaImpl` is
     // unannotated, so a field dropped or renamed at the ARCHIVE level fails to compile — but four
@@ -237,7 +241,63 @@ describe("roundEventSchema", () => {
     // These assignments above are the actual test — they only compile if z.infer and the
     // domain type are structurally identical in both directions. This assertion just gives
     // vitest something to run.
-    expect([forwardEvent, backwardEvent, forwardConfig, backwardConfig, forwardResult, backwardResult, forwardArchive, backwardArchive]).toHaveLength(8);
+    expect([
+      forwardEvent, backwardEvent,
+      forwardConfig, backwardConfig,
+      forwardResult, backwardResult,
+      forwardState, backwardState,
+      forwardArchive, backwardArchive,
+    ]).toHaveLength(10);
+  });
+});
+
+describe("gameStateSchema", () => {
+  // Every fixture below folds a REAL event log through foldAndScore (domain's own reduceRound +
+  // scoreGame composition) rather than building a GameState literal by hand — a hand-built
+  // literal would be written from the same reading of the domain type as the schema, so both
+  // could be wrong together and agree anyway. fixtureLinks is domain's own 9-hole golden card.
+  const A = golferId("ann");
+  const B = golferId("bo");
+  const players: readonly Participant[] = [
+    { golferId: A, name: "Ann", tee: "white", strokes: 6 },
+    { golferId: B, name: "Bo", tee: "white", strokes: 0 },
+  ];
+
+  const gamesByKind = {
+    "stroke-play": { kind: "stroke-play", id: gameId("sp1"), scoring: "net", players: [A, B] } as const,
+    "singles-match": { kind: "singles-match", id: gameId("sm1"), a: A, b: B } as const,
+    stableford: { kind: "stableford", id: gameId("sf1"), players: [A, B] } as const,
+    "fourball-match": { kind: "fourball-match", id: gameId("fb1"), a: [A, B] as const, b: [A, B] as const } as const,
+    skins: { kind: "skins", id: gameId("sk1"), scoring: "net", players: [A, B] } as const,
+  };
+
+  // A partial, unfinalized card — thru 7 of 9 — is enough to exercise every live-only field
+  // (thru, remaining, dormie, carrying, holesDecided, the per-hole trails) that resultOf never
+  // reaches, since a settled GameResult never carries them.
+  const scores = {
+    [A]: [5, 5, 3, 6, 4, 4, 5],
+    [B]: [4, 5, 4, 5, 5, 3, 5],
+  };
+
+  for (const kind of ["stroke-play", "singles-match", "stableford", "fourball-match", "skins"] as const) {
+    it(`round-trips a live ${kind} game`, () => {
+      const events = playGoldenRoundLog(fixtureLinks, players, [gamesByKind[kind]], scores, [], false);
+      const [state] = foldAndScore(events).games;
+      expect(parse(gameStateSchema, JSON.parse(JSON.stringify(state)) as unknown)).toEqual(state);
+    });
+  }
+
+  // The arm most likely to be missed: a singles match where up === remaining. Same card as
+  // singlesMatch.test.ts's own golden dormie fixture — h7 halves, leaving Ann 2 up with 2 to play.
+  it("round-trips a match that has gone dormie", () => {
+    const dormieScores = {
+      [A]: [5, 5, 3, 6, 4, 4, 5],
+      [B]: [4, 5, 4, 5, 5, 3, 4],
+    };
+    const events = playGoldenRoundLog(fixtureLinks, players, [gamesByKind["singles-match"]], dormieScores, [], false);
+    const [state] = foldAndScore(events).games;
+    expect(state).toMatchObject({ dormie: true });
+    expect(parse(gameStateSchema, JSON.parse(JSON.stringify(state)) as unknown)).toEqual(state);
   });
 });
 

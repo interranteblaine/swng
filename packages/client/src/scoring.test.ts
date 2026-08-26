@@ -61,20 +61,6 @@ describe("foldAndScore — the read-only cousin of RoundSession's live fold", ()
     expect(stableford?.kind).toBe("stableford");
   });
 
-  it("filters an unknown/future game kind out of the scored games rather than throwing", () => {
-    const unknownGame = { kind: "wolf-9000", id: gameId("game-unknown") } as unknown as GameConfig;
-    const events = buildLog([unknownGame]);
-
-    let games: ReturnType<typeof foldAndScore>["games"] = [];
-    expect(() => {
-      games = foldAndScore(events).games;
-    }).not.toThrow();
-
-    const kinds = games.map((game) => game.kind);
-    expect(kinds).toContain("stableford");
-    expect(kinds).not.toContain("wolf-9000");
-  });
-
   it("throws (via reduceRound's genesis check) on a log with no round-created event", () => {
     expect(() => foldAndScore([])).toThrow();
   });

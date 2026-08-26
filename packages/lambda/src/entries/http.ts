@@ -1,6 +1,7 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { buildApp } from "../compositionRoot.js";
 import type { App } from "../compositionRoot.js";
+import { fromApiGatewayEvent, toApiGatewayResult } from "../http/apiGatewayAdapter.js";
 
 // Composition happens ONCE per cold start (conventions §3, M3 plan) — but buildApp is async
 // since prod-readiness hardening Arc A Task 4 (it awaits the token-signing secret from
@@ -22,5 +23,5 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
     throw e;
   });
   const app = await appPromise;
-  return app.dispatcher(event);
+  return toApiGatewayResult(await app.dispatcher(fromApiGatewayEvent(event)));
 };

@@ -1,9 +1,9 @@
-import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import type { AccountClaims, AccountVerifier, Logger, ParticipantClaims, TokenIssuer } from "@swng/application";
 import { ApplicationError } from "@swng/application";
 import { ContractError, parse } from "@swng/contracts";
 import type { Route, RouteContext } from "./routes.js";
 import { jsonResponse, toHttpError } from "./errorMapping.js";
+import type { HttpRequest, HttpResponse } from "./httpRequest.js";
 
 const BEARER_PREFIX = "Bearer ";
 
@@ -43,17 +43,20 @@ const matchPath = (template: string, actualSegments: readonly string[]): Record<
   return pathParams;
 };
 
-const bearerToken = (event: APIGatewayProxyEventV2): string | undefined => {
-  // HTTP API (payload format 2.0) lower-cases header names, but this never trusts that.
-  const header = event.headers["authorization"] ?? event.headers["Authorization"];
+// Header-case-folding (HTTP API lower-cases names, but this never trusted that) now lives in
+// apiGatewayAdapter.ts's fromApiGatewayEvent — `headers.authorization` is always the right key
+// here, whatever the transport.
+const bearerToken = (request: HttpRequest): string | undefined => {
+  const header = request.headers.authorization;
   return header?.startsWith(BEARER_PREFIX) ? header.slice(BEARER_PREFIX.length) : undefined;
 };
 
-const readJsonBody = (event: APIGatewayProxyEventV2): unknown => {
-  if (!event.body) return undefined;
-  const raw = event.isBase64Encoded ? Buffer.from(event.body, "base64").toString("utf8") : event.body;
+// Base64-decoding (a transport-specific concern) already happened in fromApiGatewayEvent —
+// this only owns "is the body valid JSON," which every transport shares.
+const readJsonBody = (request: HttpRequest): unknown => {
+  if (!request.body) return undefined;
   try {
-    return JSON.parse(raw);
+    return JSON.parse(request.body);
   } catch {
     throw new ContractError("invalid-request", ["body: invalid JSON"]);
   }
@@ -63,10 +66,10 @@ const readJsonBody = (event: APIGatewayProxyEventV2): unknown => {
 // auth, parsing, and error-mapping all happen exactly once, here, never per-route.
 export const createDispatcher =
   (routes: readonly Route[], tokens: TokenIssuer, verifier: AccountVerifier, logger: Logger) =>
-  async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
+  async (request: HttpRequest): Promise<HttpResponse> => {
     const startedAt = Date.now();
-    const method = event.requestContext.http.method.toUpperCase();
-    const path = event.rawPath;
+    const method = request.method;
+    const path = request.path;
 
     // Hoisted above the try so the finally's one access-log line names the matched route and the
     // authenticated subject on EVERY exit (404 / success / mapped-error). Observability (Arc B).
@@ -101,7 +104,7 @@ export const createDispatcher =
 
       let claims: ParticipantClaims | undefined;
       if (route.auth === "participant") {
-        const token = bearerToken(event);
+        const token = bearerToken(request);
         const verified = token ? tokens.verify(token) : undefined;
         // Crew membership (invited in, accountable out): a verified crew-invite token carries
         // no roundId at all (TokenClaims' own doc comment, ports/tokenIssuer.ts) — narrowed OUT
@@ -127,7 +130,7 @@ export const createDispatcher =
         // golferId (readEvents only needs the roundId already in pathParams), and leaving
         // claims unset here is what keeps a future write handler from being tempted to reuse
         // this tier by mistake instead of declaring "participant".
-        const token = bearerToken(event);
+        const token = bearerToken(request);
         const verified = token ? tokens.verify(token) : undefined;
         // Crew membership (invited in, accountable out): same crew-invite rejection as the
         // "participant" tier above, and for the same reason — no roundId to match against.
@@ -139,7 +142,7 @@ export const createDispatcher =
         // "golfer" REQUIRES a token — missing is a 401, same as "participant" above. Accounts-only
         // identity (spec §3): StartRound/JoinRound are "golfer" now too, so an anonymous start or
         // join lands here as invalid-token rather than proceeding — there is no anonymous path left.
-        const token = bearerToken(event);
+        const token = bearerToken(request);
         if (!token) throw new ApplicationError("invalid-token");
         // The injected AccountVerifier rejects on a bad signature, expiry, or wrong issuer/audience
         // (createCognitoVerifier's own doc comment) — every one of those collapses to the same 401
@@ -150,12 +153,8 @@ export const createDispatcher =
         });
       }
 
-      const body = route.schema ? parse(route.schema, readJsonBody(event)) : undefined;
-      const query: Record<string, string> = {};
-      for (const [key, value] of Object.entries(event.queryStringParameters ?? {})) {
-        if (value !== undefined) query[key] = value;
-      }
-      const ctx: RouteContext = { claims, account, pathParams, query };
+      const body = route.schema ? parse(route.schema, readJsonBody(request)) : undefined;
+      const ctx: RouteContext = { claims, account, pathParams, query: request.query };
 
       const result = await route.handler(ctx, body);
       status = route.successStatus;

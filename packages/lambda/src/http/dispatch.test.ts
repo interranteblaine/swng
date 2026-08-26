@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { cardId, courseId, crewId, deviceId, fixtureLinks, fixtureLinks18, fixtureWhite, golferId, opId, placeholderName } from "@swng/domain";
 import type { AccountClaims, AccountVerifier, Logger } from "@swng/application";
 import {
@@ -98,45 +97,32 @@ import { createHmacTokenIssuer } from "../auth/hmacTokenIssuer.js";
 import { buildRoutes } from "./routes.js";
 import type { UseCases } from "./routes.js";
 import { createDispatcher } from "./dispatch.js";
+import type { HttpRequest, HttpResponse } from "./httpRequest.js";
 
-// Builds just enough of an APIGatewayProxyEventV2 (HTTP API payload format 2.0) for the
-// dispatcher to route/authorize/parse against — every field the dispatcher actually reads.
-// `rawBody` bypasses the JSON.stringify(body) convenience for the one test that needs to
-// send bytes that aren't valid JSON at all.
-const makeEvent = (opts: {
+// Builds just enough of an HttpRequest for the dispatcher to route/authorize/parse against —
+// every field the dispatcher actually reads. Transport-agnostic since Task 5's extraction: no
+// API Gateway shape here at all — that translation is apiGatewayAdapter.ts's own job, covered
+// by apiGatewayAdapter.test.ts instead. `rawBody` bypasses the JSON.stringify(body) convenience
+// for the one test that needs to send bytes that aren't valid JSON at all.
+const makeRequest = (opts: {
   method: string;
   path: string;
   body?: unknown;
   rawBody?: string;
   token?: string;
   query?: Record<string, string>;
-}): APIGatewayProxyEventV2 => ({
-  version: "2.0",
-  routeKey: "$default",
-  rawPath: opts.path,
-  rawQueryString: "",
+}): HttpRequest => ({
+  method: opts.method,
+  path: opts.path,
   headers: opts.token ? { authorization: `Bearer ${opts.token}` } : {},
-  queryStringParameters: opts.query,
-  requestContext: {
-    accountId: "test-account",
-    apiId: "test-api",
-    domainName: "test.execute-api.us-east-1.amazonaws.com",
-    domainPrefix: "test",
-    http: { method: opts.method, path: opts.path, protocol: "HTTP/1.1", sourceIp: "127.0.0.1", userAgent: "vitest" },
-    requestId: "req-1",
-    routeKey: "$default",
-    stage: "$default",
-    time: "07/Jul/2026:00:00:00 +0000",
-    timeEpoch: 0,
-  },
+  query: opts.query ?? {},
   body: opts.rawBody ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body)),
-  isBase64Encoded: false,
 });
 
-// The dispatcher always returns a structured result (dispatch.ts never returns a bare
-// string) — this helper spares every assertion below a repeated cast.
-const asStructured = (result: Awaited<ReturnType<ReturnType<typeof createDispatcher>>>): APIGatewayProxyStructuredResultV2 =>
-  result as APIGatewayProxyStructuredResultV2;
+// The dispatcher's return type (HttpResponse) is no longer a union with a bare string the way
+// APIGatewayProxyResultV2 was — this is now a no-op identity, kept (rather than deleted) so
+// every `asStructured(...)` call site below stands unchanged.
+const asStructured = (result: HttpResponse): HttpResponse => result;
 
 // Accounts-only identity (spec §3): POST /rounds and POST /rounds/join are "golfer"-gated now, so
 // even the golden-path/course-routes/share suites must present a Bearer to start or join a round.
@@ -226,7 +212,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
     const startResp = asStructured(
       await dispatcher(
-        makeEvent({
+        makeRequest({
           method: "POST",
           path: "/rounds",
           token: "sub-ann",
@@ -239,7 +225,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
     const joinResp = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: "/rounds/join", token: "sub-bo", body: { code: started.joinCode, tee: "white" } }),
+        makeRequest({ method: "POST", path: "/rounds/join", token: "sub-bo", body: { code: started.joinCode, tee: "white" } }),
       ),
     );
     expect(joinResp.statusCode).toBe(201);
@@ -249,7 +235,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     // Ann 3, Bo 0 — the numbers stableford.test.ts's 10/17 lines are built on. Bo joins on 0.
     const setStrokesResp = asStructured(
       await dispatcher(
-        makeEvent({
+        makeRequest({
           method: "POST",
           path: `/rounds/${started.roundId}/strokes`,
           token: started.token,
@@ -261,7 +247,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
     const addGameResp = asStructured(
       await dispatcher(
-        makeEvent({
+        makeRequest({
           method: "POST",
           path: `/rounds/${started.roundId}/games`,
           token: started.token,
@@ -278,7 +264,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     // — not just enough to exercise one recordScore call.
     const record = (opts: { token: string; golferId: string; hole: number; result: unknown; opIdSuffix: string; wallMs: number }) =>
       dispatcher(
-        makeEvent({
+        makeRequest({
           method: "POST",
           path: `/rounds/${started.roundId}/scores`,
           token: opts.token,
@@ -297,7 +283,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     const toResult = (score: number | "picked-up") => (score === "picked-up" ? { kind: "picked-up" } : { kind: "strokes", strokes: score });
 
     let wallMs = 5_000;
-    let firstScoreResp: APIGatewayProxyStructuredResultV2 | undefined;
+    let firstScoreResp: HttpResponse | undefined;
     for (let hole = 1; hole <= 9; hole += 1) {
       const resp = asStructured(
         await record({
@@ -338,14 +324,14 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     expect(recordScoreResponseSchema.parse(JSON.parse(dupResp.body!))).toEqual({ duplicate: true });
 
     const eventsResp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
+      await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
     );
     expect(eventsResp.statusCode).toBe(200);
     const events = JSON.parse(eventsResp.body!) as { events: readonly unknown[]; nextSeq: number };
     expect(events.events.length).toBeGreaterThan(0);
 
     const finalizeResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })),
+      await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })),
     );
     expect(finalizeResp.statusCode).toBe(200);
     const finalized = finalizeRoundResponseSchema.parse(JSON.parse(finalizeResp.body!));
@@ -371,7 +357,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+            makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
           ),
         ).body!,
       ),
@@ -380,7 +366,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds/join", token: "sub-bo", body: { code: started.joinCode, tee: "white" } }),
+            makeRequest({ method: "POST", path: "/rounds/join", token: "sub-bo", body: { code: started.joinCode, tee: "white" } }),
           ),
         ).body!,
       ),
@@ -388,7 +374,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
     const resp = asStructured(
       await dispatcher(
-        makeEvent({
+        makeRequest({
           method: "POST",
           path: `/rounds/${started.roundId}/strokes`,
           token: started.token,
@@ -402,7 +388,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     expect(parsed.events[0]).toMatchObject({ kind: "participant-strokes-set", golferId: joined.golferId, strokes: 13 });
 
     const eventsResp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
+      await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
     );
     expect(eventsResp.statusCode).toBe(200);
     const events = eventsResponseSchema.parse(JSON.parse(eventsResp.body!));
@@ -418,7 +404,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+            makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
           ),
         ).body!,
       ),
@@ -426,7 +412,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
     const resp = asStructured(
       await dispatcher(
-        makeEvent({
+        makeRequest({
           method: "POST",
           path: `/rounds/${started.roundId}/played-at`,
           token: started.token,
@@ -440,7 +426,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     expect(parsed.events[0]).toMatchObject({ kind: "round-played-at-set", playedAtMs: 1_700_000_000_000 });
 
     const eventsResp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
+      await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
     );
     expect(eventsResp.statusCode).toBe(200);
     const events = eventsResponseSchema.parse(JSON.parse(eventsResp.body!));
@@ -461,7 +447,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: course18, host: { tee: "white" } } }),
+            makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: course18, host: { tee: "white" } } }),
           ),
         ).body!,
       ),
@@ -469,7 +455,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
     const resp = asStructured(
       await dispatcher(
-        makeEvent({
+        makeRequest({
           method: "POST",
           path: `/rounds/${started.roundId}/holes`,
           token: started.token,
@@ -483,7 +469,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     expect(parsed.events[0]).toMatchObject({ kind: "round-holes-set", holes: "front" });
 
     const eventsResp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
+      await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
     );
     expect(eventsResp.statusCode).toBe(200);
     const events = eventsResponseSchema.parse(JSON.parse(eventsResp.body!));
@@ -492,7 +478,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
   it("rejects a request with no bearer token on a participant route — 401", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds/some-round/finalize" })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: "/rounds/some-round/finalize" })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
@@ -500,7 +486,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
   it("rejects a request with a garbage bearer token on a participant route — 401", async () => {
     const { dispatcher } = await setup();
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/rounds/some-round/finalize", token: "not-a-real-token" })),
+      await dispatcher(makeRequest({ method: "POST", path: "/rounds/some-round/finalize", token: "not-a-real-token" })),
     );
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
@@ -512,20 +498,20 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
     const roundX = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
+          await dispatcher(makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
         ).body!,
       ),
     );
     const roundY = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
+          await dispatcher(makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
         ).body!,
       ),
     );
 
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: `/rounds/${roundY.roundId}/finalize`, token: roundX.token })),
+      await dispatcher(makeRequest({ method: "POST", path: `/rounds/${roundY.roundId}/finalize`, token: roundX.token })),
     );
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "token-round-mismatch" });
@@ -533,21 +519,21 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
   it("rejects a zod-invalid body — 400 with errorResponseSchema shape", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE } })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE } })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
 
   it("rejects a body that isn't valid JSON at all — 400 with errorResponseSchema shape", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", rawBody: "{not valid json" })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", rawBody: "{not valid json" })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
 
   it("404s an unmatched path, shaped through the same error envelope as every other error", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/not-a-real-route" })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/not-a-real-route" })));
     expect(resp.statusCode).toBe(404);
     // The not-found body is hand-built in dispatch.ts, but it must still round-trip through
     // errorResponseSchema — one error-shaping site (errorMapping.ts), not a second one that
@@ -557,13 +543,13 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
   it("404s a matched path with the wrong method", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "DELETE", path: "/rounds" })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "DELETE", path: "/rounds" })));
     expect(resp.statusCode).toBe(404);
   });
 
   it("maps a malformed percent-escape in the path to a structured 400, not a raw throw", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/%zz/scores" })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/rounds/%zz/scores" })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
@@ -574,7 +560,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+            makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
           ),
         ).body!,
       ),
@@ -582,7 +568,7 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
 
     const resp = asStructured(
       await dispatcher(
-        makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "abc" } }),
+        makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "abc" } }),
       ),
     );
     expect(resp.statusCode).toBe(400);
@@ -598,16 +584,16 @@ describe("createDispatcher — HTTP-shaped golden path", () => {
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+            makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
           ),
         ).body!,
       ),
     );
 
     const emptyResp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "" } })),
+      await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "" } })),
     );
-    const absentResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token })));
+    const absentResp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token })));
     expect(emptyResp.statusCode).toBe(200);
     expect(JSON.parse(emptyResp.body!)).toEqual(JSON.parse(absentResp.body!));
   });
@@ -623,7 +609,7 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
     const { dispatcher } = await setup();
 
     const createResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })),
+      await dispatcher(makeRequest({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })),
     );
     expect(createResp.statusCode).toBe(201);
     const created = createCourseResponseSchema.parse(JSON.parse(createResp.body!));
@@ -633,7 +619,7 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
     const blueTee = { ...courseInputTee, name: "blue", rating: 73.1, slope: 132 };
     const supersedeResp = asStructured(
       await dispatcher(
-        makeEvent({
+        makeRequest({
           method: "PUT",
           path: `/courses/${created.course.courseId}`,
           token: "sub-ann",
@@ -648,12 +634,12 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
     expect(superseded.course.card.teeSets.find((tee) => tee.name === "white")?.teeId).toBe(keptTeeId);
     expect(superseded.course.cardId).not.toBe(created.course.cardId);
 
-    const getResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/courses/${created.course.courseId}` })));
+    const getResp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/courses/${created.course.courseId}` })));
     expect(getResp.statusCode).toBe(200);
     const fetched = getCourseResponseSchema.parse(JSON.parse(getResp.body!));
     expect(fetched.course.cardId).toBe(superseded.course.cardId); // GET serves the CURRENT (superseded) card
 
-    const searchResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses", query: { query: "Casa" } })));
+    const searchResp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/courses", query: { query: "Casa" } })));
     expect(searchResp.statusCode).toBe(200);
     const searched = searchCoursesResponseSchema.parse(JSON.parse(searchResp.body!));
     expect(searched.courses.map((c) => c.name)).toEqual(["Casa Verde GC"]);
@@ -663,13 +649,13 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
   it("409s a PUT /courses/{courseId} whose supersedes is stale — card-superseded", async () => {
     const { dispatcher } = await setup();
     const createResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })),
+      await dispatcher(makeRequest({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })),
     );
     const created = createCourseResponseSchema.parse(JSON.parse(createResp.body!));
 
     const resp = asStructured(
       await dispatcher(
-        makeEvent({ method: "PUT", path: `/courses/${created.course.courseId}`, token: "sub-ann", body: { name: "Casa Verde GC", teeSets: [courseInputTee], supersedes: "stale-card" } }),
+        makeRequest({ method: "PUT", path: `/courses/${created.course.courseId}`, token: "sub-ann", body: { name: "Casa Verde GC", teeSets: [courseInputTee], supersedes: "stale-card" } }),
       ),
     );
     expect(resp.statusCode).toBe(409);
@@ -678,21 +664,21 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
 
   it("401s a POST /courses with no bearer — the write tier is golfer-gated now", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: "/courses", body: { name: "Casa Verde GC", teeSets: [courseInputTee] } })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
 
   it("404s GET /courses/{courseId} for an unknown id — course-not-found", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses/does-not-exist" })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/courses/does-not-exist" })));
     expect(resp.statusCode).toBe(404);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "course-not-found" });
   });
 
   it("400s GET /courses with no ?query= — invalid-request, never an empty-string search", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses" })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/courses" })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
@@ -706,11 +692,11 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
     // course-cards reference StartRound resolves) into the SAME cardStore this search hits — a
     // "Fixture"-prefixed name here would pick that up as an unwanted 4th result.
     for (const name of ["Zeta Alpha", "Zeta Beta", "Zeta Gamma"]) {
-      const created = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name, teeSets: [courseInputTee] } })));
+      const created = asStructured(await dispatcher(makeRequest({ method: "POST", path: "/courses", token: "sub-ann", body: { name, teeSets: [courseInputTee] } })));
       expect(created.statusCode).toBe(201);
     }
 
-    const emptyLimitResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/courses", query: { query: "Zeta", limit: "" } })));
+    const emptyLimitResp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/courses", query: { query: "Zeta", limit: "" } })));
     expect(emptyLimitResp.statusCode).toBe(200);
     const searched = searchCoursesResponseSchema.parse(JSON.parse(emptyLimitResp.body!));
     // Before the fix, limit="" parsed as 0 -> clamped to MIN_LIMIT (1) — only one of the three
@@ -720,7 +706,7 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
 
   it("400s a zod-invalid POST /courses body — invalid-request", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC" } })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: "/courses", token: "sub-ann", body: { name: "Casa Verde GC" } })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
@@ -729,12 +715,12 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
     const { dispatcher } = await setup();
     const startResp = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+        makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
       ),
     );
     const started = startRoundResponseSchema.parse(JSON.parse(startResp.body!));
 
-    const peekResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek", query: { code: started.joinCode } })));
+    const peekResp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/rounds/peek", query: { code: started.joinCode } })));
     expect(peekResp.statusCode).toBe(200);
     const peeked = peekRoundResponseSchema.parse(JSON.parse(peekResp.body!));
     expect(peeked.courseName).toBe(fixtureLinks.courseName);
@@ -742,14 +728,14 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
 
   it("400s GET /rounds/peek with no ?code= — invalid-request", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek" })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/rounds/peek" })));
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-request" });
   });
 
   it("404s GET /rounds/peek with an unknown join code — bad-join-code, not a 401", async () => {
     const { dispatcher } = await setup();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek", query: { code: "ZZZZZZ" } })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/rounds/peek", query: { code: "ZZZZZZ" } })));
     expect(resp.statusCode).toBe(404);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "bad-join-code" });
   });
@@ -765,14 +751,14 @@ describe("createDispatcher — course routes + peek (course-cards spec)", () => 
     const { dispatcher } = await setup();
     const startResp = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+        makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
       ),
     );
     const started = startRoundResponseSchema.parse(JSON.parse(startResp.body!));
 
     // No `token` — if this were (mis)matched to the participant-gated events route it would
     // 401 (invalid-token), never reach peekRound.
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/peek", query: { code: started.joinCode } })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/rounds/peek", query: { code: started.joinCode } })));
     expect(resp.statusCode).toBe(200);
     const peeked = peekRoundResponseSchema.parse(JSON.parse(resp.body!));
     expect(Object.keys(peeked).sort()).toEqual(["courseName", "playedAt", "teeSets"]); // playedAt: spec 2026-08-01 §4b, replacing the old createdAt
@@ -810,21 +796,21 @@ describe("createDispatcher — golfer auth tier (M7 Task 4)", () => {
 
   it("401s a golfer-tier route with no bearer token at all", async () => {
     const dispatcher = setupGolferTier();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me" })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me" })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
 
   it("401s a golfer-tier route with a garbage bearer token the verifier rejects", async () => {
     const dispatcher = setupGolferTier();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: "not-a-real-token" })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me", token: "not-a-real-token" })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
 
   it("hands {sub} to the handler for a token the verifier accepts — sub only, no email", async () => {
     const dispatcher = setupGolferTier();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: VALID_TOKEN })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me", token: VALID_TOKEN })));
     expect(resp.statusCode).toBe(200);
     expect(JSON.parse(resp.body!)).toEqual({ sub: account.sub });
   });
@@ -861,7 +847,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+              makeRequest({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
             ),
           ).body!,
         ),
@@ -869,7 +855,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
 
       const addGameResp = asStructured(
         await dispatcher(
-          makeEvent({
+          makeRequest({
             method: "POST",
             path: `/rounds/${started.roundId}/games`,
             token: started.token,
@@ -881,21 +867,21 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
 
       // Nobody scores — finalize must fail until the game is terminated.
       const blockedResp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })),
+        await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })),
       );
       expect(blockedResp.statusCode).toBe(409);
       expect(errorResponseSchema.parse(JSON.parse(blockedResp.body!))).toMatchObject({ code: "game-unresolved" });
 
       const terminateResp = asStructured(
         await dispatcher(
-          makeEvent({ method: "POST", path: `/rounds/${started.roundId}/games/${added.gameId}/terminate`, token: started.token }),
+          makeRequest({ method: "POST", path: `/rounds/${started.roundId}/games/${added.gameId}/terminate`, token: started.token }),
         ),
       );
       expect(terminateResp.statusCode).toBe(200);
       terminateGameResponseSchema.parse(JSON.parse(terminateResp.body!));
 
       const finalizeResp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })),
+        await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })),
       );
       expect(finalizeResp.statusCode).toBe(200);
       const finalized = finalizeRoundResponseSchema.parse(JSON.parse(finalizeResp.body!));
@@ -909,7 +895,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+              makeRequest({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
             ),
           ).body!,
         ),
@@ -917,7 +903,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
 
       const resp = asStructured(
         await dispatcher(
-          makeEvent({ method: "POST", path: `/rounds/${started.roundId}/games/never-added/terminate`, token: started.token }),
+          makeRequest({ method: "POST", path: `/rounds/${started.roundId}/games/never-added/terminate`, token: started.token }),
         ),
       );
       expect(resp.statusCode).toBe(404);
@@ -932,7 +918,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+            makeRequest({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
           ),
         ).body!,
       ),
@@ -940,14 +926,14 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
 
     // started.token is a real, valid PARTICIPANT token — but the stub verifier (standing in
     // for CognitoVerifier) doesn't recognize it as any of its own golfer bearers.
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: started.token })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me", token: started.token })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
 
   it("401s GET /me — a golfer-tier route — given a garbage bearer token", async () => {
     const { dispatcher } = await setupGolfer();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: "totally-not-a-real-token" })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me", token: "totally-not-a-real-token" })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
@@ -959,18 +945,18 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
   it("GET /me (mints, same on re-get) -> PUT /me (renames, drops the placeholder flag)", async () => {
     const { dispatcher } = await setupGolfer();
 
-    const firstGet = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: golferBearer(ann) })));
+    const firstGet = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me", token: golferBearer(ann) })));
     expect(firstGet.statusCode).toBe(200);
     const firstGolfer = getMeResponseSchema.parse(JSON.parse(firstGet.body!)).golfer;
     expect(firstGolfer?.name).toBe(placeholderName(ann.sub));
     expect(firstGolfer?.namePlaceholder).toBe(true);
 
-    const secondGet = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: golferBearer(ann) })));
+    const secondGet = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me", token: golferBearer(ann) })));
     expect(secondGet.statusCode).toBe(200);
     expect(getMeResponseSchema.parse(JSON.parse(secondGet.body!)).golfer?.golferId).toBe(firstGolfer?.golferId); // same minted golfer, not a second row
 
     const putResp = asStructured(
-      await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann Golfer" } })),
+      await dispatcher(makeRequest({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann Golfer" } })),
     );
     expect(putResp.statusCode).toBe(200);
     const created = golferResponseSchema.parse(JSON.parse(putResp.body!));
@@ -978,7 +964,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
     expect(created.golfer.golferId).toBe(firstGolfer?.golferId); // renamed in place — the mint's own id
     expect(created.golfer).not.toHaveProperty("namePlaceholder"); // real name dropped the flag
 
-    const thirdGet = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: golferBearer(ann) })));
+    const thirdGet = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me", token: golferBearer(ann) })));
     expect(thirdGet.statusCode).toBe(200);
     const fetched = getMeResponseSchema.parse(JSON.parse(thirdGet.body!));
     expect(fetched.golfer?.golferId).toBe(created.golfer.golferId);
@@ -987,7 +973,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
 
   it("GET /me/record returns empty metrics and an empty history for a golfer who has never played a finalized round", async () => {
     const { dispatcher } = await setupGolfer();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/record", token: golferBearer(ann) })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me/record", token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(200);
     expect(getMyRecordResponseSchema.parse(JSON.parse(resp.body!))).toEqual({
       metrics: { typicalEighteen: { eagles: 0, birdies: 0, pars: 0, bogeys: 0, doublePlus: 0 }, averageHistory: [], bests: {}, milestones: [] },
@@ -1001,7 +987,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
     it("returns rounds: 0 for a golfer who has never played a finalized round at this course — call-through to getMyCourseRecord", async () => {
       const { dispatcher } = await setupGolfer();
       const resp = asStructured(
-        await dispatcher(makeEvent({ method: "GET", path: `/me/courses/${DEFAULT_COURSE.courseId}/record`, token: golferBearer(ann) })),
+        await dispatcher(makeRequest({ method: "GET", path: `/me/courses/${DEFAULT_COURSE.courseId}/record`, token: golferBearer(ann) })),
       );
       expect(resp.statusCode).toBe(200);
       expect(getMyCourseRecordResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ courseId: DEFAULT_COURSE.courseId, rounds: 0 });
@@ -1009,7 +995,7 @@ describe("createDispatcher — golfer + terminate routes (M7 Task 5)", () => {
 
     it("401s with no bearer token at all — golfer-tier auth", async () => {
       const { dispatcher } = await setupGolfer();
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/me/courses/${DEFAULT_COURSE.courseId}/record` })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/me/courses/${DEFAULT_COURSE.courseId}/record` })));
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });
@@ -1037,7 +1023,7 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
     it("arm 1 — no bearer token: 401 invalid-token (no anonymous start)", async () => {
       const { dispatcher } = await setupGolferTier();
       const resp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: "/rounds", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
+        await dispatcher(makeRequest({ method: "POST", path: "/rounds", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
       );
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
@@ -1047,7 +1033,7 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
       const { dispatcher } = await setupGolferTier();
       const resp = asStructured(
         await dispatcher(
-          makeEvent({ method: "POST", path: "/rounds", token: "garbage-token", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+          makeRequest({ method: "POST", path: "/rounds", token: "garbage-token", body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
         ),
       );
       expect(resp.statusCode).toBe(401);
@@ -1057,12 +1043,12 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
     it("arm 3 — a VALID bearer token: 201, seated as the caller's OWN account golfer (as-self)", async () => {
       const { dispatcher } = await setupGolferTier();
       // PUT /me first so ann has a named account golfer; the round's creator seat must resolve to it.
-      const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
+      const putResp = asStructured(await dispatcher(makeRequest({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
       const annGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
 
       const resp = asStructured(
         await dispatcher(
-          makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+          makeRequest({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
         ),
       );
       expect(resp.statusCode).toBe(201);
@@ -1077,7 +1063,7 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+              makeRequest({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
             ),
           ).body!,
         ),
@@ -1087,7 +1073,7 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
       const { dispatcher } = await setupGolferTier();
       const started = await startRoundAs(dispatcher);
       const resp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: "/rounds/join", body: { code: started.joinCode, tee: "white" } })),
+        await dispatcher(makeRequest({ method: "POST", path: "/rounds/join", body: { code: started.joinCode, tee: "white" } })),
       );
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
@@ -1097,7 +1083,7 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
       const { dispatcher } = await setupGolferTier();
       const started = await startRoundAs(dispatcher);
       const resp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: "/rounds/join", token: "garbage-token", body: { code: started.joinCode, tee: "white" } })),
+        await dispatcher(makeRequest({ method: "POST", path: "/rounds/join", token: "garbage-token", body: { code: started.joinCode, tee: "white" } })),
       );
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
@@ -1106,13 +1092,13 @@ describe("createDispatcher — golfer-tier StartRound/JoinRound (accounts-only i
     it("arm 3 — a VALID bearer token: 201, joiner seated as their OWN account golfer (as-self)", async () => {
       const { dispatcher } = await setupGolferTier();
       // bo has a named account golfer; ann creates the round, bo joins as himself.
-      const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(bo), body: { name: "Bo" } })));
+      const putResp = asStructured(await dispatcher(makeRequest({ method: "PUT", path: "/me", token: golferBearer(bo), body: { name: "Bo" } })));
       const boGolfer = golferResponseSchema.parse(JSON.parse(putResp.body!));
 
       const started = await startRoundAs(dispatcher); // created by ann
       const resp = asStructured(
         await dispatcher(
-          makeEvent({ method: "POST", path: "/rounds/join", token: golferBearer(bo), body: { code: started.joinCode, tee: "white" } }),
+          makeRequest({ method: "POST", path: "/rounds/join", token: golferBearer(bo), body: { code: started.joinCode, tee: "white" } }),
         ),
       );
       expect(resp.statusCode).toBe(201);
@@ -1145,14 +1131,14 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   // PUT /me creates an account golfer for `account` and returns its GolferId — every crew
   // route needs a real account golfer seated first (golfer-required otherwise).
   const putMe = async (dispatcher: ReturnType<typeof createDispatcher>, account: AccountClaims, name: string) => {
-    const resp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(account), body: { name } })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "PUT", path: "/me", token: golferBearer(account), body: { name } })));
     return golferResponseSchema.parse(JSON.parse(resp.body!)).golfer;
   };
 
   it("POST /crews with no account golfer yet is rejected — golfer-required (the REAL error code, driven end-to-end)", async () => {
     const { dispatcher } = await setupCrews();
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
+      await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
     );
     expect(resp.statusCode).toBe(400);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "golfer-required" });
@@ -1162,13 +1148,13 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const createResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
+      await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
     );
     const created = createCrewResponseSchema.parse(JSON.parse(createResp.body!));
 
     await putMe(dispatcher, cal, "Cal"); // has an account golfer, but never joined this crew
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}`, token: golferBearer(cal) })),
+      await dispatcher(makeRequest({ method: "GET", path: `/crews/${created.crew.crewId}`, token: golferBearer(cal) })),
     );
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-a-member" });
@@ -1178,11 +1164,11 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const { dispatcher } = await setupCrews();
     const annGolfer = await putMe(dispatcher, ann, "Ann");
     const createResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
+      await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
     );
     const created = createCrewResponseSchema.parse(JSON.parse(createResp.body!));
 
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}`, token: golferBearer(ann) })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/crews/${created.crew.crewId}`, token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(200);
     const fetched = getCrewResponseSchema.parse(JSON.parse(resp.body!));
     expect(fetched.crew.members).toEqual([{ golferId: annGolfer.golferId, name: "Ann", role: "organizer" }]);
@@ -1191,7 +1177,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
   it("GET /crews/{crewId} for an unknown crewId is rejected — 404 unknown-crew", async () => {
     const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/crews/does-not-exist", token: golferBearer(ann) })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/crews/does-not-exist", token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(404);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "unknown-crew" });
   });
@@ -1200,7 +1186,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(ann), body: { token: "not-a-real-token" } })),
+      await dispatcher(makeRequest({ method: "POST", path: "/crews/join", token: golferBearer(ann), body: { token: "not-a-real-token" } })),
     );
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "crew-invite-invalid" });
@@ -1218,7 +1204,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       await putMe(dispatcher, bo, "Bo");
 
       const createResp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
+        await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } })),
       );
       expect(createResp.statusCode).toBe(201);
       const created = createCrewResponseSchema.parse(JSON.parse(createResp.body!));
@@ -1226,7 +1212,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       expect(created.crew).not.toHaveProperty("joinCode"); // the permanent join code is gone (crew membership, invited in)
 
       const inviteResp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) })),
+        await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) })),
       );
       expect(inviteResp.statusCode).toBe(200); // an act on an existing resource, not a top-level mint — see routes.ts's own comment
       const invite = mintCrewInviteResponseSchema.parse(JSON.parse(inviteResp.body!));
@@ -1234,7 +1220,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
 
       // The consent-screen preview — no Bearer token at all (auth: "none"), proving the
       // "Join The Saturday Boys? · N members · invited by Al" screen renders BEFORE sign-in.
-      const peekResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews/peek", body: { token: invite.token } })));
+      const peekResp = asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews/peek", body: { token: invite.token } })));
       expect(peekResp.statusCode).toBe(200);
       expect(peekCrewInviteResponseSchema.parse(JSON.parse(peekResp.body!))).toEqual({
         crewName: "Sunday Skins",
@@ -1243,12 +1229,12 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       });
 
       const joinResp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } })),
+        await dispatcher(makeRequest({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } })),
       );
       expect(joinResp.statusCode).toBe(200); // an act on an existing resource, not a mint — see routes.ts's own comment
       joinCrewResponseSchema.parse(JSON.parse(joinResp.body!));
 
-      const myCrewsResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/crews", token: golferBearer(bo) })));
+      const myCrewsResp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me/crews", token: golferBearer(bo) })));
       expect(myCrewsResp.statusCode).toBe(200);
       const myCrews = listMyCrewsResponseSchema.parse(JSON.parse(myCrewsResp.body!));
       expect(myCrews.crews).toEqual(expect.arrayContaining([{ crewId: created.crew.crewId, name: "Sunday Skins", memberCount: 2 }]));
@@ -1257,7 +1243,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       // players[] roster, no crewId (sealed leaf). ann's crew membership is irrelevant to the round.
       const startResp = asStructured(
         await dispatcher(
-          makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+          makeRequest({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
         ),
       );
       expect(startResp.statusCode).toBe(201);
@@ -1265,7 +1251,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       expect(started.golferId).toBe(annGolfer.golferId); // the creator resolved to ann's OWN golfer (as-self)
 
       const eventsResp = asStructured(
-        await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
+        await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
       );
       const events = JSON.parse(eventsResp.body!) as { events: readonly { kind: string; participant?: { golferId: string; name: string } }[] };
       const joins = events.events.filter((e) => e.kind === "participant-joined");
@@ -1277,14 +1263,14 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       // routes are wired (this round was never finalized, so nothing is counted yet).
       const seasonResp = asStructured(
         await dispatcher(
-          makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(bo), body: { name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" } }),
+          makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(bo), body: { name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" } }),
         ),
       );
       expect(seasonResp.statusCode).toBe(201);
       const season = createSeasonResponseSchema.parse(JSON.parse(seasonResp.body!));
       expect(season.season).toMatchObject({ name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" });
 
-      const listResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann) })));
+      const listResp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann) })));
       expect(listResp.statusCode).toBe(200);
       const listed = listSeasonsResponseSchema.parse(JSON.parse(listResp.body!));
       // POST /crews already auto-opened the crew's own first season (spec 2026-07-22 §2) — the
@@ -1301,15 +1287,15 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     await putMe(dispatcher, ann, "Ann");
     await putMe(dispatcher, bo, "Bo");
     const created = createCrewResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
     const firstInvite = mintCrewInviteResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
     );
-    await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: firstInvite.token } }));
+    await dispatcher(makeRequest({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: firstInvite.token } }));
 
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(bo) })),
+      await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(bo) })),
     );
     expect(resp.statusCode).toBe(200);
     mintCrewInviteResponseSchema.parse(JSON.parse(resp.body!));
@@ -1319,12 +1305,12 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const created = createCrewResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
     await putMe(dispatcher, cal, "Cal");
 
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(cal) })),
+      await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(cal) })),
     );
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-a-member" });
@@ -1332,7 +1318,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
 
   it("POST /crews/peek with a bad token is rejected — 403 crew-invite-invalid, no Bearer needed to fail this way", async () => {
     const { dispatcher } = await setupCrews();
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews/peek", body: { token: "not-a-real-token" } })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews/peek", body: { token: "not-a-real-token" } })));
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "crew-invite-invalid" });
   });
@@ -1350,7 +1336,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({
+            makeRequest({
               method: "POST",
               path: "/rounds",
               token: golferBearer(ann),
@@ -1360,23 +1346,23 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
         ).body!,
       ),
     );
-    expect(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token }))).statusCode).toBe(200);
+    expect(asStructured(await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token }))).statusCode).toBe(200);
 
     const created = createCrewResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
     const season = createSeasonResponseSchema.parse(
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" } }),
+            makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" } }),
           ),
         ).body!,
       ),
     ).season;
 
     const standingsResp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}/seasons/${season.seasonId}/standings`, token: golferBearer(ann) })),
+      await dispatcher(makeRequest({ method: "GET", path: `/crews/${created.crew.crewId}/seasons/${season.seasonId}/standings`, token: golferBearer(ann) })),
     );
     expect(standingsResp.statusCode).toBe(200);
     const standings = seasonStandingsResponseSchema.parse(JSON.parse(standingsResp.body!));
@@ -1392,19 +1378,19 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     await putMe(dispatcher, ann, "Ann");
     const boGolfer = await putMe(dispatcher, bo, "Bo");
     const created = createCrewResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
     const invite = mintCrewInviteResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
     );
-    await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
+    await dispatcher(makeRequest({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
 
-    const leaveResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/leave`, token: golferBearer(bo) })));
+    const leaveResp = asStructured(await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/leave`, token: golferBearer(bo) })));
     expect(leaveResp.statusCode).toBe(200);
     expect(leaveCrewResponseSchema.parse(JSON.parse(leaveResp.body!))).toEqual({ crewId: created.crew.crewId });
 
     // Bo is off the roster — GET /crews now 403s not-a-member for Bo.
-    const getResp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/crews/${created.crew.crewId}`, token: golferBearer(bo) })));
+    const getResp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/crews/${created.crew.crewId}`, token: golferBearer(bo) })));
     expect(getResp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(getResp.body!))).toMatchObject({ code: "not-a-member" });
     expect(boGolfer).toBeDefined();
@@ -1418,15 +1404,15 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const annGolfer = await putMe(dispatcher, ann, "Ann");
     const boGolfer = await putMe(dispatcher, bo, "Bo");
     const created = createCrewResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
     const invite = mintCrewInviteResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
     );
-    await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
+    await dispatcher(makeRequest({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
 
     const removeResp = asStructured(
-      await dispatcher(makeEvent({ method: "DELETE", path: `/crews/${created.crew.crewId}/members/${boGolfer.golferId}`, token: golferBearer(ann) })),
+      await dispatcher(makeRequest({ method: "DELETE", path: `/crews/${created.crew.crewId}/members/${boGolfer.golferId}`, token: golferBearer(ann) })),
     );
     expect(removeResp.statusCode).toBe(200);
     const removed = getCrewResponseSchema.parse(JSON.parse(removeResp.body!));
@@ -1439,19 +1425,19 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const boGolfer = await putMe(dispatcher, bo, "Bo");
     const calGolfer = await putMe(dispatcher, cal, "Cal");
     const created = createCrewResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
     for (const account of [bo, cal]) {
       const invite = mintCrewInviteResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+        JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
       );
-      await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(account), body: { token: invite.token } }));
+      await dispatcher(makeRequest({ method: "POST", path: "/crews/join", token: golferBearer(account), body: { token: invite.token } }));
     }
     expect(boGolfer).toBeDefined();
 
     // Bo (an ordinary member, not the organizer) tries to remove Cal.
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "DELETE", path: `/crews/${created.crew.crewId}/members/${calGolfer.golferId}`, token: golferBearer(bo) })),
+      await dispatcher(makeRequest({ method: "DELETE", path: `/crews/${created.crew.crewId}/members/${calGolfer.golferId}`, token: golferBearer(bo) })),
     );
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-organizer" });
@@ -1462,16 +1448,16 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const annGolfer = await putMe(dispatcher, ann, "Ann");
     const boGolfer = await putMe(dispatcher, bo, "Bo");
     const created = createCrewResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
     const invite = mintCrewInviteResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
     );
-    await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
+    await dispatcher(makeRequest({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
 
     const transferResp = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/transfer`, token: golferBearer(ann), body: { golferId: boGolfer.golferId } }),
+        makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/transfer`, token: golferBearer(ann), body: { golferId: boGolfer.golferId } }),
       ),
     );
     expect(transferResp.statusCode).toBe(200);
@@ -1484,7 +1470,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     // Ann (now an ordinary member) can no longer remove/transfer — not-organizer.
     const rejected = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/transfer`, token: golferBearer(ann), body: { golferId: annGolfer.golferId } }),
+        makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/transfer`, token: golferBearer(ann), body: { golferId: annGolfer.golferId } }),
       ),
     );
     expect(rejected.statusCode).toBe(403);
@@ -1497,19 +1483,19 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const boGolfer = await putMe(dispatcher, bo, "Bo");
     const calGolfer = await putMe(dispatcher, cal, "Cal");
     const created = createCrewResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
     for (const account of [bo, cal]) {
       const invite = mintCrewInviteResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+        JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
       );
-      await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(account), body: { token: invite.token } }));
+      await dispatcher(makeRequest({ method: "POST", path: "/crews/join", token: golferBearer(account), body: { token: invite.token } }));
     }
     expect(boGolfer).toBeDefined();
 
     const resp = asStructured(
       await dispatcher(
-        makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/transfer`, token: golferBearer(bo), body: { golferId: calGolfer.golferId } }),
+        makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/transfer`, token: golferBearer(bo), body: { golferId: calGolfer.golferId } }),
       ),
     );
     expect(resp.statusCode).toBe(403);
@@ -1520,10 +1506,10 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
     const { dispatcher } = await setupCrews();
     await putMe(dispatcher, ann, "Ann");
     const created = createCrewResponseSchema.parse(
-      JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+      JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
     );
 
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/leave`, token: golferBearer(ann) })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/leave`, token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(409);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "organizer-must-transfer" });
   });
@@ -1537,13 +1523,13 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const { dispatcher } = await setupCrews();
       await putMe(dispatcher, ann, "Ann");
       const created = createCrewResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+        JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
       );
       const season = createSeasonResponseSchema.parse(
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" } }),
+              makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" } }),
             ),
           ).body!,
         ),
@@ -1551,7 +1537,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const seasonPath = `/crews/${created.crew.crewId}/seasons/${season.seasonId}`;
 
       const putResp = asStructured(
-        await dispatcher(makeEvent({ method: "PUT", path: seasonPath, token: golferBearer(ann), body: { name: "Summer Cup", endsAt: "2026-06-30" } })),
+        await dispatcher(makeRequest({ method: "PUT", path: seasonPath, token: golferBearer(ann), body: { name: "Summer Cup", endsAt: "2026-06-30" } })),
       );
       expect(putResp.statusCode).toBe(200);
       const updated = createSeasonResponseSchema.parse(JSON.parse(putResp.body!));
@@ -1563,24 +1549,24 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       await putMe(dispatcher, ann, "Ann");
       const boGolfer = await putMe(dispatcher, bo, "Bo");
       const created = createCrewResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+        JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
       );
       const invite = mintCrewInviteResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+        JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
       );
-      await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
+      await dispatcher(makeRequest({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
       const season = createSeasonResponseSchema.parse(
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" } }),
+              makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" } }),
             ),
           ).body!,
         ),
       ).season;
 
       const resp = asStructured(
-        await dispatcher(makeEvent({ method: "PUT", path: `/crews/${created.crew.crewId}/seasons/${season.seasonId}`, token: golferBearer(bo), body: { name: "Nope" } })),
+        await dispatcher(makeRequest({ method: "PUT", path: `/crews/${created.crew.crewId}/seasons/${season.seasonId}`, token: golferBearer(bo), body: { name: "Nope" } })),
       );
       expect(resp.statusCode).toBe(403);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-organizer" });
@@ -1589,7 +1575,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
 
     it("401s with no bearer token at all — golfer-tier auth", async () => {
       const { dispatcher } = await setupCrews();
-      const resp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/crews/anything/seasons/anything", body: { name: "x" } })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "PUT", path: "/crews/anything/seasons/anything", body: { name: "x" } })));
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });
@@ -1598,13 +1584,13 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const { dispatcher } = await setupCrews();
       await putMe(dispatcher, ann, "Ann");
       const created = createCrewResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+        JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
       );
       const season = createSeasonResponseSchema.parse(
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" } }),
+              makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/seasons`, token: golferBearer(ann), body: { name: "2026", startsAt: "2026-01-01", endsAt: "2026-12-31" } }),
             ),
           ).body!,
         ),
@@ -1612,7 +1598,7 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
 
       const resp = asStructured(
         await dispatcher(
-          makeEvent({ method: "PUT", path: `/crews/${created.crew.crewId}/seasons/${season.seasonId}`, token: golferBearer(ann), body: { endsAt: "2025-01-01" } }),
+          makeRequest({ method: "PUT", path: `/crews/${created.crew.crewId}/seasons/${season.seasonId}`, token: golferBearer(ann), body: { endsAt: "2025-01-01" } }),
         ),
       );
       expect(resp.statusCode).toBe(400);
@@ -1627,11 +1613,11 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const { dispatcher } = await setupCrews();
       await putMe(dispatcher, ann, "Ann");
       const created = createCrewResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+        JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
       );
 
       const resp = asStructured(
-        await dispatcher(makeEvent({ method: "PUT", path: `/crews/${created.crew.crewId}`, token: golferBearer(ann), body: { name: "Sunday Regulars" } })),
+        await dispatcher(makeRequest({ method: "PUT", path: `/crews/${created.crew.crewId}`, token: golferBearer(ann), body: { name: "Sunday Regulars" } })),
       );
       expect(resp.statusCode).toBe(200);
       expect(getCrewResponseSchema.parse(JSON.parse(resp.body!)).crew.name).toBe("Sunday Regulars");
@@ -1642,15 +1628,15 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       await putMe(dispatcher, ann, "Ann");
       const boGolfer = await putMe(dispatcher, bo, "Bo");
       const created = createCrewResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+        JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
       );
       const invite = mintCrewInviteResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
+        JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: `/crews/${created.crew.crewId}/invites`, token: golferBearer(ann) }))).body!),
       );
-      await dispatcher(makeEvent({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
+      await dispatcher(makeRequest({ method: "POST", path: "/crews/join", token: golferBearer(bo), body: { token: invite.token } }));
 
       const resp = asStructured(
-        await dispatcher(makeEvent({ method: "PUT", path: `/crews/${created.crew.crewId}`, token: golferBearer(bo), body: { name: "Nope" } })),
+        await dispatcher(makeRequest({ method: "PUT", path: `/crews/${created.crew.crewId}`, token: golferBearer(bo), body: { name: "Nope" } })),
       );
       expect(resp.statusCode).toBe(403);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-organizer" });
@@ -1661,11 +1647,11 @@ describe("createDispatcher — crew routes (M8 Task 4)", () => {
       const { dispatcher } = await setupCrews();
       await putMe(dispatcher, ann, "Ann");
       const created = createCrewResponseSchema.parse(
-        JSON.parse(asStructured(await dispatcher(makeEvent({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
+        JSON.parse(asStructured(await dispatcher(makeRequest({ method: "POST", path: "/crews", token: golferBearer(ann), body: { name: "Sunday Skins" } }))).body!),
       );
 
       const resp = asStructured(
-        await dispatcher(makeEvent({ method: "PUT", path: `/crews/${created.crew.crewId}`, token: golferBearer(ann), body: { name: "   " } })),
+        await dispatcher(makeRequest({ method: "PUT", path: `/crews/${created.crew.crewId}`, token: golferBearer(ann), body: { name: "   " } })),
       );
       expect(resp.statusCode).toBe(400);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-crew-name" });
@@ -1682,12 +1668,12 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
+          await dispatcher(makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
         ).body!,
       ),
     );
     const shareResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/share`, token: started.token })),
+      await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/share`, token: started.token })),
     );
     expect(shareResp.statusCode).toBe(200);
     const { url } = shareLinkResponseSchema.parse(JSON.parse(shareResp.body!));
@@ -1701,7 +1687,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     const { started, spectatorToken } = await startAndShare(dispatcher);
 
     const secondResp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/share`, token: started.token })),
+      await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/share`, token: started.token })),
     );
     expect(secondResp.statusCode).toBe(200);
     const second = shareLinkResponseSchema.parse(JSON.parse(secondResp.body!));
@@ -1713,7 +1699,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     const { started } = await startAndShare(dispatcher);
 
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
+      await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: started.token, query: { since: "0" } })),
     );
     expect(resp.statusCode).toBe(200);
   });
@@ -1723,7 +1709,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     const { started, spectatorToken } = await startAndShare(dispatcher);
 
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: spectatorToken, query: { since: "0" } })),
+      await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: spectatorToken, query: { since: "0" } })),
     );
     expect(resp.statusCode).toBe(200);
     const events = JSON.parse(resp.body!) as { events: readonly unknown[] };
@@ -1736,13 +1722,13 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     const otherRound = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
+          await dispatcher(makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
         ).body!,
       ),
     );
 
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${otherRound.roundId}/events`, token: spectatorToken, query: { since: "0" } })),
+      await dispatcher(makeRequest({ method: "GET", path: `/rounds/${otherRound.roundId}/events`, token: spectatorToken, query: { since: "0" } })),
     );
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "token-round-mismatch" });
@@ -1751,7 +1737,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
   it("GET /rounds/{roundId}/events — round-read: no bearer token at all — 401 invalid-token", async () => {
     const { dispatcher } = await setup();
     const { started } = await startAndShare(dispatcher);
-    const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, query: { since: "0" } })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, query: { since: "0" } })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
@@ -1760,7 +1746,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     const { dispatcher } = await setup();
     const { started } = await startAndShare(dispatcher);
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: "not-a-real-token", query: { since: "0" } })),
+      await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: "not-a-real-token", query: { since: "0" } })),
     );
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
@@ -1776,7 +1762,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(
         await dispatcher(
-          makeEvent({
+          makeRequest({
             method: "POST",
             path: `/rounds/${started.roundId}/games`,
             token: spectatorToken,
@@ -1793,7 +1779,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(
         await dispatcher(
-          makeEvent({
+          makeRequest({
             method: "POST",
             path: `/rounds/${started.roundId}/scores`,
             token: spectatorToken,
@@ -1814,7 +1800,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     it("POST /rounds/{roundId}/finalize", async () => {
       const { dispatcher } = await setup();
       const { started, spectatorToken } = await startAndShare(dispatcher);
-      const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: spectatorToken })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: spectatorToken })));
       expect(resp.statusCode).toBe(403);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
     });
@@ -1823,7 +1809,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
       const { dispatcher } = await setup();
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(
-        await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/games/some-game/terminate`, token: spectatorToken })),
+        await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/games/some-game/terminate`, token: spectatorToken })),
       );
       expect(resp.statusCode).toBe(403);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
@@ -1834,7 +1820,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(
         await dispatcher(
-          makeEvent({
+          makeRequest({
             method: "POST",
             path: `/rounds/${started.roundId}/strokes`,
             token: spectatorToken,
@@ -1851,7 +1837,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(
         await dispatcher(
-          makeEvent({
+          makeRequest({
             method: "POST",
             path: `/rounds/${started.roundId}/played-at`,
             token: spectatorToken,
@@ -1868,7 +1854,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
       const { started, spectatorToken } = await startAndShare(dispatcher);
       const resp = asStructured(
         await dispatcher(
-          makeEvent({
+          makeRequest({
             method: "POST",
             path: `/rounds/${started.roundId}/holes`,
             token: spectatorToken,
@@ -1883,7 +1869,7 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     it("POST /rounds/{roundId}/share itself — minting a NEW share link is participant-only", async () => {
       const { dispatcher } = await setup();
       const { started, spectatorToken } = await startAndShare(dispatcher);
-      const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/share`, token: spectatorToken })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/share`, token: spectatorToken })));
       expect(resp.statusCode).toBe(403);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "read-only-token" });
     });
@@ -1899,13 +1885,13 @@ describe("createDispatcher — share: spectator tokens + the round-read tier (M9
     const otherRound = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
+          await dispatcher(makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
         ).body!,
       ),
     );
 
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: `/rounds/${otherRound.roundId}/finalize`, token: spectatorToken })),
+      await dispatcher(makeRequest({ method: "POST", path: `/rounds/${otherRound.roundId}/finalize`, token: spectatorToken })),
     );
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "token-round-mismatch" });
@@ -1926,7 +1912,7 @@ describe("createDispatcher — a crew-invite token never opens a round (crew mem
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
+          await dispatcher(makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
         ).body!,
       ),
     );
@@ -1938,7 +1924,7 @@ describe("createDispatcher — a crew-invite token never opens a round (crew mem
     });
 
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: crewInviteToken })),
+      await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: crewInviteToken })),
     );
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
@@ -1949,7 +1935,7 @@ describe("createDispatcher — a crew-invite token never opens a round (crew mem
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
-          await dispatcher(makeEvent({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
+          await dispatcher(makeRequest({ method: "POST", path: "/rounds", token: "sub-ann", body: { course: DEFAULT_COURSE, host: { tee: "white" } } })),
         ).body!,
       ),
     );
@@ -1961,7 +1947,7 @@ describe("createDispatcher — a crew-invite token never opens a round (crew mem
     });
 
     const resp = asStructured(
-      await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/events`, token: crewInviteToken, query: { since: "0" } })),
+      await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/events`, token: crewInviteToken, query: { since: "0" } })),
     );
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
@@ -1993,13 +1979,13 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
   // account-golfer participant this suite needs.
   const seedAnnsFinalizedRound = async (dispatcher: ReturnType<typeof createDispatcher>) => {
     // Names ann's account golfer before she starts as-self (the seat resolves from her Bearer).
-    await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
+    await dispatcher(makeRequest({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
 
     const started = startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({
+            makeRequest({
               method: "POST",
               path: "/rounds",
               token: golferBearer(ann),
@@ -2010,7 +1996,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       ),
     );
 
-    const finalizeResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })));
+    const finalizeResp = asStructured(await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })));
     expect(finalizeResp.statusCode).toBe(200);
 
     return started;
@@ -2019,7 +2005,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
   describe("GET /rounds/{roundId}/archive", () => {
     it("404s round-not-found for a roundId with no snapshot at all", async () => {
       const { dispatcher } = await setupArchive();
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/rounds/never-started/archive", token: golferBearer(ann) })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/rounds/never-started/archive", token: golferBearer(ann) })));
       expect(resp.statusCode).toBe(404);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "round-not-found" });
     });
@@ -2030,13 +2016,13 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
+              makeRequest({ method: "POST", path: "/rounds", token: golferBearer(ann), body: { course: DEFAULT_COURSE, host: { tee: "white" } } }),
             ),
           ).body!,
         ),
       );
 
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(ann) })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(ann) })));
       expect(resp.statusCode).toBe(404);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "round-not-found" });
     });
@@ -2045,7 +2031,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       const { dispatcher } = await setupArchive();
       const started = await seedAnnsFinalizedRound(dispatcher);
 
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(ann) })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(ann) })));
       expect(resp.statusCode).toBe(200);
       const { events } = getRoundArchiveResponseSchema.parse(JSON.parse(resp.body!));
       expect(events.length).toBeGreaterThan(0);
@@ -2059,7 +2045,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       const { dispatcher } = await setupArchive();
       const started = await seedAnnsFinalizedRound(dispatcher);
 
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(bo) })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/archive`, token: golferBearer(bo) })));
       expect(resp.statusCode).toBe(200);
       const { events } = getRoundArchiveResponseSchema.parse(JSON.parse(resp.body!));
       expect(events.some((event) => event.kind === "round-finalized")).toBe(true);
@@ -2069,7 +2055,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
       const { dispatcher } = await setupArchive();
       const started = await seedAnnsFinalizedRound(dispatcher);
 
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/rounds/${started.roundId}/archive` })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/rounds/${started.roundId}/archive` })));
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });
@@ -2078,14 +2064,14 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
   describe("GET /me/rounds", () => {
     it("returns an empty list for a golfer who has never played a finalized round", async () => {
       const { dispatcher } = await setupArchive();
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds", token: golferBearer(bo) })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me/rounds", token: golferBearer(bo) })));
       expect(resp.statusCode).toBe(200);
       expect(getMyRoundsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: [] });
     });
 
     it("401s with no bearer token at all", async () => {
       const { dispatcher } = await setupArchive();
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds" })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me/rounds" })));
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });
@@ -2096,20 +2082,20 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
   describe("GET /me/rounds/live", () => {
     it("returns an empty list for a golfer with no live round", async () => {
       const { dispatcher } = await setupArchive();
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds/live", token: golferBearer(bo) })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me/rounds/live", token: golferBearer(bo) })));
       expect(resp.statusCode).toBe(200);
       expect(getMyLiveRoundsResponseSchema.parse(JSON.parse(resp.body!))).toEqual({ rounds: [] });
     });
 
     it("lists a round the golfer just started, by identity — courseName + joinedAt + playedAt on the wire", async () => {
       const { dispatcher } = await setupArchive();
-      await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
+      await dispatcher(makeRequest({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
 
       const started = startRoundResponseSchema.parse(
         JSON.parse(
           asStructured(
             await dispatcher(
-              makeEvent({
+              makeRequest({
                 method: "POST",
                 path: "/rounds",
                 token: golferBearer(ann),
@@ -2120,7 +2106,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
         ),
       );
 
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds/live", token: golferBearer(ann) })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me/rounds/live", token: golferBearer(ann) })));
       expect(resp.statusCode).toBe(200);
       const parsed = getMyLiveRoundsResponseSchema.parse(JSON.parse(resp.body!));
       // playedAt (spec 2026-08-01 §4b, replacing the old createdAt) — domain's playedAtMsOf over
@@ -2132,7 +2118,7 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
 
     it("401s with no bearer token at all", async () => {
       const { dispatcher } = await setupArchive();
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me/rounds/live" })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me/rounds/live" })));
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });
@@ -2143,10 +2129,10 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
   describe("GET /golfers/{golferId}", () => {
     it("returns another golfer's name/metrics/history for any signed-in caller", async () => {
       const { dispatcher } = await setupArchive();
-      const putResp = asStructured(await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
+      const putResp = asStructured(await dispatcher(makeRequest({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } })));
       const { golfer } = golferResponseSchema.parse(JSON.parse(putResp.body!));
 
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: `/golfers/${golfer.golferId}`, token: golferBearer(bo) })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: `/golfers/${golfer.golferId}`, token: golferBearer(bo) })));
       expect(resp.statusCode).toBe(200);
       const parsed = getGolferResponseSchema.parse(JSON.parse(resp.body!));
       expect(parsed).toEqual({
@@ -2158,14 +2144,14 @@ describe("createDispatcher — snapshot routes: GET /me/rounds + GET /rounds/{ro
 
     it("404s golfer-not-found for an unknown golferId", async () => {
       const { dispatcher } = await setupArchive();
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/golfers/no-such-golfer", token: golferBearer(bo) })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/golfers/no-such-golfer", token: golferBearer(bo) })));
       expect(resp.statusCode).toBe(404);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "golfer-not-found" });
     });
 
     it("401s with no bearer token at all", async () => {
       const { dispatcher } = await setupArchive();
-      const resp = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/golfers/anything" })));
+      const resp = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/golfers/anything" })));
       expect(resp.statusCode).toBe(401);
       expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
     });
@@ -2195,13 +2181,13 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
   // Seeds ann's own account golfer and starts a LIVE round as-self (the seat resolves from her
   // Bearer) — the smallest real round with a real account-golfer participant this suite needs.
   const seedAnnsLiveRound = async (dispatcher: ReturnType<typeof createDispatcher>) => {
-    await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
+    await dispatcher(makeRequest({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
 
     return startRoundResponseSchema.parse(
       JSON.parse(
         asStructured(
           await dispatcher(
-            makeEvent({
+            makeRequest({
               method: "POST",
               path: "/rounds",
               token: golferBearer(ann),
@@ -2217,7 +2203,7 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
     const { dispatcher } = await setupToken();
     const started = await seedAnnsLiveRound(dispatcher);
 
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(ann) })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(200);
     const minted = joinRoundResponseSchema.parse(JSON.parse(resp.body!));
     // The join code rides the credential (spec 2026-07-20 §2) — mint's own response carries the
@@ -2228,7 +2214,7 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
     // not just a response-shape check.
     const scoreResp = asStructured(
       await dispatcher(
-        makeEvent({
+        makeRequest({
           method: "POST",
           path: `/rounds/${started.roundId}/scores`,
           token: minted.token,
@@ -2249,7 +2235,7 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
     const { dispatcher } = await setupToken();
     const started = await seedAnnsLiveRound(dispatcher);
 
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(bo) })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(bo) })));
     expect(resp.statusCode).toBe(403);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "not-a-participant" });
   });
@@ -2259,9 +2245,9 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
     // A real golfer row for ann first (PUT /me) — otherwise the no-golfer-row 403 would fire
     // before the round is ever folded (mintParticipantToken.ts's own check-order doc comment),
     // masking this specific 404 case.
-    await dispatcher(makeEvent({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
+    await dispatcher(makeRequest({ method: "PUT", path: "/me", token: golferBearer(ann), body: { name: "Ann" } }));
 
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: "/rounds/never-started/token", token: golferBearer(ann) })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: "/rounds/never-started/token", token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(404);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "round-not-found" });
   });
@@ -2269,10 +2255,10 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
   it("409s round-final for an actual participant once the round is finalized", async () => {
     const { dispatcher } = await setupToken();
     const started = await seedAnnsLiveRound(dispatcher);
-    const finalizeResp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })));
+    const finalizeResp = asStructured(await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/finalize`, token: started.token })));
     expect(finalizeResp.statusCode).toBe(200);
 
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(ann) })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/token`, token: golferBearer(ann) })));
     expect(resp.statusCode).toBe(409);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "round-final" });
   });
@@ -2281,7 +2267,7 @@ describe("createDispatcher — POST /rounds/{roundId}/token (Task 14: participan
     const { dispatcher } = await setupToken();
     const started = await seedAnnsLiveRound(dispatcher);
 
-    const resp = asStructured(await dispatcher(makeEvent({ method: "POST", path: `/rounds/${started.roundId}/token` })));
+    const resp = asStructured(await dispatcher(makeRequest({ method: "POST", path: `/rounds/${started.roundId}/token` })));
     expect(resp.statusCode).toBe(401);
     expect(errorResponseSchema.parse(JSON.parse(resp.body!))).toMatchObject({ code: "invalid-token" });
   });
@@ -2299,7 +2285,7 @@ describe("createDispatcher — access log (prod-readiness Arc B Task 3)", () => 
     // golfer-tier request with token "sub-123" is verified as sub "sub-123".
     const { dispatcher } = await setup(subVerifier, logger);
 
-    const res = asStructured(await dispatcher(makeEvent({ method: "GET", path: "/me", token: "sub-123" })));
+    const res = asStructured(await dispatcher(makeRequest({ method: "GET", path: "/me", token: "sub-123" })));
     expect(res.statusCode).toBe(200);
 
     const line = infos.find((l) => l.message === "request");
@@ -2315,10 +2301,10 @@ describe("createDispatcher — access log (prod-readiness Arc B Task 3)", () => 
     const { dispatcher } = await setup(subVerifier, logger);
 
     // GET /courses is `auth: "none"` — no bearer token is presented, and none is required.
-    await dispatcher(makeEvent({ method: "GET", path: "/courses", query: { query: "anything" } }));
+    await dispatcher(makeRequest({ method: "GET", path: "/courses", query: { query: "anything" } }));
     // Never matches any route — the dispatcher's own 404, distinct from a matched route that
     // itself happens to 404 (e.g. course-not-found).
-    await dispatcher(makeEvent({ method: "GET", path: "/no/such/route" }));
+    await dispatcher(makeRequest({ method: "GET", path: "/no/such/route" }));
 
     const noneLine = infos.find((l) => l.message === "request" && l.data!.route !== "not-found");
     expect(noneLine).toBeDefined();

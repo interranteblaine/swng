@@ -1,5 +1,5 @@
 import { randomInt, randomUUID } from "node:crypto";
-import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, DynamoDBStreamEvent } from "aws-lambda";
+import type { DynamoDBStreamEvent } from "aws-lambda";
 import type { RoundArchive } from "@swng/domain";
 import type {
   AccountVerifier,
@@ -77,6 +77,7 @@ import {
 import { createSecretsManagerReader } from "@swng/adapters-secretsmanager";
 import { createHmacTokenIssuer } from "./auth/hmacTokenIssuer.js";
 import { createDispatcher } from "./http/dispatch.js";
+import type { HttpRequest, HttpResponse } from "./http/httpRequest.js";
 import { buildRoutes } from "./http/routes.js";
 import type { UseCases } from "./http/routes.js";
 
@@ -233,7 +234,7 @@ const unavailableSnapshotStore = (): SnapshotStore => {
 };
 
 export interface App {
-  readonly dispatcher: (event: APIGatewayProxyEventV2) => Promise<APIGatewayProxyResultV2>;
+  readonly dispatcher: (request: HttpRequest) => Promise<HttpResponse>;
   readonly registry: ConnectionRegistry;
   readonly tokens: TokenIssuer;
 }

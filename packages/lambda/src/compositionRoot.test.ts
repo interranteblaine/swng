@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, DynamoDBStreamEvent } from "aws-lambda";
+import type { DynamoDBStreamEvent } from "aws-lambda";
 import { deviceId, fixtureLinks18, golferId, opId, roundId } from "@swng/domain";
 import type { RoundArchive, RoundEvent } from "@swng/domain";
 import { createFixedClock, createInMemoryGolferStore, createInMemoryProjectionStore, createNullLogger, projectArchive, putAndBindGolfer } from "@swng/application";
 import { buildApp, buildProjector, buildRebuild, createConsoleLogger, createEmfMetrics, createProjectorHandler, createRandomIds } from "./compositionRoot.js";
 import { createHmacTokenIssuer } from "./auth/hmacTokenIssuer.js";
+import type { HttpRequest } from "./http/httpRequest.js";
 
 // Every buildApp call in this file injects this fake in place of the real Secrets Manager
 // fetch (Task 4: buildApp now resolves TOKEN_SECRET_ARN via an injectable readSecret seam) —
@@ -142,28 +143,9 @@ describe("buildApp — TABLE_CORE is optional (wsConnect/wsDisconnect never set 
     // GET /courses/{courseId} is auth "none" (course-cards spec §4), so it reaches the handler
     // — and the unavailable card store — with no Cognito config required; the write routes are
     // "golfer"-gated now and would 401 before the store, which wouldn't exercise this path.
-    const event: APIGatewayProxyEventV2 = {
-      version: "2.0",
-      routeKey: "$default",
-      rawPath: "/courses/does-not-exist",
-      rawQueryString: "",
-      headers: {},
-      requestContext: {
-        accountId: "test-account",
-        apiId: "test-api",
-        domainName: "test.execute-api.us-east-1.amazonaws.com",
-        domainPrefix: "test",
-        http: { method: "GET", path: "/courses/does-not-exist", protocol: "HTTP/1.1", sourceIp: "127.0.0.1", userAgent: "vitest" },
-        requestId: "req-1",
-        routeKey: "$default",
-        stage: "$default",
-        time: "07/Jul/2026:00:00:00 +0000",
-        timeEpoch: 0,
-      },
-      isBase64Encoded: false,
-    };
+    const request: HttpRequest = { method: "GET", path: "/courses/does-not-exist", headers: {}, query: {}, body: undefined };
 
-    const result = (await app.dispatcher(event)) as APIGatewayProxyStructuredResultV2;
+    const result = await app.dispatcher(request);
     expect(result.statusCode).toBe(500);
   });
 });

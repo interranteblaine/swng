@@ -10,4 +10,5 @@ export { createHmacTokenIssuer } from "./auth/hmacTokenIssuer.js";
 export { buildRoutes } from "./http/routes.js";
 export type { Route, RouteContext, UseCases } from "./http/routes.js";
 export { createDispatcher } from "./http/dispatch.js";
+export type { HttpRequest, HttpResponse } from "./http/httpRequest.js";
 export { toHttpError } from "./http/errorMapping.js";

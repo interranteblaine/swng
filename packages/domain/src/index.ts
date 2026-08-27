@@ -3,6 +3,7 @@ export * from "./errors.js";
 export * from "./course/card.js";
 export * from "./course/course.js";
 export * from "./round/hlc.js";
+export * from "./round/hlcSource.js";
 export * from "./round/participant.js";
 export * from "./round/holeResult.js";
 export * from "./round/events.js";

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { compareHlc, deviceId } from "@swng/domain";
-import { createHlcSource } from "./hlc.js";
+import { deviceId } from "../ids.js";
+import { compareHlc } from "./hlc.js";
+import { createHlcSource } from "./hlcSource.js";
 
 const DEVICE = deviceId("phone-a");
 const OTHER_DEVICE = deviceId("phone-b");

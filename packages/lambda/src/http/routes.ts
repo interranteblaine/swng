@@ -38,6 +38,7 @@ import type {
   PeekRoundResponse,
   RecordScoreRequest,
   RecordScoreResponse,
+  RoundViewResponse,
   SearchCoursesResponse,
   SeasonStandingsResponse,
   SetHolesRequest,
@@ -120,6 +121,12 @@ export interface UseCases {
   // credential). Navigation spec §6b relaxed this to any signed-in golfer, not just a
   // participant/counting-crew-member — getRoundArchive.ts's own doc comment covers why.
   getRoundArchive: (claims: AccountClaims, id: RoundId) => Promise<GetRoundArchiveResponse>;
+  // MCP-prep Task 7: the ONE route that serves a FOLDED round. "golfer"-gated, not a
+  // round-scoped tier — mintParticipantToken throws round-final for a finalized round
+  // (mintParticipantToken.ts), so a round-scoped tier would 409 on exactly the finished
+  // rounds a golfer's history is made of. Authorization splits inside getRoundView.ts
+  // itself, on settledness (final vs. everything else), not on this tier.
+  getRoundView: (claims: AccountClaims, id: RoundId) => Promise<RoundViewResponse>;
   // Architecture-realignment Task 14: the participant-token re-mint — "golfer"-gated (the SAME
   // signed-in account tier getRoundArchive above uses, not a round-scoped participant token,
   // since the whole point is minting one for a device that has none yet). Reuses
@@ -409,6 +416,16 @@ export const buildRoutes = (useCases: UseCases): readonly Route[] => [
     auth: "golfer",
     successStatus: 200,
     handler: async (ctx) => useCases.getRoundArchive(ctx.account!, roundId(ctx.pathParams.roundId!)),
+  },
+  // MCP-prep Task 7: the folded round — "golfer"-gated the same way /archive above is, since
+  // mintParticipantToken (round-scoped tokens) throws round-final for exactly the finished
+  // rounds a golfer's history is made of. getRoundView.ts's own doc comment covers the split.
+  {
+    method: "GET",
+    path: "/rounds/{roundId}/view",
+    auth: "golfer",
+    successStatus: 200,
+    handler: async (ctx) => useCases.getRoundView(ctx.account!, roundId(ctx.pathParams.roundId!)),
   },
   // Architecture-realignment Task 14: the participant-token re-mint. "golfer"-gated (same tier
   // as the archive route just above) — no request body, path param only, same shape as

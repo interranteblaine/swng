@@ -70,7 +70,8 @@ export interface SwngStackProps extends StackProps {
 
 // The dispatcher (packages/lambda/src/http/dispatch.ts) does its own method+path matching
 // against event.rawPath, so API Gateway just needs to forward each of these to the `http`
-// function — but the (41, as of spec 2026-08-02 §3b: +POST /rounds/{roundId}/holes, the holes a
+// function — but the (42, as of MCP-prep Task 7: +GET /rounds/{roundId}/view, the ONE route that
+// serves a FOLDED round — 41 before that, as of spec 2026-08-02 §3b: +POST /rounds/{roundId}/holes, the holes a
 // round set out to play, corrected — 40 before that, as of spec 2026-08-01 §3b/§4:
 // +POST /rounds/{roundId}/played-at, a round's played date corrected — 39 before that, as of
 // "the season is the record" spec
@@ -115,6 +116,10 @@ export const HTTP_ROUTES: ReadonlyArray<{ readonly method: HttpMethod; readonly 
   // (routes.ts's own doc comment on why this differs from GET /rounds/{roundId}/events'
   // round-scoped "round-read" tier just above).
   { method: HttpMethod.GET, path: "/rounds/{roundId}/archive" },
+  // MCP-prep Task 7: the folded round — "golfer"-gated, same tier as the archive route just
+  // above (routes.ts's own doc comment covers why: mintParticipantToken 409s a finalized
+  // round, so a round-scoped tier can't cover both live and settled reads).
+  { method: HttpMethod.GET, path: "/rounds/{roundId}/view" },
   // Architecture-realignment Task 14: the participant-token re-mint — "golfer"-gated, same
   // tier as the archive route just above. Scoring capability derives from participation, not
   // the device that joined.

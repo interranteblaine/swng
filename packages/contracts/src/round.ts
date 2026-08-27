@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CourseCard, GameConfig, GameResult, GameState, HoleResult, HoleSelection, Participant, RosterEntry, RoundArchive, RoundEvent, ScoreCell } from "@swng/domain";
+import type { CourseCard, GameConfig, GameResult, GameState, HoleResult, HoleSelection, Participant, RosterEntry, RoundArchive, RoundEvent, RoundStatus, ScoreCell, UnresolvedGameDescription } from "@swng/domain";
 import { cardIdSchema, courseIdSchema, gameIdSchema, golferIdSchema, hlcSchema, opIdSchema, roundIdSchema, teeIdSchema } from "./ids.js";
 
 // Wire mirrors of domain types. These stay structural (loose numeric bounds where the
@@ -495,4 +495,46 @@ export interface GetRoundArchiveResponse {
 
 export const getRoundArchiveResponseSchema: z.ZodType<GetRoundArchiveResponse> = z.object({
   events: z.array(roundEventSchema).readonly(),
+});
+
+// The wire mirror of domain's RoundStatus (round/state.ts) — no earlier schema declared this
+// union; this route is the first to serve it directly (every other round response serves an
+// event log for the caller to fold, never the fold's own status field).
+const roundStatusSchema: z.ZodType<RoundStatus> = z.enum(["setup", "live", "final", "abandoned"]);
+
+// The wire mirror of domain's UnresolvedGameDescription (scoring/present.ts) — prose, not
+// numbers: `title` and `missing` are describeGame/describeMissing's own formatted strings, the
+// same ones the web's finalize dialog already renders. No earlier task serialized this type
+// (Task 4 was domain-only); this route is the first wire consumer.
+const unresolvedGameDescriptionSchema: z.ZodType<UnresolvedGameDescription> = z.object({
+  gameId: gameIdSchema,
+  title: z.string(),
+  missing: z.string(),
+});
+
+// GET /rounds/{roundId}/view (M9/MCP-prep Task 7): the ONE route that serves a FOLDED round —
+// every other round-reading route (`/archive`, `/events`) hands back an event log for the caller
+// to fold itself, which was fine while the only caller was a phone that must fold offline
+// anyway. `games` is GameState (LIVE scoring), not GameResult: a GameResult is undefined until a
+// game settles, so a GameResult[] would silently read empty for every live round — the exact
+// question this route exists to answer. `unresolved` is describeUnresolvedGames' prose, the same
+// strings the finalize dialog already shows, not a re-derivation.
+export interface RoundViewResponse {
+  readonly status: RoundStatus;
+  readonly card: CourseCard;
+  readonly holes: HoleSelection;
+  readonly playedAt: number;
+  readonly participants: readonly RosterEntry[];
+  readonly games: readonly GameState[];
+  readonly unresolved: readonly UnresolvedGameDescription[];
+}
+
+export const roundViewResponseSchema: z.ZodType<RoundViewResponse> = z.object({
+  status: roundStatusSchema,
+  card: courseCardSchema,
+  holes: holeSelectionSchema,
+  playedAt: z.number(),
+  participants: z.array(rosterEntrySchema).readonly(),
+  games: z.array(gameStateSchema).readonly(),
+  unresolved: z.array(unresolvedGameDescriptionSchema).readonly(),
 });

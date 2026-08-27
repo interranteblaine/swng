@@ -31,6 +31,7 @@ import {
   getMyRecord,
   getMyRounds,
   getRoundArchive,
+  getRoundView,
   getSeasonStandings,
   getShareLink,
   joinCrewByInvite,
@@ -349,6 +350,10 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
     // crewStore authorization deps — any signed-in golfer may read now, so only "does a
     // snapshot exist" is left to check): the SAME instance finalize/crew use cases above share.
     getRoundArchive: getRoundArchive({ snapshots }),
+    // journal/snapshots/golferStore (MCP-prep Task 7): the SAME instances shared above — the
+    // folded round, journal first and the snapshot as its trimmed-journal fallback
+    // (getRoundView.ts's own doc comment covers the split).
+    getRoundView: getRoundView({ journal, snapshots, golferStore }),
     // journal/golferStore/tokens (architecture-realignment Task 14): the SAME journal/tokens
     // instances startRound/joinRound above already share, plus the SAME golferStore
     // startRound/joinRound above share. store (spec 2026-07-20 §2): the SAME createDynamoRoundStore

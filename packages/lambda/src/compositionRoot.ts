@@ -80,7 +80,7 @@ import { createHmacTokenIssuer } from "./auth/hmacTokenIssuer.js";
 import { createDispatcher } from "./http/dispatch.js";
 import type { HttpRequest, HttpResponse } from "./http/httpRequest.js";
 import { buildRoutes } from "./http/routes.js";
-import type { UseCases } from "./http/routes.js";
+import type { Route, UseCases } from "./http/routes.js";
 
 // 6 chars, no 0/O/1/I/L (M3 plan, Global Constraints) — visually unambiguous when read
 // aloud or typed on a phone at the first tee.
@@ -238,6 +238,11 @@ export interface App {
   readonly dispatcher: (request: HttpRequest) => Promise<HttpResponse>;
   readonly registry: ConnectionRegistry;
   readonly tokens: TokenIssuer;
+  // buildRoutes' own output (MCP arc Task 13): the ONE route table the dispatcher above was
+  // built from, exposed so a consumer that needs to read auth tiers off it (toolDispatch.ts's
+  // tierOf) — or anything else about the route shape — reads THIS, never re-derives its own
+  // `buildRoutes(useCases)` call and risks it drifting from what the dispatcher actually runs.
+  readonly routes: readonly Route[];
 }
 
 // Built ONCE per cold start by each entry (each entry's own lazily-initialized, cached
@@ -437,9 +442,10 @@ export const buildApp = async (
     transferOrganizer: transferOrganizer({ crewStore, golferStore }),
   };
 
-  const dispatcher = createDispatcher(buildRoutes(useCases), tokens, verifier, logger);
+  const routes = buildRoutes(useCases);
+  const dispatcher = createDispatcher(routes, tokens, verifier, logger);
 
-  return { dispatcher, registry, tokens };
+  return { dispatcher, registry, tokens, routes };
 };
 
 // --- Projector (M7 Task 4; projection-realignment Task 2): the DynamoDB Streams trigger on the

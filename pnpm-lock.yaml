@@ -490,6 +490,9 @@ importers:
       '@swng/domain':
         specifier: workspace:*
         version: link:../domain
+      aws-jwt-verify:
+        specifier: 'catalog:'
+        version: 5.2.1
       zod:
         specifier: 'catalog:'
         version: 4.4.3

@@ -22,11 +22,19 @@ import { oauthClientPk, oauthCodePk, oauthHandlePk, oauthRequestPk } from "./key
 // item still present, so at most one can ever return it. A read-then-delete would not have that
 // guarantee, which is why this is not written as one.
 //
-// THE GRACE WINDOW: `retireHandle` does not delete or mark anything — it SHRINKS the handle's own
-// `expiresAtMs` to `now + HANDLE_GRACE_MS`. `getHandle` then needs no special "retired" state at
-// all: it is the exact same expiry comparison every other read makes. Retiring an already-expired
-// (but still physically present) handle is refused by the same `expiresAtMs > :now` condition, so
-// retirement can never resurrect a handle that's actually gone.
+// THE GRACE WINDOW: `retireHandle` SHRINKS the handle's own `expiresAtMs` to
+// `now + HANDLE_GRACE_MS` — `getHandle` then needs no special "retired" state at all, it's the
+// exact same expiry comparison every other read makes. The window is a BOUNDED bridge for
+// in-flight refresh races, and retirement must therefore only ever shrink a handle's life, never
+// extend it — a review round-1 finding (Task 14): the first version's condition let a SECOND
+// retire, issued while still inside the first retire's grace window, push `expiresAtMs` another
+// 30s out from the new call time, so retiring on every use of a retired handle kept it alive
+// forever. Fixed with a `retiredAtMs` marker: the update also sets it, and the condition adds
+// `attribute_not_exists(retiredAtMs)`, so only the FIRST retire can ever succeed — every
+// subsequent one (inside or outside the window) fails the condition and falls into the same
+// no-op path as "already gone." Retiring an already-expired (but still physically present)
+// handle is separately refused by the existing `expiresAtMs > :now` clause, so retirement can
+// never resurrect a handle that's actually gone either.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const CLIENT_TTL_MS = 90 * DAY_MS;
@@ -144,12 +152,13 @@ export const createDynamoOAuthStore = <TClient, TRequest, TCodeGrant, THandle>(c
     putHandle: (handleId, value) => put(oauthHandlePk(handleId), value, HANDLE_TTL_MS),
     getHandle: (handleId) => get(oauthHandlePk(handleId), parseHandle),
 
-    // Shrinks expiresAtMs to a fresh HANDLE_GRACE_MS window rather than writing any "retired"
-    // flag — getHandle needs no separate code path, it's the same expiry comparison every read
-    // makes. Conditioned on the SAME "attribute_exists(pk) AND expiresAtMs > :now" as `take`
-    // (not just attribute_exists) so retiring a handle that has already expired — physically
-    // present only because TTL cleanup hasn't run yet — is refused rather than resurrecting it
-    // with a brand-new 30-second window.
+    // Shrinks expiresAtMs to a fresh HANDLE_GRACE_MS window and stamps `retiredAtMs` — see the
+    // file header. `attribute_not_exists(retiredAtMs)` is what makes this a ONE-TIME shrink: a
+    // second retire (whether still inside the first one's window or after) finds `retiredAtMs`
+    // already set, fails the condition, and falls into the same no-op path as "already gone" —
+    // it can never push expiresAtMs out again. `expiresAtMs > :now` is unchanged from before:
+    // retiring a handle that's already expired (physically present only because TTL cleanup
+    // hasn't run yet) is refused rather than resurrecting it.
     retireHandle: async (handleId) => {
       const nowMs = clock.now();
       const expiresAtMs = nowMs + HANDLE_GRACE_MS;
@@ -162,14 +171,21 @@ export const createDynamoOAuthStore = <TClient, TRequest, TCodeGrant, THandle>(c
             // the `#ttl` alias. (Found by the contract suite against real DynamoDB Local: the
             // hermetic unit test's in-memory fake doesn't validate reserved words, so this broke
             // silently there until proven against the real service.)
-            UpdateExpression: "SET expiresAtMs = :expiresAtMs, #ttl = :ttl",
-            ConditionExpression: "attribute_exists(pk) AND expiresAtMs > :now",
+            UpdateExpression: "SET expiresAtMs = :expiresAtMs, #ttl = :ttl, retiredAtMs = :retiredAtMs",
+            ConditionExpression: "attribute_exists(pk) AND expiresAtMs > :now AND attribute_not_exists(retiredAtMs)",
             ExpressionAttributeNames: { "#ttl": "ttl" },
-            ExpressionAttributeValues: { ":expiresAtMs": expiresAtMs, ":ttl": Math.floor(expiresAtMs / 1000), ":now": nowMs },
+            ExpressionAttributeValues: {
+              ":expiresAtMs": expiresAtMs,
+              ":ttl": Math.floor(expiresAtMs / 1000),
+              ":now": nowMs,
+              ":retiredAtMs": nowMs,
+            },
           }),
         );
       } catch (error) {
-        if (error instanceof ConditionalCheckFailedException) return; // already gone (or already expired) — nothing to retire
+        // Already retired once (retiredAtMs already set), already gone, or already expired —
+        // every one of those reads as "nothing to retire," never as an error the caller sees.
+        if (error instanceof ConditionalCheckFailedException) return;
         throw error;
       }
     },

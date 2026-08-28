@@ -15,20 +15,45 @@ import { CODE_TTL_MS, createDynamoOAuthStore, HANDLE_GRACE_MS, HANDLE_TTL_MS, RE
 //
 // It implements exactly the four commands createDynamoOAuthStore.ts issues (Put/Get/Delete with
 // ConditionExpression + ReturnValues, Update with ConditionExpression) against a plain in-memory
-// Map, replicating DynamoDB's OWN conditional-write semantics for the two specific conditions
-// this file writes: `attribute_exists(pk)` and `expiresAtMs > :now` — not a general expression
-// evaluator. `src/contract/oauthStore.contract.test.ts` (test:contract, not run here) is what
-// proves those two conditions behave the same way against the real service.
+// Map. `conditionHolds` below evaluates each `AND`-joined clause of a ConditionExpression against
+// the three shapes this file's conditions are ever built from — `attribute_exists(attr)`,
+// `attribute_not_exists(attr)`, and `attr > :value` — rather than special-casing whole condition
+// strings; that generality is load-bearing (review round 1, Task 14): a whole-string special case
+// for "attribute_exists(pk) AND expiresAtMs > :now" stayed green when retireHandle grew a THIRD
+// clause (`attribute_not_exists(retiredAtMs)`) whose absence was exactly the bug. It is still not
+// a full DynamoDB expression parser (no OR, no nested parens, no arbitrary comparators) — just
+// enough to evaluate every clause this store actually writes.
+// `src/contract/oauthStore.contract.test.ts` (test:contract, not run here) is what proves this
+// fake's conditional semantics agree with the real service, including under genuine concurrency
+// a synchronous fake can never exercise.
 const createFakeDocumentClient = (): DynamoDBDocumentClient => {
   const table = new Map<string, Record<string, unknown>>();
 
-  const conditionHolds = (item: Record<string, unknown> | undefined, conditionExpression: string, now: unknown): boolean => {
-    if (item === undefined) return false;
-    if (conditionExpression.includes("expiresAtMs > :now")) {
-      return typeof item.expiresAtMs === "number" && typeof now === "number" && item.expiresAtMs > now;
+  // One clause of a ConditionExpression, evaluated against the item and the command's
+  // ExpressionAttributeValues. `item` may be undefined (no item at that pk).
+  const clauseHolds = (item: Record<string, unknown> | undefined, clause: string, values: Record<string, unknown> | undefined): boolean => {
+    const existsMatch = /^attribute_exists\(([\w#]+)\)$/.exec(clause);
+    if (existsMatch) return item !== undefined && item[existsMatch[1]!] !== undefined;
+
+    const notExistsMatch = /^attribute_not_exists\(([\w#]+)\)$/.exec(clause);
+    if (notExistsMatch) return item === undefined || item[notExistsMatch[1]!] === undefined;
+
+    const gtMatch = /^(\w+) > (:\w+)$/.exec(clause);
+    if (gtMatch) {
+      if (item === undefined) return false;
+      const actual = item[gtMatch[1]!];
+      const bound = values?.[gtMatch[2]!];
+      return typeof actual === "number" && typeof bound === "number" && actual > bound;
     }
-    return true; // attribute_exists(pk) alone — item presence already checked above
+
+    throw new Error(`fake document client: unrecognized condition clause "${clause}" — teach clauseHolds this shape`);
   };
+
+  const conditionHolds = (item: Record<string, unknown> | undefined, conditionExpression: string, values: Record<string, unknown> | undefined): boolean =>
+    conditionExpression
+      .split(" AND ")
+      .map((clause) => clause.trim())
+      .every((clause) => clauseHolds(item, clause, values));
 
   const fail = (message: string): never => {
     throw new ConditionalCheckFailedException({ message, $metadata: {} });
@@ -49,8 +74,8 @@ const createFakeDocumentClient = (): DynamoDBDocumentClient => {
         const pk = command.input.Key!.pk as string;
         const item = table.get(pk);
         const condition = command.input.ConditionExpression;
-        const now = command.input.ExpressionAttributeValues?.[":now"];
-        if (condition && !conditionHolds(item, condition, now)) fail(`conditional delete failed for ${pk}`);
+        const values = command.input.ExpressionAttributeValues;
+        if (condition && !conditionHolds(item, condition, values)) fail(`conditional delete failed for ${pk}`);
         table.delete(pk);
         return command.input.ReturnValues === "ALL_OLD" ? { Attributes: item ? { ...item } : undefined } : {};
       }
@@ -58,14 +83,17 @@ const createFakeDocumentClient = (): DynamoDBDocumentClient => {
         const pk = command.input.Key!.pk as string;
         const item = table.get(pk);
         const condition = command.input.ConditionExpression;
-        const now = command.input.ExpressionAttributeValues?.[":now"];
-        if (condition && !conditionHolds(item, condition, now)) fail(`conditional update failed for ${pk}`);
-        // Only the two attributes this store's UpdateExpression ever sets — a general
-        // UpdateExpression parser would be scope creep this fake doesn't need.
+        const values = command.input.ExpressionAttributeValues;
+        if (condition && !conditionHolds(item, condition, values)) fail(`conditional update failed for ${pk}`);
+        // Only the three attributes this store's UpdateExpression ever sets — a general
+        // UpdateExpression parser would be scope creep this fake doesn't need. retiredAtMs is
+        // undefined for every SET this file issues except retireHandle's, which is exactly the
+        // one that needs it read back by clauseHolds's attribute_not_exists check above.
         table.set(pk, {
           ...item,
-          expiresAtMs: command.input.ExpressionAttributeValues?.[":expiresAtMs"],
-          ttl: command.input.ExpressionAttributeValues?.[":ttl"],
+          expiresAtMs: values?.[":expiresAtMs"],
+          ttl: values?.[":ttl"],
+          ...(values && ":retiredAtMs" in values ? { retiredAtMs: values[":retiredAtMs"] } : {}),
         });
         return {};
       }
@@ -237,6 +265,24 @@ describe("createDynamoOAuthStore", () => {
 
     it("retiring an unknown handle is a no-op, not a throw", async () => {
       await expect(store.retireHandle("never-existed")).resolves.toBeUndefined();
+    });
+
+    // Review round 1 finding: the first version of retireHandle re-armed a fresh 30s window on
+    // EVERY call, so retiring on each use of an already-retired handle kept it alive forever —
+    // exactly the failure mode the grace window exists to bound. The fix is a `retiredAtMs`
+    // marker that lets only the FIRST retire succeed; this proves the second one is a true
+    // no-op, not merely "didn't error."
+    it("a second retire before the grace window elapses does not extend it", async () => {
+      await store.putHandle("h1", handle); // expiresAtMs = start + 30d
+      await store.retireHandle("h1"); // FIRST retire fixes expiresAtMs = start + 30s
+      clock.advance(20_000); // 20s later, still well inside the first retire's window
+      await store.retireHandle("h1"); // SECOND retire — must be a no-op, not a fresh +30s
+
+      // Without the fix, the second retire would have pushed expiresAtMs to 20s + 30s = 50s from
+      // start; advancing to 30_001ms (past the CORRECT deadline, short of the buggy one) proves
+      // which one actually happened.
+      clock.advance(10_001); // total 30_001ms since the first retire
+      await expect(store.getHandle("h1")).resolves.toBeUndefined();
     });
   });
 });

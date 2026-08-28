@@ -107,4 +107,23 @@ describe("createDynamoOAuthStore (real DynamoDB)", () => {
     // Immediately after retiring, still inside the 30s grace window against real wall time.
     await expect(store.getHandle(handleId)).resolves.toEqual({ refreshToken: "cognito-refresh-1" });
   }, 15_000);
+
+  // Review round 1 finding: the first version of retireHandle re-armed a fresh 30s window on
+  // every call — retiring on each use of an already-retired handle kept it alive forever. Proven
+  // here against REAL wall time (the hermetic suite proves the same invariant against a fake
+  // clock): the second retire, issued 5s after the first, must NOT push expiry to (5s + 30s) =
+  // 35s from the first retire. It waits to 31s — past the correct (30s) deadline, short of the
+  // buggy (35s) one — so a flip to defined there would mean the bug is back.
+  it("a second retire while still inside the grace window does not extend it (real DynamoDB)", async () => {
+    const store = newStore();
+    const handleId = randomUUID();
+    await store.putHandle(handleId, { refreshToken: "cognito-refresh-1" });
+
+    await store.retireHandle(handleId); // first retire — fixes expiry at (now + 30s)
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+    await store.retireHandle(handleId); // second retire, still well inside the window — must be a no-op
+
+    await new Promise((resolve) => setTimeout(resolve, 26_000)); // total 31s since the FIRST retire
+    await expect(store.getHandle(handleId)).resolves.toBeUndefined();
+  }, 45_000);
 });

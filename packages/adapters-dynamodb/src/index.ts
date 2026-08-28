@@ -21,3 +21,8 @@ export { parseSnapshotStreamImage } from "./parseSnapshotStreamImage.js";
 // against the real names rather than invented ones.
 export { STORED_ARCHIVE_INVALID, STORED_EVENT_INVALID } from "./parseStored.js";
 export { createDocumentClient } from "./createDocumentClient.js";
+// The OAuth mediation store (swng-speaks-mcp design §4.3, Task 14): registered DCR clients,
+// recorded /authorize requests, opaque authorization codes, and opaque refresh handles — the
+// short-lived state that lets mcp.swng.golf mediate while Cognito stays the only token issuer.
+export { createDynamoOAuthStore } from "./createDynamoOAuthStore.js";
+export type { OAuthStore } from "./createDynamoOAuthStore.js";

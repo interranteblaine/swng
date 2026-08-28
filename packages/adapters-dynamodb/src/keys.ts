@@ -181,3 +181,21 @@ export const countedRoundSkMarker = "#ROUND#";
 // snapshots table (crews/getSeasonStandings), stored nowhere, so the projector no longer touches
 // any crew keyspace. A crew's SEASON#/counted-round keys above (its OWN entity data on the core
 // table) are unrelated and stay.
+
+// The OAuth mediation store's key vocabulary (swng-speaks-mcp design §4.3, Task 14): four item
+// kinds, one table, `pk`-only — no item collection needs a sort key because every kind is looked
+// up by its own opaque id alone (a DCR client id, a recorded /authorize request, an opaque code,
+// an opaque refresh handle). Each prefix is its own namespace so the four kinds can never collide
+// even though every id is otherwise just a random string. `createDynamoOAuthStore.ts` is the only
+// reader/writer of these four.
+const OAUTH_CLIENT_PK_PREFIX = "OAUTHCLIENT#";
+export const oauthClientPk = (id: string): string => `${OAUTH_CLIENT_PK_PREFIX}${id}`;
+
+const OAUTH_REQUEST_PK_PREFIX = "OAUTHREQUEST#";
+export const oauthRequestPk = (id: string): string => `${OAUTH_REQUEST_PK_PREFIX}${id}`;
+
+const OAUTH_CODE_PK_PREFIX = "OAUTHCODE#";
+export const oauthCodePk = (id: string): string => `${OAUTH_CODE_PK_PREFIX}${id}`;
+
+const OAUTH_HANDLE_PK_PREFIX = "OAUTHHANDLE#";
+export const oauthHandlePk = (id: string): string => `${OAUTH_HANDLE_PK_PREFIX}${id}`;

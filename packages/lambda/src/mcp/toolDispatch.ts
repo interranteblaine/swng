@@ -130,10 +130,16 @@ export const dispatchTool = async (
     case "golfer":
     case "none":
     case "round-read":
-      // The caller's own credential rides straight through as-is. No live TOOL_TABLE entry is
-      // "none" or "round-read" tier today (every tool is "golfer" or "participant") — named
-      // explicitly here rather than folded into a catch-all default so that adding one is a
-      // considered choice made at this call site, not a silent no-op.
+      // The caller's own credential rides straight through as-is. Review round 1 (task 12)
+      // corrected this comment: three tools ARE "none"-tier today — get_course, search_courses,
+      // peek_round (routes.ts: "reads are identity-free — a course card is public data anyone
+      // may fetch," "search is identity-free too," and peek_round has no participant yet to hold
+      // a token) — so "the caller's own credential" is sent even though the route itself needs
+      // none; the dispatcher's own auth layer (dispatch.ts) is what actually ignores it for a
+      // "none" route. No live TOOL_TABLE entry is "round-read" tier (every remaining tool is
+      // "golfer" or "participant"). Each tier is still named explicitly here rather than folded
+      // into a catch-all default so that adding one is a considered choice made at this call
+      // site, not a silent no-op.
       break;
     case undefined:
       // No route in deps.routes names this tool's method+path at all. Nothing to authorize —

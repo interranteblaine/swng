@@ -174,6 +174,33 @@ describe("buildApp — USER_POOL_ID/USER_POOL_CLIENT_ID are optional (wsConnect/
   });
 });
 
+// Task 11 (the bug this task exists to prevent): buildApp built createCognitoVerifier
+// internally with no seam to override it, so nothing short of a real Cognito user pool could
+// dispatch a "golfer"-tier route in a test — which is exactly how a `tokenUse: "id"` verifier
+// wired up to reject every Cognito ACCESS token went uncaught. `deps.accountVerifier` opens
+// that seam, same idiom as `deps.readSecret` above. This test proves two things at once: the
+// seam is wired (the injected fake, not a real Cognito verifier, is what the dispatcher calls),
+// and doing so does NOT require TABLE_CORE/USER_POOL_ID/USER_POOL_CLIENT_ID to be set — a fake
+// verifier is enough to reach a golfer-tier handler in a hermetic test.
+describe("buildApp — deps.accountVerifier overrides the default Cognito verifier", () => {
+  const baseEnv = {
+    TABLE_ROUNDS: "rounds-table",
+    TABLE_CONNECTIONS: "connections-table",
+    TOKEN_SECRET_ARN: "arn:aws:secretsmanager:us-east-1:111122223333:secret:swng-token-secret-test",
+    WS_ENDPOINT: "https://example.execute-api.us-east-1.amazonaws.com/beta",
+  };
+
+  it("dispatches a golfer-tier route through the injected fake verifier, not the real Cognito one", async () => {
+    const fakeVerifier = { verify: vi.fn(async () => ({ sub: "sub-1" })) };
+    const app = await buildApp(baseEnv, { readSecret: fakeReadSecret, accountVerifier: fakeVerifier });
+
+    const request: HttpRequest = { method: "GET", path: "/me", headers: { authorization: "Bearer fake-access-token" }, query: {}, body: undefined };
+    await app.dispatcher(request);
+
+    expect(fakeVerifier.verify).toHaveBeenCalledWith("fake-access-token");
+  });
+});
+
 // M7 Task 5: TABLE_PROJECTIONS was granted + env'd onto httpFn back in Task 4 but unread by
 // buildApp until this task wired getMyRecord to a real ProjectionStore — same "shared
 // buildApp, entry-scoped env" story as TABLE_CORE/USER_POOL_ID above. wsConnect/wsDisconnect

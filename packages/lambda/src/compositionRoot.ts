@@ -257,7 +257,17 @@ export interface App {
 // plaintext env var — `deps.readSecret` is an injectable seam (default = the real SDK fetch,
 // @swng/adapters-secretsmanager's createSecretsManagerReader) so compositionRoot.test.ts can
 // drive this with a fake, no AWS calls or credentials required.
-export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn: string) => Promise<string> } = {}): Promise<App> => {
+//
+// `deps.accountVerifier` (Task 11, same idiom as `deps.readSecret` just above): the ONLY way
+// to reach the dispatcher's "golfer" auth tier in a test without a real Cognito user pool /
+// JWKS fetch. The default (`?? createCognitoVerifier({ userPoolId, clientId: userPoolClientId })`
+// below) is UNCHANGED from before this seam existed — the web keeps getting the exact
+// `tokenUse: "id"`, web-client-id verifier it always has. The MCP dispatch path (toolDispatch.ts,
+// wired at Task 13) is the one real caller that will ever pass a different verifier here.
+export const buildApp = async (
+  env: NodeJS.ProcessEnv,
+  deps: { readSecret?: (arn: string) => Promise<string>; accountVerifier?: AccountVerifier } = {},
+): Promise<App> => {
   const tableRounds = requireEnv(env, "TABLE_ROUNDS");
   const tableConnections = requireEnv(env, "TABLE_CONNECTIONS");
   const tableCore = env.TABLE_CORE; // optional — see unavailableCardStore above
@@ -298,9 +308,10 @@ export const buildApp = async (env: NodeJS.ProcessEnv, deps: { readSecret?: (arn
   const projectionStore =
     tableProjections !== undefined ? createDynamoProjectionStore({ client: documentClient, tableName: tableProjections }) : unavailableProjectionStore();
   const verifier =
-    userPoolId !== undefined && userPoolClientId !== undefined
+    deps.accountVerifier ??
+    (userPoolId !== undefined && userPoolClientId !== undefined
       ? createCognitoVerifier({ userPoolId, clientId: userPoolClientId })
-      : unavailableVerifier();
+      : unavailableVerifier());
 
   const managementClient = createManagementClient(wsEndpoint);
   const broadcast = createApiGatewayBroadcast({ client: managementClient, connections: registry, logger });

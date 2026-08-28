@@ -111,7 +111,7 @@ describe("dispatchTool", () => {
     expect(sent.query).toEqual({ query: "pebble", limit: "5" });
   });
 
-  it("mints opId/hlc for record_score, and a model-supplied value is discarded, not merely overwritten", async () => {
+  it("mints opId/hlc for record_score; a model-supplied opId/hlc never reaches the wire", async () => {
     const dispatch = vi.fn(async (_request: HttpRequest): Promise<HttpResponse> => jsonResponse(200, { duplicate: false, seq: 1 }));
 
     // Even though record_score is a "participant" tier, this test only cares about the SECOND

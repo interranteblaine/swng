@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createHlcSource, deviceId, opId } from "@swng/domain";
+import { joinRoundResponseSchema, parse } from "@swng/contracts";
 import type { Route } from "../http/routes.js";
 import type { HttpRequest, HttpResponse } from "../http/httpRequest.js";
 import type { ToolDefinition } from "./toolTable.js";
@@ -43,17 +44,20 @@ const bearer = (token: string): Record<string, string> => ({ authorization: `Bea
 
 // Extracts the mint's own credential — StartRoundResponse/JoinRoundResponse both carry it as
 // `token` (contracts/commands.ts's joinRoundResponseSchema; mintParticipantToken.ts's handler
-// returns a JoinRoundResponse verbatim, routes.ts's own doc comment) — never assumed without
-// checking the shape in contracts first.
-const mintedToken = (body: string): string => (JSON.parse(body) as { token: string }).token;
+// returns a JoinRoundResponse verbatim, routes.ts's own doc comment). Parsed against the real
+// contract schema, never cast (CLAUDE.md: "a type must not assert what the read path cannot
+// guarantee — parse stored data, never cast it") — a shape drift here fails loudly as a
+// ContractError instead of silently producing `Bearer undefined`.
+const mintedToken = (body: string): string => parse(joinRoundResponseSchema, JSON.parse(body)).token;
 
 // Builds a real HttpRequest (Task 5's transport-agnostic type) for one tool call, given the
-// bearer token that has already been decided (the caller's own access token for a "golfer"
-// route, a freshly minted round-scoped token for a "participant" route). Path args go on the
-// path, query args go on the query, everything else — with `authored` fields never taken from
-// `args`, always minted here — goes on the body. GET carries no body at all: it is dropped on
-// the wire (toolTable.test.ts's own "sends nothing in a GET body" pins the table side of this).
-const buildRequest = (tool: ToolDefinition, args: Record<string, unknown>, accessToken: string): HttpRequest => {
+// credential that has already been decided (the caller's own access token for a "golfer"
+// route, a freshly minted round-scoped token for a "participant" route — buildRequest itself
+// doesn't know or care which). Path args go on the path, query args go on the query, everything
+// else — with `authored` fields never taken from `args`, always minted here — goes on the body.
+// GET carries no body at all: it is dropped on the wire (toolTable.test.ts's own "sends nothing
+// in a GET body" pins the table side of this).
+const buildRequest = (tool: ToolDefinition, args: Record<string, unknown>, credential: string): HttpRequest => {
   const routedNames = new Set([...tool.pathParams, ...(tool.queryParams ?? []), ...(tool.authored ?? [])]);
   const path = fillPath(tool.path, tool.pathParams, args);
 
@@ -64,7 +68,7 @@ const buildRequest = (tool: ToolDefinition, args: Record<string, unknown>, acces
   }
 
   if (tool.method === "GET") {
-    return { method: tool.method, path, headers: bearer(accessToken), query, body: undefined };
+    return { method: tool.method, path, headers: bearer(credential), query, body: undefined };
   }
 
   const bodyFields: Record<string, unknown> = {};
@@ -74,47 +78,73 @@ const buildRequest = (tool: ToolDefinition, args: Record<string, unknown>, acces
 
   // `record_score`'s carve-out (toolTable.ts's `authored`): opId/hlc are the last-writer-wins
   // key the round's convergence rests on — minted HERE, per invocation, never taken from the
-  // model's own arguments (which can't even reach this point: `routedNames` above excludes them
-  // from the copy loop, so a model-supplied opId/hlc in `args` is discarded, not merely
-  // overwritten). One fresh HlcSource per call, `deviceId("mcp")` — the MCP layer IS a client,
-  // authoring exactly the way a browser session does (@swng/domain's createHlcSource, moved
-  // there by Task 8 for precisely this reuse).
+  // model's own arguments (`routedNames` above excludes them from the copy loop, so a
+  // model-supplied opId/hlc in `args` never reaches `bodyFields` at all — there is nothing to
+  // overwrite). ONE FRESH HlcSource per call, deviceId("mcp"). This is NOT what the browser
+  // session does: client/session.ts holds a single HlcSource per session and floors it via
+  // `observe(event.hlc)` on every remote event it sees (session.ts:96,211); this mints a source
+  // that has observed nothing, so `next()` always returns `counter: 0` and `wallMs` is only ever
+  // the current wall clock. Consequence: a score whose wallMs does not exceed an existing score's
+  // for the same golfer+hole (a clock skewed behind, or two MCP calls in the same millisecond) is
+  // silently dropped by the LWW fold (domain/round/state.ts's cells reducer) while this call
+  // still returns 200. Not fixed here — observing would need an extra authenticated read of the
+  // event log per write, on a differently-tiered route; escalated to the owner as a design call.
   if (tool.authored?.length) {
     if (tool.authored.includes("opId")) bodyFields.opId = opId(randomUUID());
     if (tool.authored.includes("hlc")) bodyFields.hlc = createHlcSource(deviceId("mcp")).next();
   }
 
-  return { method: tool.method, path, headers: bearer(accessToken), query, body: JSON.stringify(bodyFields) };
+  return { method: tool.method, path, headers: bearer(credential), query, body: JSON.stringify(bodyFields) };
 };
 
-// The one entry point Task 13's MCP request handler calls per tool invocation. `accessToken` is
-// the caller's own Cognito access token (verified upstream, at the MCP transport boundary — see
-// design spec §4.3); this function never verifies it itself, it only decides where it rides.
+// The one entry point Task 13's MCP request handler calls per tool invocation, dispatching
+// through `deps.dispatch` (the SAME dispatcher buildApp constructs) exactly once for a
+// "golfer"-tier tool, and twice — mint, then the named route — for a "participant"-tier one.
 export const dispatchTool = async (
   deps: ToolDispatchDeps,
   tool: ToolDefinition,
   args: Record<string, unknown>,
-  accessToken: string,
+  credential: string,
 ): Promise<HttpResponse> => {
   const tier = tierOf(deps.routes, tool.method, tool.path);
 
-  let credential = accessToken;
-  if (tier === "participant") {
-    const roundId = String(args.roundId);
-    const mintRequest: HttpRequest = {
-      method: "POST",
-      path: `/rounds/${encodeURIComponent(roundId)}/token`,
-      headers: bearer(accessToken),
-      query: {},
-      body: undefined,
-    };
-    const mintResult = await deps.dispatch(mintRequest);
-    // A failed mint short-circuits here: the route this tool actually names is never called,
-    // and the mint's OWN status/body is what the caller sees — mintParticipantToken 409s
-    // "round-final" for a finalized round, and that is the useful, specific answer, not a
-    // confusing 401 from a route the call should never have reached.
-    if (mintResult.statusCode >= 400) return mintResult;
-    credential = mintedToken(mintResult.body);
+  switch (tier) {
+    case "participant": {
+      const roundId = String(args.roundId);
+      const mintRequest: HttpRequest = {
+        method: "POST",
+        path: `/rounds/${encodeURIComponent(roundId)}/token`,
+        headers: bearer(credential),
+        query: {},
+        body: undefined,
+      };
+      const mintResult = await deps.dispatch(mintRequest);
+      // A failed mint short-circuits here: the route this tool actually names is never called,
+      // and the mint's OWN status/body is what the caller sees — mintParticipantToken 409s
+      // "round-final" for a finalized round, and that is the useful, specific answer, not a
+      // confusing 401 from a route the call should never have reached.
+      if (mintResult.statusCode >= 400) return mintResult;
+      credential = mintedToken(mintResult.body);
+      break;
+    }
+    case "golfer":
+    case "none":
+    case "round-read":
+      // The caller's own credential rides straight through as-is. No live TOOL_TABLE entry is
+      // "none" or "round-read" tier today (every tool is "golfer" or "participant") — named
+      // explicitly here rather than folded into a catch-all default so that adding one is a
+      // considered choice made at this call site, not a silent no-op.
+      break;
+    case undefined:
+      // No route in deps.routes names this tool's method+path at all. Nothing to authorize —
+      // let deps.dispatch's own 404 surface the problem rather than guessing a credential.
+      break;
+    default: {
+      // Exhaustiveness check: a new Route["auth"] value that reaches here without an explicit
+      // case above is a COMPILE-TIME type error, not a silent runtime 401.
+      const unhandledTier: never = tier;
+      throw new Error(`dispatchTool: unhandled auth tier ${String(unhandledTier)}`);
+    }
   }
 
   return deps.dispatch(buildRequest(tool, args, credential));

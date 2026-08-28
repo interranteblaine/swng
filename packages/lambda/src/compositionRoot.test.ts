@@ -6,6 +6,19 @@ import { createFixedClock, createInMemoryGolferStore, createInMemoryProjectionSt
 import { buildApp, buildProjector, buildRebuild, createConsoleLogger, createEmfMetrics, createProjectorHandler, createRandomIds } from "./compositionRoot.js";
 import { createHmacTokenIssuer } from "./auth/hmacTokenIssuer.js";
 import type { HttpRequest } from "./http/httpRequest.js";
+import { createCognitoVerifier } from "@swng/adapters-cognito";
+
+// Task 11 review fix 2: buildApp's default verifier branch (deps.accountVerifier ?? ...
+// createCognitoVerifier(...)) is otherwise pinned by NOTHING — every existing test either
+// injects a fake accountVerifier or never dispatches a "golfer" route, so replacing the
+// default with `unavailableVerifier()` unconditionally would break the web silently. Wrapping
+// the real createCognitoVerifier in a spy (rather than a fake replacement) keeps every OTHER
+// test in this file byte-identical — the wrapped function still constructs and returns the
+// real Cognito verifier, this just lets one test downstream assert it was actually called.
+vi.mock("@swng/adapters-cognito", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@swng/adapters-cognito")>();
+  return { ...actual, createCognitoVerifier: vi.fn(actual.createCognitoVerifier) };
+});
 
 // Every buildApp call in this file injects this fake in place of the real Secrets Manager
 // fetch (Task 4: buildApp now resolves TOKEN_SECRET_ARN via an injectable readSecret seam) —
@@ -190,6 +203,25 @@ describe("buildApp — deps.accountVerifier overrides the default Cognito verifi
     WS_ENDPOINT: "https://example.execute-api.us-east-1.amazonaws.com/beta",
   };
 
+  // GET /me reaches unavailableGolferStore (no TABLE_CORE here) and 500s — expected, and
+  // covered by the TABLE_CORE describe block above's own "500s gracefully" test. Silenced the
+  // same way createConsoleLogger's own describe block above does (:46-47): a passing suite's
+  // stdout/stderr should be pristine, not carrying a real access-log line and a full
+  // "dispatcher: unhandled error" stack trace that trains people to ignore stack traces.
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+    vi.mocked(createCognitoVerifier).mockClear();
+  });
+
   it("dispatches a golfer-tier route through the injected fake verifier, not the real Cognito one", async () => {
     const fakeVerifier = { verify: vi.fn(async () => ({ sub: "sub-1" })) };
     const app = await buildApp(baseEnv, { readSecret: fakeReadSecret, accountVerifier: fakeVerifier });
@@ -198,6 +230,17 @@ describe("buildApp — deps.accountVerifier overrides the default Cognito verifi
     await app.dispatcher(request);
 
     expect(fakeVerifier.verify).toHaveBeenCalledWith("fake-access-token");
+  });
+
+  // Task 11 review fix 2 (the important one): pins the DEFAULT branch itself, not just that an
+  // override works. Nothing else in this file would fail if `deps.accountVerifier ?? ...` were
+  // replaced with `deps.accountVerifier ?? unavailableVerifier()` — dropping the Cognito
+  // fallback and silently breaking the web, precisely the class of regression this task exists
+  // to prevent (a `tokenUse: "id"` verifier is exactly what buildApp must still construct here).
+  it("falls back to the real createCognitoVerifier, with the real pool/client config, when no accountVerifier is injected", async () => {
+    await buildApp({ ...baseEnv, USER_POOL_ID: "us-east-1_Test123", USER_POOL_CLIENT_ID: "test-client-id" }, { readSecret: fakeReadSecret });
+
+    expect(createCognitoVerifier).toHaveBeenCalledWith({ userPoolId: "us-east-1_Test123", clientId: "test-client-id" });
   });
 });
 

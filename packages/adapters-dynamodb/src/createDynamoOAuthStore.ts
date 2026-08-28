@@ -158,8 +158,13 @@ export const createDynamoOAuthStore = <TClient, TRequest, TCodeGrant, THandle>(c
           new UpdateCommand({
             TableName: tableName,
             Key: { pk: oauthHandlePk(handleId) },
-            UpdateExpression: "SET expiresAtMs = :expiresAtMs, ttl = :ttl",
+            // `ttl` is a DynamoDB reserved keyword — unusable bare in an UpdateExpression, hence
+            // the `#ttl` alias. (Found by the contract suite against real DynamoDB Local: the
+            // hermetic unit test's in-memory fake doesn't validate reserved words, so this broke
+            // silently there until proven against the real service.)
+            UpdateExpression: "SET expiresAtMs = :expiresAtMs, #ttl = :ttl",
             ConditionExpression: "attribute_exists(pk) AND expiresAtMs > :now",
+            ExpressionAttributeNames: { "#ttl": "ttl" },
             ExpressionAttributeValues: { ":expiresAtMs": expiresAtMs, ":ttl": Math.floor(expiresAtMs / 1000), ":now": nowMs },
           }),
         );

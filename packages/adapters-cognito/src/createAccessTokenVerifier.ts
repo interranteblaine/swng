@@ -133,3 +133,23 @@ export const accountVerifierFromAccessToken = (verifier: RawVerifier, resource: 
     },
   };
 };
+
+// Task 13 review round 1 (MCP arc): entries/mcp.ts needs BOTH faces — the OAuthTokenVerifier
+// `requireBearerAuth` gates on, and the AccountVerifier buildApp's dispatcher seam (Task 11)
+// needs — over the SAME underlying CognitoJwtVerifier instance. accountVerifierFromAccessToken's
+// own doc comment above already states the intended design ("so both adapters can share one
+// underlying CognitoJwtVerifier instance at the call site") — this is that call site, moved
+// into the adapters layer where CognitoJwtVerifier construction belongs (docs/engineering-
+// conventions.md), rather than a second raw verifier built directly in packages/lambda. One
+// JWKS cache, one cold-start fetch, one RS256 verify per token per request instead of two.
+export const createMcpVerifiers = (config: {
+  userPoolId: string;
+  clientId: string;
+  resource: string;
+}): { tokenVerifier: OAuthTokenVerifier; accountVerifier: AccountVerifier } => {
+  const raw = CognitoJwtVerifier.create({ userPoolId: config.userPoolId, tokenUse: "access", clientId: config.clientId });
+  return {
+    tokenVerifier: accessTokenVerifierFrom(raw, config.resource),
+    accountVerifier: accountVerifierFromAccessToken(raw, config.resource),
+  };
+};

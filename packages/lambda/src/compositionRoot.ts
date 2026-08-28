@@ -135,7 +135,12 @@ export const createEmfMetrics = (stage: string): Metrics => ({
   },
 });
 
-const requireEnv = (env: NodeJS.ProcessEnv, key: string): string => {
+// Exported (not module-private) so every entry that needs the same "read this env var, throw
+// loudly if it's missing" behavior shares ONE implementation — entries/mcp.ts (Task 13 review
+// round 1) is the first consumer outside this file, for the env vars buildApp itself treats as
+// OPTIONAL (TABLE_CORE/TABLE_PROJECTIONS/TABLE_SNAPSHOTS) but the MCP entry's full tool surface
+// needs unconditionally.
+export const requireEnv = (env: NodeJS.ProcessEnv, key: string): string => {
   const value = env[key];
   if (!value) throw new Error(`buildApp: missing required env var ${key}`);
   return value;

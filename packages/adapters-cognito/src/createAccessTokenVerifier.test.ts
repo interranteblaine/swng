@@ -1,7 +1,7 @@
 import { generateKeyPairSync, sign as cryptoSign } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CognitoJwtVerifier } from "aws-jwt-verify";
-import { accessTokenVerifierFrom, accountVerifierFromAccessToken, createAccessTokenVerifier } from "./createAccessTokenVerifier.js";
+import { accessTokenVerifierFrom, accountVerifierFromAccessToken, createAccessTokenVerifier, createMcpVerifiers } from "./createAccessTokenVerifier.js";
 
 // Hermetic (CLAUDE.md: `pnpm validate` is offline) — `accessTokenVerifierFrom` and
 // `accountVerifierFromAccessToken` both take an injectable `{ verify }` stub instead of the real
@@ -197,5 +197,26 @@ describe("createAccessTokenVerifier — real CognitoJwtVerifier, offline JWKS", 
   it("createAccessTokenVerifier builds an OAuthTokenVerifier from plain config", () => {
     const verifier = createAccessTokenVerifier({ userPoolId: USER_POOL_ID, clientId: CLIENT_ID, resource: CANONICAL });
     expect(typeof verifier.verifyAccessToken).toBe("function");
+  });
+
+  it("createMcpVerifiers builds both faces, constructing only ONE underlying CognitoJwtVerifier", () => {
+    // Task 13 review round 1: entries/mcp.ts needs BOTH the OAuthTokenVerifier
+    // requireBearerAuth gates on and the dispatcher's AccountVerifier (Task 11's seam) — over
+    // the SAME underlying verifier instance, per accountVerifierFromAccessToken's own doc
+    // comment above ("so both adapters can share one underlying CognitoJwtVerifier instance at
+    // the call site"). `CognitoJwtVerifier.create` performs no I/O (aws-jwt-verify fetches the
+    // JWKS lazily inside `verify()`, never at construction — dist/esm/jwt-verifier.js's own
+    // `verify()`/`decomposeUnverifiedJwt` ordering), so this spies on the real constructor to
+    // prove ONE call, not two, without touching the network.
+    const createSpy = vi.spyOn(CognitoJwtVerifier, "create");
+
+    const { tokenVerifier, accountVerifier } = createMcpVerifiers({ userPoolId: USER_POOL_ID, clientId: CLIENT_ID, resource: CANONICAL });
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(createSpy).toHaveBeenCalledWith({ userPoolId: USER_POOL_ID, tokenUse: "access", clientId: CLIENT_ID });
+    expect(typeof tokenVerifier.verifyAccessToken).toBe("function");
+    expect(typeof accountVerifier.verify).toBe("function");
+
+    createSpy.mockRestore();
   });
 });

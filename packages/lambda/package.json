@@ -27,7 +27,6 @@
     "@swng/adapters-powertools": "workspace:*",
     "@swng/adapters-secretsmanager": "workspace:*",
     "@modelcontextprotocol/server": "2.0.0",
-    "aws-jwt-verify": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

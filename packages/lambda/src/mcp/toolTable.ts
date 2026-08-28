@@ -73,7 +73,10 @@ export const TOOL_TABLE: readonly ToolDefinition[] = [
     method: "GET",
     path: "/crews/{crewId}/seasons/{seasonId}/standings",
     pathParams: ["crewId", "seasonId"],
-    inputSchema: z.object({ crewId: crewIdSchema, seasonId: z.string().min(1) }),
+    // seasonId is never branded (routes.ts's own comment: "an opaque string — never branded,
+    // never parsed"), matching crewSeasonViewSchema's own `seasonId: z.string()` field — no bound
+    // invented here that the contract doesn't already carry.
+    inputSchema: z.object({ crewId: crewIdSchema, seasonId: z.string() }),
   },
   {
     name: "finalize_round",
@@ -184,7 +187,9 @@ export const TOOL_TABLE: readonly ToolDefinition[] = [
     path: "/rounds/peek",
     pathParams: [],
     queryParams: ["code"],
-    inputSchema: z.object({ code: z.string().min(1) }),
+    // parseJoinCode (routes.ts) rejects empty/blank at dispatch time; no bound invented here —
+    // required-ness alone (no `.optional()`) is this schema's job.
+    inputSchema: z.object({ code: z.string() }),
   },
   {
     name: "record_score",
@@ -206,7 +211,10 @@ export const TOOL_TABLE: readonly ToolDefinition[] = [
     path: "/courses",
     pathParams: [],
     queryParams: ["query", "limit"],
-    inputSchema: z.object({ query: z.string().min(1), limit: z.number().int().optional() }),
+    // parseSearchQuery rejects empty/blank and parseLimit rejects a non-integer at dispatch time
+    // (routes.ts) — no bound invented here beyond `limit`'s integer type, which mirrors what
+    // parseOptionalInt actually enforces rather than adding a new ceiling.
+    inputSchema: z.object({ query: z.string(), limit: z.number().int().optional() }),
   },
   {
     name: "set_participant_strokes",

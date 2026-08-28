@@ -30,6 +30,17 @@ export interface OAuthTokenVerifier {
   verifyAccessToken(token: string): Promise<AuthInfo>;
 }
 
+// `resource` is CANONICAL (design spec §4.3) and everything below is measured against it — so
+// a bad `resource` at construction time (empty string, or `undefined` arriving from env
+// plumbing typed `string | undefined`, per compositionRoot.ts) would make `claims.aud !==
+// resource` compare against something falsy and let a no-`aud` token through silently. Guarded
+// once here rather than trusted at every call site.
+const requireValidResource = (resource: string): void => {
+  if (typeof resource !== "string" || resource.length === 0) {
+    throw new Error("A non-empty resource is required to construct an access-token verifier");
+  }
+};
+
 // The check aws-jwt-verify does NOT do for an access token. Read from its own source
 // (dist/cjs/cognito-verifier.js, validateCognitoJwtFields): when `payload.token_use` is
 // "access" it asserts `payload.client_id` against the configured clientId and never reads
@@ -39,20 +50,28 @@ export interface OAuthTokenVerifier {
 // (§4.2, F1). So without this explicit comparison, a token bound to a different resource server
 // — or one minted with no resource binding whatsoever — verifies identically to one bound to
 // `resource` here. This is the security property this whole file exists for.
+//
+// `aud` is normalized to an array before comparison: RFC 7519 permits a JWT audience to be
+// either a single string or an array of strings, and aws-jwt-verify's own JwtPayload types it
+// `aud?: string | string[]` — so array form must still be checked exactly, not rejected purely
+// because it isn't `===` a string (that would fail closed today, since Cognito hasn't been
+// observed emitting array form, but a future emission would be a silent full outage rather
+// than a handled case).
 const requireAudience = (claims: Record<string, unknown>, resource: string): void => {
-  if (claims.aud !== resource) {
+  const auds = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+  if (!auds.includes(resource)) {
     throw new Error(`Token audience does not match required resource "${resource}"`);
   }
 };
 
 // Cognito's `scope` claim on an access token is one space-delimited string ("a b c"), not an
-// array — splitting an empty string with String.split(" ") yields [""], not [], so the empty
-// case is handled explicitly rather than trusted to split cleanly.
+// array. A plain `.split(" ")` on an empty string yields `[""]`, not `[]`, and a doubled or
+// leading/trailing space would leave stray empty entries — `.split(/\s+/).filter(...)` avoids
+// both without weakening the check (still every whitespace-delimited token, still no empties).
 const parseScopes = (claims: Record<string, unknown>): string[] => {
   if (claims.scope === undefined) return [];
   if (typeof claims.scope !== "string") throw new Error("Token scope claim is not a string");
-  if (claims.scope.length === 0) return [];
-  return claims.scope.split(" ");
+  return claims.scope.split(/\s+/).filter((scope) => scope.length > 0);
 };
 
 const parseAuthInfo = (token: string, claims: Record<string, unknown>, resource: string): AuthInfo => {
@@ -70,12 +89,15 @@ const parseAuthInfo = (token: string, claims: Record<string, unknown>, resource:
 // `resource` — exported (not `createAccessTokenVerifier`'s own private detail) so tests can
 // hand it a stub verifier instead of the real CognitoJwtVerifier built below, mirroring
 // createCognitoVerifier.ts's `…From` split so tests never touch JWKS or the network.
-export const accessTokenVerifierFrom = (verifier: RawVerifier, resource: string): OAuthTokenVerifier => ({
-  verifyAccessToken: async (token: string): Promise<AuthInfo> => {
-    const claims = await verifier.verify(token);
-    return parseAuthInfo(token, claims, resource);
-  },
-});
+export const accessTokenVerifierFrom = (verifier: RawVerifier, resource: string): OAuthTokenVerifier => {
+  requireValidResource(resource);
+  return {
+    verifyAccessToken: async (token: string): Promise<AuthInfo> => {
+      const claims = await verifier.verify(token);
+      return parseAuthInfo(token, claims, resource);
+    },
+  };
+};
 
 // The one real implementation — an access-token verifier (tokenUse: "access") for the MCP app
 // client, bound to `resource` (CANONICAL, design spec §4.3). Distinct from createCognitoVerifier
@@ -91,12 +113,23 @@ export const createAccessTokenVerifier = (config: { userPoolId: string; clientId
 // shape as accessTokenVerifierFrom so both adapters can share one underlying CognitoJwtVerifier
 // instance at the call site, and applies the identical parse-don't-cast discipline: a missing
 // or non-string `sub` fails closed rather than passing through as `undefined`.
-export const accountVerifierFromAccessToken = (verifier: RawVerifier): AccountVerifier => ({
-  verify: async (bearer: string): Promise<AccountClaims> => {
-    const claims = await verifier.verify(bearer);
-    if (typeof claims.sub !== "string" || claims.sub.length === 0) {
-      throw new Error("Token is missing sub");
-    }
-    return { sub: claims.sub };
-  },
-});
+//
+// Takes `resource` and runs the SAME `requireAudience` check accessTokenVerifierFrom does —
+// application/src/ports/accountVerifier.ts's own doc comment states the port's contract is
+// "rejects ... on an invalid/expired/wrong-audience bearer token," true of createCognitoVerifier
+// (the library checks `aud` on id tokens) and would be silently false here otherwise: fed the
+// real Cognito verifier, this adapter would accept a token bound to a different resource server,
+// or to none, with nothing else in front of it enforcing that today.
+export const accountVerifierFromAccessToken = (verifier: RawVerifier, resource: string): AccountVerifier => {
+  requireValidResource(resource);
+  return {
+    verify: async (bearer: string): Promise<AccountClaims> => {
+      const claims = await verifier.verify(bearer);
+      requireAudience(claims, resource);
+      if (typeof claims.sub !== "string" || claims.sub.length === 0) {
+        throw new Error("Token is missing sub");
+      }
+      return { sub: claims.sub };
+    },
+  };
+};

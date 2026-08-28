@@ -376,8 +376,17 @@ export default [
     // domain-boundary-restore arc's own Task 5 grep (2026-07-18, commit 0798828), which excludes
     // `.test.` — NOT the "strokes are typed" arc's task 5 (2026-07-30), a different task of the
     // same ordinal number that landed the `no-restricted-syntax` re-derivation rule below.
-    files: ["apps/web/src/**/*.{ts,tsx}"],
-    ignores: ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
+    //
+    // The swng-speaks-mcp arc (task 10) scopes this SAME fence to `packages/lambda/src/mcp/**` —
+    // the MCP tool table renders golf facts (describeGame et al.) exactly as the web does, but
+    // must not compute any (spec §5.2). It gets the identical banlist, not a bespoke one: a
+    // hand-rolled MCP fence would drift from the web's the moment either changes.
+    files: ["apps/web/src/**/*.{ts,tsx}", "packages/lambda/src/mcp/**/*.ts"],
+    ignores: [
+      "apps/web/src/**/*.test.ts",
+      "apps/web/src/**/*.test.tsx",
+      "packages/lambda/src/mcp/**/*.test.ts",
+    ],
     rules: {
       "@typescript-eslint/no-restricted-imports": [
         "error",

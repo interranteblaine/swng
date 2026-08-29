@@ -25,6 +25,15 @@ export interface ClientRecord {
   readonly clientName?: string;
 }
 
+// The ONE place a `ClientRecord` is constructed, everywhere in this file. `clientName` is
+// OMITTED (not present as a key at all) rather than set to `undefined` when absent — review
+// round 1, Task 16, fix 2: `createDocumentClient.ts` builds its DynamoDB client with no
+// `marshallOptions`, so `removeUndefinedValues` is `false`, and `marshall({ clientName:
+// undefined })` throws. An optional `client_name` (RFC 7591) is the COMMON case, not an edge
+// one, so `{ ...clientId, redirectUris, clientName: body.clientName }` broke the ordinary path.
+const buildClientRecord = (clientId: string, redirectUris: readonly string[], clientName: string | undefined): ClientRecord =>
+  clientName === undefined ? { clientId, redirectUris } : { clientId, redirectUris, clientName };
+
 // The narrow slice of Task 14's `OAuthStore` this module needs — just the client slot, typed
 // against the concrete `ClientRecord` above. `getClient` already returns a PARSED `ClientRecord`
 // because the store's own `parseClient` (supplied by whoever wires `createDynamoOAuthStore`,
@@ -62,11 +71,7 @@ export const parseStoredClientRecord = (raw: unknown): ClientRecord => {
   if (obj.clientName !== undefined && typeof obj.clientName !== "string") {
     throw new Error("stored OAuth client record: clientName present but not a string");
   }
-  return {
-    clientId: obj.clientId,
-    redirectUris: obj.redirectUris as string[],
-    clientName: obj.clientName as string | undefined,
-  };
+  return buildClientRecord(obj.clientId, obj.redirectUris as string[], obj.clientName as string | undefined);
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -75,6 +80,16 @@ export const parseStoredClientRecord = (raw: unknown): ClientRecord => {
 // Path and host are NEVER relaxed, not even for loopback. This is the second attackable surface
 // named in the brief: get this wrong and an authorization code can be redirected to a host an
 // attacker controls.
+//
+// RETURNS THE CANONICAL MATCHED URI (or `undefined`), not a boolean — review round 1, Task 16,
+// fix 4: the WHATWG URL parser strips ASCII tab/CR/LF before this function ever compares
+// anything, so a raw caller string like "https://app.example.com/c\r\nb" and its parsed form
+// "https://app.example.com/cb" compare as identical here — but a CALLER that went on to use the
+// original raw string (e.g. to build a `Location:` header) would emit the un-stripped CRLF. The
+// fix is at the boundary, not the parser: hand back `requested.href` — the value that was
+// ACTUALLY validated — so a future `/authorize` never touches the untrusted raw string again.
+// Also refuses a `redirect_uri` (or a registered URI) carrying userinfo or a fragment: RFC 6749
+// §3.1.2 forbids a fragment in a redirect URI outright, and userinfo has no legitimate use here.
 // ---------------------------------------------------------------------------------------------
 
 // Exactly the two forms the brief names (`http://localhost/*`, `http://127.0.0.1/*`) plus the
@@ -95,26 +110,31 @@ const tryParseUrl = (value: string): URL | undefined => {
   }
 };
 
-export const redirectUriAllowed = (registeredUris: readonly string[], requestedUri: string): boolean => {
+const hasUserinfoOrFragment = (url: URL): boolean => url.username !== "" || url.password !== "" || url.hash !== "";
+
+export const redirectUriAllowed = (registeredUris: readonly string[], requestedUri: string): string | undefined => {
   const requested = tryParseUrl(requestedUri);
-  if (!requested) return false;
-  return registeredUris.some((registered) => {
+  if (!requested || hasUserinfoOrFragment(requested)) return undefined;
+
+  for (const registered of registeredUris) {
     const reg = tryParseUrl(registered);
-    if (!reg) return false;
+    if (!reg || hasUserinfoOrFragment(reg)) continue;
 
     // Scheme, host and path are compared unconditionally, loopback or not — this is the "never
     // relaxed" half of the rule. `search` (the query string) is part of the registered URI too:
     // an exact match includes it.
-    if (reg.protocol !== requested.protocol) return false;
-    if (reg.hostname !== requested.hostname) return false;
-    if (reg.pathname !== requested.pathname) return false;
-    if (reg.search !== requested.search) return false;
+    if (reg.protocol !== requested.protocol) continue;
+    if (reg.hostname !== requested.hostname) continue;
+    if (reg.pathname !== requested.pathname) continue;
+    if (reg.search !== requested.search) continue;
 
     // Only PORT is ever relaxed, and only when both sides are one of the two loopback hosts
     // above (they're equal at this point, so checking one side is checking both).
-    if (isLoopbackHost(reg.hostname)) return true;
-    return reg.port === requested.port;
-  });
+    if (isLoopbackHost(reg.hostname) || reg.port === requested.port) {
+      return requested.href; // canonical — see the block comment above for why not the raw input
+    }
+  }
+  return undefined;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -123,6 +143,27 @@ export const redirectUriAllowed = (registeredUris: readonly string[], requestedU
 // (createDynamoOAuthStore.ts), not re-decided here.
 // ---------------------------------------------------------------------------------------------
 
+// The redirect_uri scheme allowlist — review round 1, Task 16, fix 5: `z.string().url()` alone
+// accepts `javascript:`, `data:` and `file:`, none of which have a "hostname" for the consent
+// page (design spec §4.3) to display — the one safety signal the golfer actually sees before
+// approving. https is always fine; http is fine ONLY for the two loopback hosts (RFC 8252 §7.3);
+// anything else must look like a private-use URI scheme per RFC 8252 §7.1 — reverse-DNS-style,
+// containing a dot, and neither "http" nor "https" outright (a scheme WITH a dot can't collide
+// with a single dangerous bare word like "javascript" or "data"). This is deliberately narrower
+// than RFC 8252 strictly requires (a dot is a recommendation there, not a MUST) — a simple
+// undotted custom scheme like "myapp:" is refused rather than guessed at; that's a real,
+// consciously-drawn line, not an oversight.
+const isAllowedRedirectUriScheme = (raw: string): boolean => {
+  const url = tryParseUrl(raw);
+  if (!url) return false;
+  if (url.protocol === "https:") return true;
+  if (url.protocol === "http:") return isLoopbackHost(url.hostname);
+  const scheme = url.protocol.slice(0, -1); // strip the trailing ":" `URL.protocol` always carries
+  return scheme.includes(".") && scheme !== "http" && scheme !== "https";
+};
+
+const REDIRECT_URI_SCHEME_MESSAGE = "redirect_uris must use https, loopback http, or a private-use URI scheme (RFC 8252 §7.1)";
+
 // Bounds belong on a request schema (CLAUDE.md) — this IS one: an unauthenticated POST body.
 // The caps (10 redirect URIs, 200-char name) are generous-but-finite, purely to stop an
 // abusive registration from writing an unbounded item; DCR's real unboundedness problem (an
@@ -130,7 +171,7 @@ export const redirectUriAllowed = (registeredUris: readonly string[], requestedU
 const dcrRegistrationRequestSchema = z
   .object({
     redirect_uris: z
-      .array(z.string().url())
+      .array(z.string().url().refine(isAllowedRedirectUriScheme, { message: REDIRECT_URI_SCHEME_MESSAGE }))
       .min(1, "redirect_uris must contain at least one URI")
       .max(10, "redirect_uris exceeds the maximum of 10"),
     client_name: z.string().max(200).optional(),
@@ -157,11 +198,7 @@ export const registerDcrClient = async (
 ): Promise<ClientRecord> => {
   const body = parseDcrRegistrationRequestBody(rawJson);
   const clientId = (deps.generateClientId ?? randomUUID)();
-  const record: ClientRecord = {
-    clientId,
-    redirectUris: body.redirectUris,
-    clientName: body.clientName,
-  };
+  const record = buildClientRecord(clientId, body.redirectUris, body.clientName);
   await deps.store.putClient(clientId, record);
   return record;
 };
@@ -183,7 +220,7 @@ const cimdDocumentSchema = z
   .object({
     client_id: z.string().max(2048),
     redirect_uris: z
-      .array(z.string().url())
+      .array(z.string().url().refine(isAllowedRedirectUriScheme, { message: REDIRECT_URI_SCHEME_MESSAGE }))
       .min(1, "redirect_uris must contain at least one URI")
       .max(10, "redirect_uris exceeds the maximum of 10"),
     client_name: z.string().max(200).optional(),
@@ -210,11 +247,7 @@ export const parseCimdDocument = (rawBody: string, expectedClientIdUrl: string):
       `client metadata document's client_id ("${result.data.client_id}") does not match the URL it was fetched from ("${expectedClientIdUrl}")`,
     );
   }
-  return {
-    clientId: result.data.client_id,
-    redirectUris: result.data.redirect_uris,
-    clientName: result.data.client_name,
-  };
+  return buildClientRecord(result.data.client_id, result.data.redirect_uris, result.data.client_name);
 };
 
 // ---- SSRF guard -------------------------------------------------------------------------------
@@ -296,24 +329,51 @@ const expandIPv6 = (address: string): bigint => {
   }, 0n);
 };
 
+const octetsToDotted = (value: bigint): string =>
+  [Number((value >> 24n) & 0xffn), Number((value >> 16n) & 0xffn), Number((value >> 8n) & 0xffn), Number(value & 0xffn)].join(".");
+
+// ALLOWLIST, not blocklist — review round 1, Task 16, fix 1 (Critical). The prior version named
+// four ranges (::, ::1, fe80::/10 link-local, fc00::/7 unique-local) plus the ::ffff:0:0/96
+// IPv4-mapped delegation, and a reviewer PROBE proved `fetchImpl` was reached for six more IPv6
+// forms that range simply never enumerated: NAT64 (64:ff9b::/96), 6to4 (2002::/16), deprecated
+// site-local (fec0::/10), IPv4-compatible (::a.b.c.d), and IPv4-translated (::ffff:0:a.b.c.d).
+// Not reachable TODAY — the CDK stack has no VPC, so there's no IPv6 egress and this module
+// isn't wired yet — but NAT64 is a documented cloud-SSRF bypass class, and a blocklist that must
+// enumerate every non-public range is a hole waiting for the next one IANA (or a cloud vendor)
+// invents. A SECURITY CONTROL LIKE THIS MUST ENUMERATE WHAT'S PERMITTED: only `2000::/3`
+// (assigned global unicast) is public, full stop. That alone silently catches every range named
+// above EXCEPT one — 6to4 (2002::/16) sits INSIDE 2000::/3 by construction (it's an IANA-assigned
+// /16 carved out of it) while still embedding an arbitrary, un-vetted IPv4 address in its next 32
+// bits, so it gets its own explicit unwrap-and-recheck below. The IPv4-mapped case (::ffff:0:0/96,
+// OUTSIDE 2000::/3) keeps its own explicit delegation to `isPrivateIPv4` for the same reason —
+// both are "this IPv6 address is just packaging around an IPv4 one; judge the IPv4," not "this
+// IPv6 address is itself a public network."
 const isPrivateIPv6 = (address: string): boolean => {
   const value = expandIPv6(stripIPv6Brackets(address));
-  if (value === 0n) return true; // :: (unspecified)
-  if (value === 1n) return true; // ::1 (loopback)
 
-  // ::ffff:0:0/96 — an IPv4-mapped address. Extract the mapped v4 and re-check it as v4, so
-  // ::ffff:169.254.169.254 is caught by exactly the same rule as the bare v4 form.
+  // ::ffff:0:0/96 — IPv4-mapped. Extract the mapped v4 and re-check IT, so ::ffff:169.254.169.254
+  // is caught by exactly the same rule as the bare v4 form (and ::ffff:8.8.8.8, a legitimately
+  // public address wearing an IPv6 wrapper, is correctly let through).
   if (value >> 32n === 0xffffn) {
-    const mapped = value & 0xffffffffn;
-    const octets = [Number((mapped >> 24n) & 0xffn), Number((mapped >> 16n) & 0xffn), Number((mapped >> 8n) & 0xffn), Number(mapped & 0xffn)];
-    return isPrivateIPv4(octets.join("."));
+    return isPrivateIPv4(octetsToDotted(value & 0xffffffffn));
   }
 
   const top16 = Number(value >> 112n);
-  if ((top16 & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
-  if ((top16 & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
 
-  return false;
+  // 2002::/16 (6to4, RFC 3056) embeds an IPv4 address in the NEXT 32 bits
+  // (2002:V4ADDR::/48) and would otherwise sail through the 2000::/3 allowlist below
+  // untouched — a reviewer probe confirmed 2002:7f00:1:: (encoding 127.0.0.1) reached
+  // `fetchImpl` before this case was added. Unwrap and re-check the embedded v4 exactly like
+  // the IPv4-mapped case above.
+  if (top16 === 0x2002) {
+    return isPrivateIPv4(octetsToDotted((value >> 80n) & 0xffffffffn));
+  }
+
+  // Every other special-purpose range (::, ::1, fe80::/10, fc00::/7, fec0::/10 deprecated
+  // site-local, 64:ff9b::/96 NAT64, ::a.b.c.d deprecated IPv4-compatible, ::ffff:0:a.b.c.d
+  // IPv4-translated, and anything IANA has not assigned as global unicast) falls out of this one
+  // comparison for free: none of them have `001` as their top three bits.
+  return (top16 & 0xe000) !== 0x2000;
 };
 
 // The one thing this module names as an HONEST GAP (task-16 brief's own instruction: name a gap
@@ -372,21 +432,30 @@ export interface CimdCache {
   set(clientIdUrl: string, record: ClientRecord, ttlMs: number): Promise<void>;
 }
 
+// Ceiling on a CIMD document's SELF-DECLARED cache lifetime — review round 1, Task 16, fix 6:
+// `Number(match[1]) * 1000` with no cap let a client's own `Cache-Control: max-age=999999999`
+// pin its record for over 31 years, which is effectively "this identity can never be revoked or
+// re-fetched even after the domain changes hands." 24h is generous for a document that's
+// supposed to be cheap to re-fetch (64 KB cap, 5s timeout) and short enough that a compromised
+// or transferred domain's stale record ages out within a day rather than a decade.
+export const CIMD_MAX_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
 // Reads `Cache-Control` (an explicit `no-store`/`no-cache` or `max-age=N` wins) falling back to
 // `Expires`, and returns 0 (do not cache) when neither header says anything — the safe default,
 // since caching an uncacheable-by-its-own-say-so document for any length of time only benefits
-// an attacker who wants a stale client identity to stick around.
+// an attacker who wants a stale client identity to stick around. Whatever a header DOES declare
+// is clamped to `CIMD_MAX_CACHE_TTL_MS` — see above.
 export const cacheTtlMsFromHeaders = (headers: Headers, nowMs: number): number => {
   const cacheControl = headers.get("cache-control");
   if (cacheControl) {
     if (/(?:^|,)\s*(no-store|no-cache)\s*(?:,|$)/i.test(cacheControl)) return 0;
     const match = /max-age=(\d+)/i.exec(cacheControl);
-    if (match) return Number(match[1]) * 1000;
+    if (match) return Math.min(Number(match[1]) * 1000, CIMD_MAX_CACHE_TTL_MS);
   }
   const expires = headers.get("expires");
   if (expires) {
     const expiresMs = Date.parse(expires);
-    if (!Number.isNaN(expiresMs)) return Math.max(0, expiresMs - nowMs);
+    if (!Number.isNaN(expiresMs)) return Math.min(Math.max(0, expiresMs - nowMs), CIMD_MAX_CACHE_TTL_MS);
   }
   return 0;
 };

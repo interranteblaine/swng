@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Clock } from "@swng/application";
 import {
   CIMD_MAX_BYTES,
+  CIMD_MAX_CACHE_TTL_MS,
   cacheTtlMsFromHeaders,
   type CimdCache,
   type ClientRecord,
@@ -23,46 +24,70 @@ const fixedClock: Clock = { now: () => 1_000_000 };
 // ---------------------------------------------------------------------------------------------
 
 describe("redirectUriAllowed", () => {
-  it("allows an exact non-loopback match", () => {
-    expect(redirectUriAllowed(["https://app.example.com/cb"], "https://app.example.com/cb")).toBe(true);
+  it("allows an exact non-loopback match, returning the canonical matched URI", () => {
+    expect(redirectUriAllowed(["https://app.example.com/cb"], "https://app.example.com/cb")).toBe("https://app.example.com/cb");
   });
 
   it("refuses a non-loopback host with a different port", () => {
-    expect(redirectUriAllowed(["https://app.example.com:443/cb"], "https://app.example.com:8443/cb")).toBe(false);
+    expect(redirectUriAllowed(["https://app.example.com:443/cb"], "https://app.example.com:8443/cb")).toBeUndefined();
   });
 
   it("refuses a non-loopback host with a different path", () => {
-    expect(redirectUriAllowed(["https://app.example.com/cb"], "https://app.example.com/other")).toBe(false);
+    expect(redirectUriAllowed(["https://app.example.com/cb"], "https://app.example.com/other")).toBeUndefined();
   });
 
   it("refuses a non-loopback host that merely shares a hostname suffix", () => {
-    expect(redirectUriAllowed(["https://app.example.com/cb"], "https://evil-app.example.com/cb")).toBe(false);
+    expect(redirectUriAllowed(["https://app.example.com/cb"], "https://evil-app.example.com/cb")).toBeUndefined();
   });
 
-  it("matches localhost loopback across different ephemeral ports", () => {
-    expect(redirectUriAllowed(["http://localhost:51000/cb"], "http://localhost:61999/cb")).toBe(true);
+  it("matches localhost loopback across different ephemeral ports, returning the REQUESTED (actual-port) URI", () => {
+    expect(redirectUriAllowed(["http://localhost:51000/cb"], "http://localhost:61999/cb")).toBe("http://localhost:61999/cb");
   });
 
   it("matches 127.0.0.1 loopback across different ephemeral ports", () => {
-    expect(redirectUriAllowed(["http://127.0.0.1:51000/cb"], "http://127.0.0.1:61999/cb")).toBe(true);
+    expect(redirectUriAllowed(["http://127.0.0.1:51000/cb"], "http://127.0.0.1:61999/cb")).toBe("http://127.0.0.1:61999/cb");
   });
 
   it("still refuses a loopback redirect whose PATH differs — port-agnostic never means path-agnostic", () => {
-    expect(redirectUriAllowed(["http://127.0.0.1:51000/cb"], "http://127.0.0.1:61999/steal")).toBe(false);
+    expect(redirectUriAllowed(["http://127.0.0.1:51000/cb"], "http://127.0.0.1:61999/steal")).toBeUndefined();
   });
 
   it("still refuses a loopback-looking HOST that is not the registered loopback host", () => {
     // 127.0.0.2 is not in the registered set and is not string-equal to 127.0.0.1 — host is
     // never relaxed, so this must NOT be treated as "the same loopback host, different port."
-    expect(redirectUriAllowed(["http://127.0.0.1:51000/cb"], "http://127.0.0.2:51000/cb")).toBe(false);
+    expect(redirectUriAllowed(["http://127.0.0.1:51000/cb"], "http://127.0.0.2:51000/cb")).toBeUndefined();
   });
 
   it("refuses an attacker-controlled redirect_uri entirely absent from the registered set", () => {
-    expect(redirectUriAllowed(["https://app.example.com/cb"], "https://attacker.example/cb")).toBe(false);
+    expect(redirectUriAllowed(["https://app.example.com/cb"], "https://attacker.example/cb")).toBeUndefined();
   });
 
   it("refuses a malformed requested URI rather than throwing", () => {
-    expect(redirectUriAllowed(["https://app.example.com/cb"], "not-a-url")).toBe(false);
+    expect(redirectUriAllowed(["https://app.example.com/cb"], "not-a-url")).toBeUndefined();
+  });
+
+  it("returns the CANONICAL (CRLF-stripped) form, never the raw attacker-suppliable string — review round 1 fix 4", () => {
+    // The WHATWG URL parser silently strips ASCII tab/CR/LF while parsing, so the raw requested
+    // string below and "https://app.example.com/cb" compare as identical paths here. The point
+    // of returning a value (not a boolean) is that a caller building a `Location:` header uses
+    // THIS canonical string, never re-touching the original raw one.
+    const result = redirectUriAllowed(["https://app.example.com/cb"], "https://app.example.com/c\r\nb");
+    expect(result).toBe("https://app.example.com/cb");
+    expect(result).not.toContain("\r");
+    expect(result).not.toContain("\n");
+  });
+
+  it("refuses a requested redirect_uri carrying userinfo", () => {
+    expect(redirectUriAllowed(["https://app.example.com/cb"], "https://user:pass@app.example.com/cb")).toBeUndefined();
+  });
+
+  it("refuses a requested redirect_uri carrying a fragment (RFC 6749 §3.1.2)", () => {
+    expect(redirectUriAllowed(["https://app.example.com/cb"], "https://app.example.com/cb#frag")).toBeUndefined();
+  });
+
+  it("refuses a match against a REGISTERED uri that (somehow) carries userinfo or a fragment, even with a clean requested uri", () => {
+    expect(redirectUriAllowed(["https://user@app.example.com/cb"], "https://app.example.com/cb")).toBeUndefined();
+    expect(redirectUriAllowed(["https://app.example.com/cb#frag"], "https://app.example.com/cb")).toBeUndefined();
   });
 });
 
@@ -99,6 +124,39 @@ describe("parseCimdDocument", () => {
     expect(() => parseCimdDocument(JSON.stringify({ client_id: "https://app.example.com/id" }), "https://app.example.com/id")).toThrow(
       ClientRegistrationError,
     );
+  });
+
+  // Review round 1, Task 16, fix 5 — `z.string().url()` alone accepts `javascript:`/`data:`/
+  // `file:`, none of which have a hostname for the consent page (design spec §4.3) to display.
+  it.each(["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd"])(
+    "rejects a document whose redirect_uris uses a disallowed scheme (%s)",
+    (badUri) => {
+      expect(() => parseCimdDocument(cimdDoc("https://app.example.com/id", { redirect_uris: [badUri] }), "https://app.example.com/id")).toThrow(
+        ClientRegistrationError,
+      );
+    },
+  );
+
+  it("accepts a loopback http redirect_uri", () => {
+    const record = parseCimdDocument(
+      cimdDoc("https://app.example.com/id", { redirect_uris: ["http://127.0.0.1:51000/cb"] }),
+      "https://app.example.com/id",
+    );
+    expect(record.redirectUris).toEqual(["http://127.0.0.1:51000/cb"]);
+  });
+
+  it("accepts a private-use (reverse-DNS) custom-scheme redirect_uri", () => {
+    const record = parseCimdDocument(
+      cimdDoc("https://app.example.com/id", { redirect_uris: ["com.example.app:/callback"] }),
+      "https://app.example.com/id",
+    );
+    expect(record.redirectUris).toEqual(["com.example.app:/callback"]);
+  });
+
+  it("rejects a NON-loopback http redirect_uri", () => {
+    expect(() =>
+      parseCimdDocument(cimdDoc("https://app.example.com/id", { redirect_uris: ["http://app.example.com/cb"] }), "https://app.example.com/id"),
+    ).toThrow(ClientRegistrationError);
   });
 });
 
@@ -145,6 +203,58 @@ describe("fetchCimdClient — SSRF protection", () => {
     await expect(
       fetchCimdClient("https://[::1]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
     ).rejects.toThrow(ClientRegistrationError);
+  });
+
+  // Review round 1, Task 16, fix 1 (Critical) — a reviewer PROBE confirmed `fetchImpl` was
+  // invoked (i.e. the SSRF gate was bypassed) for every one of the six IPv6 forms below, against
+  // the prior blocklist-of-four-ranges implementation. `isPrivateIPv6` is now an allowlist
+  // (only 2000::/3 global unicast is public); these are its falsifying tests.
+  it("refuses NAT64 (64:ff9b::/96) encoding a private v4 address (10.0.0.5)", async () => {
+    await expect(
+      fetchCimdClient("https://[64:ff9b::a00:5]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
+    ).rejects.toThrow(ClientRegistrationError);
+  });
+
+  it("refuses NAT64 (64:ff9b::/96) encoding loopback (127.0.0.1)", async () => {
+    await expect(
+      fetchCimdClient("https://[64:ff9b::7f00:1]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
+    ).rejects.toThrow(ClientRegistrationError);
+  });
+
+  it("refuses 6to4 (2002::/16) encoding loopback (127.0.0.1) — sits INSIDE the 2000::/3 allowlist by construction", async () => {
+    await expect(
+      fetchCimdClient("https://[2002:7f00:1::]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
+    ).rejects.toThrow(ClientRegistrationError);
+  });
+
+  it("refuses deprecated site-local (fec0::/10)", async () => {
+    await expect(
+      fetchCimdClient("https://[fec0::1]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
+    ).rejects.toThrow(ClientRegistrationError);
+  });
+
+  it("refuses deprecated IPv4-compatible (::127.0.0.1)", async () => {
+    await expect(
+      fetchCimdClient("https://[::127.0.0.1]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
+    ).rejects.toThrow(ClientRegistrationError);
+  });
+
+  it("refuses IPv4-translated (::ffff:0:127.0.0.1)", async () => {
+    await expect(
+      fetchCimdClient("https://[::ffff:0:127.0.0.1]/id", { clock: fixedClock, fetchImpl: vi.fn(), resolveHost: publicResolveHost }),
+    ).rejects.toThrow(ClientRegistrationError);
+  });
+
+  it("allows a genuine global-unicast IPv6 literal — the allowlist must not over-block", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(cimdDoc("https://[2606:4700:4700::1111]/id")));
+    const record = await fetchCimdClient("https://[2606:4700:4700::1111]/id", { clock: fixedClock, fetchImpl, resolveHost: publicResolveHost });
+    expect(record.clientId).toBe("https://[2606:4700:4700::1111]/id");
+  });
+
+  it("allows a public IPv4-mapped IPv6 literal (::ffff:8.8.8.8) — the mapped-v4 delegation must not over-block", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(cimdDoc("https://[::ffff:8.8.8.8]/id")));
+    const record = await fetchCimdClient("https://[::ffff:8.8.8.8]/id", { clock: fixedClock, fetchImpl, resolveHost: publicResolveHost });
+    expect(record.clientId).toBe("https://[::ffff:8.8.8.8]/id");
   });
 
   it("refuses the link-local range, including the cloud instance-metadata address 169.254.169.254", async () => {
@@ -207,12 +317,18 @@ describe("fetchCimdClient — SSRF protection", () => {
     expect(record.clientId).toBe("https://app.example.com/id");
   });
 
-  it("enforces the 64 KB response cap", async () => {
-    const oversized = "x".repeat(CIMD_MAX_BYTES + 1);
-    const fetchImpl = vi.fn(async () => jsonResponse(oversized));
-    await expect(fetchCimdClient("https://app.example.com/id", { clock: fixedClock, fetchImpl, resolveHost: publicResolveHost })).rejects.toThrow(
-      ClientRegistrationError,
-    );
+  it("enforces the 64 KB response cap — with a body that is otherwise VALID and would parse (review round 1 fix 3)", () => {
+    // The oversized body deliberately IS a well-formed, schema-valid CIMD document (not "x"
+    // repeated, which parseCimdDocument would reject as invalid JSON regardless of the cap and
+    // give this test zero falsifiability — removing the cap check must be the only thing that
+    // flips this test, not a coincidental JSON-parse failure).
+    const oversizedButValid = cimdDoc("https://app.example.com/id", { extra_field: "a".repeat(CIMD_MAX_BYTES + 1000) });
+    expect(oversizedButValid.length).toBeGreaterThan(CIMD_MAX_BYTES);
+    expect(() => JSON.parse(oversizedButValid)).not.toThrow();
+    const fetchImpl = vi.fn(async () => jsonResponse(oversizedButValid));
+    return expect(
+      fetchCimdClient("https://app.example.com/id", { clock: fixedClock, fetchImpl, resolveHost: publicResolveHost }),
+    ).rejects.toThrow(ClientRegistrationError);
   });
 
   it("accepts a response at or under the 64 KB cap", async () => {
@@ -305,6 +421,20 @@ describe("cacheTtlMsFromHeaders", () => {
   it("defaults to 0 (no cache) when neither header is present", () => {
     expect(cacheTtlMsFromHeaders(new Headers(), 0)).toBe(0);
   });
+
+  it("clamps an absurd self-declared max-age to CIMD_MAX_CACHE_TTL_MS — review round 1 fix 6", () => {
+    // A client's own document controls this header; an unclamped max-age lets it pin its
+    // record for decades with no way to revoke or re-fetch it.
+    const ttl = cacheTtlMsFromHeaders(new Headers({ "cache-control": "max-age=999999999" }), 0);
+    expect(ttl).toBe(CIMD_MAX_CACHE_TTL_MS);
+    expect(ttl).toBeLessThan(999_999_999 * 1000);
+  });
+
+  it("clamps an absurd Expires value to CIMD_MAX_CACHE_TTL_MS", () => {
+    const nowMs = Date.parse("2026-01-01T00:00:00Z");
+    const ttl = cacheTtlMsFromHeaders(new Headers({ expires: "2099-01-01T00:00:00Z" }), nowMs);
+    expect(ttl).toBe(CIMD_MAX_CACHE_TTL_MS);
+  });
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -329,6 +459,29 @@ describe("parseDcrRegistrationRequestBody", () => {
   it("rejects a body whose redirect_uris is an empty array", () => {
     expect(() => parseDcrRegistrationRequestBody(JSON.stringify({ redirect_uris: [] }))).toThrow(ClientRegistrationError);
   });
+
+  it.each(["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd"])(
+    "rejects a redirect_uris entry using a disallowed scheme (%s) — review round 1 fix 5",
+    (badUri) => {
+      expect(() => parseDcrRegistrationRequestBody(JSON.stringify({ redirect_uris: [badUri] }))).toThrow(ClientRegistrationError);
+    },
+  );
+
+  it("accepts a loopback http redirect_uri", () => {
+    const parsed = parseDcrRegistrationRequestBody(JSON.stringify({ redirect_uris: ["http://127.0.0.1:51000/cb"] }));
+    expect(parsed.redirectUris).toEqual(["http://127.0.0.1:51000/cb"]);
+  });
+
+  it("accepts a private-use (reverse-DNS) custom-scheme redirect_uri", () => {
+    const parsed = parseDcrRegistrationRequestBody(JSON.stringify({ redirect_uris: ["com.example.app:/callback"] }));
+    expect(parsed.redirectUris).toEqual(["com.example.app:/callback"]);
+  });
+
+  it("rejects a NON-loopback http redirect_uri", () => {
+    expect(() => parseDcrRegistrationRequestBody(JSON.stringify({ redirect_uris: ["http://app.example.com/cb"] }))).toThrow(
+      ClientRegistrationError,
+    );
+  });
 });
 
 describe("registerDcrClient", () => {
@@ -339,10 +492,28 @@ describe("registerDcrClient", () => {
 
   it("stores the registered client and returns it", async () => {
     const store = makeStore();
-    const body = JSON.stringify({ redirect_uris: ["https://app.example.com/cb"] });
+    const body = JSON.stringify({ redirect_uris: ["https://app.example.com/cb"], client_name: "Test Client" });
     const record = await registerDcrClient(body, { store, generateClientId: () => "fixed-client-id" });
-    expect(record).toEqual({ clientId: "fixed-client-id", redirectUris: ["https://app.example.com/cb"], clientName: undefined });
+    expect(record).toStrictEqual({ clientId: "fixed-client-id", redirectUris: ["https://app.example.com/cb"], clientName: "Test Client" });
     expect(store.putClient).toHaveBeenCalledWith("fixed-client-id", record);
+  });
+
+  it("OMITS the clientName key entirely when absent — never an explicit `clientName: undefined` (review round 1 fix 2)", async () => {
+    // `toEqual`/`toStrictEqual` alone would not have caught this — jest/vitest's `toEqual`
+    // treats `{ clientName: undefined }` and `{}` as equal, which is exactly why the ORIGINAL
+    // version of this test (asserting `toEqual({ ..., clientName: undefined })`) passed while
+    // silently locking in a shape that throws once real DynamoDB marshalling touches it
+    // (createDocumentClient.ts sets no `marshallOptions`, so `removeUndefinedValues` is `false`
+    // and `marshall({ clientName: undefined })` throws — the COMMON case, since `client_name` is
+    // optional in RFC 7591). `toStrictEqual` distinguishes an absent key from an explicit
+    // `undefined` value, and the explicit `hasOwnProperty` checks below make the point undeniable.
+    const store = makeStore();
+    const body = JSON.stringify({ redirect_uris: ["https://app.example.com/cb"] });
+    const record = await registerDcrClient(body, { store, generateClientId: () => "id" });
+    expect(record).toStrictEqual({ clientId: "id", redirectUris: ["https://app.example.com/cb"] });
+    expect(Object.hasOwn(record, "clientName")).toBe(false);
+    const storedValue = (store.putClient as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(Object.hasOwn(storedValue, "clientName")).toBe(false);
   });
 
   it("does not decide its own TTL — that's the store's 90-day CLIENT_TTL_MS (Task 14)", async () => {

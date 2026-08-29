@@ -116,9 +116,17 @@ export const redirectUriAllowed = (registeredUris: readonly string[], requestedU
   const requested = tryParseUrl(requestedUri);
   if (!requested || hasUserinfoOrFragment(requested)) return undefined;
 
+  // Review round 2, Task 16, fix 3: apply the SAME scheme allowlist `isAllowedRedirectUriScheme`
+  // enforces at registration time. Unreachable today — both writers (DCR, CIMD) already refuse a
+  // disallowed scheme before a record can exist — but this is the actual security decision
+  // point a future `/authorize` feeds straight into a `Location:` header, and defence in depth
+  // means this function must not depend on every future caller of `putClient`/the CIMD cache
+  // having gone through this module's own writers.
+  if (!isAllowedRedirectUriScheme(requestedUri)) return undefined;
+
   for (const registered of registeredUris) {
     const reg = tryParseUrl(registered);
-    if (!reg || hasUserinfoOrFragment(reg)) continue;
+    if (!reg || hasUserinfoOrFragment(reg) || !isAllowedRedirectUriScheme(registered)) continue;
 
     // Scheme, host and path are compared unconditionally, loopback or not — this is the "never
     // relaxed" half of the rule. `search` (the query string) is part of the registered URI too:
@@ -144,15 +152,24 @@ export const redirectUriAllowed = (registeredUris: readonly string[], requestedU
 // ---------------------------------------------------------------------------------------------
 
 // The redirect_uri scheme allowlist — review round 1, Task 16, fix 5: `z.string().url()` alone
-// accepts `javascript:`, `data:` and `file:`, none of which have a "hostname" for the consent
-// page (design spec §4.3) to display — the one safety signal the golfer actually sees before
-// approving. https is always fine; http is fine ONLY for the two loopback hosts (RFC 8252 §7.3);
-// anything else must look like a private-use URI scheme per RFC 8252 §7.1 — reverse-DNS-style,
-// containing a dot, and neither "http" nor "https" outright (a scheme WITH a dot can't collide
-// with a single dangerous bare word like "javascript" or "data"). This is deliberately narrower
-// than RFC 8252 strictly requires (a dot is a recommendation there, not a MUST) — a simple
-// undotted custom scheme like "myapp:" is refused rather than guessed at; that's a real,
-// consciously-drawn line, not an oversight.
+// accepts `javascript:`, `data:` and `file:`. https is always fine; http is fine ONLY for the two
+// loopback hosts (RFC 8252 §7.3); anything else must look like a private-use URI scheme per RFC
+// 8252 §7.1's reverse-DNS-style recommendation — containing a dot, and neither "http" nor
+// "https" outright. THE RULE KEYS ON THE DOT, NOT ON HAVING A HOSTNAME — review round 2 caught an
+// earlier version of this comment claiming the rejected schemes lack a "hostname for the consent
+// page to display," which is backwards: `com.example.app:/callback` (ACCEPTED) parses with
+// `hostname === ""`, while `myapp://callback` (REJECTED, no dot) parses with
+// `hostname === "callback"`. This is deliberately narrower than RFC 8252 strictly requires (the
+// dot is a recommendation there, not a MUST) — a simple undotted custom scheme like "myapp:" is
+// refused rather than guessed at; that's a real, consciously-drawn line (recorded, not
+// reconsidered, in review round 2), not an oversight.
+//
+// THE CONSEQUENCE FOR TASK 17: an accepted private-use URI genuinely DOES have an empty
+// `hostname` (`com.example.app:/callback` above), and design spec §4.3 requires the consent page
+// to display the redirect URI's hostname as the golfer's one safety signal before approving.
+// Whoever builds that page must handle the empty-hostname case explicitly (e.g. falling back to
+// showing the whole URI, or the scheme) rather than rendering a blank next to "you're granting
+// access to:".
 const isAllowedRedirectUriScheme = (raw: string): boolean => {
   const url = tryParseUrl(raw);
   if (!url) return false;
@@ -164,6 +181,19 @@ const isAllowedRedirectUriScheme = (raw: string): boolean => {
 
 const REDIRECT_URI_SCHEME_MESSAGE = "redirect_uris must use https, loopback http, or a private-use URI scheme (RFC 8252 §7.1)";
 
+// Review round 2, Task 16, fix 2: a redirect_uri carrying userinfo or a fragment used to pass
+// registration (isAllowedRedirectUriScheme only checks the scheme) and then NEVER match anything
+// at `/authorize` time, because `redirectUriAllowed` refuses userinfo/fragment on both sides.
+// Fail-closed, but silently dead — the registering client believes it registered something
+// usable. Refusing it HERE, at `/register`, means the client learns immediately instead of
+// discovering a permanently-unmatchable URI the first time a real user tries to authorize.
+const REDIRECT_URI_USERINFO_OR_FRAGMENT_MESSAGE = "redirect_uris must not contain userinfo (user:pass@) or a fragment (#...) — RFC 6749 §3.1.2";
+
+const isFreeOfUserinfoAndFragment = (raw: string): boolean => {
+  const url = tryParseUrl(raw);
+  return url !== undefined && !hasUserinfoOrFragment(url);
+};
+
 // Bounds belong on a request schema (CLAUDE.md) — this IS one: an unauthenticated POST body.
 // The caps (10 redirect URIs, 200-char name) are generous-but-finite, purely to stop an
 // abusive registration from writing an unbounded item; DCR's real unboundedness problem (an
@@ -171,7 +201,13 @@ const REDIRECT_URI_SCHEME_MESSAGE = "redirect_uris must use https, loopback http
 const dcrRegistrationRequestSchema = z
   .object({
     redirect_uris: z
-      .array(z.string().url().refine(isAllowedRedirectUriScheme, { message: REDIRECT_URI_SCHEME_MESSAGE }))
+      .array(
+        z
+          .string()
+          .url()
+          .refine(isAllowedRedirectUriScheme, { message: REDIRECT_URI_SCHEME_MESSAGE })
+          .refine(isFreeOfUserinfoAndFragment, { message: REDIRECT_URI_USERINFO_OR_FRAGMENT_MESSAGE }),
+      )
       .min(1, "redirect_uris must contain at least one URI")
       .max(10, "redirect_uris exceeds the maximum of 10"),
     client_name: z.string().max(200).optional(),
@@ -220,7 +256,13 @@ const cimdDocumentSchema = z
   .object({
     client_id: z.string().max(2048),
     redirect_uris: z
-      .array(z.string().url().refine(isAllowedRedirectUriScheme, { message: REDIRECT_URI_SCHEME_MESSAGE }))
+      .array(
+        z
+          .string()
+          .url()
+          .refine(isAllowedRedirectUriScheme, { message: REDIRECT_URI_SCHEME_MESSAGE })
+          .refine(isFreeOfUserinfoAndFragment, { message: REDIRECT_URI_USERINFO_OR_FRAGMENT_MESSAGE }),
+      )
       .min(1, "redirect_uris must contain at least one URI")
       .max(10, "redirect_uris exceeds the maximum of 10"),
     client_name: z.string().max(200).optional(),

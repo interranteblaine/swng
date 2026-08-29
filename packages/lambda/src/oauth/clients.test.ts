@@ -89,6 +89,22 @@ describe("redirectUriAllowed", () => {
     expect(redirectUriAllowed(["https://user@app.example.com/cb"], "https://app.example.com/cb")).toBeUndefined();
     expect(redirectUriAllowed(["https://app.example.com/cb#frag"], "https://app.example.com/cb")).toBeUndefined();
   });
+
+  // Review round 2, Task 16, fix 3 — defence in depth: apply the SAME scheme allowlist the
+  // writers (DCR, CIMD) enforce, right here too. Both a disallowed-scheme REQUESTED uri and a
+  // disallowed-scheme REGISTERED uri (the latter shouldn't exist given the writers, but this
+  // function must not depend on that) are refused.
+  it("refuses a disallowed-scheme requested uri even if it happens to string-match a registered one", () => {
+    expect(redirectUriAllowed(["javascript:alert(1)"], "javascript:alert(1)")).toBeUndefined();
+  });
+
+  it("refuses a match against a disallowed-scheme REGISTERED uri", () => {
+    expect(redirectUriAllowed(["data:text/html,hi"], "data:text/html,hi")).toBeUndefined();
+  });
+
+  it("still allows a private-use (RFC 8252 §7.1) custom scheme through, matching the writers' own allowance", () => {
+    expect(redirectUriAllowed(["com.example.app:/callback"], "com.example.app:/callback")).toBe("com.example.app:/callback");
+  });
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -127,7 +143,9 @@ describe("parseCimdDocument", () => {
   });
 
   // Review round 1, Task 16, fix 5 — `z.string().url()` alone accepts `javascript:`/`data:`/
-  // `file:`, none of which have a hostname for the consent page (design spec §4.3) to display.
+  // `file:`; none of them contain a dot before the scheme's ":", so none pass the RFC 8252 §7.1
+  // private-use-scheme check (review round 2 fix 1: the rule keys on the dot, NOT on whether the
+  // scheme has a "hostname" — see clients.ts's corrected comment on isAllowedRedirectUriScheme).
   it.each(["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd"])(
     "rejects a document whose redirect_uris uses a disallowed scheme (%s)",
     (badUri) => {
@@ -156,6 +174,27 @@ describe("parseCimdDocument", () => {
   it("rejects a NON-loopback http redirect_uri", () => {
     expect(() =>
       parseCimdDocument(cimdDoc("https://app.example.com/id", { redirect_uris: ["http://app.example.com/cb"] }), "https://app.example.com/id"),
+    ).toThrow(ClientRegistrationError);
+  });
+
+  // Review round 2, Task 16, fix 2 — a redirect_uri with userinfo or a fragment used to register
+  // successfully and then never match anything at /authorize (redirectUriAllowed refuses both on
+  // either side), a silently-dead registration. Refuse it at registration time instead.
+  it("rejects a redirect_uri carrying userinfo", () => {
+    expect(() =>
+      parseCimdDocument(
+        cimdDoc("https://app.example.com/id", { redirect_uris: ["https://user:pass@app.example.com/cb"] }),
+        "https://app.example.com/id",
+      ),
+    ).toThrow(ClientRegistrationError);
+  });
+
+  it("rejects a redirect_uri carrying a fragment", () => {
+    expect(() =>
+      parseCimdDocument(
+        cimdDoc("https://app.example.com/id", { redirect_uris: ["https://app.example.com/cb#frag"] }),
+        "https://app.example.com/id",
+      ),
     ).toThrow(ClientRegistrationError);
   });
 });
@@ -479,6 +518,21 @@ describe("parseDcrRegistrationRequestBody", () => {
 
   it("rejects a NON-loopback http redirect_uri", () => {
     expect(() => parseDcrRegistrationRequestBody(JSON.stringify({ redirect_uris: ["http://app.example.com/cb"] }))).toThrow(
+      ClientRegistrationError,
+    );
+  });
+
+  // Review round 2, Task 16, fix 2 — same rationale as the CIMD tests above: a redirect_uri
+  // carrying userinfo or a fragment could never match at /authorize, so DCR now refuses it at
+  // registration time rather than accepting a permanently-unmatchable URI silently.
+  it("rejects a redirect_uri carrying userinfo", () => {
+    expect(() => parseDcrRegistrationRequestBody(JSON.stringify({ redirect_uris: ["https://user:pass@app.example.com/cb"] }))).toThrow(
+      ClientRegistrationError,
+    );
+  });
+
+  it("rejects a redirect_uri carrying a fragment", () => {
+    expect(() => parseDcrRegistrationRequestBody(JSON.stringify({ redirect_uris: ["https://app.example.com/cb#frag"] }))).toThrow(
       ClientRegistrationError,
     );
   });

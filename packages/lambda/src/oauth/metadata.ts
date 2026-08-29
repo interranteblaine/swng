@@ -16,6 +16,11 @@ import type { OAuthMetadata, OAuthProtectedResourceMetadata } from "@modelcontex
 
 const readScope = (resource: string): string => `${resource}/read`;
 
+// The ONE place `new URL(resource).origin` is taken — both builders below call this instead of
+// re-deriving the origin themselves, so the comment above ("derived from it, once") is literally
+// true and the two documents can't drift the next time one function is edited alone.
+const originOf = (resource: string): string => new URL(resource).origin;
+
 /**
  * RFC 9728 Protected Resource Metadata — served at
  * `.well-known/oauth-protected-resource/mcp`, per `getOAuthProtectedResourceMetadataUrl`
@@ -25,15 +30,11 @@ const readScope = (resource: string): string => `${resource}/read`;
  * Advertises the read scope only (task-15 brief): write is granted at the consent page
  * (design spec §4.4), never by a runtime step-up a resource-metadata document could invite.
  */
-export const buildProtectedResourceMetadata = (resource: string): OAuthProtectedResourceMetadata => {
-  const { origin } = new URL(resource);
-
-  return {
-    resource,
-    authorization_servers: [origin],
-    scopes_supported: [readScope(resource)],
-  };
-};
+export const buildProtectedResourceMetadata = (resource: string): OAuthProtectedResourceMetadata => ({
+  resource,
+  authorization_servers: [originOf(resource)],
+  scopes_supported: [readScope(resource)],
+});
 
 /**
  * RFC 8414 Authorization Server Metadata — served at `.well-known/oauth-authorization-server`.
@@ -42,7 +43,7 @@ export const buildProtectedResourceMetadata = (resource: string): OAuthProtected
  * Cognito's.
  */
 export const buildAuthorizationServerMetadata = (resource: string): OAuthMetadata => {
-  const { origin } = new URL(resource);
+  const origin = originOf(resource);
 
   return {
     issuer: origin,

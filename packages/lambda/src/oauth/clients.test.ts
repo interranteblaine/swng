@@ -406,6 +406,104 @@ describe("fetchCimdClient — SSRF protection", () => {
   });
 });
 
+// Fix round 1, Important 1. A `client_id` URL is an UNAUTHENTICATED stranger's input, and three
+// of the ways fetching it can fail used to throw a bare Error/TypeError straight past every
+// caller's `instanceof ClientRegistrationError` mapping — so `/authorize` answered 500 for an
+// unresolvable host and 400 for a resolvable one, and "does this name resolve from inside our
+// network" was readable off the status code. These three failures are now the SAME error, with
+// the SAME message, as an ordinary bad document; the real cause rides on `cause` for the log.
+describe("fetchCimdClient — every network-layer failure is one indistinguishable verdict", () => {
+  const enotfound = (): Error => Object.assign(new Error("getaddrinfo ENOTFOUND nope.example.com"), { code: "ENOTFOUND" });
+
+  // A response whose BODY stream errors after the headers arrived — a server that drops the
+  // connection mid-transfer, which undici surfaces as `TypeError: terminated` out of
+  // `reader.read()`, well past the point `fetchImpl` itself resolved.
+  const midStreamAbortResponse = (): Response =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"client_id":'));
+          controller.error(new TypeError("terminated"));
+        },
+      }),
+    );
+
+  const failures: readonly [string, () => Promise<unknown>][] = [
+    [
+      "DNS resolution failure",
+      () =>
+        fetchCimdClient("https://nope.example.com/id", {
+          clock: fixedClock,
+          fetchImpl: vi.fn(async () => jsonResponse(cimdDoc("https://nope.example.com/id"))),
+          resolveHost: () => Promise.reject(enotfound()),
+        }),
+    ],
+    [
+      "connect/TLS failure",
+      () =>
+        fetchCimdClient("https://app.example.com/id", {
+          clock: fixedClock,
+          fetchImpl: vi.fn(() => Promise.reject(new TypeError("fetch failed"))),
+          resolveHost: publicResolveHost,
+        }),
+    ],
+    [
+      "mid-stream abort",
+      () =>
+        fetchCimdClient("https://app.example.com/id", {
+          clock: fixedClock,
+          fetchImpl: vi.fn(async () => midStreamAbortResponse()),
+          resolveHost: publicResolveHost,
+        }),
+    ],
+  ];
+
+  it.each(failures)("%s becomes a ClientRegistrationError, not a bare Error", async (_name, run) => {
+    await expect(run()).rejects.toThrow(ClientRegistrationError);
+  });
+
+  it("all three wear the SAME message — nothing about the host is readable back off the failure", async () => {
+    const messages: string[] = [];
+    for (const [, run] of failures) {
+      try {
+        await run();
+        throw new Error("expected a rejection");
+      } catch (error) {
+        messages.push((error as Error).message);
+      }
+    }
+
+    expect(new Set(messages).size).toBe(1);
+    // Named explicitly rather than only compared to itself: a future edit that makes all three
+    // say "getaddrinfo ENOTFOUND nope.example.com" would still pass the set-size check above.
+    expect(messages[0]).toBe("client metadata document could not be fetched");
+    expect(messages[0]).not.toContain("nope.example.com");
+  });
+
+  it("keeps the real cause for the operator's log, off the message", async () => {
+    const [, run] = failures[0] as [string, () => Promise<unknown>];
+
+    const error = await run().then(
+      () => undefined,
+      (e: unknown) => e as ClientRegistrationError,
+    );
+
+    expect((error?.cause as Error | undefined)?.message).toContain("ENOTFOUND");
+  });
+
+  // The control: a deliberate refusal keeps its own message, so the wrap did not flatten the
+  // taxonomy it was meant to complete.
+  it("leaves a deliberate ClientRegistrationError (the private-address refusal) untouched", async () => {
+    await expect(
+      fetchCimdClient("https://internal.example.com/id", {
+        clock: fixedClock,
+        fetchImpl: vi.fn(async () => jsonResponse(cimdDoc("https://internal.example.com/id"))),
+        resolveHost: async () => ["10.0.0.5"],
+      }),
+    ).rejects.toThrow(/private address/);
+  });
+});
+
 describe("fetchCimdClient — caching per the response's own headers", () => {
   const makeCache = (): CimdCache & { store: Map<string, ClientRecord> } => {
     const store = new Map<string, ClientRecord>();

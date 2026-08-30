@@ -42,11 +42,30 @@ const buildClientRecord = (clientId: string, redirectUris: readonly string[], cl
 export type ClientStore = Pick<OAuthStore<ClientRecord, unknown, unknown, unknown>, "putClient" | "getClient">;
 
 export class ClientRegistrationError extends Error {
-  constructor(message: string) {
-    super(message);
+  // `cause` (fix round 1, Important 1): every NETWORK-layer failure below is reported with ONE
+  // fixed message so nothing about the client's host can be read back off the answer — the real
+  // DNS/TLS/socket error rides here instead, for the operator's log and for nowhere else.
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
     this.name = "ClientRegistrationError";
   }
 }
+
+// THE ONE MESSAGE every network-layer CIMD failure wears — DNS resolution, connect, TLS, and a
+// mid-stream abort alike (fix round 1, Important 1). It is deliberately singular and deliberately
+// says nothing: `/authorize` is unauthenticated, and a caller who can tell "this host does not
+// resolve from the Lambda" apart from "this host refused the connection" has a DNS oracle for
+// internal names — the exact leak withholding the message was supposed to close. Distinguishing
+// them here, even in a message no caller sees today, would put the oracle one careless
+// `error_description` away from being live again.
+const CIMD_FETCH_FAILED = "client metadata document could not be fetched";
+
+// A raw throw from the network is a client-supplied document we could not obtain — the caller's
+// input, not our fault, and therefore the same 400 every other CIMD verdict earns. A
+// ClientRegistrationError raised deliberately (the size cap, the timeout's abort reason, a
+// private-address refusal) passes through untouched: it already says what it means.
+const asCimdFetchFailure = (error: unknown): ClientRegistrationError =>
+  error instanceof ClientRegistrationError ? error : new ClientRegistrationError(CIMD_FETCH_FAILED, { cause: error });
 
 // ---------------------------------------------------------------------------------------------
 // Stored-record parsing — CLAUDE.md: "a type must not assert what the read path cannot
@@ -477,7 +496,15 @@ const assertPublicHttpsUrl = async (url: URL, resolveHost: HostResolver): Promis
     return;
   }
 
-  const addresses = await resolveHost(hostname);
+  // A DNS failure (`getaddrinfo ENOTFOUND`) throws a bare system Error, which — before this
+  // wrap — travelled straight past the entry's `instanceof ClientRegistrationError` mapping and
+  // answered 500, making the status code itself say "this hostname does not resolve here."
+  let addresses: readonly string[];
+  try {
+    addresses = await resolveHost(hostname);
+  } catch (error) {
+    throw asCimdFetchFailure(error);
+  }
   if (addresses.length === 0) {
     throw new ClientRegistrationError(`client_id host does not resolve to any address: ${hostname}`);
   }
@@ -584,7 +611,14 @@ export const fetchCimdClient = async (clientIdUrl: string, deps: FetchCimdDeps):
       // `redirect: "manual"` — we decide whether each hop is acceptable BEFORE this function (or
       // undici) ever opens a connection to it, rather than letting fetch silently chase a
       // redirect into private address space on our behalf.
-      const response = await fetchImpl(target, { redirect: "manual", signal: controller.signal });
+      // Connect refused, TLS handshake failure, and every other transport fault arrive as a bare
+      // `TypeError: fetch failed` — same treatment, same message, same status as everything else.
+      let response: Response;
+      try {
+        response = await fetchImpl(target, { redirect: "manual", signal: controller.signal });
+      } catch (error) {
+        throw asCimdFetchFailure(error);
+      }
 
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get("location");
@@ -603,7 +637,15 @@ export const fetchCimdClient = async (clientIdUrl: string, deps: FetchCimdDeps):
         throw new ClientRegistrationError(`client metadata document fetch failed with status ${response.status}`);
       }
 
-      const body = await readBodyWithCap(response, CIMD_MAX_BYTES);
+      // A server that drops the connection mid-body makes `reader.read()` reject with
+      // `TypeError: terminated` — the third escaping class. `readBodyWithCap`'s OWN size-cap
+      // refusal is already a ClientRegistrationError and passes through unchanged.
+      let body: string;
+      try {
+        body = await readBodyWithCap(response, CIMD_MAX_BYTES);
+      } catch (error) {
+        throw asCimdFetchFailure(error);
+      }
       const record = parseCimdDocument(body, clientIdUrl);
 
       if (deps.cache) {

@@ -3,19 +3,20 @@ import type { Clock } from "@swng/application";
 import { createDocumentClient, createDynamoOAuthStore } from "@swng/adapters-dynamodb";
 import { createSecretsManagerReader } from "@swng/adapters-secretsmanager";
 import { fromFetchResponse, toFetchRequest } from "../http/fetchAdapter.js";
-import {
-  CALLBACK_PATH,
-  CONSENT_SUBMIT_PATH,
-  handleAuthorize,
-  handleCallback,
-  handleConsentSubmit,
-  parseStoredAuthorizeRequest,
-  parseStoredCodeGrant,
-} from "../oauth/authorize.js";
+import { handleAuthorize, handleCallback, handleConsentSubmit, parseStoredAuthorizeRequest, parseStoredCodeGrant } from "../oauth/authorize.js";
 import type { AuthorizeCognitoConfig, AuthorizeDeps } from "../oauth/authorize.js";
 import { ClientRegistrationError, parseStoredClientRecord, registerDcrClient } from "../oauth/clients.js";
 import type { ClientRecord, ClientStore } from "../oauth/clients.js";
 import { buildAuthorizationServerMetadata, buildProtectedResourceMetadata } from "../oauth/metadata.js";
+import {
+  AUTHORIZATION_SERVER_METADATA_PATH,
+  AUTHORIZE_PATH,
+  CALLBACK_PATH,
+  CONSENT_SUBMIT_PATH,
+  PROTECTED_RESOURCE_METADATA_PATH,
+  REGISTER_PATH,
+  TOKEN_PATH,
+} from "../oauth/paths.js";
 import { handleToken, parseStoredRefreshHandle } from "../oauth/token.js";
 import type { TokenDeps } from "../oauth/token.js";
 
@@ -55,16 +56,13 @@ const requireEnv = (env: NodeJS.ProcessEnv, key: string): string => {
 const stripTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
 
 // ---------------------------------------------------------------------------------------------
-// Paths — the routing table. CALLBACK_PATH and CONSENT_SUBMIT_PATH are IMPORTED from
-// authorize.ts (never retyped) precisely so this table, the consent form's own `action`, and
-// the Cognito app client's configured callback URL are one string with one place to change it.
+// Paths — the routing table, every entry IMPORTED from ../oauth/paths.js and never retyped
+// (fix round 1, Minor 4). That file is also what metadata.ts builds its advertised
+// `authorization_endpoint`/`token_endpoint`/`registration_endpoint` from, and what authorize.ts
+// re-exports for the consent form's `action` and the Cognito app client's callback URL — so the
+// path a client is TOLD to use and the path this switch SERVES are the same constant, not two
+// literals kept in step by a comment.
 // ---------------------------------------------------------------------------------------------
-
-const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
-const AUTHORIZATION_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server";
-const REGISTER_PATH = "/register";
-const AUTHORIZE_PATH = "/authorize";
-const TOKEN_PATH = "/token";
 
 // RFC 9728 §3.1 inserts `.well-known/oauth-protected-resource` between the resource's host and
 // its PATH — so the canonical document URL for `https://mcp.beta.swng.golf/mcp` is
@@ -78,10 +76,24 @@ const TOKEN_PATH = "/token";
 // The authorization-server document deliberately gets NO such second path. Its issuer is the
 // resource's ORIGIN (metadata.ts), and RFC 8414 §3.3 has the client check that the `issuer` in
 // the document it fetched matches the identifier it derived from the URL it fetched it from —
-// so serving this document at `…/oauth-authorization-server/mcp` would hand a strict client an
-// issuer mismatch, where a 404 makes it fall through to the bare path and succeed.
-const protectedResourceMetadataPathsFor = (resource: string): ReadonlySet<string> =>
-  new Set([PROTECTED_RESOURCE_METADATA_PATH, `${PROTECTED_RESOURCE_METADATA_PATH}${new URL(resource).pathname}`]);
+// the SDK enforces exactly that, throwing a dedicated `IssuerMismatchError`. So serving this
+// document at `…/oauth-authorization-server/mcp` would POISON the only client that would ask for
+// it: one that mistook the resource URL for the AS URL, and that would otherwise have been sent
+// to the right document by our PRM's `authorization_servers`. (Corrected in fix round 1: a 404
+// there does NOT make that client fall through to the bare path — `buildDiscoveryUrls` never
+// includes the bare path once the AS URL has one, so it tries the two OIDC URLs and gives up.
+// Not serving it fails; serving it fails WORSE, by breaking the client that had a good route.)
+//
+// The suffix is NORMALIZED exactly the way the SDK normalizes it (fix round 1, Minor 3):
+// `protectedResourceMetadataPath` strips a trailing slash and maps a bare "/" to no suffix at
+// all. Without that, an `MCP_RESOURCE` written with a trailing slash makes entries/mcp.ts's
+// challenge point at `…/oauth-protected-resource/mcp` while this served `…/mcp/` — and per the
+// client's guarded fallback, a 404 there is a hard connection failure, not a slow path. This is
+// the one seam where a hand-rolled derivation and the SDK's must agree byte for byte.
+const protectedResourceMetadataPathsFor = (resource: string): ReadonlySet<string> => {
+  const resourcePath = stripTrailingSlash(new URL(resource).pathname);
+  return new Set([PROTECTED_RESOURCE_METADATA_PATH, `${PROTECTED_RESOURCE_METADATA_PATH}${resourcePath}`]);
+};
 
 // ---------------------------------------------------------------------------------------------
 // Responses this file owns (everything else is a handler's own Response, returned verbatim)
@@ -235,7 +247,17 @@ const routeAuthorize = async (request: Request, deps: AuthorizeDeps): Promise<Re
     // The message is LOGGED, never forwarded: those messages name resolved addresses
     // ("…resolved to a private address"), which would turn this unauthenticated endpoint into a
     // DNS/network oracle for an attacker probing what our VPC can see.
-    console.warn(JSON.stringify({ level: "warn", message: "mcpAuth: /authorize could not resolve the client", error: error.message }));
+    // The `cause` is where the real DNS/TLS/socket failure lives now (fix round 1, Important 1:
+    // clients.ts gives every network-layer failure ONE fixed message so the answer can't be read
+    // as an oracle) — so the operator's log has to unwrap it, or the diagnosis is gone.
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        message: "mcpAuth: /authorize could not resolve the client",
+        error: error.message,
+        cause: error.cause instanceof Error ? (error.cause.stack ?? error.cause.message) : undefined,
+      }),
+    );
     return jsonResponse({ error: "invalid_request", error_description: "the client_id could not be resolved" }, 400);
   }
 };
@@ -290,7 +312,26 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   // a tidy 500 that looks like an ordinary bad request.
   const entry = await entryPromise;
 
-  const request = toFetchRequest(event);
+  // Fix round 1, Minor 2: `toFetchRequest` THROWS on inputs API Gateway can still deliver — undici
+  // refuses the fetch spec's forbidden methods (`TRACE`/`CONNECT`/`TRACK`), and a malformed `Host`
+  // fails `new URL(...)`. Above the boundary that was an unhandled Lambda error: a 502 and a
+  // function-error metric for what is plainly a bad request. It gets its OWN catch rather than
+  // joining the 500 boundary below, because the caller sent something unrepresentable — that is a
+  // 400, and folding it into `server_error` would blame us for their request.
+  let request: Request;
+  try {
+    request = toFetchRequest(event);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        message: "mcpAuth: request could not be represented",
+        path: event.rawPath,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return fromFetchResponse(jsonResponse({ error: "invalid_request", error_description: "the request could not be parsed" }, 400));
+  }
 
   try {
     return await fromFetchResponse(await route(request, entry));

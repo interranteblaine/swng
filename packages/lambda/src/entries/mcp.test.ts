@@ -285,6 +285,22 @@ describe("handler — the assembled entry", () => {
     expect(dispatchSpy).not.toHaveBeenCalled();
   });
 
+  // swng-speaks-mcp task-19 fix round 1, Minor 2 — the same defect as entries/mcpAuth.ts, in the
+  // already-deployed entry: `toFetchRequest` throws on the fetch spec's forbidden methods, and
+  // above any boundary that is an unhandled Lambda error (API Gateway 502, function error metric,
+  // alarm) for what is plainly a bad request. What is asserted here is first and foremost that
+  // the handler RESOLVES rather than throws.
+  it("answers a forbidden HTTP method with a JSON-RPC 400 instead of throwing out of the handler", async () => {
+    const event = makeEvent({ authorization: "Bearer t", body: { jsonrpc: "2.0", id: 12, method: "tools/list", params: {} } });
+
+    const result = await handler({ ...event, requestContext: { ...event.requestContext, http: { ...event.requestContext.http, method: "TRACE" } } });
+
+    expect(result.statusCode).toBe(400);
+    const parsed = JSON.parse(result.body ?? "{}") as { error: { code: number } };
+    expect(parsed.error.code).toBe(-32600);
+    expect(dispatchSpy).not.toHaveBeenCalled();
+  });
+
   it("a missing Origin header and the literal 'null' Origin are both admitted (design spec §7)", async () => {
     tokenVerifierMock.verifyAccessToken.mockResolvedValue({ token: "t", clientId: "c", scopes: [READ_SCOPE], expiresAt: futureExpiry() });
 

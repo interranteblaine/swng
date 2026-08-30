@@ -1,4 +1,5 @@
 import type { OAuthMetadata, OAuthProtectedResourceMetadata } from "@modelcontextprotocol/server";
+import { AUTHORIZE_PATH, REGISTER_PATH, TOKEN_PATH } from "./paths.js";
 
 // `import type` only (task-15 brief, design spec §3.4): mcpAuth carries no MCP SDK runtime —
 // Claude allows 10s for discovery, so these two well-known documents are hand-authored constants
@@ -47,9 +48,12 @@ export const buildAuthorizationServerMetadata = (resource: string): OAuthMetadat
 
   return {
     issuer: origin,
-    authorization_endpoint: `${origin}/authorize`,
-    token_endpoint: `${origin}/token`,
-    registration_endpoint: `${origin}/register`,
+    // The SAME constants entries/mcpAuth.ts routes on (fix round 1, Minor 4) — advertising an
+    // endpoint the router does not serve is a 404 discovered only by a real client, and the two
+    // literals that used to stand here were coupled to the router by nothing at all.
+    authorization_endpoint: `${origin}${AUTHORIZE_PATH}`,
+    token_endpoint: `${origin}${TOKEN_PATH}`,
+    registration_endpoint: `${origin}${REGISTER_PATH}`,
     scopes_supported: [readScope(resource)],
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],

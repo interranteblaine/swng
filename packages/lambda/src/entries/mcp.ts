@@ -175,7 +175,30 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
   });
   const entry = await entryPromise;
 
-  const request = toFetchRequest(event);
+  // swng-speaks-mcp task-19 fix round 1, Minor 2 (the same two lines in entries/mcpAuth.ts, and
+  // the reason this already-deployed entry is edited alongside it): `toFetchRequest` THROWS on
+  // inputs API Gateway can still deliver — undici refuses the fetch spec's forbidden methods
+  // (`TRACE`/`CONNECT`/`TRACK`), and a malformed `Host` header fails `new URL(...)`. Unguarded,
+  // that is an unhandled Lambda error — API Gateway answers 502 and the function's error metric
+  // (and its alarm) fires for what is plainly a bad request. Answered here as a well-formed
+  // JSON-RPC `-32600 Invalid Request`, the same shape every other refusal this entry writes
+  // itself uses.
+  let request: Request;
+  try {
+    request = toFetchRequest(event);
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        message: "mcp: request could not be represented",
+        path: event.rawPath,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return fromFetchResponse(
+      Response.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "The request could not be parsed." } }, { status: 400 }),
+    );
+  }
 
   // Review round 1, fix 6: log the Origin header unconditionally (spec §7's "the header
   // logged"), then treat a missing header AND the literal string "null" (a sandboxed/opaque

@@ -4,6 +4,7 @@ import type { OAuthStore } from "@swng/adapters-dynamodb";
 import { MAX_OAUTH_ID_BYTES } from "@swng/adapters-dynamodb";
 import type { ClientStore, FetchCimdDeps } from "./clients.js";
 import { MAX_REDIRECT_URI_LENGTH, redirectUriAllowed, resolveClient } from "./clients.js";
+import { CONSENT_SUBMIT_PATH } from "./paths.js";
 
 // /authorize, the Cognito callback, and consent (design spec §4.2/§4.3, Task 17). swng
 // MEDIATES; Cognito remains the only token issuer.
@@ -243,11 +244,11 @@ export interface AuthorizeDeps {
 }
 
 // The path this module's consent form posts to, and the path Cognito's app client is configured
-// to redirect back to (both legs share the SAME callback URL) — named here as the one place both
-// halves of the wiring (this file, and whichever future task adds the HTTP routes) read the same
-// strings from.
-export const CALLBACK_PATH = "/oauth/callback";
-export const CONSENT_SUBMIT_PATH = "/oauth/consent";
+// to redirect back to (both legs share the SAME callback URL). Re-exported from ./paths.js —
+// which now holds ALL EIGHT of this authorization server's paths, so the ones metadata.ts
+// ADVERTISES and the ones entries/mcpAuth.ts SERVES cannot drift apart (fix round 1, Minor 4) —
+// rather than moved, because every caller already reaches for them here.
+export { CALLBACK_PATH, CONSENT_SUBMIT_PATH } from "./paths.js";
 
 // ---------------------------------------------------------------------------------------------
 // Small helpers

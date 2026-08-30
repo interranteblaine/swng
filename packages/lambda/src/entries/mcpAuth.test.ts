@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { CALLBACK_PATH, CONSENT_SUBMIT_PATH, parseStoredAuthorizeRequest, parseStoredCodeGrant } from "../oauth/authorize.js";
 import type { AuthorizeDeps } from "../oauth/authorize.js";
@@ -78,6 +78,15 @@ vi.mock("@swng/adapters-dynamodb", async (importOriginal) => {
   return { ...actual, createDocumentClient: () => documentClient, createDynamoOAuthStore: createDynamoOAuthStoreMock };
 });
 
+// The real `handleAuthorize`, kept aside by the factory below so ONE test can run the genuine
+// client-resolution path (fix round 1, Important 1) while every other test keeps the cheap spy.
+const realAuthorize = vi.hoisted(() => ({ handleAuthorize: undefined as undefined | ((request: Request, deps: unknown) => Promise<Response>) }));
+
+// clients.ts resolves a CIMD hostname through `node:dns/promises`; mocked so the status-code
+// probe below is hermetic and so a DNS failure is something this test can actually cause.
+const dnsLookupMock = vi.hoisted(() => vi.fn());
+vi.mock("node:dns/promises", () => ({ lookup: dnsLookupMock }));
+
 const handleAuthorizeMock = vi.hoisted(() => vi.fn());
 const handleCallbackMock = vi.hoisted(() => vi.fn());
 const handleConsentSubmitMock = vi.hoisted(() => vi.fn());
@@ -86,6 +95,7 @@ const registerDcrClientMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../oauth/authorize.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../oauth/authorize.js")>();
+  realAuthorize.handleAuthorize = actual.handleAuthorize as (request: Request, deps: unknown) => Promise<Response>;
   return { ...actual, handleAuthorize: handleAuthorizeMock, handleCallback: handleCallbackMock, handleConsentSubmit: handleConsentSubmitMock };
 });
 
@@ -162,6 +172,11 @@ describe("mcpAuth routing", () => {
 
     expect(suffixed.statusCode).toBe(200);
     expect(suffixed.headers?.["content-type"]).toMatch(/^application\/json/);
+    // Fix round 1, Minor 6. These two documents are the ONLY cacheable thing this server emits —
+    // public, identical for every caller, and on the leg with Claude's 10 s budget. Everything
+    // else carries no-store. An hour was a silent judgment call until this line named it.
+    expect(suffixed.headers?.["cache-control"]).toBe("public, max-age=3600");
+    expect(bare.headers?.["cache-control"]).toBe("public, max-age=3600");
     expect(JSON.parse(suffixed.body ?? "")).toEqual(expected);
     expect(bare.statusCode).toBe(200);
     expect(JSON.parse(bare.body ?? "")).toEqual(expected);
@@ -174,7 +189,31 @@ describe("mcpAuth routing", () => {
     const result = await handler(makeEvent({ method: "GET", path: "/.well-known/oauth-authorization-server" }));
 
     expect(result.statusCode).toBe(200);
+    expect(result.headers?.["cache-control"]).toBe("public, max-age=3600");
     expect(JSON.parse(result.body ?? "")).toEqual(buildAuthorizationServerMetadata(CANONICAL));
+  });
+
+  // Fix round 1, Minor 4. The bridge between the document and the router: three endpoints used to
+  // be typed twice, coupled only by two hardcoded copies in two test files, so renaming one the
+  // natural way left the router green while beta advertised a 404. They share ../oauth/paths.js
+  // now — and this test is what catches a future un-sharing, because it reads the ADVERTISED URL
+  // out of the served document and drives the router at exactly that path.
+  it("every endpoint the AS metadata ADVERTISES is a path the router actually serves", async () => {
+    handleAuthorizeMock.mockImplementation(async () => marker("authorize"));
+    handleTokenMock.mockImplementation(async () => marker("token"));
+    registerDcrClientMock.mockImplementation(async () => ({ clientId: "advertised", redirectUris: [] }));
+
+    const document = JSON.parse(
+      (await handler(makeEvent({ method: "GET", path: "/.well-known/oauth-authorization-server" }))).body ?? "",
+    ) as { authorization_endpoint: string; token_endpoint: string; registration_endpoint: string };
+
+    const advertised = [document.authorization_endpoint, document.token_endpoint, document.registration_endpoint];
+    expect(advertised).toHaveLength(3);
+    for (const endpoint of advertised) {
+      const { pathname } = new URL(endpoint);
+      const result = await handler(makeEvent({ method: "POST", path: pathname }));
+      expect({ endpoint, statusCode: result.statusCode }).not.toEqual({ endpoint, statusCode: 404 });
+    }
   });
 
   it("routes GET /authorize to handleAuthorize with the query string intact, and returns its Response verbatim", async () => {
@@ -372,11 +411,126 @@ describe("mcpAuth failures", () => {
     expect(body.error).toBe("server_error");
   });
 
+  // Fix round 1, Minor 2. `toFetchRequest` sat above the boundary, so these threw clean out of
+  // the handler: API Gateway answers 502 and the function's error metric (and its alarm) fires
+  // for what is plainly a bad request. Note what is asserted — that the handler RESOLVES at all.
+  it.each([
+    ["TRACE", "a forbidden HTTP method undici refuses to construct"],
+    ["CONNECT", "a forbidden HTTP method undici refuses to construct"],
+  ])("answers 400 for %s (%s) instead of throwing out of the handler", async (method) => {
+    const result = await handler(makeEvent({ method, path: "/token" }));
+
+    expect(result.statusCode).toBe(400);
+    expect(JSON.parse(result.body ?? "")).toEqual({ error: "invalid_request", error_description: "the request could not be parsed" });
+  });
+
+  it("answers 400 for a Host header that cannot form a URL, instead of throwing out of the handler", async () => {
+    const event = makeEvent({ method: "GET", path: "/token" });
+
+    const result = await handler({ ...event, headers: { ...event.headers, host: "evil .com" } });
+
+    expect(result.statusCode).toBe(400);
+  });
+
   it("refuses a GET on /register rather than answering a misleading 'not valid JSON'", async () => {
     const result = await handler(makeEvent({ method: "GET", path: "/register" }));
 
     expect(result.statusCode).toBe(405);
     expect(result.headers?.["allow"]).toBe("POST");
+  });
+});
+
+// --- /authorize's CIMD failures, read the way an attacker reads them --------------------------
+
+// Fix round 1, Important 1. `/authorize` is unauthenticated and its `client_id` may be a URL this
+// server FETCHES. Before the fix, a resolvable-but-refused host answered 400 and an unresolvable
+// one answered 500 — so "does this name resolve from inside our network" (an internal Route 53
+// private-zone name included) was readable straight off the status code, which is the exact leak
+// the entry's log-don't-forward handling was written to close. These four cases run the REAL
+// handleAuthorize → resolveClient → fetchCimdClient chain, with only DNS and fetch replaced, and
+// read what a stranger reads: the status, and the bytes.
+describe("mcpAuth /authorize — every CIMD failure is one indistinguishable answer", () => {
+  const PUBLIC_ADDRESS = [{ address: "93.184.216.34", family: 4 }];
+  const QUERY = new URLSearchParams({
+    client_id: "https://client.example.com/id",
+    redirect_uri: "http://127.0.0.1:8976/cb",
+    response_type: "code",
+    code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+    code_challenge_method: "S256",
+  }).toString();
+
+  const midStreamAbort = (): Response =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"client_id":'));
+          controller.error(new TypeError("terminated"));
+        },
+      }),
+    );
+
+  const NETWORK_FAILURES: readonly [string, () => void][] = [
+    [
+      "the host does not resolve",
+      () => {
+        dnsLookupMock.mockRejectedValue(Object.assign(new Error("getaddrinfo ENOTFOUND client.example.com"), { code: "ENOTFOUND" }));
+      },
+    ],
+    [
+      "the connection or TLS handshake fails",
+      () => {
+        dnsLookupMock.mockResolvedValue(PUBLIC_ADDRESS);
+        vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("fetch failed"))));
+      },
+    ],
+    [
+      "the server drops the connection mid-document",
+      () => {
+        dnsLookupMock.mockResolvedValue(PUBLIC_ADDRESS);
+        vi.stubGlobal("fetch", vi.fn(async () => midStreamAbort()));
+      },
+    ],
+    [
+      "the host resolves to a private address (the control — this one was always 400)",
+      () => {
+        dnsLookupMock.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
+      },
+    ],
+  ];
+
+  const probe = async (setup: () => void): Promise<APIGatewayProxyStructuredResultV2> => {
+    setup();
+    handleAuthorizeMock.mockImplementationOnce(realAuthorize.handleAuthorize as (request: Request, deps: unknown) => Promise<Response>);
+    return handler(makeEvent({ method: "GET", path: "/authorize", query: QUERY }));
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    dnsLookupMock.mockReset();
+  });
+
+  it.each(NETWORK_FAILURES)("answers 400, not 500, when %s", async (_name, setup) => {
+    const result = await probe(setup);
+
+    expect(result.statusCode).toBe(400);
+  });
+
+  it("answers the four cases with the SAME bytes — nothing about the host is readable back", async () => {
+    const answers: string[] = [];
+    for (const [, setup] of NETWORK_FAILURES) {
+      const result = await probe(setup);
+      answers.push(JSON.stringify({ statusCode: result.statusCode, body: result.body }));
+      vi.unstubAllGlobals();
+      dnsLookupMock.mockReset();
+    }
+
+    expect(new Set(answers).size).toBe(1);
+    // Named, not merely compared to itself: four identical 500s would also be a set of one.
+    expect(JSON.parse(JSON.parse(answers[0] as string).body as string)).toEqual({
+      error: "invalid_request",
+      error_description: "the client_id could not be resolved",
+    });
+    expect(answers[0]).not.toContain("client.example.com");
   });
 });
 
@@ -394,5 +548,37 @@ describe("mcpAuth required environment", () => {
       process.env[key] = saved as string;
       vi.resetModules();
     }
+  });
+});
+
+// --- The resource pathname, normalized the way the SDK normalizes it --------------------------
+
+// Fix round 1, Minor 3. entries/mcp.ts builds its 401 challenge with the SDK's
+// `getOAuthProtectedResourceMetadataUrl`, which strips a trailing slash and maps a bare "/" to no
+// suffix. This entry derives the same path by hand, and a client the SDK sent to
+// `…/oauth-protected-resource/mcp` gets a HARD connection failure if that 404s (its fallback is
+// guarded off once a challenge named the URL). So the two derivations have to agree on inputs
+// nobody has typed yet, not just on beta's current one.
+describe("mcpAuth protected-resource metadata path derivation", () => {
+  const statusFor = async (resource: string, path: string): Promise<number | undefined> => {
+    const saved = process.env["MCP_RESOURCE"];
+    process.env["MCP_RESOURCE"] = resource;
+    vi.resetModules();
+    try {
+      const fresh = (await import("./mcpAuth.js")).handler as Handler;
+      return (await fresh(makeEvent({ method: "GET", path }))).statusCode;
+    } finally {
+      process.env["MCP_RESOURCE"] = saved as string;
+      vi.resetModules();
+    }
+  };
+
+  it("serves the SDK's path when MCP_RESOURCE carries a trailing slash", async () => {
+    await expect(statusFor("https://mcp.beta.swng.golf/mcp/", "/.well-known/oauth-protected-resource/mcp")).resolves.toBe(200);
+  });
+
+  it("serves the bare document for a resource with no path — and not a stray trailing-slash twin", async () => {
+    await expect(statusFor("https://mcp.beta.swng.golf", "/.well-known/oauth-protected-resource")).resolves.toBe(200);
+    await expect(statusFor("https://mcp.beta.swng.golf", "/.well-known/oauth-protected-resource/")).resolves.toBe(404);
   });
 });

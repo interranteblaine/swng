@@ -24,6 +24,7 @@ const createFakeStore = () => {
   const requests = new Map<string, AuthorizeRequestRecord>();
   const codes = new Map<string, AuthorizeCodeGrant>();
   let putRequestCallCount = 0;
+  let takeRequestCallCount = 0;
   return {
     putRequest: async (id: string, value: AuthorizeRequestRecord) => {
       putRequestCallCount += 1;
@@ -31,6 +32,7 @@ const createFakeStore = () => {
       requests.set(id, value);
     },
     takeRequest: async (id: string) => {
+      takeRequestCallCount += 1;
       assertKeyable(id);
       const value = requests.get(id);
       requests.delete(id);
@@ -43,6 +45,7 @@ const createFakeStore = () => {
     debugCodeCount: async () => codes.size,
     debugPeekCode: (code: string) => codes.get(code),
     debugPutRequestCallCount: () => putRequestCallCount,
+    debugTakeRequestCallCount: () => takeRequestCallCount,
   };
 };
 
@@ -459,6 +462,29 @@ describe("handleConsentSubmit", () => {
     const res = await handleConsentSubmit(req, { ...deps, store });
     expect(res.status).toBe(400);
     expect(await store.debugCodeCount()).toBe(0);
+  });
+
+  it("refuses an over-long consent_id WITHOUT touching the store (fix round 3, N2-3)", async () => {
+    // My fix-round-2 report called this tightening unpinnable, and that was wrong — the severity
+    // reasoning was right (512 code units weigh at most 1536 bytes, so the old cap was never a
+    // live 5xx) but the two bounds do NOT refuse the same requests. A 200-character consent_id
+    // passed the old 512-character cap and was refused only AFTER `takeRequest` had been called;
+    // `opaqueIdSchema` refuses it before. That is the same "refused by the guard, not by a later
+    // miss" distinction fix round 1 adopted for /token under M-7, and the counter is what sees it.
+    const { fetchImpl } = buildFetchSpy();
+    const { deps, store } = buildDeps({ fetchImpl });
+    const { consentId } = await driveToConsent(deps);
+    const takesSoFar = store.debugTakeRequestCallCount();
+
+    const res = await handleConsentSubmit(
+      consentSubmitRequest({ consent_id: "a".repeat(200), action: "approve", scope_choice: "read" }),
+      { ...deps, store },
+    );
+    expect(res.status).toBe(400);
+    expect(store.debugTakeRequestCallCount()).toBe(takesSoFar);
+    // …and the real consent session is untouched: it still redeems.
+    const approveRes = await handleConsentSubmit(consentSubmitRequest({ consent_id: consentId, action: "approve", scope_choice: "read" }), { ...deps, store });
+    expect(approveRes.status).toBe(302);
   });
 
   it("rejects a JSON content-type that SMUGGLES the form media type in a parameter", async () => {

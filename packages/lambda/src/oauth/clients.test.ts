@@ -3,6 +3,8 @@ import type { Clock } from "@swng/application";
 import {
   CIMD_MAX_BYTES,
   CIMD_MAX_CACHE_TTL_MS,
+  MAX_REDIRECT_URI_LENGTH,
+  MAX_REDIRECT_URIS_TOTAL_BYTES,
   cacheTtlMsFromHeaders,
   type CimdCache,
   type ClientRecord,
@@ -568,6 +570,67 @@ describe("registerDcrClient", () => {
     expect(Object.hasOwn(record, "clientName")).toBe(false);
     const storedValue = (store.putClient as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as Record<string, unknown>;
     expect(Object.hasOwn(storedValue, "clientName")).toBe(false);
+  });
+
+  // fix round 3, N2-2: the count was capped and the strings were not, so a registration wrote an
+  // UNBOUNDED item. Proved by the reviewer against real DynamoDB: ten 400 KB URIs threw
+  // `Item size has exceeded the maximum allowed size`, and nine 45 450-character URIs registered
+  // SUCCESSFULLY and then threw the same exception at /authorize, which copies a client's
+  // registeredRedirectUris verbatim into its request record. Each of these must be refused before
+  // `putClient` is ever reached — the store call is what the assertions below pin.
+  const longUri = (chars: number): string => {
+    const prefix = "https://client.example.com/";
+    return prefix + "a".repeat(chars - prefix.length);
+  };
+
+  it("refuses a single redirect URI longer than a URL has any business being, without storing anything", async () => {
+    const store = makeStore();
+    const body = JSON.stringify({ redirect_uris: [longUri(MAX_REDIRECT_URI_LENGTH + 1)] });
+    await expect(registerDcrClient(body, { store, generateClientId: () => "id" })).rejects.toThrow(ClientRegistrationError);
+    expect(store.putClient).not.toHaveBeenCalled();
+  });
+
+  it("accepts a redirect URI at exactly the per-URI maximum — the bound is inclusive", async () => {
+    const store = makeStore();
+    const body = JSON.stringify({ redirect_uris: [longUri(MAX_REDIRECT_URI_LENGTH)] });
+    await registerDcrClient(body, { store, generateClientId: () => "id" });
+    expect(store.putClient).toHaveBeenCalled();
+  });
+
+  it("refuses a LEGAL COUNT of LEGAL-LENGTH URIs that together overflow the aggregate", async () => {
+    // The chained band a per-URI cap alone misses: ten URIs, each inside the per-URI maximum, and
+    // 20 KB between them. This is the shape that registered cleanly and then killed /authorize.
+    const store = makeStore();
+    const uris = Array.from({ length: 10 }, (_unused, index) => `${longUri(MAX_REDIRECT_URI_LENGTH - 4)}?i=${index}`);
+    expect(uris.every((uri) => uri.length <= MAX_REDIRECT_URI_LENGTH)).toBe(true);
+    expect(uris.reduce((total, uri) => total + uri.length, 0)).toBeGreaterThan(MAX_REDIRECT_URIS_TOTAL_BYTES);
+
+    const body = JSON.stringify({ redirect_uris: uris });
+    await expect(registerDcrClient(body, { store, generateClientId: () => "id" })).rejects.toThrow(ClientRegistrationError);
+    expect(store.putClient).not.toHaveBeenCalled();
+  });
+
+  it("measures the aggregate in BYTES, not characters", async () => {
+    // N-1's lesson applied to the same file: three URIs of 2000 multi-byte characters are 6000
+    // code units (inside the 8 KB budget if you count wrong) and ~18 KB of UTF-8 (outside it).
+    const store = makeStore();
+    const multibyteUri = `https://client.example.com/${"\u8a9e".repeat(1973)}`;
+    expect(multibyteUri.length).toBeLessThanOrEqual(MAX_REDIRECT_URI_LENGTH);
+    const uris = [multibyteUri, `${multibyteUri}x`, `${multibyteUri}y`];
+    expect(uris.reduce((total, uri) => total + uri.length, 0)).toBeLessThan(MAX_REDIRECT_URIS_TOTAL_BYTES);
+    expect(uris.reduce((total, uri) => total + Buffer.byteLength(uri, "utf8"), 0)).toBeGreaterThan(MAX_REDIRECT_URIS_TOTAL_BYTES);
+
+    const body = JSON.stringify({ redirect_uris: uris });
+    await expect(registerDcrClient(body, { store, generateClientId: () => "id" })).rejects.toThrow(ClientRegistrationError);
+    expect(store.putClient).not.toHaveBeenCalled();
+  });
+
+  it("still registers what a real client actually sends", async () => {
+    // The regression guard for every bound above: Claude Code registers one or two loopback URIs.
+    const store = makeStore();
+    const body = JSON.stringify({ redirect_uris: ["http://127.0.0.1:51000/callback", "http://localhost:51000/callback"], client_name: "Claude Code" });
+    const record = await registerDcrClient(body, { store, generateClientId: () => "id" });
+    expect(record.redirectUris).toHaveLength(2);
   });
 
   it("does not decide its own TTL — that's the store's 90-day CLIENT_TTL_MS (Task 14)", async () => {

@@ -194,22 +194,64 @@ const isFreeOfUserinfoAndFragment = (raw: string): boolean => {
   return url !== undefined && !hasUserinfoOrFragment(url);
 };
 
+// ---------------------------------------------------------------------------------------------
+// `redirect_uris` — ONE schema, shared by the DCR body and the CIMD document, because the two are
+// the same untrusted list arriving by two roads and a bound that lives in two places is a bound
+// that will disagree with itself.
+//
+// Review round 2, N2-2: the count was capped and the STRINGS were not, so "10 redirect URIs"
+// bounded nothing — `https://client.example.com/` plus 400 000 characters is a valid URL. Proved:
+// ten 400 KB URIs threw `Item size has exceeded the maximum allowed size` out of
+// `registerDcrClient`, and — the more interesting half — nine 45 450-character URIs REGISTERED
+// SUCCESSFULLY and then threw the same exception at `/authorize`, because a client's
+// `registeredRedirectUris` are copied verbatim into the request record. Past leg 1 that overflow
+// lands after the golfer has already authenticated. It is the exact failure `/authorize`'s own
+// oversized-`state` test exists to prevent, reachable through a different field.
+//
+// THE NUMBERS COME FROM WHAT A REDIRECT URI IS, not from what DynamoDB tolerates:
+//
+//   - 2048 characters each, the conventional URL ceiling and the SAME cap `authorizeQuerySchema`
+//     puts on the `redirect_uri` it must match exactly — a registered URI longer than that could
+//     never be redeemed at /authorize anyway, so this bound can only refuse a registration that
+//     was already useless.
+//   - 8 KB for the whole list, measured in BYTES (N-1's lesson: `.max()` counts UTF-16 code units,
+//     and a URI may carry multi-byte characters). Real clients register one to three loopback or
+//     https URIs of 30–60 characters; 8 KB is two orders of magnitude of headroom, and it is what
+//     makes the guarantee hold for a LEGAL COUNT of LEGAL-LENGTH URIs — ten 2048-character URIs
+//     are individually fine and together are not, which is precisely the band that overflowed.
+//
+// WHAT IS THEREFORE GUARANTEED (the old comment claimed this and did not deliver it): a client
+// record is at most ~8.5 KB — the URI list, a 200-character name, a 36-character id — and so is
+// the `registeredRedirectUris` any /authorize request record copies out of it. Both are three
+// orders of magnitude under DynamoDB's 400 KB item ceiling, and no combination of a legal body
+// can raise either.
+// ---------------------------------------------------------------------------------------------
+
+export const MAX_REDIRECT_URI_LENGTH = 2048;
+export const MAX_REDIRECT_URIS_TOTAL_BYTES = 8 * 1024;
+
+const redirectUrisSchema = z
+  .array(
+    z
+      .string()
+      .max(MAX_REDIRECT_URI_LENGTH, `a redirect URI exceeds the maximum of ${MAX_REDIRECT_URI_LENGTH} characters`)
+      .url()
+      .refine(isAllowedRedirectUriScheme, { message: REDIRECT_URI_SCHEME_MESSAGE })
+      .refine(isFreeOfUserinfoAndFragment, { message: REDIRECT_URI_USERINFO_OR_FRAGMENT_MESSAGE }),
+  )
+  .min(1, "redirect_uris must contain at least one URI")
+  .max(10, "redirect_uris exceeds the maximum of 10")
+  .refine((uris) => uris.reduce((total, uri) => total + Buffer.byteLength(uri, "utf8"), 0) <= MAX_REDIRECT_URIS_TOTAL_BYTES, {
+    message: `redirect_uris exceeds the maximum of ${MAX_REDIRECT_URIS_TOTAL_BYTES} bytes in total`,
+  });
+
 // Bounds belong on a request schema (CLAUDE.md) — this IS one: an unauthenticated POST body.
-// The caps (10 redirect URIs, 200-char name) are generous-but-finite, purely to stop an
-// abusive registration from writing an unbounded item; DCR's real unboundedness problem (an
-// unbounded PILE of clients, not one huge client) is what the store's 90-day TTL answers.
+// The caps are generous-but-finite, purely to stop an abusive registration from writing an
+// unbounded item; DCR's real unboundedness problem (an unbounded PILE of clients, not one huge
+// client) is what the store's 90-day TTL answers.
 const dcrRegistrationRequestSchema = z
   .object({
-    redirect_uris: z
-      .array(
-        z
-          .string()
-          .url()
-          .refine(isAllowedRedirectUriScheme, { message: REDIRECT_URI_SCHEME_MESSAGE })
-          .refine(isFreeOfUserinfoAndFragment, { message: REDIRECT_URI_USERINFO_OR_FRAGMENT_MESSAGE }),
-      )
-      .min(1, "redirect_uris must contain at least one URI")
-      .max(10, "redirect_uris exceeds the maximum of 10"),
+    redirect_uris: redirectUrisSchema,
     client_name: z.string().max(200).optional(),
   })
   .passthrough();
@@ -255,16 +297,7 @@ const CIMD_MAX_REDIRECTS = 5;
 const cimdDocumentSchema = z
   .object({
     client_id: z.string().max(2048),
-    redirect_uris: z
-      .array(
-        z
-          .string()
-          .url()
-          .refine(isAllowedRedirectUriScheme, { message: REDIRECT_URI_SCHEME_MESSAGE })
-          .refine(isFreeOfUserinfoAndFragment, { message: REDIRECT_URI_USERINFO_OR_FRAGMENT_MESSAGE }),
-      )
-      .min(1, "redirect_uris must contain at least one URI")
-      .max(10, "redirect_uris exceeds the maximum of 10"),
+    redirect_uris: redirectUrisSchema,
     client_name: z.string().max(200).optional(),
   })
   .passthrough();

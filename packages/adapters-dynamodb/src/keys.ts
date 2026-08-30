@@ -199,3 +199,18 @@ export const oauthCodePk = (id: string): string => `${OAUTH_CODE_PK_PREFIX}${id}
 
 const OAUTH_HANDLE_PK_PREFIX = "OAUTHHANDLE#";
 export const oauthHandlePk = (id: string): string => `${OAUTH_HANDLE_PK_PREFIX}${id}`;
+
+// DynamoDB caps a partition key at 2048 BYTES — not characters — and each prefix above counts
+// against that budget. This is therefore the most an OAuth id may weigh, in UTF-8 bytes, for the
+// key it produces to be legal: the ceiling minus the LONGEST of the four prefixes, so one number
+// covers every slot and no caller has to know which prefix its id will get. Exported because the
+// callers that MINT and VALIDATE these ids (the lambda's OAuth request schemas) cannot honour a
+// budget they cannot see — swng-speaks-mcp review round 2, N-1: a `max(2048)` written in JS string
+// length let a 2039-character `code` through to an uncaught `ValidationException`, i.e. an
+// unauthenticated 5xx at an endpoint whose contract is "every failure answers invalid_grant".
+const DYNAMO_PARTITION_KEY_MAX_BYTES = 2048;
+export const MAX_OAUTH_ID_BYTES =
+  DYNAMO_PARTITION_KEY_MAX_BYTES -
+  Math.max(
+    ...[OAUTH_CLIENT_PK_PREFIX, OAUTH_REQUEST_PK_PREFIX, OAUTH_CODE_PK_PREFIX, OAUTH_HANDLE_PK_PREFIX].map((prefix) => Buffer.byteLength(prefix, "utf8")),
+  );

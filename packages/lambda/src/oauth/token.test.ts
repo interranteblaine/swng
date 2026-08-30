@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { CODE_TTL_MS, HANDLE_GRACE_MS, HANDLE_TTL_MS } from "@swng/adapters-dynamodb";
+import { CODE_TTL_MS, HANDLE_GRACE_MS, HANDLE_TTL_MS, MAX_OAUTH_ID_BYTES } from "@swng/adapters-dynamodb";
 import type { AuthorizeCodeGrant, AuthorizeCognitoConfig } from "./authorize.js";
 import type { RefreshHandleRecord, TokenDeps } from "./token.js";
 import { handleToken, parseStoredRefreshHandle } from "./token.js";
 
 // ---------------------------------------------------------------------------------------------
 // A hand-rolled in-memory store reproducing Task 14's OAuthStore semantics for the three slots
-// /token touches. Fidelity here is what makes every assertion in this file mean anything, so
-// each method mirrors the real one line for line:
+// /token touches. Fidelity here is what makes every assertion in this file mean anything, so each
+// method mirrors the real one's OWN CONDITIONS — with one deliberate omission, named below:
 //
 //   takeCode     — ONE conditional delete on `attribute_exists(pk) AND expiresAtMs > :now`, so an
 //                  expired code is neither returned NOR deleted (fix round 1, M-10: this used to
@@ -16,6 +16,14 @@ import { handleToken, parseStoredRefreshHandle } from "./token.js";
 //   getHandle      presence: DynamoDB's `ttl` is cleanup, not expiry.
 //   retireHandle — SHRINKS expiresAtMs to now + HANDLE_GRACE_MS and stamps retiredAtMs, so only
 //                  the FIRST retire ever takes effect.
+//   every read/  — refuses an id too heavy to be a legal partition key, the way DynamoDB does
+//   write          (review round 2, N-1) — see `assertKeyable`.
+//
+// WHAT IT DOES NOT DO (review round 2, N-3): the real `takeCode`/`getHandle` end by running the
+// INJECTED PARSER over the stored value, and those parsers throw. This fake never parses, so no
+// test here can accidentally depend on a parser throw being caught — it is not: a corrupt stored
+// record, like a DynamoDB error, is a server-side fault that answers 5xx, NOT `invalid_grant`.
+// That is deliberate, and "a store failure is a 5xx" below pins it.
 //
 // CODE_TTL_MS / HANDLE_GRACE_MS / HANDLE_TTL_MS are IMPORTED, never retyped: they are the store's
 // constants, and a copy here would silently desync the day one of them moves.
@@ -35,6 +43,15 @@ const createClock = (startMs = NOW_MS) => {
   return { now: () => nowMs, advance: (ms: number) => (nowMs += ms) };
 };
 
+// The real store builds `<PREFIX>#<id>` and DynamoDB refuses a partition key over 2048 BYTES with
+// a `ValidationException` — an error nothing in `handleToken` catches, so it surfaces as a 5xx.
+// The fake refuses the same ids, so a bound written in the wrong unit (characters, not bytes)
+// fails HERE instead of in production. `MAX_OAUTH_ID_BYTES` is the store's own published budget.
+const assertKeyable = (id: string): void => {
+  const bytes = Buffer.byteLength(id, "utf8");
+  if (bytes > MAX_OAUTH_ID_BYTES) throw new Error(`ValidationException: Hash primary key values must be under 2048 bytes (id weighed ${bytes})`);
+};
+
 const createFakeStore = (clock: { now: () => number }) => {
   const codes = new Map<string, { value: AuthorizeCodeGrant; expiresAtMs: number }>();
   const handles = new Map<string, StoredHandle>();
@@ -43,6 +60,7 @@ const createFakeStore = (clock: { now: () => number }) => {
   return {
     takeCode: async (code: string) => {
       takeCodeCalls += 1;
+      assertKeyable(code);
       const stored = codes.get(code);
       if (stored === undefined) return undefined;
       if (stored.expiresAtMs <= clock.now()) return undefined; // the condition fails: nothing returned, nothing deleted
@@ -50,16 +68,19 @@ const createFakeStore = (clock: { now: () => number }) => {
       return stored.value;
     },
     putHandle: async (handleId: string, value: RefreshHandleRecord) => {
+      assertKeyable(handleId);
       handles.set(handleId, { value, expiresAtMs: clock.now() + HANDLE_TTL_MS });
     },
     getHandle: async (handleId: string) => {
       getHandleCalls += 1;
+      assertKeyable(handleId);
       const stored = handles.get(handleId);
       if (stored === undefined) return undefined;
       if (stored.expiresAtMs <= clock.now()) return undefined;
       return stored.value;
     },
     retireHandle: async (handleId: string) => {
+      assertKeyable(handleId);
       const stored = handles.get(handleId);
       if (stored === undefined) return;
       if (stored.expiresAtMs <= clock.now()) return; // never resurrect an already-expired handle
@@ -240,6 +261,17 @@ describe("handleToken — the request envelope", () => {
     expect(res.status).toBe(200);
   });
 
+  it("accepts the form media type with the whitespace RFC 9110 allows before a parameter", async () => {
+    // fix round 2, N-2: `.trim()` inside isFormUrlEncoded was the one line of the fix round's new
+    // production surface that no test pinned, and it is the only thing accepting this header —
+    // RFC 9110 §5.6.6 allows optional whitespace before a parameter.
+    const { deps, store } = buildDeps({});
+    store.debugPutCode("the-opaque-code", buildGrant());
+
+    const res = await handleToken(tokenRequest(codeForm(), { contentType: "application/x-www-form-urlencoded ; charset=utf-8" }), deps);
+    expect(res.status).toBe(200);
+  });
+
   it("refuses a non-POST carrying an otherwise-valid form body", async () => {
     const { deps, store } = buildDeps({});
     store.debugPutCode("the-opaque-code", buildGrant());
@@ -247,6 +279,35 @@ describe("handleToken — the request envelope", () => {
     const res = await handleToken(tokenRequest(codeForm(), { method: "PUT" }), deps);
     await expectInvalidGrant(res);
     expect((await handleToken(tokenRequest(codeForm()), deps)).status).toBe(200);
+  });
+
+  // fix round 2, N-1: `max(2048)` counts UTF-16 code units while a DynamoDB partition key is
+  // capped in BYTES with the store's prefix counted in — so each of these used to reach the store
+  // and throw an uncaught ValidationException, i.e. an unauthenticated 5xx at the one endpoint
+  // whose whole contract is "every failure answers invalid_grant". `code` and `refresh_token` are
+  // ids WE minted (a randomUUID is 36 characters), so they are now bounded at what they ARE.
+  it.each([
+    ["a code of 2039 ASCII characters — one byte past the key ceiling", "code", "a".repeat(2039)],
+    ["a code of 1024 CJK characters — inside max(2048) but 3072 bytes", "code", "\u8a9e".repeat(1024)],
+    ["a code at the old schema's own 2048 maximum", "code", "a".repeat(2048)],
+  ])("answers invalid_grant, never a 5xx, for %s", async (_label, field, value) => {
+    const { deps, store } = buildDeps({});
+    store.debugPutCode("the-opaque-code", buildGrant());
+
+    await expectInvalidGrant(await handleToken(tokenRequest(codeForm({ [field]: value })), deps));
+    expect(store.debugTakeCodeCalls()).toBe(0);
+  });
+
+  it.each([
+    ["2039 ASCII characters", "a".repeat(2039)],
+    ["1024 CJK characters", "\u8a9e".repeat(1024)],
+    ["the old schema's own 2048 maximum", "a".repeat(2048)],
+  ])("answers invalid_grant, never a 5xx, for a refresh_token of %s", async (_label, value) => {
+    const { fetchImpl } = buildCognitoFetch();
+    const { deps, store } = buildDeps({ fetchImpl });
+
+    await expectInvalidGrant(await handleToken(tokenRequest(refreshForm(value)), deps));
+    expect(store.debugGetHandleCalls()).toBe(0);
   });
 
   it("answers invalid_grant — not unsupported_grant_type — for a grant type it does not implement", async () => {
@@ -686,6 +747,27 @@ describe("handleToken — what comes back from Cognito", () => {
 
     await expectInvalidGrant(await handleToken(tokenRequest(refreshForm(handle)), deps));
     expect(store.debugHandleCount()).toBe(1);
+  });
+});
+
+describe("a store failure is a 5xx, not invalid_grant", () => {
+  // fix round 2, N-3. The real `takeCode`/`getHandle` run the injected parser over the stored
+  // value and those parsers throw; a DynamoDB error takes the same path. Neither is the caller's
+  // fault, and answering `invalid_grant` to a throttle would make a client discard a perfectly
+  // good refresh handle — so this endpoint deliberately lets both through to the entry's error
+  // boundary. Documented in token.ts's header; pinned here so "every failure answers
+  // invalid_grant" cannot quietly grow a `catch` that swallows a corrupt record.
+  it("lets a parser throw out of the authorization_code path", async () => {
+    const { deps, store } = buildDeps({});
+    const thrower = { ...store, takeCode: async () => Promise.reject(new Error("stored OAuth code grant: approvedScopes missing or not a string[]")) };
+    await expect(handleToken(tokenRequest(codeForm()), { ...deps, store: thrower })).rejects.toThrow("approvedScopes missing");
+  });
+
+  it("lets a DynamoDB failure out of the refresh_token path", async () => {
+    const { fetchImpl } = buildCognitoFetch();
+    const { deps, store } = buildDeps({ fetchImpl });
+    const thrower = { ...store, getHandle: async () => Promise.reject(new Error("ProvisionedThroughputExceededException")) };
+    await expect(handleToken(tokenRequest(refreshForm("handle-original")), { ...deps, store: thrower })).rejects.toThrow("ProvisionedThroughput");
   });
 });
 

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { OAuthStore } from "@swng/adapters-dynamodb";
+import { MAX_OAUTH_ID_BYTES } from "@swng/adapters-dynamodb";
 import type { ClientStore, FetchCimdDeps } from "./clients.js";
 import { redirectUriAllowed, resolveClient } from "./clients.js";
 
@@ -281,6 +282,42 @@ const originOf = (resource: string): string => new URL(resource).origin;
 export const isFormUrlEncoded = (contentTypeHeader: string | null): boolean =>
   ((contentTypeHeader ?? "").split(";")[0] ?? "").trim().toLowerCase() === "application/x-www-form-urlencoded";
 
+// ---------------------------------------------------------------------------------------------
+// Bounds for the request fields that become a DynamoDB PARTITION KEY — shared with token.ts,
+// because both endpoints key on values a stranger supplies and a bound that lives in two places
+// is a bound that will disagree with itself.
+//
+// Review round 2, N-1: `z.string().max(2048)` measures UTF-16 code units; the key is capped at
+// 2048 BYTES with the store's own prefix counted in. Proved against real DynamoDB: a
+// 2039-character ASCII `code` (or 1024 CJK characters, or the schema's own 2048 maximum) threw an
+// uncaught `ValidationException` — an unauthenticated 5xx at an endpoint whose whole contract is
+// "every failure answers invalid_grant".
+//
+// WHICH TREATMENT APPLIES IS DECIDED BY WHO MINTED THE VALUE:
+//
+//   - An id WE minted — an authorization code, a refresh handle, a request id (the callback's
+//     `state`), a consent id — is a `randomUUID()`: 36 characters. `opaqueIdSchema` caps it at
+//     128, generous for a UUID and so far under the byte ceiling in any encoding that the byte
+//     question never arises. Something materially longer cannot be one we issued, so refusing it
+//     costs nothing and is the honest bound: cap at what the value IS, not at what DynamoDB
+//     tolerates.
+//   - A `client_id` is genuinely the CALLER's, and a CIMD client_id is legitimately a URL up to
+//     2048 (`cimdDocumentSchema`). That one cannot be capped at 128, so it is measured in BYTES,
+//     against the store's own published budget.
+// ---------------------------------------------------------------------------------------------
+
+export const OPAQUE_ID_MAX_LENGTH = 128;
+
+export const opaqueIdSchema = z.string().min(1).max(OPAQUE_ID_MAX_LENGTH);
+
+export const storeKeyStringSchema = z
+  .string()
+  .min(1)
+  .max(2048)
+  .refine((value) => Buffer.byteLength(value, "utf8") <= MAX_OAUTH_ID_BYTES, {
+    message: `value exceeds the ${MAX_OAUTH_ID_BYTES}-byte budget for a value used as an OAuth store key`,
+  });
+
 // Once redirect_uri is trusted (it came back from redirectUriAllowed, or from our OWN stored
 // record — never the raw request again), further errors answer via a standard OAuth error
 // redirect: legible to the client, and carrying `iss` per RFC 9207 on every authorization
@@ -345,7 +382,9 @@ const defaultGeneratePkce = (): { verifier: string; challenge: string } => {
 // own request-schema bounds (`client_id` <= 2048 matches its CIMD cap); `code_challenge`'s 128 is
 // RFC 7636's own maximum length for the parameter.
 const authorizeQuerySchema = z.object({
-  client_id: z.string().min(1).max(2048),
+  // BYTES, not characters — see storeKeyStringSchema. `resolveClient` keys an opaque client_id
+  // straight into `getClient`, so this is the /authorize twin of review round 2's N-1.
+  client_id: storeKeyStringSchema,
   redirect_uri: z.string().min(1).max(2048),
   response_type: z.string().min(1).max(64),
   code_challenge: z.string().min(1).max(128),
@@ -538,6 +577,11 @@ export const handleCallback = async (request: Request, deps: AuthorizeDeps): Pro
   const cognitoError = url.searchParams.get("error");
 
   if (requestId === null) return badRequest("callback is missing state");
+  // Review round 2, N-1: `state` goes straight into `takeRequest` as a partition key, and was
+  // bounded by nothing at all. It is a request id THIS server minted (`randomUUID`), so anything
+  // longer than `opaqueIdSchema` allows cannot be one — refuse it here rather than let DynamoDB
+  // refuse the key with a 5xx.
+  if (!opaqueIdSchema.safeParse(requestId).success) return badRequest("authorization request not found or expired");
 
   const record = await deps.store.takeRequest(requestId);
   if (record === undefined) return badRequest("authorization request not found or expired");
@@ -698,8 +742,6 @@ ${loopbackWarning}
 // actually issued for read+write.
 // ---------------------------------------------------------------------------------------------
 
-const MAX_FORM_FIELD_LENGTH = 512;
-
 export const handleConsentSubmit = async (request: Request, deps: AuthorizeDeps): Promise<Response> => {
   // fix round 1, Minor: pin the method and content-type — a bare form-shaped body on any verb
   // used to mint a code.
@@ -714,7 +756,11 @@ export const handleConsentSubmit = async (request: Request, deps: AuthorizeDeps)
   const action = body.get("action");
   const scopeChoice = body.get("scope_choice");
 
-  if (consentId === null || consentId.length > MAX_FORM_FIELD_LENGTH) return badRequest("missing or invalid consent_id");
+  // Also a partition key, and also an id we minted — review round 2, N-1. The 512-character cap
+  // that stood here was NOT a live 5xx (512 code units weigh at most 1536 bytes, inside the
+  // budget); it was a second, differently-derived bound for the same class of value, and one rule
+  // for "an id this server minted" is the point.
+  if (consentId === null || !opaqueIdSchema.safeParse(consentId).success) return badRequest("missing or invalid consent_id");
 
   const record = await deps.store.takeRequest(consentId);
   if (record === undefined || record.phase !== "consent") {

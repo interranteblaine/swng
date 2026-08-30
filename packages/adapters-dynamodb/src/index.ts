@@ -31,3 +31,8 @@ export type { OAuthStore } from "./createDynamoOAuthStore.js";
 // there would silently desync the moment a constant moved. Consumers import them from the package
 // root, never a deep path.
 export { CODE_TTL_MS, HANDLE_GRACE_MS, HANDLE_TTL_MS } from "./createDynamoOAuthStore.js";
+// The key-layout number the lambda's request schemas need: how many UTF-8 bytes an OAuth id may
+// weigh before the key it produces exceeds DynamoDB's 2048-byte partition-key ceiling. The key
+// BUILDERS in keys.ts stay internal — this one derived constant does not, because a bound written
+// without it is a bound in the wrong unit (review round 2, N-1).
+export { MAX_OAUTH_ID_BYTES } from "./keys.js";

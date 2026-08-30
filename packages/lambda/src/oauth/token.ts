@@ -3,11 +3,19 @@ import { z } from "zod";
 import type { Clock } from "@swng/application";
 import type { OAuthStore } from "@swng/adapters-dynamodb";
 import type { AuthorizeCodeGrant, AuthorizeCognitoConfig } from "./authorize.js";
-import { isFormUrlEncoded } from "./authorize.js";
+import { isFormUrlEncoded, opaqueIdSchema, storeKeyStringSchema } from "./authorize.js";
 
 // POST /token — where the opaque codes `/authorize` mints get redeemed (design spec §4.3 step 4,
 // Task 18). swng MEDIATES: this endpoint issues no JWT of its own, it hands back the access
 // token COGNITO issued for the grant, wrapped only in an opaque refresh handle of ours.
+//
+// WHAT "EVERY FAILURE ANSWERS invalid_grant" DOES AND DOES NOT COVER (review round 2, N-3): it is
+// a statement about the REQUEST — every way a caller can present a bad or spent credential is an
+// `invalid_grant`. It is not a statement about the STORE. A DynamoDB error, or a stored record
+// that fails its parser on the way out, throws through this module to the entry's error boundary
+// and answers 5xx, deliberately: those are server-side faults, not the caller's, and answering
+// `invalid_grant` to a throttle would make a client discard a perfectly good refresh handle. An
+// attacker cannot author those records — the only writers are /authorize and this file.
 //
 // TWO GRANT TYPES, one rule about failure. `authorization_code` verifies the PKCE verifier,
 // `client_id` and `redirect_uri` against the STORED grant, then returns Cognito's access token
@@ -89,29 +97,37 @@ export const parseStoredRefreshHandle = (raw: unknown): RefreshHandleRecord => {
 
 // ---------------------------------------------------------------------------------------------
 // Request schemas — the ONE place in this file bounds belong (CLAUDE.md: "bounds go on request
-// schemas only, never on a stored/read/fold schema"), for the same reason `authorizeQuerySchema`
-// exists: every field here is attacker-controlled, and an unbounded one reaches DynamoDB as a key
-// (past the 2048-byte key ceiling it is a ValidationException, i.e. a 500 where the contract
-// promises `invalid_grant`). The caps mirror that schema's. `code_verifier`'s 43–128 is RFC 7636
-// §4.1's own range — review round 1, M-9: a one-character verifier was accepted before this.
-// Length only, deliberately, NOT §4.1's `[A-Za-z0-9-._~]` charset: refusing a padded or otherwise
-// off-alphabet verifier that still hashes correctly would be an interop break with no security
-// gain, since the challenge comparison is what actually decides.
+// schemas only, never on a stored/read/fold schema"), because every field here is
+// attacker-controlled and two of them are used as DynamoDB partition keys.
+//
+// `code` and `refresh_token` are values WE minted (`randomUUID`, 36 characters), so they get
+// `opaqueIdSchema`'s tight 128 rather than a byte computation — review round 2, N-1: the
+// `max(2048)` that stood here counted UTF-16 code units while the key is capped in BYTES, and a
+// 2039-character `code` threw an uncaught `ValidationException` out of this endpoint. `client_id`
+// is the caller's own and legitimately long (a CIMD client_id is a URL), so it is measured in
+// bytes against the store's published budget. Both schemas live in authorize.ts, shared with
+// /authorize, which keys on the same class of value. `redirect_uri` is COMPARED, never keyed, so
+// a plain character cap is the right bound for it.
+//
+// `code_verifier`'s 43–128 is RFC 7636 §4.1's own range — review round 1, M-9: a one-character
+// verifier was accepted before this. Length only, deliberately, NOT §4.1's `[A-Za-z0-9-._~]`
+// charset: refusing a padded or otherwise off-alphabet verifier that still hashes correctly would
+// be an interop break with no security gain, since the challenge comparison is what decides.
 //
 // Parsing happens BEFORE the store is touched, so a malformed request never burns a code, never
 // reads a handle, and never reaches Cognito.
 // ---------------------------------------------------------------------------------------------
 
 const authorizationCodeRequestSchema = z.object({
-  code: z.string().min(1).max(2048),
-  client_id: z.string().min(1).max(2048),
+  code: opaqueIdSchema,
+  client_id: storeKeyStringSchema,
   redirect_uri: z.string().min(1).max(2048),
   code_verifier: z.string().min(43).max(128),
 });
 
 const refreshRequestSchema = z.object({
-  refresh_token: z.string().min(1).max(2048),
-  client_id: z.string().min(1).max(2048),
+  refresh_token: opaqueIdSchema,
+  client_id: storeKeyStringSchema,
 });
 
 const AUTHORIZATION_CODE_KEYS = ["code", "client_id", "redirect_uri", "code_verifier"] as const;

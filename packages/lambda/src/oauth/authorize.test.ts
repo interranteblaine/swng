@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_OAUTH_ID_BYTES } from "@swng/adapters-dynamodb";
 import type { Clock } from "@swng/application";
 import type { ClientRecord, ClientStore, FetchCimdDeps } from "./clients.js";
 import type { AuthorizeCodeGrant, AuthorizeDeps, AuthorizeRequestRecord } from "./authorize.js";
@@ -10,6 +11,15 @@ import { CALLBACK_PATH, handleAuthorize, handleCallback, handleConsentSubmit, pa
 // (debugCodeCount/debugPeekCode) that is NOT part of the production AuthorizeStore interface.
 // ---------------------------------------------------------------------------------------------
 
+// The real store builds `<PREFIX>#<id>` and DynamoDB refuses a partition key over 2048 BYTES with
+// a `ValidationException` — an error nothing in this module catches, so it surfaces as a 5xx. The
+// fake refuses the same ids (review round 2, N-1: `z.string().max(2048)` counts UTF-16 code units,
+// not bytes, so a bound written in the wrong unit used to reach the store and throw).
+const assertKeyable = (id: string): void => {
+  const bytes = Buffer.byteLength(id, "utf8");
+  if (bytes > MAX_OAUTH_ID_BYTES) throw new Error(`ValidationException: Hash primary key values must be under 2048 bytes (id weighed ${bytes})`);
+};
+
 const createFakeStore = () => {
   const requests = new Map<string, AuthorizeRequestRecord>();
   const codes = new Map<string, AuthorizeCodeGrant>();
@@ -17,14 +27,17 @@ const createFakeStore = () => {
   return {
     putRequest: async (id: string, value: AuthorizeRequestRecord) => {
       putRequestCallCount += 1;
+      assertKeyable(id);
       requests.set(id, value);
     },
     takeRequest: async (id: string) => {
+      assertKeyable(id);
       const value = requests.get(id);
       requests.delete(id);
       return value;
     },
     putCode: async (code: string, value: AuthorizeCodeGrant) => {
+      assertKeyable(code);
       codes.set(code, value);
     },
     debugCodeCount: async () => codes.size,
@@ -41,7 +54,10 @@ const fixedClock: Clock = { now: () => 1_000_000 };
 
 const buildClientStore = (record: ClientRecord | undefined): ClientStore => ({
   putClient: async () => {},
-  getClient: async (id: string) => (id === record?.clientId ? record : undefined),
+  getClient: async (id: string) => {
+    assertKeyable(id);
+    return id === record?.clientId ? record : undefined;
+  },
 });
 
 const buildCimd = (): FetchCimdDeps => ({ clock: fixedClock });
@@ -187,6 +203,22 @@ describe("handleAuthorize", () => {
     expect(store.debugPutRequestCallCount()).toBe(0);
   });
 
+  it("400s a client_id that is inside max(2048) but too heavy to be a partition key (fix round 2, N-1)", async () => {
+    // 700 CJK characters: 700 code units, 2100 UTF-8 bytes. `z.string().max(2048)` measures the
+    // former and the DynamoDB key ceiling the latter, so this used to sail through the schema and
+    // throw a ValidationException inside `getClient` — an unauthenticated 5xx at /authorize, the
+    // twin of the /token finding.
+    const { deps, store } = buildDeps({});
+    const heavyClientId = "\u8a9e".repeat(700);
+    expect(heavyClientId.length).toBeLessThanOrEqual(2048);
+    expect(Buffer.byteLength(heavyClientId, "utf8")).toBeGreaterThan(MAX_OAUTH_ID_BYTES);
+
+    const res = await handleAuthorize(authorizeRequest({ ...baseParams, client_id: heavyClientId }), deps);
+    expect(res.status).toBe(400);
+    expect(res.headers.get("location")).toBeNull();
+    expect(store.debugPutRequestCallCount()).toBe(0);
+  });
+
   it("refuses a scope the resource server does not own", async () => {
     const { deps } = buildDeps({});
     const res = await handleAuthorize(authorizeRequest({ ...baseParams, scope: "https://other-resource.example/admin" }), deps);
@@ -231,6 +263,21 @@ describe("handleAuthorize", () => {
     expect(approveRes.status).toBe(302);
     expect(approveRes.headers.get("location")).not.toBeNull(); // this IS the code-carrying redirect
     expect(approveRes.headers.get("cache-control")).toContain("no-store");
+  });
+});
+
+describe("handleCallback", () => {
+  it("400s an over-long state instead of keying it into the store (fix round 2, N-1)", async () => {
+    // `state` IS the request id, and it went straight into `takeRequest` as a partition key with
+    // no bound at all. It is a randomUUID this server minted, so 2039 characters cannot be one.
+    const { deps } = buildDeps({});
+    const callbackUrl = new URL(`https://mcp.beta.swng.golf${CALLBACK_PATH}`);
+    callbackUrl.searchParams.set("state", "a".repeat(2039));
+    callbackUrl.searchParams.set("code", "cognito-code-leg1");
+
+    const res = await handleCallback(new Request(callbackUrl.toString()), deps);
+    expect(res.status).toBe(400);
+    expect(res.headers.get("location")).toBeNull();
   });
 });
 

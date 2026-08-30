@@ -118,6 +118,111 @@ const omitUndefined = <T extends object>(obj: T): T => {
   return out;
 };
 
+// ---------------------------------------------------------------------------------------------
+// Stored-record parsing — CLAUDE.md: "a type must not assert what the read path cannot guarantee
+// — parse stored data, never cast it." These are the `parseRequest` / `parseCodeGrant` that
+// `createDynamoOAuthStore` (Task 14) takes as injected parameters; without them the store cannot
+// be wired at all. Same idiom as `parseStoredClientRecord` in clients.ts: plain shape checks, a
+// named error per failed field, and deliberately NO bounds — CLAUDE.md again: "bounds go on
+// request schemas only, never on a stored/read/fold schema." `authorizeQuerySchema` already
+// bounded every one of these fields on the way IN.
+//
+// `parseStoredAuthorizeRequest` discriminates on `phase` and must cover ALL THREE variants:
+// dropping "leg2-pending" would leave every WRITE-approving consent dead at the leg-2 callback
+// (handleCallback's `record.phase === "leg2-pending"` branch would never be reached, because the
+// store would throw while parsing the record it was handed) — i.e. the entire write path.
+// ---------------------------------------------------------------------------------------------
+
+const storedObject = (context: string, raw: unknown): Record<string, unknown> => {
+  if (typeof raw !== "object" || raw === null) throw new Error(`${context} is not an object`);
+  return raw as Record<string, unknown>;
+};
+
+const storedString = (context: string, obj: Record<string, unknown>, field: string): string => {
+  const value = obj[field];
+  if (typeof value !== "string") throw new Error(`${context}: ${field} missing or not a string`);
+  return value;
+};
+
+const storedOptionalString = (context: string, obj: Record<string, unknown>, field: string): string | undefined => {
+  const value = obj[field];
+  if (value !== undefined && typeof value !== "string") throw new Error(`${context}: ${field} present but not a string`);
+  return value;
+};
+
+const storedStringArray = (context: string, obj: Record<string, unknown>, field: string): string[] => {
+  const value = obj[field];
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) {
+    throw new Error(`${context}: ${field} missing or not a string[]`);
+  }
+  return value as string[];
+};
+
+export const parseStoredAuthorizeRequest = (raw: unknown): AuthorizeRequestRecord => {
+  const context = "stored OAuth authorize request";
+  const obj = storedObject(context, raw);
+
+  if (obj.phase === "pending") {
+    return omitUndefined<PendingAuthorizeRequest>({
+      phase: "pending",
+      clientId: storedString(context, obj, "clientId"),
+      clientName: storedOptionalString(context, obj, "clientName"),
+      redirectUri: storedString(context, obj, "redirectUri"),
+      clientState: storedOptionalString(context, obj, "clientState"),
+      requestedScopes: storedStringArray(context, obj, "requestedScopes"),
+      codeChallenge: storedString(context, obj, "codeChallenge"),
+      codeChallengeMethod: storedString(context, obj, "codeChallengeMethod"),
+      registeredRedirectUris: storedStringArray(context, obj, "registeredRedirectUris"),
+      cognitoCodeVerifier: storedString(context, obj, "cognitoCodeVerifier"),
+    });
+  }
+
+  if (obj.phase === "consent") {
+    return omitUndefined<ConsentAuthorizeRequest>({
+      phase: "consent",
+      clientId: storedString(context, obj, "clientId"),
+      clientName: storedOptionalString(context, obj, "clientName"),
+      redirectUri: storedString(context, obj, "redirectUri"),
+      clientState: storedOptionalString(context, obj, "clientState"),
+      requestedScopes: storedStringArray(context, obj, "requestedScopes"),
+      codeChallenge: storedString(context, obj, "codeChallenge"),
+      codeChallengeMethod: storedString(context, obj, "codeChallengeMethod"),
+      registeredRedirectUris: storedStringArray(context, obj, "registeredRedirectUris"),
+      cognitoAccessToken: storedString(context, obj, "cognitoAccessToken"),
+      cognitoRefreshToken: storedOptionalString(context, obj, "cognitoRefreshToken"),
+    });
+  }
+
+  if (obj.phase === "leg2-pending") {
+    return omitUndefined<Leg2PendingAuthorizeRequest>({
+      phase: "leg2-pending",
+      clientId: storedString(context, obj, "clientId"),
+      redirectUri: storedString(context, obj, "redirectUri"),
+      clientState: storedOptionalString(context, obj, "clientState"),
+      codeChallenge: storedString(context, obj, "codeChallenge"),
+      codeChallengeMethod: storedString(context, obj, "codeChallengeMethod"),
+      approvedScopes: storedStringArray(context, obj, "approvedScopes"),
+      cognitoCodeVerifier: storedString(context, obj, "cognitoCodeVerifier"),
+    });
+  }
+
+  throw new Error(`${context}: unknown phase ${JSON.stringify(obj.phase)} — expected "pending", "consent" or "leg2-pending"`);
+};
+
+export const parseStoredCodeGrant = (raw: unknown): AuthorizeCodeGrant => {
+  const context = "stored OAuth code grant";
+  const obj = storedObject(context, raw);
+  return omitUndefined<AuthorizeCodeGrant>({
+    clientId: storedString(context, obj, "clientId"),
+    redirectUri: storedString(context, obj, "redirectUri"),
+    approvedScopes: storedStringArray(context, obj, "approvedScopes"),
+    codeChallenge: storedString(context, obj, "codeChallenge"),
+    codeChallengeMethod: storedString(context, obj, "codeChallengeMethod"),
+    cognitoAccessToken: storedString(context, obj, "cognitoAccessToken"),
+    cognitoRefreshToken: storedOptionalString(context, obj, "cognitoRefreshToken"),
+  });
+};
+
 export interface AuthorizeCognitoConfig {
   readonly domain: string; // e.g. "https://swng-beta.auth.us-east-1.amazoncognito.com"
   readonly clientId: string; // OUR confidential Cognito app client, held server-side

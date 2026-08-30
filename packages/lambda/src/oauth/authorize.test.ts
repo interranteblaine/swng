@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Clock } from "@swng/application";
 import type { ClientRecord, ClientStore, FetchCimdDeps } from "./clients.js";
 import type { AuthorizeCodeGrant, AuthorizeDeps, AuthorizeRequestRecord } from "./authorize.js";
-import { CALLBACK_PATH, handleAuthorize, handleCallback, handleConsentSubmit } from "./authorize.js";
+import { CALLBACK_PATH, handleAuthorize, handleCallback, handleConsentSubmit, parseStoredAuthorizeRequest, parseStoredCodeGrant } from "./authorize.js";
 
 // ---------------------------------------------------------------------------------------------
 // A hand-rolled in-memory store, matching Task 14's OAuthStore contract (put/take, single-use)
@@ -431,5 +431,184 @@ describe("handleConsentSubmit", () => {
     const res = await handleConsentSubmit(req, { ...deps, store });
     expect(res.status).toBe(400);
     expect(await store.debugCodeCount()).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The stored-record parsers — `createDynamoOAuthStore`'s injected `parseRequest`/`parseCodeGrant`
+// (Task 14 takes all four as parameters; nothing could wire the store without these). CLAUDE.md:
+// "parse stored data, never cast it."
+// ---------------------------------------------------------------------------------------------
+
+// A store that behaves like the real one at the boundary that matters here: what goes to DynamoDB
+// is JSON-shaped, and what comes back is UNKNOWN until a parser has said otherwise. Any phase the
+// parser fails to handle therefore kills the flow that stores it, in this file, end to end.
+const createParsingStore = () => {
+  const inner = createFakeStore();
+  const roundTrip = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
+  return {
+    ...inner,
+    putRequest: (id: string, value: AuthorizeRequestRecord) => inner.putRequest(id, roundTrip(value) as AuthorizeRequestRecord),
+    takeRequest: async (id: string) => {
+      const raw = await inner.takeRequest(id);
+      return raw === undefined ? undefined : parseStoredAuthorizeRequest(raw);
+    },
+    putCode: (code: string, value: AuthorizeCodeGrant) => inner.putCode(code, roundTrip(value) as AuthorizeCodeGrant),
+    debugPeekCode: (code: string) => {
+      const raw = inner.debugPeekCode(code);
+      return raw === undefined ? undefined : parseStoredCodeGrant(raw);
+    },
+  };
+};
+
+const PENDING_RECORD = {
+  phase: "pending",
+  clientId: CLIENT_ID,
+  clientName: "Test Client",
+  redirectUri: REGISTERED_REDIRECT,
+  clientState: "client-state-123",
+  requestedScopes: [`${CANONICAL}/read`],
+  codeChallenge: "client-challenge",
+  codeChallengeMethod: "S256",
+  registeredRedirectUris: [REGISTERED_REDIRECT],
+  cognitoCodeVerifier: "our-leg1-verifier",
+} as const;
+
+const CONSENT_RECORD = {
+  phase: "consent",
+  clientId: CLIENT_ID,
+  clientName: "Test Client",
+  redirectUri: REGISTERED_REDIRECT,
+  clientState: "client-state-123",
+  requestedScopes: [`${CANONICAL}/read`],
+  codeChallenge: "client-challenge",
+  codeChallengeMethod: "S256",
+  registeredRedirectUris: [REGISTERED_REDIRECT],
+  cognitoAccessToken: "leg1-access-token",
+  cognitoRefreshToken: "leg1-refresh-token",
+} as const;
+
+const LEG2_RECORD = {
+  phase: "leg2-pending",
+  clientId: CLIENT_ID,
+  redirectUri: REGISTERED_REDIRECT,
+  clientState: "client-state-123",
+  codeChallenge: "client-challenge",
+  codeChallengeMethod: "S256",
+  approvedScopes: [`${CANONICAL}/read`, `${CANONICAL}/write`],
+  cognitoCodeVerifier: "our-leg2-verifier",
+} as const;
+
+const CODE_GRANT_RECORD = {
+  clientId: CLIENT_ID,
+  redirectUri: REGISTERED_REDIRECT,
+  approvedScopes: [`${CANONICAL}/read`, `${CANONICAL}/write`],
+  codeChallenge: "client-challenge",
+  codeChallengeMethod: "S256",
+  cognitoAccessToken: "leg2-access-token",
+  cognitoRefreshToken: "leg2-refresh-token",
+} as const;
+
+const stored = (record: object): unknown => JSON.parse(JSON.stringify(record));
+
+// Drops keys from a record fixture — the "this field is absent in the stored item" case, which
+// is what an omitted optional (or a corrupt record) actually looks like coming back from Dynamo.
+const without = (record: object, ...keys: string[]): Record<string, unknown> => {
+  const copy = { ...record } as Record<string, unknown>;
+  for (const key of keys) delete copy[key];
+  return copy;
+};
+
+describe("parseStoredAuthorizeRequest", () => {
+  it.each([
+    ["pending", PENDING_RECORD],
+    ["consent", CONSENT_RECORD],
+    ["leg2-pending", LEG2_RECORD],
+  ])("round-trips a %s record", (_phase, record) => {
+    expect(parseStoredAuthorizeRequest(stored(record))).toEqual(record);
+  });
+
+  it("omits absent optional fields rather than setting them to undefined", () => {
+    // The marshalling lesson clients.ts already paid for: `marshall({ clientName: undefined })`
+    // throws, so an absent optional must come back as an ABSENT KEY, not an undefined value.
+    const parsed = parseStoredAuthorizeRequest(stored(without(CONSENT_RECORD, "clientName", "clientState", "cognitoRefreshToken")));
+    expect("clientName" in parsed).toBe(false);
+    expect("clientState" in parsed).toBe(false);
+    expect("cognitoRefreshToken" in parsed).toBe(false);
+  });
+
+  it.each([
+    ["a phase it does not know", { ...PENDING_RECORD, phase: "leg3-pending" }],
+    ["no phase at all", without(PENDING_RECORD, "phase")],
+    ["a pending record missing cognitoCodeVerifier", without(PENDING_RECORD, "cognitoCodeVerifier")],
+    ["a consent record missing cognitoAccessToken", without(CONSENT_RECORD, "cognitoAccessToken")],
+    ["a leg2-pending record missing approvedScopes", without(LEG2_RECORD, "approvedScopes")],
+    ["requestedScopes that is not a string[]", { ...PENDING_RECORD, requestedScopes: [1, 2] }],
+    ["a clientName that is not a string", { ...PENDING_RECORD, clientName: 42 }],
+  ])("throws on %s", (_label, record) => {
+    expect(() => parseStoredAuthorizeRequest(stored(record))).toThrow();
+  });
+
+  it.each([
+    ["a string", "not-a-record"],
+    ["null", null],
+  ])("throws on %s", (_label, raw) => {
+    expect(() => parseStoredAuthorizeRequest(raw)).toThrow();
+  });
+});
+
+describe("parseStoredCodeGrant", () => {
+  it("round-trips a code grant", () => {
+    expect(parseStoredCodeGrant(stored(CODE_GRANT_RECORD))).toEqual(CODE_GRANT_RECORD);
+  });
+
+  it("omits an absent cognitoRefreshToken rather than setting it to undefined", () => {
+    expect("cognitoRefreshToken" in parseStoredCodeGrant(stored(without(CODE_GRANT_RECORD, "cognitoRefreshToken")))).toBe(false);
+  });
+
+  it.each([
+    ["not an object", "nope"],
+    ["missing cognitoAccessToken", without(CODE_GRANT_RECORD, "cognitoAccessToken")],
+    ["approvedScopes not a string[]", { ...CODE_GRANT_RECORD, approvedScopes: "read write" }],
+    ["codeChallenge missing", without(CODE_GRANT_RECORD, "codeChallenge")],
+  ])("throws when %s", (_label, raw) => {
+    expect(() => parseStoredCodeGrant(typeof raw === "string" ? raw : stored(raw))).toThrow();
+  });
+});
+
+describe("the whole flow, driven through the stored-record parsers", () => {
+  // These two are the reason the parsers are not merely unit-testable trivia: every record this
+  // file writes must survive a store round trip, and a parser that misses a phase takes the flow
+  // that stores it down with it. A parser missing "leg2-pending" fails the SECOND test only —
+  // which is precisely the whole WRITE path.
+  it("completes the read-only path when every stored record is parsed on the way out", async () => {
+    const { fetchImpl } = buildFetchSpy();
+    const { deps, store } = buildDeps({ fetchImpl, store: createParsingStore() });
+    const { consentId } = await driveToConsent(deps);
+
+    const approveRes = await handleConsentSubmit(consentSubmitRequest({ consent_id: consentId, action: "approve", scope_choice: "read" }), deps);
+    expect(approveRes.status).toBe(302);
+    const code = new URL(approveRes.headers.get("location")!).searchParams.get("code");
+    expect(store.debugPeekCode(code!)!.approvedScopes).toEqual([`${CANONICAL}/read`]);
+  });
+
+  it("completes the WRITE step-up path when every stored record is parsed on the way out", async () => {
+    const { fetchImpl } = buildFetchSpy();
+    const { deps, store } = buildDeps({ fetchImpl, store: createParsingStore() });
+    const { consentId } = await driveToConsent(deps);
+
+    const stepUpRes = await handleConsentSubmit(consentSubmitRequest({ consent_id: consentId, action: "approve", scope_choice: "read_write" }), deps);
+    expect(stepUpRes.status).toBe(302);
+    const leg2Id = new URL(stepUpRes.headers.get("location")!).searchParams.get("state")!;
+
+    const leg2CallbackUrl = new URL(`https://mcp.beta.swng.golf${CALLBACK_PATH}`);
+    leg2CallbackUrl.searchParams.set("state", leg2Id);
+    leg2CallbackUrl.searchParams.set("code", "cognito-code-leg2");
+    const finalRes = await handleCallback(new Request(leg2CallbackUrl.toString()), deps);
+
+    expect(finalRes.status).toBe(302);
+    const code = new URL(finalRes.headers.get("location")!).searchParams.get("code");
+    expect(code).not.toBeNull();
+    expect(store.debugPeekCode(code!)!.approvedScopes).toEqual([`${CANONICAL}/read`, `${CANONICAL}/write`]);
   });
 });

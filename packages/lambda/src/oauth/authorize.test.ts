@@ -414,6 +414,25 @@ describe("handleConsentSubmit", () => {
     expect(await store.debugCodeCount()).toBe(0);
   });
 
+  it("rejects a JSON content-type that SMUGGLES the form media type in a parameter", async () => {
+    // Task 18 fix round 1, M-1: the `.includes(...)` test that stood here (and at /token, where
+    // the reviewer used it to redeem a real authorization code) accepted this header. The media
+    // type is everything before the first ";" — `isFormUrlEncoded` is the one place both
+    // form-encoded endpoints in this surface ask.
+    const { fetchImpl } = buildFetchSpy();
+    const { deps, store } = buildDeps({ fetchImpl });
+    const { consentId } = await driveToConsent(deps);
+
+    const req = new Request("https://mcp.beta.swng.golf/oauth/consent", {
+      method: "POST",
+      headers: { "content-type": 'application/json; note="application/x-www-form-urlencoded"' },
+      body: new URLSearchParams({ consent_id: consentId, action: "approve", scope_choice: "read" }).toString(),
+    });
+    const res = await handleConsentSubmit(req, { ...deps, store });
+    expect(res.status).toBe(400);
+    expect(await store.debugCodeCount()).toBe(0);
+  });
+
   it("rejects a submission that isn't form-urlencoded — an OTHERWISE-VALID form BODY under the wrong content-type", async () => {
     const { fetchImpl } = buildFetchSpy();
     const { deps, store } = buildDeps({ fetchImpl });

@@ -1,19 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { HANDLE_GRACE_MS, HANDLE_TTL_MS } from "@swng/adapters-dynamodb";
+import { CODE_TTL_MS, HANDLE_GRACE_MS, HANDLE_TTL_MS } from "@swng/adapters-dynamodb";
 import type { AuthorizeCodeGrant, AuthorizeCognitoConfig } from "./authorize.js";
 import type { RefreshHandleRecord, TokenDeps } from "./token.js";
 import { handleToken, parseStoredRefreshHandle } from "./token.js";
 
 // ---------------------------------------------------------------------------------------------
 // A hand-rolled in-memory store reproducing Task 14's OAuthStore semantics for the three slots
-// /token touches: `takeCode` (single-use — the delete IS the replay defence), `putHandle`/
-// `getHandle` (explicit expiry against an injected clock, never mere presence), and
-// `retireHandle` (SHRINKS expiresAtMs to now + HANDLE_GRACE_MS and stamps retiredAtMs, so only
-// the FIRST retire ever takes effect — createDynamoOAuthStore.ts's own rule, which its contract
-// suite already proves against real DynamoDB).
+// /token touches. Fidelity here is what makes every assertion in this file mean anything, so
+// each method mirrors the real one line for line:
 //
-// HANDLE_GRACE_MS / HANDLE_TTL_MS are IMPORTED, never retyped as 30_000 / 30 days: the grace
-// window is the store's constant, and a copy here would silently desync the day it moves.
+//   takeCode     — ONE conditional delete on `attribute_exists(pk) AND expiresAtMs > :now`, so an
+//                  expired code is neither returned NOR deleted (fix round 1, M-10: this used to
+//                  be a plain get+delete, which silently dropped the expiry clause).
+//   putHandle /  — an explicit `expiresAtMs` comparison against the injected clock, never mere
+//   getHandle      presence: DynamoDB's `ttl` is cleanup, not expiry.
+//   retireHandle — SHRINKS expiresAtMs to now + HANDLE_GRACE_MS and stamps retiredAtMs, so only
+//                  the FIRST retire ever takes effect.
+//
+// CODE_TTL_MS / HANDLE_GRACE_MS / HANDLE_TTL_MS are IMPORTED, never retyped: they are the store's
+// constants, and a copy here would silently desync the day one of them moves.
 // ---------------------------------------------------------------------------------------------
 
 interface StoredHandle {
@@ -22,27 +27,36 @@ interface StoredHandle {
   readonly retiredAtMs?: number;
 }
 
-const createClock = (startMs = 1_700_000_000_000) => {
+const NOW_MS = 1_700_000_000_000;
+const NOW_S = NOW_MS / 1000;
+
+const createClock = (startMs = NOW_MS) => {
   let nowMs = startMs;
   return { now: () => nowMs, advance: (ms: number) => (nowMs += ms) };
 };
 
 const createFakeStore = (clock: { now: () => number }) => {
-  const codes = new Map<string, AuthorizeCodeGrant>();
+  const codes = new Map<string, { value: AuthorizeCodeGrant; expiresAtMs: number }>();
   const handles = new Map<string, StoredHandle>();
+  let takeCodeCalls = 0;
+  let getHandleCalls = 0;
   return {
     takeCode: async (code: string) => {
-      const grant = codes.get(code);
-      codes.delete(code); // single-use, exactly as the conditional delete is
-      return grant;
+      takeCodeCalls += 1;
+      const stored = codes.get(code);
+      if (stored === undefined) return undefined;
+      if (stored.expiresAtMs <= clock.now()) return undefined; // the condition fails: nothing returned, nothing deleted
+      codes.delete(code);
+      return stored.value;
     },
     putHandle: async (handleId: string, value: RefreshHandleRecord) => {
       handles.set(handleId, { value, expiresAtMs: clock.now() + HANDLE_TTL_MS });
     },
     getHandle: async (handleId: string) => {
+      getHandleCalls += 1;
       const stored = handles.get(handleId);
       if (stored === undefined) return undefined;
-      if (stored.expiresAtMs <= clock.now()) return undefined; // expiry is an explicit comparison, never TTL cleanup
+      if (stored.expiresAtMs <= clock.now()) return undefined;
       return stored.value;
     },
     retireHandle: async (handleId: string) => {
@@ -53,10 +67,12 @@ const createFakeStore = (clock: { now: () => number }) => {
       handles.set(handleId, { value: stored.value, expiresAtMs: clock.now() + HANDLE_GRACE_MS, retiredAtMs: clock.now() });
     },
     // TEST-ONLY introspection — not part of the production TokenStore slice.
-    debugPutCode: (code: string, grant: AuthorizeCodeGrant) => codes.set(code, grant),
+    debugPutCode: (code: string, grant: AuthorizeCodeGrant) => codes.set(code, { value: grant, expiresAtMs: clock.now() + CODE_TTL_MS }),
     debugPutHandle: (handleId: string, value: RefreshHandleRecord) => handles.set(handleId, { value, expiresAtMs: clock.now() + HANDLE_TTL_MS }),
     debugPeekHandle: (handleId: string) => handles.get(handleId),
     debugHandleCount: () => handles.size,
+    debugTakeCodeCalls: () => takeCodeCalls,
+    debugGetHandleCalls: () => getHandleCalls,
   };
 };
 
@@ -66,14 +82,28 @@ const CANONICAL = "https://mcp.beta.swng.golf/mcp";
 const CLIENT_ID = "test-client-1";
 const REGISTERED_REDIRECT = "https://client.example.com/cb";
 
-// The S256 pair, hard-coded rather than recomputed here: a test that derives the challenge with
+// The S256 pairs, hard-coded rather than recomputed here: a test that derives the challenge with
 // its own `createHash("sha256")` shares the production algorithm choice and would follow it
-// anywhere. This literal is the fixed answer S256 must produce for that verifier.
+// anywhere. These literals are the fixed answers S256 must produce for those verifiers.
 const CODE_VERIFIER = "a-forty-three-plus-character-code-verifier-value-0123456789";
 const CODE_CHALLENGE = "_9VsrwI8EFcpmtTykQ_NYvolh90s5Pb9o5MPRUru_mM";
+const VERIFIER_43 = "a".repeat(43); // RFC 7636 §4.1's shortest legal verifier
+const CHALLENGE_43 = "ZtNPunH49FD35FWYhT5Tv8I7vRKQJ8uxMaL0_9eHjNA";
+const VERIFIER_128 = "b".repeat(128); // …and its longest
+const CHALLENGE_128 = "cK4cUwf1JQ1cueQHQrqWE_zfm42ett05MzBEOy1e_70";
 
-const COGNITO_ACCESS_TOKEN = "cognito-access-token-from-the-authorize-legs";
+// A JWT-shaped access token. Nothing signs or verifies these — `expires_in` is read from `exp`
+// advisorily (see token.ts), so the signature segment is a literal.
+const jwtWith = (payload: object): string =>
+  [
+    Buffer.from(JSON.stringify({ alg: "RS256", kid: "k1" })).toString("base64url"),
+    Buffer.from(JSON.stringify(payload)).toString("base64url"),
+    "signature-nothing-here-verifies",
+  ].join(".");
+
+const COGNITO_ACCESS_TOKEN = jwtWith({ sub: "golfer-1", token_use: "access", exp: NOW_S + 3600 });
 const COGNITO_REFRESH_TOKEN = "cognito-refresh-token-THE-CREDENTIAL-WE-WRAP";
+const refreshedAccessToken = (n: number): string => jwtWith({ sub: "golfer-1", token_use: "access", exp: NOW_S + 3600, jti: `refreshed-${n}` });
 
 const COGNITO: AuthorizeCognitoConfig = {
   domain: "https://swng-beta.auth.us-east-1.amazoncognito.com",
@@ -94,9 +124,9 @@ const buildGrant = (overrides: Partial<AuthorizeCodeGrant> = {}): AuthorizeCodeG
 });
 
 // Cognito's refresh grant, modelled faithfully: it returns a NEW access token and — by default,
-// as the real endpoint does — NO new refresh token. `refreshToken` is set only by the test that
-// probes what happens when a rotating issuer sends one.
-const buildCognitoFetch = (opts: { ok?: boolean; refreshToken?: string } = {}) => {
+// as the real endpoint does — NO new refresh token. `status` / `payload` / `throws` exist so the
+// upstream-failure branches are reachable from a test.
+const buildCognitoFetch = (opts: { status?: number; refreshToken?: string; payload?: Record<string, unknown>; throws?: boolean } = {}) => {
   const calls: { url: string; body: URLSearchParams; authorization: string | null }[] = [];
   let issued = 0;
   const fetchImpl = (async (input: unknown, init?: RequestInit) => {
@@ -106,13 +136,15 @@ const buildCognitoFetch = (opts: { ok?: boolean; refreshToken?: string } = {}) =
       body: new URLSearchParams(typeof init?.body === "string" ? init.body : ""),
       authorization: headers.get("authorization"),
     });
-    if (opts.ok === false) {
-      return new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400, headers: { "content-type": "application/json" } });
-    }
+    if (opts.throws === true) throw new TypeError("fetch failed"); // what undici throws when the network is gone
     issued += 1;
-    const payload: Record<string, string> = { access_token: `cognito-access-refreshed-${issued}`, token_type: "Bearer", expires_in: "3600" };
-    if (opts.refreshToken !== undefined) payload.refresh_token = opts.refreshToken;
-    return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+    const payload = opts.payload ?? {
+      access_token: refreshedAccessToken(issued),
+      token_type: "Bearer",
+      expires_in: 3600,
+      ...(opts.refreshToken === undefined ? {} : { refresh_token: opts.refreshToken }),
+    };
+    return new Response(JSON.stringify(payload), { status: opts.status ?? 200, headers: { "content-type": "application/json" } });
   }) as unknown as typeof fetch;
   return { fetchImpl, calls };
 };
@@ -126,6 +158,7 @@ const buildDeps = (overrides: { store?: FakeStore; fetchImpl?: typeof fetch; clo
   const deps: TokenDeps = {
     store,
     cognito: COGNITO,
+    clock,
     fetchImpl: overrides.fetchImpl,
     generateId: nextId,
   };
@@ -158,12 +191,14 @@ const refreshForm = (handle: string, overrides: Record<string, string> = {}): Re
 const bodyOf = async (res: Response): Promise<Record<string, unknown>> => (await res.json()) as Record<string, unknown>;
 
 // Every failure at this endpoint answers `invalid_grant` — spec §4.3 step 4, "Claude keys its
-// recovery on that exact code." Never invalid_request, never a custom code.
+// recovery on that exact code." Never invalid_request, never a custom code. RFC 6749 §5.1 wants
+// BOTH cache headers on a token endpoint response, so both are asserted on every failure.
 const expectInvalidGrant = async (res: Response): Promise<void> => {
   expect(res.status).toBe(400);
   const body = await bodyOf(res);
   expect(body.error).toBe("invalid_grant");
   expect(res.headers.get("cache-control")).toContain("no-store");
+  expect(res.headers.get("pragma")).toBe("no-cache");
 };
 
 describe("handleToken — the request envelope", () => {
@@ -183,6 +218,28 @@ describe("handleToken — the request envelope", () => {
     expect(retry.status).toBe(200);
   });
 
+  it("refuses a JSON content-type that SMUGGLES the form media type in a parameter", async () => {
+    // fix round 1, M-1: the reviewer redeemed a real code with exactly this header, because the
+    // guard was a substring test. The media type is everything before the first ";" — nothing else.
+    const { deps, store } = buildDeps({});
+    store.debugPutCode("the-opaque-code", buildGrant());
+
+    const smuggled = 'application/json; note="application/x-www-form-urlencoded"';
+    await expectInvalidGrant(await handleToken(tokenRequest(codeForm(), { contentType: smuggled }), deps));
+    expect(store.debugTakeCodeCalls()).toBe(0); // refused before the store was ever touched
+    expect((await handleToken(tokenRequest(codeForm()), deps)).status).toBe(200); // the code survived
+  });
+
+  it("accepts the form media type with parameters attached", async () => {
+    // The other half of M-1's fix: a charset is a PARAMETER, and stripping it must not make the
+    // guard reject an ordinary, conformant client.
+    const { deps, store } = buildDeps({});
+    store.debugPutCode("the-opaque-code", buildGrant());
+
+    const res = await handleToken(tokenRequest(codeForm(), { contentType: "Application/X-WWW-Form-UrlEncoded; charset=UTF-8" }), deps);
+    expect(res.status).toBe(200);
+  });
+
   it("refuses a non-POST carrying an otherwise-valid form body", async () => {
     const { deps, store } = buildDeps({});
     store.debugPutCode("the-opaque-code", buildGrant());
@@ -197,6 +254,28 @@ describe("handleToken — the request envelope", () => {
     const res = await handleToken(tokenRequest({ grant_type: "client_credentials", client_id: CLIENT_ID }), deps);
     await expectInvalidGrant(res);
   });
+
+  it("never echoes anything the caller sent back in the error body", async () => {
+    // fix round 1, M-6: the report claimed this property and nothing held it. A description built
+    // with a template literal over `client_id` / `refresh_token` turns this red.
+    const marker = "MARKER-9d41f0-reflected-input";
+    const { fetchImpl } = buildCognitoFetch();
+    const { deps, store } = buildDeps({ fetchImpl });
+    store.debugPutCode("the-opaque-code", buildGrant());
+    store.debugPutHandle("handle-original", { clientId: CLIENT_ID, approvedScopes: [`${CANONICAL}/read`], cognitoRefreshToken: COGNITO_REFRESH_TOKEN });
+
+    const responses = [
+      await handleToken(tokenRequest(codeForm({ client_id: marker })), deps),
+      await handleToken(tokenRequest(codeForm({ code: marker, code_verifier: marker })), deps),
+      await handleToken(tokenRequest({ grant_type: marker }), deps),
+      await handleToken(tokenRequest(refreshForm(marker)), deps),
+      await handleToken(tokenRequest(refreshForm("handle-original", { client_id: marker })), deps),
+    ];
+    for (const res of responses) {
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(await bodyOf(res))).not.toContain(marker);
+    }
+  });
 });
 
 describe("handleToken — authorization_code", () => {
@@ -207,10 +286,13 @@ describe("handleToken — authorization_code", () => {
     const res = await handleToken(tokenRequest(codeForm()), deps);
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toContain("no-store");
+    expect(res.headers.get("pragma")).toBe("no-cache");
     const body = await bodyOf(res);
 
     expect(body.access_token).toBe(COGNITO_ACCESS_TOKEN);
     expect(body.token_type).toBe("Bearer");
+    // The complete key set — nothing extra is ever published from a stored record.
+    expect(Object.keys(body).sort()).toEqual(["access_token", "expires_in", "refresh_token", "token_type"]);
 
     // The whole reason this wrapper exists (spec §4.3, "Why wrap the refresh token"): Cognito's
     // own refresh credential must never leave the server.
@@ -249,11 +331,23 @@ describe("handleToken — authorization_code", () => {
     expect(store.debugHandleCount()).toBe(0); // nothing was issued
   });
 
+  it("refuses a grant whose challenge method is not S256, even when the challenge DOES match", async () => {
+    // fix round 1, M-2: the old version of this test used a plain-style challenge, so it passed
+    // on the hash mismatch and the method guard could be deleted with all tests green. Here the
+    // stored challenge is the correct S256 of the presented verifier and ONLY the method is
+    // wrong, so deleting `codeChallengeMethod !== "S256"` turns this 200.
+    const { deps, store } = buildDeps({});
+    store.debugPutCode("the-opaque-code", buildGrant({ codeChallengeMethod: "plain" }));
+
+    await expectInvalidGrant(await handleToken(tokenRequest(codeForm()), deps));
+    expect(store.debugHandleCount()).toBe(0);
+  });
+
   it("burns the code on a failed PKCE check — a retry with the RIGHT verifier finds nothing left", async () => {
     const { deps, store } = buildDeps({});
     store.debugPutCode("the-opaque-code", buildGrant());
 
-    await expectInvalidGrant(await handleToken(tokenRequest(codeForm({ code_verifier: "wrong" })), deps));
+    await expectInvalidGrant(await handleToken(tokenRequest(codeForm({ code_verifier: CODE_VERIFIER.replace("a", "z") })), deps));
     await expectInvalidGrant(await handleToken(tokenRequest(codeForm()), deps));
   });
 
@@ -262,6 +356,14 @@ describe("handleToken — authorization_code", () => {
     store.debugPutCode("the-opaque-code", buildGrant());
 
     expect((await handleToken(tokenRequest(codeForm()), deps)).status).toBe(200);
+    await expectInvalidGrant(await handleToken(tokenRequest(codeForm()), deps));
+  });
+
+  it("refuses an expired code", async () => {
+    const { deps, store, clock } = buildDeps({});
+    store.debugPutCode("the-opaque-code", buildGrant());
+
+    clock.advance(CODE_TTL_MS + 1);
     await expectInvalidGrant(await handleToken(tokenRequest(codeForm()), deps));
   });
 
@@ -281,15 +383,6 @@ describe("handleToken — authorization_code", () => {
     const res = await handleToken(tokenRequest(codeForm({ redirect_uri: "https://client.example.com/cb2" })), deps);
     await expectInvalidGrant(res);
     expect(store.debugHandleCount()).toBe(0);
-  });
-
-  it("refuses a stored grant whose challenge method is not S256", async () => {
-    const { deps, store } = buildDeps({});
-    // "plain" would make the challenge equal the verifier — never minted by /authorize, and not
-    // something to start trusting at redemption time.
-    store.debugPutCode("the-opaque-code", buildGrant({ codeChallengeMethod: "plain", codeChallenge: CODE_VERIFIER }));
-
-    await expectInvalidGrant(await handleToken(tokenRequest(codeForm()), deps));
   });
 
   it("issues no refresh handle when the grant carries no Cognito refresh token", async () => {
@@ -312,13 +405,103 @@ describe("handleToken — authorization_code", () => {
     expect(store.debugHandleCount()).toBe(0);
   });
 
-  it.each([["code"], ["client_id"], ["redirect_uri"], ["code_verifier"]])("refuses an authorization_code grant missing %s", async (field) => {
+  // fix round 1, M-7: each of these used to pass for the wrong reason — a missing `client_id`
+  // failed the LATER mismatch check, so the presence guard was deletable with everything green.
+  // The store counter is what pins it: a malformed request must be refused before the code is
+  // taken, so the code is still redeemable afterwards.
+  it.each([["code"], ["client_id"], ["redirect_uri"], ["code_verifier"]])(
+    "refuses an authorization_code grant missing %s WITHOUT touching the store",
+    async (field) => {
+      const { deps, store } = buildDeps({});
+      store.debugPutCode("the-opaque-code", buildGrant());
+
+      const form = codeForm();
+      delete form[field];
+      await expectInvalidGrant(await handleToken(tokenRequest(form), deps));
+      expect(store.debugTakeCodeCalls()).toBe(0);
+      expect((await handleToken(tokenRequest(codeForm()), deps)).status).toBe(200);
+    },
+  );
+
+  // fix round 1, M-9: RFC 7636 §4.1 fixes the verifier at 43–128 characters, and a
+  // one-character verifier used to be accepted. Bounds live on the REQUEST schema (CLAUDE.md).
+  it.each([
+    ["one character", "a"],
+    ["42 characters", "a".repeat(42)],
+    ["129 characters", "a".repeat(129)],
+  ])("refuses a code_verifier of %s without touching the store", async (_label, verifier) => {
     const { deps, store } = buildDeps({});
     store.debugPutCode("the-opaque-code", buildGrant());
 
-    const form = codeForm();
-    delete form[field];
-    await expectInvalidGrant(await handleToken(tokenRequest(form), deps));
+    await expectInvalidGrant(await handleToken(tokenRequest(codeForm({ code_verifier: verifier })), deps));
+    expect(store.debugTakeCodeCalls()).toBe(0);
+  });
+
+  it.each([
+    ["43 characters", VERIFIER_43, CHALLENGE_43],
+    ["128 characters", VERIFIER_128, CHALLENGE_128],
+  ])("accepts a code_verifier of %s — the range is inclusive at both ends", async (_label, verifier, challenge) => {
+    const { deps, store } = buildDeps({});
+    store.debugPutCode("the-opaque-code", buildGrant({ codeChallenge: challenge }));
+
+    expect((await handleToken(tokenRequest(codeForm({ code_verifier: verifier })), deps)).status).toBe(200);
+  });
+});
+
+describe("handleToken — expires_in", () => {
+  // Spec §4.3 justifies the 30-second rotation grace with "Claude refreshes proactively up to
+  // five minutes before expiry" — a schedule the client cannot compute without this field. It is
+  // read from the access token's own `exp` (advisory; nothing here verifies a signature), so both
+  // grant types report it identically.
+  it("reports the seconds left on the Cognito access token, on the authorization_code path", async () => {
+    const { deps, store } = buildDeps({});
+    store.debugPutCode("the-opaque-code", buildGrant());
+
+    const body = await bodyOf(await handleToken(tokenRequest(codeForm()), deps));
+    expect(body.expires_in).toBe(3600);
+  });
+
+  it("counts down against the injected clock, never a wall clock", async () => {
+    const { fetchImpl } = buildCognitoFetch();
+    const { deps, store, clock } = buildDeps({ fetchImpl });
+    store.debugPutHandle("handle-original", { clientId: CLIENT_ID, approvedScopes: [`${CANONICAL}/read`], cognitoRefreshToken: COGNITO_REFRESH_TOKEN });
+    clock.advance(600_000); // ten minutes — well past a code's 60s TTL, which is why this runs on a handle
+
+    const body = await bodyOf(await handleToken(tokenRequest(refreshForm("handle-original")), deps));
+    expect(body.expires_in).toBe(3000);
+  });
+
+  it("reports the seconds left on the refreshed token, on the refresh_token path", async () => {
+    const { fetchImpl } = buildCognitoFetch();
+    const { deps, store } = buildDeps({ fetchImpl });
+    store.debugPutHandle("handle-original", { clientId: CLIENT_ID, approvedScopes: [`${CANONICAL}/read`], cognitoRefreshToken: COGNITO_REFRESH_TOKEN });
+
+    const body = await bodyOf(await handleToken(tokenRequest(refreshForm("handle-original")), deps));
+    expect(body.expires_in).toBe(3600);
+  });
+
+  // Every degradation OMITS the field and still issues the token — exactly the behaviour this
+  // endpoint had before `expires_in` existed. Nothing here may throw or refuse.
+  it.each([
+    ["an opaque, non-JWT access token", "opaque-token-with-no-segments"],
+    ["a two-segment token whose second segment WOULD parse", `header.${Buffer.from(JSON.stringify({ exp: NOW_S + 3600 })).toString("base64url")}`],
+    ["a payload that is not JSON", `${Buffer.from(JSON.stringify({ alg: "RS256" })).toString("base64url")}.bm90LWpzb24.sig`],
+    ["a payload that is JSON null", `${Buffer.from(JSON.stringify({ alg: "RS256" })).toString("base64url")}.${Buffer.from("null").toString("base64url")}.sig`],
+    ["a payload that is a bare number", `${Buffer.from(JSON.stringify({ alg: "RS256" })).toString("base64url")}.${Buffer.from("42").toString("base64url")}.sig`],
+    ["no exp claim", jwtWith({ sub: "golfer-1" })],
+    ["an exp that is not a number", jwtWith({ sub: "golfer-1", exp: "soon" })],
+    ["an exp that is not finite", `${Buffer.from(JSON.stringify({ alg: "RS256" })).toString("base64url")}.${Buffer.from('{"exp":1e999}').toString("base64url")}.sig`],
+    ["an exp already in the past", jwtWith({ sub: "golfer-1", exp: NOW_S - 10 })],
+    ["an exp exactly now", jwtWith({ sub: "golfer-1", exp: NOW_S })],
+  ])("omits expires_in for %s, and still issues the token", async (_label, accessToken) => {
+    const { deps, store } = buildDeps({});
+    store.debugPutCode("the-opaque-code", buildGrant({ cognitoAccessToken: accessToken }));
+
+    const res = await handleToken(tokenRequest(codeForm()), deps);
+    expect(res.status).toBe(200);
+    const body = await bodyOf(res);
+    expect(body.access_token).toBe(accessToken);
+    expect(body).not.toHaveProperty("expires_in");
   });
 });
 
@@ -339,6 +522,7 @@ describe("handleToken — refresh_token", () => {
 
     const res = await handleToken(tokenRequest(refreshForm(handle)), deps);
     expect(res.status).toBe(200);
+    expect(res.headers.get("pragma")).toBe("no-cache");
     const body = await bodyOf(res);
 
     expect(calls).toHaveLength(1);
@@ -347,7 +531,7 @@ describe("handleToken — refresh_token", () => {
     expect(calls[0]!.body.get("refresh_token")).toBe(COGNITO_REFRESH_TOKEN); // the real credential, never the handle
     expect(calls[0]!.authorization).toBe(`Basic ${Buffer.from(`${COGNITO.clientId}:${COGNITO.clientSecret}`).toString("base64")}`);
 
-    expect(body.access_token).toBe("cognito-access-refreshed-1");
+    expect(body.access_token).toBe(refreshedAccessToken(1));
     expect(body.refresh_token).toBeTypeOf("string");
     expect(body.refresh_token).not.toBe(handle); // ROTATED
     expect(body.refresh_token).not.toBe(COGNITO_REFRESH_TOKEN); // still opaque
@@ -434,22 +618,9 @@ describe("handleToken — refresh_token", () => {
     await expectInvalidGrant(await handleToken(tokenRequest(refreshForm(handle)), deps));
   });
 
-  it("does not retire the handle when Cognito refuses the refresh", async () => {
-    // A transient upstream failure must not cost the golfer their session: the handle keeps its
-    // FULL life, not a 30-second grace window.
-    const { fetchImpl } = buildCognitoFetch({ ok: false });
-    const { deps, store, clock } = buildDeps({ fetchImpl });
-    const handle = seedHandle(store);
-
-    await expectInvalidGrant(await handleToken(tokenRequest(refreshForm(handle)), deps));
-    expect(store.debugHandleCount()).toBe(1); // no fresh handle minted either
-
-    clock.advance(HANDLE_GRACE_MS + 1);
-    const { fetchImpl: healthy } = buildCognitoFetch();
-    expect((await handleToken(tokenRequest(refreshForm(handle)), { ...deps, fetchImpl: healthy })).status).toBe(200);
-  });
-
-  it.each([["refresh_token"], ["client_id"]])("refuses a refresh grant missing %s", async (field) => {
+  it.each([["refresh_token"], ["client_id"]])("refuses a refresh grant missing %s WITHOUT touching the store", async (field) => {
+    // fix round 1, M-7 again: a missing client_id used to be caught by the later mismatch check,
+    // so the presence guard was deletable. The store counter pins the ORDER.
     const { fetchImpl } = buildCognitoFetch();
     const { deps, store } = buildDeps({ fetchImpl });
     const handle = seedHandle(store);
@@ -457,6 +628,64 @@ describe("handleToken — refresh_token", () => {
     const form = refreshForm(handle);
     delete form[field];
     await expectInvalidGrant(await handleToken(tokenRequest(form), deps));
+    expect(store.debugGetHandleCalls()).toBe(0);
+  });
+});
+
+describe("handleToken — what comes back from Cognito", () => {
+  const seedHandle = (store: FakeStore) => {
+    store.debugPutHandle("handle-original", { clientId: CLIENT_ID, approvedScopes: [`${CANONICAL}/read`], cognitoRefreshToken: COGNITO_REFRESH_TOKEN });
+    return "handle-original";
+  };
+
+  // fix round 1, M-3: `!response.ok` and the `access_token` type check were individually
+  // deletable — the suite pinned "a refused response is refused" without pinning WHICH line does
+  // it. These two tests separate them: the first is refused only by the type check, the second
+  // only by `!response.ok`.
+  it("refuses a 200 whose body carries no access_token, and does not retire the handle", async () => {
+    const { fetchImpl } = buildCognitoFetch({ payload: { token_type: "Bearer", expires_in: 3600 } });
+    const { deps, store, clock } = buildDeps({ fetchImpl });
+    const handle = seedHandle(store);
+
+    await expectInvalidGrant(await handleToken(tokenRequest(refreshForm(handle)), deps));
+    expect(store.debugHandleCount()).toBe(1); // no fresh handle minted
+
+    clock.advance(HANDLE_GRACE_MS + 1); // the handle kept its FULL life, not a grace window
+    const { fetchImpl: healthy } = buildCognitoFetch();
+    expect((await handleToken(tokenRequest(refreshForm(handle)), { ...deps, fetchImpl: healthy })).status).toBe(200);
+  });
+
+  it("refuses a non-2xx even when it carries a perfectly good access_token — the token never escapes", async () => {
+    const leaked = refreshedAccessToken(99);
+    const { fetchImpl } = buildCognitoFetch({ status: 401, payload: { access_token: leaked, token_type: "Bearer" } });
+    const { deps, store } = buildDeps({ fetchImpl });
+    const handle = seedHandle(store);
+
+    const res = await handleToken(tokenRequest(refreshForm(handle)), deps);
+    const rawBody = await res.clone().text();
+    await expectInvalidGrant(res);
+    expect(rawBody).not.toContain(leaked);
+    expect(store.debugHandleCount()).toBe(1);
+  });
+
+  it("answers invalid_grant — not a thrown 500 — when the network is gone", async () => {
+    // fix round 1, M-5: removing the try/catch around fetchImpl left every test green, so nothing
+    // stopped "every failure answers invalid_grant" regressing into an unhandled rejection.
+    const { fetchImpl } = buildCognitoFetch({ throws: true });
+    const { deps, store } = buildDeps({ fetchImpl });
+    const handle = seedHandle(store);
+
+    await expectInvalidGrant(await handleToken(tokenRequest(refreshForm(handle)), deps));
+    expect(store.debugHandleCount()).toBe(1);
+  });
+
+  it("answers invalid_grant when the upstream body is not JSON at all", async () => {
+    const fetchImpl = (async () => new Response("<html>gateway error</html>", { status: 200, headers: { "content-type": "text/html" } })) as unknown as typeof fetch;
+    const { deps, store } = buildDeps({ fetchImpl });
+    const handle = seedHandle(store);
+
+    await expectInvalidGrant(await handleToken(tokenRequest(refreshForm(handle)), deps));
+    expect(store.debugHandleCount()).toBe(1);
   });
 });
 

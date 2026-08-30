@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
+import { z } from "zod";
+import type { Clock } from "@swng/application";
 import type { OAuthStore } from "@swng/adapters-dynamodb";
 import type { AuthorizeCodeGrant, AuthorizeCognitoConfig } from "./authorize.js";
+import { isFormUrlEncoded } from "./authorize.js";
 
 // POST /token — where the opaque codes `/authorize` mints get redeemed (design spec §4.3 step 4,
 // Task 18). swng MEDIATES: this endpoint issues no JWT of its own, it hands back the access
@@ -51,6 +54,10 @@ export type TokenStore = Pick<
 export interface TokenDeps {
   readonly store: TokenStore;
   readonly cognito: AuthorizeCognitoConfig;
+  // Injected, not `Date.now()`: `expires_in` is derived against it (see `expiresInSecondsOf`),
+  // which is the one place this endpoint reads a wall clock at all — the store owns every
+  // record's own expiry against its own injected clock.
+  readonly clock: Clock;
   readonly fetchImpl?: typeof fetch; // injected so `pnpm validate` stays offline
   readonly generateId?: () => string; // the opaque refresh handle — default randomUUID
 }
@@ -81,6 +88,47 @@ export const parseStoredRefreshHandle = (raw: unknown): RefreshHandleRecord => {
 };
 
 // ---------------------------------------------------------------------------------------------
+// Request schemas — the ONE place in this file bounds belong (CLAUDE.md: "bounds go on request
+// schemas only, never on a stored/read/fold schema"), for the same reason `authorizeQuerySchema`
+// exists: every field here is attacker-controlled, and an unbounded one reaches DynamoDB as a key
+// (past the 2048-byte key ceiling it is a ValidationException, i.e. a 500 where the contract
+// promises `invalid_grant`). The caps mirror that schema's. `code_verifier`'s 43–128 is RFC 7636
+// §4.1's own range — review round 1, M-9: a one-character verifier was accepted before this.
+// Length only, deliberately, NOT §4.1's `[A-Za-z0-9-._~]` charset: refusing a padded or otherwise
+// off-alphabet verifier that still hashes correctly would be an interop break with no security
+// gain, since the challenge comparison is what actually decides.
+//
+// Parsing happens BEFORE the store is touched, so a malformed request never burns a code, never
+// reads a handle, and never reaches Cognito.
+// ---------------------------------------------------------------------------------------------
+
+const authorizationCodeRequestSchema = z.object({
+  code: z.string().min(1).max(2048),
+  client_id: z.string().min(1).max(2048),
+  redirect_uri: z.string().min(1).max(2048),
+  code_verifier: z.string().min(43).max(128),
+});
+
+const refreshRequestSchema = z.object({
+  refresh_token: z.string().min(1).max(2048),
+  client_id: z.string().min(1).max(2048),
+});
+
+const AUTHORIZATION_CODE_KEYS = ["code", "client_id", "redirect_uri", "code_verifier"] as const;
+const REFRESH_KEYS = ["refresh_token", "client_id"] as const;
+
+// A present-keys-only record, so an ABSENT field fails the schema as "required" rather than
+// arriving as an empty string that some later comparison happens to reject.
+const presentFields = (form: URLSearchParams, keys: readonly string[]): Record<string, string> => {
+  const raw: Record<string, string> = {};
+  for (const key of keys) {
+    const value = form.get(key);
+    if (value !== null) raw[key] = value;
+  }
+  return raw;
+};
+
+// ---------------------------------------------------------------------------------------------
 // Responses. RFC 6749 §5.1 requires `Cache-Control: no-store` and `Pragma: no-cache` on any
 // response carrying tokens; both are set on the error responses too rather than remembered per
 // branch.
@@ -92,8 +140,9 @@ const TOKEN_HEADERS = {
   pragma: "no-cache",
 } as const;
 
-// The ONE error this endpoint speaks. `error_description` never echoes the caller's own input
-// back — it names which check failed, for a human reading a log, and nothing more.
+// The ONE error this endpoint speaks. `error_description` is a FIXED string at every call site —
+// it names which check failed, for a human reading a log, and never interpolates anything the
+// caller sent (which is why no branch below builds one with a template literal).
 const invalidGrant = (description: string): Response =>
   new Response(JSON.stringify({ error: "invalid_grant", error_description: description }), {
     status: 400,
@@ -107,14 +156,44 @@ const invalidGrant = (description: string): Response =>
 // authority is the TOKEN, not our record; it stops being harmless the moment this endpoint
 // publishes the record to the client as truth. RFC 6749 §5.1 makes `scope` OPTIONAL when the
 // granted scope matches the request, and the client already holds the token that says what it
-// really got. `expires_in` is absent for the same reason in reverse: the authorization_code path
-// has no expiry to report (the stored grant records none), and reporting one on the refresh path
-// only would be a contract that changes shape between two calls the client treats alike — the
-// access token's own `exp` is authoritative either way.
-const tokenResponse = (cognitoAccessToken: string, refreshHandle: string | undefined): Response => {
-  const body: Record<string, string> = { access_token: cognitoAccessToken, token_type: "Bearer" };
+// really got. `expires_in` IS reported, and is the counter-example that shows where the line is:
+// it is not a claim of OURS about the grant, it is read straight off the access token being handed
+// over — see `expiresInSecondsOf`, and note that both grant types report it the same way, because
+// a body that changes shape between two calls the client treats alike is its own kind of lie.
+const tokenResponse = (cognitoAccessToken: string, refreshHandle: string | undefined, expiresInSeconds: number | undefined): Response => {
+  const body: Record<string, string | number> = { access_token: cognitoAccessToken, token_type: "Bearer" };
+  if (expiresInSeconds !== undefined) body.expires_in = expiresInSeconds;
   if (refreshHandle !== undefined) body.refresh_token = refreshHandle;
   return new Response(JSON.stringify(body), { status: 200, headers: { ...TOKEN_HEADERS } });
+};
+
+// `expires_in` (RFC 6749 §5.1) is what lets a client refresh BEFORE it gets a 401 — and spec §4.3
+// justifies this endpoint's whole 30-second rotation grace with "Claude refreshes proactively up
+// to five minutes before expiry," a schedule no client can compute without this field. Neither
+// source of an access token here reports one on both paths (the stored grant records no expiry,
+// and only the refresh response carries `expires_in`), so BOTH paths read it from the same place:
+// the access token's own `exp`.
+//
+// THIS IS NOT AUTHORIZATION, and it is not a second verifier. No signature is checked, and no
+// access decision is made on the result — the value is advisory, the token reached us from Cognito
+// over TLS through our own confidential client, and the resource server still verifies it properly
+// (aws-jwt-verify, spec §4.3). Every failure DEGRADES TO SILENCE — a token that is not three
+// segments, a payload that is not JSON, a missing/non-numeric/non-finite `exp`, or an expiry
+// already past — omitting the field, which is exactly how this endpoint behaved before it existed.
+const expiresInSecondsOf = (accessToken: string, nowMs: number): number | undefined => {
+  const segments = accessToken.split(".");
+  if (segments.length !== 3) return undefined;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(Buffer.from(segments[1] ?? "", "base64url").toString("utf8"));
+  } catch {
+    return undefined;
+  }
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const exp = (payload as Record<string, unknown>).exp;
+  if (typeof exp !== "number" || !Number.isFinite(exp)) return undefined;
+  const remainingSeconds = Math.floor(exp - nowMs / 1000);
+  return remainingSeconds > 0 ? remainingSeconds : undefined;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -122,12 +201,12 @@ const tokenResponse = (cognitoAccessToken: string, refreshHandle: string | undef
 // ---------------------------------------------------------------------------------------------
 
 export const handleToken = async (request: Request, deps: TokenDeps): Promise<Response> => {
-  // Pin the method and the content-type, exactly as `handleConsentSubmit` does: a form-shaped
-  // body on any verb, under any content-type, used to redeem a code. `/register` is the JSON
-  // endpoint; this one is form-encoded only (spec §4.3 step 4, "different parsers").
+  // Pin the method and the content-type, exactly as `handleConsentSubmit` does: otherwise a
+  // form-shaped body on any verb, under any content-type, redeems a code.
   if (request.method !== "POST") return invalidGrant("the token endpoint accepts POST only");
-  const contentType = request.headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().includes("application/x-www-form-urlencoded")) {
+  // The MEDIA TYPE, not a substring of the header — see `isFormUrlEncoded`. `/register` is the
+  // JSON endpoint; this one is form-encoded only (spec §4.3 step 4, "different parsers").
+  if (!isFormUrlEncoded(request.headers.get("content-type"))) {
     return invalidGrant("the token endpoint accepts application/x-www-form-urlencoded only");
   }
 
@@ -139,13 +218,11 @@ export const handleToken = async (request: Request, deps: TokenDeps): Promise<Re
 };
 
 const redeemAuthorizationCode = async (form: URLSearchParams, deps: TokenDeps): Promise<Response> => {
-  const code = form.get("code");
-  const clientId = form.get("client_id");
-  const redirectUri = form.get("redirect_uri");
-  const codeVerifier = form.get("code_verifier");
-  if (code === null || clientId === null || redirectUri === null || codeVerifier === null) {
-    return invalidGrant("authorization_code requires code, client_id, redirect_uri and code_verifier");
+  const parsed = authorizationCodeRequestSchema.safeParse(presentFields(form, AUTHORIZATION_CODE_KEYS));
+  if (!parsed.success) {
+    return invalidGrant("authorization_code requires code, client_id, redirect_uri and a 43-128 character code_verifier");
   }
+  const { code, client_id: clientId, redirect_uri: redirectUri, code_verifier: codeVerifier } = parsed.data;
 
   // `takeCode` is a conditional delete (Task 14) — it is the replay defence, and it runs BEFORE
   // the checks below on purpose. A code presented with the wrong verifier is a code that has
@@ -172,7 +249,7 @@ const redeemAuthorizationCode = async (form: URLSearchParams, deps: TokenDeps): 
     });
   }
 
-  return tokenResponse(grant.cognitoAccessToken, refreshHandle);
+  return tokenResponse(grant.cognitoAccessToken, refreshHandle, expiresInSecondsOf(grant.cognitoAccessToken, deps.clock.now()));
 };
 
 // S256 only — the one method /authorize ever records (it refuses anything else outright). A
@@ -184,11 +261,9 @@ const pkceVerifies = (codeVerifier: string, grant: AuthorizeCodeGrant): boolean 
 };
 
 const redeemRefreshHandle = async (form: URLSearchParams, deps: TokenDeps): Promise<Response> => {
-  const presentedHandle = form.get("refresh_token");
-  const clientId = form.get("client_id");
-  if (presentedHandle === null || clientId === null) {
-    return invalidGrant("refresh_token requires refresh_token and client_id");
-  }
+  const parsed = refreshRequestSchema.safeParse(presentFields(form, REFRESH_KEYS));
+  if (!parsed.success) return invalidGrant("the refresh_token grant requires refresh_token and client_id");
+  const { refresh_token: presentedHandle, client_id: clientId } = parsed.data;
 
   // `getHandle`, not a take: the handle is retired (with the store's grace window) only once the
   // refresh has actually succeeded, below.
@@ -213,7 +288,7 @@ const redeemRefreshHandle = async (form: URLSearchParams, deps: TokenDeps): Prom
     cognitoRefreshToken: tokens.refreshToken ?? record.cognitoRefreshToken,
   });
 
-  return tokenResponse(tokens.accessToken, freshHandle);
+  return tokenResponse(tokens.accessToken, freshHandle, expiresInSecondsOf(tokens.accessToken, deps.clock.now()));
 };
 
 // ---------------------------------------------------------------------------------------------

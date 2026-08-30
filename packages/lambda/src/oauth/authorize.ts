@@ -273,6 +273,14 @@ const redirectResponse = (location: string): Response =>
 
 const originOf = (resource: string): string => new URL(resource).origin;
 
+// The media type ONLY: everything from the first ";" is parameters (charset, and anything else a
+// caller cares to append), not identity. Review round 1, Task 18, M-1: the `.includes(...)` test
+// that stood here admitted `application/json; note="application/x-www-form-urlencoded"`, which
+// redeemed a real authorization code at /token. Both form-encoded endpoints in this surface —
+// the consent POST below and token.ts's /token — ask this one function, so neither can drift.
+export const isFormUrlEncoded = (contentTypeHeader: string | null): boolean =>
+  ((contentTypeHeader ?? "").split(";")[0] ?? "").trim().toLowerCase() === "application/x-www-form-urlencoded";
+
 // Once redirect_uri is trusted (it came back from redirectUriAllowed, or from our OWN stored
 // record — never the raw request again), further errors answer via a standard OAuth error
 // redirect: legible to the client, and carrying `iss` per RFC 9207 on every authorization
@@ -696,8 +704,7 @@ export const handleConsentSubmit = async (request: Request, deps: AuthorizeDeps)
   // fix round 1, Minor: pin the method and content-type — a bare form-shaped body on any verb
   // used to mint a code.
   if (request.method !== "POST") return badRequest("consent must be submitted via POST");
-  const contentType = request.headers.get("content-type") ?? "";
-  if (!contentType.toLowerCase().includes("application/x-www-form-urlencoded")) {
+  if (!isFormUrlEncoded(request.headers.get("content-type"))) {
     return badRequest("consent submission must be application/x-www-form-urlencoded");
   }
 

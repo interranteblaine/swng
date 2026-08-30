@@ -26,7 +26,8 @@ export { createDocumentClient } from "./createDocumentClient.js";
 // short-lived state that lets mcp.swng.golf mediate while Cognito stays the only token issuer.
 export { createDynamoOAuthStore } from "./createDynamoOAuthStore.js";
 export type { OAuthStore } from "./createDynamoOAuthStore.js";
-// The two handle lifetimes are exported as VALUES for one reason: /token's own test fake has to
-// reproduce the store's rotation grace, and a hard-coded 30_000 there would silently desync the
-// moment the constant moved. Consumers import them from the package root, never a deep path.
-export { HANDLE_GRACE_MS, HANDLE_TTL_MS } from "./createDynamoOAuthStore.js";
+// These lifetimes are exported as VALUES for one reason: /token's own test fake has to reproduce
+// the store's single-use code expiry and its rotation grace, and a hard-coded 60_000 / 30_000
+// there would silently desync the moment a constant moved. Consumers import them from the package
+// root, never a deep path.
+export { CODE_TTL_MS, HANDLE_GRACE_MS, HANDLE_TTL_MS } from "./createDynamoOAuthStore.js";

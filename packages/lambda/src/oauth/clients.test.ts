@@ -610,6 +610,20 @@ describe("registerDcrClient", () => {
     expect(store.putClient).not.toHaveBeenCalled();
   });
 
+  it("accepts a list at exactly the aggregate maximum — that bound is inclusive too", async () => {
+    // The per-URI cap had an at-the-boundary test and the aggregate did not, so its `<=` was
+    // unpinned: flip it to `<` and only this test notices. Four 2048-character ASCII URIs are
+    // 8192 bytes, exactly MAX_REDIRECT_URIS_TOTAL_BYTES.
+    const store = makeStore();
+    const uris = Array.from({ length: 4 }, (_unused, index) => `${longUri(MAX_REDIRECT_URI_LENGTH - 4)}?i=${index}`);
+    expect(uris.every((uri) => uri.length <= MAX_REDIRECT_URI_LENGTH)).toBe(true);
+    expect(uris.reduce((total, uri) => total + Buffer.byteLength(uri, "utf8"), 0)).toBe(MAX_REDIRECT_URIS_TOTAL_BYTES);
+
+    const body = JSON.stringify({ redirect_uris: uris });
+    await registerDcrClient(body, { store, generateClientId: () => "id" });
+    expect(store.putClient).toHaveBeenCalled();
+  });
+
   it("measures the aggregate in BYTES, not characters", async () => {
     // N-1's lesson applied to the same file: three URIs of 2000 multi-byte characters are 6000
     // code units (inside the 8 KB budget if you count wrong) and ~18 KB of UTF-8 (outside it).

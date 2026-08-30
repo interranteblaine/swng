@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { OAuthStore } from "@swng/adapters-dynamodb";
 import { MAX_OAUTH_ID_BYTES } from "@swng/adapters-dynamodb";
 import type { ClientStore, FetchCimdDeps } from "./clients.js";
-import { redirectUriAllowed, resolveClient } from "./clients.js";
+import { MAX_REDIRECT_URI_LENGTH, redirectUriAllowed, resolveClient } from "./clients.js";
 
 // /authorize, the Cognito callback, and consent (design spec §4.2/§4.3, Task 17). swng
 // MEDIATES; Cognito remains the only token issuer.
@@ -385,7 +385,12 @@ const authorizeQuerySchema = z.object({
   // BYTES, not characters — see storeKeyStringSchema. `resolveClient` keys an opaque client_id
   // straight into `getClient`, so this is the /authorize twin of review round 2's N-1.
   client_id: storeKeyStringSchema,
-  redirect_uri: z.string().min(1).max(2048),
+  // MAX_REDIRECT_URI_LENGTH, not a literal 2048: this bound and clients.ts's per-URI registration
+  // bound must stay EQUAL, because a registered URI is only ever useful if it can be presented
+  // here and matched exactly. Diverge them and you mint registrations that can never be redeemed —
+  // a silent failure with no error pointing at the cause. Fix round 3 left the two literals coupled
+  // by a comment; a comment is not a mechanism, so they now share the constant.
+  redirect_uri: z.string().min(1).max(MAX_REDIRECT_URI_LENGTH),
   response_type: z.string().min(1).max(64),
   code_challenge: z.string().min(1).max(128),
   code_challenge_method: z.string().min(1).max(16),
